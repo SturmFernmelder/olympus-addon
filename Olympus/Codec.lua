@@ -335,6 +335,22 @@ function Codec.DecodeReport(s)
 	}
 end
 
+-- (1.2.3) Where field 25 lies in a report's text, the server time it was made, which every report
+-- has its own (Data.SetLocal stamps it at each roster read): the "~" before it, the "~" after it
+-- (#s + 1 when it is the last field), and that time as Codec.DecodeReport reads it. Nothing is cut
+-- out of the text but the time itself. nil for a text without field 25, or one DecodeReport refuses
+-- by its length. (Data.DecodeReport: a sender's report alike his last one but for its time.)
+function Codec.ReportTime(s)
+	if type(s) ~= "string" or #s > Codec.CHUNK * Codec.MAX_CHUNKS then return nil end
+	local at = 0
+	for _ = 1, 24 do
+		at = s:find("~", at + 1, true)
+		if not at then return nil end
+	end
+	local stop = s:find("~", at + 1, true) or #s + 1
+	return at, stop, unBase36(s:sub(at + 1, stop - 1))
+end
+
 ---------------------------------------------------------------------------
 -- Small single-message types (always < 255 bytes, never chunked)
 --   P1~mapID~x~y~class          guild only: my position (x, y in 0..1000)

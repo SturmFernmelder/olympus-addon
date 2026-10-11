@@ -1800,7 +1800,8 @@ local function OnAddonMessage(prefix, text, dist, sender, target, zoneChannelID,
 			fullHandler(dist, sender, full)
 			return
 		end
-		local r = Codec.DecodeReport(full)
+		-- (1.2.3) Its sender's last report again but for its time: that report's row, not decoded.
+		local r = ns.Data.DecodeReport(full, sender)
 		if not r then
 			stats.bad = stats.bad + 1
 			ns.Log("bad report from %s: %s", sender, full:sub(1, 80))
