@@ -15,6 +15,14 @@ local function Read(path)
 end
 local function HN(w, c) return W3.M(w, c, "HonorsNet") end
 local function Prof(w, c) return W3.M(w, c, "ArenaProfile") end
+-- A logout and a login: the release client, its save came back (Arena.Persists). Where it did not
+-- (a first session, the Forever beta) the King's letter waits in the Edit's list (honors-letter.lua).
+local function Kept(w, c)
+	w:Logout(c)
+	w:Login(c)
+	W3.Rules(w, c)
+	return c
+end
 
 -- A title fight won by `winner` (a vacant global belt: he holds it), as its public arbiter's AE
 -- reaches `to` (the core keeps the title fights: no companion needed).
@@ -166,7 +174,8 @@ end)
 
 test("1.2 the fights part: a newly earned honour switches on by itself and the King's letter comes (Olympus's own frame, queued, 'Wear it'); a locked pick stays as set; the letters stay to read again", function()
 	local w, cast = W3.New()
-	local A = cast.A
+	local A = Kept(w, cast.A)
+	Kept(w, cast.B)
 	Belt(w, cast, A, cast.B, { A })
 	w:Run(3)
 	local pick = A.ns.ArenaProfile.Pick()
@@ -518,7 +527,7 @@ local GRYPHON = "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold"
 
 test("1.2 the King's letter: his portrait drawn as his own on his unit frame (Borders.NewPortrait, his frame's 60 across, turned round): the honour won the very art round his own portrait, his picture square; the words clear of the art", function()
 	local w, cast = W3.New()
-	local A = cast.A
+	local A = Kept(w, cast.A)
 	local r = Frames(w, A)
 	local points, pictures = Placed(A)
 	Belt(w, cast, A, cast.B, { A })

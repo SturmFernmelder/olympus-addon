@@ -43,8 +43,9 @@ ns.HonorsNet = HonorsNet
 -- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick),
 -- and the King's letter tells him: a parchment in a window of Olympus's own naming the honour and
 -- its title, the new frame on his own portrait, "Wear it" and "Later"; queued when several come,
--- re-readable from the profile's Edit (ProfileEdit); once per honour per character, ever, and never
--- to the King himself (1.2.1). Honours count only in the live arena (Arena.Counts).
+-- re-readable from the profile's Edit (ProfileEdit); once per honour per character (a month's honour:
+-- once per month), never by itself where the save did not come back, and never to the King himself
+-- (1.2.1). Honours count only in the live arena (Arena.Counts).
 
 local L = ns.L
 local H = HonorsNet
@@ -767,7 +768,7 @@ function H.Refresh()
 			sent = true
 		end
 		for _, h in ipairs(earned) do
-			if h.frame or h.title then H.QueueLetter(h.key) end
+			if h.frame or h.title then H.QueueLetter(h.key, h.period) end
 		end
 		if sent or #earned > 0 then
 			gen = gen + 1
@@ -791,13 +792,26 @@ end
 
 -- Each honour's letter comes once per character, ever (1.2.1, the owner's ask: never again after
 -- a reload, a relog or an update, nor when an honour comes back after a gap in its source, or a
--- place lost and won back): the profile's lettered = { [key] = true }, the honours told.
+-- place lost and won back): the profile's lettered = { [mark] = true }, the honours told. A
+-- month's honour (the month's donors, the Oracle: keys that name only the place) is told for its
+-- month (H.LetterMark): won again another month, it is a new award, with its letter.
 -- The profiles 1.2.0 kept are read once, at the account's first login under 1.2.1 (ns.db's
 -- honorLetters, set then: every profile kept before it is 1.2.0's, one made after it starts with
 -- nothing told): every letter it queued (its letters, read or not) and every honour its pick
 -- remembered held (its seen) count as told; and, on the safe side (a letter that has left the
 -- list of 20), every honour held at that character's first look (H.FirstLook).
 H.LETTERS_RULE = 1
+function H.LetterMark(key, period)
+	period = tonumber(period)
+	return period and (key .. "@" .. period) or key
+end
+-- A 1.2.0 letter's or pick's mark: a month's honour for the month closed before t (the one it was
+-- held for then, as Honors.Holdings counts it).
+local function OldMark(key, t)
+	local family = H.LetterFamily(key)
+	if family ~= "donor-month" and family ~= "oracle" then return key end
+	return H.LetterMark(key, ns.Honors.MonthOf(tonumber(t) or Now()) - 1)
+end
 function H.ReadOldLetters()
 	local db = ns.db
 	if type(db) ~= "table" or db.honorLetters ~= nil then return end
@@ -805,12 +819,12 @@ function H.ReadOldLetters()
 		if type(m) == "table" and m.lettered == nil and (type(m.letters) == "table" or type(m.seen) == "table") then
 			local told = {}
 			for _, x in ipairs(type(m.letters) == "table" and m.letters or {}) do
-				if type(x) == "table" and type(x.key) == "string" then told[x.key] = true end
+				if type(x) == "table" and type(x.key) == "string" then told[OldMark(x.key, x.t)] = true end
 			end
 			for _, s in pairs(type(m.seen) == "table" and m.seen or {}) do
 				if type(s) == "table" then
-					if type(s.frame) == "string" then told[s.frame] = true end
-					if type(s.title) == "string" then told[s.title] = true end
+					if type(s.frame) == "string" then told[OldMark(s.frame, m.at)] = true end
+					if type(s.title) == "string" then told[OldMark(s.title, m.at)] = true end
 				end
 			end
 			m.lettered, m.letterLook = told, true
@@ -832,23 +846,30 @@ function H.FirstLook(held)
 	if not m.letterLook then return end
 	m.lettered = type(m.lettered) == "table" and m.lettered or {}
 	for _, h in ipairs(type(held) == "table" and held or {}) do
-		if type(h) == "table" and type(h.key) == "string" then m.lettered[h.key] = true end
+		if type(h) == "table" and type(h.key) == "string" then m.lettered[H.LetterMark(h.key, h.period)] = true end
 	end
 	m.letterLook = nil
 end
 
--- A letter queued (and kept, re-readable): shown now, or after the one open; never twice.
-function H.QueueLetter(key)
+-- A letter queued (and kept, re-readable): shown now, or after the one open; never twice (period:
+-- a month's honour's month).
+-- Where the save did not come back (Arena.Persists: the Forever beta loads an empty one at each
+-- login; a first session) nothing told is known: every honour held looks new at each login. The
+-- letter is kept in the profile's list, unread, to open from the Edit, and never opens by itself
+-- (1.2.1, the owner's ask: never again at each update; as the update letter, Letters.lua).
+function H.QueueLetter(key, period)
 	if H.LetterToSender() or type(key) ~= "string" then return end
 	local told = H.Lettered()
-	if told[key] then return end
+	local mark = H.LetterMark(key, period)
+	if told[mark] then return end
 	local P = ns.ArenaProfile
 	local m = P.Mine(true)
 	m.lettered = told
-	told[key] = true
+	told[mark] = true
 	m.letters = type(m.letters) == "table" and m.letters or {}
 	m.letters[#m.letters + 1] = { key = key, t = Now() }
 	while #m.letters > H.LETTERS_MAX do table.remove(m.letters, 1) end
+	if not Arena.Persists() then return end
 	letters[#letters + 1] = { key = key, t = Now() }
 	H.ShowLetter()
 end
@@ -1001,8 +1022,10 @@ local function Build()
 	f.wear = Btn(L.HONOR_LETTER_WEAR, -(H.LETTER_BUTTON / 2 + 6), function() H.CloseLetter(true) end)
 	f.later = Btn(L.HONOR_LETTER_LATER, H.LETTER_BUTTON / 2 + 6, function() H.CloseLetter(false) end)
 	-- Hidden another way (Escape, the game's window sweep): as "Later", so it never comes back by
-	-- itself with the next letter or the Olympus window's open.
+	-- itself with the next letter or the Olympus window's open. The whole interface hidden (Alt+Z, a
+	-- cinematic: still shown itself, as Dialog.lua's) is no answer: it is there again with it.
 	f:SetScript("OnHide", function()
+		if f:IsShown() then return end
 		if f.key ~= nil then ns.SafeCall("kings letter", H.CloseLetter, false) end
 	end)
 	return f

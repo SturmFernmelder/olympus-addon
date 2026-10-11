@@ -19,13 +19,21 @@ local function Shown(c)
 	local f = c.ns.HonorsNet.LetterFrame()
 	return f ~= nil and f:IsShown() == true
 end
+-- A logout and a login: the release client, its save came back (Arena.Persists). A test world's
+-- first session is the beta's case (no save came back): there no letter opens by itself.
+local function Kept(w, c)
+	w:Logout(c)
+	w:Login(c)
+	W3.Rules(w, c)
+	return c
+end
 
 print("HonorsNet: the King's letter (1.2.1)")
 
 -- The owner after Asmon's stream (1.2.1): the King got the King's letter about a frame he holds.
 test("1.2.1 the King's letter: never to the King himself: his honour switches on, no letter shows, none is kept or opens on a click; where no King is pinned, the guild master of the King's guild the same; everyone else gets his", function()
 	local w, cast = W3.New({ more = { { "gm", "Bryn Halloway", { guild = World.KING_GUILD, rank = 0 } } } })
-	local king, A, gm = cast.king, cast.A, cast.gm
+	local king, A, gm = Kept(w, cast.king), Kept(w, cast.A), Kept(w, cast.gm)
 	-- (gm's realm group has no King pinned by name: there the guild master of his guild is the King.)
 	rawset(gm.ns, "KingCharacter", function() return nil end)
 	eq(w:As(gm, gm.ns.King.IsKing), true, "gm is the King where no King is pinned")
@@ -54,7 +62,7 @@ end)
 -- letter shows once per character, kept in his saved profile.
 test("1.2.1 the King's letter: once per honour per character: never again when the honour comes back after a gap in its source, a place lost and won back, Escape, a relog; a new honour still gets its own, once", function()
 	local w, cast = W3.New()
-	local A, B = cast.A, cast.B
+	local A, B = Kept(w, cast.A), cast.B
 	local t = w.clock
 	local function Word(names, month) t = t + 1 Donors(w, A, t, names, month) w:Run(3) end
 	Word({ A })
@@ -94,8 +102,9 @@ test("1.2.1 the King's letter: once per honour per character: never again when t
 	eq(A.ns.ArenaProfile.Pick().frame ~= nil, true)
 	eq(Shown(A), false, "nothing after a relog")
 	eq(#A.ns.HonorsNet.QueuedLetters(), 0)
+	-- (Kept in the profile; the month's koi with its month.)
 	local told = A.ns.ArenaProfile.Mine().lettered
-	eq(told["donor-top-1"], true); eq(told["donor-month-1"], true)
+	eq(told["donor-top-1"], true); eq(told["donor-month-1@" .. (A.ns.Honors.MonthOf(w.clock) - 1)], true)
 	W3.NoErrors(w)
 end)
 
@@ -115,25 +124,31 @@ test("1.2.1 the King's letter: after the update, a letter 1.2.0 gave (read or no
 	local w, cast = W3.New({ more = { { "C", "Corin Ash" }, { "D", "Dovan Quell" }, { "E", "Elsa Brook" } } })
 	local C, D, E = cast.C, cast.D, cast.E
 	local now = w.clock
-	-- C: the cornucopia's letter read under 1.2.0, then its family forgotten in a gap of its source.
-	Updated(w, C, { seen = {}, letters = { { key = "donor-top-1", t = now - 86400, read = true } }, at = now - 86400 })
-	-- D: under 1.2.0 the belt's honour remembered, its letter long gone from the list.
-	Updated(w, D, { seen = { ["belt-A"] = { place = 1, frame = "arena-champion", title = "arena-champion" } }, at = now - 86400 })
+	-- C: the cornucopia's letter and this month's koi read under 1.2.0, then both families forgotten
+	-- in a gap of their source.
+	Updated(w, C, { seen = {}, letters = { { key = "donor-top-1", t = now - 86400, read = true }, { key = "donor-month-1", t = now - 60, read = true } },
+		at = now - 86400 })
+	-- D: under 1.2.0 the belt's honour remembered, its letter long gone from the list; the koi's
+	-- letter of a month long past (another award than this month's).
+	Updated(w, D, { seen = { ["belt-A"] = { place = 1, frame = "arena-champion", title = "arena-champion" } },
+		letters = { { key = "donor-month-1", t = now - 70 * 86400, read = true } }, at = now - 86400 })
 	-- The first look under 1.2.1: C holds nothing yet; D the third place of all time already.
 	w:As(C, C.ns.HonorsNet.Refresh)
 	Donors(w, D, now, { cast.A, cast.B, D })
 	w:Run(3)
 	eq(Shown(C), false); eq(Shown(D), false, "held at the first look: told already (the safe side)")
 	eq(D.ns.ArenaProfile.Pick().frame, "donor-top-3", "his honour still switched on")
-	-- C's cornucopia back: no letter, 1.2.0 gave it.
-	Donors(w, C, now + 1, { C })
+	-- C's cornucopia and koi back: no letter, 1.2.0 gave them (the koi's for this month).
+	Donors(w, C, now + 1, { C }, Short(C.name))
 	w:Run(3)
 	eq(C.ns.ArenaProfile.Pick().frame, "donor-top-1")
-	eq(Shown(C), false, "the letter 1.2.0 gave, not again")
+	eq(C.ns.ArenaProfile.Pick().seen["donor-month"].place, 1)
+	eq(Shown(C), false, "the letters 1.2.0 gave, not again")
+	eq(#C.ns.HonorsNet.QueuedLetters(), 0)
 	-- A new honour after the first look: its letter.
 	Donors(w, D, now + 2, { cast.A, cast.B, D }, Short(D.name))
 	w:Run(3)
-	eq(Shown(D), true, "the month's donor, earned after the update: its letter")
+	eq(Shown(D), true, "the month's donor, earned after the update: its letter (1.2.0's was another month's)")
 	eq(D.ns.HonorsNet.LetterFrame().key, "donor-month-1")
 	-- E, new under 1.2.1: his pick set before any honour makes his profile (seen, no letters);
 	-- after a relog his first honour still gets its letter (that profile is 1.2.1's, not 1.2.0's).
@@ -146,6 +161,110 @@ test("1.2.1 the King's letter: after the update, a letter 1.2.0 gave (read or no
 	w:Run(3)
 	eq(Shown(E), true, "his first honour after the relog: its letter")
 	eq(E.ns.HonorsNet.LetterFrame().key, "donor-top-1")
+	W3.NoErrors(w)
+end)
+
+-- The Forever beta loads an empty save at each login (README; Arena.Persists: the logout's sentinel
+-- never comes back): nothing told is known there, and every honour held looks newly earned at each
+-- login. The letter waits in the Edit's list, unread, and never opens by itself (as the update
+-- letter, Letters.lua): it must not come back at every login.
+test("1.2.1 the King's letter: where the save does not come back (the Forever beta, a first session) it never opens by itself, at any login: kept unread in the Edit's list, opened there by a click", function()
+	local w, cast = W3.New({ more = { { "P", "Parric Stowe", { persists = false } } } })
+	local P = cast.P
+	for session = 1, 2 do
+		local where = "session " .. session
+		local HN = P.ns.HonorsNet
+		eq(P.ns.Arena.Persists(), false, where .. ": the save did not come back")
+		Donors(w, P, w.clock, { P })
+		w:Run(3)
+		eq(P.ns.ArenaProfile.Pick().frame, "donor-top-1", where .. ": his honour switched on")
+		eq(Shown(P), false, where .. ": no letter by itself")
+		eq(#HN.QueuedLetters(), 0, where .. ": none waiting")
+		eq(w:As(P, HN.WindowShown), false, where .. ": nor with the Olympus window")
+		eq(Shown(P), false)
+		local list = HN.Letters()
+		eq(#list, 1, where .. ": kept in the Edit's list"); eq(list[1].key, "donor-top-1"); eq(list[1].read, nil, where .. ": unread")
+		-- The Edit's click (ProfileEdit: ShowLetter with its key) opens it.
+		eq(w:As(P, HN.ShowLetter, "donor-top-1"), true)
+		eq(Shown(P), true, where .. ": opened by his click"); eq(HN.LetterFrame().key, "donor-top-1")
+		eq(w:As(P, HN.CloseLetter, false), true)
+		eq(Shown(P), false)
+		w:Logout(P)
+		w:Login(P)
+		W3.Rules(w, P)
+	end
+	W3.NoErrors(w)
+end)
+
+-- The client hides every frame UIParent holds when the whole interface is hidden (Alt+Z, a
+-- cinematic): their OnHide runs, their own shown flag stays on, and they are back with it. That is
+-- no answer to the letter: only a hide of its own (Escape, the window sweep) counts as Later.
+test("1.2.1 the King's letter: the whole interface hidden and shown again (Alt+Z, a cinematic) leaves the letter open and unanswered; Escape is Later and the next letter shows", function()
+	local w, cast = W3.New()
+	local A = Kept(w, cast.A)
+	local HN = A.ns.HonorsNet
+	Donors(w, A, w.clock, { A }, Short(A.name))
+	w:Run(3)
+	local letter = HN.LetterFrame()
+	eq(Shown(A), true, "the first letter")
+	local key = letter.key
+	eq(#HN.QueuedLetters(), 2, "two honours, two letters")
+	local onHide = letter:GetScript("OnHide")
+	assert(type(onHide) == "function", "the letter answers its own hide")
+	-- (UIParent hidden: the letter's OnHide, its own flag still shown.)
+	w:As(A, onHide, letter)
+	eq(letter:IsShown(), true); eq(letter.key, key, "the same letter")
+	eq(#HN.QueuedLetters(), 2, "still waiting for his answer")
+	for _, x in ipairs(HN.Letters()) do eq(x.read, nil, x.key .. ": not read") end
+	-- Escape: the letter itself hidden.
+	letter:Hide()
+	w:As(A, onHide, letter)
+	eq(#HN.QueuedLetters(), 1, "Escape: as Later")
+	eq(Shown(A), true, "the next letter")
+	eq(letter.key ~= key, true)
+	for _, x in ipairs(HN.Letters()) do eq(x.read, x.key == key and true or nil, x.key) end
+	W3.NoErrors(w)
+end)
+
+-- A month's honour (the month's donors' koi, the Oracle's ravens) is that month's award ("yours for
+-- the month ahead"): its key names only the place, so its letter is told for its month. A place
+-- lost and won back inside the month is no new letter; won again in a later month, it is.
+test("1.2.1 the King's letter: a month's honour is told for its month: a reorder within the month gives no letter; won again in a later month after a gap, its letter once", function()
+	local w, cast = W3.New()
+	local A, B = Kept(w, cast.A), cast.B
+	local HN = A.ns.HonorsNet
+	local t = w.clock
+	local function Word(month) t = t + 1 Donors(w, A, t, { B }, month) w:Run(3) end
+	-- (A month on: the clock and every timer moved together, nothing due in between.)
+	local function NextMonth()
+		local m, from = A.ns.Honors.MonthOf(w.clock), w.clock
+		while A.ns.Honors.MonthOf(w.clock) == m do w.clock = w.clock + 3600 end
+		for _, x in ipairs(w.timers) do x.at = x.at + (w.clock - from) end
+		t = w.clock
+	end
+	local function Two(a, b) return Short(a.name) .. "," .. Short(b.name) end
+	Word(Short(A.name))
+	eq(Shown(A), true, "the month's koi: its letter"); eq(HN.LetterFrame().key, "donor-month-1")
+	eq(w:As(A, HN.CloseLetter, false), true)
+	-- Second, then first again, inside the month.
+	Word(Two(B, A))
+	Word(Two(A, B))
+	eq(A.ns.ArenaProfile.Pick().seen["donor-month"].place, 1)
+	eq(Shown(A), false, "a place won back inside the month: no letter")
+	-- The next month someone else's; the month after his again: a new award.
+	NextMonth()
+	Word(Short(B.name))
+	eq(A.ns.ArenaProfile.Pick().seen["donor-month"], nil, "not his this month")
+	eq(Shown(A), false)
+	NextMonth()
+	Word(Short(A.name))
+	eq(Shown(A), true, "won again in a later month: its letter")
+	eq(HN.LetterFrame().key, "donor-month-1")
+	eq(w:As(A, HN.CloseLetter, false), true)
+	Word(Two(B, A))
+	Word(Short(A.name))
+	eq(Shown(A), false, "once for that month")
+	eq(#HN.Letters(), 2, "each month's letter kept")
 	W3.NoErrors(w)
 end)
 
