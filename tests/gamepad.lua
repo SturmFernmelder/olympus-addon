@@ -2320,7 +2320,11 @@ test("gamepad pass 2: mouse and keyboard, then a switch to the gamepad UI: the g
 	local lines, postCalls = TooltipFlow(C)
 	assert(postCalls > 0 and lines > 0, "the tooltip's post-call and its line: " .. lines)
 	local made, ran = MenuFlow(C)
-	assert(ran >= 10, "the player menus' callbacks: " .. ran)
+	-- (Changed on purpose, 1.2.1: the game's guild roster menus are never hooked, PlayerMenu.NEVER,
+	-- so 8 player menus where there were 10.)
+	assert(ran >= #ns.PlayerMenu.WHICH and ran >= 8, "the player menus' callbacks: " .. ran)
+	eq(C.menus.MENU_UNIT_COMMUNITIES_GUILD_MEMBER, nil, "never the game's guild roster menu")
+	eq(C.menus.MENU_UNIT_GUILD, nil)
 	local _, filters = ChatLineFlow(C)
 	eq(filters, 1, "the chat name filter")
 	TargetFlow(C)
@@ -2342,6 +2346,10 @@ test("gamepad pass 2: mouse and keyboard, then a switch to the gamepad UI: the g
 	-- open with Olympus's button in it, the map showing Olympus's icons: then the switch.
 	ns.ShowDialog("OLYMPUS_CRAFT_ASK")
 	ns.UI.Toggle()
+	-- (1.2.1: a guild window the player sees moves a question of Olympus's off the game's popups,
+	-- GuildFrame.lua, and none opens there while one is up: the Communities window here is open the
+	-- way ClassicUI Forever keeps it, unseen at alpha 0, which leaves the game's popup where it is.)
+	E.CommunitiesFrame:SetAlpha(0)
 	E.CommunitiesFrame:Show()
 	C.ShowMap()
 	-- (The author's preview of a border, on his own portrait: a texture of Olympus's on the game's
