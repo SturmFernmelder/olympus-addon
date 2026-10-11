@@ -1629,3 +1629,421 @@ test("1.2.1 Church: no receipt goes to a keeper (one before 1.2.1 counts each li
 	eq(SentTo(w, c.a2, c.a1, "w", "Vale Late"), 2, "and it went once more")
 	eq(SentTo(w, c.a1, c.a2, "k"), 0)
 end)
+
+-- 1.2.3 (the Church keeper's spikes on the author's laptop, a desk with 1,932 records in a 1,000-member
+-- guild): the credits kept while the ledger stays the same, the desk's checks a few a tick, the roster
+-- memory written once a day, names' keys kept, the top 3 and the due checks worked out when something
+-- changed, the ledger's first upkeep after the login's other work.
+
+-- A fixture ledger with every kind of claim (every name invented), straight into a keeper's saved ledger:
+-- credited and pending invites over 80 days and both guilds, stays, tries, transfers, alts; registrations
+-- open, expired, withdrawn, arrived and arrived late; two or three claims on one recruit (a confirmed one
+-- first, then the earliest, then the smaller id); an archived recruit; the archive's records and the
+-- person lines. "Fix Reg Cross" reaches its REG_DAYS 90 seconds after the fixture's time.
+local FIX_PEOPLE = { A1, A2, "Mira Wells", "Nils Ford", "Out Sider" }
+local function FixtureLedger(w, K)
+	local now, H, W = w.clock, 3600, { "wes brook" }
+	local l = w:As(K, K.Count.Led)
+	l.wv, l.gone = 2, l.gone or {}
+	local function Put(recruit, by, rec)
+		rec.n, rec.bn, rec.u, rec.kind = recruit, ns.ShortName(by), now, rec.kind or "i"
+		l.r[Key(recruit) .. ":" .. Key(by)] = rec
+	end
+	for i = 1, 60 do
+		local tj = now - ((i * 37) % (80 * 24)) * H
+		Put("Fix Rec" .. Letters(i), FIX_PEOPLE[i % 5 + 1], { g = i % 3 == 0 and World.GUILD2 or World.GUILD, tc = tj - (i % 4) * H, tj = tj,
+			ws = i % 4 ~= 0 and W or nil, s = i % 4 == 0 and 1 or nil, c = i % 2 == 0 and 1 or nil,
+			y = (i % 6 == 0 and 1) or (i % 11 == 0 and 0) or nil, q7 = i % 7 == 0 and 2 or nil, t = i % 13 == 0 and 1 or nil,
+			a = i % 17 == 0 and 1 or nil })
+	end
+	local function Dup(j, by, rec) Put("Fix Dup" .. Letters(j), by, rec) end
+	Dup(1, A1, { g = World.GUILD, tc = now - 50 * H, tj = now - 49 * H, ws = W })
+	Dup(1, "Mira Wells", { g = World.GUILD, tc = now - 60 * H, tj = now - 59 * H, s = 1 })
+	Dup(2, A2, { g = World.GUILD2, tc = now - 40 * H, tj = now - 39 * H, ws = W })
+	Dup(2, "Nils Ford", { g = World.GUILD, tc = now - 30 * H, tj = now - 29 * H, ws = W })
+	Dup(3, A1, { g = World.GUILD, tc = now - 20 * H, tj = now - 19 * H, ws = W })
+	Dup(3, A2, { g = World.GUILD, tc = now - 20 * H, tj = now - 19 * H, ws = W })
+	Dup(4, "Mira Wells", { kind = "g", tc = now - 5 * DAY })
+	Dup(4, "Nils Ford", { g = World.GUILD, tc = now - 2 * DAY, tj = now - 2 * DAY + H, s = 1 })
+	Dup(5, A1, { kind = "g", tc = now - 20 * DAY })
+	Dup(5, A2, { g = World.GUILD2, tc = now - 3 * DAY, tj = now - 3 * DAY + H, ws = W })
+	Dup(6, "Nils Ford", { kind = "g", tc = now - 4 * DAY, x = 1 })
+	Dup(6, "Mira Wells", { g = World.GUILD, tc = now - 3 * DAY, tj = now - 3 * DAY + H, ws = W })
+	Dup(7, A1, { g = World.GUILD, tc = now - 6 * DAY, tj = now - 6 * DAY + H, ws = W })
+	Dup(7, "Mira Wells", { g = World.GUILD, tc = now - 5 * DAY, tj = now - 5 * DAY + H, ws = W })
+	Dup(8, A1, { g = World.GUILD, tc = now - 9 * DAY, tj = now - 9 * DAY + H, ws = W, t = 1 })
+	Dup(8, "Mira Wells", { g = World.GUILD, tc = now - 10 * DAY, tj = now - 10 * DAY + H, s = 1 })
+	Dup(8, "Nils Ford", { g = World.GUILD, tc = now - 8 * DAY, tj = now - 8 * DAY + H, ws = W })
+	l.gone[Key("Fix Dup" .. Letters(7)) .. ":"] = now - DAY
+	Put("Fix Reg Open", "Nils Ford", { kind = "g", tc = now - 3 * DAY })
+	Put("Fix Reg Cross", "Mira Wells", { kind = "g", tc = now - K.Count.REG_DAYS * DAY + 90 })
+	Put("Fix Reg Arrived", A2, { kind = "g", tc = now - 10 * DAY, tj = now - 4 * DAY, g = World.GUILD2, ws = W, c = 1 })
+	Put("Fix Reg Late", A1, { kind = "g", tc = now - 30 * DAY, tj = now - 2 * DAY, g = World.GUILD })
+	Put("Fix Reg Old", "Mira Wells", { kind = "g", tc = now - 20 * DAY - 7 * H })
+	l.p[Key(A1)] = { n = "Aldric Vane", pub = true, pat = now - DAY, ap = 45, aj = 4, ay = 1, u = now }
+	l.p[Key("Mira Wells")] = { n = "Mira Wells", pub = true, pat = now - DAY, ap = 15, aj = 1, ay = 1, u = now }
+	l.p[Key("Nils Ford")] = { n = "Nils Ford", pub = true, pat = now - DAY, u = now }
+	l.p[Key(A2)] = { n = "Bera Stone", pub = false, pat = now - DAY, u = now }
+	l.arc = { [Key(A1)] = { [Key("Fix Arc A")] = { h = now - 3 * DAY, t = now - DAY, y = 1, l = 1 }, [Key("Fix Arc B")] = { h = now - 20 * DAY, t = now, l = 1 } },
+		[Key("Mira Wells")] = { [Key("Fix Arc C")] = { h = now - 33 * DAY, t = now, l = 1 } } }
+	for _, n in ipairs({ "Fix Arc A", "Fix Arc B", "Fix Arc C" }) do l.gone[Key(n) .. ":"] = now - DAY end
+	w:As(K, K.Count.Changed)
+	return l
+end
+
+-- What a keeper shows of its ledger, one line each: every ranking (list and window), every person's detail
+-- (a registration's time from `base`), every record's state, every recruit's claim, the top 3.
+local function CountResults(w, K, base)
+	local out = {}
+	local function N(v) return type(v) == "number" and ("%.17g"):format(v) or tostring(v) end
+	for _, list in ipairs({ "a", "m", "c" }) do
+		for _, window in ipairs({ "w", "m", "a" }) do
+			for _, r in ipairs(w:As(K, K.Count.Ranking, list, window)) do
+				out[#out + 1] = table.concat({ "rank", list, window, N(r.rank), r.key, r.name, r.role, N(r.score), N(r.own), N(r.share), N(r.levels[1]),
+					N(r.levels[2]), N(r.levels[3]), N(r.joins), N(r.stays), N(r.net), tostring(r.pub) }, " ")
+			end
+		end
+	end
+	for _, who in ipairs({ A1, A2, "Mira Wells", "Nils Ford", "Out Sider", World.HEAD }) do
+		for _, window in ipairs({ "w", "m", "a" }) do
+			local lines, share = w:As(K, K.Count.DetailLines, Key(who), window)
+			for i, d in ipairs(lines) do
+				out[#out + 1] = table.concat({ "detail", Key(who), window, N(i), d[1], N(d[2]), N(d[1] == "r" and d[3] - base or d[3]), N(d[4]), N(d[5]) }, " ")
+			end
+			out[#out + 1] = table.concat({ "share", Key(who), window, N(share) }, " ")
+		end
+	end
+	local recs, ids, seen = w:As(K, K.Count.Led).r, {}, {}
+	for id in pairs(recs) do ids[#ids + 1] = id end
+	table.sort(ids)
+	for _, id in ipairs(ids) do
+		out[#out + 1] = "state " .. id .. " " .. tostring(w:As(K, K.Count.StateOf, id))
+		local xk = id:match("^([^:]+):")
+		if not seen[xk] then
+			seen[xk] = true
+			local cr = w:As(K, K.Count.CreditOf, xk)
+			out[#out + 1] = table.concat({ "credit", xk, cr and cr.id or "-", cr and cr.state or "-", tostring(cr ~= nil and cr.r == recs[cr.id]) }, " ")
+		end
+	end
+	local top = w:As(K, K.Count.ComputeTop3)
+	out[#out + 1] = "top a " .. table.concat(top.a, ",")
+	out[#out + 1] = "top m " .. table.concat(top.m, ",")
+	return out
+end
+local function SameLines(got, want, label)
+	for i = 1, math.max(#got, #want) do
+		if got[i] ~= want[i] then error(("%s, line %d: expected %s, got %s"):format(label, i, tostring(want[i]), tostring(got[i])), 2) end
+	end
+end
+
+test("1.2.3 Church: the credits are what 1.2.2 worked out: every ranking, detail, state and claim of a fixture ledger, before and after a registration reaches its 14 days", function()
+	local w, c = Cast()
+	local K = c.a1
+	FixtureLedger(w, K)
+	local t0 = w.clock
+	-- (The published 1.2.2's own results on this fixture, run on its code: tests/fixtures/church-credits-1.2.2.lua.)
+	local want = assert(loadfile(ROOT .. "tests/fixtures/church-credits-1.2.2.lua"))()
+	local before = CountResults(w, K, t0)
+	SameLines(before, want.before, "90 s before Fix Reg Cross's 14 days")
+	w.clock = t0 + 120
+	local after = CountResults(w, K, t0)
+	SameLines(after, want.after, "30 s after")
+	-- (What the fixture holds: every state, and the registration that crossed.)
+	local states = {}
+	for _, line in ipairs(after) do local s = line:match("^state .* (%a+)$") if s then states[s] = true end end
+	for _, s in ipairs({ "credited", "pending", "open", "taken", "transfer", "alt", "withdrawn", "expired" }) do eq(states[s], true, s) end
+	local cross = "state " .. Key("Fix Reg Cross") .. ":" .. Key("Mira Wells")
+	local was, now
+	for _, line in ipairs(before) do if line:find(cross, 1, true) == 1 then was = line end end
+	for _, line in ipairs(after) do if line:find(cross, 1, true) == 1 then now = line end end
+	eq(was, cross .. " open"); eq(now, cross .. " expired")
+end)
+
+test("1.2.3 Church: the credits are kept while the ledger stays the same, through public rows and an upkeep that lets nothing go; worked out again when the ledger changes, when a registration reaches its 14 days, CREDITS_KEEP at most", function()
+	local w, c = Cast()
+	local K = c.a1
+	FixtureLedger(w, K)
+	local t0 = w.clock
+	local cross = Key("Fix Reg Cross") .. ":" .. Key("Mira Wells")
+	local C1 = w:As(K, K.Count.Credits)
+	eq(C1.states[cross], "open")
+	w.clock = t0 + 60
+	eq(w:As(K, K.Count.Credits), C1, "a minute later, the same (1.2.2 worked them out again every minute)")
+	-- The public rows a desk broadcasts are the tab's: the ledger did not change.
+	c.author.online = true
+	w:Presence()
+	w:Act(c.author, c.author.Church.SetPublic, true)
+	local _, at = w:As(K, K.Church.Public)
+	local B = ns.Codec.Base36
+	eq(w:As(K, K.Count.TakePublicRow, A2, ("NR~1~p~%s~m~1~Mira Wells~100~200"):format(B(at))), true)
+	eq(w:As(K, K.Count.TakePublicCount, A2, ("NR~1~n~%s~m~1"):format(B(at))), true)
+	eq(w:As(K, K.Count.Credits), C1, "public rows kept")
+	local fired = #K.fired
+	eq(w:As(K, K.Count.Prune), false, "nothing to let go")
+	eq(#K.fired, fired, "nothing changed, nothing to redraw")
+	eq(w:As(K, K.Count.Credits), C1, "an upkeep that let nothing go kept them")
+	-- Fix Reg Cross reaches its 14 days.
+	w.clock = t0 + 90
+	eq(w:As(K, K.Count.Credits), C1, "its last second open")
+	w.clock = t0 + 91
+	local C2 = w:As(K, K.Count.Credits)
+	eq(C2 ~= C1, true); eq(C2.states[cross], "expired")
+	-- CREDITS_KEEP at most.
+	w.clock = t0 + 91 + K.Count.CREDITS_KEEP
+	eq(w:As(K, K.Count.Credits), C2)
+	w.clock = w.clock + 1
+	local C3 = w:As(K, K.Count.Credits)
+	eq(C3 ~= C2, true)
+	-- A ledger change: at once.
+	local id = Key("Fix New") .. ":" .. Key("Nils Ford")
+	w:As(K, K.Count.MergeIn, id, { n = "Fix New", bn = "Nils Ford", g = World.GUILD, kind = "i", tc = w.clock - 7200, tj = w.clock - 3600, ws = { "wes brook" } }, false)
+	local C4 = w:As(K, K.Count.Credits)
+	eq(C4 ~= C3, true); eq(C4.states[id], "credited")
+	local cr = w:As(K, K.Count.CreditOf, Key("Fix New"))
+	eq(cr.id, id); eq(cr.state, "credited"); eq(cr.r, w:As(K, K.Count.Led).r[id])
+	eq(w:As(K, K.Count.CreditOf, Key("Nobody Here")), nil)
+	-- A new ledger (a malformed one replaced, another realm group's): never the old one's credits.
+	w:As(K, K.Church.Store).led = { v = 1, wv = 2, r = {}, p = {}, from = {} }
+	eq(w:As(K, K.Count.StateOf, id), nil)
+end)
+
+test("1.2.3 Church: the desk sends CHECKS_TICK seen-checks a tick, the checks of one tick sharing one list of who may answer; the hour's CHECKS_HOUR still go within minutes", function()
+	local w, c = Cast()
+	local K = c.a1
+	for i = 1, 40 do
+		local recruit = "Desk Rec" .. Letters(i)
+		w:As(K, K.Count.MergeIn, Key(recruit) .. ":" .. Key("Mira Wells"), { n = recruit, bn = "Mira Wells", g = World.GUILD, kind = "i",
+			tc = w.clock - 7200, tj = w.clock - 3600, ws = { "wes brook" } }, false)
+	end
+	w:ClearSent()
+	local function Sent() return #w:Sent(K, "NS", "CHANNEL", "q") end
+	local function Lists()
+		local out, n = {}, 0
+		for _, ch in pairs(w:As(K, K.Count.OpenChecks)) do
+			if not out[ch.expected] then out[ch.expected], n = true, n + 1 end
+		end
+		return out, n
+	end
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Sent(), K.Count.CHECKS_TICK, "three in the first tick, not the hour's thirty")
+	local first, n = Lists()
+	eq(n, 1, "one list for the tick's checks")
+	local list = next(first)
+	eq(list[Key("Wes Brook")], "roster", "a guildmate on our roster may answer")
+	eq(list[Key(A2)], "keeper", "a keeper heard may relay his roster's")
+	-- A guildmate who arrived after the first tick is on the next tick's list only.
+	Join(w, World.GUILD, "Late Mate")
+	w:Run(30)
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Sent(), 2 * K.Count.CHECKS_TICK)
+	local lists, n2 = Lists()
+	eq(n2, 2)
+	eq(list[Key("Late Mate")], nil, "not asked by the first tick's checks")
+	for l in pairs(lists) do if l ~= list then eq(l[Key("Late Mate")], "roster") end end
+	-- The rest of the hour's thirty within minutes, then nothing more that hour.
+	for _ = 1, 12 do w:Run(30); w:As(K, K.Count.DeskTick, w.clock) end
+	eq(Sent(), K.Count.CHECKS_HOUR, "thirty within seven minutes")
+	w:Run(3600)
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Sent(), K.Count.CHECKS_HOUR + K.Count.CHECKS_TICK, "the next hour's")
+end)
+
+test("1.2.3 Church: the desk looks for due checks when its ledger changes, else every DUE_EVERY; a record a keeper's line brought without its join stops no check", function()
+	local w, c = Cast()
+	local K = c.a1
+	local B = ns.Codec.Base36
+	-- (An invite's line whose join is "-": its record has no stay to check.)
+	local line = ("NL~1~r~No Join~Mira Wells~-~i~%s~-~s00~wes brook~%s"):format(B(w.clock - DAY), B(w.clock))
+	eq(w:As(K, K.Count.TakeLine, A2, line), true)
+	-- A registration whose day-1 check is due 100 seconds from now (its day-0 check done).
+	local id = Key("Reg Due") .. ":" .. Key("Mira Wells")
+	w:As(K, K.Count.MergeIn, id, { n = "Reg Due", bn = "Mira Wells", kind = "g", tc = w.clock - DAY + 100, rq = 1 }, false)
+	w:ClearSent()
+	local function Checks(name)
+		local n = 0
+		for _, e in ipairs(w:Sent(K, "NS", "CHANNEL", "q")) do if e.msg:find("~" .. name .. "~", 1, true) then n = n + 1 end end
+		return n
+	end
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Checks("Reg Due"), 0, "not due yet")
+	w.clock = w.clock + 200
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Checks("Reg Due"), 0, "due now, the ledger unchanged: looked for again DUE_EVERY after the last time")
+	w.clock = w.clock + K.Count.DUE_EVERY - 200
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Checks("Reg Due"), 1, "DUE_EVERY later")
+	-- A new record: its check is looked for at the desk's next tick.
+	w:As(K, K.Count.MergeIn, Key("Fresh One") .. ":" .. Key("Mira Wells"), { n = "Fresh One", bn = "Mira Wells", g = World.GUILD, kind = "i",
+		tc = w.clock - 7200, tj = w.clock - 3600, ws = { "wes brook" } }, false)
+	w.clock = w.clock + 30
+	w:As(K, K.Count.DeskTick, w.clock)
+	eq(Checks("Fresh One"), 1, "the ledger changed: at once")
+end)
+
+test("1.2.3 Church: the roster memory, scanned again the same day, writes no name again and holds what writing them all would; a new day, another guild, a name the bounding let go: written again", function()
+	local w, c = Cast()
+	local cl = c.wes
+	cl.Count.random = function(a, b) if b == 50 then return 2 end return a end -- (the bounding only past MEMORY_MAX)
+	local writes = 0
+	cl.ns.Codec = setmetatable({ Base36 = function(n) writes = writes + 1 return ns.Codec.Base36(n) end }, { __index = ns.Codec })
+	w.members[World.GUILD] = {}
+	for i = 1, 30 do table.insert(w.members[World.GUILD], "Mem Row" .. Letters(i)) end
+	w:RefreshRosters()
+	local rows = #cl.c.Roster.members
+	local function Remember() writes = 0; return w:As(cl, cl.Count.Remember, false) end
+	local function Fact(name) return w:As(cl, cl.Count.Fact, name) end
+	local day0 = math.floor(w.clock / DAY)
+	eq(Remember(), true)
+	eq(writes, 2 * rows, "each name written once (its first and last day)")
+	local saved = World.Copy(w:As(cl, cl.Church.Store).mem.n)
+	-- The next scan the same day: nothing written, the memory as it was.
+	w.clock = w.clock + 60
+	w:RefreshRosters()
+	eq(Remember(), true)
+	eq(writes, 0, "nothing written again")
+	local mem = w:As(cl, cl.Church.Store).mem
+	for k, v in pairs(saved) do eq(mem.n[k], v, k) end
+	-- A name new today is written.
+	Join(w, World.GUILD, "Mem Late")
+	eq(Remember(), true)
+	eq(writes, 2)
+	eq(Fact("Mem Late").first, day0)
+	-- The next day: every name's last day.
+	w.clock = (day0 + 1) * DAY + 10
+	w:RefreshRosters()
+	Remember()
+	eq(writes, 2 * (rows + 1))
+	local f = Fact("Mem Rowb")
+	eq(f.first, day0); eq(f.last, day0 + 1); eq(f.guild, World.GUILD); eq(f.now, true)
+	-- The bounding lets one go: written again when next seen.
+	cl.Count.MEMORY_MAX = rows
+	w:RefreshRosters()
+	Remember()
+	local gone
+	for _, row in ipairs(cl.c.Roster.members) do if not mem.n[Key(row.full)] then gone = row.full end end
+	assert(gone, "one name let go")
+	cl.Count.MEMORY_MAX = 2500
+	w:RefreshRosters()
+	Remember()
+	eq(writes, 2, "only the one let go")
+	eq(Fact(gone).last, day0 + 1)
+	-- Another guild: written there from its first day.
+	cl.guild = World.GUILD2
+	w:RefreshRosters()
+	Remember()
+	eq(writes, 2 * #cl.c.Roster.members)
+	eq(Fact("Wes Brook").guild, World.GUILD2); eq(Fact("Wes Brook").first, day0 + 1)
+end)
+
+test("1.2.3 Church: a name's key is kept when no realm group can change it (\"First Surname-Realm\", or no realm), KEY_MEMO_MAX names at most; a \"First-Surname\" one is worked out every time", function()
+	local w = World.New({})
+	local cl = w:Client("Key Keeper")
+	local folds = 0
+	cl.ns.Fold = function(s) folds = folds + 1 return ns.Fold(s) end
+	local function K(name) return w:As(cl, cl.Church.Key, name) end
+	local split = ns.splitNames
+	local ok, err = pcall(function()
+		ns.splitNames = true
+		eq(K("Ann Bell-Realm"), "ann bell"); eq(K("Ann Bell-Realm"), "ann bell"); eq(K("Ann Bell"), "ann bell")
+		eq(folds, 2, "each name folded its first time only")
+		-- "Ann-Bell", as the game's unit functions give it: its key depends on whether "Bell" is a realm here.
+		eq(K("Ann-Bell"), "ann bell")
+		ns.splitNames = nil
+		eq(K("Ann-Bell"), "ann", "never kept: a client that splits no names reads Bell as a realm")
+		eq(K("Ann Bell-Realm"), "ann bell")
+		eq(folds, 4)
+		eq(K(""), nil); eq(K("-"), nil); eq(K(7), nil); eq(K("-Realm"), nil)
+		-- Bounded: the memory starts over past KEY_MEMO_MAX, every key still right.
+		cl.Church.KEY_MEMO_MAX = 3
+		for i = 1, 10 do eq(K("Memo Name" .. Letters(i) .. "-Realm"), "memo name" .. Letters(i)) end
+		eq(K("Ann Bell-Realm"), "ann bell")
+		eq(K("\195\137lan Vert-Realm"), "\195\169lan vert", "a capital accented letter folded")
+	end)
+	ns.splitNames = split
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.3 Church: the top 3 is worked out again only when the ledger, the book, the hour or the top 3 held changed, and when TOP_EVERY sends it", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	local A = c.author
+	local function Give(by, recruit)
+		w:As(A, A.Count.MergeIn, Key(recruit) .. ":" .. Key(by), { n = recruit, bn = by, g = World.GUILD, kind = "i", tc = w.clock - 7200,
+			tj = w.clock - 3600, ws = { "wes brook" } }, false)
+	end
+	-- (Two hundred seconds before an hour: the new hour below comes well within TOP_EVERY of the last send.)
+	local hour = (math.floor(w.clock / 3600) + 1) * 3600
+	w.clock = hour - 200
+	w:Presence()
+	Give("Mira Wells", "Top Reca")
+	w:Act(c.m1, c.m1.Count.SetPublicRow, true)
+	w:Act(c.m2, c.m2.Count.SetPublicRow, true)
+	w:Act(A, A.Church.SetPublic, true)
+	local computed, real = 0, A.Count.ComputeTop3
+	A.Count.ComputeTop3 = function(...) computed = computed + 1 return real(...) end
+	local function Send() local sent = w:As(A, A.Count.SendTop, w.clock); w:Flush() return sent end
+	local function Top() return table.concat(w:As(c.wes, c.wes.Church.Top3).missionaries, ",") end
+	eq(Send(), true); eq(computed, 1); eq(Top(), "Mira Wells")
+	w.clock = w.clock + 30
+	eq(Send(), false); eq(computed, 1, "nothing changed: not worked out again")
+	-- The ledger changed: worked out again, and a new top goes at once.
+	Give("Nils Ford", "Top Recb"); Give("Nils Ford", "Top Recc")
+	w.clock = w.clock + 30
+	eq(Send(), true); eq(computed, 2); eq(Top(), "Nils Ford,Mira Wells")
+	w.clock = w.clock + 30
+	eq(Send(), false); eq(computed, 2)
+	-- The book changed (a missionary named): worked out again; the same top stays unsent.
+	w:Act(c.m1, c.m1.Church.NameMissionary, "Wes Brook")
+	w.clock = w.clock + 30
+	eq(Send(), false); eq(computed, 3)
+	-- A new hour (the last 30 days moved on).
+	w.clock = hour + 10
+	eq(Send(), false); eq(computed, 4)
+	-- TOP_EVERY: worked out again and sent.
+	w.clock = w.clock + A.Count.TOP_EVERY
+	eq(Send(), true); eq(computed, 5)
+	-- Another root's top 3 held here: ours, which differs, goes at once.
+	eq(w:As(A, A.Count.TakeTop, World.KING, "NR~1~t~" .. ns.Codec.Base36(w.clock + 1) .. "~Aldric Vane~Mira Wells"), true)
+	w.clock = w.clock + 30
+	eq(Send(), true); eq(computed, 6); eq(Top(), "Nils Ford,Mira Wells")
+end)
+
+test("1.2.3 Church: a keeper's first upkeep of its ledger comes PRUNE_AFTER after its first tick, then hourly; marks past GONE_MAX go, the oldest first", function()
+	local w, c = Cast()
+	local K = c.a1
+	local l = w:As(K, K.Count.Led)
+	local function Old(recruit)
+		local id = Key(recruit) .. ":" .. Key("Mira Wells")
+		l.r[id] = { n = recruit, bn = "Mira Wells", g = World.GUILD, kind = "i", tc = w.clock - 130 * DAY, tj = w.clock - 130 * DAY + 3600,
+			ws = { "wes brook" }, u = w.clock }
+		w:As(K, K.Count.Changed)
+		return id
+	end
+	local id = Old("Very Old")
+	w:Tick({ K })
+	eq(l.r[id] ~= nil, true, "not with the login's first tick")
+	w:Run(K.Count.PRUNE_AFTER - 1); w:Tick({ K })
+	eq(l.r[id] ~= nil, true)
+	w:Run(1); w:Tick({ K })
+	eq(l.r[id], nil, "PRUNE_AFTER later: let go")
+	eq(l.p[Key("Mira Wells")].aj, 1, "into her archive")
+	local id2 = Old("Older Still")
+	w:Run(1800); w:Tick({ K })
+	eq(l.r[id2] ~= nil, true, "then hourly")
+	w:Run(1800); w:Tick({ K })
+	eq(l.r[id2], nil)
+	-- Marks of what the ledger let go: GONE_MAX at most, the oldest go first.
+	local saved = K.Count.GONE_MAX
+	K.Count.GONE_MAX = 3
+	local ok, err = pcall(function()
+		local g = {}
+		for i = 1, 5 do g["mark " .. Letters(i) .. ":"] = w.clock - 10 + i end
+		l.gone = g
+		eq(w:As(K, K.Count.Prune), true)
+		eq(g["mark b:"], nil); eq(g["mark c:"], nil)
+		eq(g["mark d:"] ~= nil and g["mark e:"] ~= nil and g["mark f:"] ~= nil, true)
+	end)
+	K.Count.GONE_MAX = saved
+	if not ok then error(err, 0) end
+end)
