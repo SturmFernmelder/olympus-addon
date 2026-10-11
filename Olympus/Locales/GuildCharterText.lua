@@ -33,6 +33,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CHARTER_FRIEND = "Amigo a procurar (opcional, guardado neste computador)"
 	L.CHARTER_FRIEND_CHOOSE = "> Escolher um amigo a procurar"
 	L.CHARTER_EDIT_FIELD = "Editar %s..."
+	L.CHARTER_EDIT = "%s"
 	L.CHARTER_SAVE = "Salvar"
 	L.CHARTER_WITHDRAW = "Retirar a carta pública"
 	L.CHARTER_LETTER = "Escrever ao Lord desta guilda..."
