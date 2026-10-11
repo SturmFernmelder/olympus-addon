@@ -102,6 +102,19 @@ local function RingCentre(alpha, x0, y0)
 	assert(#pts >= 40, "enough of the ring's edge: " .. #pts)
 	return cx, cy
 end
+-- The same, from where it finds the centre again until it stops moving: a ray's edge depends on
+-- where the rays start (8 file pixels left or right of the centre move one reading 4 px), so the
+-- start is the portrait's centre only for the first reading.
+local function SettledRingCentre(alpha, x0, y0)
+	local cx, cy = RingCentre(alpha, x0, y0)
+	for _ = 1, 20 do
+		local nx, ny = RingCentre(alpha, cx, cy)
+		local moved = math.abs(nx - cx) + math.abs(ny - cy)
+		cx, cy = nx, ny
+		if moved < 0.01 then return cx, cy end
+	end
+	return cx, cy
+end
 
 test("1.2.1 party borders: every border drawn from Olympus's own file (the Treasurer's dragon, the bronze wings, the plain bronze) has its ring round the party member's portrait, within a pixel of its centre", function()
 	local saved = { ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM }
@@ -127,7 +140,7 @@ test("1.2.1 party borders: every border drawn from Olympus's own file (the Treas
 					local x0, y0 = tex.at.x, -tex.at.y -- (its top left, down from the frame's top)
 					-- The portrait's centre in the art's pixels (turned round), then the ring's.
 					local fx, fy = cw - (px - x0) / sx, (py - y0) / sy
-					local cx, cy = RingCentre(Alpha(tex.file), fx, fy)
+					local cx, cy = SettledRingCentre(Alpha(tex.file), fx, fy)
 					local gx, gy = x0 + (cw - cx) * sx, y0 + cy * sy
 					measured[name] = ("%.2f %.2f"):format(gx - px, gy - py)
 					assert(math.abs(gx - px) < 1 and math.abs(gy - py) < 1,
