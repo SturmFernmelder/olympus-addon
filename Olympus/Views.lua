@@ -861,12 +861,13 @@ local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "
 -- player seen at each letter typed and at each redraw, and a name reads the same each time.
 -- Emptied past SEARCH_NAMES_KEPT, a long session's worth.
 Views.SEARCH_NAMES_KEPT = 20000
-local searchNames, seenNames, namesKept = {}, {}, 0
+local searchNames, seenNames, lookNames, namesKept = {}, {}, {}, 0
 local function Kept()
 	namesKept = namesKept + 1
 	if namesKept > Views.SEARCH_NAMES_KEPT then
 		wipe(searchNames)
 		wipe(seenNames)
+		wipe(lookNames)
 		namesKept = 1
 	end
 end
@@ -891,6 +892,31 @@ end
 -- Does `name` hold the search `q`, as its row shows it?
 local function NameHolds(q, name)
 	return type(name) == "string" and name ~= "" and SearchName(name):find(q, 1, true) ~= nil
+end
+
+-- 1.2.1: the Census's search reads letters that look alike as one: l, I and 1, and 0 and O (a
+-- guild's name may mix them, "OLYMPUS XIlI", and the player types what he sees). A folded text
+-- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o.
+local function Lookalike(s) return (s:gsub("[l1]", "i"):gsub("0", "o")) end
+-- Does `name` hold the Census's search `lq` (Lookalike of the query), as its row shows it? Kept
+-- like SearchName.
+local function LookHolds(lq, name)
+	if type(name) ~= "string" or name == "" then return false end
+	local k = lookNames[name]
+	if not k then
+		Kept()
+		k = Lookalike(SearchName(name))
+		lookNames[name] = k
+	end
+	return k:find(lq, 1, true) ~= nil
+end
+-- Does one of the texts hold `lq`, as ns.Holds but with look-alike letters as one?
+local function CensusHolds(lq, ...)
+	for i = 1, select("#", ...) do
+		local s = select(i, ...)
+		if type(s) == "string" and s ~= "" and Lookalike(ns.Searchable(s)):find(lq, 1, true) then return true end
+	end
+	return false
 end
 
 function Views.Filter(tab) return filters[tab] or "" end
@@ -925,6 +951,7 @@ function Views.ClearFilters()
 	searchRows = Views.SEARCH_ROWS
 	wipe(searchNames)
 	wipe(seenNames)
+	wipe(lookNames)
 	namesKept = 0
 end
 
@@ -1274,12 +1301,13 @@ local function RecruitingLines(lines, s, min)
 	lines[#lines].gapAfter = true
 end
 
--- The zones whose name holds `q`, most soldiers first: each with its count, how it moved tonight
--- on this client, and its guilds there. Only what reporters who share their zone count (the tip).
-local function ZoneLines(lines, s, q)
+-- The zones whose name holds `lq` (the search, Lookalike), most soldiers first: each with its
+-- count, how it moved tonight on this client, and its guilds there. Only what reporters who share
+-- their zone count (the tip).
+local function ZoneLines(lines, s, lq)
 	for _, z in ipairs(s.zoneList) do
 		local name = ns.Zones.NameForKey(z.key)
-		if NameHolds(q, name) then
+		if LookHolds(lq, name) then
 			local _, change = ns.Data.ZoneTrend(z.key)
 			local e = ns.Data.Evening()
 			lines[#lines + 1] = {
@@ -1319,12 +1347,13 @@ end
 -- The players of a guild the Census's search finds, its Lord aside (his match shows the row
 -- alone): its Captains, its highest levels (the report's top five) and who of it was seen online
 -- (our roster for our own guild, /who's round for the others). Each once, as its row shows it.
+-- (lq: the search, Lookalike)
 Views.CENSUS_FOUND = 5 -- players listed under a guild's row, the rest counted
-local function PlayersFound(e, q, own, swept)
+local function PlayersFound(e, lq, own, swept)
 	local g, out, seen = e.g, {}, {}
 	local function Add(p)
 		local short = p.name and ns.ShortName(p.name)
-		if not short or seen[short] or not NameHolds(q, p.name) then return end
+		if not short or seen[short] or not LookHolds(lq, p.name) then return end
 		seen[short] = true
 		out[#out + 1] = p
 	end
@@ -1357,20 +1386,22 @@ end
 -- `q`, the search (Views.Query): "recruiting" (every guild with room), the zones whose name holds
 -- it (1.1), then the guilds whose name or Lord holds it, and those where it finds a Captain, a
 -- player of the top five or one seen online (under its row), the reported ones then the ones only
--- seen (by name: nobody knows their Lord), in the same order as ever.
+-- seen (by name: nobody knows their Lord), in the same order as ever. Letters that look alike
+-- read as one (Lookalike, 1.2.1).
 local function CensusLines(s, q)
 	local lines = {}
 	if q then
 		local min = RecruitQuery(q)
 		if min then RecruitingLines(lines, s, min) end
-		ZoneLines(lines, s, q)
+		local lq = Lookalike(q)
+		ZoneLines(lines, s, lq)
 		local own, swept = GetGuildInfo("player"), nil
 		for _, e in ipairs(SortedGuilds(s.guilds)) do
-			if ns.Holds(q, Plain(e.name), e.g.leader and Plain(e.g.leader)) then
+			if CensusHolds(lq, Plain(e.name), e.g.leader and Plain(e.g.leader)) then
 				lines[#lines + 1] = CensusRow(e)
 			else
 				swept = swept or CensusSwept()
-				local found = PlayersFound(e, q, own, swept)
+				local found = PlayersFound(e, lq, own, swept)
 				if #found > 0 then
 					lines[#lines + 1] = CensusRow(e)
 					for i = 1, math.min(#found, Views.CENSUS_FOUND) do lines[#lines + 1] = PersonLine(e, found[i]) end
@@ -1381,7 +1412,7 @@ local function CensusLines(s, q)
 			end
 		end
 		for _, e in ipairs(s.seen or {}) do
-			if ns.Holds(q, Plain(e.name)) then lines[#lines + 1] = SeenRow(e) end
+			if CensusHolds(lq, Plain(e.name)) then lines[#lines + 1] = SeenRow(e) end
 		end
 		if #lines == 0 then lines[1] = NoMatch() end
 		return lines
