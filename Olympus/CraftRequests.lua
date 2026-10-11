@@ -1831,11 +1831,12 @@ do
 	end
 
 	-- A party's word of the sale, to the desk: queued once per figure (the buyer's on the crafter's
-	-- recorded price, the seller's at completion), never where nothing can take the fee.
+	-- recorded price, the seller's at completion), never where nothing can take the fee, nor while
+	-- the Wallet is off (Compliance.Wallet: no fee then, so no word of one either).
 	QueueFeeReport = function(r, role, gross)
 		local s = r and r.settlement
 		gross = Clamp(gross, 1, Requests.PRICE_MAX)
-		if not s or s.rail ~= "direct" or not gross or not FeeReceiver() or TestBuild() then return false end
+		if not s or s.rail ~= "direct" or not gross or not WalletShown() or not FeeReceiver() or TestBuild() then return false end
 		if Requests.FeeBreakdown(gross, 0).guildFee <= 0 then return false end
 		local rep = s.feeReport
 		if rep and rep.role == role and rep.gross == gross then return false end
@@ -1848,7 +1849,7 @@ do
 	SendFeeReport = function(r, now)
 		local s = r and r.settlement
 		local rep = s and s.feeReport
-		if not rep then return false end
+		if not rep or not WalletShown() then return false end
 		if rep.acked and (rep.role ~= "s" or not (s.feeState == "due" or s.feeState == "mailed")) then return false end
 		if rep.sentAt and now - rep.sentAt < Requests.ASK_GAP then return false end
 		local guild = Same(r.crafter, ns.me) and Clean(GetGuildInfo and GetGuildInfo("player"), 40) or Clean(r.crafterGuild, 40)
@@ -1865,9 +1866,11 @@ do
 		return FeeWord(desk, r.id, "fee", rep.role, r.requester, r.crafter, B36(rep.gross), B36(r.itemID or 0), tostring(r.quantity), guild)
 	end
 
-	-- The desk hears a party's word.
+	-- The desk hears a party's word (none while the Wallet is off on the desk's own client: no fee
+	-- is owed then, so a word of one is a modified client's, and its ledger takes none).
 	local function TakeFeeReport(id, sender, f)
 		if not FeeDesk() then return false, "authority" end
+		if not WalletShown() then return false, "off" end
 		local role, requester, crafter = f[6], Full(f[7]), Full(f[8])
 		local gross, itemID, qty = UnB36(f[9], 1, Requests.PRICE_MAX), UnB36(f[10], 0, 999999999), Clamp(f[11], 1, Requests.QUANTITY_MAX)
 		local guild = Clean(f[12], Requests.GUILD_MAX)
@@ -1933,7 +1936,8 @@ do
 		local id = FeeSubjectId(subject)
 		copper = Clamp(copper, 1, Requests.PRICE_MAX)
 		if out or how ~= "mail" or not id or not copper or type(name) ~= "string" or Secret(name) then return false end
-		if FeeDesk() then BookFeePayment(id, Full(name), copper) end
+		-- (The Wallet off, no fee is owed: still the guild's money in the book, booked on no fee.)
+		if FeeDesk() and WalletShown() then BookFeePayment(id, Full(name), copper) end
 		return true
 	end
 
