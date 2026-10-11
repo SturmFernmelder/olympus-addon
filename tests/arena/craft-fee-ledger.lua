@@ -11,8 +11,7 @@ local ITEM = 14342
 print("CraftRequests: the fee desk's ledger")
 
 -- A requester and a crafter who makes ITEM.
-local function Cast(w, opts)
-	opts = opts or {}
+local function Cast(w)
 	local a = K.Client(w, "Sage Owl", { money = 500000 })
 	local b = K.Client(w, "Wren Thistle", { money = 500000 })
 	K.Recipes(w, b, { [ITEM] = "Mooncloth" })
