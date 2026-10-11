@@ -22,10 +22,45 @@ end
 -- game's back at a switch to the gamepad UI (GamepadRegistry.lua's "error-handler").
 if ns.Gate and ns.ParkErrorHandler then ns.Gate.Hooks("error-handler", { park = ns.ParkErrorHandler }) end
 
+-- 1.2.1: what /oly status and /oly bug never show, nor the error list or the log keep.
+-- The sealed channel's name (Comm.ChannelSpec: "Oly" or "OlyH" and eight letters and digits made
+-- from the realm key) gives a short key back to anyone who tries keys against it offline, and a
+-- report gets pasted on Discord. It shows as "(sealed channel)", in the lines of older versions
+-- too (the log names it); the public channel's name is no secret and stays.
+local SEALED_NAME = "%f[%w]OlyH?" .. ("[0-9a-z]"):rep(8) .. "%f[^%w]"
+local function Scrub(text)
+	return (tostring(text or ""):gsub(SEALED_NAME, "(sealed channel)"))
+end
+
+-- s with every `secret` in it (plain text) as "(key)".
+local function Without(s, secret)
+	if type(s) ~= "string" or type(secret) ~= "string" or secret == "" then return s end
+	local out, i = {}, 1
+	while true do
+		local a, b = s:find(secret, i, true)
+		if not a then break end
+		out[#out + 1] = s:sub(i, a - 1) .. "(key)"
+		i = b + 1
+	end
+	out[#out + 1] = s:sub(i)
+	return table.concat(out)
+end
+
+-- A failure inside /oly key <secret>: Core.lua's SlashWhere names the command with what followed
+-- it, the key itself here. It is kept as "slash key" alone, and the key (as typed, and as
+-- Comm.SetRealmKey keeps it) comes out of the message and the stack. "/oly key rotate" names no key.
+local function Unkeyed(where, msg, stack)
+	local cmd, typed = tostring(where or ""):match("^slash%s+(%S+)%s*(.-)%s*$")
+	if not cmd or cmd:lower() ~= "key" or typed == "" or typed:lower() == "rotate" then return where, msg, stack end
+	local kept = typed:gsub("[~|\n]", "")
+	return "slash key", Without(Without(msg, typed), kept), Without(Without(stack, typed), kept)
+end
+
 function ns.CaptureError(where, err)
 	local db = ns.db
 	local msg = tostring(err)
 	local stack = debugstack and debugstack(3, 12, 0) or ""
+	where, msg, stack = Unkeyed(where, msg, stack)
 	if not db then
 		print("|cffff4040Olympus error (before load):|r " .. msg)
 		return
@@ -62,6 +97,22 @@ end
 ns.On("INIT", function()
 	for _, e in ipairs(ns.earlyErrors or {}) do ns.CaptureError("load", e[1]) end
 	ns.earlyErrors = {}
+	-- (1.2.1) A key typed with /oly key that older versions kept with a failure: out of the saved
+	-- errors and log ("ERROR in slash key <key>: ..." there: the line keeps the command alone).
+	for _, e in ipairs(type(ns.db.errors) == "table" and ns.db.errors or {}) do
+		if type(e) == "table" and type(e.where) == "string" then
+			local where = e.where
+			e.where, e.msg, e.stack = Unkeyed(e.where, e.msg, e.stack)
+			if e.where ~= where then e.key = e.where .. "|" .. tostring(e.msg) end
+		end
+	end
+	local log = type(ns.db.log) == "table" and ns.db.log or {}
+	for i, line in ipairs(log) do
+		if type(line) == "string" then
+			local head, cmd, rest = line:match("^(.-ERROR in slash%s+)(%S+)%s+(.*)$")
+			if head and cmd:lower() == "key" and not rest:lower():find("^rotate:") then log[i] = head .. "key (not kept)" end
+		end
+	end
 	-- Only Olympus's own errors are kept (0.9.2, Bootstrap.lua): the saved list of an older
 	-- version, with every other addon's in it, is replaced, and nothing of theirs stays.
 	local all = ns.allErrors or {}
@@ -338,7 +389,9 @@ function ns.StatusText()
 	end
 	local c = ns.Comm and ns.Comm.Stats()
 	if c then
-		add("channel '%s' = #%s  sealed=%s  |  peers in guild=%d  |  reporter=%s (me: %s)", tostring(c.channelName), tostring(c.channel), tostring(c.sealed), c.peers, tostring(c.reporter), tostring(c.isReporter))
+		-- (1.2.1: the sealed channel's name never: see Scrub.)
+		add("channel %s = #%s  sealed=%s  |  peers in guild=%d  |  reporter=%s (me: %s)", c.sealed and "(sealed channel)" or ("'" .. tostring(c.channelName) .. "'"),
+			tostring(c.channel), tostring(c.sealed), c.peers, tostring(c.reporter), tostring(c.isReporter))
 		add("sent=%d recv=%d reports=%d sendFails=%d badMsgs=%d queue=%d lastFail=%s", c.sent, c.recv, c.reports, c.fails, c.bad, c.queue, tostring(c.lastFail))
 		local types = {}
 		for k, v in pairs(c.byType or {}) do types[#types + 1] = k .. "=" .. v end
@@ -355,11 +408,24 @@ function ns.StatusText()
 				o.locked and ("%s, %d tries, next in %ds"):format(tostring(o.locked.why), o.locked.tries, o.locked.nextIn) or "no")
 		end
 		-- The chat channels by number: ours should come after the game's own (Comm.KeepLast).
+		-- (1.2.1) Named: the game's own (zone channels, as Comm.KeepLast tells them) and ours as
+		-- "Olympus"; any other is the player's own (a private channel, another addon's): "other".
 		local ok, list = pcall(function() return { GetChannelList() } end)
 		if ok and list and #list > 0 then
 			local stride = type(list[3]) == "boolean" and 3 or 2
+			local ours = ns.Comm.ChannelName and ns.Comm.ChannelName()
+			local infoOf = C_ChatInfo and C_ChatInfo.GetChannelInfoFromIdentifier
 			local parts = {}
-			for i = 1, #list, stride do parts[#parts + 1] = ("%s %s"):format(tostring(list[i]), tostring(list[i + 1])) end
+			for i = 1, #list, stride do
+				local name, shown = list[i + 1], "other"
+				if type(name) == "string" and type(ours) == "string" and name:lower() == ours:lower() then
+					shown = "Olympus"
+				elseif type(name) == "string" and type(infoOf) == "function" then
+					local okInfo, info = pcall(infoOf, name)
+					if okInfo and type(info) == "table" and (tonumber(info.zoneChannelID) or 0) > 0 then shown = name end
+				end
+				parts[#parts + 1] = ("%s %s"):format(tostring(list[i]), shown)
+			end
 			add("chat channels: %s", table.concat(parts, ", "))
 		end
 		add("other channels dropped: %d  |  census asked %d (left out %d), answered %d  |  runner-up: %s  |  first channel msg: %s",
@@ -475,7 +541,7 @@ function ns.StatusText()
 			add("status line failed: %s", tostring(err))
 		end
 	end
-	return table.concat(lines, "\n")
+	return Scrub(table.concat(lines, "\n"))
 end
 
 function ns.BuildBugReport()
@@ -534,7 +600,8 @@ function ns.BuildBugReport()
 	local log = ns.db.log
 	for i = math.max(1, #log - 25), #log do out[#out + 1] = "  " .. log[i] end
 	out[#out + 1] = "```"
-	return table.concat(out, "\n")
+	-- (1.2.1) The log and the errors name the sealed channel too: scrubbed with the status.
+	return Scrub(table.concat(out, "\n"))
 end
 
 function ns.PrintLayer()
