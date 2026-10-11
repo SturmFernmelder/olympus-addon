@@ -24,7 +24,8 @@ local L = ns.L
 --   name was seen). The desk (Church.Desk) asks the channel about each new recruit once
 --   (NS~1~q); clients that knew him answer by whisper. One seen in another Olympus guild in the
 --   NEW_DAYS before his join, or in the same guild before the invite, is a transfer: never credited.
--- - Registered recruits ("I brought this player"): a Church person registers a name; it counts when
+-- - Registered recruits ("I brought this player"): a Church person registers a name (1.2.1: dated when a
+--   keeper hears it, and refused while another's invite holds that player); it counts when
 --   that player shows up in an Olympus guild within REG_DAYS (a seen-check answer from another
 --   client), and never for a player already in Olympus.
 -- - One recruit counts for one person only: the earliest valid invite or registration, a
@@ -1026,7 +1027,8 @@ function Count.TakeEvidence(sender, text)
 		local recruit, at = text:match("^NV~1~[gx]~([^~]+)~([0-9a-z]+)$")
 		recruit, at = WireName(recruit), UnB36(at)
 		if not recruit or not at then return Drop("shape") end
-		-- (As old as the outbox keeps one while no keeper is online: OUTBOX_DAYS.)
+		-- (As old as the outbox keeps one while no keeper is online: OUTBOX_DAYS. Its own date is only its
+		-- sender's word: a registration counts from when a keeper hears it, below.)
 		if at > now + Church.DATE_AHEAD or at < now - Count.OUTBOX_DAYS * DAY then return Drop("times") end
 		if not Church.IsPerson(sender) then return Drop("recruiter") end
 		local xk = Key(recruit)
@@ -1041,10 +1043,14 @@ function Count.TakeEvidence(sender, text)
 		if Led().r[id] then return Drop("held") end
 		local mine, all = OpenRegs(sk, now)
 		if mine >= Count.REG_OPEN or all >= Count.REG_ALL then return Drop("full") end
+		-- (1.2.1: refused, too, for one another's invite holds while it waits for its witness, and dated when this
+		-- keeper hears it, never by its own word: one whispered "six days ago" after an invite took that recruit
+		-- from his inviter, and made a player who came last week this registrant's recruit. A registration is
+		-- "I brought him": made before he came. The outbox brings one within seconds while a keeper is online.)
 		local c = Count.CreditOf(xk)
-		if (c and c.state == "credited") or Gone()[xk .. ":"] then return Drop("taken") end
+		if (c and (c.state == "credited" or c.state == "pending")) or Gone()[xk .. ":"] then return Drop("taken") end
 		stats.taken = stats.taken + 1
-		Count.MergeIn(id, { n = Short(recruit), bn = Short(sender), kind = "g", tc = at }, false)
+		Count.MergeIn(id, { n = Short(recruit), bn = Short(sender), kind = "g", tc = math.max(at, now) }, false)
 		if Church.IsDesk() then Count.QueueCheck(id, "r") end
 		return true
 	elseif kind == "o" then

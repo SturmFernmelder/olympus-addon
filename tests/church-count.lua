@@ -1563,6 +1563,35 @@ test("1.2.1 Church: a guildmate's word confirms only a recruit the keeper's own 
 	eq(w:As(c.a2, c.a2.Count.TakeEvidence, World.COUNCILLOR, PairText(w, "Mira Wells", "Sig Rec", 2)), true, "the signed keep the larger one")
 end)
 
+test("1.2.1 Church: a registration is dated when a keeper hears it and takes no recruit a live invite holds: one whispered six days back after the invite is refused, one for a recent arrival is no recruit", function()
+	local w, c = Cast()
+	local B = ns.Codec.Base36
+	local function Reg(k, name, ago) return w:As(k, k.Count.TakeEvidence, "Nils Ford-Realm", ("NV~1~g~%s-Realm~%s"):format(name, B(w.clock - ago))) end
+	-- Mira invites Stolen Kid; only her client has read the log yet: pending. Nils's registration "six days ago" is refused.
+	w:LogEvent(World.GUILD, "invite", "Mira Wells", "Stolen Kid", 1)
+	w:LogEvent(World.GUILD, "join", "Stolen Kid", nil, 0)
+	Join(w, World.GUILD, "Stolen Kid")
+	w:ReadLog(c.m1)
+	eq(StateOf(w, c.a1, "Stolen Kid", "Mira Wells"), "pending")
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(select(2, Reg(k, "Stolen Kid", 6 * DAY)), "taken", k.name) end
+	w:ReadLog(c.wes)
+	Settle(w, 700); Settle(w, 700)
+	for _, k in ipairs({ c.a1, c.a2 }) do
+		eq(StateOf(w, k, "Stolen Kid", "Mira Wells"), "credited", k.name)
+		eq(StateOf(w, k, "Stolen Kid", "Nils Ford"), nil, k.name)
+	end
+	-- Recent Arrival joined Olympus Vale three days ago, no Church person's invite: registered "six days ago", he is no recruit.
+	Join(w, World.GUILD2, "Recent Arrival")
+	w:Tick()
+	w:Run(3 * DAY)
+	w:Presence()
+	eq(Reg(c.a1, "Recent Arrival", 6 * DAY), true)
+	eq(Rec(w, c.a1, "Recent Arrival", "Nils Ford").tc, w.clock, "dated when Aldric heard it")
+	Settle(w, 700)
+	eq(StateOf(w, c.a1, "Recent Arrival", "Nils Ford"), "transfer")
+	eq(w:As(c.a1, c.a1.Count.Own, Key("Nils Ford"), "a").points, 0)
+end)
+
 test("1.2.1 Church: no receipt goes to a keeper (one before 1.2.1 counts each line against its budget for him); a keeper's report its own ledger refused is tried again there, then goes to the others", function()
 	local w, c = Cast()
 	w:Presence()
