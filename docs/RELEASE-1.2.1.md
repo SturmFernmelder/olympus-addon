@@ -52,6 +52,12 @@ Automated checks and live multiplayer checks are separate gates; use
   shows in their Watch under **Reports** and **Cases**. With no officer online it waits on the
   reporter's client for a day. The King and the High Council see a case only after an officer
   sends it to the King.
+- The Olympus shortcut is **Shift + the game's guild key** (Shift-J on Forever, where the game
+  binds Y to Legacy and G to Target Last Hostile, so the old Y shortcut never came on there). It is
+  read from the player's own guild key binding and falls back to Shift-J when that key has a
+  modifier or none is bound. As before it is used only while that key is unbound, saved bindings
+  are never changed, and `/oly hotkey on|off` switches it. A key of the player's own can be set in
+  the game's Key Bindings, under AddOns: **Toggle Olympus**.
 - **Ask to update** in a player's right-click menu is now only for the author, the King and the
   High Council. A 1.2.1 client ignores an ask from anyone else, which older versions can still
   send. **Check version** stays available to every member.
@@ -126,8 +132,7 @@ the sender's original local observation stays saved. There is not yet a reviewer
 receipt or guaranteed same-session automatic retry.
 
 Not every longer-term governance, recruitment, identity-backend or contribution proposal is
-implemented. Real-client and multiplayer verification is still needed. The reported Y shortcut
-problem is deferred and is not claimed fixed in this release; `/oly` remains available.
+implemented. Real-client and multiplayer verification is still needed.
 
 If the beta client fails to restore SavedVariables, the addon cannot distinguish another login
 from a new installation or recognize a later upgrade reliably. The automatic letter stays quiet

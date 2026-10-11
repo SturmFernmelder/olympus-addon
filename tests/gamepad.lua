@@ -1165,10 +1165,15 @@ local function World(C, opts)
 	})
 	C.loadedAddOns = { Blizzard_WorldMap = not opts.worldMapOnDemand }
 	-- (The game's default key for "Open chat", Enter: Bindings.xml's OPENCHAT.)
-	E.GetBindingKey = function(action) if action == "OPENCHAT" then return "ENTER" end return nil end
+	-- (1.2.1: and for "Guild & Communities", J: Forever's TOGGLEGUILDTAB, MainKey.lua's Shift + it.)
+	E.GetBindingKey = function(action)
+		if action == "OPENCHAT" then return "ENTER" end
+		if action == "TOGGLEGUILDTAB" then return "J" end
+		return nil
+	end
 	E.GetBindingText = function(k) return k end
 	-- Blizzard_Keybindings.lua reads base actions separately from overrides; each override
-	-- belongs to its frame, so clearing the Chat owner must not clear the main window's Y.
+	-- belongs to its frame, so clearing the Chat owner must not clear the main window's shortcut.
 	C.baseBindings, C.bindingOwners = opts.bindings or {}, {}
 	E.GetBindingAction = function(key, overrides)
 		return overrides and C.bindings and C.bindings[key] and ("CLICK " .. C.bindings[key] .. ":LeftButton") or C.baseBindings[key] or ""
@@ -2682,22 +2687,22 @@ test("gamepad pass 6: the Arena's integrations: restricted calls from a click al
 	Check(A.ledger, "the Arena")
 end)
 
-test("gamepad main Y shortcut: no binding at gamepad login, both input-style switches and saved binding changes preserve the native owner", function()
+test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login, both input-style switches and saved binding changes preserve the native owner", function()
 	local P, pad = Session(true)
 	eq(pad.MainKey.Held(), false); eq(P.env.OlympusMainKey, nil, "no key button at a gamepad login")
 	P.Switch(false); P.Advance(1); eq(pad.MainKey.Held(), true)
 	P.Switch(true); eq(pad.MainKey.Held(), false, "release in the switch before native rebinding")
 	P.Advance(1); Check(P.ledger, "main key switches")
 	local C, ns = Session(false)
-	eq(ns.MainKey.Held(), true); eq(C.bindings.Y, "OlympusMainKey")
+	eq(ns.MainKey.Held(), true); eq(C.bindings["SHIFT-J"], "OlympusMainKey")
 	if ns.UI.IsShown() then ns.UI.Toggle() end
 	eq(ns.UI.IsShown() == true, false, "start with the main window closed")
 	C.Click(C.env.OlympusMainKey); eq(ns.UI.IsShown(), true)
 	C.Click(C.env.OlympusMainKey); eq(ns.UI.IsShown(), false)
-	C.baseBindings.Y = "TOGGLEQUESTLOG"; C.Fire("UPDATE_BINDINGS")
-	eq(ns.MainKey.Held(), false); eq(C.bindings.Y, nil); eq(C.baseBindings.Y, "TOGGLEQUESTLOG")
+	C.baseBindings["SHIFT-J"] = "TOGGLEQUESTLOG"; C.Fire("UPDATE_BINDINGS")
+	eq(ns.MainKey.Held(), false); eq(C.bindings["SHIFT-J"], nil); eq(C.baseBindings["SHIFT-J"], "TOGGLEQUESTLOG")
 	C.Click(C.env.OlympusMainKey); eq(ns.UI.IsShown(), false, "a stale callback cannot steal the player's key")
-	C.baseBindings.Y = nil; C.Fire("UPDATE_BINDINGS"); eq(ns.MainKey.Held(), true)
+	C.baseBindings["SHIFT-J"] = nil; C.Fire("UPDATE_BINDINGS"); eq(ns.MainKey.Held(), true)
 	C.Switch(true); eq(ns.MainKey.Held(), false); C.Advance(1)
 	C.Switch(false); C.Advance(1); eq(ns.MainKey.Held(), true)
 	Check(C.ledger, "main key and native bindings")

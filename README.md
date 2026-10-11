@@ -2393,7 +2393,7 @@ Other limits:
 | Command | |
 |---|---|
 | `/oly` | open or close the window |
-| `/oly hotkey on\|off` | enable/disable the session-only Y shortcut (on by default for members, mouse and keyboard). It borrows only an unbound Y, preserves saved bindings and other addons' overrides, and releases its own binding when switching to the gamepad UI; combat defers binding changes. |
+| `/oly hotkey on\|off` | enable/disable the session-only shortcut, Shift + the game's guild key (Shift-J on Forever, whose Y and G the game binds itself; read from the player's own guild key binding, Shift-J when that has a modifier or is unbound). On by default for members, mouse and keyboard. It borrows that key only while it is unbound, preserves saved bindings and other addons' overrides, and releases its own binding when switching to the gamepad UI; combat defers binding changes. A key of the player's own: the game's Key Bindings, AddOns, **Toggle Olympus** (`Bindings.xml`), which the game saves like any binding. |
 | `/oly realm` · `/oly decrees` | open a tab |
 | `/oly tabard` (also `/oly inspect`, `/oly heraldry`) | open The Watch's Tabards (1.2: no tab of their own) |
 | `/oly inactive [7\|14\|30]` | your guild's members offline that long, by name (a rank that may remove members removes one per click, asked first) |
