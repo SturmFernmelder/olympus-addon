@@ -1,6 +1,6 @@
 -- 1.2.3, the once-a-minute roster scan (Roster.lua): it keeps what has not changed (a member's row,
--- the members' order, byName), reads GetGuildRosterLastOnline for everyone at one scan in
--- LAST_ONLINE_EVERY, and asks GetPlayerInfoByGUID again for a race it did not give after a wait that
+-- the members' order, byName), reads GetGuildRosterLastOnline for every member offline at every scan
+-- as 1.2.2 did, and asks GetPlayerInfoByGUID again for a race it did not give after a wait that
 -- doubles. What a reader gets must be what 1.2.2's scan gave (tests/fixtures/roster-1.2.2.lua). Each
 -- test loads Roster.lua into a table of its own over the harness's ns and scans a guild made here.
 -- Run alone: luajit tests/run.lua "1.2.3 roster"
@@ -118,7 +118,7 @@ local function RowOf(c, raw)
 	return nil
 end
 
-test("1.2.3 roster: each scan gives what 1.2.2's gave: unchanged, a rank, a logout and a login, a zone, a level, one leaving and one joining, a few and many at once, a row not loaded yet, a new server order, a row read twice, one name with and without its realm", function()
+test("1.2.3 roster: each scan gives what 1.2.2's gave: unchanged, the hours of one who logged in and out between two scans, a rank, a logout and a login, a zone, a level, one leaving and one joining, a few and many at once, a row not loaded yet, a new server order, a row read twice, one name with and without its realm", function()
 	World(Guild(120), function(w)
 		local old, new = Load("tests/fixtures/roster-1.2.2.lua", w), Load("Olympus/Roster.lua", w)
 		local R = w.roster
@@ -132,6 +132,9 @@ test("1.2.3 roster: each scan gives what 1.2.2's gave: unchanged, a rank, a logo
 		Both("the first scan")
 		Both("nothing changed")
 		Both("nothing changed again")
+		-- Offline at both scans: one logged in and out between them, another's hour ticked.
+		R[2].last, R[5].last = { 0, 0, 0, 0 }, { 0, 2, 5, 6 }
+		Both("in and out between two scans, an hour more")
 		R[30].rank = 1
 		Both("a rank")
 		R[40].online, R[41].online = false, true
@@ -256,45 +259,52 @@ test("1.2.3 roster: an unchanged roster makes nothing new (the same rows, order 
 	end)
 end)
 
-test("1.2.3 roster: GetGuildRosterLastOnline is read for every member offline at one scan in LAST_ONLINE_EVERY; in between only for who logged out or is new, the others keep the hours read before", function()
+test("1.2.3 roster: GetGuildRosterLastOnline is read for every member offline at every scan, as 1.2.2: one offline at two scans who logged in and out between them has his new hours at the next (his row, the inactive counts, the Lord's leaderDays); one whose hours are the same keeps his row", function()
 	World(Guild(20), function(w)
 		local c = Load("Olympus/Roster.lua", w)
 		local R = c.Roster
-		eq(R.LAST_ONLINE_EVERY, 5)
+		local lord = w.roster[1]
+		lord.online, lord.last = false, { 0, 1, 15, 0 }
 		local offline = 0
 		for _, m in ipairs(w.roster) do if not m.online then offline = offline + 1 end end
 		local function Scan()
 			w.last, w.clock = 0, w.clock + 60
 			return R.Scan()
 		end
-		Scan()
+		local r = Scan()
 		eq(w.last, offline, "the first scan reads every member offline")
-		local away = w.roster[2] -- (offline: 0 years, 2 months, 2 days, 2 hours)
+		local away, ticking, still = w.roster[2], w.roster[5], w.roster[6] -- (offline: 2 months 2 days 2 hours; 2 months 5 days 5 hours; 6 days 6 hours)
 		eq(RowOf(c, away.name).days, 2 * 30 + 2 + 2 / 24)
-		away.last = { 0, 2, 2, 3 }
-		Scan()
-		eq(w.last, 0, "nobody logged in or out: nothing read")
-		eq(RowOf(c, away.name).days, 2 * 30 + 2 + 2 / 24, "the hours read before")
+		eq(r.leaderDays, 45)
+		local inactive7, inactive30 = r.inactive7, r.inactive30
+		r = Scan()
+		local before, kept = RowOf(c, away.name), RowOf(c, still.name)
+		-- Between this scan and the next, he logs in for his mail and out again (offline at both), the
+		-- Lord too, and another one's hour ticks.
+		away.last, lord.last, ticking.last = { 0, 0, 0, 0 }, { 0, 0, 0, 1 }, { 0, ticking.last[2], ticking.last[3], ticking.last[4] + 1 }
+		r = Scan()
+		local row = RowOf(c, away.name)
+		eq(row.days, 0, "the hours of his visit, not the 62 days before it")
+		eq(row.online, false)
+		assert(row ~= before, "his row is new")
+		eq(before.days, 2 * 30 + 2 + 2 / 24, "the row a reader holds as it was")
+		eq(r.inactive7, inactive7 - 2, "he and the Lord no longer 7 days away")
+		eq(r.inactive30, inactive30 - 2, "nor 30")
+		eq(r.leaderDays, 1 / 24, "the Lord's hour, not his 45 days")
+		eq(RowOf(c, ticking.name).days, 2 * 30 + 5 + 6 / 24, "the hour he gained")
+		eq(RowOf(c, still.name), kept, "the same hours: his row kept")
+		eq(w.last, offline, "every member offline read at every scan")
+		-- One more logs out, one is new, one comes back: every member offline read, not he.
 		local out = w.roster[4]
 		out.online, out.last = false, { 0, 0, 0, 2 }
-		Scan()
-		eq(w.last, 1, "who logged out, read at once")
-		eq(RowOf(c, out.name).days, 2 / 24)
 		w.roster[#w.roster + 1] = Member("Late-Realm", 9, false, "Player-4619-0000CAFE")
-		Scan()
-		eq(w.last, 1, "who is new, read at once")
-		eq(RowOf(c, "Late-Realm").days, 3)
-		local back = w.roster[6]
+		local back = w.roster[7]
 		back.online = true
-		local r = Scan()
-		eq(w.last, 0, "who logged in: online, nothing to read")
+		Scan()
+		eq(w.last, offline + 1, "one more out, one new, one back")
+		eq(RowOf(c, out.name).days, 2 / 24)
+		eq(RowOf(c, "Late-Realm").days, 3)
 		eq(RowOf(c, back.name).days, 0)
-		eq(RowOf(c, away.name).days, 2 * 30 + 2 + 2 / 24)
-		local inactive = r.inactive7
-		r = Scan()
-		eq(w.last, offline + 1, "the sixth scan reads them all again (one more out, one new, one back)")
-		eq(RowOf(c, away.name).days, 2 * 30 + 2 + 3 / 24, "the hour he gained")
-		eq(r.inactive7, inactive)
 	end)
 end)
 

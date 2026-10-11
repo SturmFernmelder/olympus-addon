@@ -21,10 +21,6 @@ end
 local SCAN_EVERY = 60
 local MIN_GAP = 20
 Roster.AUTHORITY_FRESH = 120
--- (1.2.3) GetGuildRosterLastOnline counts whole hours: one scan in LAST_ONLINE_EVERY reads it for
--- every member offline; the others only for who logged in or out since the last scan, or is new to
--- the roster (the rest keep the hours read before).
-Roster.LAST_ONLINE_EVERY = 5
 -- (1.2.3) The longest a GUID the client gave no race for waits before it is asked again.
 Roster.RACE_RETRY = 600
 local lastScan, pending = 0, false
@@ -251,7 +247,6 @@ function Roster.Scan()
 	if moved[1] or movedAt[1] then Clear(moved); Clear(movedAt) end -- (left by a scan that failed)
 	scans = scans + 1
 	local scan, now = scans, ns.Now()
-	local readAll = (scan - 1) % math.max(1, math.floor(tonumber(Roster.LAST_ONLINE_EVERY) or 1)) == 0
 	-- byName stays the last one while every row names the same rank in it (and nothing else in it).
 	local keep = pubByName ~= nil and Roster.byName == pubByName and pubByName or nil
 	local sameNames = keep ~= nil
@@ -297,12 +292,10 @@ function Roster.Scan()
 			if full ~= name then bare = bare + 1 end
 			rankIndex = rankIndex or 9
 			if sameNames and keep[full] ~= rankIndex then sameNames = false end
-			-- (1.2.3) The hours offline read before, unless this is a scan that reads them all or he
-			-- was online, or not here, at the last scan.
-			local days = 0
-			if not isOnline then
-				if wasHere and not prev.online and not readAll then days = prev.days else days = DaysOffline(i, isOnline) end
-			end
+			-- (The hours offline are read for every member offline at every scan, as before 1.2.3:
+			-- offline at two scans, he may have logged in and out between them, and the hours read
+			-- before would be days wrong. His row is still kept while they are the same.)
+			local days = DaysOffline(i, isOnline)
 			level = level or 1
 			levelSum = levelSum + level
 			local rank = r.ranks[rankIndex + 1]
