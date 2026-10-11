@@ -670,3 +670,26 @@ test("hop security (1.2.1): a councillor or the King's Hand of another guild sti
 	end)
 end)
 
+-- Review of 1.2.1: the texts of Always invite and For Olympus! still promised that every player
+-- who asks is invited without a window, while only the players Hop.Trusted vouches for are (our
+-- guildmates, the King's Steward and Hands). They say so now, and that players of other guilds still
+-- get the window, in both languages.
+test("hop texts (1.2.1): Always invite and For Olympus! say who is invited on his own, and that other guilds still get the window", function()
+	local root = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]hop%-regressions%.lua$")) or "./"
+	local pt = { L = setmetatable({}, { __index = ns.L }) }
+	local savedLocale = GetLocale
+	GetLocale = function() return "ptBR" end
+	local ok, err = pcall(function() assert(loadfile(root .. "Olympus/Locales.lua"))("Olympus", pt) end)
+	GetLocale = savedLocale
+	if not ok then error(err, 0) end
+	for _, key in ipairs({ "HOP_KING_PROMPT", "HOP_KING_AUTO", "HOP_AUTO_ON", "HOP_AUTO_TIP", "HOP_AUTO_GROUP_ON" }) do
+		local en, br = ns.L[key], rawget(pt.L, key)
+		assert(type(br) == "string" and br ~= en, key .. ": its own Portuguese")
+		assert(en:find("guildmates", 1, true), "English " .. key .. " names who: " .. en)
+		assert(br:find("colegas de guilda", 1, true), "pt-BR " .. key .. " names who: " .. br)
+		if key ~= "HOP_AUTO_GROUP_ON" then
+			assert(en:find("other guilds", 1, true), "English " .. key .. ": other guilds still asked")
+			assert(br:find("outras guildas", 1, true), "pt-BR " .. key .. ": other guilds still asked")
+		end
+	end
+end)
