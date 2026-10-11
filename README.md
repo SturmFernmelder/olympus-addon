@@ -811,8 +811,18 @@ channel his addon kept, never a whisper or a private room) before he sends. It g
 addon whispers to his guild's officers in The Watch who are online (its guild master, its
 Captains, the Watchers he names and a signed moderator), never to the one reported or a name his
 player linked; with none online it waits on his client for a day. Their client shows it in The
-Watch's **Reports** and **Cases** and tells them once, with a sound. A report is never a
-sanction: an officer decides, and may send the case to the King for the High Council's vote.
+Watch's **Reports** and **Cases** and tells them once, with a sound. Since 1.2.1 the same report
+also reaches the King and the High Council in their Watch (**Reports** and **Cases**, where the
+High Council works): it goes as a logged whisper to the King's client while it is on (the lease
+the Tabards use), which keeps it apart from any guild's Watch and passes it on to the councillors
+whose clients asked it in the last 20 minutes; a councillor's client asks every 15 minutes while
+the King's client is on. The reporter's guild there is what his own client says (only his guild's
+officers check his rank, in their roster); the King's client takes a few an hour from one player
+and so many in all, never passes a case on to the councillor it is about (or a name his player
+linked), and prints no name in its chat. With the King's client off, the report waits for it on
+the reporter's client for a day, as for absent officers. A report is never a sanction: an officer
+decides, and may send the case to the King for the High Council's vote; the King and the High
+Council act on it in Olympus's chats.
 
 The **Watch** tab's desk, Reports and Cases appear only for this guild's Lord and Captains, plus a
 signed moderator while the signed authority is active and that same character is still in the

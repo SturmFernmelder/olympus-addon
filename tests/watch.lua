@@ -1177,8 +1177,11 @@ test("watch: a report with no officer online waits a day for the first one; past
 		eq(W.FlushReports(true), 1, "sent once an officer is online")
 		eq(w.jobs[1].target, "Captain One-Realm")
 		w.finish(w.jobs[1])
-		eq(#W.Book(false).outbox, 0, "delivered, out of the outbox")
+		-- (Changed on purpose, 1.2.1: a report goes to the High Council too, through the King's client;
+		-- with that client off it stays in the outbox for it alone, never sent to the officers twice.)
+		eq(#W.Book(false).outbox, 1, "delivered to the officers; it waits for the King's client")
 		eq(W.FlushReports(true), 0, "never twice")
+		eq(#w.jobs, 1, "nothing more to the officers")
 		-- Another one, from its dialog: the reporter is told it waits. Nobody online for a day:
 		-- dropped, and said so.
 		w.online(c.me); w.jobs = {}
@@ -1186,11 +1189,13 @@ test("watch: a report with no officer online waits a day for the first one; past
 		local data = { name = "Other Guy-Realm", cat = "S" }
 		StaticPopupDialogs.OLYMPUS_WATCH_REPORT_NOTE.OnAccept({ data = data, editBox = { GetText = function() return "" end } }, data)
 		eq(w.prints[#w.prints], ns.L.WATCH_REPORT_HELD:format("Other Guy"), "told it waits")
-		eq(#W.Book(false).outbox, 1)
+		eq(#W.Book(false).outbox, 2, "(the first one still waits for the King's client)")
 		w.epoch = w.epoch + W.REPORT_HOLD + 1; w.refreshRoster()
+		local printed = #w.prints
 		W.FlushReports(true)
 		eq(#W.Book(false).outbox, 0)
 		assert(w.prints[#w.prints]:find(ns.L.WATCH_REPORT_DROPPED:format("Other Guy"), 1, true))
+		eq(#w.prints, printed + 1, "the one the officers had goes quietly")
 		eq(#w.jobs, 0)
 	end)
 end)
@@ -2316,5 +2321,293 @@ test("1.2.0 watch: a target written in another case is the same member of the ro
 		eq(W.RosterRank("grandmaster-realm"), 0, "in lower case")
 		eq(W.RosterRank("GRANDMASTER"), 0, "in upper case")
 		eq(W.RosterRank("Nobodyhere-Realm"), nil)
+	end)
+end)
+
+---------------------------------------------------------------------------
+-- 1.2.1 (the owner: a member's report "deveria chegar na watch... que inclui high council nessa
+-- tab"): every report reaches the High Council and the King too, in their Watch, through the King's
+-- client (Watch.lua's council copy, C; its passing on, F; a councillor's ask, Q).
+---------------------------------------------------------------------------
+
+-- The game's GetGuildInfo for whichever client runs: p's guild and rank (nil: the world's own client).
+local function As(p, fn)
+	if not p then return fn() end
+	local saved = GetGuildInfo
+	GetGuildInfo = function(unit) if unit == nil or unit == "player" then return p.guild, "Rank", p.rank end end
+	local ok, a, b, d = pcall(fn)
+	GetGuildInfo = saved
+	if not ok then error(a, 0) end
+	return a, b, d
+end
+
+-- Another client's own Watch (the King's, a councillor's): its own guild, roster, saved data, queue
+-- and timers over the world's client; its whispers go on w.bus.
+local function WatchPeer(w, c, name, o)
+	o = o or {}
+	w.watchPeers, w.bus = w.watchPeers or {}, w.bus or {}
+	local p = setmetatable({ me = name, db = {}, rdb = {} }, { __index = c })
+	p.guild, p.rank = o.guild or "Olympus III", o.rank or 3
+	p.prints, p.handlers, p.timers = {}, {}, {}
+	p.IsMember = function() return true end
+	p.King = { IsKing = function() return o.king == true end, Preview = function() return false end }
+	p.Data = { ServerTime = function() return w.epoch end,
+		ClaimGuild = function(sender) return not (w.claimRefused and w.claimRefused[c.Fold(c.FullName(sender))]) end }
+	p.WatchChat = { missing = true }
+	p.Roster = { byName = { [name] = p.rank }, online = {}, guild = p.guild, group = c.group, faction = c.faction, complete = true,
+		snapshotAt = w.epoch, generation = 1 }
+	p.Roster.RankOf = function(n) return p.Roster.byName[c.FullName(n)] end
+	p.UI, p.PlayerMenu = { AddTab = function() end }, { Add = function() end }
+	p.On, p.Fire, p.PlayAlert, p.Every = function() end, function() end, function() end, function() end
+	p.After = function(_, _, call) p.timers[#p.timers + 1] = call end
+	p.Print = function(m) p.prints[#p.prints + 1] = tostring(m) end
+	p.Comm = { Handle = function(kind, call) p.handlers[kind] = call end, QueueRoom = function() return 60 end,
+		DeliveredLogged = function() return w.logged end,
+		Whisper = function(target, msg, _, _, logged, done, options)
+			w.bus[#w.bus + 1] = { from = name, target = target, msg = msg, logged = logged, done = done, options = options }
+			return true
+		end }
+	local dialogs = {}
+	for k, v in pairs(StaticPopupDialogs) do dialogs[k] = v end
+	As(p, function() assert(loadfile(ROOT .. "Olympus/Watch.lua"))("Olympus", p) end)
+	for k in pairs(StaticPopupDialogs) do StaticPopupDialogs[k] = dialogs[k] end
+	p.Watch.ResetForTests()
+	p.Watch.random = function(low) return low end
+	w.watchPeers[c.Fold(name)] = p
+	return p
+end
+
+-- Every MR whisper in flight, the world's client's (w.jobs) and the peers' (w.bus): checked at the
+-- send as the game would (its permit, in its sender's guild), then handed to a peer's Watch (in its
+-- own guild); one to anyone else (the reporter's guild officers) is kept in w.elsewhere.
+local function Route(w, c)
+	w.elsewhere = w.elsewhere or {}
+	for _ = 1, 50 do
+		local batch, kept = {}, {}
+		for _, job in ipairs(w.jobs) do
+			if type(job.msg) == "string" and job.msg:find("^MR~") then
+				batch[#batch + 1] = { from = c.me, target = job.target, msg = job.msg, logged = job.logged, done = job.done, options = job.options }
+			else kept[#kept + 1] = job end
+		end
+		w.jobs = kept
+		for _, m in ipairs(w.bus) do batch[#batch + 1] = m end
+		w.bus = {}
+		if #batch == 0 then return end
+		for _, m in ipairs(batch) do
+			assert(m.logged == true, "a logged whisper: " .. m.msg)
+			assert(#m.msg <= 255, "within the game's limit: " .. m.msg)
+			local from = w.watchPeers[c.Fold(m.from)]
+			local allowed = As(from, function()
+				local ok = true
+				if m.options and m.options.permit then ok = m.options.permit(m.options.owner, m.options.key, "WHISPER", m.target, m.msg) end
+				if m.done then m.done(ok == true) end
+				return ok == true
+			end)
+			if allowed then
+				local to = w.watchPeers[c.Fold(c.FullName(m.target))]
+				if to then
+					As(to, function() to.handlers.MR("WHISPER", m.from, m.msg) end)
+				else
+					w.elsewhere[#w.elsewhere + 1] = m
+				end
+			end
+		end
+	end
+	error("the whispers kept coming")
+end
+
+local function Timers(p)
+	local due = p.timers
+	p.timers = {}
+	for _, call in ipairs(due) do As(p, call) end
+end
+
+local function CouncilWorld(w, c)
+	Council(w, c)
+	w.lease = { name = KING, guild = "Olympus", id = "lease-1" }
+	w.setRank(c.me, 3); w.setRank("Captain One-Realm", 1); w.online(c.me, "Captain One-Realm")
+	w.chat.A = {
+		{ sender = SPAMMER, t = w.epoch - 300, text = "buy gold cheap" },
+		{ sender = SPAMMER, t = w.epoch - 200, text = "cheap gold here" },
+	}
+	local king = WatchPeer(w, c, KING, { king = true, guild = "Olympus", rank = 0 })
+	local hc1, hc2 = WatchPeer(w, c, HC1, { guild = "Olympus III" }), WatchPeer(w, c, HC2, { guild = "Olympus Other" })
+	return king, hc1, hc2
+end
+
+test("watch: council reports (1.2.1): a member's report reaches the King's client and the High Council in their Watch, with its lines, and his guild's officers as before", function()
+	WithWatch(function(w, W, c)
+		local king, hc1, hc2 = CouncilWorld(w, c)
+		eq(W.CanRead(), false, "an ordinary member reports")
+		-- A councillor's client asks the King's client once it is on (nothing to pass on yet).
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(true) end), true)
+		Route(w, c)
+		local ok, how = W.SendReport(SPAMMER, "A", "gold ads")
+		eq(ok, true); eq(how, "sent")
+		local toCaptain, toKing = {}, {}
+		for _, job in ipairs(w.jobs) do
+			if job.target == "Captain One-Realm" then toCaptain[#toCaptain + 1] = job.msg end
+			if job.target == KING then toKing[#toKing + 1] = job.msg end
+			eq(job.logged, true, "every one logged")
+		end
+		eq(#toCaptain, 3, "the guild's officer: the report and its two lines, as before"); assert(toCaptain[1]:find("^MR~1~R~"))
+		eq(#toKing, 3, "the King's client: the council's copy and its two lines")
+		local seq = toKing[1]:match("^MR~1~C~(%d+)~")
+		eq(toKing[1], ("MR~1~C~%s~%d~%s~%s~%s~A~%s~2~gold ads"):format(seq, w.epoch, w.guild, c.group, c.faction, SPAMMER))
+		eq(toKing[2], ("MR~1~E~%s~1~%d~A~buy gold cheap"):format(seq, w.epoch - 300))
+		Route(w, c)
+		eq(#W.Book(false).outbox, 0, "both parts went: out of the reporter's outbox")
+		-- The King's Watch: the report, its lines, its guild as the reporter's client said it.
+		local kr = As(king, function() return king.Watch.Reports() end)
+		eq(#kr, 1); eq(kr[1].reporter, c.me, "the server's sender"); eq(kr[1].guild, w.guild); eq(kr[1].note, "gold ads")
+		eq(kr[1].lines[1].text, "buy gold cheap"); eq(kr[1].lines[2].text, "cheap gold here")
+		eq(#king.prints, 1); eq(king.prints[1]:find(ns.L.WATCH_REPORT_IN_COUNCIL:format(ns.L.WATCH_REPORT_CAT_A), 1, true) ~= nil, true)
+		assert(not king.prints[1]:find("Spammer", 1, true) and not king.prints[1]:find("Officer", 1, true), "the King's chat names no one: " .. king.prints[1])
+		local open = As(king, function() return king.Watch.Cases() end)
+		eq(#open, 1); eq(open[1].target, SPAMMER); eq(open[1].lines, 2)
+		-- Passed on, once its lines had time to come, to the councillor who asked lately: not the other.
+		Timers(king)
+		Route(w, c)
+		local hr = As(hc1, function() return hc1.Watch.Reports() end)
+		eq(#hr, 1, "the asking councillor's Watch"); eq(hr[1].reporter, c.me); eq(hr[1].guild, w.guild); eq(hr[1].lines[2].text, "cheap gold here")
+		eq(As(hc1, function() return #(hc1.Watch.Cases()) end), 1, "a case of the council's in his Cases")
+		-- His Watch's Reports page: the council's, the report on it.
+		local page = As(hc1, function() hc1.Watch.Show("reports"); return Texts(hc1.Watch.Build()) end)
+		assert(page:find(ns.L.WATCH_REPORTS_TITLE_COUNCIL, 1, true), page)
+		assert(page:find(ns.L.WATCH_REPORT_CAT_A, 1, true), page)
+		eq(#As(hc2, function() return hc2.Watch.Reports() end), 0, "one who never asked gets nothing yet")
+		-- His own ask brings it, and asked again nothing comes twice.
+		eq(As(hc2, function() return hc2.Watch.CouncilTick(true) end), true)
+		Route(w, c)
+		eq(#As(hc2, function() return hc2.Watch.Reports() end), 1, "his ask brought it")
+		w.epoch = w.epoch + 60
+		As(hc2, function() hc2.Watch.CouncilTick(true) end)
+		Route(w, c)
+		eq(#As(hc2, function() return hc2.Watch.Reports() end), 1)
+		-- Nothing of it is a sanction anywhere, and no guild's Watch of theirs holds it.
+		eq(As(king, function() return king.Watch.Record(SPAMMER) end), nil)
+		eq(As(king, function() return king.Watch.Store(false) end), nil, "never in a guild's Watch store")
+		eq(As(hc1, function() return hc1.Watch.Store(false) end), nil)
+		-- The reporter's guild's officer had the report as ever.
+		local heads = 0
+		for _, m in ipairs(w.elsewhere) do if m.target == "Captain One-Realm" and m.msg:find("^MR~1~R~") then heads = heads + 1 end end
+		eq(heads, 1)
+	end)
+end)
+
+test("watch: council reports (1.2.1): the King's client is off, the report waits for it; on, only its council copy goes, never the officers' twice", function()
+	WithWatch(function(w, W, c)
+		local king = CouncilWorld(w, c)
+		w.lease = nil
+		local ok, how = W.SendReport(SPAMMER, "S", "")
+		eq(ok, true); eq(how, "sent", "the officers had it")
+		Route(w, c)
+		eq(#W.Book(false).outbox, 1, "it waits for the King's client")
+		eq(W.FlushReports(true), 0); eq(#w.jobs, 0, "nothing while it is off")
+		w.lease = { name = KING, guild = "Olympus", id = "lease-2" }
+		eq(W.FlushReports(true), 1)
+		for _, job in ipairs(w.jobs) do eq(job.target, KING, "the council's copy alone") end
+		Route(w, c)
+		eq(#W.Book(false).outbox, 0)
+		eq(#As(king, function() return king.Watch.Reports() end), 1)
+		-- No officer and no King's client: held, as before.
+		w.lease = nil; w.online(c.me); w.refreshRoster(); w.jobs = {}
+		w.epoch = w.epoch + W.REPORT_GAP
+		ok, how = W.SendReport("Other Guy-Realm", "A", "")
+		eq(ok, true); eq(how, "held"); eq(#w.jobs, 0)
+	end)
+end)
+
+test("watch: council reports (1.2.1): each end checks what it can; spoofed, replayed, unlogged and flooding copies fail closed, and the accused never gets his own case", function()
+	WithWatch(function(w, W, c)
+		local king, hc1, hc2 = CouncilWorld(w, c)
+		local K, H1 = king.Watch, hc1.Watch
+		local function Copy(o)
+			o = o or {}
+			local msgs = assert(W.CouncilWire({ seq = o.seq or 10, at = o.at or w.epoch, guild = o.guild or w.guild, group = c.group, faction = c.faction,
+				cat = o.cat or "A", target = c.FullName(o.target or SPAMMER), note = o.note or "flooding", lines = o.lines or {} }))
+			return msgs[1]
+		end
+		local function KingTakes(sender, msg, dist) return As(king, function() return K.HandleReport(dist or "WHISPER", sender, msg) end) end
+		local function Refused(expected, label, sender, msg, dist)
+			local ok, why = KingTakes(sender, msg, dist)
+			eq(ok, false, label); eq(why, expected, label)
+		end
+		local REPORTER = "Reporter One-Realm"
+		Refused("access", "whispers only", REPORTER, Copy(), "CHANNEL")
+		w.logged = false; Refused("unlogged", "the logged API", REPORTER, Copy()); w.logged = true
+		Refused("identity", "an Olympus guild only", REPORTER, Copy({ guild = "Wanderers" }))
+		w.hidden[c.Fold(REPORTER)] = true; Refused("sender", "taken off the network", REPORTER, Copy()); w.hidden[c.Fold(REPORTER)] = nil
+		w.claimRefused = { [c.Fold(REPORTER)] = true }; Refused("sender", "his own messages speak for another guild", REPORTER, Copy()); w.claimRefused = nil
+		Refused("sender", "the King's own guild: its live roster", REPORTER, Copy({ guild = "Olympus" }))
+		Refused("name", "himself", REPORTER, Copy({ target = REPORTER }))
+		Refused("name", "never the King", REPORTER, Copy({ target = KING }))
+		Refused("time", "dated ahead", REPORTER, Copy({ at = w.epoch + 600 }))
+		eq(select(1, KingTakes(REPORTER, Copy())), true)
+		Refused("replay", "a replay", REPORTER, Copy())
+		for i = 1, W.REPORT_RATE - 1 do assert(KingTakes(REPORTER, Copy({ seq = 20 + i, target = "Flood" .. i .. "-Realm" })), "report " .. i) end
+		Refused("rate", "a few an hour from one player", REPORTER, Copy({ seq = 40, target = "Flood Over-Realm" }))
+		-- Not the King's client: none taken there; a member's client takes nothing.
+		local ok, why = As(hc1, function() return H1.HandleReport("WHISPER", REPORTER, Copy({ seq = 50 })) end)
+		eq(ok, false); eq(why, "access")
+		ok, why = W.HandleReport("WHISPER", REPORTER, Copy({ seq = 51 }))
+		eq(ok, false); eq(why, "access", "a member's client")
+		-- A councillor's client takes F from the King's client alone.
+		local relay = assert(W.RelayWire({ seq = 60, at = w.epoch, guild = w.guild, cat = "S", target = "Some One-Realm", n = 0, lines = {},
+			reporter = REPORTER, note = "x" }))[1]
+		ok, why = As(hc1, function() return H1.HandleReport("WHISPER", "Not Theking-Realm", relay) end)
+		eq(ok, false); eq(why, "sender")
+		w.lease = { name = "Pretender-Realm", guild = "Olympus", id = "x" }
+		ok, why = As(hc1, function() return H1.HandleReport("WHISPER", KING, relay) end)
+		eq(ok, false); eq(why, "sender", "the lease's King's client only")
+		w.lease = { name = KING, guild = "Olympus", id = "lease-1" }
+		eq(select(1, As(hc1, function() return H1.HandleReport("WHISPER", KING, relay) end)), true)
+		-- Q: a councillor's alone, answered once in a while.
+		ok, why = KingTakes(REPORTER, "MR~1~Q~0"); eq(ok, false); eq(why, "sender", "not on the council")
+		eq(select(1, KingTakes(HC1, "MR~1~Q~0")), true)
+		ok, why = KingTakes(HC1, "MR~1~Q~0"); eq(ok, false); eq(why, "rate")
+		w.bus = {}
+		-- A report on a councillor (or on a name his player linked) never goes to him.
+		w.links[c.Fold("Sage Alt-Realm")] = { HC2 }
+		w.epoch = w.epoch + 3600
+		eq(select(1, KingTakes(REPORTER, Copy({ seq = 70, at = w.epoch, target = HC2 }))), true)
+		eq(select(1, KingTakes("Reporter Two-Realm", Copy({ seq = 71, at = w.epoch, target = "Sage Alt-Realm" }))), true)
+		eq(select(1, KingTakes(HC2, "MR~1~Q~0")), true)
+		eq(#w.bus > 0, true, "the others' reports go to him")
+		for _, m in ipairs(w.bus) do
+			eq(m.target, HC2)
+			assert(not m.msg:find(HC2, 1, true) and not m.msg:find("Sage Alt", 1, true), "never his own case: " .. m.msg)
+		end
+		w.bus = {}
+		-- A councillor's own client refuses one about himself too.
+		local own = assert(W.RelayWire({ seq = 80, at = w.epoch, guild = w.guild, cat = "A", target = HC1, n = 0, lines = {}, reporter = REPORTER, note = "" }))[1]
+		ok, why = As(hc1, function() return H1.HandleReport("WHISPER", KING, own) end)
+		eq(ok, false); eq(why, "accused")
+	end)
+end)
+
+test("watch: council reports (1.2.1): a councillor's client asks once the King's client comes on, at a moment of its own, then every COUNCIL_ASK_EVERY; nobody else asks", function()
+	WithWatch(function(w, W, c)
+		local king, hc1 = CouncilWorld(w, c)
+		w.lease = nil
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(false) end), false, "no King's client: no ask")
+		w.lease = { name = KING, guild = "Olympus", id = "lease-1" }
+		local drawn
+		hc1.Watch.random = function(low, high) drawn = { low, high } return high end
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(false) end), false, "its own moment, not at once")
+		eq(drawn[1], 0); eq(drawn[2], W.COUNCIL_SPREAD)
+		w.epoch = w.epoch + W.COUNCIL_SPREAD
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(false) end), true, "at its moment")
+		eq(#w.bus, 1); eq(w.bus[1].target, KING); assert(w.bus[1].msg:find("^MR~1~Q~%d+$"), w.bus[1].msg)
+		w.bus = {}
+		w.epoch = w.epoch + 60
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(false) end), false, "not again so soon")
+		w.epoch = w.epoch + W.COUNCIL_ASK_EVERY
+		eq(As(hc1, function() return hc1.Watch.CouncilTick(false) end), true)
+		w.bus = {}
+		-- The King's client and a member's never ask.
+		eq(As(king, function() return king.Watch.CouncilTick(true) end), false)
+		eq(W.CouncilTick(true), false)
+		eq(#w.bus, 0); eq(#w.jobs, 0)
 	end)
 end)

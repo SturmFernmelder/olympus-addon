@@ -325,6 +325,8 @@ local function TrimReports(s)
 end
 
 function Watch.Prune()
+	-- (1.2.1: the council's book too, on the King's and each councillor's client.)
+	if Watch.PruneCouncil then Watch.PruneCouncil() end
 	local s = Store(false)
 	if not s then return end
 	local now = Clock()
@@ -1543,9 +1545,235 @@ local function KeepReport(r)
 	return true, id
 end
 
+---------------------------------------------------------------------------
+-- 1.2.1 (the owner: a member's report "deveria chegar na watch... que inclui high council nessa
+-- tab"): a report reaches the High Council and the King too, in their Watch (Reports and Cases).
+-- Their one reachable client is the King's (the Tabards' lease, TabardsV2.Collector: the exact King
+-- client heard in the last 10 minutes), as for the Judgments: the reporter's client whispers the
+-- same report to it (op C, its own copy beside the guild's R), and the King's client keeps it in the
+-- council's own book (never in a guild's Watch) and passes it on to the councillors whose clients
+-- asked it lately; a councillor's client asks every COUNCIL_ASK_EVERY while the King's client is
+-- on, for those newer than its own newest (op Q). With the King's client off the report waits, as
+-- one for absent officers does, a day at most on the reporter's client. Each end checks what it
+-- can: the reporter's guild is what his own messages say (Data.ClaimGuild, one at a time; only his
+-- guild's officers can check his rank, in their roster), a councillor is on the signed list and not
+-- sanctioned, the King's client is the lease's, the accused (or a name his player linked) is never
+-- sent his own case, every message is a logged whisper, and each end has its own rate limits. The
+-- King's chat may be on stream: what it prints names no one.
+--   MR~1~C~<seq>~<at>~<guild>~<group>~<faction>~<A|S|E|O>~<Name-Realm>~<lines>~<note>   to the King's client
+--   MR~1~E~...                                       its evidence lines, as after R
+--   MR~1~Q~<since>                                   a councillor's client: the council's reports newer than <since>
+--   MR~1~F~<seq>~<at>~<guild>~<A|S|E|O>~<Name-Realm>~<lines>~<reporter>~<note>   the King's client passes one on, then its lines
+---------------------------------------------------------------------------
+Watch.COUNCIL_ASK_EVERY = 15 * 60  -- a councillor's client asks this often
+Watch.COUNCIL_SPREAD = 5 * 60      -- its first ask once the King's client comes on: within this
+Watch.COUNCIL_HEARD = 20 * 60      -- the King's client passes a new report at once to those who asked this recently
+Watch.COUNCIL_ASK_GAP = 30         -- and answers one asker this often at most
+Watch.COUNCIL_SHOWN = 6            -- reports in one answer (the oldest first; a full one is asked again soon)
+Watch.COUNCIL_BACKLOG = 3 * 86400  -- a councillor's first ask goes this far back
+Watch.COUNCIL_RATE_ALL = 60        -- the King's client takes this many council reports from everyone...
+Watch.COUNCIL_RATE_ALL_WINDOW = 600 -- ...in this long
+Watch.COUNCIL_RELAY_WAIT = 15      -- a new report is passed on once its lines had this long to arrive
+Watch.COUNCIL_RELAY_RATE = 200     -- a councillor's client takes this many from the King's client in 10 minutes
+Watch.random = math.random         -- (tests)
+
+local councilHeard = {}   -- the King's client: [councillor key] = { name, t }: asked lately (session only)
+local councilAnswered = {} -- the King's client: [councillor key] = Mono() of its last answer
+local councilAsk = { lease = nil, at = -math.huge, got = 0 } -- a councillor's client: its asks
+
+-- The King's client on now (its exact name), as the lease says, or nil.
+local function KingClient()
+	local T = ns.TabardsV2
+	if type(T) ~= "table" or T.missing or type(T.Collector) ~= "function" then return nil end
+	local c = T.Collector()
+	if type(c) ~= "table" or type(c.name) ~= "string" or type(ns.IsKingCharacter) ~= "function" or not ns.IsKingCharacter(c.name) then return nil end
+	return c.name
+end
+-- This client is the King's own.
+local function KingHere()
+	local K = ns.King
+	return type(K) == "table" and type(K.IsKing) == "function" and K.IsKing() == true
+end
+local function PowersBarred(name)
+	local WC = ns.WatchChat
+	return type(WC) == "table" and not WC.missing and type(WC.PowersBarred) == "function" and WC.PowersBarred(name) ~= nil
+end
+-- On the signed council list (the King left out), under no sanction.
+local function Councillor(name)
+	return type(name) == "string" and type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true
+		and not (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(name)) and not PowersBarred(name)
+end
+-- This client keeps the council's reports: the King's, a councillor's (Watch.CouncilDeskShown,
+-- below: a member, not net-off, under no sanction).
+local function CouncilReader() return Watch.CouncilDeskShown ~= nil and Watch.CouncilDeskShown() == true end
+
+-- The council's book on this client (the King's and each councillor's own): its reports, their
+-- replay floors; never a guild's Watch store, never in a recovery snapshot.
+local function CouncilStore(create)
+	if type(ns.rdb) ~= "table" or type(ns.group) ~= "string" or type(ns.faction) ~= "string" then return nil end
+	local s = ns.rdb.watchCouncil
+	if type(s) ~= "table" or s.version ~= 1 or s.group ~= ns.group or s.faction ~= ns.faction then
+		if not create then return nil end
+		s = { version = 1, group = ns.group, faction = ns.faction }
+		ns.rdb.watchCouncil = s
+	end
+	for _, field in ipairs({ "reports", "reportSeen", "records", "closed", "findings" }) do
+		if type(s[field]) ~= "table" then s[field] = {} end
+	end
+	s.revision = math.max(0, math.floor(tonumber(s.revision) or 0))
+	return s
+end
+Watch.CouncilStore = CouncilStore
+
+local function CouncilGuild(guild)
+	return type(guild) == "string" and guild ~= "" and #guild <= 72 and not guild:find("[~|%^%c]") and ns.IsFederation(guild) and guild or nil
+end
+
+local function PruneCouncil()
+	local s = CouncilStore(false)
+	if not s then return end
+	local now = Clock()
+	for id, r in pairs(s.reports) do
+		if not ValidReport(id, r) or not CouncilGuild(r.guild) or now - r.at > Watch.REPORT_KEEP then s.reports[id] = nil end
+	end
+	TrimReports(s)
+	for who, e in pairs(s.reportSeen) do
+		if type(who) ~= "string" or type(e) ~= "table" or type(e.seq) ~= "number" or type(e.at) ~= "number"
+			or now - e.at > Watch.REPORT_KEEP + Watch.DATE_AHEAD then s.reportSeen[who] = nil end
+	end
+	while Count(s.reportSeen) > Watch.MAX_REPORTS * 2 do
+		local oldest, at
+		for who, e in pairs(s.reportSeen) do if not at or e.at < at or (e.at == at and who < oldest) then oldest, at = who, e.at end end
+		if not oldest then break end
+		s.reportSeen[oldest] = nil
+	end
+end
+
+Watch.PruneCouncil = PruneCouncil
+
+-- A council report kept here: each player's newest on each name. Told once in a while, naming no one
+-- (quiet: one passed on long after it was made, as a councillor's first ask brings them).
+local function KeepCouncil(r, quiet)
+	local s = CouncilStore(true)
+	if not s then return false, "store" end
+	local id = Key(r.reporter) .. "#" .. Key(r.target)
+	local old = s.reports[id]
+	if type(old) == "table" and (tonumber(old.at) or 0) >= r.at then return false, "older" end
+	s.reports[id] = r
+	TrimReports(s)
+	s.revision = s.revision + 1
+	local key, now = "council#" .. Key(r.target), Mono()
+	if not quiet and now - (reportTold[key] or -math.huge) >= Watch.TOLD_GAP then
+		reportTold[key] = now
+		ns.Print(Gold(L.WATCH_REPORT_IN_COUNCIL:format(CategoryLabel(r.cat))))
+		if ns.PlayAlert then ns.PlayAlert("soft", "watch") end
+	end
+	ns.Fire("WATCH_CHANGED")
+	return true, id
+end
+
+-- The King's client passes one council report on to a councillor: its head, then each line it has.
+local function RelayWire(r)
+	local head = ("MR~1~F~%d~%d~%s~%s~%s~%d~%s~"):format(r.seq, r.at, r.guild, r.cat, r.target, tonumber(r.n) or 0, r.reporter)
+	if #head > Watch.MESSAGE_MAX then return nil end
+	local msgs = { head .. ns.Cut(r.note or "", Watch.MESSAGE_MAX - #head) }
+	for i = 1, tonumber(r.n) or 0 do
+		local line = r.lines[i]
+		if type(line) == "table" then
+			local m = ("MR~1~E~%d~%d~%d~%s~"):format(r.seq, i, line.at, line.tier)
+			msgs[#msgs + 1] = m .. ns.Cut(line.text, Watch.MESSAGE_MAX - #m)
+		end
+	end
+	return msgs
+end
+Watch.RelayWire = RelayWire
+
+local function RelayTo(name, r)
+	if Accused(name, r.target) or Same(name, ns.me) then return false end
+	local msgs = RelayWire(r)
+	if not msgs then return false end
+	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #msgs then return false end
+	for i, msg in ipairs(msgs) do
+		local guardKey = "council-relay#" .. Key(name) .. "#" .. Key(r.reporter) .. "#" .. Key(r.target) .. "#" .. i
+		ns.Comm.Whisper(name, msg, nil, false, true, nil, { owner = Watch, key = guardKey, permit = function(owner, key, dist, to, payload)
+			if owner ~= Watch or key ~= guardKey or dist ~= "WHISPER" or payload ~= msg or not Same(to, name) then return false, "guard" end
+			if not KingHere() or not CouncilReader() or not Councillor(name) or Accused(name, r.target) then
+				stats.revoked = stats.revoked + 1
+				return false, "revoked"
+			end
+			return true
+		end })
+	end
+	return true
+end
+
+-- The King's client: a new council report to the councillors who asked lately, once its lines came.
+local function RelayFresh(id)
+	Watch.after(Watch.COUNCIL_RELAY_WAIT, "watch council relay", function()
+		local s = CouncilStore(false)
+		local r = s and s.reports[id]
+		if type(r) ~= "table" or not KingHere() then return end
+		local now = Mono()
+		for _, e in pairs(councilHeard) do
+			if now - e.t <= Watch.COUNCIL_HEARD and Councillor(e.name) then RelayTo(e.name, r) end
+		end
+	end)
+end
+
+-- The reporter's client: the council's copy of report r, to the King's client (true: on its way, or
+-- this is the King's client and keeps it itself).
+local function CouncilWire(r)
+	local msgs = ReportWire(r)
+	if not msgs then return nil end
+	msgs[1] = msgs[1]:gsub("^MR~1~R~", "MR~1~C~")
+	return msgs
+end
+Watch.CouncilWire = CouncilWire
+
+local function SendCouncil(r)
+	local king = KingClient()
+	if not king then return false end
+	-- (Queued already, its first message not gone yet: on its way.)
+	if r.councilTryAt and Mono() - r.councilTryAt < Watch.REPORT_RETRY then return true end
+	if ns.me and Same(king, ns.me) then
+		if not KingHere() then return false end
+		local copy = { reporter = ns.me, target = r.target, cat = r.cat, note = r.note, at = r.at, seq = r.seq, n = #r.lines, lines = {},
+			guild = r.guild, heard = Clock() }
+		for i, line in ipairs(r.lines) do copy.lines[i] = { at = line.at, tier = line.tier, text = line.text } end
+		local ok, id = KeepCouncil(copy)
+		if ok then RelayFresh(id) end
+		r.councilDone = true
+		return true
+	end
+	local msgs = CouncilWire(r)
+	if not msgs then return false end
+	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #msgs then return false end
+	r.councilTryAt = Mono()
+	for i, msg in ipairs(msgs) do
+		local guardKey = "report-council#" .. tostring(r.seq) .. "#" .. i
+		local done = i == 1 and function(ok)
+			if not ok then return end
+			r.councilDone = true
+			if r.delivered then Unqueue(r) end
+		end or nil
+		ns.Comm.Whisper(king, msg, nil, false, true, done, { owner = Watch, key = guardKey, permit = function(owner, key, dist, to, payload)
+			if owner ~= Watch or key ~= guardKey or dist ~= "WHISPER" or payload ~= msg or not Same(to, king) then return false, "guard" end
+			if not ns.IsMember() or OwnGuild() ~= r.guild or ns.group ~= r.group or ns.faction ~= r.faction or SelfOff()
+				or not Same(KingClient(), king) then
+				stats.revoked = stats.revoked + 1
+				return false, "revoked"
+			end
+			return true
+		end })
+	end
+	return true
+end
+
 -- Sends a report now to every authorized officer of this guild online but the accused (and, on an
 -- officer's own client, to its own desk). "held": nobody to send it to yet.
-local function Deliver(r)
+-- 1.2.1: and its council copy to the King's client while it is on (SendCouncil, above). Each part
+-- goes once; the report leaves the reporter's outbox when both did (or after a day).
+local function Deliver(r, guildPart)
 	if not ns.IsMember() or OwnGuild() ~= r.guild or ns.group ~= r.group or ns.faction ~= r.faction then return false, "guild" end
 	if SelfOff() then return false, "netoff" end
 	local msgs = ReportWire(r)
@@ -1556,17 +1784,35 @@ local function Deliver(r)
 		for i, line in ipairs(r.lines) do copy.lines[i] = { at = line.at, tier = line.tier, text = line.text } end
 		r.ownTaken = KeepReport(copy) or nil
 	end
+	-- (1.2.1: the council's copy, while the King's client is on: SendCouncil.)
+	local council = r.councilDone == true or SendCouncil(r)
+	if r.delivered or guildPart == false then
+		if r.delivered and r.councilDone then Unqueue(r) end
+		return council, council and "sent" or "held", 0
+	end
 	local recipients = RecipientsFor(r.target)
 	if #recipients == 0 then
-		if r.ownTaken then Unqueue(r) return true, "local", 0 end
+		if r.ownTaken then
+			r.delivered = true
+			if r.councilDone then Unqueue(r) end
+			return true, "local", 0
+		end
+		if council then return true, "sent", 0 end
 		return false, "held"
 	end
-	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #recipients * #msgs then return false, "busy" end
+	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #recipients * #msgs then
+		if council then return true, "sent", 0 end
+		return false, "busy"
+	end
 	r.tryAt = Mono()
 	for _, recipient in ipairs(recipients) do
 		for i, msg in ipairs(msgs) do
 			local guardKey = "report#" .. tostring(r.seq) .. "#" .. Key(recipient) .. "#" .. i
-			local done = i == 1 and function(ok) if ok then r.delivered = true; Unqueue(r) end end or nil
+			local done = i == 1 and function(ok)
+				if not ok then return end
+				r.delivered = true
+				if r.councilDone then Unqueue(r) end
+			end or nil
 			ns.Comm.Whisper(recipient, msg, nil, false, true, done, { owner = Watch, key = guardKey, permit = ReportPermit(r, recipient, msg, guardKey) })
 		end
 	end
@@ -1624,7 +1870,10 @@ function Watch.FlushReports(force)
 		local r = b.outbox[i]
 		if type(r) ~= "table" or type(r.at) ~= "number" or type(r.seq) ~= "number" or type(r.lines) ~= "table" or clock - r.at > Watch.REPORT_HOLD then
 			table.remove(b.outbox, i)
-			if type(r) == "table" and r.target then ns.Print(L.WATCH_REPORT_DROPPED:format(ns.DisplayName(r.target) or tostring(r.target))) end
+			-- (1.2.1: one that reached the guild's officers or the council goes quietly.)
+			if type(r) == "table" and r.target and not r.delivered and not r.councilDone then
+				ns.Print(L.WATCH_REPORT_DROPPED:format(ns.DisplayName(r.target) or tostring(r.target)))
+			end
 		end
 	end
 	-- The oldest first, in the order they were made (a copy: a delivery takes one out of the outbox).
@@ -1632,8 +1881,10 @@ function Watch.FlushReports(force)
 	for _, r in ipairs(b.outbox) do waiting[#waiting + 1] = r end
 	table.sort(waiting, function(x, y) return x.seq < y.seq end)
 	for _, r in ipairs(waiting) do
-		if not r.delivered and (force or now - (tonumber(r.tryAt) or -math.huge) >= Watch.REPORT_RETRY) and FreshRoster() then
-			local ok, how = Deliver(r)
+		local guild = not r.delivered and (force or now - (tonumber(r.tryAt) or -math.huge) >= Watch.REPORT_RETRY) and FreshRoster() ~= nil
+		-- (1.2.1: its council copy, once the King's client is on: Deliver's SendCouncil.)
+		if guild or (not r.councilDone and KingClient() ~= nil) then
+			local ok, how = Deliver(r, guild)
 			if ok and how == "sent" then sent = sent + 1 end
 		end
 	end
@@ -1716,11 +1967,14 @@ local function TakeReportLine(sender, text)
 	if tier and not TierAllowed(tier) then return false, "tier" end
 	local wait = reportLines[Key(sender)]
 	if not seq or not wait or wait.seq ~= seq or Mono() - wait.t > Watch.LINES_WAIT or not i or i < 1 or i > wait.n then return false, "stale" end
-	local s = Store(false)
+	-- (1.2.1: a council report's lines, on the King's client or a councillor's, go to the council's book;
+	-- one passed on by the King's client may be as old as the reports it keeps.)
+	local s = wait.council and CouncilStore(false) or (not wait.council and Store(false)) or nil
 	local r = s and s.reports[wait.id]
 	if type(r) ~= "table" or r.seq ~= seq or r.lines[i] then return false, "stale" end
 	local now = Clock()
-	if not at or at > now + Watch.DATE_AHEAD or now - at > Watch.REPORT_LINE_WINDOW + Watch.REPORT_HOLD + Watch.DATE_AHEAD then return false, "time" end
+	local oldest = Watch.REPORT_LINE_WINDOW + (wait.relay and Watch.REPORT_KEEP or Watch.REPORT_HOLD) + Watch.DATE_AHEAD
+	if not at or at > now + Watch.DATE_AHEAD or now - at > oldest then return false, "time" end
 	line = CleanLine(line)
 	if line == "" then return false, "shape" end
 	r.lines[i] = { at = at, tier = tier, text = line }
@@ -1751,10 +2005,141 @@ local function TakeClose(sender, text)
 	return true
 end
 
+---------------------------------------------------------------------------
+-- 1.2.1: the council's reports as the King's client and the councillors' take them (see above).
+---------------------------------------------------------------------------
+
+-- The King's client: a member's council copy of his report (C), its lines after it (E).
+local function TakeCouncilHead(sender, text)
+	local seq, at, guild, group, faction, cat, target, n, note =
+		text:match("^MR~1~C~(%d+)~(%d+)~([^~]+)~([^~]+)~([^~]+)~(%u)~([^~]+)~(%d)~(.*)$")
+	seq, at, n = tonumber(seq), tonumber(at), tonumber(n)
+	if not seq or seq < 1 or seq > Watch.MAX_SEQ or not at or not n or n > Watch.REPORT_LINES or not Watch.REPORT_CATEGORIES[cat] then return false, "shape" end
+	if group ~= ns.group or faction ~= ns.faction or not CouncilGuild(guild) then return false, "identity" end
+	-- The reporter, as a guild's Watch takes him: not hidden by net-off. His guild: in the King's own
+	-- guild its live roster says (when fresh); any other, as his own messages say it, one at a time
+	-- (Data.ClaimGuild), which only that guild's officers can check in their roster.
+	local M = ns.Moderation
+	if M and M.Hides and M.Hides(sender, guild) then return false, "sender" end
+	if guild == OwnGuild() and FreshRoster() then
+		if RosterRank(sender) == nil then return false, "sender" end
+	elseif not (ns.Data and type(ns.Data.ClaimGuild) == "function" and ns.Data.ClaimGuild(sender, guild)) then
+		return false, "sender"
+	end
+	local name = Character(target)
+	if not name or name ~= target or Same(name, sender) or IsKingName(name) then return false, "name" end
+	if ns.me and Accused(ns.me, name) then return false, "accused" end
+	local now = Clock()
+	if at > now + Watch.DATE_AHEAD or now - at > Watch.REPORT_HOLD + Watch.DATE_AHEAD then return false, "time" end
+	local s = CouncilStore(true)
+	if not s then return false, "store" end
+	local seenKey = Key(sender) .. "#" .. Key(name)
+	local seen = s.reportSeen[seenKey]
+	if seen and seq <= (tonumber(seen.seq) or 0) then stats.replay = stats.replay + 1 return false, "replay" end
+	if not Rate("council:" .. Key(sender), Watch.REPORT_RATE, Watch.REPORT_RATE_WINDOW)
+		or not Rate("council:*", Watch.COUNCIL_RATE_ALL, Watch.COUNCIL_RATE_ALL_WINDOW) then return false, "rate" end
+	s.reportSeen[seenKey] = { seq = seq, at = at }
+	local r = { reporter = sender, target = name, guild = guild, cat = cat, note = CleanLine(note, Watch.REPORT_NOTE_MAX), at = at,
+		seq = seq, n = n, lines = {}, heard = now }
+	local ok, id = KeepCouncil(r)
+	if not ok then return false, id end
+	reportLines[Key(sender)] = n > 0 and { id = id, seq = seq, n = n, t = Mono(), council = true } or nil
+	RelayFresh(id)
+	return true
+end
+
+-- A councillor's client: one the King's client passed on (F), its lines after it (E).
+local function TakeRelay(sender, text)
+	if KingHere() or not Councillor(ns.me) then return false, "access" end
+	if not (Same(KingClient(), sender) and ns.IsKingCharacter(sender)) then return false, "sender" end
+	local seq, at, guild, cat, target, n, reporter, note =
+		text:match("^MR~1~F~(%d+)~(%d+)~([^~]+)~(%u)~([^~]+)~(%d)~([^~]+)~(.*)$")
+	seq, at, n = tonumber(seq), tonumber(at), tonumber(n)
+	if not seq or seq < 1 or seq > Watch.MAX_SEQ or not at or not n or n > Watch.REPORT_LINES or not Watch.REPORT_CATEGORIES[cat] then return false, "shape" end
+	if not CouncilGuild(guild) then return false, "identity" end
+	local name, by = Character(target), Character(reporter)
+	if not name or name ~= target or not by or by ~= reporter or Same(name, by) or IsKingName(name) then return false, "name" end
+	if ns.me and Accused(ns.me, name) then return false, "accused" end
+	local now = Clock()
+	if at > now + Watch.DATE_AHEAD or now - at > Watch.REPORT_KEEP then return false, "time" end
+	local s = CouncilStore(true)
+	if not s then return false, "store" end
+	local seenKey = Key(by) .. "#" .. Key(name)
+	local seen = s.reportSeen[seenKey]
+	if seen and seq <= (tonumber(seen.seq) or 0) then return false, "replay" end
+	if not Rate("council-relay:" .. Key(sender), Watch.COUNCIL_RELAY_RATE, 600) then return false, "rate" end
+	s.reportSeen[seenKey] = { seq = seq, at = at }
+	councilAsk.got = councilAsk.got + 1
+	local r = { reporter = by, target = name, guild = guild, cat = cat, note = CleanLine(note, Watch.REPORT_NOTE_MAX), at = at,
+		seq = seq, n = n, lines = {}, heard = now }
+	local ok, id = KeepCouncil(r, now - at > Watch.COUNCIL_HEARD)
+	if not ok then return false, id end
+	reportLines[Key(sender)] = n > 0 and { id = id, seq = seq, n = n, t = Mono(), council = true, relay = true } or nil
+	return true
+end
+
+-- The King's client: a councillor's ask (Q): the council's reports newer than <since>, the oldest
+-- first, COUNCIL_SHOWN at most, never one about himself or a name his player linked.
+local function TakeCouncilAsk(sender, text)
+	local since = tonumber(text:match("^MR~1~Q~(%d+)$"))
+	if not since then return false, "shape" end
+	if not Councillor(sender) then return false, "sender" end
+	local key, now = Key(sender), Mono()
+	if not councilHeard[key] and Count(councilHeard) >= 200 then
+		for k, e in pairs(councilHeard) do if now - e.t > Watch.COUNCIL_HEARD then councilHeard[k], councilAnswered[k] = nil, nil end end
+		if Count(councilHeard) >= 200 then return false, "busy" end
+	end
+	councilHeard[key] = { name = sender, t = now }
+	if now - (councilAnswered[key] or -math.huge) < Watch.COUNCIL_ASK_GAP then return false, "rate" end
+	councilAnswered[key] = now
+	PruneCouncil()
+	local s, list = CouncilStore(false), {}
+	for _, r in pairs(s and s.reports or {}) do
+		if type(r) == "table" and r.at > since and not Accused(sender, r.target) then list[#list + 1] = r end
+	end
+	table.sort(list, function(a, b)
+		if a.at ~= b.at then return a.at < b.at end
+		return Key(a.reporter) .. "#" .. Key(a.target) < Key(b.reporter) .. "#" .. Key(b.target)
+	end)
+	for i = 1, math.min(Watch.COUNCIL_SHOWN, #list) do RelayTo(sender, list[i]) end
+	return true
+end
+
+-- A councillor's client, each minute: its ask, once the King's client comes on (at a moment of its
+-- own within COUNCIL_SPREAD, so the councillors' asks do not all reach it at once), then every
+-- COUNCIL_ASK_EVERY; sooner after an answer that came full. force: now.
+function Watch.CouncilTick(force)
+	if KingHere() or not Councillor(ns.me) or not CouncilReader() then return false end
+	local king = KingClient()
+	if not king then councilAsk.lease = nil return false end
+	local now = Mono()
+	if not Same(councilAsk.lease, king) then
+		councilAsk.lease = king
+		councilAsk.at = now - Watch.COUNCIL_ASK_EVERY + Watch.random(0, Watch.COUNCIL_SPREAD)
+		councilAsk.got = 0
+	end
+	local due = now - councilAsk.at >= Watch.COUNCIL_ASK_EVERY
+		or (councilAsk.got >= Watch.COUNCIL_SHOWN and now - councilAsk.at >= Watch.COUNCIL_ASK_GAP * 2)
+	if not (force or due) then return false end
+	councilAsk.at, councilAsk.got = now, 0
+	PruneCouncil()
+	local s = CouncilStore(false)
+	local since = math.floor(Clock() - Watch.COUNCIL_BACKLOG)
+	for _, r in pairs(s and s.reports or {}) do if type(r) == "table" and type(r.at) == "number" and r.at > since then since = r.at end end
+	local msg = "MR~1~Q~" .. math.max(0, since)
+	return ns.Comm.Whisper(king, msg, nil, false, true, nil, { owner = Watch, key = "council-ask", permit = function(owner, key, dist, to, payload)
+		if owner ~= Watch or key ~= "council-ask" or dist ~= "WHISPER" or payload ~= msg or not Same(to, king) then return false, "guard" end
+		if not Councillor(ns.me) or not CouncilReader() or not Same(KingClient(), king) then return false, "revoked" end
+		return true
+	end }) ~= false
+end
+
 function Watch.HandleReport(dist, sender, text)
 	if type(text) ~= "string" then stats.malformed = stats.malformed + 1 return false, "shape" end
 	if #text > Watch.MESSAGE_MAX then stats.oversized = stats.oversized + 1 return false, "size" end
-	if dist ~= "WHISPER" or not Watch.CanRead() then stats.refused = stats.refused + 1 return false, "access" end
+	-- (1.2.1: a guild's Watch takes R, E and X; the King's client C, E and Q; a councillor's F and E.)
+	local desk, council = Watch.CanRead(), CouncilReader()
+	if dist ~= "WHISPER" or not (desk or council) then stats.refused = stats.refused + 1 return false, "access" end
 	if C_ChatInfo and C_ChatInfo.SendAddonMessageLogged and ns.Comm.DeliveredLogged and not ns.Comm.DeliveredLogged() then
 		stats.refused = stats.refused + 1
 		return false, "unlogged"
@@ -1764,9 +2149,14 @@ function Watch.HandleReport(dist, sender, text)
 	Watch.Prune()
 	local op = text:match("^MR~1~(%u)~")
 	local ok, why
-	if op == "R" then ok, why = TakeReportHead(sender, text)
+	local king = council and KingHere()
+	if op == "R" and desk then ok, why = TakeReportHead(sender, text)
 	elseif op == "E" then ok, why = TakeReportLine(sender, text)
-	elseif op == "X" then ok, why = TakeClose(sender, text)
+	elseif op == "X" and desk then ok, why = TakeClose(sender, text)
+	elseif op == "C" and king then ok, why = TakeCouncilHead(sender, text)
+	elseif op == "Q" and king then ok, why = TakeCouncilAsk(sender, text)
+	elseif op == "F" and council and not king then ok, why = TakeRelay(sender, text)
+	elseif op == "R" or op == "X" or op == "C" or op == "Q" or op == "F" then ok, why = false, "access"
 	else ok, why = false, "shape" end
 	if ok then stats.reports = (stats.reports or 0) + 1 else stats.refused = stats.refused + 1 end
 	return ok, why
@@ -2075,11 +2465,27 @@ end
 Watch.CatsText = CatsText -- (1.2: Judgment.lua's lines too)
 
 -- Every report this officer's client keeps, the newest first.
+-- 1.2.1: where the pages read reports: this guild's Watch (an officer's), the council's book (the
+-- King's and a councillor's: CouncilStore), each player's newest on each name; and the store whose
+-- closes, findings and records count (the guild's, else the council's, which has none).
+local function ReportSources()
+	local desk = Watch.CanRead() and Store(false) or nil
+	local council = Watch.CouncilDeskShown() and Watch.CouncilStore(false) or nil
+	local all = {}
+	for _, src in ipairs({ desk or false, council or false }) do
+		for id, r in pairs(src and src.reports or {}) do
+			local old = all[id]
+			if type(r) == "table" and (not old or (tonumber(r.at) or 0) > (tonumber(old.at) or 0)) then all[id] = r end
+		end
+	end
+	return all, desk or council
+end
+
 function Watch.Reports()
-	if not Watch.CanRead() then return {} end
+	if not (Watch.CanRead() or Watch.CouncilDeskShown()) then return {} end
 	Watch.Prune()
-	local s, out = Store(false), {}
-	for _, r in pairs(s and s.reports or {}) do out[#out + 1] = r end
+	local all, out = ReportSources(), {}
+	for _, r in pairs(all) do out[#out + 1] = r end
 	table.sort(out, function(a, b)
 		if a.at ~= b.at then return a.at > b.at end
 		return Key(a.reporter) < Key(b.reporter)
@@ -2092,13 +2498,13 @@ end
 -- on the name and its last close without action. Open ones (most players first, then the newest),
 -- and the handled ones (the newest first).
 function Watch.Cases()
-	if not Watch.CanRead() then return {}, {} end
+	if not (Watch.CanRead() or Watch.CouncilDeskShown()) then return {}, {} end
 	Watch.Prune()
-	local s = Store(false)
+	local all, s = ReportSources()
 	local open, handled = {}, {}
 	if not s then return open, handled end
 	local by = {}
-	for _, r in pairs(s.reports) do
+	for _, r in pairs(all) do
 		local key = Key(r.target)
 		local c = by[key]
 		if not c then
@@ -2199,13 +2605,17 @@ local function ReportTip(tt, r)
 	tt:AddLine(L.WATCH_REPORT_CATEGORY:format(CategoryLabel(r.cat)), 1, 1, 1, true)
 	tt:AddLine(L.WATCH_REPORT_NOTE:format(r.note ~= "" and ShownWords(r.note, r.reporter) or "-"), 1, 1, 1, true)
 	tt:AddLine(L.WATCH_REPORT_BY:format(ShownReporter(r.reporter), Stamp(r.at)), 0.7, 0.7, 0.7)
+	-- (1.2.1: a council report's guild, as the reporter's own client said it.)
+	if type(r.guild) == "string" and not OnStream() then tt:AddLine(L.WATCH_REPORT_GUILD:format(r.guild), 0.7, 0.7, 0.7, true) end
 	tt:AddLine(L.WATCH_REPORT_LINES:format(LinesGot(r), tonumber(r.n) or 0), 0.7, 0.7, 0.7, true)
 end
 
 local function AddReportLines(lines)
 	local reports = Watch.Reports()
-	lines[#lines + 1] = { header = true, text = L.WATCH_REPORTS_TITLE, right = Grey(tostring(#reports)),
-		tooltip = function(tt) tt:AddLine(L.WATCH_REPORTS_TITLE, 1, 0.82, 0); tt:AddLine(L.WATCH_REPORTS_TIP, 1, 1, 1, true) end }
+	-- (1.2.1: the King's and a councillor's, who is no officer here: the council's reports.)
+	local title = Watch.CanRead() and L.WATCH_REPORTS_TITLE or (Watch.CouncilDeskShown() and L.WATCH_REPORTS_TITLE_COUNCIL) or L.WATCH_REPORTS_TITLE
+	lines[#lines + 1] = { header = true, text = title, right = Grey(tostring(#reports)),
+		tooltip = function(tt) tt:AddLine(title, 1, 0.82, 0); tt:AddLine(L.WATCH_REPORTS_TIP, 1, 1, 1, true) end }
 	if #reports == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WATCH_REPORTS_EMPTY) } end
 	for _, r in ipairs(reports) do
 		lines[#lines + 1] = {
@@ -2333,7 +2743,18 @@ local function CaseLines(c)
 		end
 	end
 	lines[#lines].gapAfter = true
-	if not Watch.CanManage() then return lines end
+	if not Watch.CanManage() then
+		-- 1.2.1: the King and the High Council act on a council report in Olympus's chats (the
+		-- reported lines, his recent lines, a timeout: WatchChat.lua, each checked there), never
+		-- with a guild's own Watch.
+		local WC = ns.WatchChat
+		local chat = Watch.CouncilDeskShown() and WC and not WC.missing and WC.CaseLines and WC.CaseLines(c) or {}
+		if #chat > 0 then
+			lines[#lines + 1] = { header = true, text = L.WATCH_CASE_ACTIONS }
+			for _, line in ipairs(chat) do lines[#lines + 1] = line end
+		end
+		return lines
+	end
 	local target = c.target
 	lines[#lines + 1] = { header = true, text = L.WATCH_CASE_ACTIONS,
 		tooltip = function(tt) tt:AddLine(L.WATCH_CASE_ACTIONS, 1, 0.82, 0); tt:AddLine(L.WATCH_CASE_ACTIONS_TIP, 1, 1, 1, true) end }
@@ -2882,6 +3303,8 @@ function Watch.ResetForTests()
 	wipe(attemptAt)
 	wipe(pendingTargets)
 	wipe(reportLines); wipe(reportTold)
+	wipe(councilHeard); wipe(councilAnswered)
+	councilAsk.lease, councilAsk.at, councilAsk.got = nil, -math.huge, 0
 	lastFlush = -math.huge
 	Watch.mode, Watch.caseKey = nil, nil
 	if cardFrame then cardFrame:Hide() end
@@ -2925,5 +3348,7 @@ ns.On("LOGIN", function()
 	if ns.Every then
 		ns.Every(Watch.SYNC_GAP, "watch recovery", function() Watch.AskSync(false) end)
 		ns.Every(Watch.SYNC_GAP, "watch reports", function() Watch.FlushReports(false) end)
+		-- 1.2.1: a councillor's client asks the King's client for the council's reports.
+		ns.Every(60, "watch council reports", function() Watch.CouncilTick(false) end)
 	end
 end)

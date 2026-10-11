@@ -54,8 +54,17 @@ Automated checks and live multiplayer checks are separate gates; use
   can be reported, not only the 20 newest. The report goes to the online officers of the
   reporter's own guild (the guild master, Captains, appointed Watchers and signed moderators) and
   shows in their Watch under **Reports** and **Cases**. With no officer online it waits on the
-  reporter's client for a day. The King and the High Council see a case only after an officer
-  sends it to the King.
+  reporter's client for a day.
+- Every member's report also reaches the King and the High Council, in their Watch under
+  **Reports** and **Cases**, the tab where the High Council works. It goes by logged whisper to
+  the King's client while it is on, which keeps it apart from any guild's Watch and passes it on
+  to the councillors whose clients asked lately (each asks every 15 minutes while the King's
+  client is on). The reporter's guild there is what his own client says; only his guild's officers
+  check his rank. A councillor never receives a case about himself or a name his player linked,
+  the King's chat names no one, and per-player and overall rate limits apply. With the
+  King's client off, the report waits for it on the reporter's client for a day. The King and the
+  High Council act on such a case in Olympus's chats; an officer can still send a case to the King
+  for the council's vote. Multiplayer verification is still needed.
 - The Olympus shortcut is **Shift + the game's guild key** (Shift-J on Forever, where the game
   binds Y to Legacy and G to Target Last Hostile, so the old Y shortcut never came on there). It is
   read from the player's own guild key binding and falls back to Shift-J when that key has a
