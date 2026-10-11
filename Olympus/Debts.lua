@@ -1189,6 +1189,9 @@ function Debts.FeeReceipt(payer, copper, ref, mode)
 	if not ns.db or type(payer) ~= "string" or type(ref) ~= "string" then return false end
 	copper = math.floor(tonumber(copper) or 0)
 	if copper <= 0 then return false end
+	-- (1.2.1: ZF waits for the Wallet, Compliance.WALLET_WIRE: a receipt that cannot go is not kept.)
+	local C = ns.Compliance
+	if not (type(C) == "table" and type(C.Wire) == "function" and C.Wire("ZF") == true) then return false end
 	ns.db.arenaFees = type(ns.db.arenaFees) == "table" and ns.db.arenaFees or {}
 	local fees = ns.db.arenaFees
 	local key = ("%s|%s|%d"):format(Lower(payer), ref, copper)

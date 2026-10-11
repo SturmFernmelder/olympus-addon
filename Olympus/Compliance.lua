@@ -105,7 +105,15 @@ end
 -- 1.2.0 (Konig's review): debt marks and their details (ZX, ZY) go out and come in only with the
 -- Wallet on (off in the release): nothing in 1.2.0 makes a debt, and a stranger's marks would only
 -- fill everyone's saved data.
-Compliance.WALLET_WIRE = { ZX = true, ZY = true }
+-- 1.2.1: the same for every other message only the Wallet, a bet or a stake needs: the account
+-- key's claims (ZT), the fee receiver's receipts (ZF) and the banks' own (Wallet.lua: the head, the
+-- ledger and its names, the reserve, deposits, answers, codes, withdrawals, statements, lost
+-- receipts and orders). Not ZQ: its hello is how the games' ledger finds the auditors. Not ZR: a
+-- receipt also settles the custodian's payout and refund on crafting's guild rail, which runs on
+-- the arena's live gold whatever the Wallet says; with the Wallet off a receipt does nothing else
+-- (Debts.lua).
+Compliance.WALLET_WIRE = { ZX = true, ZY = true, ZT = true, ZF = true,
+	ZH = true, ZE = true, ZN = true, ZG = true, ZD = true, ZK = true, ZC = true, ZW = true, ZS = true, ZL = true, ZJ = true }
 
 -- Whether an arena message of this type may go out or be taken (a type that is not a wager always).
 function Compliance.Wire(kind)
