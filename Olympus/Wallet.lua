@@ -2645,7 +2645,8 @@ if ns.Consent and ns.Consent.Register then
 			if not (ns.Compliance and ns.Compliance.Wallet and ns.Compliance.Wallet()) then return false end
 			local R0 = R() return R0 ~= nil and (R0.IsBank(ns.me, "L") or R0.IsBank(ns.me, "T"))
 		end,
-		get = BankAnswer, set = function(on) Wallet.SetBankYes(on) end })
+		get = BankAnswer, set = function(on) Wallet.SetBankYes(on) end,
+		perCharacter = true }) -- (1.2.1: asked once on each bank character, as its yes is that character's)
 end
 
 local function Tick()

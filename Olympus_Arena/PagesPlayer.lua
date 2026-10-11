@@ -1151,8 +1151,9 @@ function ArenaUI.BoneFindInnkeeper()
 		return ok, reason
 	end
 	-- (1.2.1) The player asked for the innkeeper: where his conversation has no Bones line (the
-	-- gamepad UI, a changed NPC panel), talking to him now opens the Olympus window
-	-- (FarkleTable.WantKeeper); it never opens by itself at each visit.
+	-- gamepad UI, a changed NPC panel), the next talk to one opens the Olympus window, however long
+	-- the walk, and with Bones at innkeepers off his offer shows that once (FarkleTable.WantKeeper);
+	-- it never opens by itself at each visit.
 	local FT = ns.FarkleTable
 	if FT and FT.WantKeeper then FT.WantKeeper(not (arrow and arrow.State().active)) end
 	if not arrow then return Notice(L.FARKLE_LOBBY_GUIDE_UNAVAILABLE, false, "missing") end

@@ -356,6 +356,34 @@ test("Innkeeper gossip: missing native capability keeps the Olympus offer for a 
 	end)
 end)
 
+-- (1.2.1, review: after a No to "Bones at innkeepers" an untrained player had no way to his first
+-- game. The No hides the row at each visit; the Bones page's ask, FarkleTable.WantKeeper, brings it
+-- back for one conversation, through its Not now and the panel's own events, spent as it closes.)
+test("Innkeeper gossip: with Bones at innkeepers off the row stays hidden; the Bones page's ask shows it for one conversation, spent as it closes", function()
+	WithGossip(function(g, t)
+		local FT = t.a.ns.FarkleTable
+		FT.SetKeeperOffer(false)
+		local ok, why = g.ShowRow()
+		eq(ok, false); eq(why, "off", "off: no row at a visit")
+		FT.WantKeeper()
+		eq(g.ShowRow(), true, "asked for: the row in this conversation")
+		t.w:Fire(t.a, "GUILD_ROSTER_UPDATE")
+		eq(g.State().mode, "row", "the panel's own events keep it")
+		eq(g.Open(), true); g.State().dialog.cancel.scripts.OnClick()
+		eq(g.State().mode, "row", "Not now: back to the row, the same conversation")
+		t.f:Hide(); t.w:Fire(t.a, "GOSSIP_CLOSED")
+		eq(FT.KeeperWanted(), false, "spent as that conversation closed")
+		t.f:Show()
+		ok, why = g.ShowRow()
+		eq(ok, false); eq(why, "off", "the next visit: hidden again")
+		-- Asked again: the free lesson starts from the row as with the switch on.
+		FT.WantKeeper()
+		eq(g.ShowRow(), true); eq(g.Open(), true); eq(g.Confirm(), true)
+		eq(#t.starts, 1); eq(t.starts[1].what, "practice"); eq(t.starts[1].extra.learn, true)
+		eq(FT.KeeperWanted(), false, "spent")
+	end)
+end)
+
 test("Innkeeper gossip: a delayed native close event owns closing the conversation before training", function()
 	WithGossip(function(g, t)
 		C_GossipInfo.CloseGossip = function() end

@@ -11,6 +11,7 @@ G.DICE_TEXTURE = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
 G.ROW_GAP = 4
 local host, row, dialog, saved, keeper, innID
 local pendingPractice
+local served -- the Bones page's ask brought this conversation's row: it is spent as it closes
 local generation, mode = 0, "inactive"
 local hooked = setmetatable({}, { __mode = "k" })
 local function Method(obj, key) return obj and type(obj[key]) == "function" end
@@ -20,8 +21,9 @@ local function Context()
 	if not InCombatLockdown or InCombatLockdown() then return nil, "combat" end
 	local FT = ns.FarkleTable
 	if not FT or not FT.Innkeeper or not FT.Live or FT.Live() then return nil, "game" end
-	-- (1.2.1: the player hid the offer, the privacy page's line or /oly farkle keeper off.)
-	if FT.KeeperOffer and not FT.KeeperOffer() then return nil, "off" end
+	-- (1.2.1: the player hid the offer, the privacy page's line or /oly farkle keeper off, and did
+	-- not ask for the innkeeper on the Bones page since.)
+	if FT.KeeperOffer and not FT.KeeperOffer() and not (FT.KeeperWanted and FT.KeeperWanted()) then return nil, "off" end
 	local name, id = FT.Innkeeper(true)
 	if not name or not id then return nil, "npc" end
 	return name, id
@@ -150,6 +152,7 @@ function G.ShowRow() -- gp:innkeeper-gossip
 	if extent > rowTop then scroll:SetHeight(rowTop) end
 	row:ClearAllPoints(); row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(rowTop + G.ROW_GAP))
 	row:Show()
+	if ns.FarkleTable.KeeperWanted and ns.FarkleTable.KeeperWanted() then served = true end
 	if not hooked[f] then
 		hooked[f] = true
 		f:HookScript("OnHide", function() -- gp:innkeeper-gossip
@@ -187,6 +190,11 @@ local function Closed() -- gp:innkeeper-gossip
 	if not ns.Gate.Allowed(GATE) then return end
 	local request = pendingPractice
 	G.Park()
+	-- (1.2.1: the ask served the conversation that just closed, the row shown in it.)
+	if served then
+		served = nil
+		if ns.FarkleTable.WantKeeper then ns.FarkleTable.WantKeeper(false) end
+	end
 	if not request then return end
 	local current = generation
 	local function Start() -- gp:innkeeper-gossip
@@ -225,7 +233,8 @@ function G.Confirm() -- gp:innkeeper-gossip
 end
 
 -- The Olympus dialogue where no row can show: never by itself at each visit (1.2.1, a player's
--- report), only once the player asked for the innkeeper on the Bones page (FT.KeeperWanted).
+-- report), only once the player asked for the innkeeper on the Bones page (FT.KeeperWanted), and
+-- that ask is spent.
 local function Fallback()
 	local name = Context()
 	local FT = ns.FarkleTable

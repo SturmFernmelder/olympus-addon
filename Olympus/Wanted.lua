@@ -3219,7 +3219,8 @@ if ns.Consent and ns.Consent.Register then
 		get = function() return SightingsOn() end,
 		set = function(on) Wanted.SetSightings(on) end,
 		-- 1.2.0: off until its own Yes, and asked like the page's other lines until it is answered
-		-- (the page opens by itself for it once a session); the bulk Yes never turns it on.
+		-- (1.2.1: the page opens by itself for it once, never again once shown); the bulk Yes never
+		-- turns it on.
 		pending = function() return type(ns.db) == "table" and ns.db.wantedSightings == nil end,
 		explicit = true,
 	})

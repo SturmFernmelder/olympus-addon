@@ -147,3 +147,74 @@ test("1.2.1 privacy page: a question the page never showed still opens it once (
 	a.ns.me = me
 	NoErrors(w)
 end)
+
+-- (Review: the arena bank's yes is kept per character, but the page's record of asking it was the
+-- account's: one bank character asked, the account's others never were by themselves.)
+test("1.2.1 privacy page: the arena bank's line is asked once on each bank character of the account", function()
+	local w = World.New()
+	local king = w:Role("king")
+	local bank = w:Role("bank")
+	LoadWanted(w, bank)
+	local other = "Coffrey Strongbox-Emberfall" -- (another bank character on the same saved data)
+	w:As(king, function()
+		assert(king.ns.ArenaRoles.SetSettings({ live = 1 }))
+		assert(king.ns.ArenaRoles.SetBanks({ World.NAMES.bank, other }))
+	end)
+	w:Run(0)
+	-- (A third character of the account answered before: Wallet.lua's book of the bank's yeses.)
+	bank.db.arenaBankYes = { ["coffrey hoard-emberfall"] = true }
+	local C = bank.Consent
+	local function Waits()
+		for _, item in ipairs(C.Pending()) do if item.key == "arenabank" then return true end end
+		return false
+	end
+	eq(Waits(), true, "the bank's line waits for this character's answer")
+	eq(C.Ask("login"), true, "this bank character: the page asks")
+	C.Frame():Hide()
+	Relog(w, bank)
+	C = bank.Consent
+	w:Run(C.LOGIN_WAIT + 125)
+	eq(C.Frame(), nil, "the next login: not again")
+	bank.ns.me = other
+	eq(Waits(), true, "the other bank character's own answer waits")
+	eq(C.Ask("login"), true, "the other bank character: asked once")
+	eq(C.Choose("arenabank", false), true)
+	C.Frame():Hide()
+	eq(bank.db.arenaBankYes[World.NAMES.bank:lower()], nil, "the first one's: still unanswered, off")
+	eq(C.Ask("login"), false)
+	NoErrors(w)
+end)
+
+-- (Review: a new tabard contract drops both answers, but with the page's record kept for good the
+-- lines were never asked again by themselves: off, unseen.)
+test("1.2.1 privacy page: a new tabard contract asks its two lines once more", function()
+	local w = World.New({ compliance = "shipped" })
+	local a = w:Client("Lida Fenn")
+	local function LoadTabards(contract)
+		w:As(a, function()
+			assert(loadfile(H.ADDON_DIR .. "TabardsV2.lua"))("Olympus", a.ns)
+			if contract then a.ns.TabardsV2.CONTRACT = contract end
+		end)
+	end
+	LoadTabards()
+	local C = a.Consent
+	a.db.shareLocation, a.db.layerHelp = false, false
+	eq(C.Ask("login"), true, "the first login: the page")
+	for _, item in ipairs(C.Pending()) do C.Choose(item.key, true) end
+	C.Frame():Hide()
+	eq(a.ns.TabardsV2.Consent("self"), true); eq(a.ns.TabardsV2.Consent("nearby"), true)
+	eq(Keys(C.Pending()), "", "every line answered")
+	-- A later build with a new contract: its lines lose their answer.
+	local contract = a.ns.TabardsV2.CONTRACT + 1
+	w:Logout(a); w:Login(a); LoadTabards(contract)
+	C = a.Consent
+	eq(Keys(C.Pending()), "tabardnearbyv2,tabardselfv2", "the new contract's lines wait")
+	eq(C.Waiting(), true)
+	eq(C.Ask("login"), true, "asked once more")
+	C.Frame():Hide()
+	w:Logout(a); w:Login(a); LoadTabards(contract)
+	C = a.Consent
+	w:Run(C.LOGIN_WAIT + 125)
+	eq(C.Frame(), nil, "then not again for that contract")
+	NoErrors(w)
+end)

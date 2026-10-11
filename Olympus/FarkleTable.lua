@@ -129,7 +129,6 @@ FT.REASONS = { b = true, d = true, l = true, n = true, a = true, g = true, c = t
 -- (1.2.1, a player's report: "I don't wanna play bones every time I go to an inn. Or ever.")
 FT.INVITES_BURST = 2      -- invitations from this many different players...
 FT.INVITES_WINDOW = 600   -- ...within this many seconds: one question, stop receiving them?
-FT.KEEPER_WANT = 600      -- the Bones page's ask for the innkeeper holds this long (FT.WantKeeper)
 
 -- The stake sources by kind (the design): direct o/o; arbiter t/t or w/w; the King w/w.
 FT.SOURCES = { d = { o = true }, a = { t = true, w = true } }
@@ -2551,14 +2550,17 @@ end
 -- The innkeeper's offer (ns.db.bonesKeeper: false hides it; the privacy page's line, /oly farkle
 -- keeper) is the quiet line in his conversation (InnkeeperGossip.lua). Where that line cannot show
 -- (the gamepad UI, a changed NPC panel) his Olympus window opens only after the player asked for
--- him on the Bones page (WantKeeper), never by itself at each visit.
+-- him on the Bones page (WantKeeper), never by itself at each visit. The ask has no time limit
+-- (the walk to an inn has none) and is kept in this character's Bones options through a /reload:
+-- it serves the next conversation with a mapped innkeeper where his offer shows, and brings that
+-- offer back once with the switch off too (the player asked; an untrained one could not train).
 local invitesSeen = {}    -- [sender, lower case] = when his invitation was last shown or told
 local invitesAsked = false -- the question came this session
-local keeperWanted        -- when the Bones page asked for the innkeeper
 
 function FT.InvitesOn() return not (type(ns.db) == "table" and ns.db.bonesInvites == false) end
--- Off: every invitation still waiting for this player's answer is refused the same way.
-function FT.SetInvites(on)
+-- Off: every invitation still waiting for this player's answer is refused the same way. silent:
+-- no chat line (a restore, Backup.NOES).
+function FT.SetInvites(on, silent)
 	if type(ns.db) ~= "table" then return false end
 	ns.db.bonesInvites = on and true or false
 	if not on then
@@ -2571,24 +2573,35 @@ function FT.SetInvites(on)
 			end
 		end
 	end
-	ns.Print(on and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF)
+	if not silent then ns.Print(on and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF) end
 	A().Changed()
 	return true
 end
 function FT.KeeperOffer() return not (type(ns.db) == "table" and ns.db.bonesKeeper == false) end
-function FT.SetKeeperOffer(on)
+-- Off: an ask made before it is dropped (the No came after it).
+function FT.SetKeeperOffer(on, silent)
 	if type(ns.db) ~= "table" then return false end
 	ns.db.bonesKeeper = on and true or false
-	if not on and ns.InnkeeperGossip and ns.InnkeeperGossip.Park then ns.InnkeeperGossip.Park() end
-	ns.Print(on and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF)
+	if not on then
+		FT.WantKeeper(false)
+		if ns.InnkeeperGossip and ns.InnkeeperGossip.Park then ns.InnkeeperGossip.Park() end
+	end
+	if not silent then ns.Print(on and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF) end
 	return true
 end
--- The player asked for the innkeeper (the Bones page): his next conversation may open the window.
+-- The player asked for the innkeeper (the Bones page): his next conversation shows the offer.
 function FT.WantKeeper(on)
-	keeperWanted = on ~= false and Clock() or nil
+	if on == false then
+		local m = Peek("L")
+		if m and type(m.opts) == "table" then m.opts.keeperAsked = nil end
+		return
+	end
+	local m = Mine("L")
+	if m then m.opts.keeperAsked = true end
 end
 function FT.KeeperWanted()
-	return FT.KeeperOffer() and keeperWanted ~= nil and Clock() - keeperWanted <= FT.KEEPER_WANT
+	local m = Peek("L")
+	return m ~= nil and type(m.opts) == "table" and m.opts.keeperAsked == true
 end
 
 -- The different players whose invitations reached this player within INVITES_WINDOW, his own
@@ -2630,11 +2643,14 @@ StaticPopupDialogs["OLYMPUS_BONES_INVITES"] = {
 	button1 = L.FARKLE_INVITES_STOP,
 	button2 = L.FARKLE_INVITES_KEEP,
 	OnAccept = function() ns.SafeCall("bones invitations", FT.InvitesAnswer, true, true) end,
-	-- Keep them: kept, never asked again; Escape or another popup's place: not answered.
+	-- Keep them: kept, never asked again; another popup's place: not answered, the invitation shown.
 	OnCancel = function(_, _, reason) ns.SafeCall("bones invitations", FT.InvitesAnswer, false, reason == "clicked") end,
 	timeout = 0,
 	whileDead = true,
 	hideOnEscape = true,
+	-- Escape only closes it, answering nothing (the game's StaticPopup_CallEscapeHandler would call
+	-- OnCancel with "clicked", a Keep them for good); the invitation waits on the Bones page.
+	noCancelOnEscape = true,
 	preferredIndex = 3,
 	buttonHeight = 24,
 	textFont = "GameFontHighlightMed2",
@@ -3522,7 +3538,7 @@ end
 -- the separate Olympus dialogue on clients whose native layout is unavailable, opened only
 -- once the player asked for the innkeeper (1.2.1: FT.KeeperWanted, never at each visit).
 pcall(ns.RegisterEvent, "GOSSIP_SHOW", function()
-	if not ns.IsMember() or FT.Live() or not FT.KeeperOffer() then return end
+	if not ns.IsMember() or FT.Live() or not (FT.KeeperOffer() or FT.KeeperWanted()) then return end
 	if ns.InnkeeperGossip then ns.InnkeeperGossip.OnShow(); return end
 	local keeper = FT.Innkeeper(true)
 	if keeper and FT.KeeperWanted() then FT.WantKeeper(false); FT.ShowUI("innkeeper", nil, keeper) end
@@ -3726,6 +3742,6 @@ function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
 	tables, invitedBy, notices = {}, {}, {}
 	selftest, lastSelfTest = nil, nil
-	invitesSeen, invitesAsked, keeperWanted = {}, false, nil
+	invitesSeen, invitesAsked = {}, false
 end
 FT._ = { tables = function() return tables end, notices = function() return notices end, Split = Split, Terms = Terms, Fields = Fields }
