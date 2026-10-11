@@ -17,7 +17,7 @@ local function WithWatch(fn)
 	local w = { epoch = 1800000000, guild = "Olympus II", myRank = 0, member = true,
 		logged = true, jobs = {}, events = {}, listeners = {}, dialogs = {}, prints = {},
 		hidden = {}, issuers = {}, signed = {}, links = {}, filterHit = nil, queueRoom = 60, timers = {},
-		handlers = {}, chat = {} }
+		handlers = {}, chat = {}, on = {}, tickers = {} }
 	local ok, err = pcall(function()
 		GetGuildInfo = function(unit)
 			if unit == nil or unit == "player" then return w.guild, "Guild Master", w.myRank end
@@ -52,11 +52,16 @@ local function WithWatch(fn)
 		c.Ago = function(at) return tostring(w.epoch - (tonumber(at) or 0)) .. "s ago" end
 		c.SafeCall = function(_, call, ...) return call(...) end
 		c.Fire = function(name, ...) w.events[#w.events + 1] = { name, ... } end
-		c.On = function(name, call) w.listeners[name] = call end
+		-- (w.listeners: the last one of a name; w.on: every one, in order, 1.2.1.)
+		c.On = function(name, call)
+			w.listeners[name] = call
+			w.on[name] = w.on[name] or {}
+			table.insert(w.on[name], call)
+		end
 		c.Print = function(message) w.prints[#w.prints + 1] = tostring(message) end
 		c.PlayAlert = function(kind, source) w.alert = { kind, source } end
 		c.After = function(seconds, where, call) w.timers[#w.timers + 1] = { seconds = seconds, where = where, call = call } end
-		c.Every = function() end
+		c.Every = function(seconds, where, call) w.tickers[#w.tickers + 1] = { seconds = seconds, where = where, call = call } end
 		c.ShowDialog = function(which, a, b, data)
 			w.dialogs[#w.dialogs + 1] = { which = which, a = a, b = b, data = data }
 			return true
@@ -2922,5 +2927,68 @@ test("watch: council reports (1.2.1): an officer who sits on the council, and th
 			assert(hp:find(L.WATCH_REPORTS_TITLE_COUNCIL, 1, true) and not hp:find(L.WATCH_REPORTS_TITLE, 1, true), hp)
 			eq(detail, L.WATCH_COUNCIL_DETAIL)
 		end)
+	end)
+end)
+
+-- 1.2.1 (the stutter players reported): DATA_CHANGED comes with the census's news, about once a
+-- second. Each one pruned every record of The Watch and queued one more recovery ask (and one more
+-- report flush): the records are pruned on their own ticker now, and one ask and one flush wait at
+-- a time.
+test("watch: the census's news (1.2.1): no prune on DATA_CHANGED, one recovery ask and one report flush waiting at a time; the prune on a ticker of its own", function()
+	WithWatch(function(w, W, c)
+		local prunes = 0
+		local prune = W.Prune
+		W.Prune = function(...) prunes = prunes + 1; return prune(...) end
+		local function Timers(where)
+			local out = {}
+			for _, t in ipairs(w.timers) do if t.where == where then out[#out + 1] = t end end
+			return out
+		end
+		eq(W.CanRead(), true, "a guild master reads the desk")
+		local changed = assert(w.listeners.DATA_CHANGED)
+		for _ = 1, 20 do changed() end
+		eq(prunes, 0, "nothing pruned on the census's news")
+		local asks = Timers("watch roster recovery")
+		eq(#asks, 1, "one recovery ask waits for the twenty")
+		eq(asks[1].seconds, 5)
+		local asked, ask = 0, W.AskSync
+		W.AskSync = function(...) asked = asked + 1; return ask(...) end
+		asks[1].call()
+		eq(asked, 1)
+		changed()
+		eq(#Timers("watch roster recovery"), 2, "once it ran, the next news asks again")
+		-- A report waiting for an officer: one flush waits, however many changes come.
+		w.setRank(c.me, 3); w.online(c.me); w.refreshRoster()
+		local ok, how = W.SendReport(SPAMMER, "A", "waits")
+		eq(ok, true); eq(how, "held")
+		eq(#W.Book(false).outbox, 1)
+		w.timers = {}
+		for _ = 1, 20 do changed() end
+		local flushes = Timers("watch reports")
+		eq(#flushes, 1, "one report flush waits")
+		eq(flushes[1].seconds, 3)
+		flushes[1].call()
+		changed()
+		eq(#Timers("watch reports"), 2, "once it ran, the next news queues one again")
+		eq(prunes, 0, "still no prune from the news")
+		-- The login: its prune ticker, every PRUNE_EVERY, pruning a reader's desk only.
+		local login
+		for _, fn in ipairs(w.on.LOGIN or {}) do login = login or fn end
+		assert(login, "The Watch's login")
+		w.tickers = {}
+		w.setRank(c.me, 0); w.refreshRoster()
+		login()
+		local ticker
+		for _, t in ipairs(w.tickers) do if t.where == "watch prune" then ticker = t end end
+		assert(ticker, "a prune ticker")
+		eq(ticker.seconds, W.PRUNE_EVERY); eq(W.PRUNE_EVERY, 60)
+		prunes = 0
+		ticker.call()
+		eq(prunes, 1, "a reader's desk pruned")
+		w.setRank(c.me, 3); w.refreshRoster()
+		eq(W.CanRead(), false)
+		ticker.call()
+		eq(prunes, 1, "a member has no desk to prune")
+		W.Prune, W.AskSync = prune, ask
 	end)
 end)

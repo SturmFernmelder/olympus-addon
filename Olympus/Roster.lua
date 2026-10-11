@@ -271,8 +271,15 @@ ns.RegisterEvent("GUILD_ROSTER_UPDATE", function()
 	if pending then ns.After(1, "roster update", Roster.TryScan) end
 end)
 
-ns.RegisterEvent("PLAYER_GUILD_UPDATE", function()
+-- (1.2.1) The game sends this for other units too (a nameplate's, a party member's guild reaching
+-- the client): only ours is a guild change, and a burst of ours waits for one timer.
+local guildChangeQueued = false
+ns.RegisterEvent("PLAYER_GUILD_UPDATE", function(unit)
+	if unit and unit ~= "player" then return end
+	if guildChangeQueued then return end
+	guildChangeQueued = true
 	ns.After(2, "guild changed", function()
+		guildChangeQueued = false
 		Roster.RequestScan(true)
 		-- Left an Olympus guild (or joined one): leave the channel, redraw the map and window.
 		ns.Comm.CheckMembership()

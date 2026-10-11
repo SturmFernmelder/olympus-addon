@@ -35,10 +35,12 @@ Locales\MainKeyText.lua
 Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
+Locales\PerfText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
 Diagnostics.lua
+Perf.lua
 Dialog.lua
 PlayerMenu.lua
 Codec.lua

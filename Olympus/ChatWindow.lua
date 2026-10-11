@@ -48,7 +48,9 @@ local L = ns.L
 -- - Links in a line show their tooltip on hover (GameTooltip:SetHyperlink) and go into its own
 --   box with a Shift-click; never SetItemRef, ChatEdit_InsertLink or HandleModifiedItemClick.
 -- Nothing is drawn while the tab is hidden: a change marks it dirty and it redraws at most every
--- 0.2 s while shown (the census at most every 5 s).
+-- 0.2 s while shown (the census at most every 5 s); 1.2.1: after a slow redraw, ten times what it
+-- cost (up to 5 s, ChatWindow.RedrawGap), and a bubble whose look did not change is only moved
+-- (Bubble, ChatWindow.SameLook, ChatWindow.KeepBubbles).
 
 local ChatWindow = {}
 ns.ChatWindow = ChatWindow
@@ -634,6 +636,10 @@ local function Own(e)
 end
 
 -- One line of the history in its bubble. Returns its height.
+-- 1.2.1 (players' stutter that stopped with Olympus off): every redraw laid out every bubble again,
+-- the 100 lines of a busy channel a few times a second. A bubble whose look is just what it was
+-- laid out from last time (its words, header, time, width, colours and fonts: ChatWindow.SameLook)
+-- only takes its place; anything of it different, and it is laid out again, whole, as before.
 local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	pane = pane or frame
 	local bubbles = pane.bubbles
@@ -651,6 +657,37 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	if b.mod then b.mod:Hide() end
 	local modRoom = not mine and not deleted and (pane.embedded and ChatWindow.ModRoom() or ChatWindow.modRoom) == true
 	local c = pane.colour or Colour(tier)
+	-- Its words: the header's at a group's start, then the line's.
+	local who, when, whisper, full
+	if start then
+		local deletedGuild = ns.Channels.ShowGuildNames() and (" <" .. ns.Codec.Plain(e.guild or "?") .. ">") or ""
+		who = mine and L.CHATWIN_YOU or deleted and Grey(ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. deletedGuild)
+			or NameText(e)
+		when = Grey(date("%H:%M", tonumber(e.t) or 0))
+		whisper = not mine and ns.TellName(e.sender) or nil
+		full = not mine and (ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. "  <" .. ns.Codec.Plain(e.guild or "?") .. ">") or nil
+	end
+	local text = deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN)
+		or ((veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. ns.Codec.SanitizeChat(e.text))
+	local bodyFont, bodySize, bodyFlags = ChatWindow.FontOf(b.body)
+	local whoFont, whoSize, whoFlags = ChatWindow.FontOf(b.who)
+	-- (Written into the bubble's second look, b.lookNext, not a new table: no garbage each redraw.)
+	local k = b.lookNext or {}
+	b.lookNext = k
+	k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[8], k[9], k[10] = ChatWindow.lookEra, start == true, maxInner, mine,
+		veiled, modRoom, c[1], c[2], c[3], who
+	k[11], k[12], k[13], k[14], k[15], k[16], k[17], k[18], k[19], k[20], k.n = when, whisper, full, text,
+		bodyFont, bodySize, bodyFlags, whoFont, whoSize, whoFlags, 20
+	if ChatWindow.SameLook(b, k) then
+		b:ClearAllPoints()
+		if mine then
+			b:SetPoint("TOPRIGHT", pane.content, "TOPRIGHT", -EDGE, -y)
+		else
+			b:SetPoint("TOPLEFT", pane.content, "TOPLEFT", EDGE, -y)
+		end
+		b:Show()
+		return b.look.h
+	end
 	local r, g, bl, a = 0.09, 0.09, 0.11, 0.92
 	if mine then r, g, bl, a = c[1] * 0.28, c[2] * 0.28, c[3] * 0.28, 0.95 end
 	if b.SetBackdropColor then
@@ -662,22 +699,19 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	-- The header, at a group's start.
 	local headerW, timeW = 0, 0
 	if start then
-		local deletedGuild = ns.Channels.ShowGuildNames() and (" <" .. ns.Codec.Plain(e.guild or "?") .. ">") or ""
-		b.who:SetText(mine and L.CHATWIN_YOU or deleted and Grey(ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. deletedGuild)
-			or NameText(e))
-		b.time:SetText(Grey(date("%H:%M", tonumber(e.t) or 0)))
+		b.who:SetText(who)
+		b.time:SetText(when)
 		timeW = math.ceil(TextWidth(b.time))
 		headerW = math.ceil(TextWidth(b.who)) + 8 + timeW + (modRoom and 18 or 0) -- (room for the moderator's button, 1.1.6)
-		b.header.whisper = not mine and ns.TellName(e.sender) or nil
-		b.header.full = not mine and (ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. "  <" .. ns.Codec.Plain(e.guild or "?") .. ">") or nil
+		b.header.whisper = whisper
+		b.header.full = full
 		b.header:EnableMouse(not mine)
 		b.header:Show()
 	else
 		b.header.whisper, b.header.full = nil, nil
 		b.header:Hide()
 	end
-	b.body:SetText(deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN)
-		or ((veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. ns.Codec.SanitizeChat(e.text)))
+	b.body:SetText(text)
 	local inner = math.min(maxInner, math.max(math.ceil(TextWidth(b.body)), headerW, 1))
 	b.body:SetWidth(inner)
 	local bodyH = TextHeight(b.body, inner)
@@ -703,7 +737,41 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 		b:SetPoint("TOPLEFT", pane.content, "TOPLEFT", EDGE, -y)
 	end
 	b:Show()
+	b.look.h = h -- (laid out whole: the next redraw may reuse it)
 	return h
+end
+
+-- A font string's font (the file, size and flags the client draws it with), or nothing where the
+-- client cannot say: a font changed meanwhile lays the bubble out again.
+function ChatWindow.FontOf(fs)
+	if type(fs) ~= "table" or type(fs.GetFont) ~= "function" then return nil end
+	return fs:GetFont()
+end
+
+-- The screen's or the UI's scale changed (the client may measure the same words a little wider
+-- then): every bubble, in every pane, is laid out again at its next redraw.
+ChatWindow.lookEra = 0
+function ChatWindow.ForgetLooks()
+	ChatWindow.lookEra = ChatWindow.lookEra + 1
+	MarkDirty()
+end
+
+-- 1.2.1: true when bubble `b` was laid out, whole, from look `k` the last time (Bubble: k[1..k.n]);
+-- else `k` is kept as its look and it is laid out again (k.h, its height, set once that is done: a
+-- layout that failed half way is never taken as done). The look it replaces becomes b.lookNext,
+-- the table Bubble fills next time: each bubble keeps two, and a redraw makes no new one.
+function ChatWindow.SameLook(b, k)
+	local was = b.look
+	if was and was.h ~= nil and was.n == k.n then
+		local same = true
+		for i = 1, k.n do
+			if was[i] ~= k[i] then same = false; break end
+		end
+		if same then return true end
+	end
+	if k ~= was then b.look, b.lookNext = k, was end
+	k.h = nil -- (a table used before has an older layout's height)
+	return false
 end
 
 ---------------------------------------------------------------------------
@@ -885,6 +953,7 @@ local function DrawLines(all)
 		y = y + 8 + Row(nr, Grey(L.SEARCH_NO_MATCH), y + 8, width)
 	end
 	local maxInner = math.max(BUBBLE_MIN, math.floor(width * SHARE)) - 2 * PAD
+	ChatWindow.KeepBubbles(frame.bubbles, list)
 	local prev, prevDay
 	for _, e in ipairs(list) do
 		local t = tonumber(e.t) or 0
@@ -915,6 +984,36 @@ local function DrawLines(all)
 	for i = nb + 1, #frame.bubbles do frame.bubbles[i]:Hide(); frame.bubbles[i].entry, frame.bubbles[i].y = nil, nil end
 	for i = nr + 1, #frame.rows do frame.rows[i]:Hide(); frame.rows[i].onClick, frame.rows[i].tip = nil, nil end
 	frame.content:SetHeight(math.max(1, y))
+end
+
+-- KeepBubbles' line-to-bubble index: one table, emptied at each start and end (no new table each
+-- redraw, and no line held once it is done).
+ChatWindow.keepAt = {}
+function ChatWindow.EmptyKeep()
+	local at = ChatWindow.keepAt
+	for e in pairs(at) do at[e] = nil end
+	return at
+end
+
+-- 1.2.1: each line back in the bubble that showed it (`bubbles` reordered, still in the order of
+-- `list`, the lines drawn), so a new line, or the oldest dropped at a channel's 100 (everything
+-- moving up by one), lays out no other bubble again: each keeps its look (Bubble) and moves.
+function ChatWindow.KeepBubbles(bubbles, list)
+	local at = ChatWindow.EmptyKeep()
+	for k, b in ipairs(bubbles) do
+		if b.entry ~= nil then at[b.entry] = k end
+	end
+	if next(at) == nil then return end
+	for k = 1, math.min(#list, #bubbles) do
+		local j = at[list[k]]
+		if j and j > k then
+			local here = bubbles[k]
+			bubbles[k], bubbles[j] = bubbles[j], here
+			at[list[k]] = k
+			if here.entry ~= nil and at[here.entry] == k then at[here.entry] = j end
+		end
+	end
+	ChatWindow.EmptyKeep()
 end
 
 ---------------------------------------------------------------------------
@@ -2195,9 +2294,34 @@ local function Draw()
 	ShowNew()
 end
 
+-- 1.2.1 (as UI.RedrawGap and Map.RefreshGap, 1.1.6): the redraws a change asks for (a line, the
+-- census's marks, a setting) wait REDRAW_COST times what the last redraw cost on this client (the
+-- client's own clock, seconds), at least THROTTLE (0.2 s, as before), at most REDRAW_MAX_GAP: the
+-- tab never takes much more than a tenth of the game's time however slow it is to draw there. A
+-- click (a channel picked, the gear, a line put back) still draws at once.
+ChatWindow.REDRAW_COST = 10
+ChatWindow.REDRAW_MAX_GAP = 5
+ChatWindow.lastCost = 0
+ChatWindow.sinceDraw = 0 -- (seconds of the tab's own frames since it last drew)
+function ChatWindow.RedrawGap()
+	return math.min(ChatWindow.REDRAW_MAX_GAP, math.max(THROTTLE, (ChatWindow.lastCost or 0) * ChatWindow.REDRAW_COST))
+end
+
+-- The client's millisecond clock (debugprofilestop), or nil where there is none.
+function ChatWindow.Clock()
+	local clock = rawget(_G, "debugprofilestop")
+	if type(clock) ~= "function" then return nil end
+	local ok, ms = pcall(clock)
+	return ok and type(ms) == "number" and ms or nil
+end
+
 function ChatWindow.Render()
 	dirty = false
+	ChatWindow.sinceDraw = 0
+	local started = ChatWindow.Clock()
 	Draw()
+	local finished = started and ChatWindow.Clock()
+	if finished then ChatWindow.lastCost = math.max(0, (finished - started) / 1000) end
 	-- (The "Open chat" key follows: the chats on or off, the tab gone with the last channel.)
 	ns.SafeCall("chat tab key", SyncKeys)
 end
@@ -2383,6 +2507,7 @@ end
 local function OnUpdate(_, elapsed)
 	local step = tonumber(elapsed) or 0
 	acc = acc + step
+	ChatWindow.sinceDraw = ChatWindow.sinceDraw + step
 	if watching then
 		lookAcc = lookAcc + step
 		if lookAcc >= LOOK_GAP and not (pointer and pointer:IsShown()) then
@@ -2398,13 +2523,16 @@ local function OnUpdate(_, elapsed)
 	-- A rank that no longer reads this channel (a demotion, out of the guild), or a room whose
 	-- retention ended: drawn again at once.
 	if ChatWindow.PruneDynamicRooms and GetTime() - lastRoomPrune >= LOOK_GAP then ChatWindow.PruneDynamicRooms() end
-	if tier and not Choice(tier) then dirty = true end
+	local lost = tier ~= nil and not Choice(tier)
+	if lost then dirty = true end
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local status = logical and logical.scope == "topic" and type(R) == "table" and type(R.RequestStatus) == "function" and R.RequestStatus(tier) or nil
 	local minute = status and status.wait and status.wait > 0 and math.ceil(status.wait / 60) or nil
 	if minute ~= ChatWindow.requestMinute then ChatWindow.requestMinute, dirty = minute, true end
-	if dirty then ns.SafeCall("chat tab", Render) end
+	-- (1.2.1: after a slow redraw the next waits longer, ChatWindow.RedrawGap; a cheap one, as before.)
+	local gap = ChatWindow.RedrawGap()
+	if dirty and (lost or gap <= THROTTLE or ChatWindow.sinceDraw >= gap) then ns.SafeCall("chat tab", Render) end
 end
 
 -- A texture from the game's atlas when this client has it, else a file every client carries.
@@ -2911,6 +3039,7 @@ function ChatWindow.CreateEmbedded(parent, opts)
 		local y, prev = 6
 		local hides = Hides()
 		local all = Searched(opts.lines(), self.query, hides)
+		ChatWindow.KeepBubbles(self.bubbles, all) -- (1.2.1: each line in its own bubble again)
 		for i, e in ipairs(all) do
 			local start = not prev or ns.FullName(prev.sender) ~= ns.FullName(e.sender) or Own(prev) ~= Own(e) or (e.t or 0) - (prev.t or 0) > GROUP_TIME
 			if prev then y = y + (start and GAP_OUT or GAP_IN) end
@@ -3479,6 +3608,7 @@ function ChatWindow.Reset()
 	ChatWindow.globalTier = nil
 	dynamicRooms, dynamicOrder, lastRoomPrune = {}, {}, -math.huge
 	dirty, dataPending, lastData = false, false, -math.huge
+	ChatWindow.lastCost, ChatWindow.sinceDraw = 0, 0
 	unread, notes, ChatWindow.drafts = {}, {}, {}
 	revealed = setmetatable({}, { __mode = "k" })
 	stick, newCount, lastAt, quiet, acc, want = true, 0, 0, false, 0, nil
@@ -3591,6 +3721,8 @@ end)
 ns.RegisterEvent("UPDATE_BINDINGS", function()
 	if boundKeys or Shown() then SyncKeys() end
 end)
+ns.RegisterEvent("UI_SCALE_CHANGED", function() ChatWindow.ForgetLooks() end)
+ns.RegisterEvent("DISPLAY_SIZE_CHANGED", function() ChatWindow.ForgetLooks() end)
 -- The switch between mouse and keyboard and the gamepad UI (Blizzard_SharedXML/InputUtil.lua's
 -- event, as Borders.lua reads it; not on every client): to the gamepad UI the key goes back to the
 -- game at the switch, the one binding change made there; back, bound at once while the tab shows.

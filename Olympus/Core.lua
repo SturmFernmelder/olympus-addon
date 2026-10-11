@@ -437,7 +437,8 @@ function ns.LinkRealms(a, b)
 		ns.group = mine
 		ns.rdb = OpenStore(Stores(db), mine)
 		ns.Print(L.REALMS_LINKED:format((mine:gsub("%+", " + "))))
-		ns.Fire("DATA_CHANGED")
+		-- (Another store: the census's reports are others, Data.Revision with them.)
+		if ns.Data and ns.Data.ChangedNow then ns.Data.ChangedNow() else ns.Fire("DATA_CHANGED") end
 		-- A new key means another channel. Before our first join, that join picks it up (and
 		-- the login's key request asks for a dropped key).
 		if ns.rdb.realmKey ~= oldKey and ns.Comm and ns.Comm.ChannelName() then
@@ -1627,8 +1628,25 @@ end)
 function ns.After(seconds, where, fn)
 	C_Timer.After(seconds, function() ns.SafeCall(where, fn) end)
 end
+-- A ticker (1.2.1): it starts after a random part of its period, EVERY_SPREAD at most, so the
+-- dozens started at login do not all tick on one frame (the owner's PC: a hitch once a minute).
+-- Its first tick comes one period after that start, never sooner than before. The handle's Cancel
+-- stops it before its start, from inside a tick, or after.
+ns.EVERY_SPREAD = 60
 function ns.Every(seconds, where, fn)
-	return C_Timer.NewTicker(seconds, function() ns.SafeCall(where, fn) end)
+	local ticker, cancelled = nil, false
+	local handle = {}
+	function handle.Cancel()
+		cancelled = true
+		if ticker and ticker.Cancel then ticker:Cancel() end
+	end
+	function handle.IsCancelled() return cancelled end
+	local function Tick() if not cancelled then ns.SafeCall(where, fn) end end
+	local spread = math.max(0, math.min(tonumber(seconds) or 0, ns.EVERY_SPREAD)) * math.random()
+	C_Timer.After(spread, function()
+		if not cancelled then ticker = C_Timer.NewTicker(seconds, Tick) end
+	end)
+	return handle
 end
 
 ---------------------------------------------------------------------------
@@ -2077,6 +2095,7 @@ local function Help()
 	print(L.HELP_CMD_SHARE)
 	print(L.HELP_CMD_BUG)
 	print(L.HELP_CMD_STATUS)
+	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
 	print(L.HELP_MAINKEY)
 	if ns.Keys.CanRotate and ns.Keys.CanRotate() then print(L.HELP_KEY_ROTATE) end -- (1.1: the King's alone)
@@ -2308,6 +2327,9 @@ local function Slash(input)
 			ns.Print(ns.L.DEMO_REMOVED)
 		elseif cmd == "bug" then
 			ns.UI.ShowBugReport()
+		elseif cmd == "perf" then
+			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
+			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "status" then
 			-- (1.2: the memory figures in it are measured now, on the command alone: Diagnostics' arena lines.)
 			if UpdateAddOnMemoryUsage then pcall(UpdateAddOnMemoryUsage) end
@@ -2374,7 +2396,7 @@ local function Slash(input)
 			wipe(ns.rdb.guilds)
 			wipe(ns.Data.Seen())
 			ns.Who.Reset()
-			ns.Fire("DATA_CHANGED")
+			if ns.Data.ChangedNow then ns.Data.ChangedNow() else ns.Fire("DATA_CHANGED") end
 			ns.Print(L.CACHE_CLEARED)
 		elseif cmd == "error" then
 			error("test error from /oly error")   -- to check that bug capture works

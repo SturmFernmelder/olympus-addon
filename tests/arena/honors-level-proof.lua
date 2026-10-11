@@ -71,9 +71,12 @@ test("1.2.1 the level race: one forged census row no longer wins a place, nor th
 	Report(w, viewer, "Olympus Elsewhere", cast.f2, alt.name, 60)
 	w:Run(after)
 	eq(Place(viewer, 60), nil, "two guilds, one sender each")
-	-- A second sender of the first guild: vouched (the census's own two-sender rule); the claim is
-	-- older than CONFIRM_AFTER by now, so the place at once.
+	-- A second sender of the first guild: vouched (the census's own two-sender rule) at once; the
+	-- claim is older than CONFIRM_AFTER by now, so the place as soon as the race runs (1.2.1: RACE_SOON
+	-- after the census change, never inside the message's own handler).
 	Report(w, viewer, "Olympus Fakers", cast.f3, alt.name, 60)
+	for _, c in pairs(viewer.ns.HonorsNet.Store().claims) do eq(c.vouched, true, "vouched at once") end
+	w:Run(viewer.ns.HonorsNet.RACE_SOON)
 	eq(Place(viewer, 60), alt.name)
 	W3.NoErrors(w)
 end)
