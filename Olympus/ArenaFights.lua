@@ -446,6 +446,39 @@ local MatchFromChallenge -- assigned once the challenge table exists (below)
 local MarketSpecs, OpenMarkets -- a public fight's own sheet (below)
 local function Refuse(why) Count(stats.refused, why) return false, why end
 
+-- (1.2.1) This client's own part in a fight: its fighter accepted it, signed for its slot, said he
+-- was at the ring or read a duel line of it (f.took: only this client's own acts set it), wrote
+-- it, or agreed the challenge an arbiter made it from. An arbiter naming two players is not their
+-- part: his word alone writes nothing in their own records.
+local function TookPart(f)
+	if f.took == true or Me(f.writer) then return true end
+	local side = SideOf(f, ns.me)
+	local other = side and f[Other(side)]
+	if not other then return false end
+	for _, c in pairs(chal) do
+		if not c.judge and c.how == "a" and c.mode == f.mode and (c.state == "yes" or c.state == "set") then
+			if c.fid == f.fid then return true end
+			if c.incoming and not c.fid and Same(c.A, other.name) then return true end
+		end
+	end
+	return false
+end
+F.TookPart = TookPart
+-- (1.2.1) A private fight's result (a round's, the fight's) is held only by a client with a part of
+-- its own in it: one that took part in it, judges it or promotes it. The history a profile shows
+-- lists the fights its client holds, by name or by gk: a result its arbiter whispered alone about
+-- two players who never accepted it, came to or fought it is in neither one's. (A public fight is
+-- every member's record, as its lane carries it.)
+local function OwnPart(f) return TookPart(f) or Me(f.arb) or Me(Promoter(f)) end
+local RESULT = { R = true, F = true, W = true }
+local function Forget(f)
+	local mode = f.mode == "T" and "T" or "L"
+	for _, t in ipairs({ Core(mode, "fights") or {}, HeavyOf(mode, "fights") or {}, Mem(mode).fights }) do t[f.fid] = nil end
+	Arena.Involve("fight:" .. f.fid, nil)
+	Arena.Changed()
+	return Refuse("not-ours")
+end
+
 -- An AF heard from `sender`: taken, or false and why (the design).
 function F.Take(dist, sender, mode, body)
 	local fid, st, fl, bo, cat, arb, card, a, gkA, b, gkB, tAnn, tCall, lockAt, round, sc, w, m, dur = Arena.Fields(body, 19)
@@ -528,6 +561,9 @@ function F.Take(dist, sender, mode, body)
 	-- when its promoter kept it out of betting (x).
 	local takeover = arb and Me(arb) and not direct and not Me(f.writer)
 	if arb and Me(arb) and not direct then f.writer = ns.me end
+	-- (A challenge this client agreed stays its part after a reload; the session's list does not.)
+	if not f.took and SideOf(f, ns.me) and TookPart(f) then f.took = true end
+	if not Has(fl, "p") and RESULT[st] and not OwnPart(f) then return Forget(f) end
 	if takeover and f.marketSpecs == nil then f.marketSpecs = MarketSpecs(Has(fl, "p") and not Has(fl, "x"), nil) end
 	if not Put("fights", f) then return Refuse("capacity") end
 	if takeover and f.st ~= "D" then
@@ -658,25 +694,6 @@ function F.Record(f)
 	return { fid = f.fid, mode = f.mode, cat = f.cat, bo = f.bo, A = f.A, B = f.B, w = f.w, m = f.m, sc = f.sc, dur = f.dur,
 		rounds = f.rounds, lockAt = f.lockAt, arb = f.arb, fl = f.fl, t = f.graceEnd or Now(), public = Has(f.fl, "p") }
 end
-
--- (1.2.1) This client's own part in a fight: its fighter accepted it, signed for its slot, said he
--- was at the ring or read a duel line of it (f.took: only this client's own acts set it), wrote
--- it, or agreed the challenge an arbiter made it from. An arbiter naming two players is not their
--- part: his word alone writes nothing in their own records.
-local function TookPart(f)
-	if f.took == true or Me(f.writer) then return true end
-	local side = SideOf(f, ns.me)
-	local other = side and f[Other(side)]
-	if not other then return false end
-	for _, c in pairs(chal) do
-		if not c.judge and c.how == "a" and c.mode == f.mode and (c.state == "yes" or c.state == "set") then
-			if c.fid == f.fid then return true end
-			if c.incoming and not c.fid and Same(c.A, other.name) then return true end
-		end
-	end
-	return false
-end
-F.TookPart = TookPart
 
 -- A fight over: the fighter's own history (the design's mine, the design myFights: direct and unrated
 -- too), matchmaking's end, the stakes and the markets on the writer's client.
@@ -2076,6 +2093,9 @@ local function OnResult(dist, sender, mode, body)
 	local king = isKing and (f.st == "R" or kingVoid)
 	if not (Same(sender, f.writer) or Same(sender, Promoter(f)) or king) then return Refuse("sender") end
 	if Has(f.fl, "p") and dist ~= "CHANNEL" and dist ~= "RAID" and dist ~= "PARTY" then return Refuse("lane") end
+	-- (1.2.1) A round's or the fight's result (never a void) of a private fight this client has no
+	-- part in: the record goes (OwnPart).
+	if not Has(f.fl, "p") and not (final == "1" and (m == "V" or m == "N")) and not OwnPart(f) then return Forget(f) end
 	round = N(round, 1, 9)
 	local sa, sb = tostring(sc):match("^(%d):(%d)$")
 	if not round or not sa then return Refuse("shape") end
