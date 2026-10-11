@@ -187,6 +187,12 @@ local function Attach(frame, kind) -- gp:communities-button
 		if not ns.Gate.Allowed(GATE) then return end
 		if kind == "communities" and frame.GetAlpha and frame:GetAlpha() == 0 then return end
 		lastShown = host
+		-- 1.2.1 (an officer: the same failure "when try change Rank"): a rank change or a removal can
+		-- start from the roster itself (its right-click menu), with no member's card opened, and the
+		-- game asks some of them in its popups too. So as the guild window opens, a question of
+		-- Olympus's still up as a game popup moves into Olympus's own window (Core.lua's
+		-- ns.MoveDialogsOffGame), as it does when the card opens.
+		if type(ns.MoveDialogsOffGame) == "function" then ns.SafeCall("guild window popups", ns.MoveDialogsOffGame) end
 	end)
 	-- 1.2.1: the member's card (GuildMemberDetailFrame: the Guild & Communities window's, the old Guild
 	-- tab's) holds the game's Remove from Guild, whose question is one of the game's popups that the

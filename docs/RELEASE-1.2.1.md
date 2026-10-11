@@ -41,7 +41,11 @@ Automated checks and live multiplayer checks are separate gates; use
 - Removing a member from the guild is no longer refused with "Interface action failed because of
   an AddOn" because an Olympus question was open. With mouse and keyboard, while one of the game's
   guild windows is open, Olympus asks its questions in its own windows. A question already open
-  as a game popup moves there when a member's card opens, keeping what was typed in its box.
+  as a game popup moves there as soon as the guild window (or a member's card) opens, keeping what
+  was typed in its box. An officer reported the same failure, now and then, when changing a rank:
+  Olympus also no longer adds its lines to the game's guild roster right-click menu, where the
+  game's own promote, demote, rank and removal are (a guildmate's Olympus lines stay in the other
+  right-click menus and on the Olympus window's rows). The rank case still needs an in-game check.
   Escape still closes these questions, now together with the guild window. One limit remains: if
   an Olympus popup closed while another game popup stayed open, the removal can still be refused
   until every game popup has closed. The gamepad UI is unchanged.

@@ -3315,13 +3315,18 @@ end)
 -- rosters' menus are hooked (this client's: COMMUNITIES_GUILD_MEMBER and COMMUNITIES_WOW_MEMBER;
 -- the old Guild window's GUILD), and a right-click on an Olympus window row that names a player
 -- opens a menu of the same lines.
-test("1.2 the guild's rows: the rosters' menus hooked; an Olympus row's right-click opens the player menu's lines", function()
+-- (Changed on purpose, 1.2.1, an officer's failed kick and rank change: the game's guild roster
+-- menus, COMMUNITIES_GUILD_MEMBER and GUILD, hold its promote, demote, rank and removal, and get no
+-- Olympus line any more (PlayerMenu.NEVER, tests/arena/guild-rank-taint.lua); the community roster's
+-- menu and the Olympus window's rows keep them.)
+test("1.2 the guild's rows: the community roster's menu hooked, never the game's guild roster's; an Olympus row's right-click opens the player menu's lines", function()
 	-- (the harness's own client: it loads 1.1.2's PlayerMenu.lua and Versions.lua)
 	local ns = H.ns
 	local PM = ns.PlayerMenu
 	local which = {}
 	for _, x in ipairs(PM.WHICH) do which[x] = true end
-	assert(which.COMMUNITIES_GUILD_MEMBER and which.COMMUNITIES_WOW_MEMBER and which.GUILD, "the guild rosters' menus")
+	assert(which.COMMUNITIES_WOW_MEMBER, "the community roster's menu")
+	assert(not which.COMMUNITIES_GUILD_MEMBER and not which.GUILD, "never the game's guild roster menus")
 	-- the row menu: the client's own context menu, the same lines for the name
 	local built, owner
 	local was = rawget(_G, "MenuUtil")

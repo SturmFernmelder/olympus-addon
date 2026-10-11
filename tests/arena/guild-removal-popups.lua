@@ -137,9 +137,12 @@ test("guild removal (1.2.1): a question of Olympus's up as a game popup when a m
 		ns.ShowDialog(WHICH, "kept", nil, data)
 		eq(#w.game.shown, 1); eq(StaticPopup_Visible(WHICH) ~= nil, true, "up as the game's popup")
 		w.window:Show()
-		eq(StaticPopup_Visible(WHICH) ~= nil, true, "the guild window alone leaves it where it is")
+		-- (Changed on purpose, 1.2.1, an officer's failed rank change: a rank change or a removal can
+		-- start from the roster's own right-click menu, with no card opened, so the guild window
+		-- opening moves it already; the card opening after it finds nothing more to move.)
+		eq(StaticPopup_Visible(WHICH), nil, "the guild window open: no longer among the game's popups")
 		w.card:Show()
-		eq(StaticPopup_Visible(WHICH), nil, "the card open: no longer among the game's popups")
+		eq(StaticPopup_Visible(WHICH), nil, "the card open: still not among the game's popups")
 		local hidden = false
 		for _, which in ipairs(w.game.hidden) do if which == WHICH then hidden = true end end
 		eq(hidden, true, "closed there unanswered")

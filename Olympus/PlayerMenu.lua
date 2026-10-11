@@ -2,8 +2,8 @@ local ADDON, ns = ...
 local L = ns.L
 
 -- Olympus's lines in the game's right-click menus for a player (1.1.2): the target frame, party
--- and raid frames, a name in chat, the Who list, the friends list, the guild roster and the chat
--- channel roster. One place for every feature that adds a line there: Versions.lua (the player's
+-- and raid frames, a name in chat, the Who list, the friends list, a community roster and the chat
+-- channel roster (1.2.1: not the game's guild roster, below). One place for every feature that adds a line there: Versions.lua (the player's
 -- Olympus version, Ask to update, Check version, Tell them about Olympus), Workshop.lua (the
 -- author's Ask for a bug report) and (1.1.6) Watch.lua (Report to Olympus: to this guild's
 -- officers). Any later addition uses PlayerMenu.Add too, with no feature hooking a menu of its own.
@@ -33,11 +33,20 @@ local PlayerMenu = {}
 ns.PlayerMenu = PlayerMenu
 
 -- The menus hooked ("MENU_UNIT_" .. each). RAID: the raid roster; FRIEND: a name in chat, the Who
--- list and the friends list; COMMUNITIES_*: Forever's guild and community rosters; GUILD: the old
--- Guild window's roster (Classic); CHAT_ROSTER: a chat channel's member list; RECENT_ALLY: Forever's
--- recent allies.
-PlayerMenu.WHICH = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_GUILD_MEMBER",
-	"COMMUNITIES_WOW_MEMBER", "GUILD", "CHAT_ROSTER", "RECENT_ALLY" }
+-- list and the friends list; COMMUNITIES_WOW_MEMBER: Forever's community rosters; CHAT_ROSTER: a
+-- chat channel's member list; RECENT_ALLY: Forever's recent allies.
+-- 1.2.1 (a guild officer, with mouse and keyboard: an addon failure "usually when try kick, this time
+-- when try change Rank... it hasnt happened every time"): never the game's guild roster menus,
+-- COMMUNITIES_GUILD_MEMBER (Forever's Guild & Communities roster) and GUILD (the old Guild window's).
+-- Those hold the game's own guild actions (promote, demote, rank, Remove from Guild), whose calls
+-- the game refuses from tainted code; a line of ours there is built by Olympus's code into that same
+-- menu (for an online member only, never an offline one: a failure that would come and go). With
+-- none, nothing of Olympus is in the menu the officer acts from. Olympus's lines for a guildmate stay
+-- in every other menu (a name in chat, the target and party frames, the Who list) and on the
+-- Olympus window's own rows.
+PlayerMenu.WHICH = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_WOW_MEMBER", "CHAT_ROSTER", "RECENT_ALLY" }
+-- (Never hooked: the game's guild roster menus, above.)
+PlayerMenu.NEVER = { COMMUNITIES_GUILD_MEMBER = true, GUILD = true }
 
 local entries = {}   -- { key, order, build }, in order
 local hooked = false -- Menu.ModifyMenu called for every menu above
@@ -198,11 +207,13 @@ function PlayerMenu.Hook() -- gp:player-menu
 	end
 	for _, which in ipairs(PlayerMenu.WHICH) do
 		local w = which
-		local ok, err = pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx)
-			if ns.GamepadUI() then return end
-			ns.SafeCall("player menu", PlayerMenu.Build, w, root, ctx)
-		end)
-		if not ok then ns.Log("player menu %s not hooked: %s", w, tostring(err)) end
+		if not PlayerMenu.NEVER[w] then
+			local ok, err = pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx)
+				if ns.GamepadUI() then return end
+				ns.SafeCall("player menu", PlayerMenu.Build, w, root, ctx)
+			end)
+			if not ok then ns.Log("player menu %s not hooked: %s", w, tostring(err)) end
+		end
 	end
 	hooked = true
 	return true

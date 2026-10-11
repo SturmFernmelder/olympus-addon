@@ -57992,10 +57992,13 @@ end)()
 				Menu = { ModifyMenu = function(tag, cb) hooks[tag] = cb; order[#order + 1] = tag; return {} end }
 				eq(PM.Hook(), true); eq(PM.Hook(), true, "once")
 				eq(#order, #PM.WHICH, "each menu once")
-				for _, which in ipairs({ "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_GUILD_MEMBER", "GUILD", "CHAT_ROSTER" }) do
+				for _, which in ipairs({ "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_WOW_MEMBER", "CHAT_ROSTER" }) do
 					assert(hooks["MENU_UNIT_" .. which], which)
 				end
-				for _, which in ipairs({ "ENEMY_PLAYER", "SELF", "FRIEND_OFFLINE", "GUILD_OFFLINE", "BN_FRIEND", "BN_FRIEND_OFFLINE", "TARGET" }) do
+				-- (Changed on purpose, 1.2.1, an officer's failed rank change: never the game's guild
+				-- roster menus, which hold its promote, demote, rank and removal; PlayerMenu.NEVER.)
+				for _, which in ipairs({ "ENEMY_PLAYER", "SELF", "FRIEND_OFFLINE", "GUILD_OFFLINE", "BN_FRIEND", "BN_FRIEND_OFFLINE", "TARGET",
+					"COMMUNITIES_GUILD_MEMBER", "GUILD" }) do
 					eq(hooks["MENU_UNIT_" .. which], nil, which)
 				end
 				-- A name in chat (FRIEND): the divider, "Olympus", the version line, Check version.
@@ -58013,11 +58016,11 @@ end)()
 				for _, ctx in ipairs({ { name = "Tester" }, { name = "Ann", isSelf = true }, { name = "Ann", bnetIDAccount = 7 },
 					{ name = "Ann", clubMemberInfo = { presence = 3 } }, { name = "Ann", isMobile = true }, { name = "" }, {} }) do
 					local r = MenuRoot()
-					hooks.MENU_UNIT_COMMUNITIES_GUILD_MEMBER(nil, r, ctx)
+					hooks.MENU_UNIT_COMMUNITIES_WOW_MEMBER(nil, r, ctx)
 					eq(#r.items, 0, "no line for " .. tostring(ctx.name))
 				end
 				local r = MenuRoot()
-				hooks.MENU_UNIT_COMMUNITIES_GUILD_MEMBER(nil, r, { name = "Ann", clubMemberInfo = { presence = 1 } })
+				hooks.MENU_UNIT_COMMUNITIES_WOW_MEMBER(nil, r, { name = "Ann", clubMemberInfo = { presence = 1 } })
 				assert(#r.items > 0, "online in the roster")
 				-- A unit (the target frame): its name as the server writes it; not a player, not connected: nothing.
 				UnitIsPlayer = function(unit) return unit ~= "npc" end
