@@ -8,12 +8,12 @@ print("Diagnostics.lua: what /oly status, /oly bug and the error log never keep"
 local function Saved(fn)
 	local db, rdb, C = ns.db, ns.rdb, ns.Comm
 	local was = { errors = db.errors, log = db.log, realmKey = rdb.realmKey, joined = C.JoinedName(), setKey = C.SetRealmKey,
-		list = GetChannelList, chat = C_ChatInfo }
+		list = GetChannelList, chat = C_ChatInfo, stats = C.Stats }
 	db.errors, db.log = {}, {}
 	local ok, err = pcall(fn)
 	db.errors, db.log, rdb.realmKey = was.errors, was.log, was.realmKey
 	C.SetJoinedForTest(was.joined)
-	C.SetRealmKey = was.setKey
+	C.SetRealmKey, C.Stats = was.setKey, was.stats
 	GetChannelList, C_ChatInfo = was.list, was.chat
 	if not ok then error(err, 0) end
 end
@@ -99,5 +99,40 @@ test("1.2.1 leaks: /oly status and /oly bug never name the sealed channel nor th
 		ns.rdb.realmKey = nil
 		ns.Comm.SetJoinedForTest(ns.CHANNEL)
 		assert(ns.StatusText():find("channel '" .. ns.CHANNEL .. "' = #", 1, true))
+	end)
+end)
+
+test("1.2.1 leaks: a character whose name looks like a sealed channel's keeps it in /oly status and /oly bug, the channel's name still goes", function()
+	Saved(function()
+		ns.rdb.realmKey = "Amber Weir 6603"
+		local sealed = (ns.Comm.ChannelSpec())
+		ns.Comm.SetJoinedForTest(sealed)
+		local stats = ns.Comm.Stats
+		ns.Comm.Stats = function()
+			local c = stats()
+			c.chanArgs = "localID=4 name=Oly7old2key target=Oly7old2key"
+			return c
+		end
+		ns.db.log = {
+			"10-11 12:00:00 joining channel Oly7old2key (sealed)",
+			"10-11 12:00:01 channel " .. sealed .. ": PLAYER_BANNED Olyandersen-Realm by Olyhannahxx",
+			"10-11 12:00:02 left channel Oly7old2key: not in an Olympus guild",
+			"10-11 12:00:03 pin from Olyandersen-Realm <Olympus II> (rank 2)",
+			"10-11 12:00:04 lost " .. sealed .. " on a reload",
+		}
+		-- "Oly" and eight lowercase letters: a name the game allows (invented here).
+		local status, bug
+		H.WithStub("me", "Olyverstone", function() status, bug = ns.StatusText(), ns.BuildBugReport() end)
+		assert(status:find("player Olyverstone  |", 1, true), status)
+		assert(status:find("first channel msg: localID=4 name=(sealed channel) target=(sealed channel)", 1, true), status)
+		for _, text in ipairs({ status, bug }) do
+			assert(not text:find(sealed, 1, true), "the sealed channel is not named")
+			assert(not text:find("Oly7old2key", 1, true), "nor an older key's")
+		end
+		assert(bug:find("channel (sealed channel): PLAYER_BANNED Olyandersen-Realm by Olyhannahxx", 1, true), bug)
+		assert(bug:find("joining channel (sealed channel) (sealed)", 1, true))
+		assert(bug:find("left channel (sealed channel): not in", 1, true))
+		assert(bug:find("pin from Olyandersen-Realm <Olympus II>", 1, true), "a player in the log keeps his name")
+		assert(bug:find("lost (sealed channel) on a reload", 1, true), "this key's name goes wherever it is")
 	end)
 end)

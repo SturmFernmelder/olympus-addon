@@ -22,28 +22,43 @@ end
 -- game's back at a switch to the gamepad UI (GamepadRegistry.lua's "error-handler").
 if ns.Gate and ns.ParkErrorHandler then ns.Gate.Hooks("error-handler", { park = ns.ParkErrorHandler }) end
 
--- 1.2.1: what /oly status and /oly bug never show, nor the error list or the log keep.
--- The sealed channel's name (Comm.ChannelSpec: "Oly" or "OlyH" and eight letters and digits made
--- from the realm key) gives a short key back to anyone who tries keys against it offline, and a
--- report gets pasted on Discord. It shows as "(sealed channel)", in the lines of older versions
--- too (the log names it); the public channel's name is no secret and stays.
-local SEALED_NAME = "%f[%w]OlyH?" .. ("[0-9a-z]"):rep(8) .. "%f[^%w]"
-local function Scrub(text)
-	return (tostring(text or ""):gsub(SEALED_NAME, "(sealed channel)"))
-end
-
--- s with every `secret` in it (plain text) as "(key)".
-local function Without(s, secret)
+-- s with every `secret` in it (plain text) as `as` ("(key)" unless given).
+local function Without(s, secret, as)
 	if type(s) ~= "string" or type(secret) ~= "string" or secret == "" then return s end
 	local out, i = {}, 1
 	while true do
 		local a, b = s:find(secret, i, true)
 		if not a then break end
-		out[#out + 1] = s:sub(i, a - 1) .. "(key)"
+		out[#out + 1] = s:sub(i, a - 1) .. (as or "(key)")
 		i = b + 1
 	end
 	out[#out + 1] = s:sub(i)
 	return table.concat(out)
+end
+
+-- 1.2.1: what /oly status and /oly bug never show, nor the error list or the log keep.
+-- The sealed channel's name (Comm.ChannelSpec: "Oly" or "OlyH" and eight letters and digits made
+-- from the realm key) gives a short key back to anyone who tries keys against it offline, and a
+-- report gets pasted on Discord. It shows as "(sealed channel)", in the lines of older versions
+-- too (the log names it); the public channel's name is no secret and stays.
+-- A word shaped like a sealed name is also a character's name ("Oly" and eight lowercase letters
+-- is a name the game allows), so the shape alone is never enough: the names this client's key gives
+-- go word for word, and one of an older key only where Comm.lua writes a channel's name (its log's
+-- "channel X", "joining channel X", "left channel X"; the first channel message's name= and target=).
+local SEALED_SHAPE = "OlyH?" .. ("[0-9a-z]"):rep(8)
+local SEALED_AFTER = { "(channel )", "(name=)", "(target=)" }
+local function Scrub(text)
+	text = tostring(text or "")
+	local C = ns.Comm
+	if C then
+		local name, key = nil, nil
+		if type(C.ChannelSpec) == "function" then name, key = C.ChannelSpec() end
+		if key and type(name) == "string" then text = Without(text, name, "(sealed channel)") end
+		local joined = type(C.ChannelName) == "function" and C.ChannelName()
+		if type(joined) == "string" and joined:match("^" .. SEALED_SHAPE .. "$") then text = Without(text, joined, "(sealed channel)") end
+	end
+	for _, at in ipairs(SEALED_AFTER) do text = text:gsub(at .. SEALED_SHAPE .. "%f[^%w]", "%1(sealed channel)") end
+	return text
 end
 
 -- A failure inside /oly key <secret>: Core.lua's SlashWhere names the command with what followed
