@@ -518,3 +518,32 @@ test("hop security (1.2.1): trust is asked again at the invite, and a pinned or 
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- Review of 1.2.1: the helper we asked was matched by his short name, so a namesake on another
+-- realm of our group ("Helper-Otherrealm") had his invite accepted for the player as the helper's,
+-- and his LN or LX (the ask's id is on the channel) moved our ask on or took us out of the group.
+test("hop security (1.2.1): a namesake on another realm is not the helper we asked: invite, no and release", function()
+	WithHop(function(w, H)
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Helper-Realm", "LO~1~0~0")
+		H.HandleOffer("WHISPER", "Second-Realm", "LO~1~0~0")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		eq(H.State().helper, "Helper-Realm")
+		H.OnInvite("Helper-Otherrealm")
+		eq(w.accepted, 0, "a namesake's invite is not accepted for the player")
+		eq(H.State().invitedBy, nil, "nor taken as the helper's")
+		H.HandleNo("WHISPER", "Helper-Otherrealm", "LN~1")
+		eq(H.State().helper, "Helper-Realm", "a namesake's no does not move the ask on")
+		eq(H.State().phase, "requested")
+		H.OnInvite("Helper")
+		eq(w.accepted, 1, "the helper of our realm, named without it by the game")
+		w.group, w.party.party1 = 2, "Helper"; H.OnRoster()
+		eq(H.State().phase, "joined")
+		H.HandleRelease("WHISPER", "Helper-Otherrealm", "LX~1")
+		eq(w.left, 0, "a namesake's release does not take us out of the group")
+		eq(H.State().phase, "joined")
+		H.HandleRelease("WHISPER", "Helper-Realm", "LX~1")
+		eq(w.left, 1, "the helper's own does")
+	end)
+end)

@@ -638,19 +638,18 @@ end
 
 function Hop.HandleNo(dist, sender, text)
 	if dist ~= "WHISPER" or not ask or ask.phase ~= "requested" then return end
-	if tonumber(text:match("^LN~(%d+)$")) ~= ask.id or ns.ShortName(ns.FullName(sender)) ~= ns.ShortName(ask.helper) then return end
+	if tonumber(text:match("^LN~(%d+)$")) ~= ask.id or ns.FullName(sender) ~= ask.helper then return end -- (1.2.1: the whole name)
 	Hop.Next()
 end
 
 -- The invite we asked for: accept it for the player (anyone else's invite is left alone).
 -- A helper asked before may still invite late (after we moved on): theirs counts too.
+-- 1.2.1: by the whole name (the game names an inviter of our realm without it, ns.FullName): a
+-- namesake on another realm of our group is not the helper we asked.
 local function AskedHelper(name)
-	if not name then return nil end
-	local short = ns.ShortName(name)
-	for helper in pairs(ask.tried) do
-		if ns.ShortName(helper) == short then return helper end
-	end
-	return nil
+	if type(name) ~= "string" or name == "" then return nil end
+	local full = ns.FullName(name)
+	return ask.tried[full] and full or nil
 end
 
 function Hop.OnInvite(name) -- gp:party-invite
@@ -799,7 +798,7 @@ end
 function Hop.HandleRelease(dist, sender, text)
 	if dist ~= "WHISPER" or not ask or ask.phase ~= "joined" or not ask.helper then return end
 	if tonumber(text:match("^LX~(%d+)$")) ~= ask.id then return end
-	if ns.ShortName(ns.FullName(sender)) ~= ns.ShortName(ask.helper) then return end
+	if ns.FullName(sender) ~= ask.helper then return end -- (1.2.1: the whole name, not a namesake's)
 	Leave(L.HOP_RELEASED:format(ns.DisplayName(ask.helper)))
 end
 
