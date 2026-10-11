@@ -1770,6 +1770,21 @@ do
 		return n < Requests.FEES_MAX, "full"
 	end
 
+	-- A seller's fee mail that came before his word of the sale waits on its own (the request, the
+	-- payer, no buyer): his own word of that sale takes it, or the desk's confirmation by hand of a
+	-- fee naming him for it. Never a buyer's word alone: anyone may name himself the buyer of
+	-- another's sale, and so would take the gold its seller paid and leave his real fee unpaid.
+	local function JoinEarly(led, e)
+		local key = FeeKey(e.id, e.crafter, nil)
+		local early = led.entries[key]
+		if type(early) ~= "table" or early == e then return end
+		led.entries[key] = nil
+		e.paid = (tonumber(e.paid) or 0) + (tonumber(early.paid) or 0)
+		e.payments = type(e.payments) == "table" and e.payments or {}
+		for _, p in ipairs(type(early.payments) == "table" and early.payments or {}) do e.payments[#e.payments + 1] = p end
+		while #e.payments > 10 do table.remove(e.payments, 1) end
+	end
+
 	-- A party's word of a sale, on the desk. Each party's figure is kept, and the higher one is the
 	-- fee's: a seller's lower word never shrinks what the buyer confirmed (the price the seller
 	-- recorded, on an unmodified client), and a difference waits for the desk (Fee.Confirmed). The
@@ -1778,8 +1793,8 @@ do
 		local led, now = Ledger(), Now()
 		local key = FeeKey(id, crafter, requester)
 		local e = led.entries[key]
-		if not e then
-			-- The seller's fee mail came before any word of the sale: it was his, for this request.
+		if not e and role == "s" then
+			-- The seller's fee mail came before his word of the sale: it was his, for this request.
 			local early = FeeKey(id, crafter, nil)
 			if type(led.entries[early]) == "table" then
 				e, led.entries[early] = led.entries[early], nil
@@ -1798,6 +1813,7 @@ do
 		end
 		e.by = type(e.by) == "table" and e.by or {}
 		e.by[role] = e.by[role] or now
+		if role == "s" then JoinEarly(led, e) end
 		if role == "s" then e.grossS = gross else e.grossB = gross end
 		e.gross = math.max(tonumber(e.grossS) or 0, tonumber(e.grossB) or 0)
 		e.fee = Requests.FeeBreakdown(e.gross, 0).guildFee
@@ -1910,20 +1926,22 @@ do
 		return true
 	end
 
-	-- A fee mail that reached the desk: booked against that seller's fee for that request (or kept
-	-- for it, until the word of the sale comes).
+	-- A fee mail that reached the desk: booked against that seller's fee for that request, one his
+	-- own word named (or kept for it, until his word comes: JoinEarly).
 	local function BookFeePayment(id, payer, copper)
 		local led, now = Ledger(), Now()
 		local e
 		for _, x in pairs(led.entries) do
-			if type(x) == "table" and x.id == id and Same(x.crafter, payer) and (not e or (x.created or 0) < (e.created or 0)) then e = x end
+			if type(x) == "table" and x.id == id and Same(x.crafter, payer) and type(x.by) == "table" and x.by.s
+				and (not e or (x.created or 0) < (e.created or 0)) then e = x end
 		end
+		local key = FeeKey(id, payer, nil)
+		if not e and type(led.entries[key]) == "table" then e = led.entries[key] end
 		if not e then
 			if not FeeRoom(led, "mail", nil, payer, now) then
 				ns.Log("craft fee mail %s from %s not booked: full", tostring(id), tostring(payer))
 				return nil
 			end
-			local key = FeeKey(id, payer, nil)
 			e = { key = key, id = id, crafter = payer, created = now, paid = 0, by = {}, state = "due" }
 			led.entries[key] = e
 		end
@@ -1969,6 +1987,9 @@ do
 			if Fee.Confirmed(e) then return false, "state" end
 			e.checkedBy, e.checkedAt, e.checkNote = ns.me, now, note
 			e.due = math.max(tonumber(e.due) or now, now + Requests.FEE_DUE)
+			-- (A sale the desk checked is its seller's: the fee mail he sent for it before any word of his.)
+			JoinEarly(Ledger(), e)
+			if (tonumber(e.paid) or 0) >= e.fee then e.state, e.paidAt = "paid", now end
 			Changed()
 			return true
 		end

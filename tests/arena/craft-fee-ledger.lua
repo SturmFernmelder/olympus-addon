@@ -175,3 +175,81 @@ test("1.2.1 craft fee desk: each sender's fees the desk never confirmed are capp
 	eq(e.paid, 2); eq(e.requester, a.name); eq(e.fee, 675)
 	NoErrors(w)
 end)
+
+test("1.2.1 craft fee desk: a fee word is taken only from the party it names as its sender: nobody books a sale between two others", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail")
+	HearsDesk({ a, b, c }, desk)
+	-- c says a bought from b, and then that b sold to a: he is neither.
+	FeeWordTo(w, c, desk, "tp001", "b", a.name, b.name, "8ow")
+	FeeWordTo(w, c, desk, "tp002", "s", a.name, b.name, "8ow")
+	-- Nor may one name himself both parties.
+	FeeWordTo(w, c, desk, "tp003", "s", c.name, c.name, "8ow")
+	eq(Rows(desk), 0, "no row for a sale its sender is no party to")
+	NoErrors(w)
+end)
+
+-- The fee of request id between requester and crafter, on the desk's ledger.
+local function Fee(desk, id, crafter, requester)
+	return desk.Craft.FeeLedger().entries[("%s|%s|%s"):format(id, crafter.name:lower(), requester and requester.name:lower() or "-")]
+end
+
+test("1.2.1 craft fee desk: a made-up buyer's word never takes the seller's fee mail, whichever came first: the gold he paid is on his own fee, which is paid, and he is nobody's debtor", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b, c }, desk)
+	-- b's fee mail for his sale to a reaches the desk before either party's word of it; then c names
+	-- himself the buyer of that sale.
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee sale01"))
+	FeeWordTo(w, c, desk, "sale01", "b", c.name, b.name, "7ps")
+	-- Another sale: c's word comes first, then b's mail.
+	w:Run(61)
+	FeeWordTo(w, c, desk, "sale02", "b", c.name, b.name, "7ps")
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee sale02"))
+	-- The parties' own words of both sales, the buyer's first.
+	for _, id in ipairs({ "sale01", "sale02" }) do
+		w:Run(61)
+		FeeWordTo(w, a, desk, id, "b", a.name, b.name, "7ps")
+		FeeWordTo(w, b, desk, id, "s", a.name, b.name, "7ps")
+		local real = assert(Fee(desk, id, b, a), id .. ": the real sale's fee")
+		assert(real.by.s and real.by.b, "both parties' words")
+		eq(real.paid, 600, id .. ": the seller's gold is on his own fee")
+		eq(real.state, "paid")
+		local fake = assert(Fee(desk, id, b, c), id .. ": the made-up purchase waits apart")
+		eq(fake.paid, 0, id .. ": with none of the seller's gold")
+		eq(Fee(desk, id, b), nil, id .. ": no payment left waiting")
+	end
+	for _, d in ipairs(desk.Craft.Debtors().ranking) do assert(d.name ~= b.name, "the seller who paid is nobody's debtor") end
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: a seller's fee mail on a sale only its buyer named waits apart, and is the seller's once his word comes or the desk confirms that sale by hand", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b }, desk)
+	for _, id in ipairs({ "sale03", "sale04" }) do
+		FeeWordTo(w, a, desk, id, "b", a.name, b.name, "7ps")
+		w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee " .. id))
+		local e = assert(Fee(desk, id, b, a), "the buyer's word")
+		eq(e.paid, 0, "a buyer's word alone takes none of the seller's gold")
+		eq(Fee(desk, id, b).paid, 600, "it waits for the seller's word")
+		w:Run(61)
+	end
+	eq(#desk.Craft.Debtors().ranking, 0)
+	-- sale03: the seller's word comes.
+	FeeWordTo(w, b, desk, "sale03", "s", a.name, b.name, "7ps")
+	eq(Fee(desk, "sale03", b, a).paid, 600); eq(Fee(desk, "sale03", b, a).state, "paid")
+	-- sale04: it never does; the desk checks with both and confirms it by hand.
+	local e = Fee(desk, "sale04", b, a)
+	eq(desk.Craft.SettleFee(e.key, "confirmed", "checked with both"), true)
+	eq(e.paid, 600, "the desk's confirmation joins the mail he sent for it")
+	eq(e.state, "paid")
+	eq(Rows(desk), 2, "one row for each sale")
+	eq(#desk.Craft.Debtors().ranking, 0, "he owes nothing")
+	NoErrors(w)
+end)
