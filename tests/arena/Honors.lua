@@ -646,9 +646,10 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 		eq(Honors.ArtOf(key), nil, "no art: " .. key)
 	end
 	-- Every file the honours can name: 3 gryphons, 9 classes and 8 races in three metals, three
-	-- cornucopias, koi and ravens, three comets and the gold owl.
+	-- cornucopias, koi and ravens, three comets and the gold owl; and (1.2.1) the ten preview
+	-- frames nobody holds (three crosses, three charms, three owlcats and the red cross).
 	local files = Honors.ArtFiles()
-	eq(#files, 3 + 27 + 24 + 9 + 3 + 1)
+	eq(#files, 3 + 27 + 24 + 9 + 3 + 1 + 10)
 	local listed = {}
 	for _, f in ipairs(files) do listed[f] = true end
 	for _, art in pairs(want) do eq(listed[art], true, art) end
@@ -683,7 +684,50 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 			got[h.art] = true
 		end
 	end
-	for _, f in ipairs(files) do eq(got[f], true, "held: " .. f) end
+	local preview = {}
+	for _, key in ipairs(Honors.PREVIEWS) do preview[(Honors.ArtOf(key))] = true end
+	for _, f in ipairs(files) do
+		if preview[f] then eq(got[f], nil, "a preview, held by nobody: " .. f) else eq(got[f], true, "held: " .. f) end
+	end
+end)
+
+-- 1.2.1 (the author's ask): the new frames ship as a preview only. Their keys name their art for
+-- /oly borders test, and no honour has them: everyone holding everything holds none of them, none
+-- can be picked, and a pick naming one shows the rank's frame.
+test("1.2.1 honours: the new frames are a preview only: apostle-1/2/3 the cross, bones-1/2/3 the charm, arena-race-skyborn the owlcat, apostle-red the red cross on the black; held by nobody, never picked or shown", function()
+	local want = {
+		["apostle-1"] = { "cross-gold", "gold" }, ["apostle-2"] = { "cross-silver", "silver" }, ["apostle-3"] = { "cross-bronze", "bronze" },
+		["bones-1"] = { "charm-gold", "gold" }, ["bones-2"] = { "charm-silver", "silver" }, ["bones-3"] = { "charm-bronze", "bronze" },
+		["arena-race-skyborn"] = { "owlcat-gold", "gold" }, ["arena-race-skyborn-2"] = { "owlcat-silver", "silver" },
+		["arena-race-skyborn-3"] = { "owlcat-bronze", "bronze" }, ["apostle-red"] = { "cross-red", "black" },
+	}
+	local n = 0
+	for _, key in ipairs(Honors.PREVIEWS) do
+		n = n + 1
+		local art, shape, metal = Honors.ArtOf(key)
+		assert(want[key], "a preview key: " .. key)
+		eq(art, want[key][1], key) eq(shape, "plain", key .. ": the plain box") eq(metal, want[key][2], key .. "'s underlay")
+	end
+	eq(n, 10)
+	eq(Honors.RACE_ART.skyborn, "owlcat")
+	for _, key in ipairs({ "apostle-4", "apostle", "bones-red", "apostle-red-2", "arena-race-skyborn-4" }) do eq(Honors.ArtOf(key), nil, key) end
+	-- Out of the frames worn, as Honors.lua ships them.
+	for family in pairs(SHIPPED) do assert(family ~= "apostle" and family ~= "bones" and family ~= "belt-R" and not family:find("skyborn"), family) end
+	-- Everyone holding everything (every belt, every class and race, every donor and level place):
+	-- none of them.
+	local inputs = Everything()
+	local players = { ME, { name = "Brenna", guid = "Player-1-B" }, { name = "Cato", guid = "Player-1-C" } }
+	for _, cat in ipairs({ "R9", "R10", "R11", "R12", "R13", "R14", "R15", "R16" }) do
+		inputs.belts[#inputs.belts + 1] = { cat = cat, guid = "Player-1-A", name = "Aldric" }
+	end
+	for _, p in ipairs(players) do
+		local held = Honors.Holdings(p, inputs)
+		for _, h in ipairs(held) do assert(not want[h.key] and not want[h.frame or ""], p.name .. " holds " .. h.key) end
+		for key in pairs(want) do
+			eq(select(2, Honors.Choose({}, held, key)), "frame", key .. ": never picked")
+			eq((Honors.Shown({ frame = key }, held)), "rank", key .. ": his rank's frame instead")
+		end
+	end
 end)
 
 test("honours: belts and level places follow the GUID (a rename keeps them, a namesake gets none); names where there is no GUID", function()

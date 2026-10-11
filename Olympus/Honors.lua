@@ -67,6 +67,11 @@ local ADDON, ns = ...
 --   the tier's badge: arena-tier-<bronze|silver|gold> (the crossed swords of the arena's
 --     division, a badge in the arena's screens: no frame, no mark, no title).
 --   A pick's frame may also be "rank" (the Olympus rank's frame) or "none".
+--   1.2.1, a preview only (Honors.PREVIEWS: the author's /oly borders test <key>; no honour has
+--   these keys, so nobody holds, wears or is awarded them): apostle-<1-3> (cross-gold/-silver/
+--   -bronze), bones-<1-3> (charm-...), arena-race-skyborn (owlcat-gold; -2, -3 silver and bronze),
+--   all plain; and apostle-red (cross-red, plain, on the black underlay: its metal "black"), also
+--   a signed Apostle's own look on his own screen (Borders.OwnLook), never anyone's honour.
 --
 -- API
 --   Honors.Key(name) -> key or nil
@@ -239,8 +244,9 @@ local ADDON, ns = ...
 --       An honour key's art stem (its frame "<art>.tga", its mark "<art>-mark.tga"), the frame's
 --       shape ("winged" or "plain") and its metal; nil for a key with no art (rank, none, a tier's
 --       badge, an unknown key, a class or race the catalogue has no beast for).
---   Honors.ArtFiles() -> { art, ... }  every art stem a held honour can name (the files the
---       addon ships; sorted), for scripts/make-honors.py's list and the tests.
+--   Honors.ArtFiles() -> { art, ... }  every art stem a held honour can name, and the previews'
+--       (Honors.PREVIEWS): the files the addon ships; sorted, for scripts/make-honors.py's list
+--       and the tests.
 
 local Honors = {}
 ns.Honors = Honors
@@ -290,13 +296,21 @@ Honors.METALS = METAL
 -- Shaman's spirit wolf, the Mage's sheep, the Warlock's felhunter, the Druid's stag.
 Honors.CLASS_ART = { warrior = "boar", paladin = "paladin", hunter = "hunter", rogue = "rogue", priest = "priest",
 	shaman = "shaman", mage = "mage", warlock = "warlock", druid = "druid" }
--- The race champions' mounts, by the race's word.
+-- The race champions' mounts, by the race's word. (1.2.1: the skyborn's owlcat, a preview only: no
+-- race ID gives "skyborn", so no belt or podium is ever his.)
 Honors.RACE_ART = { human = "lion", dwarf = "ram", nightelf = "nightsaber", gnome = "mechanostrider", orc = "orc-wolf",
-	undead = "skeletal-horse", tauren = "kodo", troll = "raptor" }
+	undead = "skeletal-horse", tauren = "kodo", troll = "raptor", skyborn = "owlcat" }
 Honors.WINGED = { gryphon = true, owl = true }
--- The families' beasts: donors of all time, the month's, the Oracle, the level race.
+-- The families' beasts: donors of all time, the month's, the Oracle, the level race. (1.2.1, a
+-- preview only: the Apostles' cross and the Bones' charm; Holdings never names those families.)
 Honors.FAMILY_ART = { ["donor-top"] = "cornucopia", ["donor-month"] = "koi", oracle = "raven", level = "comet",
-	["wanted-slayer"] = "orc-wolf" }
+	["wanted-slayer"] = "orc-wolf", apostle = "cross", bones = "charm" }
+-- 1.2.1: the new frames' keys, a preview only (see the top of the file): out of FRAMES_SHIPPED and
+-- of every honour, so nobody can wear them or be awarded them.
+Honors.PREVIEWS = { "apostle-1", "apostle-2", "apostle-3", "apostle-red", "bones-1", "bones-2", "bones-3",
+	"arena-race-skyborn", "arena-race-skyborn-2", "arena-race-skyborn-3" }
+-- The red cross: its own art, plain, on the plain underlay tinted black (Borders.lua's UNDERLAY).
+Honors.RED_CROSS = "apostle-red"
 -- The level race's metal by milestone: bronze the first to 20, silver to 40, gold to 60.
 Honors.LEVEL_METAL = { [20] = "bronze", [40] = "silver", [60] = "gold" }
 -- The kinds of line the Treasury's ranking never counts (Treasury.lua's Add; the arena's, as
@@ -899,6 +913,7 @@ function Honors.ArtOf(key)
 		return "comet-" .. Honors.LEVEL_METAL[m], "plain", Honors.LEVEL_METAL[m]
 	end
 	if key == "guild-top-leader" then return "owl-gold", "winged", "gold" end
+	if key == Honors.RED_CROSS then return "cross-red", "plain", "black" end
 	return nil
 end
 local ArtOf = Honors.ArtOf
@@ -917,6 +932,7 @@ function Honors.ArtFiles()
 		for n = 1, 3 do Add((ArtOf(family .. "-" .. n))) end
 	end
 	for _, m in ipairs(Honors.MILESTONES) do Add((ArtOf("level-race-" .. m))) end
+	for _, k in ipairs(Honors.PREVIEWS) do Add((ArtOf(k))) end
 	table.sort(out)
 	return out
 end

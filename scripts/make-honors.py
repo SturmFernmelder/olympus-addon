@@ -15,23 +15,34 @@ Only the ones the honours use come in (the design), renamed <name>-<metal>.tga a
 the arena champion's gryphon, the nine class beasts, the eight racial mounts, the cornucopia (all
 time donors), the koi (the month's donors), the raven (the Oracle) and the comet (the level race),
 each in gold, silver and bronze; the best guild's owl in gold alone. The lab's other files (the
-raw and colour drafts, the phoenix, the dragon, the owl's silver and bronze) stay out, so the
-package carries 67 frames and 67 marks and nothing else:
-67 x 262,188 + 67 x 4,140 bytes = 17,843,976 bytes (17.0 MiB) on disk, about 3.2 MB in the zip
+raw and colour drafts, the phoenix, the dragon, the owl's silver and bronze) stay out.
+
+1.2.1: the new frames, a preview only (the author's /oly borders test; no honour names them, so
+nobody can be awarded or wear them): the Apostles' cross, the Bones' charm and the skyborn's
+owlcat in gold, silver and bronze, and the red cross (an Apostle's own look, on his screen alone).
+They were finished outside the lab, already in the shipped format and under their shipped names,
+in ~/Downloads/olympus-new-frames (the uncut ones at its top, not its cut/ folder), and come in
+from there unrenamed (--new). So the package carries 77 frames and 77 marks and nothing else:
+77 x 262,188 + 77 x 4,140 bytes = 20,507,256 bytes (19.6 MiB) on disk, about 3.5 MB in the zip
 (the transparent canvas packs well). The files are copied byte for byte, never re-encoded.
 
-Their provenance stays in the repository without a second copy of 17 MB: media/honors/src/SHA256SUMS
-(outside the package, like media/borders/src) records each lab file's SHA-256, its lab name and the
-addon name it ships as, written by --from. --check compares every shipped file with it byte for
-byte (through the hash), so the art can be checked again after the throwaway lab is gone.
+Their provenance stays in the repository without a second copy of 20 MB: media/honors/src/SHA256SUMS
+(outside the package, like media/borders/src) records each source file's SHA-256, its source name
+(the lab's file name, or the new frames' folder and name: ~/Downloads/olympus-new-frames/<name>)
+and the addon name it ships as, written by --from. --check compares every shipped file with it
+byte for byte (through the hash), so the art can be checked again after the sources are gone.
 
 Usage, from anywhere (no Pillow needed):
-  python3 scripts/make-honors.py --from <lab media folder>   copy and rename them in, and write
-                                                             media/honors/src/SHA256SUMS
+  python3 scripts/make-honors.py --from <lab media folder> [--new <folder>]
+                                                             copy and rename them in (the new
+                                                             frames from <folder>, by default
+                                                             ~/Downloads/olympus-new-frames), and
+                                                             write media/honors/src/SHA256SUMS
   python3 scripts/make-honors.py --check                     fail unless the shipped set is whole,
                                                              each file has the right shape and is
-                                                             the lab file SHA256SUMS records
+                                                             the source file SHA256SUMS records
   python3 scripts/make-honors.py --check --from <folder>     ...and is byte for byte its source
+                                 [--new <folder>]            (the lab's; the new frames' with --new)
 """
 
 import hashlib
@@ -56,17 +67,26 @@ BEASTS = [
 GOLD_ONLY = ["owl"]                                          # the best guild's leader (winged)
 # The lab's name for a gold frame, where it is not <name>.tga.
 GOLD_SOURCE = {"paladin": "paladin-new"}
+# 1.2.1, a preview only (Honors.PREVIEWS): from the new frames' folder, under their own names.
+NEW_SOURCE = "~/Downloads/olympus-new-frames"
+NEW_BEASTS = ["cross", "charm", "owlcat"]                    # the Apostles', the Bones', the skyborn's
+NEW_ONLY = ["cross-red"]                                     # the Apostles' red cross (one look, no metal)
 FRAME_SIZE, MARK_SIZE = 256, 32
 
 
 def files():
-    """(addon file name, lab file name, square size) for every file the honours ship."""
+    """(addon file name, source file name, square size, source) for every file the honours ship:
+    source "lab" (--from's folder, the lab's name) or "new" (--new's folder, NEW_SOURCE/<name>)."""
     out = []
     for beast in BEASTS + GOLD_ONLY:
         for metal in (METALS if beast in BEASTS else ("gold",)):
             frame = GOLD_SOURCE.get(beast, beast) if metal == "gold" else beast + "-" + metal
-            out.append(("%s-%s.tga" % (beast, metal), frame + ".tga", FRAME_SIZE))
-            out.append(("%s-%s-mark.tga" % (beast, metal), "%s-%s-mark.tga" % (beast, metal), MARK_SIZE))
+            out.append(("%s-%s.tga" % (beast, metal), frame + ".tga", FRAME_SIZE, "lab"))
+            out.append(("%s-%s-mark.tga" % (beast, metal), "%s-%s-mark.tga" % (beast, metal), MARK_SIZE, "lab"))
+    stems = ["%s-%s" % (beast, metal) for beast in NEW_BEASTS for metal in METALS] + NEW_ONLY
+    for stem in stems:
+        for name, size in ((stem + ".tga", FRAME_SIZE), (stem + "-mark.tga", MARK_SIZE)):
+            out.append((name, NEW_SOURCE + "/" + name, size, "new"))
     return out
 
 
@@ -111,20 +131,29 @@ def write_manifest(rows):
     with open(MANIFEST, "w", encoding="utf-8", newline="\n") as f:
         f.write("# The honours' art (Olympus/media/honors): each file's SHA-256, the frame lab's file it was\n")
         f.write("# copied from, and its name in the addon. Written by scripts/make-honors.py --from; checked by --check.\n")
+        f.write("# 1.2.1's new frames (a preview only) name their source as ~/Downloads/olympus-new-frames/<name>.\n")
         for name, lab, digest in sorted(rows):
             f.write("%s  %s  %s\n" % (digest, lab, name))
 
 
+def folder(argv, flag, what):
+    if flag not in argv:
+        return None
+    i = argv.index(flag)
+    if i + 1 >= len(argv):
+        sys.exit("%s needs %s" % (flag, what))
+    return argv[i + 1]
+
+
 def main(argv):
     check = "--check" in argv
-    source = None
-    if "--from" in argv:
-        i = argv.index("--from")
-        if i + 1 >= len(argv):
-            sys.exit("--from needs the lab's media folder")
-        source = argv[i + 1]
+    source = folder(argv, "--from", "the lab's media folder")
+    new = folder(argv, "--new", "the new frames' folder")
     if not check and not source:
         sys.exit(__doc__)
+    if not check and not new:
+        new = os.path.expanduser(NEW_SOURCE)
+    sources = {"lab": source, "new": new}
     wanted = files()
     problems = []
     manifest = read_manifest() if check else None
@@ -133,11 +162,11 @@ def main(argv):
     rows = []
     if not check:
         os.makedirs(OUTPUT, exist_ok=True)
-    for name, lab, size in wanted:
+    for name, lab, size, kind in wanted:
         target = os.path.join(OUTPUT, name)
         data = None
-        if source:
-            path = os.path.join(source, lab)
+        if sources[kind]:
+            path = os.path.join(sources[kind], os.path.basename(lab))
             if not os.path.exists(path):
                 problems.append("missing in the source: " + lab)
                 continue
@@ -167,7 +196,7 @@ def main(argv):
             with open(target, "wb") as f:
                 f.write(data)
             rows.append((name, lab, sha(data)))
-    names = set(n for n, _, _ in wanted)
+    names = set(n for n, _, _, _ in wanted)
     if os.path.isdir(OUTPUT):
         for extra in sorted(os.listdir(OUTPUT)):
             if extra.endswith(".tga") and extra not in names:

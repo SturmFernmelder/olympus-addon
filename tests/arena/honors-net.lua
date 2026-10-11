@@ -499,6 +499,50 @@ test("1.2 the fights part: the author's preview (Borders.SetPreview) takes an ho
 	W3.NoErrors(w)
 end)
 
+-- 1.2.1 (the author's ask): the new frames, a preview only. /oly borders test <key> shows each round
+-- his own portrait as a holder sees his own, on its plain metal (the red cross on the black), and
+-- its mark on the plates; nobody else can preview them, and nobody's real border changes.
+test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-race-skyborn(-2/-3) and apostle-red show the cross, the charm, the owlcat and the red cross round the author's own portrait, and their marks", function()
+	local w = World.New()
+	local author = w:Client(N.author)
+	local other = w:Client(N.fighterA)
+	local r = Frames(w, author)
+	author.target = other.name
+	local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
+	local want = {
+		{ "apostle-1", "cross-gold", "1 1 1 1" }, { "apostle-2", "cross-silver", "1 1 1 1" }, { "apostle-3", "cross-bronze" },
+		{ "bones-1", "charm-gold" }, { "bones-2", "charm-silver" }, { "bones-3", "charm-bronze" },
+		{ "arena-race-skyborn", "owlcat-gold" }, { "arena-race-skyborn-2", "owlcat-silver" }, { "arena-race-skyborn-3", "owlcat-bronze" },
+		{ "apostle-red", "cross-red", "0.24 0.24 0.27 1" },
+	}
+	for _, row in ipairs(want) do
+		local key, art, color = row[1], row[2], row[3]
+		eq(r.B.SetPreview(key), true, key)
+		eq(r.B.Preview(), key)
+		r.B.Refresh("player", true)
+		eq(r.Shown("player"), MEDIA .. art, key)
+		local t
+		for _, x in ipairs(r.textures) do if x.owner == "player" and x.sublevel ~= 2 and x.shown then t = x end end
+		eq(t.coord, "0.78125 0 0 0.78125", key .. ": the plain box, turned round on his own frame")
+		eq(t.size, "100x100")
+		local under = r.Underlay("player")
+		eq(under.shown, true, key .. ": on its plain metal")
+		if color then eq(under.color, color, key .. "'s underlay") end
+		if key == "apostle-red" then
+			eq(under.atlas, "ui-hud-unitframe-target-portraiton-boss-rare-silver", "the plain underlay...")
+			eq(under.desaturated, true, "...tinted black")
+		end
+		r.NP.RefreshAll(true)
+		eq(r.Shown("plate"), MEDIA .. art .. "-mark", key .. "'s mark")
+	end
+	eq(r.B.SetPreview("off"), true)
+	-- Anyone else: no preview.
+	local rr = Frames(w, other)
+	eq(rr.B.SetPreview("apostle-red"), false)
+	eq(rr.B.SetPreview("bones-1"), false)
+	W3.NoErrors(w)
+end)
+
 -- 1.2 (the owner's ask, test build 33): every Olympus portrait identical to the player's own on his
 -- unit frame. The core's windows that show his portrait with a frame (the King's letter, the
 -- profile's Edit) drew their own: a square picture and the frame centred on it at a size of their
@@ -639,7 +683,7 @@ test("1.2 the fights part: every art file the honours name ships in Olympus/medi
 		eq(want[name], true, "an honour's file: " .. name)
 	end
 	p:close()
-	eq(n, 134)
+	eq(n, 154, "67 frames and 67 marks, and (1.2.1) the ten preview frames and their marks")
 end)
 
 test("1.2 the fights part: the words of fights and honours exist in English and pt-BR, the same keys (tables with the same entries); every title and letter the honours can name", function()
