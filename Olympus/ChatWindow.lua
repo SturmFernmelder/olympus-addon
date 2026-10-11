@@ -671,8 +671,14 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 		or ((veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. ns.Codec.SanitizeChat(e.text))
 	local bodyFont, bodySize, bodyFlags = ChatWindow.FontOf(b.body)
 	local whoFont, whoSize, whoFlags = ChatWindow.FontOf(b.who)
-	if ChatWindow.SameLook(b, { ChatWindow.lookEra, start == true, maxInner, mine, veiled, modRoom, c[1], c[2], c[3], who, when,
-		whisper, full, text, bodyFont, bodySize, bodyFlags, whoFont, whoSize, whoFlags, n = 20 }) then
+	-- (Written into the bubble's second look, b.lookNext, not a new table: no garbage each redraw.)
+	local k = b.lookNext or {}
+	b.lookNext = k
+	k[1], k[2], k[3], k[4], k[5], k[6], k[7], k[8], k[9], k[10] = ChatWindow.lookEra, start == true, maxInner, mine,
+		veiled, modRoom, c[1], c[2], c[3], who
+	k[11], k[12], k[13], k[14], k[15], k[16], k[17], k[18], k[19], k[20], k.n = when, whisper, full, text,
+		bodyFont, bodySize, bodyFlags, whoFont, whoSize, whoFlags, 20
+	if ChatWindow.SameLook(b, k) then
 		b:ClearAllPoints()
 		if mine then
 			b:SetPoint("TOPRIGHT", pane.content, "TOPRIGHT", -EDGE, -y)
@@ -752,7 +758,8 @@ end
 
 -- 1.2.1: true when bubble `b` was laid out, whole, from look `k` the last time (Bubble: k[1..k.n]);
 -- else `k` is kept as its look and it is laid out again (k.h, its height, set once that is done: a
--- layout that failed half way is never taken as done).
+-- layout that failed half way is never taken as done). The look it replaces becomes b.lookNext,
+-- the table Bubble fills next time: each bubble keeps two, and a redraw makes no new one.
 function ChatWindow.SameLook(b, k)
 	local was = b.look
 	if was and was.h ~= nil and was.n == k.n then
@@ -762,7 +769,8 @@ function ChatWindow.SameLook(b, k)
 		end
 		if same then return true end
 	end
-	b.look = k
+	if k ~= was then b.look, b.lookNext = k, was end
+	k.h = nil -- (a table used before has an older layout's height)
 	return false
 end
 
@@ -978,11 +986,20 @@ local function DrawLines(all)
 	frame.content:SetHeight(math.max(1, y))
 end
 
+-- KeepBubbles' line-to-bubble index: one table, emptied at each start and end (no new table each
+-- redraw, and no line held once it is done).
+ChatWindow.keepAt = {}
+function ChatWindow.EmptyKeep()
+	local at = ChatWindow.keepAt
+	for e in pairs(at) do at[e] = nil end
+	return at
+end
+
 -- 1.2.1: each line back in the bubble that showed it (`bubbles` reordered, still in the order of
 -- `list`, the lines drawn), so a new line, or the oldest dropped at a channel's 100 (everything
 -- moving up by one), lays out no other bubble again: each keeps its look (Bubble) and moves.
 function ChatWindow.KeepBubbles(bubbles, list)
-	local at = {}
+	local at = ChatWindow.EmptyKeep()
 	for k, b in ipairs(bubbles) do
 		if b.entry ~= nil then at[b.entry] = k end
 	end
@@ -996,6 +1013,7 @@ function ChatWindow.KeepBubbles(bubbles, list)
 			if here.entry ~= nil and at[here.entry] == k then at[here.entry] = j end
 		end
 	end
+	ChatWindow.EmptyKeep()
 end
 
 ---------------------------------------------------------------------------

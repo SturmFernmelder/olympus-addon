@@ -400,3 +400,91 @@ test("1.2.1 performance: the Chat tab's redraws a change asks for wait ten times
 		if not ok then error(err, 0) end
 	end)
 end)
+
+test("1.2.1 performance: the Chat tab's redraws make no new table for its bubbles: each bubble keeps two looks it writes into, the bubbles' index is one table emptied after each redraw", function()
+	h.WithWindow(function(w)
+		local CW = w.CW
+		local list = History(100)
+		ns.rdb.chat = { A = list }
+		-- Every look a bubble is compared with (ChatWindow.SameLook), by bubble.
+		local seen, calls = {}, 0
+		local same = CW.SameLook
+		CW.SameLook = function(b, k)
+			calls = calls + 1
+			seen[b] = seen[b] or {}
+			seen[b][k] = true
+			return same(b, k)
+		end
+		local empty = CW.EmptyKeep
+		local ok, err = pcall(function()
+			local f = CW.Open("A")
+			-- Nothing new, a resize, another, new lines with the oldest dropped: two looks a bubble, always.
+			CW.Render(); CW.Render()
+			CW.Window():SetSize(800, 600); CW.Render()
+			CW.Window():SetSize(700, 600); CW.Render()
+			for k = 1, 3 do
+				table.remove(list, 1)
+				list[#list + 1] = Line(list[#list].t + 10, "Cc-Realm", "new " .. k)
+				w.fire("CHAT_LINE", "A", "Cc-Realm", "new " .. k)
+				f:Fire("OnUpdate", 0.3)
+			end
+			CW.Render()
+			assert(calls >= 700, "every bubble compared at each redraw: " .. calls)
+			local bubbles = 0
+			for _, b in ipairs(f.bubbles) do
+				local n = 0
+				for k in pairs(seen[b] or {}) do
+					n = n + 1
+					assert(k == b.look or k == b.lookNext, "a look compared is one of the bubble's own two")
+				end
+				assert(n <= 2, "a bubble's looks: " .. n .. " tables over seven redraws (a new one each before)")
+				assert(b.look ~= b.lookNext, "two of them")
+				bubbles = bubbles + 1
+			end
+			eq(bubbles, 100)
+			-- The index KeepBubbles reorders them by: one table, filled and emptied by each redraw.
+			assert(type(empty) == "function" and type(CW.keepAt) == "table", "one index table (a new one each redraw before)")
+			local keepAt, held = CW.keepAt, {}
+			CW.EmptyKeep = function()
+				local n = 0
+				for _ in pairs(CW.keepAt) do n = n + 1 end
+				held[#held + 1] = n
+				return empty()
+			end
+			CW.Render()
+			eq(table.concat(held, ","), "0,100", "that table: empty at the redraw's start, its 100 lines in it at the end")
+			eq(CW.keepAt, keepAt, "still the same table")
+			eq(next(keepAt), nil, "no line held once a redraw is done")
+		end)
+		CW.SameLook, CW.EmptyKeep = same, empty
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("1.2.1 performance: a Chat tab bubble whose layout failed half way is laid out again at the next redraw, though its look's table was used before (its old height forgotten)", function()
+	h.WithWindow(function(w)
+		local CW = w.CW
+		-- (Words enough to wrap at each width: each width its own height.)
+		ns.rdb.chat = { A = { Line(T0, "Aa-Realm", "a line that breaks " .. ("words "):rep(100)), Line(T0 + 10, "Bb-Realm", "and another") } }
+		local f = CW.Open("A") -- (its first look)
+		local b = f.bubbles[1]
+		local opened = b:GetHeight()
+		CW.Window():SetSize(800, 600); CW.Render() -- (its second: both of its tables have had a height)
+		-- The next layout, into its first look's table again, fails half way (the client erring in it).
+		local body = b.body
+		body.SetWidth = function() error("the client's error half way") end
+		CW.Window():SetSize(700, 600)
+		pcall(CW.Render)
+		body.SetWidth = nil
+		-- Nothing changed since: that bubble is laid out again, whole, not taken as done.
+		local laid, setText = 0, body.SetText
+		body.SetText = function(self, ...) laid = laid + 1; return setText(self, ...) end
+		CW.Render()
+		body.SetText = nil
+		eq(laid, 1, "the bubble laid out again")
+		local got = Shown(f)
+		CW.ForgetLooks(); CW.Render()
+		SameShown(got, Shown(f), "as a full redraw")
+		assert(b:GetHeight() ~= opened, "(its height at this width is not the one it had when opened)")
+	end)
+end)
