@@ -77,7 +77,9 @@ Count.READ_EVERY, Count.READ_GAP, Count.EVENTS_MAX = 300, 60, 500
 Count.PAIR_HOURS = 48
 Count.CLAIM_KEEP = 7 * 86400
 Count.MEMORY_MAX, Count.MEMORY_DAYS, Count.GUILDS_MAX = 2500, 120, 64
-Count.EV_MAX, Count.EV_DAYS, Count.INV_MAX, Count.ATT_MAX, Count.ATT_DAYS = 3000, 8, 300, 500, 14
+-- (1.2.1: invites remembered for their join, 1500, not 300, and the oldest go first: past 300 in two days
+-- of a busy guild's, all of them went, and a join read after its invite was no pair.)
+Count.EV_MAX, Count.EV_DAYS, Count.INV_MAX, Count.ATT_MAX, Count.ATT_DAYS = 3000, 8, 1500, 500, 14
 -- (1.2.1: 1500 reports, not 40: each waits here until a keeper's receipt, NV k, a busy Apostle's day of
 -- invites with them. RESEND_GAP after a round no keeper took one, it goes again, RESEND_TRIES rounds.)
 Count.OUTBOX_MAX, Count.OUTBOX_DAYS = 1500, 7
@@ -423,11 +425,14 @@ function Count.Process(events)
 		if n > Count.EV_MAX then wipe(ev.k); ev.n = 0 end
 	end
 	local hourNow = math.floor(Clock() / 3600)
-	local kept = 0
+	local kept = {}
 	for k, i in pairs(inv) do
-		if hourNow - i.h > Count.PAIR_HOURS + 1 then inv[k] = nil else kept = kept + 1 end
+		if type(i) ~= "table" or type(i.h) ~= "number" or hourNow - i.h > Count.PAIR_HOURS + 1 then inv[k] = nil else kept[#kept + 1] = { k = k, h = i.h } end
 	end
-	if kept > Count.INV_MAX then wipe(inv) end
+	if #kept > Count.INV_MAX then
+		table.sort(kept, function(a, b) if a.h ~= b.h then return a.h < b.h end return a.k < b.k end)
+		for j = 1, #kept - Count.INV_MAX do inv[kept[j].k] = nil end
+	end
 	return found
 end
 

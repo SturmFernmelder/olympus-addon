@@ -1438,3 +1438,30 @@ test("1.2.1 Church: a report no keeper took waits and goes again: to a keeper he
 	local full = "NV~1~k~" .. table.concat((function() local t = {} for i = 1, c.a1.Count.RECEIPT_IDS do t[i] = ns.Comm.Hash36("r" .. i) end return t end)(), ",")
 	assert(#full <= 255, #full)
 end)
+
+test("1.2.1 Church: a busy guild's invites wait for their joins: 320 invited in one read, joined by the next, are 320 pairs (the invites past 300 all went)", function()
+	local w, c = Cast()
+	w:Presence()
+	local names = {}
+	for i = 1, 320 do
+		names[i] = "Wait Rec" .. Letters(i)
+		w:LogEvent(World.GUILD, "invite", "Mira Wells", names[i], 1)
+	end
+	w:ReadLog(c.m1)
+	w.log[World.GUILD] = {}
+	for i = 1, 320 do w:LogEvent(World.GUILD, "join", names[i], nil, 0) end
+	w:ReadLog(c.m1)
+	eq(w:As(c.m1, c.m1.Count.Stats).pairs, 320)
+	eq(w:As(c.a1, c.a1.Count.Own, Key("Mira Wells"), "m").pending, c.a1.Count.VERIFIED_HOUR, "the hour's budget")
+	-- (The rest an hour later, the outbox's next round.)
+	w:Run(3600)
+	w:Presence(); w:Tick(); w:Run(30)
+	eq(w:As(c.a1, c.a1.Count.Own, Key("Mira Wells"), "m").pending, 320)
+	-- Bounded: past INV_MAX, the oldest invites go first.
+	local inv = w:As(c.m1, function() return c.m1.Church.Store().inv end)
+	for i = 1, c.m1.Count.INV_MAX + 10 do inv["x" .. i] = { by = "Mira Wells-Realm", h = math.floor(w.clock / 3600) - (i % 40) } end
+	w:As(c.m1, c.m1.Count.Process, {})
+	local n = 0
+	for _ in pairs(inv) do n = n + 1 end
+	eq(n, c.m1.Count.INV_MAX)
+end)
