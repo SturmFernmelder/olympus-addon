@@ -9,12 +9,14 @@ local WithGamepadUI = assert(extra and extra.WithGamepadUI, "WithGamepadUI")
 -- its own saved variables, so the hook it registers never reaches the harness's Channels. The game's
 -- side stood in for as Forever's UI source has it: hooksecurefunc's post-hook after SetItemRef, which
 -- is the game's own handling (it is called first, with the same arguments), the chat box
--- (ChatFrame_OpenChat), the main chat window, Shift. Generic names alone.
+-- (ChatFrameUtil.OpenChat, and the global ChatFrame_OpenChat set to it while the
+-- loadDeprecationFallbacks setting is on: Deprecated_ChatFrame.lua:4/74), the main chat window,
+-- Shift. Generic names alone.
 local GUILD = "Olympus II"
 local SPEAKER, CAPTAIN, LORD = "Test Speaker-Realm", "Test Captain-Realm", "Test Lord-Realm"
 
 local function WithLinks(fn)
-	local GLOBALS = { "hooksecurefunc", "SetItemRef", "ChatFrame_OpenChat", "IsShiftKeyDown", "DEFAULT_CHAT_FRAME", "GetGuildInfo",
+	local GLOBALS = { "hooksecurefunc", "SetItemRef", "ChatFrameUtil", "ChatFrame_OpenChat", "IsShiftKeyDown", "DEFAULT_CHAT_FRAME", "GetGuildInfo",
 		"C_ChatInfo", "IsInGuild", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
 	local SLASH = { "OLYMPUSALL", "OLYMPUSCAPTAINS", "OLYMPUSLORDS" }
 	local DIALOGS = { "OLYMPUS_CHAT_PRIVACY", "OLYMPUS_PIN", "OLYMPUS_PIN_DOWN", "OLYMPUS_GAMEPAD_RELOAD" }
@@ -34,7 +36,10 @@ local function WithLinks(fn)
 			w.hooks[#w.hooks + 1] = key
 			t[key] = function(...) original(...); post(...) end
 		end
-		ChatFrame_OpenChat = function(text, frame) w.opened[#w.opened + 1] = { text = text, frame = frame } end
+		-- (via: which of the client's openers was called.)
+		function w.Opener(via) return function(text, frame) w.opened[#w.opened + 1] = { text = text, frame = frame, via = via } end end
+		ChatFrameUtil = { OpenChat = w.Opener("ChatFrameUtil.OpenChat") }
+		ChatFrame_OpenChat = ChatFrameUtil.OpenChat -- (Deprecated_ChatFrame.lua:74: the same function)
 		IsShiftKeyDown = function() return w.shift == true end
 		DEFAULT_CHAT_FRAME = { AddMessage = function(_, text) w.lines[#w.lines + 1] = text end }
 		GetGuildInfo = function() return GUILD, "rank", w.rank end
@@ -204,6 +209,38 @@ test("1.2.1 chat channel links: a left click opens the chat box with /ol, /olc o
 			eq(#w.printed, 0)
 		end)
 		eq(w.Click("addon:Olympus:chan:A").text, "/ol ", "mouse and keyboard again")
+	end)
+end)
+
+test("1.2.1 chat channel links: the chat box is opened with the game's ChatFrameUtil.OpenChat, the deprecated global ChatFrame_OpenChat only where ChatFrameUtil has none; with neither, the plain name and a click opens nothing", function()
+	WithLinks(function(w)
+		local L = ns.L
+		local A = "[" .. L.CHAN_ALL .. "]"
+		w.Login()
+		w.rank = 0 -- (a Lord: writes in all three)
+		-- The loadDeprecationFallbacks setting off (Deprecated_ChatFrame.lua:4): no ChatFrame_OpenChat,
+		-- ChatFrameUtil.OpenChat still there (ChatFrameUtil.lua:433).
+		ChatFrame_OpenChat = nil
+		eq(w.C.Tag("A"), Link("A", L.CHAN_ALL), "still a link without the deprecated global")
+		local box = w.Click("addon:Olympus:chan:A")
+		eq(box and box.text, "/ol ", "a left click still opens the chat box")
+		eq(box.via, "ChatFrameUtil.OpenChat"); eq(box.frame, w.frame, "the box of the window clicked")
+		-- Both there as two functions: the current one, as the game's own [Party] handler calls it.
+		ChatFrame_OpenChat = w.Opener("ChatFrame_OpenChat")
+		eq(w.Click("addon:Olympus:chan:C").via, "ChatFrameUtil.OpenChat", "ChatFrameUtil.OpenChat first")
+		-- A ChatFrameUtil without OpenChat: the global, with the same text and window.
+		ChatFrameUtil = {}
+		eq(w.C.Tag("L"), Link("L", L.CHAN_LORDS))
+		local old = w.Click("addon:Olympus:chan:L")
+		eq(old and old.text, "/oll "); eq(old.via, "ChatFrame_OpenChat"); eq(old.frame, w.frame)
+		-- Neither: no chat box to open, so the plain name, and a link printed before opens nothing
+		-- and says nothing.
+		ChatFrame_OpenChat = nil
+		eq(w.C.Tag("A"), A, "no chat box to open: the plain name")
+		eq(w.Click("addon:Olympus:chan:A"), nil); eq(#w.printed, 0)
+		ChatFrameUtil = nil
+		eq(w.C.Tag("A"), A, "no ChatFrameUtil at all: the plain name")
+		eq(w.Click("addon:Olympus:chan:A"), nil); eq(#w.printed, 0)
 	end)
 end)
 

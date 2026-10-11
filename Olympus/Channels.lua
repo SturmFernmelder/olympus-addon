@@ -2106,8 +2106,12 @@ end })
 -- click on "addon:Olympus:chan:<A|C|L>" and nothing else, every other link left as the game
 -- handled it. The game's own [Party] link (type "channel") can't be borrowed: its right-click
 -- builds a menu from ChatTypeInfo, which has no entry of ours. A tab of Chattynator's gets the
--- link too; its click comes here where Chattynator hands its links to SetItemRef, as the game's
--- own windows do (its code is not in this repository: checked in game). The gamepad gate
+-- link too, and its click comes here only if Chattynator hands its links to SetItemRef as the
+-- game's own windows do: its code is not in this repository and that is not yet checked in game.
+-- The chat box: ChatFrameUtil.OpenChat (ChatFrameUtil.lua:433), the one the game's own [Party]
+-- handler calls (ItemRefHandlersShared.lua:37/42); the global ChatFrame_OpenChat is only its
+-- alias, set while the loadDeprecationFallbacks setting is on (Deprecated_ChatFrame.lua:4/74),
+-- and is used only where ChatFrameUtil has no OpenChat. The gamepad gate
 -- (GamepadRegistry.lua's "chat-links"): the hook is registered at a login with mouse and
 -- keyboard, or at the first switch to it, once a session; with the gamepad UI it does nothing
 -- from its first line and no line gets the link. Opening the chat box from Olympus is the gate's
@@ -2147,11 +2151,23 @@ function Channels.CanWrite(tier, tell)
 	return false
 end
 
+-- The game's opener of its chat box: ChatFrameUtil.OpenChat, else the deprecated global
+-- ChatFrame_OpenChat (the same function, there only while loadDeprecationFallbacks is on); nil
+-- when the gate refuses the chat box or the client has neither.
+local function ChatOpener() -- gp:chat-box
+	if not ns.Gate.Allowed("chat-box") then return nil end
+	local U = ChatFrameUtil
+	if type(U) == "table" and type(U.OpenChat) == "function" then return U.OpenChat end
+	if type(ChatFrame_OpenChat) == "function" then return ChatFrame_OpenChat end
+	return nil
+end
+
 -- Whether tier's name is a link on a line printed now: the hook in place, the gate allowing it and
--- the chat box, /ol, /olc and /oll registered, and the channel this client's to write in.
-function Channels.TagLinked(tier) -- gp:chat-box
-	return tagHooked and slashDone and ns.Gate.Allowed("chat-links") and ns.Gate.Allowed("chat-box")
-		and type(ChatFrame_OpenChat) == "function" and Channels.CanWrite(tier) or false
+-- the chat box, /ol, /olc and /oll registered, the game's chat box there to open, and the channel
+-- this client's to write in.
+function Channels.TagLinked(tier)
+	return tagHooked and slashDone and ns.Gate.Allowed("chat-links") and ChatOpener() ~= nil
+		and Channels.CanWrite(tier) or false
 end
 
 -- "[Olympus]", "[Captains]" or "[Lords]" before a line: the link where Channels.TagLinked says so.
@@ -2179,9 +2195,10 @@ function Channels.TagClick(link, text, button, frame) -- gp:chat-box
 	local tier = link:sub(#TAG_LINK + 1)
 	if not TIERS[tier] or button ~= "LeftButton" or (IsShiftKeyDown and IsShiftKeyDown()) then return false end
 	if not Channels.CanWrite(tier, true) then return false end
-	if type(ChatFrame_OpenChat) ~= "function" then return false end
+	local open = ChatOpener()
+	if not open then return false end
 	ns.Gate.Used("chat-box") -- (the gate's: told at a switch to the gamepad UI)
-	ChatFrame_OpenChat(TIERS[tier].slash .. " ", BoxFrame(frame))
+	open(TIERS[tier].slash .. " ", BoxFrame(frame))
 	return true
 end
 

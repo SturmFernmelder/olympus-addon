@@ -682,6 +682,7 @@ return {
 		["C_TradeSkillUI.GetRecipeOutputItemData"] = "api",
 		["C_UI.Reload"] = "api",
 		["C_UnitAuras.GetPlayerAuraBySpellID"] = "api",
+		["ChatFrameUtil.OpenChat"] = "lua",
 		["ChatTypeInfo.RAID_WARNING"] = "lua",
 		["GamepadMode.FrameControlsManager"] = "lua",
 		["GamepadMode.PopupHandler"] = "lua",

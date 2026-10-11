@@ -1381,6 +1381,9 @@ local function World(C, opts)
 			table.insert(C.nameFilters, fn)
 			C.callbacks[#C.callbacks + 1] = { kind = "AddSenderNameFilter", fn = fn }
 		end),
+		-- The game's chat box opener (ChatFrameUtil.lua:433; ChatFrame_OpenChat above is its alias,
+		-- Deprecated_ChatFrame.lua:74).
+		OpenChat = Fn("ChatFrameUtil.OpenChat", function(text) ChatBox(text) end),
 	})
 
 	-- Restricted and roster calls.
