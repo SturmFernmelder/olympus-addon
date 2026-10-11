@@ -38,6 +38,9 @@ Automated checks and live multiplayer checks are separate gates; use
   Chronicle with its sender; this does not create a jury or another punishment system.
 - Invitations through the addon warn about a character blocked from the network, with a reason
   and date. The officer still chooses; native guild invitations are not silently declined.
+- **Ask to update** in a player's right-click menu is now only for the author, the King and the
+  High Council. A 1.2.1 client ignores an ask from anyone else, which older versions can still
+  send. **Check version** stays available to every member.
 - The race chat's short label is **Skyborn**. Long Lottery animal names stay on one line above
   the drawn numbers, with the original five-place animation kept.
 - Finding a Bones opponent updates the existing Find window while searching and reviewing
@@ -79,6 +82,10 @@ Automated checks and live multiplayer checks are separate gates; use
   bypasses the shipped financial gate.
 - Photo-tour rolls no longer replace the game's global roll function. Innkeeper handoff waits
   for the native conversation to close and keeps the addon-only gamepad route.
+- A bug report's blocked-call stack now starts at the call the game refused, not at the Olympus
+  handler that recorded it. A block kept from an older version no longer heads a newer
+  version's report, and the status line names that block's version. This does not change who
+  caused a block; it only keeps an old one from appearing current.
 - The test simulator isolates each client's popup/slash registrations, preventing old worlds
   from being retained by later clients. Diagnostic timing is optional; assertions and gameplay
   scenarios are retained. Affected runs include the complete Bones/Farkle regression family,

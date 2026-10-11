@@ -56,6 +56,9 @@ test("Version letter content: English and Portuguese preserve the same role mark
 	assert(pt.L.LETTER_1_2_1:find("não anonimato na rede", 1, true))
 	assert(en.L.LETTER_1_2_1:find("excluded from test and release packages", 1, true))
 	assert(pt.L.LETTER_1_2_1:find("fora dos pacotes de teste e de release", 1, true))
+	-- 1.2.1 takes Ask to update away from ordinary members: the letter says who keeps it.
+	assert(en.L.LETTER_1_2_1:find("Ask to update, in a player's right-click menu, is now only for the King, the High Council and the addon's author", 1, true))
+	assert(pt.L.LETTER_1_2_1:find("Pedir para atualizar, no menu do botão direito de um jogador, agora é só para o Rei, o High Council e o autor do addon", 1, true))
 end)
 
 test("Version letter content: the actual letters limit level bands to duels and place the King's note in the recipient's local Chronicle", function()
