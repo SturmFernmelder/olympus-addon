@@ -59737,9 +59737,9 @@ end)()
 	end)
 
 	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.1")
+		eq(ns.VERSION, "1.2.2") -- (1.2.2: the same files, a new version, since 1.2.1 was already published)
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.1", 1, true))
+		assert(toc:find("## Version: 1.2.2", 1, true))
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -60001,7 +60001,12 @@ end
 			assert(roadmap:find("\n- v" .. v .. " ", 1, true), v)
 			if i > 1 then assert(Num(versions[i - 1]) > Num(v), v) end
 		end
-		assert(store:find("[#56](https://github.com/dnl-gentile/olympus-addon/issues/56)", 1, true), "an issue's number links to it")
+		-- An issue's number links to it (1.2.2: 1.1.5's line, the one that names #56, has left the
+		-- three recent versions, so the line of the TOC's version names it here).
+		local withIssue = roadmap:gsub("(\n%- v" .. ns.VERSION:gsub("%.", "%%.") .. " [^\n]*)", "%1 (#56)", 1)
+		local linked = gen.Build(full, readme, withIssue, ns.VERSION, size)
+		assert(linked:find("(#56)", 1, true) == nil, "no bare issue number")
+		assert(linked:find("[#56](https://github.com/dnl-gentile/olympus-addon/issues/56)", 1, true), "an issue's number links to it")
 		-- Each cut section: its opening, word for word, then the link to the same section of the
 		-- README. An opening that leads into the part cut (it ends on a colon, or names "the
 		-- following") says that part is in the README, where "Continued" read as broken off
@@ -60121,8 +60126,8 @@ end)()
 		return n
 	end
 
-	test("1.2.1 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.1")
+	test("1.2.2 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.2")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -60136,11 +60141,12 @@ end)()
 				assert(loadfile(ADDON_DIR .. "Letters.lua"))("Olympus", lns)
 				local title, body = lns.Letters.Text(ns.VERSION)
 				assert(type(title) == "string" and title ~= "", code .. ": current letter title")
-				assert(type(body) == "string" and body:find("1.2.1", 1, true), code .. ": current letter version")
+				assert(type(body) == "string" and body:find(ns.VERSION, 1, true), code .. ": current letter version")
 				eq(body:find("1.1.6", 1, true), nil, code .. ": no old build label")
 				eq(lns.Letters.Versions()[1], ns.VERSION, code .. ": current letter first")
 				assert(lns.Letters.Has("1.1.5"), code .. ": published letter retained")
 				assert(lns.Letters.Has("1.2.0"), code .. ": previous release letter retained")
+				assert(lns.Letters.Has("1.2.1"), code .. ": the published 1.2.1 letter retained")
 				assert(body:lower():find(code == "ptBR" and "sem apostas" or "no bets", 1, true), code .. ": free-game policy")
 			end)
 			GetLocale = savedLocale
@@ -60150,18 +60156,29 @@ end)()
 			ns.db.lettersRead = { ["1.1.6"] = true, ["1.2.0"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true)
-			eq(w.Letters.Frame().version, "1.2.1")
-			eq(ns.db.lettersRead["1.2.1"], true)
+			eq(w.Letters.Frame().version, "1.2.2")
+			eq(ns.db.lettersRead["1.2.2"], true)
 			eq(w.Letters.Ask("update"), false, "shown once per release")
+		end)
+		-- 1.2.1 was already published (its letter read by everyone who took it): this release's
+		-- letter is still new to them.
+		WithLetters(function(w)
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true }
+			ns.Consent.Show():Hide()
+			eq(w.Letters.Ask("update"), true, "a reader of the published 1.2.1 letter gets 1.2.2's")
+			eq(w.Letters.Frame().version, "1.2.2")
+			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text("1.2.2")), "and only 1.2.2's")
 		end)
 	end)
 
-	test("1.2.1 version letters: unread 1.2.0 comes before 1.2.1 on the update parchment, both are marked shown, but history remains individual", function()
+	test("1.2.2 version letters: unread 1.2.0 comes before 1.2.2 on the update parchment, both are marked shown, but history remains individual", function()
 		WithLetters(function(w)
 			local Lt = w.Letters
 			local _, oldBody = Lt.Text("1.2.0")
-			local _, newBody = Lt.Text("1.2.1")
-			local _, catchup = Lt.Text("1.2.1", true)
+			local _, newBody = Lt.Text("1.2.2")
+			local _, catchup = Lt.Text("1.2.2", true)
+			local _, catchup121 = Lt.Text("1.2.1", true)
+			assert(catchup121:find(oldBody, 1, true), "1.2.1's own catch-up still carries 1.2.0")
 			local oldAt, newAt = catchup:find(oldBody, 1, true), catchup:find(newBody, 1, true)
 			assert(oldAt and newAt and oldAt < newAt, "previous release before the current release")
 			eq(Lt.IsRead("1.2.0"), false, "reading text alone does not mark it shown")
@@ -60172,10 +60189,10 @@ end)()
 			ns.Consent.Show():Hide()
 			eq(Lt.Ask("update"), true)
 			eq(Lt.Frame().body:GetText(), catchup)
-			eq(Lt.IsRead("1.2.0"), true); eq(Lt.IsRead("1.2.1"), true)
+			eq(Lt.IsRead("1.2.0"), true); eq(Lt.IsRead("1.2.2"), true)
 			Lt.Hide()
 			eq(Lt.Ask("update"), false, "no repeated catch-up popup")
-			eq(Lt.Show("1.2.1"), true)
+			eq(Lt.Show("1.2.2"), true)
 			eq(Lt.Frame().body:GetText(), newBody, "history opens only the requested release")
 			eq(Lt.Show("1.2.0"), true)
 			eq(Lt.Frame().body:GetText(), oldBody)
@@ -60185,7 +60202,7 @@ end)()
 			ns.db.lettersRead = { ["1.2.0"] = true }
 			ns.Consent.Show():Hide()
 			eq(Lt.Ask("update"), true)
-			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.1")), "read old release is not repeated")
+			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.2")), "read old release is not repeated")
 		end)
 	end)
 
@@ -60433,7 +60450,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)

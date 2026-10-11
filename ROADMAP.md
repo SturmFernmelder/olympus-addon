@@ -34,8 +34,11 @@
   Guild treasuries in one list with one search; Bones between players for points, at a tavern or at a
   camp; no arbiters without bets (duels and Bones between their two players); duel points that
   consider levels; Find a player by level, distance and game
-- v1.2.1 Candidate (not published): Bones table chat; Watch and Wanted relay fixes; weekly briefs;
-  local chat label options
+- v1.2.1 Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
+- v1.2.2 The stutter fixed (the level race's checks off the message handler, data changes taken once
+  a second, the map left alone while closed, the minute jobs spread out) and `/oly perf`; the
+  privacy page and Bones invitations; guild removal and rank changes; Church counts; chat reports to
+  the King and the High Council; [Olympus] links; Shift + the guild key; the security reviews' fixes
 
 ## Next (after the base is proven in game)
 - ~~Guild leader offline for X days~~ (v0.3)

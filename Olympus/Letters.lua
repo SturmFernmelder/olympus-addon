@@ -39,7 +39,7 @@ local Letters = {}
 ns.Letters = Letters
 
 -- Every version with a letter, newest first.
-Letters.LIST = { "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
+Letters.LIST = { "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
 Letters.LOGIN_WAIT = 60 -- after login (the privacy page asks at 45 s: Consent.LOGIN_WAIT)
 Letters.WIDTH, Letters.HEIGHT = 440, 470
 
@@ -113,16 +113,21 @@ local function Strings(version)
 	return title, body
 end
 
+-- The letter a release's letter carries before it for a player who never read it (1.2.2 already
+-- tells 1.2.1's changes itself, so it carries 1.2.0's, like 1.2.1).
+Letters.CATCH_UP = { ["1.2.1"] = "1.2.0", ["1.2.2"] = "1.2.0" }
+
 -- A version's letter: its title and its text as the page shows them (its marks drawn), or nil when
 -- it has none.
 function Letters.Text(version, includePrevious)
 	local title, body = Strings(version)
 	if not title then return nil end
 	local previous
-	if includePrevious and version == "1.2.1" and not Letters.IsRead("1.2.0") then
-		local oldTitle, oldBody = Strings("1.2.0")
+	local older = includePrevious and Letters.CATCH_UP[version] or nil
+	if older and not Letters.IsRead(older) then
+		local oldTitle, oldBody = Strings(older)
 		if oldTitle then
-			previous = "1.2.0"
+			previous = older
 			body = table.concat({ oldTitle, oldBody, title, body }, "\n\n")
 		end
 	end

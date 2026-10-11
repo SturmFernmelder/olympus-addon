@@ -18,7 +18,7 @@ end
 test("Version letter content: both languages explain the guild, 99 soldiers, Church and free games with supported role markers", function()
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local cns = Language(locale)
-		for _, version in ipairs({ "1.2.0", "1.2.1" }) do
+		for _, version in ipairs({ "1.2.0", "1.2.1", "1.2.2" }) do
 			local key = "LETTER_" .. version:gsub("%.", "_")
 			local raw = assert(rawget(cns.L, key))
 			local title, body = cns.Letters.Text(version)
@@ -36,7 +36,7 @@ test("Version letter content: both languages explain the guild, 99 soldiers, Chu
 		assert(old:find("Vox Populi", 1, true) and old:find("30", 1, true), locale .. ": retained polls")
 		assert(old:find(locale == "enUS" and "duels only" or "somente para duelos", 1, true), locale .. ": level band does not apply to Bones")
 		assert(old:find(locale == "enUS" and "not a finished new departmental workflow" or "não a um novo fluxo departamental pronto", 1, true), locale .. ": limited departments not advertised as finished")
-		assert(cns.L.LETTER_1_2_1:find("Players", 1, true) and cns.L.LETTER_1_2_1:find("Everyone", 1, true), locale .. ": actual table audiences")
+		assert(cns.L.LETTER_1_2_2:find("Players", 1, true) and cns.L.LETTER_1_2_2:find("Everyone", 1, true), locale .. ": actual table audiences")
 	end
 end)
 
@@ -47,31 +47,31 @@ test("Version letter content: English and Portuguese preserve the same role mark
 		for mark in text:gmatch("{(%a+)}") do out[#out + 1] = mark end
 		return table.concat(out, ",")
 	end
-	for _, key in ipairs({ "LETTER_1_2_0", "LETTER_1_2_1" }) do
+	for _, key in ipairs({ "LETTER_1_2_0", "LETTER_1_2_1", "LETTER_1_2_2" }) do
 		eq(Order(en.L[key]), Order(pt.L[key]), key .. ": same sections and bullet icons")
 	end
-	assert(en.L.LETTER_1_2_1:find("no local send record or confirmed receipt held", 1, true))
-	assert(pt.L.LETTER_1_2_1:find("Sem registro local de envio nem recibo confirmado guardado", 1, true))
-	assert(en.L.LETTER_1_2_1:find("not anonymity on the network", 1, true))
-	assert(pt.L.LETTER_1_2_1:find("não anonimato na rede", 1, true))
-	assert(en.L.LETTER_1_2_1:find("excluded from test and release packages", 1, true))
-	assert(pt.L.LETTER_1_2_1:find("fora dos pacotes de teste e de release", 1, true))
+	assert(en.L.LETTER_1_2_2:find("no local send record or confirmed receipt held", 1, true))
+	assert(pt.L.LETTER_1_2_2:find("Sem registro local de envio nem recibo confirmado guardado", 1, true))
+	assert(en.L.LETTER_1_2_2:find("not anonymity on the network", 1, true))
+	assert(pt.L.LETTER_1_2_2:find("não anonimato na rede", 1, true))
+	assert(en.L.LETTER_1_2_2:find("excluded from test and release packages", 1, true))
+	assert(pt.L.LETTER_1_2_2:find("fora dos pacotes de teste e de release", 1, true))
 	-- 1.2.1 takes Ask to update away from ordinary members: the letter says who keeps it.
-	assert(en.L.LETTER_1_2_1:find("Ask to update, in a player's right-click menu, is now only for the King, the High Council and the addon's author", 1, true))
-	assert(pt.L.LETTER_1_2_1:find("Pedir para atualizar, no menu do botão direito de um jogador, agora é só para o Rei, o High Council e o autor do addon", 1, true))
+	assert(en.L.LETTER_1_2_2:find("Ask to update, in a player's right-click menu, is now only for the King, the High Council and the addon's author", 1, true))
+	assert(pt.L.LETTER_1_2_2:find("Pedir para atualizar, no menu do botão direito de um jogador, agora é só para o Rei, o High Council e o autor do addon", 1, true))
 end)
 
 test("Version letter content: the actual letters limit level bands to duels and place the King's note in the recipient's local Chronicle", function()
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local cns = Language(locale)
 		local _, before = cns.Letters.Text("1.2.0")
-		local _, now = cns.Letters.Text("1.2.1")
+		local _, now = cns.Letters.Text("1.2.2")
 		assert(before:find(locale == "enUS" and "duels only" or "somente para duelos", 1, true), locale .. ": the original Bones level-filter claim is corrected")
 		assert(now:find(locale == "enUS" and "The recipient keeps the note in their local Chronicle with the King's authorship"
 			or "Quem recebe guarda a nota em seu Chronicle local, com a autoria do Rei", 1, true), locale .. ": recipient-local record, not a persistent King's ledger")
 		assert(now:find(locale == "enUS" and "main window's Realm tab, available to every member"
-			or "aba The Realm da janela principal, disponível para todos os membros", 1, true), locale .. ": personal brief belongs to the ordinary member's main window")
-		assert(now:find(locale == "enUS" and "no longer opens as a surprise popup"
-			or "sem mais aparecer como popup inesperado", 1, true), locale .. ": no obsolete automatic-popup claim")
+			or "aba O Reino da janela principal, disponível para todos os membros", 1, true), locale .. ": personal brief belongs to the ordinary member's main window")
+		-- (1.2.2: the popup never reached a release, so the letter no longer says it is gone.)
+		eq(now:find(locale == "enUS" and "surprise popup" or "popup inesperado", 1, true), nil, locale .. ": no fix claimed for a popup players never had")
 	end
 end)

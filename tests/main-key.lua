@@ -218,7 +218,7 @@ test("Main shortcut: the 1.2.1 letter tells of Shift + the guild key and the gam
 		local ok, why = pcall(assert(loadfile(ROOT .. "Olympus/Locales.lua")), "Olympus", cns)
 		GetLocale = saved
 		if not ok then error(why, 0) end
-		local letter = cns.L.LETTER_1_2_1
+		local letter = cns.L.LETTER_1_2_2
 		assert(letter:find(locale == "enUS" and "Shift + your guild key (Shift-J by default)" or "Shift + a sua tecla da guilda (Shift-J por padrão)", 1, true), locale)
 		assert(letter:find(locale == "enUS" and "AddOns: Toggle Olympus" or "AddOns: Abrir/fechar o Olympus", 1, true), locale)
 	end

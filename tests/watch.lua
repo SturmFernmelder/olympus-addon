@@ -1490,8 +1490,8 @@ test("watch: the report and case strings in English and pt-BR, with the same pla
 	end
 	assert(n >= 60, "the strings: " .. n)
 	-- (1.2.1, the review: the letter promises the council copy only as the King's client takes it.)
-	assert(ns.L.LETTER_1_2_1:find("once it already knows you in your guild", 1, true) and ns.L.LETTER_1_2_1:find("it keeps only the lines it heard itself", 1, true))
-	assert(pt.L.LETTER_1_2_1:find("quando ele já conhece você na sua guilda", 1, true) and pt.L.LETTER_1_2_1:find("ele guarda só as linhas que ouviu", 1, true))
+	assert(ns.L.LETTER_1_2_2:find("once it already knows you in your guild", 1, true) and ns.L.LETTER_1_2_2:find("it keeps only the lines it heard itself", 1, true))
+	assert(pt.L.LETTER_1_2_2:find("quando ele já conhece você na sua guilda", 1, true) and pt.L.LETTER_1_2_2:find("ele guarda só as linhas que ouviu", 1, true))
 	assert(ns.L.WATCH_REPORT_TIP:find("Nothing happens to them by itself", 1, true))
 	assert(pt.L.WATCH_REPORT_TIP:find("Nada acontece com ele por isso", 1, true))
 end)
