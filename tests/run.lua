@@ -7194,12 +7194,14 @@ local RealTrusted = ns.Hop.Trusted
 test("layer hop: only a helper the addon can vouch for gets their invite accepted for us", function()
 	WithHop(function(w, H)
 		local real = RealTrusted
-		-- Who counts: a guildmate, a Lord or Captain the census names, a player seen on that layer.
+		-- Who counts: a guildmate; not a Lord or Captain only the census names, nor a player seen on
+		-- that layer. (Changed on purpose, 1.2.1: the census Captain counted; two cooperating
+		-- characters can forge one, so his invite is the player's click now: tests/hop-regressions.lua.)
 		local savedRank, savedGuilds = ns.Roster.RankOf, ns.rdb.guilds
 		ns.Roster.RankOf = function(name) if ns.ShortName(name) == "Mate" then return 5 end end
 		ns.rdb.guilds = SampleGuilds()
 		eq(real("Mate-Realm", 1453, 8), true, "a guildmate")
-		eq(real("Capt-Realm", 1453, 8), true, "a Captain the census names")
+		eq(real("Capt-Realm", 1453, 8), false, "a Captain only the census names")
 		eq(real("Stranger-Realm", 1453, 8), false, "anyone else")
 		ns.Layers.Receive("Seen-Realm", { mapID = 1453, zoneUID = 8, rank = 9, guild = "Olympus IV" })
 		eq(real("Seen-Realm", 1453, 8), false, "a layer announcement is only its sender's word")

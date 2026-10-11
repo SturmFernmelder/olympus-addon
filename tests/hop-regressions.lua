@@ -404,3 +404,117 @@ test("hop security (1.2.1): the asker takes no offer from a claimed guild; a ver
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- Review of 1.2.1: Hop.Trusted counted a Lord or Captain the census names, and while signed
+-- enforcement is off (as 1.2.1 ships) two cooperating characters can forge one in their guild's
+-- reports. That trust accepted his invite for the player (AcceptGroup) and let "Always invite" or
+-- "For Olympus!" invite him without a click. Now only our roster, signed or pinned people; a
+-- census officer of another guild (Channels.VerifiedLevel's 2, true) still hops by a click.
+local RealTrusted = ns.Hop.Trusted
+local function WithCensusOfficer(w, H, fn)
+	H.Trusted = RealTrusted -- (WithHop puts it back)
+	w.strangers["Officer-Realm"] = true
+	local guildOf, known, guilds = ns.Moderation.GuildOf, ns.Data.KnownRank, ns.rdb.guilds
+	ns.rdb.guilds = { ["Olympus III"] = { total = 40, online = 4, zones = {}, t = w.clock, leader = "Leadperson",
+		leaderOnline = false, officers = { { name = "Officer" } }, top = {} } }
+	-- The census's word that "Officer" is an officer there (two reports, Data.KnownRank).
+	ns.Data.KnownRank = function(n, g, soft)
+		if ns.FullName(n) == "Officer-Realm" and g == "Olympus III" then return 1, 2 end
+		return known(n, g, soft)
+	end
+	ns.Moderation.GuildOf = function(n) if ns.FullName(n) == "Officer-Realm" then return "Olympus III" end return guildOf(n) end
+	local ok, err = pcall(function()
+		local level, verified = ns.Channels.VerifiedLevel("Officer-Realm", "Olympus III")
+		eq(level, 2); eq(verified, true, "the census verifies him: a member")
+		fn()
+	end)
+	ns.Moderation.GuildOf, ns.Data.KnownRank, ns.rdb.guilds = guildOf, known, guilds
+	if not ok then error(err, 0) end
+end
+
+test("hop security (1.2.1): Always invite and For Olympus! invite a census officer of another guild only on a click", function()
+	for _, mode in ipairs({ "always", "king" }) do
+		WithHop(function(w, H)
+			WithCensusOfficer(w, H, function()
+				local S, saved = ns.HopSightings, ns.HopSightings.LocalKingLayer
+				local ok, err = pcall(function()
+					w.see(7)
+					if mode == "always" then ns.db.layerAutoInvite = true
+					else
+						S.LocalKingLayer = function(mapID, zoneUID) return mapID == 1453 and zoneUID == 7 end
+						H.ChooseKing("auto")
+					end
+					eq(RealTrusted("Officer-Realm"), false, "the census alone vouches for nobody")
+					H.HandleAsk("CHANNEL", "Officer-Realm", "LQ~42~1453~7")
+					eq(w.whispered[1], "Officer-Realm LO~42~0~0", "still offered")
+					H.HandleRequest("WHISPER", "Officer-Realm", "LR~42")
+					eq(#w.invited, 0, mode .. ": not invited on its own")
+					eq(#w.popups, 1, mode .. ": the window")
+					H.Answer(w.popups[1].data, true)
+					eq(w.invited[1], "Officer", "invited on the click")
+					-- A guildmate is still invited on its own (alone with a hop guest: OnlyGuests).
+					w.group, w.lead, w.party.party1 = 2, true, "Officer"
+					w.clock = w.clock + H.HELP_GAP + 1
+					H.HandleAsk("CHANNEL", "Mate-Realm", "LQ~43~1453~7")
+					H.HandleRequest("WHISPER", "Mate-Realm", "LR~43")
+					eq(w.invited[2], "Mate", mode .. ": a guildmate, on its own"); eq(#w.popups, 1)
+				end)
+				S.LocalKingLayer = saved
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end
+end)
+
+test("hop security (1.2.1): a census officer's invite is never accepted for the player; a guildmate's is", function()
+	WithHop(function(w, H)
+		WithCensusOfficer(w, H, function()
+			w.see(7)
+			H.Ask(1453, 8, "destination")
+			H.HandleOffer("WHISPER", "Officer-Realm", "LO~1~0~0")
+			eq(H.State().count, 1, "his offer is taken: a verified member")
+			w.clock = w.clock + H.WINDOW; H.Tick()
+			eq(w.whispered[1], "Officer-Realm LR~1")
+			H.OnInvite("Officer")
+			eq(w.accepted, 0, "the game's invite window: the player clicks")
+			eq(H.State().phase, "requested")
+			-- The player accepts by hand: the hop goes on as the officer's.
+			w.group, w.party.party1 = 2, "Officer"; H.OnRoster()
+			eq(H.State().phase, "joined")
+		end)
+	end)
+	WithHop(function(w, H)
+		H.Trusted = RealTrusted
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Mate-Realm", "LO~1~0~0")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		H.OnInvite("Mate")
+		eq(w.accepted, 1, "a guildmate's invite is accepted for the player")
+	end)
+end)
+
+test("hop security (1.2.1): trust is asked again at the invite, and a pinned or signed title still counts", function()
+	WithHop(function(w, H)
+		H.Trusted = RealTrusted
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Mate-Realm", "LO~1~0~0")
+		assert(H.State().offers["Mate-Realm"].trusted, "a guildmate when he offered")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		w.strangers["Mate-Realm"] = true -- (out of our roster before his invite)
+		H.OnInvite("Mate")
+		eq(w.accepted, 0, "not one of ours any more: the player clicks")
+		local K, saved = ns.King, ns.King.IsStewardName
+		K.IsStewardName = function(n) return ns.FullName(n) == "Stewardy-Realm" end
+		local ok, err = pcall(function()
+			w.strangers["Stewardy-Realm"] = true
+			eq(RealTrusted("Stewardy-Realm"), true, "the signed titles' Steward")
+			eq(RealTrusted("Nobody-Realm"), true, "(a guildmate in this harness)")
+			w.strangers["Nobody-Realm"] = true
+			eq(RealTrusted("Nobody-Realm"), false, "anyone else")
+		end)
+		K.IsStewardName = saved
+		if not ok then error(err, 0) end
+	end)
+end)

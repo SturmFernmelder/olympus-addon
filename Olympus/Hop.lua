@@ -303,7 +303,9 @@ function Hop.HandleRequest(dist, sender, text)
 	-- alone or with hop guests; in a group of our own we get the window, until "Always invite"
 	-- is clicked in it (1.1.5, #50: then that group too, GroupAutoActive).
 	-- "For Olympus!" invites on its own only for a King two reports confirm.
-	local auto = ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))
+	-- 1.2.1: both, only for a player the addon can vouch for (Hop.Trusted: roster, signed or
+	-- pinned); a member of another guild the census names gets the window, a click.
+	local auto = (ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))) and Hop.Trusted(sender)
 	if auto and (OnlyGuests() or GroupAutoActive()) then return Invite(sender, id, true) end
 	if auto then
 		stats.autoBlocked = stats.autoBlocked + 1
@@ -601,33 +603,22 @@ function Hop.SendAsk()
 	Changed()
 end
 
--- A helper the addon can vouch for: a guildmate (our roster), or a Lord or Captain. Until the
--- author explicitly activates signed enforcement, preserve the documented census rule exactly;
--- after it, only the manifest (plus the pinned Crown identities) counts. Their invite is accepted
--- for the player; anyone else's is left to the game's invite
--- window (one click), so nobody pulls a player into their group just by answering an ask read
--- on the channel. (A layer announcement is the sender's own word: it proves nothing here.)
+-- A player the addon can vouch for, and so may act for without a click: a guildmate (our roster),
+-- the King's pinned character, his Steward and Hands, or a Lord or Captain of the author's signed
+-- manifest (once signed enforcement is on). Their invite is accepted for the player, and "Always
+-- invite" or "For Olympus!" invites them; anyone else's invite is left to the game's invite window
+-- (one click), and anyone else's request to ours, so nobody pulls a player into a group just by
+-- answering an ask read on the channel. 1.2.1: never a census rank: two cooperating characters can
+-- forge an "officer" in one guild's reports, and the census rule still holds while enforcement is
+-- off. A census officer of another guild still hops, by a click. (A layer announcement is the
+-- sender's own word: it proves nothing here.)
 function Hop.Trusted(name)
 	name = ns.FullName(name)
 	if ns.Roster.RankOf(name) then return true end
-	if ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced() then
-		if ns.IsKingCharacter(name) or (ns.King and (ns.King.IsStewardName(name) or ns.King.IsHandName(name))) then return true end
-		local guild, rank = ns.Authority.Role(name)
-		if guild and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild)) then return true end
-		return false
-	end
-	local short = ns.ShortName(name)
-	for guild, g in pairs(ns.rdb.guilds or {}) do
-		-- (1.1: never a guild the moderators took off the network, Moderation.lua.)
-		if type(g) == "table" and not (ns.Data.NetOff and ns.Data.NetOff(guild)) then
-			local listed = g.leader and ns.ShortName(g.leader) == short
-			for _, o in ipairs(not listed and g.officers or {}) do
-				if o.name and ns.ShortName(o.name) == short then listed = true break end
-			end
-			if listed and ns.Data.KnownRank(name, guild) then return true end
-		end
-	end
-	return false
+	if ns.IsKingCharacter(name) or (ns.King and (ns.King.IsStewardName(name) or ns.King.IsHandName(name))) then return true end
+	if not (ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced()) then return false end
+	local guild, rank = ns.Authority.Role(name)
+	return (guild and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild))) and true or false
 end
 
 function Hop.HandleOffer(dist, sender, text)
@@ -672,9 +663,10 @@ function Hop.OnInvite(name) -- gp:party-invite
 	if problem then return Finish(problem) end
 	-- Not one the addon can vouch for (Hop.Trusted): the game's own window, the player's click.
 	-- With the gamepad UI, always: the addon leaves the game's popups alone there (Dialog.lua),
-	-- and the game's invite window is the one a controller answers.
+	-- and the game's invite window is the one a controller answers. (1.2.1: asked again now, not
+	-- only when the offer came: a signed role can lapse, a guildmate leave, in between.)
 	local o = ask.offers[helper]
-	if not (o and o.trusted) or ns.GamepadUI() then
+	if not (o and o.trusted and Hop.Trusted(helper)) or ns.GamepadUI() then
 		-- The player decides: the wait starts over from this invite, and the group they may
 		-- join counts as this helper's (OnRoster) even before the game names its members.
 		ask.helper, ask.invitedBy, ask.asked = helper, helper, ns.Now()
