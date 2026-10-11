@@ -1036,6 +1036,16 @@ end
 
 -- Receipts heard (auditors: exposure and evidence; banks: the token's history).
 Debts.receiptHooks = {} -- fn(r, sender, mode)
+Debts.RECEIPTS_MAX = 2000        -- an auditor's receipts kept...
+Debts.RECEIPTS_PER_SENDER = 200  -- ...one sender's at most (his oldest go first): no flood pushes the others' out
+-- (1.2.1) What an auditor or a bank keeps of a receipt (the evidence, an arbiter's exposure, a
+-- bank's standing history) is the Wallet's and the stakes'. With neither (the release), a receipt is
+-- only its two parties' own: the payer's debt it clears, the payee's confirmation.
+local function KeepsReceipts()
+	local C = ns.Compliance
+	if type(C) ~= "table" then return false end
+	return (type(C.Wallet) == "function" and C.Wallet() == true) or (type(C.Arbiters) == "function" and C.Arbiters() == true)
+end
 local function OnReceipt(dist, sender, mode, body)
 	if dist ~= "WHISPER" then return end
 	local ref, payer, payee, copper, how, time, onTime = ns.Arena.Fields(body, 7)
@@ -1056,12 +1066,18 @@ local function OnReceipt(dist, sender, mode, body)
 		end
 	end
 	local R = ns.ArenaRoles
-	if R and R.Auditor(ns.me, mode) then
+	local keeps = KeepsReceipts()
+	if keeps and R and R.Auditor(ns.me, mode) then
 		local s = Store(mode)
 		s.receipts = type(s.receipts) == "table" and s.receipts or {}
 		local list = s.receipts
 		list[#list + 1] = r
-		while #list > 2000 do table.remove(list, 1) end
+		local who, his, oldest = r.from:lower(), 0, nil
+		for i, x in ipairs(list) do
+			if type(x) == "table" and type(x.from) == "string" and x.from:lower() == who then his, oldest = his + 1, oldest or i end
+		end
+		if his > Debts.RECEIPTS_PER_SENDER then table.remove(list, oldest) end
+		while #list > Debts.RECEIPTS_MAX do table.remove(list, 1) end
 	end
 	-- The payer's word to me, the payee: confirmed once I saw the gold (before or after this).
 	r.mode = mode
@@ -1078,7 +1094,9 @@ local function OnReceipt(dist, sender, mode, body)
 			table.insert(echoes[key], r)
 		end
 	end
-	for _, fn in ipairs(Debts.receiptHooks) do ns.SafeCall("arena receipt", fn, r, sender, mode) end
+	if keeps then
+		for _, fn in ipairs(Debts.receiptHooks) do ns.SafeCall("arena receipt", fn, r, sender, mode) end
+	end
 	ns.Arena.Changed()
 end
 ns.Comm.Handle("ZR", ns.Arena.Handle("ZR", OnReceipt))
