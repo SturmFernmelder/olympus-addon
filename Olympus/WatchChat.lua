@@ -89,6 +89,7 @@ WC.SELF_REPEAT = 300        -- current own guild timeout testimony, never the gu
 WC.SELF_AUDIT_MAX = 5       -- a player's own words (S) in the council's audit at most
 WC.ACTIONS_MAX = 50           -- the actor's own actions it repeats
 WC.APPLIED_MAX = 1000
+WC.APPLIED_EACH = 200          -- one actor's floors kept; past it his oldest goes, under a watermark
 WC.SELF_APPLIED_MAX = 1000
 WC.LISTS_MAX = 40             -- namers' lists kept
 WC.LIST_EVERY = 300           -- a list is repeated this often (King.HANDS_EVERY)...
@@ -239,7 +240,7 @@ WC.Hash = Hash
 -- What this client keeps (ns.rdb.chatMod: per realm group and faction, like the net-off words)
 ---------------------------------------------------------------------------
 
-local FIELDS = { "timeouts", "lifts", "tombs", "applied", "selfApplied", "guildLists", "modLists", "myMods", "myWatchers",
+local FIELDS = { "timeouts", "lifts", "tombs", "applied", "appliedFloor", "selfApplied", "guildLists", "modLists", "myMods", "myWatchers",
 	"actions", "audit", "record", "appeals", "appealAnswers", "decisions", "toldJ", "blocked", "sentS", "verdicts" }
 
 local function Store()
@@ -283,6 +284,38 @@ end
 local function ReplayRoom(t, id, max)
 	PruneReplayFloors(t)
 	return t[id] ~= nil or Count(t) < max
+end
+
+-- 1.2.1: a full history makes room instead of refusing every new action (one actor could fill
+-- it and stop all moderation): the actor's own oldest floor goes first, then the oldest of all,
+-- and each forgotten floor leaves its actor a watermark, so a replay of it (no newer) is still
+-- refused while that actor's later actions are taken.
+local function OldestFloor(t, by)
+	local oid, oat
+	for k, v in pairs(t) do
+		if type(k) == "string" and (not by or k:sub(1, #by + 1) == by .. "#") and type(v) == "number" and (not oat or v < oat) then oid, oat = k, v end
+	end
+	return oid, oat
+end
+local function ForgetFloor(t, floors, id, at)
+	t[id] = nil
+	local who = id:match("^(.-)#")
+	if who then floors[who] = math.max(tonumber(floors[who]) or 0, tonumber(at) or 0) end
+end
+local function MakeFloorRoom(t, floors, by)
+	PruneReplayFloors(t)
+	local mine = 0
+	for k in pairs(t) do if type(k) == "string" and k:sub(1, #by + 1) == by .. "#" then mine = mine + 1 end end
+	if mine >= WC.APPLIED_EACH then
+		local id, at = OldestFloor(t, by)
+		if id then ForgetFloor(t, floors, id, at) end
+	end
+	while Count(t) >= WC.APPLIED_MAX do
+		local id, at = OldestFloor(t, by)
+		if not id then id, at = OldestFloor(t) end
+		if not id then break end
+		ForgetFloor(t, floors, id, at)
+	end
 end
 
 local function Trim(list, max) while #list > max do table.remove(list, 1) end end
@@ -1177,10 +1210,14 @@ end
 local function Apply(a)
 	local s = Store()
 	if not s then return false, "store" end
-	local id = Key(a.by) .. "#" .. tostring(a.seq)
+	local by = Key(a.by)
+	local id = by .. "#" .. tostring(a.seq)
 	local seen = s.applied[id]
 	if seen and (a.op == "D" or a.op == "P") then return true, "repeat" end
-	if not ReplayRoom(s.applied, id, WC.APPLIED_MAX) then return false, "full" end
+	if not seen then
+		if (tonumber(s.appliedFloor[by]) or 0) >= (tonumber(a.at) or 0) then return false, "old" end
+		MakeFloorRoom(s.applied, s.appliedFloor, by)
+	end
 	local n, words
 	if a.op == "D" then
 		n, words = ApplyDelete(a.target, a.refs, a.at, a.role)

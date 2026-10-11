@@ -786,32 +786,30 @@ end)
 -- Watchers and Olympus moderators
 ---------------------------------------------------------------------------
 
-test("watch: chat moderation: full action replay history refuses overflow without losing live floors or sending rejected local actions", function()
+test("watch: chat moderation (1.2.1): a full action replay history makes room: the actor's own oldest floor goes under a watermark, its replay stays refused, and moderation never stops", function()
 	World(function(w)
 		local G, A, B, D = Standard(w)
 		A.WC.APPLIED_MAX = 2
 		assert(w.As(A, A.WC.Purge, B.name, "first")); w.Run()
 		w.epoch = w.epoch + 61
 		assert(w.As(A, A.WC.Purge, B.name, "second")); w.Run()
-		local s, retained, n = A.WC.Store(), {}, 0
-		for key, at in pairs(s.applied) do retained[key] = at; n = n + 1 end
-		eq(n, 2)
-		local sent, audit = #w.sent, #s.audit
+		local s = A.WC.Store()
 		w.epoch = w.epoch + 61
-		local ok, why = w.As(A, A.WC.Purge, B.name, "overflow")
-		eq(ok, false); eq(why, "full"); w.Run()
-		eq(#w.sent, sent, "a rejected local action sends nothing"); eq(#s.audit, audit)
-		for key, at in pairs(retained) do eq(s.applied[key], at, "live replay floors are not evicted") end
+		local ok, why = w.As(A, A.WC.Purge, B.name, "third")
+		eq(ok, true, "a full history no longer refuses a new action: " .. tostring(why)); w.Run()
+		local n = 0
+		for _ in pairs(s.applied) do n = n + 1 end
+		eq(n, 2, "still within the cap")
 		D.WC.APPLIED_MAX = 1
-		local function Wire(seq)
-			return ("MD~1~P~G~%d~%d~%s~%s~60~-~-~"):format(seq, w.epoch, X, B.name)
+		local function Wire(seq, at)
+			return ("MD~1~P~G~%d~%d~%s~%s~60~-~-~"):format(seq, at, X, B.name)
 		end
 		w.epoch = w.epoch + 61
-		-- D already received the two old actions. Lowering the cap is a legacy oversize store,
-		-- which must stop growing without forgetting valid entries.
-		local before = #D.WC.Store().audit
-		eq(select(2, w.Inject("GUILD", A.name, D, Wire(900))), "full")
-		eq(#D.WC.Store().audit, before)
+		local newer = w.epoch
+		eq(w.Inject("GUILD", A.name, D, Wire(900, newer)), true, "a newer action is taken on a full history")
+		w.epoch = w.epoch + 61
+		eq(w.Inject("GUILD", A.name, D, Wire(901, w.epoch)), true, "and the next one")
+		eq(select(2, w.Inject("GUILD", A.name, D, Wire(900, newer))), "old", "the forgotten one's replay is refused")
 	end)
 end)
 
