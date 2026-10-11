@@ -611,7 +611,8 @@ test("1.1.6 Church: saved data: a malformed ledger or book is dropped at load; t
 	local cl2 = w:Client("Saved Two", { rdb = rdb2 })
 	w:As(cl2, cl2.Church.CheckSaved)
 	w:As(cl2, cl2.Count.CheckSaved)
-	eq(rdb2.church.led, nil); eq(rdb2.church.book, nil)
+	-- (1.2.1: the malformed record goes, the ledger itself stays for its good ones.)
+	eq(next(rdb2.church.led.r), nil); eq(rdb2.church.book, nil)
 	-- A real ledger and book survive the load's check whole (their keys and lines carry no escape code).
 	local w3, c3 = Cast()
 	w3:LogEvent(World.GUILD, "invite", "Mira Wells", "Kept Guy", 3)
@@ -904,4 +905,112 @@ test("1.1.6 Church: a full ledger archives the credited record it lets go, and n
 	end)
 	K.Count.RECORDS_MAX = saved
 	if not ok then error(err, 0) end
+end)
+
+-- 1.2.1 (a Church Apostle: "i went from 1300 invites to 893, even though i invited 400 players
+-- today"). The keeper's ledger was full: each new record let the oldest go into an all-time archive
+-- the "Last 30 days" and "This week" windows never read, so every invite of the day took one of his
+-- confirmed recruits off the ranking. Each test below fails on that build.
+
+-- A record straight into a keeper's ledger (as evidence or a catch-up line merges it): a recruit of
+-- `by`, joined `hoursAgo` hours ago (the hour the log gives), confirmed by a witness unless `pending`.
+local function Give(w, K, recruit, by, hoursAgo, pending, extra)
+	local tj = (math.floor(w.clock / 3600) - hoursAgo) * 3600
+	local rec = { n = recruit, bn = by, g = World.GUILD, kind = "i", tc = tj - 3600, tj = tj,
+		ws = not pending and { "wes brook" } or nil, s = pending and 1 or nil }
+	for k, v in pairs(extra or {}) do rec[k] = v end
+	return w:As(K, K.Count.MergeIn, Key(recruit) .. ":" .. Key(by), rec, false)
+end
+local function Joins(w, K, by, window) return w:As(K, K.Count.Own, Key(by), window).joins end
+
+test("1.2.1 Church: a full ledger takes no recruit off a count: 1316 credited this week, 423 invites more today, still 1316 (not 893), and the next confirmation counts", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 2000 -- (the ledger's size when the Apostle saw it)
+	local ok, err = pcall(function()
+		-- Aldric's 1316 confirmed recruits of the last five days, the ledger's oldest records (many in
+		-- one hour, as the log dates them), then 684 of Nils's: the ledger is full.
+		for i = 1, 1316 do Give(w, K, "Ald Rec" .. Letters(i), A1, 120 - (i % 72)) end
+		for i = 1, 684 do Give(w, K, "Nil Rec" .. Letters(i), "Nils Ford", 47 - (i % 24)) end
+		eq(Records(w, K), 2000)
+		local week = Joins(w, K, A1, "w")
+		eq(Joins(w, K, A1, "m"), 1316)
+		local function Row()
+			for _, r in ipairs(w:As(K, K.Count.Ranking, "a", "m")) do if r.key == Key(A1) then return r end end
+		end
+		local before = Row()
+		eq(before.own, 13160)
+		-- Today's invites, his own client's reports (pending until a witness's read confirms them).
+		for i = 1, 423 do Give(w, K, "New Rec" .. Letters(i), A1, 1, true) end
+		assert(Records(w, K) <= 2000, "the ledger stays bounded")
+		eq(Joins(w, K, A1, "m"), 1316, "the last 30 days: 1316, not 893")
+		eq(Joins(w, K, A1, "w"), week, "this week unchanged")
+		eq(Joins(w, K, A1, "a"), 1316, "all time")
+		eq(Joins(w, K, "Nils Ford", "m"), 684, "nobody else's either")
+		local row = Row()
+		eq(row.own, 13160); eq(row.joins, 1316)
+		eq(row.score, before.score, "his score (his own and his network's share: Nils is under Mira, under him) unchanged")
+		-- A witness confirms the first of today's invites, which had to make room: it counts.
+		eq(Give(w, K, "New Rec" .. Letters(1), A1, 1), true)
+		eq(Joins(w, K, A1, "m"), 1317, "and the count still rises")
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: keepers holding the same records show the same numbers in every window, whatever order they came in, full ledgers included", function()
+	local w, c = Cast()
+	local K1, K2, truth = c.a1, c.a2, c.head
+	local saved = K1.Count.RECORDS_MAX
+	K1.Count.RECORDS_MAX, K2.Count.RECORDS_MAX = 60, 60
+	local ok, err = pcall(function()
+		-- 200 records: Aldric's and Nils's recruits, four to an hour, every fifth one pending and every
+		-- seventh a transfer; one keeper takes them oldest first, the other newest first.
+		local specs = {}
+		for i = 1, 200 do
+			specs[i] = { "Con Rec" .. Letters(i), i % 2 == 0 and A1 or "Nils Ford", math.floor((200 - i) / 4), i % 5 == 0,
+				i % 7 == 0 and { t = 1 } or nil }
+		end
+		for i = 1, 200 do
+			local s = specs[i]
+			Give(w, K1, s[1], s[2], s[3], s[4], s[5])
+			Give(w, truth, s[1], s[2], s[3], s[4], s[5])
+			local r = specs[201 - i]
+			Give(w, K2, r[1], r[2], r[3], r[4], r[5])
+		end
+		assert(Records(w, K1) <= 60 and Records(w, K2) <= 60, "both ledgers stayed bounded")
+		eq(Records(w, truth), 200, "the third keeper's ledger had room for all")
+		for _, by in ipairs({ A1, "Nils Ford" }) do
+			for _, window in ipairs({ "w", "m", "a" }) do
+				local want = w:As(truth, truth.Count.Own, Key(by), window)
+				for _, K in ipairs({ K1, K2 }) do
+					local got = w:As(K, K.Count.Own, Key(by), window)
+					eq(got.joins, want.joins, by .. " " .. window .. " joins")
+					eq(got.points, want.points, by .. " " .. window .. " points")
+				end
+			end
+		end
+		-- (Each recruit once: the second claim on a recruit whose credited claim went to the archive is
+		-- not taken, so he can never count for two people.)
+		eq(Rec(w, K1, specs[2][1], A1), nil, "(Aldric's recruit went to the archive)")
+		eq(Give(w, K1, specs[2][1], "Nils Ford", 1), false)
+		eq(Joins(w, K1, "Nils Ford", "a"), w:As(truth, truth.Count.Own, Key("Nils Ford"), "a").joins)
+	end)
+	K1.Count.RECORDS_MAX, K2.Count.RECORDS_MAX = saved, saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: a reload keeps the ledger when one saved record fails the load's check: only that record goes", function()
+	local w, c = Cast()
+	local K = c.a1
+	for i = 1, 5 do Give(w, K, "Kept Rec" .. Letters(i), "Mira Wells", 3) end
+	-- A record of a guild this build no longer counts as Olympus (the council's removed list, the
+	-- signed approved list).
+	w:As(K, K.Count.Led).r["odd guy:mira wells"] = { n = "Odd Guy", bn = "Mira Wells", g = "Plain Guild", kind = "i",
+		tc = w.clock - 7200, tj = w.clock - 3600, ws = { "wes brook" }, u = w.clock }
+	w:As(K, K.Count.CheckSaved)
+	eq(w:As(K, K.Count.Led).r["odd guy:mira wells"], nil, "the record that fails goes")
+	eq(Records(w, K), 5, "the others stay")
+	eq(Joins(w, K, "Mira Wells", "m"), 5)
 end)

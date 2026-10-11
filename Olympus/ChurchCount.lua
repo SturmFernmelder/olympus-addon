@@ -73,7 +73,10 @@ Count.CLAIM_KEEP = 7 * 86400
 Count.MEMORY_MAX, Count.MEMORY_DAYS, Count.GUILDS_MAX = 2500, 120, 64
 Count.EV_MAX, Count.EV_DAYS, Count.INV_MAX, Count.ATT_MAX, Count.ATT_DAYS = 3000, 8, 300, 500, 14
 Count.OUTBOX_MAX, Count.OUTBOX_DAYS = 40, 7
-Count.RECORDS_MAX, Count.RECORDS_DAYS, Count.PEOPLE_MAX = 2000, 120, 400
+-- (1.2.1: 6000 records, not 2000. One Apostle alone held 1316 within days of the Church opening, and
+-- a record must stay in the ledger for its 7-day stay check.)
+Count.RECORDS_MAX, Count.RECORDS_DAYS, Count.PEOPLE_MAX = 6000, 120, 400
+Count.MONTH_DAYS = 30 -- the "last 30 days" window (WindowFrom)
 Count.REG_DAYS, Count.REG_OPEN, Count.REG_ALL = 14, 15, 300
 Count.REG_CHECKS = { 0, 1, 3, 7, 14 }
 Count.REG_LATE = 7  -- a registration's check the desk missed on its day still runs this many days later
@@ -535,8 +538,15 @@ local function TooOld(r, now)
 	return now - t > Count.RECORDS_DAYS * DAY
 end
 
--- A credited record's points folded into its recruiter's archive when it ages out.
-local function Archive(r)
+-- How long an archived join still counts in a window: a join in the last MONTH_DAYS, and the stay
+-- STAY_DAYS after it.
+local function WindowKeep() return (Count.MONTH_DAYS + Count.STAY_DAYS) * DAY end
+
+-- A credited record's points folded into its recruiter's archive when it ages out or makes room.
+-- 1.2.1: and, while a window still counts it, its join hour (p.wj, and p.wy when he stayed: hour ->
+-- recruits), which Count.Own reads for this week and the last 30 days. The log dates a pair by the
+-- hour, so the hour is the record's own time and the windows count it exactly as before.
+local function Archive(r, now)
 	local l = Led()
 	local by = Key(r.bn)
 	if not by then return end
@@ -546,27 +556,81 @@ local function Archive(r)
 	p.aj = (p.aj or 0) + 1
 	p.ay = (p.ay or 0) + (r.y == 1 and 1 or 0)
 	p.u = Clock()
+	local tj = tonumber(r.tj)
+	if tj and tj >= (now or Clock()) - WindowKeep() then
+		local hour = math.floor(tj / 3600) * 3600
+		if type(p.wj) ~= "table" then p.wj = {} end
+		p.wj[hour] = (tonumber(p.wj[hour]) or 0) + 1
+		if r.y == 1 then
+			if type(p.wy) ~= "table" then p.wy = {} end
+			p.wy[hour] = (tonumber(p.wy[hour]) or 0) + 1
+		end
+	end
 end
 
--- The records this ledger archived before RECORDS_DAYS to make room: id -> when (RECORDS_DAYS,
--- RECORDS_MAX at most). Never taken again, or their points would count twice.
+-- The records this ledger archived before RECORDS_DAYS to make room: id -> when, and (1.2.1) the
+-- recruit's own mark ("<recruit>:"), for RECORDS_DAYS, 2 * RECORDS_MAX marks at most. Never taken
+-- again, or their points would count twice; nor another claim on that recruit, who would then count
+-- for two people.
 local function Gone()
 	local l = Led()
 	if type(l.gone) ~= "table" then l.gone = {} end
 	return l.gone
 end
-local function MarkGone(id, now)
-	local g = Gone()
-	local n, oldest, at = 0, nil, nil
+local function MarkGone(ids, now)
+	if #ids == 0 then return end
+	local g, old = Gone(), {}
 	for k, t in pairs(g) do
-		if type(t) ~= "number" or now - t > Count.RECORDS_DAYS * DAY then g[k] = nil
-		else
-			n = n + 1
-			if not at or t < at then oldest, at = k, t end
-		end
+		if type(t) ~= "number" or now - t > Count.RECORDS_DAYS * DAY then g[k] = nil else old[#old + 1] = { k = k, t = t } end
 	end
-	if n >= Count.RECORDS_MAX and oldest then g[oldest] = nil end
-	g[id] = now
+	for _, id in ipairs(ids) do
+		g[id] = now
+		local xk = id:match("^([^:]+):")
+		if xk then g[xk .. ":"] = now end
+	end
+	local n, max = 0, 2 * Count.RECORDS_MAX
+	for _ in pairs(g) do n = n + 1 end
+	if n <= max then return end
+	table.sort(old, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.k < b.k end)
+	for _, e in ipairs(old) do
+		if n <= max then break end
+		if g[e.k] == e.t then g[e.k], n = nil, n - 1 end
+	end
+end
+
+-- Room in a full ledger (1.2.1): first the records that count for nothing (withdrawn, transfers, alts,
+-- claims another holds, expired registrations), then credited ones nothing can change any more (the
+-- new-to-Olympus check done, the stay answered or its tries spent), then pending ones (a witness's
+-- read brings one back), then the other credited ones, open registrations last: the oldest first in
+-- each, the id breaking ties, so keepers holding the same records let the same ones go. A credited
+-- one goes into its recruiter's archive with its join hour: no window's count drops. A fiftieth of
+-- the ledger goes at once, so the ledger is sorted once for that many new records.
+local LET_GO = { withdrawn = 1, transfer = 1, alt = 1, taken = 1, expired = 1, pending = 3, credited = 4, open = 5 }
+local function MakeRoom(l, now, n)
+	local C = Count.Credits()
+	local list = {}
+	for id, r in pairs(l.r) do
+		local state = C.states[id]
+		local tier = LET_GO[state] or 1
+		if state == "credited" and r.c and (r.y ~= nil or (r.q7 or 0) >= Count.STAY_TRIES) then tier = 2 end
+		list[#list + 1] = { id = id, tier = tier, t = tonumber(r.tj or r.tc) or 0 }
+	end
+	table.sort(list, function(a, b)
+		if a.tier ~= b.tier then return a.tier < b.tier end
+		if a.t ~= b.t then return a.t < b.t end
+		return a.id < b.id
+	end)
+	local keep = Count.RECORDS_MAX - math.max(1, math.floor(Count.RECORDS_MAX / 50))
+	local gone = {}
+	for i = 1, math.min(#list, n - keep) do
+		local id = list[i].id
+		if C.states[id] == "credited" then
+			Archive(l.r[id], now)
+			gone[#gone + 1] = id
+		end
+		l.r[id] = nil
+	end
+	MarkGone(gone, now)
 end
 
 -- A record into the ledger (new, or merged). push: send it to the other keepers online (the desk's
@@ -578,23 +642,12 @@ function Count.MergeIn(id, rec, push)
 	local changed
 	if not r then
 		-- (A record past RECORDS_DAYS was archived: one coming back from another keeper is not taken;
-		-- nor one this ledger archived to make room, Gone.)
-		if not (rec.tc or rec.tj) or TooOld(rec, now) or Gone()[id] then return false end
+		-- nor one this ledger archived to make room, nor another claim on its recruit, Gone.)
+		local g, xk = Gone(), id:match("^([^:]+):")
+		if not (rec.tc or rec.tj) or TooOld(rec, now) or g[id] or (xk and g[xk .. ":"]) then return false end
 		local n = 0
 		for _ in pairs(l.r) do n = n + 1 end
-		if n >= Count.RECORDS_MAX then
-			-- Full: the oldest goes, its points into its recruiter's archive when it was credited
-			-- (as Count.Prune does at RECORDS_DAYS), so nobody's all-time score drops.
-			local oldest, at
-			for k, x in pairs(l.r) do local t = x.tj or x.tc or 0 if not at or t < at then oldest, at = k, t end end
-			if oldest then
-				if Count.StateOf(oldest) == "credited" then
-					Archive(l.r[oldest])
-					MarkGone(oldest, now)
-				end
-				l.r[oldest] = nil
-			end
-		end
+		if n >= Count.RECORDS_MAX then MakeRoom(l, now, n) end
 		r = { n = rec.n, bn = rec.bn, kind = rec.kind or "i" }
 		l.r[id] = r
 		changed = true
@@ -801,7 +854,7 @@ local function WindowFrom(window, now)
 		if D and D.WeekOf and D.WeekStart then return D.WeekStart(D.WeekOf(now)) end
 		return now - 7 * DAY
 	elseif window == "m" then
-		return now - 30 * DAY
+		return now - Count.MONTH_DAYS * DAY
 	end
 	return -math.huge
 end
@@ -837,12 +890,22 @@ function Count.Own(key, window)
 			elseif state == "open" then out.open = out.open + 1 end
 		end
 	end
-	if window == "a" then
-		local p = Led().p[key]
-		if p then
-			out.points = out.points + (p.ap or 0)
-			out.joins = out.joins + (p.aj or 0)
-			out.stays = out.stays + (p.ay or 0)
+	local p = Led().p[key or ""]
+	if window == "a" and p then
+		out.points = out.points + (p.ap or 0)
+		out.joins = out.joins + (p.aj or 0)
+		out.stays = out.stays + (p.ay or 0)
+	elseif p then
+		-- (1.2.1: the recruits archived to make room still count where their join hour does, Archive.)
+		for hour, n in pairs(type(p.wj) == "table" and p.wj or {}) do
+			if type(hour) == "number" and type(n) == "number" and hour >= from then
+				out.points, out.joins = out.points + n * Count.POINTS_JOIN, out.joins + n
+			end
+		end
+		for hour, n in pairs(type(p.wy) == "table" and p.wy or {}) do
+			if type(hour) == "number" and type(n) == "number" and hour + Count.STAY_DAYS * DAY >= from then
+				out.points, out.stays = out.points + n * Count.POINTS_STAY, out.stays + n
+			end
 		end
 	end
 	return out
@@ -1714,8 +1777,19 @@ function Count.Prune()
 	local C = Count.Credits()
 	for id, r in pairs(l.r) do
 		if TooOld(r, now) then
-			if C.states[id] == "credited" then Archive(r) end
+			if C.states[id] == "credited" then Archive(r, now) end
 			l.r[id] = nil
+		end
+	end
+	-- (1.2.1: archived join hours no window counts any more, Archive.)
+	local keep = now - WindowKeep() - 3600
+	for _, p in pairs(l.p) do
+		for _, f in ipairs({ "wj", "wy" }) do
+			local t = type(p) == "table" and p[f]
+			if type(t) == "table" then
+				for hour in pairs(t) do if type(hour) ~= "number" or hour < keep then t[hour] = nil end end
+				if next(t) == nil then p[f] = nil end
+			end
 		end
 	end
 	Changed()
@@ -1728,11 +1802,17 @@ function Count.CheckSaved()
 	if l ~= nil then
 		local ok = type(l) == "table" and l.v == 1 and type(l.r) == "table" and type(l.p) == "table" and type(l.from) == "table"
 		if ok then
+			-- (1.2.1: a record that fails goes alone. One record of a guild this build no longer counts as
+			-- Olympus took the whole ledger with it, and the catch-up then refilled it from another keeper's,
+			-- maybe smaller, one.)
+			local bad = {}
 			for id, r in pairs(l.r) do
 				local okLine, line = pcall(Count.RecordLine, id, r)
 				local pid, rec = ParseRecord(okLine and line or "")
-				if pid ~= id or not rec then ok = false break end
+				if pid ~= id or not rec then bad[#bad + 1] = id end
 			end
+			for _, id in ipairs(bad) do l.r[id] = nil end
+			if #bad > 0 then ns.Log("church ledger: %d saved records dropped at load", #bad) end
 		end
 		if not ok then c.led = nil end
 	end
