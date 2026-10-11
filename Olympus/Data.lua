@@ -21,6 +21,37 @@ local MAX_VOUCH = 8            -- votes kept per guild (the newest)
 -- approves while another can go. Several times the guilds any realm group has.
 Data.MAX_GUILDS = 300
 
+-- 1.2.1 (the stutter players reported, measured on the owner's PC): every census report heard,
+-- about one a second and up to nine in a burst, ran every DATA_CHANGED listener at once, inside
+-- the game's addon-message event. A report heard from someone else now marks the census changed,
+-- and DATA_CHANGED follows within NOTIFY_GAP, once for every report heard meanwhile (one timer
+-- waits at a time). What the player does himself (his own roster's report, a /who, /oly reset, a
+-- realm linked) still fires it at once. Data.Revision(): a number that grows with every change to
+-- the census's reports, for what is worked out from them and kept (HonorsNet's level race).
+Data.NOTIFY_GAP = 1
+local revision, notifyQueued, notifyDirty = 0, false, false
+function Data.Revision() return revision end
+local function Notify()
+	notifyQueued = false
+	if not notifyDirty then return end -- (fired at once meanwhile: Data.ChangedNow)
+	notifyDirty = false
+	ns.Fire("DATA_CHANGED")
+end
+-- A change heard from someone else: DATA_CHANGED within NOTIFY_GAP.
+function Data.ChangedSoon()
+	revision = revision + 1
+	notifyDirty = true
+	if notifyQueued then return end
+	notifyQueued = true
+	ns.After(Data.NOTIFY_GAP, "census changed", Notify)
+end
+-- A change the player made: DATA_CHANGED now, which answers for what was waiting too.
+function Data.ChangedNow()
+	revision = revision + 1
+	notifyDirty = false
+	ns.Fire("DATA_CHANGED")
+end
+
 -- The key a guild is stored under, whatever the case a report spells it in: a realm has one
 -- guild of a name, so "OLYMPUS X" and "Olympus X" are the same one (or one is forged).
 function Data.GuildKey(name)
@@ -65,6 +96,7 @@ function Data.Trim(room)
 	local n = math.min(over, #list)
 	for i = 1, n do guilds[list[i].name] = nil end
 	trimmed = trimmed + n
+	if n > 0 then revision = revision + 1 end
 	return n
 end
 function Data.Trimmed() return trimmed end -- (this session: /oly status)
@@ -157,7 +189,7 @@ function Data.RecordSightings(players, capped)
 	end
 	local seen, now = Data.Seen(), ns.Now()
 	for guild, n in pairs(count) do seen[guild] = { online = n, capped = capped or nil, t = now } end
-	if next(count) then ns.Fire("DATA_CHANGED") end
+	if next(count) then Data.ChangedNow() end -- (a /who: the player's own click)
 end
 ns.Who.Listen(Data.RecordSightings)
 
@@ -169,6 +201,25 @@ function Data.ServerTime()
 	return ok and type(t) == "number" and t > 0 and t or nil
 end
 
+-- Two reports alike but for when they were made (t, st), their tables compared value by value.
+local WHEN = { t = true, st = true }
+local function SameReport(a, b, depth)
+	if a == b then return true end
+	if type(a) ~= "table" or type(b) ~= "table" or depth > 4 then return false end
+	for k, v in pairs(a) do
+		if not (depth == 0 and WHEN[k]) and not SameReport(v, b[k], depth + 1) then return false end
+	end
+	for k in pairs(b) do
+		if not (depth == 0 and WHEN[k]) and a[k] == nil then return false end
+	end
+	return true
+end
+
+-- (1.2.1) The roster is read once a minute, and most minutes our guild's report comes out as the
+-- last one did: stored (its time is new) with no DATA_CHANGED, so nothing is worked out again for
+-- it. Only against the report stored by this session: the first one after login, a /oly reset or
+-- another realm's store (Core.lua's ns.LinkRealms) is always news.
+local lastLocal
 function Data.SetLocal(r)
 	r.t = ns.Now()
 	r.st = Data.ServerTime() -- field 25 of our report: when it was made, by the server's clock
@@ -178,9 +229,12 @@ function Data.SetLocal(r)
 	r.from = ns.realm -- travels in the report: whoever hears it on another realm sees the channel shared (/oly status)
 	r.heardOn = ns.realm -- see Data.Receive
 	r.mine = true
-	if ns.rdb.guilds[r.guild] == nil then Data.Trim(1) end -- (1.2.1: MAX_GUILDS)
+	local old = ns.rdb.guilds[r.guild]
+	if old == nil then Data.Trim(1) end -- (1.2.1: MAX_GUILDS)
 	ns.rdb.guilds[r.guild] = r
-	ns.Fire("DATA_CHANGED")
+	local same = old ~= nil and old == lastLocal and SameReport(old, r, 0)
+	lastLocal = r
+	if not same then Data.ChangedNow() end
 end
 
 -- Sender names are set by the server and cannot be forged, so we tie every sender to the
@@ -269,6 +323,7 @@ function Data.ForgetVotes()
 	for _, g in pairs(ns.rdb and ns.rdb.guilds or {}) do
 		if type(g) == "table" then g.vouch, g.conflict, g.outvoted = nil, nil, nil end
 	end
+	revision = revision + 1
 end
 
 -- What the census's mark on a row says (1.1, Fern's #30): its senders split on the guild's leader
@@ -417,7 +472,7 @@ function Data.Receive(r, sender)
 		previous.vouch = votes
 		if not previous.outvoted then ns.Log("conflict on %s: %s's report is not what the other senders say", r.guild, who) end
 		previous.outvoted = true
-		ns.Fire("DATA_CHANGED")
+		Data.ChangedSoon() -- (1.2.1: within NOTIFY_GAP, once for a burst)
 		return false
 	end
 	-- Shown in the census: the senders are split on this guild (no picture leads).
@@ -430,7 +485,7 @@ function Data.Receive(r, sender)
 	-- (1.2.1) A guild not kept yet: room for it first (MAX_GUILDS, Data.Trim).
 	if ns.rdb.guilds[r.guild] == nil then Data.Trim(1) end
 	ns.rdb.guilds[r.guild] = r
-	ns.Fire("DATA_CHANGED")
+	Data.ChangedSoon() -- (1.2.1: within NOTIFY_GAP, once for a burst)
 	return true
 end
 

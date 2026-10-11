@@ -78,6 +78,7 @@ local attemptAt = {}
 local pendingTargets = {}
 local syncAsked, syncIncoming, syncOutgoing, syncRates = {}, {}, {}, {}
 local mwRates = {} -- [sender key] = { times }: his actions this minute (Watch.MW_RATE)
+local syncQueued, flushQueued = false, false -- (1.2.1: one recovery ask, one report flush waiting: DATA_CHANGED)
 local syncCounter, syncPeerIndex, lastSync = 0, 0, -math.huge
 
 Watch.after = function(seconds, where, fn) ns.After(seconds, where, fn) end
@@ -3314,6 +3315,7 @@ function Watch.ResetForTests()
 	cardFrame = nil
 	wipe(syncAsked); wipe(syncIncoming); wipe(syncOutgoing); wipe(syncRates); wipe(mwRates)
 	syncCounter, syncPeerIndex, lastSync = 0, 0, -math.huge
+	syncQueued, flushQueued = false, false
 	for k in pairs(stats) do stats[k] = 0 end
 end
 
@@ -3332,16 +3334,23 @@ ns.On("FILTER_CHANGED", function() ns.Fire("WATCH_CHANGED") end)
 ns.On("NETOFF_CHANGED", function() ns.Fire("WATCH_CHANGED") end)
 ns.On("NETOFF_TIMED_CHANGED", function() ns.Fire("WATCH_CHANGED") end) -- (1.1.6: the desk lists the timed words)
 ns.On("WATCH_CHANGED", function() if cardFrame and cardFrame:IsShown() then Watch.RefreshCard() end end)
+-- 1.2.1 (DATA_CHANGED comes with the census's news, once a second at most): the records are
+-- pruned on their own ticker (and by every read of them), and one recovery ask and one report
+-- flush wait at a time, however many changes come meanwhile.
+Watch.PRUNE_EVERY = 60
 ns.On("DATA_CHANGED", function()
 	-- Visibility is recomputed by UI.  Pending sends are guarded by Watch.CanManage and therefore
 	-- need no eager cancellation here.
-	if Watch.CanRead() then
-		Watch.Prune()
-		Watch.after(5, "watch roster recovery", function() Watch.AskSync(false) end)
+	if not syncQueued and Watch.CanRead() then
+		syncQueued = true
+		Watch.after(5, "watch roster recovery", function() syncQueued = false; Watch.AskSync(false) end)
 	end
 	-- 1.1.6: a report waiting for an officer goes once the roster shows one online.
-	local b = Book(false)
-	if b and #b.outbox > 0 then Watch.after(3, "watch reports", function() Watch.FlushReports(false) end) end
+	local b = not flushQueued and Book(false)
+	if b and #b.outbox > 0 then
+		flushQueued = true
+		Watch.after(3, "watch reports", function() flushQueued = false; Watch.FlushReports(false) end)
+	end
 end)
 
 ns.On("LOGIN", function()
@@ -3349,6 +3358,7 @@ ns.On("LOGIN", function()
 	Watch.after(20, "watch login recovery", function() Watch.AskSync(false) end)
 	Watch.after(30, "watch login reports", function() Watch.FlushReports(true) end)
 	if ns.Every then
+		ns.Every(Watch.PRUNE_EVERY, "watch prune", function() if Watch.CanRead() then Watch.Prune() end end)
 		ns.Every(Watch.SYNC_GAP, "watch recovery", function() Watch.AskSync(false) end)
 		ns.Every(Watch.SYNC_GAP, "watch reports", function() Watch.FlushReports(false) end)
 		-- 1.2.1: a councillor's client asks the King's client for the council's reports.

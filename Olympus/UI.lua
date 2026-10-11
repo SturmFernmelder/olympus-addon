@@ -2516,7 +2516,7 @@ function UI.Toggle()
 end
 
 -- Reports come in bursts (every guild answers a census request within seconds, a patrol
--- inspects a crowd): the window redraws at once for the first news and then at most once
+-- inspects a crowd): the window redraws soon for the first news and then at most once
 -- every REDRAW_GAP, so a busy channel never redraws it dozens of times a second.
 UI.REDRAW_GAP = 0.5
 -- 1.1.6 (the owner's game: a 1000-member guild, about two census reports a second, a laptop):
@@ -2530,11 +2530,12 @@ UI.lastCost = 0
 function UI.RedrawGap()
 	return math.min(UI.REDRAW_MAX_GAP, math.max(UI.REDRAW_GAP, (UI.lastCost or 0) * UI.REDRAW_COST))
 end
+-- 1.2.1: always through its timer (at the next frame when the gap is over), never inside the
+-- listener that asked: a census change, a search typed, an event of the game's.
 local redrawQueued = false
 function UI.RefreshSoon()
 	if not main or not main:IsShown() or redrawQueued then return end
-	local wait = UI.RedrawGap() - (GetTime() - (UI.lastRedraw or 0))
-	if wait <= 0 then return UI.Refresh() end
+	local wait = math.max(0, UI.RedrawGap() - (GetTime() - (UI.lastRedraw or 0)))
 	redrawQueued = true
 	ns.After(wait, "ui redraw", function()
 		redrawQueued = false
