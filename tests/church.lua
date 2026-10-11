@@ -762,6 +762,10 @@ test("1.1.6 Church: the Head's keep: never past the new parent's quota, none in 
 	local B = ns.Codec.Base36
 	local hour = math.floor(namedAt / 3600) + 1
 	local ev = ("NV~1~w~Grand Kid-Realm~Fresh Face-Realm~%s~%s~%s"):format(World.GUILD, B(hour), B(hour + 1))
+	-- (1.2.1: a guildmate's word counts for a recruit Aldric's roster shows.)
+	w.members[World.GUILD] = w.members[World.GUILD] or {}
+	table.insert(w.members[World.GUILD], "Fresh Face")
+	w:RefreshRosters()
 	eq(select(2, w:As(c.a1, c.a1.Count.TakeEvidence, "Plain Member-Realm", ev)), nil, "not refused as invited before his place")
 	-- The since travels in the book's pages: another client reads it back.
 	local line = w:As(c.a1, c.a1.Church.PageLines, w:As(c.a1, c.a1.Church.PageOf, Key("Grand Kid")))

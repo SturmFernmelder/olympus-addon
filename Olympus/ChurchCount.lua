@@ -16,8 +16,9 @@ local L = ns.L
 -- - Pending or confirmed. The recruiter's own report leaves a record pending; it is confirmed once a
 --   client other than his, his linked alts' (Alts.Linked) and the recruit's reported the same pair
 --   from its own read of the log, and the keeper can vouch for that client in the pair's guild
---   (1.2.1, VerifiedWitness: a whisper from anyone else is not taken; the keeper that vouched tells
---   the others, Count.Push and the catch-up). (A seen-check answer that places the recruit in the guild shows
+--   (1.2.1, VerifiedWitness: a whisper from anyone else is not taken, nor a plain guildmate's of a recruit
+--   the keeper's own roster or log never showed; the keeper that vouched tells the others, Count.Push and
+--   the catch-up). (A seen-check answer that places the recruit in the guild shows
 --   he is there, not who invited him: it confirms a registration's arrival, never an invite.)
 -- - New to Olympus. Every client keeps a memory of its own guild's roster (first and last day each
 --   name was seen). The desk (Church.Desk) asks the channel about each new recruit once
@@ -516,10 +517,10 @@ end
 -- The outbox (1.2.1: every report waits here for a keeper's receipt, NV k, as Church.DeliverActs hands
 -- acts on). Each goes once to every keeper heard online, leaving room in Comm's queue (a busy read's
 -- reports, one whisper to each keeper, overflowed it and were lost), a keeper first heard later at once.
--- One a keeper refused for now (NV l: over its budget, a missionary its book did not place yet) goes to
--- that keeper again RESEND_GAP after it last did, RESEND_TRIES sends to each keeper at most: counted for
--- each keeper, so the hours one was away spend none of his. OUTBOX_DAYS and OUTBOX_MAX at most. One this
--- keeper's own ledger took goes once to each keeper online. The number sent.
+-- One a keeper refused for now (NV l: over its budget, a missionary its book did not place yet, a recruit
+-- its roster did not show yet) goes to that keeper again RESEND_GAP after it last did, RESEND_TRIES sends
+-- to each keeper at most: counted for each keeper, so the hours one was away spend none of his. OUTBOX_DAYS
+-- and OUTBOX_MAX at most. One this keeper's own ledger took goes once to each keeper online. The number sent.
 function Count.Flush()
 	local out = Out()
 	if not out or #out == 0 or Off() or (ns.ChatLocked and ns.ChatLocked()) then return 0 end
@@ -592,9 +593,9 @@ end
 -- could change (Count.LATER) gets none: its reporter is told it may send it again (NV l), once a round.
 local owed, owing = {}, false
 local FINAL = { shape = true, kind = true, times = true, self = true, guild = true, held = true, taken = true }
--- (1.2.1) What a later try may change: a budget spent, a missionary this book does not place yet, one not yet
--- a Church person here.
-Count.LATER = { budget = true, recruiter = true, person = true }
+-- (1.2.1) What a later try may change: a budget spent, a missionary this book does not place yet, a recruit
+-- our roster does not show yet (VerifiedWitness), one not yet a Church person here.
+Count.LATER = { budget = true, recruiter = true, roster = true, person = true }
 local function SendReceipts()
 	owing = false
 	for k, r in pairs(owed) do
@@ -666,28 +667,52 @@ local function AltOf(recruit, recruiter)
 end
 Count.AltOf = AltOf
 
+-- (1.2.1) A recruit this client saw in our guild itself: its roster memory has him there no earlier than the
+-- day before his join (Count.Remember first, for its newest roster), or its own read of the log saw him join.
+-- A name nobody's roster ever showed was no recruit: a guildmate's whisper of one made him one.
+local function SeenHere(invitee, guild, tj)
+	local xk = Key(invitee)
+	if not xk or not tj then return false, "roster" end
+	Count.Remember(false)
+	local mem = Mem()
+	local gi, _, last = ReadMem(mem and mem.n[xk])
+	if gi and mem.g[gi] and ns.Fold(mem.g[gi]) == ns.Fold(guild) and (last or 0) >= Day(tj * 3600) - 1 then return true end
+	local ev = Ev()
+	if ev and type(ev.k) == "table" and SeenEvent(ev, "join:" .. xk .. ":", tj) then return true end
+	return false, "roster"
+end
+
 -- (1.2.1) A witness this client can vouch for in the pair's guild, as the desk's seen-checks keep their
--- answers to (CheckRecipients): our fresh roster when the pair is our own guild's (a guildmate of ours
--- reads our guild's log, never another's); the signed (a keeper, the King, a High Councillor); that
--- guild's correspondent, named by its guild master (the book); or one the Olympus chats verify for that
--- guild (Channels.VerifiedLevel's verified word: its signed leadership, or the census as they read it).
--- A whisper alone vouches for nothing: anyone can send one.
-local function VerifiedWitness(name, guild)
+-- answers to (CheckRecipients): the signed (a keeper, the King, a High Councillor); that guild's
+-- correspondent, named by its guild master (the book); in our own guild, a guildmate on our fresh roster (a
+-- guildmate of ours reads our guild's log, never another's), for a recruit we saw there ourselves (SeenHere);
+-- in another, one the Olympus chats verify for it (Channels.VerifiedLevel's verified word: its signed
+-- leadership, or the census as they read it). A whisper alone vouches for nothing: anyone can send one.
+-- Returns true and "census" for a witness only the census vouches for (the signed leadership not enforced:
+-- two characters can make one), who has the smaller budget; false and why ("roster": a later try may pass).
+local function VerifiedWitness(name, guild, invitee, tj)
 	local who, mine = ns.FullName(name), OwnGuild()
-	if not who or not guild then return false end
+	if not who or not guild then return false, "unverified" end
 	local R = ns.Roster
-	local mate = R and R.Fresh and R.Fresh() and R.RankOf and R.RankOf(who) ~= nil
+	local fresh = R and R.Fresh and R.Fresh()
+	local mate = fresh and R.RankOf and R.RankOf(who) ~= nil
 	local ours = mine ~= nil and ns.Fold(mine) == ns.Fold(guild)
-	if ours and mate then return true end
-	if mate then return false end
+	if mate and not ours then return false, "unverified" end
 	if Church.IsKeeper(who) or Church.IsKing(who) or (ns.IsHighCouncillor and ns.IsHighCouncillor(who) == true) then return true end
 	local corr = Church.State().corr[ns.Fold(guild)]
 	if corr and Key(corr.n) == Key(who) then return true end
-	if ours then return false end
+	if ours then
+		if not fresh then return false, "roster" end
+		if not mate then return false, "unverified" end
+		return SeenHere(invitee, guild, tj)
+	end
 	local C = ns.Channels
-	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false end
+	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false, "unverified" end
 	local ok, level, verified = pcall(C.VerifiedLevel, who, guild)
-	return ok and verified == true and (tonumber(level) or 0) >= 1
+	if not (ok and verified == true and (tonumber(level) or 0) >= 1) then return false, "unverified" end
+	local A = ns.Authority
+	local okE, enforced = pcall(function() return A and A.Enforced and A.Enforced() end)
+	return true, not (okE and enforced) and "census" or nil
 end
 Count.VerifiedWitness = VerifiedWitness
 
@@ -976,9 +1001,14 @@ function Count.TakeEvidence(sender, text)
 		local alt = not own and Linked(inviter, sender)
 		-- (1.2.1: only a witness this keeper can vouch for confirms, VerifiedWitness. Any other whisperer
 		-- counted as one: a single whisper credited a recruit, or took one from his real recruiter.)
-		local independent = not own and not alt and VerifiedWitness(sender, guild)
-		if not own and not alt and not independent then return Drop("unverified") end
-		if alt and not Budget(sender, now, false) then return Drop("budget") end
+		local independent, how = false, nil
+		if not own and not alt then
+			independent, how = VerifiedWitness(sender, guild, invitee, tj)
+			if not independent then return Drop(how or "unverified") end
+		end
+		-- (A witness only the census vouches for, as one only the recruiter's alt stands behind: the smaller
+		-- budget too. Two characters can make a census officer.)
+		if (alt or how == "census") and not Budget(sender, now, false) then return Drop("budget") end
 		stats.taken = stats.taken + 1
 		local id = xk .. ":" .. ik
 		local held = Led().r[id]

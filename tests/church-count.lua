@@ -541,6 +541,7 @@ test("1.1.6 Church: the keepers' ledger: a keeper catches up from another; the m
 	local hour = math.floor(w.clock / 3600)
 	local e1 = ("NV~1~w~Mira Wells-Realm~Merge Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 2), B(hour - 1))
 	local e2 = ("NV~1~w~Mira Wells-Realm~Merge Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 3), B(hour - 1))
+	Join(w, World.GUILD, "Merge Guy") -- (1.2.1: a guildmate confirms only a recruit Aldric's roster shows)
 	w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Wells-Realm", e1)
 	w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", e2)
 	-- (1.2.1: Bera, in Olympus Vale, can't vouch for Wes of Olympus Ember: she takes his word from Aldric's
@@ -625,6 +626,7 @@ test("1.1.6 Church: saved data: a malformed ledger or book is dropped at load; t
 	local w3, c3 = Cast()
 	w3:LogEvent(World.GUILD, "invite", "Mira Wells", "Kept Guy", 3)
 	w3:LogEvent(World.GUILD, "join", "Kept Guy", nil, 2)
+	Join(w3, World.GUILD, "Kept Guy")
 	w3:ReadLog(c3.m1); w3:ReadLog(c3.wes)
 	local store = w3:As(c3.a1, c3.a1.Church.Store)
 	w3:As(c3.a1, c3.a1.Church.CheckSaved)
@@ -1164,7 +1166,9 @@ test("1.2.1 Church: a transfer a full ledger let go stays a transfer: a witness'
 		eq(StateOf(w, K, "Moved Guy", "Mira Wells"), "transfer")
 		for i = 1, 60 do Give(w, K, "Nil Rec" .. Letters(i), "Nils Ford", 5) end
 		eq(Rec(w, K, "Moved Guy", "Mira Wells"), nil, "let go first: it counted for nothing")
-		-- Wes's client reads the pair again (its memory of what it sent was wiped past ATT_MAX).
+		-- Wes's client reads the pair again (its memory of what it sent was wiped past ATT_MAX); Moved Guy is
+		-- still on Aldric's roster.
+		Join(w, World.GUILD, "Moved Guy")
 		local B = ns.Codec.Base36
 		local hour = math.floor(w.clock / 3600) - 3
 		w:As(K, K.Count.TakeEvidence, "Wes Brook-Realm", ("NV~1~w~Mira Wells-Realm~Moved Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 1), B(hour)))
@@ -1314,7 +1318,9 @@ test("1.2.1 Church: a witness is one the keeper can vouch for in the pair's guil
 	eq(Take(c.a1, "Vik Stone-Realm", PairText(w, "Mira Wells", "Made Up", 2)), "unverified")
 	w.alts[Key("Wes Kid")] = { "Wes Brook-Realm" }
 	eq(Take(c.a1, "Wes Brook-Realm", PairText(w, "Mira Wells", "Wes Kid", 2)), "recruit")
-	-- Nils's real recruit, confirmed by Wes (Aldric's roster): a stranger's earlier-dated pair for Mira takes nothing.
+	-- Nils's real recruit, confirmed by Wes (Aldric's roster, which shows Real Kid): a stranger's earlier-dated
+	-- pair for Mira takes nothing.
+	Join(w, World.GUILD, "Real Kid")
 	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Nils Ford-Realm", PairText(w, "Nils Ford", "Real Kid", 2)), true)
 	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", PairText(w, "Nils Ford", "Real Kid", 2)), true)
 	eq(Take(c.a1, "Stray Whisper-Realm", PairText(w, "Mira Wells", "Real Kid", 5)), "unverified")
@@ -1525,6 +1531,36 @@ test("1.2.1 Church: a report the keeper who can vouch refused for now goes to hi
 	for _ = 1, 8 do w:Run(3600); w:Presence(); w:Tick() end
 	eq(SentTo(w, c.wes, c.a1, "w", "Nova Last"), c.wes.Count.RESEND_TRIES)
 	eq(Outbox(w, c.wes), 1)
+end)
+
+test("1.2.1 Church: a guildmate's word confirms only a recruit the keeper's own roster or log saw in the guild: 300 made-up names are no recruits; a census-only witness has the smaller budget", function()
+	local w, c = Cast()
+	for i = 1, 300 do
+		eq(select(2, w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", PairText(w, "Mira Wells", "Ghost Rec" .. Letters(i), 2))), "roster")
+	end
+	Settle(w)
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(Joins(w, k, "Mira Wells", "m"), 0, k.name) end
+	-- One the roster shows: confirmed, and told to Bera (the next hour: the made-up ones spent Wes's budget).
+	w:Run(3600); w:Presence()
+	Join(w, World.GUILD, "Real Rec")
+	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", PairText(w, "Mira Wells", "Real Rec", 2)), true)
+	w:Flush()
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(StateOf(w, k, "Real Rec", "Mira Wells"), "credited", k.name) end
+	-- One the roster no longer shows (he left at once), whose join Aldric's own read of the log saw: confirmed.
+	w:LogEvent(World.GUILD, "join", "Quick Leaver", nil, 2)
+	w:ReadLog(c.a1)
+	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", PairText(w, "Mira Wells", "Quick Leaver", 2)), true)
+	eq(StateOf(w, c.a1, "Quick Leaver", "Mira Wells"), "credited")
+	-- An officer of Olympus Ember the chats verify only through the census, at Bera's: EVIDENCE_HOUR, not VERIFIED_HOUR.
+	c.a2.c.Channels.VerifiedLevel = function(n, g)
+		if Key(n) == Key("Ola Officer") and g == World.GUILD then return 2, true, 1 end
+		return 1, false
+	end
+	for i = 1, c.a2.Count.EVIDENCE_HOUR do
+		eq(w:As(c.a2, c.a2.Count.TakeEvidence, "Ola Officer-Realm", PairText(w, "Mira Wells", "Cen Rec" .. Letters(i), 2)), true)
+	end
+	eq(select(2, w:As(c.a2, c.a2.Count.TakeEvidence, "Ola Officer-Realm", PairText(w, "Mira Wells", "Cen Over", 2))), "budget")
+	eq(w:As(c.a2, c.a2.Count.TakeEvidence, World.COUNCILLOR, PairText(w, "Mira Wells", "Sig Rec", 2)), true, "the signed keep the larger one")
 end)
 
 test("1.2.1 Church: no receipt goes to a keeper (one before 1.2.1 counts each line against its budget for him); a keeper's report its own ledger refused is tried again there, then goes to the others", function()
