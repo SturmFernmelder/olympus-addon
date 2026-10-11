@@ -345,6 +345,9 @@ local function DetailLinesFor(person, lines, skipRegs)
 		elseif kind == "t" then
 			lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_TAKEN_LINE:format(tonumber(d[2]) or 0, tonumber(d[3]) or 0)) }
 			lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_NETWORK_LINE:format(tonumber(d[4]) or 0)), gapAfter = true }
+		elseif kind == "g" and tostring(d[2]) == "-" then
+			-- (1.2.1: the archive's recruits, whose guild it does not keep.)
+			lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_GUILD_ARCHIVED:format(tonumber(d[3]) or 0, tonumber(d[4]) or 0)) }
 		elseif kind == "g" then
 			lines[#lines + 1] = { indent = 1, text = L.CHURCH_GUILD_LINE:format(Plain(tostring(d[2])), tonumber(d[3]) or 0, tonumber(d[4]) or 0) }
 		elseif kind == "r" and not skipRegs then

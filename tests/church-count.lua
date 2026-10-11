@@ -659,6 +659,9 @@ test("1.1.6 Church: the counting's messages fit one message each at their worst 
 	local id, back = w:As(c.a1, c.a1.Count.ParseRecord, line)
 	assert(id and back, "it reads back")
 	eq(back.tj, rec.tj); eq(back.y, 1); eq(back.q7, 3); eq(back.rq, 4)
+	-- (1.2.1: an archived record, its keys for its names.)
+	local z = w:As(c.a1, c.a1.Count.ArchiveLine, Key(name), Key("Bbcdefghijklmno Pqrstuvwxyzabc"), { h = 4 * 10 ^ 9, y = 1, t = 4 * 10 ^ 9 })
+	assert(#z <= 255, #z)
 	local answer = ("NS~1~a~%s~%s~%s~%s~1"):format(B(1679615), guild, B(99999), B(99999))
 	assert(#answer <= 255, #answer)
 	local row = ("NR~1~r~m~a~%d~%s~%d~%d~%d~%d~%d~%d~1"):format(300, name, 999999, 999999, 999999, 9999, 9999, 9999)
@@ -1032,12 +1035,252 @@ test("1.2.1 Church: a ledger the old build had cut back counts its own let-go re
 	eq(Joins(w, K, A1, "a"), 893 + 424, "all time as it was")
 	w:As(K, K.Count.CheckSaved)
 	eq(Joins(w, K, A1, "m"), 1316, "once")
-	-- A ledger this build began has nothing to restore: its archive keeps the hours itself.
+	-- (The marks became its recruits' marks: no other claim on them is taken.)
+	eq(l.gone[Key("Lost Recb") .. ":" .. Key(A1)], nil); eq(type(l.gone[Key("Lost Recb") .. ":"]), "number")
+	eq(Give(w, K, "Lost Recb", "Mira Wells", 2), false)
+	-- A ledger this build began has nothing to restore: its archive keeps each record itself. (Its
+	-- marks of a record are what counted for nothing, never a recruit to count again.)
 	local K2 = c.a2
 	local l2 = w:As(K2, K2.Count.Led)
-	eq(l2.wv, 1)
+	eq(l2.wv, 2)
 	l2.gone = { [Key("Some Rec") .. ":" .. Key(A2)] = w.clock }
-	l2.p[Key(A2)] = { n = "Bera Stone", ap = 10, aj = 1, ay = 0, u = w.clock, wj = { [math.floor(w.clock / 3600) * 3600] = 1 } }
+	l2.arc = { [Key(A2)] = { [Key("Kept Rec")] = { h = w.clock - 3600, t = w.clock, l = 1 } } }
+	l2.p[Key(A2)] = { n = "Bera Stone", ap = 10, aj = 1, ay = 0, u = w.clock }
 	w:As(K2, K2.Count.CheckSaved)
 	eq(Joins(w, K2, A2, "m"), 1)
+	-- One of 1.2.1's first builds (wv 1) kept the archive's joins by the hour: they still count.
+	l2.wv, l2.arc = 1, {}
+	l2.p[Key(A2)].wj = { [math.floor(w.clock / 3600) * 3600] = 1 }
+	w:As(K2, K2.Count.CheckSaved)
+	eq(Joins(w, K2, A2, "m"), 1); eq(l2.wv, 2)
+end)
+
+-- 1.2.1 review: the counts must converge on every keeper, whichever let a record go, and no recruit
+-- may count twice. Each test below fails on the first 1.2.1 build (f0778c4, 939ad78).
+
+local function Numbers(w, K, by)
+	local out = {}
+	for _, win in ipairs({ "w", "m", "a" }) do
+		local o = w:As(K, K.Count.Own, Key(by), win)
+		out[win] = { joins = o.joins, points = o.points, stays = o.stays }
+	end
+	return out
+end
+local function SameNumbers(got, want, who)
+	for _, win in ipairs({ "w", "m", "a" }) do
+		eq(got[win].joins, want[win].joins, who .. ", " .. win .. " joins")
+		eq(got[win].points, want[win].points, who .. ", " .. win .. " points")
+		eq(got[win].stays, want[win].stays, who .. ", " .. win .. " stays")
+	end
+end
+
+test("1.2.1 Church: a keeper catching up from a full ledger shows its week, 30 days and all time: the archive travels by record, and one held live counts once", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 60
+	local ok, err = pcall(function()
+		c.a2.online = false
+		w:Run(K.Church.KEEPER_EVERY * 3)
+		w:Presence()
+		-- 100 confirmed recruits of Mira's, one an hour back to 99 hours ago (the oldest still in after 7
+		-- days); Aldric's ledger holds 60 of them, the rest went into his archive. Bera's holds the 30
+		-- oldest live: she took them before her ledger filled.
+		for i = 1, 100 do Give(w, K, "Arc Rec" .. Letters(i), "Mira Wells", 100 - i, false, i <= 10 and { y = 1, c = 1 } or nil) end
+		for i = 1, 30 do Give(w, c.a2, "Arc Rec" .. Letters(i), "Mira Wells", 100 - i, false, i <= 10 and { y = 1, c = 1 } or nil) end
+		assert(Records(w, K) <= 60, "Aldric's ledger is full")
+		local want = Numbers(w, K, "Mira Wells")
+		eq(want.m.joins, 100); eq(want.a.joins, 100); eq(want.m.stays, 10)
+		-- Bera comes online and catches up from him: his archive comes as records, and the 30 she held
+		-- live go into her own archive, each counted once.
+		c.a2.online = true
+		w:Presence()
+		eq(w:As(c.a2, c.a2.Count.CatchUp, true), true)
+		w:Run(600)
+		SameNumbers(Numbers(w, c.a2, "Mira Wells"), want, "Bera")
+		eq(Rec(w, c.a2, "Arc Recb", "Mira Wells"), nil, "the record she held went into her archive")
+		-- The Head comes online with an empty ledger and catches up from Aldric: the same numbers.
+		c.head.online = true
+		w:Presence()
+		eq(w:As(c.head, c.head.Count.CatchUp, true), true)
+		w:Run(600)
+		SameNumbers(Numbers(w, c.head, "Mira Wells"), want, "the Head")
+		-- Their rankings agree too, whichever keeper an audience client asks.
+		local function Row(K2)
+			for _, r in ipairs(w:As(K2, K2.Count.Ranking, "a", "m")) do if r.key == Key(A1) then return r end end
+		end
+		eq(Row(c.head).score, Row(K).score); eq(Row(c.a2).score, Row(K).score)
+		-- Taken again (a second catch-up, the same records once more): nothing changes.
+		w:As(c.head, c.head.Count.Led).from = {}
+		eq(w:As(c.head, c.head.Count.CatchUp, true), true)
+		w:Run(600)
+		SameNumbers(Numbers(w, c.head, "Mira Wells"), want, "the Head again")
+		-- A week later the Head's numbers move with the windows as Aldric's do.
+		w:Run(7 * DAY)
+		SameNumbers(Numbers(w, c.head, "Mira Wells"), Numbers(w, K, "Mira Wells"), "a week later")
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: catch-ups go round every keeper online: records only the last keeper in the list holds reach the others", function()
+	local Z = "Zed Last-Realm"
+	local w = World.New({ apostles = { A1, A2, Z }, head = false })
+	local c = { a1 = w:Client(A1), a2 = w:Client(A2, { guild = World.GUILD2 }), z = w:Client(Z), m1 = w:Client("Mira Wells"), wes = w:Client("Wes Brook") }
+	w:Act(c.a1, c.a1.Church.NameMissionary, "Mira Wells")
+	w:Run(8 * 3600)
+	-- Only Zed is online when ten of Mira's recruits are confirmed.
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.z.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	for i = 1, 10 do Give(w, c.z, "Solo Rec" .. Letters(i), "Mira Wells", 2) end
+	eq(Joins(w, c.z, "Mira Wells", "m"), 10)
+	-- Aldric and Bera come back; every keeper catches up every half hour.
+	c.a1.online, c.a2.online = true, true
+	for _ = 1, 3 do
+		w:Presence()
+		for _, K in ipairs({ c.a1, c.a2, c.z }) do w:As(K, K.Count.CatchUp, false) end
+		w:Run(c.a1.Count.CATCHUP_EVERY + 100)
+	end
+	eq(Joins(w, c.a1, "Mira Wells", "m"), 10, "Aldric")
+	eq(Joins(w, c.a2, "Mira Wells", "m"), 10, "Bera")
+end)
+
+test("1.2.1 Church: a transfer a full ledger let go stays a transfer: a witness's later report or a keeper's line without the word is not a new recruit", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 60
+	local ok, err = pcall(function()
+		Give(w, K, "Moved Guy", "Mira Wells", 3, false, { t = 1, c = 1 })
+		eq(StateOf(w, K, "Moved Guy", "Mira Wells"), "transfer")
+		for i = 1, 60 do Give(w, K, "Nil Rec" .. Letters(i), "Nils Ford", 5) end
+		eq(Rec(w, K, "Moved Guy", "Mira Wells"), nil, "let go first: it counted for nothing")
+		-- Wes's client reads the pair again (its memory of what it sent was wiped past ATT_MAX).
+		local B = ns.Codec.Base36
+		local hour = math.floor(w.clock / 3600) - 3
+		w:As(K, K.Count.TakeEvidence, "Wes Brook-Realm", ("NV~1~w~Mira Wells-Realm~Moved Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 1), B(hour)))
+		-- And a keeper's line that never had the word.
+		local line = w:As(K, K.Count.RecordLine, "x", { n = "Moved Guy", bn = "Mira Wells", g = World.GUILD, kind = "i", tc = (hour - 1) * 3600,
+			tj = hour * 3600, ws = { "vik stone" }, u = w.clock })
+		w:As(K, K.Count.TakeLine, A2, line)
+		eq(StateOf(w, K, "Moved Guy", "Mira Wells"), nil)
+		eq(Joins(w, K, "Mira Wells", "m"), 0)
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: what a full ledger let go is remembered by time, not by count: a recruit archived weeks ago is never taken again", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 60
+	local ok, err = pcall(function()
+		-- 250 of Mira's recruits from 40 days ago (all time only), then today's: about 190 went into the
+		-- archive, more than the old build's 2 * RECORDS_MAX marks kept.
+		for i = 1, 250 do Give(w, K, "Old Rec" .. Letters(i), "Mira Wells", 40 * 24 + 250 - i) end
+		eq(Joins(w, K, "Mira Wells", "a"), 250)
+		eq(Rec(w, K, "Old Recb", "Mira Wells"), nil, "the oldest went into the archive")
+		-- Another keeper still holding the oldest sends it in a catch-up: not taken, not counted twice.
+		local tj = (math.floor(w.clock / 3600) - (40 * 24 + 249)) * 3600
+		local line = w:As(K, K.Count.RecordLine, "x", { n = "Old Recb", bn = "Mira Wells", g = World.GUILD, kind = "i", tc = tj - 3600, tj = tj,
+			ws = { "wes brook" }, u = w.clock })
+		eq(w:As(K, K.Count.TakeLine, A2, line), false)
+		eq(Joins(w, K, "Mira Wells", "a"), 250)
+		-- The hourly upkeep keeps the marks while a line could bring one back (RECORDS_DAYS)...
+		w:As(K, K.Count.Prune)
+		eq(w:As(K, K.Count.TakeLine, A2, line), false)
+		-- ...and lets them go after, when every keeper refuses such a record as too old anyway.
+		w:Run((K.Count.RECORDS_DAYS + 1) * DAY)
+		w:As(K, K.Count.Prune)
+		eq(next(w:As(K, K.Count.Led).gone), nil)
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: a person's detail adds up: the archive's recruits have their own line next to the guilds'", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 60
+	local ok, err = pcall(function()
+		for i = 1, 100 do Give(w, K, "Det Rec" .. Letters(i), "Mira Wells", 100 - i) end
+		for _, win in ipairs({ "m", "a" }) do
+			local lines = w:As(K, K.Count.DetailLines, Key("Mira Wells"), win)
+			local joins, sum, archived = nil, 0, nil
+			for _, d in ipairs(lines) do
+				if d[1] == "j" then joins = d[2] end
+				if d[1] == "g" then
+					sum = sum + d[3]
+					if d[2] == "-" then archived = d[3] end
+				end
+			end
+			eq(joins, 100, win); eq(sum, joins, win .. ": the lines add up")
+			assert(archived and archived > 0, "the archive's own line, " .. win)
+		end
+		eq(type(ns.L.CHURCH_GUILD_ARCHIVED), "string")
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: an archived recruit later proven a transfer leaves the count, on every keeper; one still in after 7 days counts his stay", function()
+	local w, c = Cast()
+	local K = c.a1
+	local saved = K.Count.RECORDS_MAX
+	K.Count.RECORDS_MAX = 60
+	local ok, err = pcall(function()
+		Give(w, K, "Late Mover", "Mira Wells", 30); Give(w, c.a2, "Late Mover", "Mira Wells", 30)
+		Give(w, K, "Late Stayer", "Mira Wells", 29); Give(w, c.a2, "Late Stayer", "Mira Wells", 29)
+		for i = 1, 60 do Give(w, K, "Fill Rec" .. Letters(i), "Nils Ford", 5) end
+		eq(Rec(w, K, "Late Mover", "Mira Wells"), nil, "archived"); eq(Rec(w, K, "Late Stayer", "Mira Wells"), nil, "archived")
+		eq(Joins(w, K, "Mira Wells", "m"), 2)
+		-- The desk's new-to-Olympus check finds him in another Olympus guild: a transfer, on Bera's too.
+		eq(w:As(K, K.Count.MergeIn, Key("Late Mover") .. ":" .. Key("Mira Wells"), { c = 1, t = 1 }, true), true)
+		w:Run(5)
+		eq(Joins(w, K, "Mira Wells", "m"), 1); eq(Joins(w, K, "Mira Wells", "a"), 1, "all time too")
+		eq(StateOf(w, c.a2, "Late Mover", "Mira Wells"), "transfer")
+		-- Bera's check finds the other still in after 7 days: her line brings his stay to Aldric's archive.
+		local id = Key("Late Stayer") .. ":" .. Key("Mira Wells")
+		local r = Rec(w, c.a2, "Late Stayer", "Mira Wells")
+		r.y, r.u = 1, w.clock
+		eq(w:As(K, K.Count.TakeLine, A2, w:As(c.a2, c.a2.Count.RecordLine, id, r)), true)
+		local o = w:As(K, K.Count.Own, Key("Mira Wells"), "m")
+		eq(o.stays, 1); eq(o.points, 15)
+		eq(w:As(K, K.Count.Own, Key("Mira Wells"), "a").points, 15)
+	end)
+	K.Count.RECORDS_MAX = saved
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.1 Church: a keeper just logged in answers no ask before its catch-up: an audience page keeps its numbers instead of a ledger's that is behind", function()
+	local w, c = Cast()
+	-- Aldric is away while Bera, the only keeper online, takes five of Mira's recruits; Nils's page asks her.
+	c.a1.online = false
+	w:Run(c.a2.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	for i = 1, 5 do Give(w, c.a2, "Away Rec" .. Letters(i), "Mira Wells", 2) end
+	local function MiraJoins()
+		for _, r in ipairs((w:As(c.m2, c.m2.Count.RankingView, "m", "m"))) do if r.key == Key("Mira Wells") then return r.joins end end
+	end
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "m", nil, true), true)
+	w:Run(30)
+	eq(MiraJoins(), 5)
+	-- Aldric logs in: the desk again (his name first), his ledger without those five.
+	c.a1.online = true
+	Login(w, c.a1)
+	w:Presence()
+	eq(w:As(c.a1, c.a1.Church.Desk), A1)
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "m", nil, true), true)
+	w:Run(30)
+	eq(MiraJoins(), 5, "not 0: the page kept its numbers")
+	-- Caught up from Bera, he answers, with them.
+	eq(w:As(c.a1, c.a1.Count.CatchUp, true), true)
+	w:Run(60)
+	eq(w:As(c.a1, c.a1.Count.Settled), true)
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "m", nil, true), true)
+	w:Run(30)
+	eq(MiraJoins(), 5)
 end)
