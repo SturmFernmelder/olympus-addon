@@ -15,7 +15,9 @@ local L = ns.L
 --   PAIR_HOURS is whispered to every keeper heard online (an outbox keeps it otherwise).
 -- - Pending or confirmed. The recruiter's own report leaves a record pending; it is confirmed once a
 --   client other than his, his linked alts' (Alts.Linked) and the recruit's reported the same pair
---   from its own read of the log. (A seen-check answer that places the recruit in the guild shows
+--   from its own read of the log, and the keeper can vouch for that client in the pair's guild
+--   (1.2.1, VerifiedWitness: a whisper from anyone else is not taken; the keeper that vouched tells
+--   the others, Count.Push and the catch-up). (A seen-check answer that places the recruit in the guild shows
 --   he is there, not who invited him: it confirms a registration's arrival, never an invite.)
 -- - New to Olympus. Every client keeps a memory of its own guild's roster (first and last day each
 --   name was seen). The desk (Church.Desk) asks the channel about each new recruit once
@@ -513,6 +515,31 @@ local function AltOf(recruit, recruiter)
 end
 Count.AltOf = AltOf
 
+-- (1.2.1) A witness this client can vouch for in the pair's guild, as the desk's seen-checks keep their
+-- answers to (CheckRecipients): our fresh roster when the pair is our own guild's (a guildmate of ours
+-- reads our guild's log, never another's); the signed (a keeper, the King, a High Councillor); that
+-- guild's correspondent, named by its guild master (the book); or one the Olympus chats verify for that
+-- guild (Channels.VerifiedLevel's verified word: its signed leadership, or the census as they read it).
+-- A whisper alone vouches for nothing: anyone can send one.
+local function VerifiedWitness(name, guild)
+	local who, mine = ns.FullName(name), OwnGuild()
+	if not who or not guild then return false end
+	local R = ns.Roster
+	local mate = R and R.Fresh and R.Fresh() and R.RankOf and R.RankOf(who) ~= nil
+	local ours = mine ~= nil and ns.Fold(mine) == ns.Fold(guild)
+	if ours and mate then return true end
+	if mate then return false end
+	if Church.IsKeeper(who) or Church.IsKing(who) or (ns.IsHighCouncillor and ns.IsHighCouncillor(who) == true) then return true end
+	local corr = Church.State().corr[ns.Fold(guild)]
+	if corr and Key(corr.n) == Key(who) then return true end
+	if ours then return false end
+	local C = ns.Channels
+	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false end
+	local ok, level, verified = pcall(C.VerifiedLevel, who, guild)
+	return ok and verified == true and (tonumber(level) or 0) >= 1
+end
+Count.VerifiedWitness = VerifiedWitness
+
 local function Sources(list)
 	local out, seen = {}, {}
 	for _, s in ipairs(list or {}) do if s and not seen[s] then seen[s], out[#out + 1] = true, s end end
@@ -790,12 +817,25 @@ function Count.TakeEvidence(sender, text)
 		local ik, xk = Key(inviter), Key(invitee)
 		if ik == xk then return Drop("self") end
 		if not PlacedBy(inviter, ti * 3600) then return Drop("recruiter") end
-		if sk == xk then return Drop("recruit") end
+		if sk == xk or Linked(invitee, sender) then return Drop("recruit") end
 		local own = sk == ik
-		local independent = not own and not Linked(inviter, sender)
+		local alt = not own and Linked(inviter, sender)
+		-- (1.2.1: only a witness this keeper can vouch for confirms, VerifiedWitness. Any other whisperer
+		-- counted as one: a single whisper credited a recruit, or took one from his real recruiter.)
+		local independent = not own and not alt and VerifiedWitness(sender, guild)
+		if not own and not alt and not independent then return Drop("unverified") end
 		stats.taken = stats.taken + 1
-		Count.MergeIn(xk .. ":" .. ik, { n = Short(invitee), bn = Short(inviter), g = guild, kind = "i", tc = ti * 3600, tj = tj * 3600,
+		local id = xk .. ":" .. ik
+		local held = Led().r[id]
+		local had = held ~= nil and held.ws ~= nil and #held.ws > 0
+		Count.MergeIn(id, { n = Short(invitee), bn = Short(inviter), g = guild, kind = "i", tc = ti * 3600, tj = tj * 3600,
 			s = own and 1 or nil, ws = independent and { sk } or nil, a = AltOf(invitee, inviter) and 1 or nil }, false)
+		-- (A keeper outside the pair's guild can't vouch for a guildmate there: the one that did tells the
+		-- keepers online at once, when the queue has room; the catch-up carries it otherwise. Our own
+		-- report reaches them all itself: a keeper is signed.)
+		local r = Led().r[id]
+		if independent and not had and r and r.ws and sk ~= Key(ns.me)
+			and ns.Comm.QueueRoom() > Count.SEND_ROOM + #Church.KeepersOnline(false) then Count.Push(id) end
 		return true
 	elseif kind == "g" or kind == "x" then
 		local recruit, at = text:match("^NV~1~[gx]~([^~]+)~([0-9a-z]+)$")

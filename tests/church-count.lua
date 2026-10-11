@@ -538,9 +538,12 @@ test("1.1.6 Church: the keepers' ledger: a keeper catches up from another; the m
 	local e2 = ("NV~1~w~Mira Wells-Realm~Merge Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 3), B(hour - 1))
 	w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Wells-Realm", e1)
 	w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", e2)
-	w:As(c.a2, c.a2.Count.TakeEvidence, "Wes Brook-Realm", e2)
+	-- (1.2.1: Bera, in Olympus Vale, can't vouch for Wes of Olympus Ember: she takes his word from Aldric's
+	-- ledger, which did, Count.Push.)
+	eq(select(2, w:As(c.a2, c.a2.Count.TakeEvidence, "Wes Brook-Realm", e2)), "unverified")
 	w:As(c.a2, c.a2.Count.TakeEvidence, "Mira Wells-Realm", e1)
 	w:As(c.a2, c.a2.Count.TakeEvidence, "Mira Wells-Realm", e1)
+	w:Flush()
 	local r1, r2 = Rec(w, c.a1, "Merge Guy", "Mira Wells"), Rec(w, c.a2, "Merge Guy", "Mira Wells")
 	eq(r1.tc, r2.tc); eq(r1.tc, (hour - 3) * 3600, "the earliest invite"); eq(r1.s, r2.s); eq(r1.ws[1], r2.ws[1])
 	-- The Head comes online with nothing: he catches up from the desk.
@@ -1283,4 +1286,49 @@ test("1.2.1 Church: a keeper just logged in answers no ask before its catch-up: 
 	eq(w:As(c.m2, c.m2.Count.Ask, "m", "m", nil, true), true)
 	w:Run(30)
 	eq(MiraJoins(), 5)
+end)
+
+-- 1.2.1, the security review: what a keeper takes from whom.
+
+-- A log pair as a reporter's client whispers it: invite and join `ago` hours ago, in Olympus Ember.
+local function PairText(w, inviter, recruit, ago, guild)
+	local B, hour = ns.Codec.Base36, math.floor(w.clock / 3600)
+	return ("NV~1~w~%s-Realm~%s-Realm~%s~%s~%s"):format(inviter, recruit, guild or World.GUILD, B(hour - ago), B(hour - ago))
+end
+
+test("1.2.1 Church: a witness is one the keeper can vouch for in the pair's guild: an outsider's whisper confirms nothing and takes no recruit from his recruiter", function()
+	local w, c = Cast()
+	local function Take(k, from, text) return select(2, w:As(k, k.Count.TakeEvidence, from, text)) end
+	-- Mira's own report leaves her pair pending; a stranger's whisper of the same pair, to every keeper, changes nothing.
+	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Wells-Realm", PairText(w, "Mira Wells", "Made Up", 2)), true)
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(Take(k, "Stray Whisper-Realm", PairText(w, "Mira Wells", "Made Up", 2)), "unverified") end
+	w:Flush()
+	eq(StateOf(w, c.a1, "Made Up", "Mira Wells"), "pending")
+	eq(w:As(c.a1, c.a1.Count.Own, Key("Mira Wells"), "a").points, 0)
+	-- A member of another guild is no witness to an Olympus Ember pair, nor one of the recruit's own characters.
+	eq(Take(c.a1, "Vik Stone-Realm", PairText(w, "Mira Wells", "Made Up", 2)), "unverified")
+	w.alts[Key("Wes Kid")] = { "Wes Brook-Realm" }
+	eq(Take(c.a1, "Wes Brook-Realm", PairText(w, "Mira Wells", "Wes Kid", 2)), "recruit")
+	-- Nils's real recruit, confirmed by Wes (Aldric's roster): a stranger's earlier-dated pair for Mira takes nothing.
+	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Nils Ford-Realm", PairText(w, "Nils Ford", "Real Kid", 2)), true)
+	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", PairText(w, "Nils Ford", "Real Kid", 2)), true)
+	eq(Take(c.a1, "Stray Whisper-Realm", PairText(w, "Mira Wells", "Real Kid", 5)), "unverified")
+	eq(StateOf(w, c.a1, "Real Kid", "Nils Ford"), "credited", "not taken from his recruiter")
+	eq(StateOf(w, c.a1, "Real Kid", "Mira Wells"), nil)
+	w:Flush()
+	eq(StateOf(w, c.a2, "Real Kid", "Nils Ford"), "credited", "Aldric, who vouched for Wes, told Bera")
+	-- Bera, in Olympus Vale, vouches for the signed (a High Councillor), Olympus Ember's correspondent and an
+	-- officer the Olympus chats verify there; not for a member they could not.
+	eq(w:As(c.a2, c.a2.Count.TakeEvidence, World.COUNCILLOR, PairText(w, "Mira Wells", "Sig Ned", 2)), true)
+	eq(StateOf(w, c.a2, "Sig Ned", "Mira Wells"), "credited")
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Cora Penn", World.GUILD), true)
+	eq(w:As(c.a2, c.a2.Count.TakeEvidence, "Cora Penn-Realm", PairText(w, "Mira Wells", "Cor Ned", 2)), true)
+	eq(StateOf(w, c.a2, "Cor Ned", "Mira Wells"), "credited")
+	c.a2.c.Channels.VerifiedLevel = function(n, g)
+		if Key(n) == Key("Ola Officer") and g == World.GUILD then return 2, true, 1 end
+		return 1, false
+	end
+	eq(w:As(c.a2, c.a2.Count.TakeEvidence, "Ola Officer-Realm", PairText(w, "Mira Wells", "Off Ned", 2)), true)
+	eq(StateOf(w, c.a2, "Off Ned", "Mira Wells"), "credited")
+	eq(Take(c.a2, "Plain Ember-Realm", PairText(w, "Mira Wells", "Plain Ned", 2)), "unverified", "a claimed member the chats could not verify")
 end)
