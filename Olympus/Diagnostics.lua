@@ -487,7 +487,9 @@ function ns.StatusText()
 	end
 	local n = 0
 	for _ in pairs(ns.rdb.guilds) do n = n + 1 end
-	add("cached guilds=%d  |  map=%s  |  errors=%d  |  sessions=%d", n, tostring(ns.db.showMap), #ns.db.errors, ns.db.sessions or 0)
+	-- (1.2.1: the census keeps Data.MAX_GUILDS reports at most; how many went this session to make room.)
+	add("cached guilds=%d (at most %s, %s let go)  |  map=%s  |  errors=%d  |  sessions=%d", n, tostring(ns.Data and ns.Data.MAX_GUILDS or "?"),
+		tostring(ns.Data and ns.Data.Trimmed and ns.Data.Trimmed() or 0), tostring(ns.db.showMap), #ns.db.errors, ns.db.sessions or 0)
 	add("map lib: %s  |  zones indexed=%d  |  tabs: %s", tostring(ns.Map and ns.Map.libOk), ns.Zones and ns.Zones.Count() or 0,
 		ns.UI and ns.UI.tabTemplate and (ns.UI.tabTemplate .. " (" .. tostring(ns.UI.tabStyle) .. " spacing), window "
 			.. tostring(ns.UI.WindowStyle and ns.UI.WindowStyle())) or "not built")

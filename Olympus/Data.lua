@@ -13,6 +13,13 @@ Data.TOTAL_KEEP = 24 * 60 * 60 -- a guild's size counts in the army's total this
 Data.VOUCH_TTL = 30 * 60       -- a report counts as its sender's vote on the guild this long
 Data.CLAIM_TTL = 15 * 60       -- a sender quiet this long for its guild may speak for another one
 local MAX_VOUCH = 8            -- votes kept per guild (the newest)
+-- 1.2.1: the reports kept, at most, ours among them. Any guild whose name holds "Olympus" is an
+-- Olympus guild, so characters to spare (one guild each every CLAIM_TTL) could fill the saved
+-- variables with guilds that do not exist, each kept for KEEP. Past it the report heard longest ago
+-- goes (Data.Trim): a real guild reports every few minutes while anyone of it is on, so a forger's
+-- old names go first. Never our own guild's, nor the King's guild or one the author's signed list
+-- approves while another can go. Several times the guilds any realm group has.
+Data.MAX_GUILDS = 300
 
 -- The key a guild is stored under, whatever the case a report spells it in: a realm has one
 -- guild of a name, so "OLYMPUS X" and "Olympus X" are the same one (or one is forged).
@@ -31,6 +38,36 @@ function Data.Guild(name)
 	local key = Data.GuildKey(name)
 	return key and ns.rdb.guilds[key] or nil
 end
+
+-- (1.2.1) The store at MAX_GUILDS reports less `room` (0, or 1 before a new guild goes in): the
+-- reports heard longest ago go, the King's guild and the approved ones only once no other is
+-- left, our own never. Returns how many went.
+local trimmed = 0
+function Data.Trim(room)
+	local guilds = ns.rdb and ns.rdb.guilds
+	if type(guilds) ~= "table" then return 0 end
+	local count = 0
+	for _ in pairs(guilds) do count = count + 1 end
+	local over = count + (room or 0) - Data.MAX_GUILDS
+	if over <= 0 then return 0 end
+	local list = {}
+	for name, g in pairs(guilds) do
+		if not (type(g) == "table" and g.mine) then
+			local kept = type(name) == "string" and (ns.IsKingGuild(name) or (ns.IsApprovedGuild ~= nil and ns.IsApprovedGuild(name)))
+			list[#list + 1] = { name = name, t = type(g) == "table" and tonumber(g.t) or -math.huge, kept = kept and 1 or 0 }
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.kept ~= b.kept then return a.kept < b.kept end
+		if a.t ~= b.t then return a.t < b.t end
+		return tostring(a.name) < tostring(b.name)
+	end)
+	local n = math.min(over, #list)
+	for i = 1, n do guilds[list[i].name] = nil end
+	trimmed = trimmed + n
+	return n
+end
+function Data.Trimmed() return trimmed end -- (this session: /oly status)
 
 -- Where the King is pinned by name (ns.KING_CHARACTER), a report of his guild that names
 -- anyone else as its leader (or nobody) is not his guild's: forged, or out of date.
@@ -76,6 +113,9 @@ ns.On("INIT", function()
 		ns.Log("dropped guild %s: forged size or a second spelling", name)
 		ns.rdb.guilds[name] = nil
 	end
+	-- (1.2.1) Kept by older versions, without a cap: MAX_GUILDS at most from now on.
+	local over = Data.Trim(0)
+	if over > 0 then ns.Log("census: %d guild reports heard longest ago let go (%d kept at most)", over, Data.MAX_GUILDS) end
 	local seen = Data.Seen()
 	for name, e in pairs(seen) do
 		if type(e) ~= "table" or now - (e.t or 0) > Data.KEEP then seen[name] = nil end
@@ -138,6 +178,7 @@ function Data.SetLocal(r)
 	r.from = ns.realm -- travels in the report: whoever hears it on another realm sees the channel shared (/oly status)
 	r.heardOn = ns.realm -- see Data.Receive
 	r.mine = true
+	if ns.rdb.guilds[r.guild] == nil then Data.Trim(1) end -- (1.2.1: MAX_GUILDS)
 	ns.rdb.guilds[r.guild] = r
 	ns.Fire("DATA_CHANGED")
 end
@@ -386,6 +427,8 @@ function Data.Receive(r, sender)
 	if r.conflict and not (previous and previous.conflict) then
 		ns.Log("conflict on %s: the senders are split on it", r.guild)
 	end
+	-- (1.2.1) A guild not kept yet: room for it first (MAX_GUILDS, Data.Trim).
+	if ns.rdb.guilds[r.guild] == nil then Data.Trim(1) end
 	ns.rdb.guilds[r.guild] = r
 	ns.Fire("DATA_CHANGED")
 	return true
