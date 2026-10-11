@@ -7,16 +7,33 @@ local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]perf%.lua
 -- its own (its ns.SafeCall, ns.Fire, events and the /oly dispatcher), the profiler over it, a clock
 -- that moves only when a call here moves it (w.now, milliseconds) and GetTime (w.t, seconds). The
 -- game's next frame: w.Tick() runs the timers due (C_Timer.After), as the load's end does once.
--- before(c, Perf): what else the files register after Perf.lua, before INIT.
+-- before(c, Perf): what else the files register after Perf.lua, before INIT. 1.2.3: the Lua heap
+-- (collectgarbage("count"), KB) is w.heap, moved only where a call here moves it (the real one
+-- while w.realHeap), each read of it counted (w.heapReads); the game's figures per addon are
+-- w.addons, each UpdateAddOnMemoryUsage counted (w.updates).
 
-local GLOBALS = { "CreateFrame", "debugprofilestop", "GetTime", "C_Timer", "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARENA1" }
+local GLOBALS = { "CreateFrame", "debugprofilestop", "GetTime", "C_Timer", "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARENA1",
+	"collectgarbage", "UpdateAddOnMemoryUsage", "GetAddOnMemoryUsage" }
 local SLASH = { "OLYMPUS", "OLYMPUSARENA" }
 
 local function World(db, fn, before)
-	local w = { now = 0, t = 1000, frames = {}, printed = {}, errors = {}, copies = {}, timers = {} }
+	local w = { now = 0, t = 1000, frames = {}, printed = {}, errors = {}, copies = {}, timers = {},
+		heap = 50000, heapReads = 0, updates = 0, addons = { Olympus = 12345.6, Olympus_Arena = 0 } }
 	local saved, slash = {}, {}
 	for _, k in ipairs(GLOBALS) do saved[k] = rawget(_G, k) end
 	for _, k in ipairs(SLASH) do slash[k] = SlashCmdList[k] end
+	local gc = saved.collectgarbage
+	collectgarbage = function(opt, ...)
+		if opt == "count" then
+			w.heapReads = w.heapReads + 1
+			if w.realHeap then return gc("count") end
+			return w.heap
+		end
+		return gc(opt, ...)
+	end
+	UpdateAddOnMemoryUsage = function() w.updates = w.updates + 1 end
+	-- (The game's: a name it has no addon by is an error.)
+	GetAddOnMemoryUsage = function(name) return assert(w.addons[name], "no such addon") end
 	CreateFrame = function()
 		local f = { scripts = {}, events = {} }
 		function f:SetScript(kind, script) self.scripts[kind] = script end
@@ -261,12 +278,18 @@ test("1.2.1 profiler in the gamepad pass's client: on from the saved variables i
 		local p = gns.db.perf
 		assert(next(p.stats), what .. ": the session's calls measured")
 		assert(p.frames > 0, what .. ": its frame counted the frames")
+		-- (1.2.3: the client's own Lua heap, read through the pass's collectgarbage: the session allocates.)
+		assert(p.peak > 0, what .. ": the heap read at the frames' end")
+		local allocated = false
+		for _, s in pairs(p.stats) do if s.kbMax > 0 then allocated = true end end
+		assert(allocated, what .. ": a call's KB measured")
 		assert(gns.Perf.ReportText():find(pad and gns.L.PERF_INPUT_PAD or gns.L.PERF_INPUT_KEYS, 1, true), what .. ": the report says which")
 		if not pad then
 			eq(GPM.TypeSlash(C, "/oly perf"), true, "/oly perf typed")
 			local f = gns.UI.CopyFrame("perf")
 			assert(f and f:IsShown(), "the report in Olympus's copy window")
 			assert(f.text:find(gns.L.PERF_TITLE, 1, true), "its text")
+			assert(f.text:find(gns.L.PERF_MEMORY_NOW:match("^(.-)%%s"), 1, true), "the memory now, the game's figures")
 			eq(GPM.TypeSlash(C, "/oly perf off"), true)
 			eq(gns.Perf.IsOn(), false)
 		end
@@ -437,4 +460,250 @@ test("1.2.1 profiler: /oly help lists /oly perf, so does the README's table of c
 		eq(Codes(pt[k]), Codes(v), "pt-BR codes: " .. k)
 	end
 	assert(n >= 25 and en.HELP_CMD_PERF and pt.HELP_CMD_PERF ~= en.HELP_CMD_PERF)
+end)
+
+-- 1.2.3: memory, for the RAM's spikes. time() here is GetTime's (w.t) from t0, so each time kept
+-- is known; utc: date() in UTC, as the fixture's report was written.
+local function WorldTime(w, t0, utc, fn)
+	local savedTime, savedDate = time, date
+	time = function() return t0 + math.floor(w.t) end
+	if utc then date = function(f, t) f = f or "%c"; if f:sub(1, 1) ~= "!" then f = "!" .. f end; return savedDate(f, t) end end
+	local ok, err = pcall(fn)
+	time, date = savedTime, savedDate
+	if not ok then error(err, 0) end
+end
+
+local function Copy(v)
+	if type(v) ~= "table" then return v end
+	local t = {}
+	for k, x in pairs(v) do t[k] = Copy(x) end
+	return t
+end
+
+-- a and b the same, but for the keys in skip (which a may have and b has not).
+local function Same(a, b, path, skip)
+	if type(a) ~= "table" or type(b) ~= "table" then
+		eq(a, b, path)
+		return
+	end
+	for k, v in pairs(b) do Same(a[k], v, path .. "." .. tostring(k), skip) end
+	for k in pairs(a) do assert(b[k] ~= nil or skip[k], path .. "." .. tostring(k) .. ": not in 1.2.2's") end
+end
+
+local function Lines(text)
+	local out = {}
+	for line in (text .. "\n"):gmatch("(.-)\n") do out[#out + 1] = line end
+	return out
+end
+
+-- Invisible where it is meant to be: tests/fixtures/perf-1.2.2.lua is a session (its heap moving
+-- too) as 1.2.2 measured it, what 1.2.2 saved and the report it opened.
+test("1.2.3 profiler: a session 1.2.2 measured (tests/fixtures/perf-1.2.2.lua) is measured the same, each label's calls and ms, the slowest calls and the worst frames, the KB beside them; what 1.2.2 saved reads, and its report's every line is there in its order, the memory's lines added", function()
+	local F = assert(loadfile(ROOT .. "tests/fixtures/perf-1.2.2.lua"))()
+	local db = {}
+	World(db, function(P, w, c)
+		WorldTime(w, F.t0, true, function() F.Session(c, w) end)
+	end)
+	local NEW = { kb = true, kbMax = true, kbAt = true, jumps = true, jumped = true, peak = true, peakAt = true }
+	Same(db.perf, F.saved, "perf", NEW)
+	eq(db.perf.stats["perf fixture inner"].kbMax, 2500, "and the KB")
+	eq(db.perf.stats["perf fixture outer"].kbMax, 2500, "the call inside counted in the outer's")
+	eq(db.perf.stats["callback PERF_FIXTURE #2 perf-1.2.2.lua:12"].kb, 4500)
+	-- (The loop's 5 frames grew 940 + 300 i KB each, the outer's 2500; the collection's none.)
+	eq(db.perf.jumped, 6, "the frames whose heap grew 1 MB or more")
+	eq(db.perf.jumps[1].kb, 2500); eq(db.perf.jumps[1].top, "perf fixture outer"); eq(db.perf.jumps[6].kb, 1240)
+	-- What 1.2.2 saved, opened by 1.2.3.
+	local saved = Copy(F.saved)
+	World({ perf = saved }, function(P, w, c, L)
+		eq(P.IsOn(), false)
+		WorldTime(w, F.t0, true, function()
+			c.VERSION = F.version
+			w.slash("perf")
+		end)
+		local extra, j = {}, 1
+		for _, line in ipairs(Lines(w.Report())) do
+			if line == F.report[j] then j = j + 1 else extra[#extra + 1] = line end
+		end
+		eq(j, #F.report + 1, "1.2.2's line " .. j .. " in its place: " .. tostring(F.report[j]))
+		local K = c.FormatNumber
+		local want = { L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(50000)), L.PERF_JUMPED:format(K(1024), "0", "8"),
+			L.PERF_JUMPS, "  " .. L.PERF_NONE, "", L.PERF_ALLOCS, "  " .. L.PERF_NONE, "", L.PERF_MEMORY_NOTES }
+		eq(table.concat(extra, "\n"), table.concat(want, "\n"), "the memory's lines alone added")
+		eq(saved.stats["perf fixture timer"].kb, 0, "a row 1.2.2 saved: no KB in it")
+		eq(saved.stats["perf fixture timer"].total, 105)
+	end)
+end)
+
+test("1.2.3 profiler: each call's KB (the Lua heap before and after it) by label, total and biggest with its time, the calls inside counted in the outer's, never below 0; the frames whose heap grew 1 MB or more, with Olympus's part and its biggest call; the highest heap; the report lists them, with no name", function()
+	World({}, function(P, w, c, L)
+		WorldTime(w, 1760000000, false, function()
+			local K = c.FormatNumber
+			local function At(t) return date("%H:%M:%S", t) end
+			w.slash("perf on")
+			w.Draw()
+			local p = c.db.perf
+			eq(p.peak, 50000, "the heap at a frame's end")
+			c.SafeCall("perf alloc", function() w.heap = w.heap + 300 end)
+			local s = p.stats["perf alloc"]
+			eq(s.kb, 300); eq(s.kbMax, 300); eq(s.kbAt, 1760001000)
+			w.t = w.t + 1
+			c.SafeCall("perf alloc", function() w.heap = w.heap + 100 end)
+			eq(s.n, 2); eq(s.kb, 400); eq(s.kbMax, 300, "the biggest one call"); eq(s.kbAt, 1760001000, "and when")
+			-- A collection inside the call: the heap lower after it than before, nothing allocated.
+			c.SafeCall("perf alloc", function() w.heap = w.heap - 500 end)
+			eq(s.n, 3); eq(s.kb, 400); eq(s.kbMax, 300)
+			-- An event's handler firing a callback: the listener's line has its KB, the handler's has it too.
+			c.On("PERF_MEM", function() w.heap = w.heap + 2000 end)
+			c.RegisterEvent("PERF_MEM_EVENT", function() w.heap = w.heap + 24; c.Fire("PERF_MEM") end)
+			w.eventFrame.scripts.OnEvent(w.eventFrame, "PERF_MEM_EVENT")
+			local kl, ke = KeyStarting(p.stats, "callback PERF_MEM #1"), KeyStarting(p.stats, "event PERF_MEM_EVENT #1")
+			eq(p.stats[kl].kbMax, 2000); eq(p.stats[ke].kbMax, 2024)
+			eq(p.events["callback PERF_MEM"].kb, 2000)
+			-- The frame: the heap grew 1924 KB since the last (300 + 100 - 500 + 2024); Olympus's calls
+			-- allocated 2424, the most of it the handler (its listener's inside it).
+			w.Draw()
+			eq(p.jumped, 1); eq(#p.jumps, 1)
+			local j = p.jumps[1]
+			eq(j.kb, 1924); eq(j.heap, 51924); eq(j.ours, 2424); eq(j.top, ke); eq(j.topKb, 2024); eq(j.at, 1760001001)
+			-- A jump none of Olympus's calls made (another addon's), one under 1 MB, a collection.
+			w.t = w.t + 1
+			w.heap = w.heap + 5000; w.Draw()
+			w.heap = w.heap + 1023; w.Draw()
+			local peak = w.heap
+			w.heap = 40000; w.Draw()
+			eq(p.jumped, 2); eq(p.jumps[1].kb, 5000); eq(p.jumps[1].top, nil); eq(p.jumps[1].ours, 0); eq(p.jumps[2].kb, 1924)
+			eq(p.peak, peak); eq(p.peakAt, 1760001002)
+			-- The ten biggest kept, biggest first.
+			for i = 1, 12 do w.heap = w.heap + 1024 + i; w.Draw() end
+			eq(p.jumped, 14); eq(#p.jumps, 10)
+			for i = 2, 10 do assert(p.jumps[i - 1].kb >= p.jumps[i].kb, "biggest first") end
+			eq(p.jumps[1].kb, 5000); eq(p.jumps[2].kb, 1924); eq(p.jumps[3].kb, 1036); eq(p.jumps[10].kb, 1029)
+			-- A label with a name in it allocating: its line kept without the name.
+			c.SafeCall("arena after wallet auto Somebank-Realm", function() w.heap = w.heap + 4000 end)
+			w.Draw()
+			eq(p.jumps[2].kb, 4000); eq(p.jumps[2].top, "arena after wallet auto")
+			eq(p.stats["arena after wallet auto"].kbMax, 4000)
+			-- The report: the game's figures measured once, as it opens (never while measuring).
+			eq(w.updates, 0, "nothing measured the game's figures while measuring")
+			w.slash("perf")
+			eq(w.updates, 1, "once as the report opened")
+			local text = w.Report()
+			for _, want in ipairs({
+				L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(w.heap)),
+				L.PERF_JUMPED:format(K(1024), K(15), K(p.frames)),
+				L.PERF_HEAP_PEAK:format(K(peak), At(p.peakAt)),
+				L.PERF_JUMP_ROW:format(K(1924), At(j.at), K(51924), K(2424), ke, K(2024)),
+				L.PERF_JUMP_ROW_NONE:format(K(5000), At(p.jumps[1].at), K(p.jumps[1].heap)),
+				L.PERF_JUMP_ROW:format(K(4000), At(p.jumps[2].at), K(p.jumps[2].heap), K(4000), "arena after wallet auto", K(4000)),
+				L.PERF_ALLOC_ROW:format("perf alloc", "300", At(1760001000), "400", "3"),
+				L.PERF_ALLOC_ROW:format(ke, K(2024), At(p.stats[ke].kbAt), K(2024), "1"),
+				L.PERF_ALLOC_ROW:format(kl, K(2000), At(p.stats[kl].kbAt), K(2000), "1"),
+				L.PERF_MEMORY_NOTES }) do
+				assert(text:find(want, 1, true), "the report lists: " .. want .. "\n" .. text)
+			end
+			-- Biggest one call first: the 4000 KB call above the 2024 KB one.
+			local a1 = text:find("  " .. L.PERF_ALLOC_ROW:format("arena after wallet auto", K(4000), "", "", ""):match("^(.-) at "), 1, true)
+			local a2 = text:find("  " .. L.PERF_ALLOC_ROW:format(ke, K(2024), "", "", ""):match("^(.-) at "), 1, true)
+			assert(a1 and a2 and a1 < a2, "the spikes first")
+			assert(not text:find("omebank", 1, true), "no name in the report")
+			-- An addon the game has no figure for (its error caught): "?".
+			w.addons.Olympus_Arena = nil
+			w.slash("perf")
+			eq(w.updates, 2)
+			assert(w.Report():find(L.PERF_MEMORY_NOW:format(K(12346), "?", K(w.heap)), 1, true), w.Report())
+			eq(#w.errors, 0, table.concat(w.errors, "; "))
+		end)
+	end)
+end)
+
+-- The real heap (LuaJIT's, the collector stopped): a call whose listener the profiler meets without
+-- a source, as on Forever's client (no debug library), has the namespace's names built inside it,
+-- the profiler's own work; the call itself allocates next to nothing.
+test("1.2.3 profiler: what its own records allocate (a label's row, the namespace's names it builds once) is not counted in the call around them", function()
+	World({}, function(P, w, c)
+		w.slash("perf on")
+		c.PerfBig = {}
+		for i = 1, 3000 do c.PerfBig["F" .. i] = function() end end
+		c.On("PERF_OWN", function() end)
+		local function Outer() c.Fire("PERF_OWN") end
+		local savedDebug = rawget(_G, "debug")
+		collectgarbage("collect")
+		collectgarbage("stop")
+		w.realHeap = true
+		rawset(_G, "debug", nil)
+		local before = collectgarbage("count")
+		local ok, err = pcall(c.SafeCall, "perf own outer", Outer)
+		local grew = collectgarbage("count") - before
+		rawset(_G, "debug", savedDebug)
+		w.realHeap = false
+		collectgarbage("restart")
+		assert(ok, err)
+		local p = c.db.perf
+		assert(grew > 50, "the profiler's own names were built inside the call: " .. grew .. " KB")
+		assert(p.stats["perf own outer"].kbMax < 4, "the call's own KB alone: " .. p.stats["perf own outer"].kbMax)
+		assert(p.stats["callback PERF_OWN #1"].kbMax < 4, "the listener's: " .. p.stats["callback PERF_OWN #1"].kbMax)
+	end)
+end)
+
+test("1.2.3 profiler: off it reads no heap (no wrapper, no OnUpdate) and the game's figures only as the report opens; reset clears the memory's numbers; a damaged saved list of jumps loses its bad rows", function()
+	World({}, function(P, w, c, L)
+		local K = c.FormatNumber
+		c.SafeCall("perf off call", function() w.heap = w.heap + 5000 end)
+		eq(w.heapReads, 0, "off: no heap read")
+		w.slash("perf")
+		eq(w.updates, 1)
+		eq(w.heapReads, 1, "the report's one read: the heap now")
+		assert(w.Report():find(L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(55000)), 1, true), "the memory now, nothing measured yet")
+		assert(w.Report():find(L.PERF_STATE_NEVER, 1, true))
+		eq(c.db.perf, nil, "nothing saved")
+		w.slash("perf on")
+		local reads = w.heapReads
+		c.SafeCall("perf on call", function() end)
+		eq(w.heapReads, reads + 2, "on: two reads around a call")
+		w.Draw()
+		eq(w.heapReads, reads + 3, "and one at a frame's end")
+		w.slash("perf off")
+		reads = w.heapReads
+		c.SafeCall("perf off again", function() w.heap = w.heap + 5000 end)
+		eq(w.Frame().scripts.OnUpdate, nil)
+		eq(c.SafeCall, w.core)
+		eq(w.heapReads, reads, "off again: no read")
+		eq(w.updates, 1, "never on a timer or a frame")
+		-- Reset clears them too, measuring goes on.
+		w.slash("perf on")
+		c.SafeCall("perf alloc", function() w.heap = w.heap + 3000 end)
+		w.Draw()
+		local p = c.db.perf
+		eq(p.jumped, 1); eq(#p.jumps, 1); assert(p.peak > 0 and p.peakAt > 0)
+		eq(p.stats["perf alloc"].kbMax, 3000)
+		w.slash("perf reset")
+		eq(p.jumped, 0); eq(#p.jumps, 0); eq(p.peak, 0); eq(p.peakAt, 0)
+		eq(p.stats["perf alloc"], nil)
+		w.Draw()
+		eq(p.jumped, 0, "the heap unchanged since the last frame: no jump")
+		eq(p.peak, w.heap)
+		w.heap = w.heap + 2048
+		w.Draw()
+		eq(p.jumped, 1)
+	end)
+	-- A saved file edited by hand: the bad rows of its jumps dropped, the rest biggest first; a row
+	-- without numbers for its KB gets 0s.
+	local db = { perf = { on = true, jumps = { { kb = "x" }, { kb = 2000, top = "a" }, "bad", { kb = 3000 } }, peak = "x", jumped = 0 / 0,
+		stats = { ["perf saved"] = { n = 1, total = 1, max = 1, at = 0, kb = "x", kbMax = 5 } } } }
+	World(db, function(P, w, c, L)
+		eq(P.IsOn(), true)
+		local p = c.db.perf
+		eq(#p.jumps, 2); eq(p.jumps[1].kb, 3000); eq(p.jumps[2].kb, 2000)
+		eq(p.jumped, 0); eq(p.peak, 0)
+		eq(p.stats["perf saved"].kb, 0); eq(p.stats["perf saved"].kbMax, 0); eq(p.stats["perf saved"].kbAt, 0)
+		c.SafeCall("perf saved", function() w.heap = w.heap + 10 end)
+		eq(p.stats["perf saved"].kb, 10); eq(p.stats["perf saved"].n, 2)
+		w.Draw()
+		eq(p.peak, w.heap)
+		w.slash("perf")
+		local text = w.Report()
+		assert(text:find("  " .. L.PERF_JUMP_ROW_NONE:format(c.FormatNumber(3000), "-", "0.0"), 1, true), text)
+		assert(text:find("  " .. L.PERF_JUMP_ROW:format(c.FormatNumber(2000), "-", "0.0", "0.0", "a", "0.0"), 1, true), text)
+		eq(#w.errors, 0, table.concat(w.errors, "; "))
+	end)
 end)
