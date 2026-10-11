@@ -91,6 +91,17 @@ function GuildFrameHook.Candidates() -- gp:lookups
 	return out
 end
 
+-- 1.2.1: one of the game's guild windows on screen now (the Communities window ClassicUI Forever
+-- keeps unseen, at alpha 0, aside): where the game's own Remove from Guild asks, so Olympus asks in
+-- its own windows meanwhile, never in the game's popups (Core.lua's ns.ShowDialog).
+function GuildFrameHook.GameWindowShown() -- gp:lookups
+	for _, c in ipairs(GuildFrameHook.Candidates()) do
+		local f = c.frame
+		if f.IsVisible and f:IsVisible() and not (c.kind == "communities" and f.GetAlpha and f:GetAlpha() == 0) then return true end
+	end
+	return false
+end
+
 -- Forever's Mainline UI: its only Blizzard guild window is the new one. Classic Era and
 -- Anniversary keep their old Guild tab (hidden or not): their Communities window stays "old".
 function GuildFrameHook.IsHDClient() -- gp:lookups
@@ -177,6 +188,19 @@ local function Attach(frame, kind) -- gp:communities-button
 		if kind == "communities" and frame.GetAlpha and frame:GetAlpha() == 0 then return end
 		lastShown = host
 	end)
+	-- 1.2.1: the member's card (GuildMemberDetailFrame: the Guild & Communities window's, the old Guild
+	-- tab's) holds the game's Remove from Guild, whose question is one of the game's popups that the
+	-- game refuses with one of Olympus's among them. As the card opens, a question of Olympus's still
+	-- up as a game popup moves into Olympus's own window (Core.lua's ns.MoveDialogsOffGame; while a
+	-- guild window is on screen, ns.ShowDialog opens none there).
+	local card = kind == "communities" and frame.GuildMemberDetailFrame
+		or ((kind == "old" or kind == "guildui") and _G.GuildMemberDetailFrame) or nil
+	if type(card) == "table" and card.HookScript then
+		card:HookScript("OnShow", function()
+			if not ns.Gate.Allowed(GATE) then return end
+			if type(ns.MoveDialogsOffGame) == "function" then ns.SafeCall("guild member card popups", ns.MoveDialogsOffGame) end
+		end)
+	end
 	-- Closing the guild window closes our window if it is docked to that one (only then).
 	frame:HookScript("OnHide", function()
 		if not ns.Gate.Allowed(GATE) then return end

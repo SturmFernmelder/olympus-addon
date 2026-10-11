@@ -1819,18 +1819,48 @@ ns.Gate.Hooks("escape-list", {
 
 -- (1.1.5, the gamepad gate's "dialogs": a game popup of ours still up at a switch to the gamepad UI
 -- leaves the popups' shared state behind in Olympus's taint until a /reload; the player is told.)
-local gamePopups = {} -- [which] = true: shown as the game's popup this session
+-- 1.2.1 (a guild officer: "get a fail from addon when kick ppl from guild"): while one of the game's
+-- guild windows is on screen, Olympus's own window too. There the game asks its Remove from Guild
+-- in an exclusive popup of its own (REMOVE_GUILDMEMBER) whose Yes is a call the game refuses from
+-- tainted code (C_GuildInfo.RemoveFromGuild); showing it, the game goes through the popups on
+-- screen (StaticPopup_HideExclusive, StaticPopup_FindVisible, StaticPopup_SetUpPosition), and one
+-- opened from Olympus's code hands Olympus's taint to that question: the removal failed with
+-- "Interface action failed because of an AddOn". When the member's card (where Remove is) opens,
+-- ours still up as the game's move into Olympus's windows (ns.MoveDialogsOffGame, GuildFrame.lua).
+local gamePopups = {} -- [which] = { a, b, data }: shown as the game's popup this session, as last shown
+local function GuildWindowShown()
+	local hook = ns.GuildFrameHook
+	if ns.Dialog.missing or type(hook) ~= "table" or type(hook.GameWindowShown) ~= "function" then return false end
+	local ok, shown = pcall(hook.GameWindowShown)
+	return ok and shown == true
+end
 function ns.ShowDialog(which, a, b, data) -- gp:dialogs
-	local own = not ns.Gate.Allowed("dialogs")
-	ns.Log("dialog %s (%s)", tostring(which), own and "olympus window, gamepad UI" or "game popup")
-	if own then
+	local pad = not ns.Gate.Allowed("dialogs")
+	local guild = not pad and GuildWindowShown()
+	ns.Log("dialog %s (%s)", tostring(which), pad and "olympus window, gamepad UI" or guild and "olympus window, a guild window open" or "game popup")
+	if pad or guild then
 		-- Updated without restarting the game (Dialog.lua not loaded yet): never the game's
 		-- popup there, the player is told to restart.
 		if ns.Dialog.missing then ns.Print(L.RESTART_NEEDED) return nil end
 		return ns.Dialog.Show(which, a, b, data)
 	end
-	if type(which) == "string" then gamePopups[which] = true end
+	if type(which) == "string" then gamePopups[which] = { a = a, b = b, data = data } end
 	return StaticPopup_Show(which, a, b, data)
+end
+-- 1.2.1: each question of ours still up as the game's popup closes there unanswered (its OnHide
+-- alone, as ns.HideDialog closes one) and is asked again in Olympus's own window, with what it was
+-- shown with (a note typed in its box is not carried over). How many moved.
+function ns.MoveDialogsOffGame() -- gp:dialogs
+	if ns.Dialog.missing or not ns.Gate.Allowed("dialogs") or type(StaticPopup_Visible) ~= "function" then return 0 end
+	local moved = 0
+	for which, shown in pairs(gamePopups) do
+		if type(shown) == "table" and StaticPopup_Visible(which) then
+			ns.HideDialog(which)
+			ns.Dialog.Show(which, shown.a, shown.b, shown.data)
+			moved = moved + 1
+		end
+	end
+	return moved
 end
 function ns.HideDialog(which, data) -- gp:dialogs
 	if not ns.Dialog.missing then ns.Dialog.Hide(which, data) end
