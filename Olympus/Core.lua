@@ -2308,6 +2308,9 @@ local function Slash(input)
 			ns.Print(ns.L.DEMO_REMOVED)
 		elseif cmd == "bug" then
 			ns.UI.ShowBugReport()
+		elseif cmd == "perf" then
+			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
+			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "status" then
 			-- (1.2: the memory figures in it are measured now, on the command alone: Diagnostics' arena lines.)
 			if UpdateAddOnMemoryUsage then pcall(UpdateAddOnMemoryUsage) end
