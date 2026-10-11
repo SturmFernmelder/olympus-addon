@@ -1826,9 +1826,9 @@
         "How do I ask someone to update?",
         "Can I tell a guildmate their addon is old?"
       ],
-      "answer": "Right-click them and pick Ask to update (it only shows when they're behind). On 1.1.2 or newer their addon shows a small notice with where to update; older ones can't, so it opens a whisper with the ask for you to send. One ask per player a day, 5 an hour.",
-      "in_game": "Right-click them, Ask to update (it shows when they're behind). 1.1.2+ get a small notice; for older ones it opens a whisper you send.",
-      "notes": "The author's pick sends his usual update window (V3), which every version shows, naming the version he marked as released. Anyone else's sends V9, shown once a day at most, 7 days of quiet after Don't remind me. On the beta the limits last until logout (addon data isn't loaded back).",
+      "answer": "Only the author, the King and the High Council can (1.2.1): right-click them, Ask to update (it shows when they're behind). On 1.1.2 or newer they get a small notice with where to update; older ones get a whisper you send. One ask per player a day, 5 an hour.",
+      "in_game": "The author, the King and the High Council: right-click them, Ask to update (when they're behind). 1.1.2+ get a small notice; older ones a whisper you send.",
+      "notes": "The author's pick sends his usual update window (V3), which every version shows, naming the version he marked as released. The King's and a councillor's send V9, shown once a day at most, 7 days of quiet after Don't remind me; since 1.2.1 a V9 from anyone else is dropped (older versions still send them). On the beta the limits last until logout (addon data isn't loaded back).",
       "sources": [
         "Versions.lua",
         "Workshop.lua AskUpdate"

@@ -3336,11 +3336,18 @@ test("1.2 the guild's rows: the rosters' menus hooked; an Olympus row's right-cl
 	end }
 	local ok
 	H.WithStub("IsMember", function() return true end, function() ok = PM.OpenFor("row", "Parric Stowe-Emberfall") end)
-	MenuUtil = was
 	eq(ok, true); eq(owner, "row")
 	local text = table.concat(built or {}, " | ")
 	assert(text:find("button:" .. ns.L.VERSION_CHECK, 1, true), "Check version: " .. text)
-	assert(text:find("button:" .. ns.L.VERSION_ASK, 1, true), "Ask to update: " .. text)
+	-- (Changed on purpose, 1.2.1, the author's call: Ask to update in the author's, the King's and
+	-- the High Council's menus alone; the harness's player is none of them, then a councillor.)
+	assert(not text:find("button:" .. ns.L.VERSION_ASK, 1, true), "no Ask to update for a member: " .. text)
+	H.WithStub("IsMember", function() return true end, function()
+		H.WithStub("IsHighCouncillor", function() return true end, function() ok = PM.OpenFor("row", "Parric Stowe-Emberfall") end)
+	end)
+	MenuUtil = was
+	text = table.concat(built or {}, " | ")
+	assert(text:find("button:" .. ns.L.VERSION_ASK, 1, true), "Ask to update for a councillor: " .. text)
 	eq(PM.OpenFor("row", nil), false, "a row with no player: nothing")
 end)
 

@@ -280,11 +280,12 @@ friends list, the guild roster) and the game's menu gets an **Olympus** part at 
   answer, so no answer in 10 seconds can mean no Olympus, an older one, a dungeon or raid, or no
   Olympus guild (outside one the addon sends nothing). The author's check is his roll call to that
   player alone, which every version since 0.9.9 answers, and only after their yes to his roll calls.
-- **Ask to update**, when they are behind the newest version your addon knows: first a small
-  confirmation asks you before anything is sent. On 1.1.2 or newer their addon shows a compact
-  notice with both versions and where to update; **Read update** opens a parchment letter in plain
-  language, with reviewed public release notes and the safe next step. An older one can't show the
-  notice, so after your confirmation Olympus opens a whisper with the ask for you to send. One ask per player a day, 5 an hour;
+- **Ask to update** (1.2.1: the author, the King and the High Council only; others' asks are
+  dropped), when they are behind the newest version your addon knows: nothing goes before you
+  confirm. On 1.1.2 or newer their addon shows a compact notice with both versions and where to
+  update; **Read update** opens a plain-language parchment letter: reviewed public release notes
+  and the safe next step. For an older one, confirming opens a whisper you send with the ask. One
+  ask per player a day, 5 an hour;
   they see one a day at most, **Don't remind me** hides them for 7 days (on the beta, which forgets
   addon data at login, these last until you log out), and a player they block (`/oly block`) or
   ignore, or one the moderators took off, never gets through. The notice never names a version the

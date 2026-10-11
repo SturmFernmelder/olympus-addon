@@ -57745,7 +57745,8 @@ end)()
 		WithWorkshop(me, function(w, W)
 			local saved = { peer = ns.Comm.PeerVersion, after = V.after, random = V.random, ui = ns.UI, release = ns.db.authorRelease,
 				asked = ns.db.updateAsked, times = ns.db.updateAskTimes, shown = ns.db.updateAskShown, snooze = ns.db.updateAskSnooze,
-				friends = C_FriendList, blocked = ns.db.blocked, released = ns.db.releasedVersion, chat = C_ChatInfo, rollCall = ns.db.rollCall }
+				friends = C_FriendList, blocked = ns.db.blocked, released = ns.db.releasedVersion, chat = C_ChatInfo, rollCall = ns.db.rollCall,
+				council = ns.rdb.council }
 			w.hellos, w.timers, w.copies, w.whispers = {}, {}, {}, {}
 			local ok, err = pcall(function()
 				V.Reset()
@@ -57754,6 +57755,7 @@ end)()
 				ns.db.authorRelease, ns.db.updateAsked, ns.db.updateAskTimes, ns.db.updateAskShown, ns.db.updateAskSnooze = nil, nil, nil, nil, nil
 				ns.db.releasedVersion = nil
 				ns.db.blocked = {}
+				ns.rdb.council = nil
 				ns.Comm.PeerVersion = function(name)
 					local v = w.hellos[ns.ShortName(ns.FullName(ns.Normal(name)))]
 					if v then return v, w.clock - (w.helloAge or 0) end
@@ -57772,11 +57774,20 @@ end)()
 			ns.Comm.PeerVersion, V.after, V.random, ns.UI, ns.db.authorRelease = saved.peer, saved.after, saved.random, saved.ui, saved.release
 			ns.db.updateAsked, ns.db.updateAskTimes, ns.db.updateAskShown, ns.db.updateAskSnooze = saved.asked, saved.times, saved.shown, saved.snooze
 			C_FriendList, ns.db.blocked, ns.db.releasedVersion, C_ChatInfo, ns.db.rollCall = saved.friends, saved.blocked, saved.released, saved.chat, saved.rollCall
+			ns.rdb.council = saved.council
 			W.ResetVersion()
 			ns.ResetAfterCombat()
 			V.Reset()
 			if not ok then error(err, 0) end
 		end)
+	end
+	-- (1.2.1, the author's call) Only the author, the King and the High Council ask a player to
+	-- update, and every client drops anyone else's ask: these short names on the signed High
+	-- Council list (WithVersions starts with none).
+	local function Council(...)
+		local names = {}
+		for _, n in ipairs({ ... }) do names[n:lower()] = n end
+		ns.rdb.council = { at = 1, names = names }
 	end
 	local function AskAndConfirm(w, name)
 		if not V.AskUpdate(name) then return false end
@@ -57809,8 +57820,10 @@ end)()
 				local root = MenuRoot()
 				hooks.MENU_UNIT_FRIEND(nil, root, { name = "Ann", which = "FRIEND" })
 				-- (The owner's call, 2026-09-30: Ask to update and Check version are always there for
-				-- anyone who may run Olympus, greyed with the reason when they can't go.)
-				eq(root.Texts(), "divider: | title:Olympus | title:" .. L.VERSION_LINE_UNKNOWN .. " | button:" .. L.VERSION_ASK .. " | button:" .. L.VERSION_CHECK)
+				-- anyone who may run Olympus, greyed with the reason when they can't go. Changed on
+				-- purpose, 1.2.1, the author's call: Ask to update in the author's, the King's and the
+				-- High Council's menus alone; this one is a plain member's.)
+				eq(root.Texts(), "divider: | title:Olympus | title:" .. L.VERSION_LINE_UNKNOWN .. " | button:" .. L.VERSION_CHECK)
 				assert(TipOf(root.Find(L.VERSION_CHECK)):find(L.VERSION_CHECK_TIP, 1, true))
 				eq(#w.whispered + #w.sent, 0, "opening a menu sends nothing")
 				-- Whoever we can't reach: no line at all.
@@ -57835,8 +57848,13 @@ end)()
 				-- (Changed on purpose, 1.1.2's review: under the version, a line of its own says where
 				-- from, when and the newest known: a gamepad can't reach a menu line's tooltip.)
 				local detail = L.VERSION_DETAIL_HELLO:format(ns.Ago(w.clock)) .. "; " .. L.VERSION_DETAIL_NEWEST:format(ns.VERSION)
-				-- (Check version there too, the owner's call, 2026-09-30)
+				-- (Check version there too, the owner's call, 2026-09-30; Ask to update for a councillor.)
+				eq(r.Texts(), "divider: | title:Olympus | title:" .. L.VERSION_LINE_OUTDATED:format("1.0.0") .. " | title:|cff9d9d9d" .. detail .. "|r | button:" .. L.VERSION_CHECK)
+				Council("Tester")
+				r = MenuRoot()
+				hooks.MENU_UNIT_PLAYER(nil, r, { unit = "target" })
 				eq(r.Texts(), "divider: | title:Olympus | title:" .. L.VERSION_LINE_OUTDATED:format("1.0.0") .. " | title:|cff9d9d9d" .. detail .. "|r | button:" .. L.VERSION_ASK .. " | button:" .. L.VERSION_CHECK)
+				ns.rdb.council = nil
 				eq(PM.Target("PLAYER", { unit = "target" }).name, "Bob-Realm")
 				for _, unit in ipairs({ "npc", "gone", "player" }) do eq(PM.Target("PLAYER", { unit = unit }), nil, unit) end
 				-- Classic's split name (the menu gives "Bob" and his realm apart): whole again.
@@ -58050,7 +58068,9 @@ end)()
 	test("1.1.2 Ask to update: confirmation sends nothing until accepted; one ask per player a day, five an hour; the author's is his usual update window (V3)", function()
 		WithVersions("Tester-Realm", function(w, W)
 			-- (Changed on purpose, 1.1.2's review: a player's ask, V9, goes to 1.1.2 and newer alone,
-			-- the first that show it: here the author's presence named the current build as out.)
+			-- the first that show it: here the author's presence named the current build as out.
+			-- 1.2.1: a councillor's ask, the only players besides the author and the King who have it.)
+			Council("Tester")
 			W.HeardVersion(ns.VERSION)
 			w.hellos = { Ann = ns.VERSION, Bob = "1.1.5", P1 = "1.1.5", P2 = "1.1.5", P3 = "1.1.5", P4 = "1.1.5", P5 = "1.1.5" }
 			eq(V.AskUpdate("Ann-Realm"), false, "up to date"); eq(#w.whispered, 0)
@@ -58097,6 +58117,7 @@ end)()
 		WithUI(function()
 			WithGamepadUI(true, function(game)
 				WithVersions("Tester-Realm", function(w, W)
+					Council("Tester") -- (1.2.1: a councillor's ask)
 					W.HeardVersion(ns.VERSION)
 					w.hellos = { Bob = "1.1.5" }
 					eq(V.AskUpdate("Bob-Realm"), true)
@@ -58144,6 +58165,7 @@ end)()
 
 	test("1.1.2 review: a player older than 1.1.2 can't show a player's ask or answer a check: Ask to update opens a whisper to send yourself; no answer says it may be an older Olympus", function()
 		WithVersions("Tester-Realm", function(w, W)
+			Council("Tester") -- (1.2.1: a councillor's ask)
 			w.hellos = { Old = "1.1.1" }
 			local root = MenuRoot()
 			V.MenuLines({ name = "Old-Realm" }, { Line = function(t) root:CreateTitle(t) end, Button = function(t, fn, title, tip) local d = root:CreateButton(t, fn); d.tipText = tip end })
@@ -58184,6 +58206,9 @@ end)()
 						return #notices
 					end
 					local ok, err = pcall(function()
+						-- (1.2.1: every client drops an ask from anyone but the author, the King and
+						-- the High Council; these askers are councillors.)
+						Council("Ann", "Bob", "Cid", "Dee", "Eli", "Fay")
 						V.HandleAsk("WHISPER", "Ann-Realm", "V9~1.1.0")
 						V.HandleAsk("WHISPER", "Ann-Realm", "V9~1.0.9")
 						V.HandleAsk("WHISPER", "Ann-Realm", "V9~go to evil.example")
@@ -58250,6 +58275,7 @@ end)()
 					local mine, savedHides, savedCombat = ns.VERSION, ns.Moderation.Hides, rawget(_G, "InCombatLockdown")
 					ns.VERSION = "1.1.2"
 					local ok, err = pcall(function()
+						Council("Gus", "Hal", "Low", "Ivy", "Joy") -- (1.2.1: councillors' asks)
 						-- Taken off by the moderators (net-off): nothing.
 						ns.Moderation.Hides = function(sender) if sender == "Gus-Realm" then return { kind = "c" } end return nil end
 						V.HandleAsk("WHISPER", "Gus-Realm", "V9~1.1.3")
@@ -58318,6 +58344,75 @@ end)()
 		end)
 	end)
 
+	test("1.2.1 Ask to update: only the author, the King and the High Council have the line and can send it; every client drops anyone else's ask (older versions still send one)", function()
+		local KING = ns.KingCharacter() .. "-Realm"
+		assert(ns.IsKingCharacter(KING), KING)
+		local function Menu(name)
+			local root = MenuRoot()
+			V.MenuLines({ name = name }, { Line = function(t) root:CreateTitle(t) end, Button = function(t) root:CreateButton(t) end })
+			return root
+		end
+		WithVersions("Tester-Realm", function(w, W)
+			W.HeardVersion(ns.VERSION)
+			w.hellos = { Bob = "1.1.5", Old = "1.1.1" }
+			-- A plain member: no line, and nothing opens or leaves when it is called all the same
+			-- (a V9, or the whisper for an Olympus older than 1.1.2).
+			eq(Menu("Bob-Realm").Find(L.VERSION_ASK), nil, "a plain member's menu: no Ask to update")
+			assert(Menu("Bob-Realm").Find(L.VERSION_CHECK), "Check version stays")
+			eq(Menu("Old-Realm").Find(L.VERSION_ASK), nil)
+			eq(V.AskUpdate("Bob-Realm"), false); eq(V.AskUpdate("Old-Realm"), false)
+			StaticPopupDialogs.OLYMPUS_UPDATE_CONFIRM.OnAccept(nil, "Bob-Realm")
+			StaticPopupDialogs.OLYMPUS_UPDATE_CONFIRM_LEGACY.OnAccept(nil, "Old-Realm")
+			eq(#w.popups, 0); eq(#w.whispered, 0); eq(#w.whispers, 0); eq(ns.db.updateAsked, nil)
+			-- A councillor: the line, and the ask goes.
+			Council("Tester")
+			assert(Menu("Bob-Realm").Find(L.VERSION_ASK), "a councillor's menu")
+			eq(AskAndConfirm(w, "Bob-Realm"), true); eq(w.whispered[1].msg, "V9~" .. ns.VERSION)
+			-- Taken off the list: gone again.
+			ns.rdb.council = nil
+			eq(Menu("Bob-Realm").Find(L.VERSION_ASK), nil); eq(V.AskUpdate("Old-Realm"), false)
+		end)
+		WithVersions(KING, function(w, W)
+			W.HeardVersion(ns.VERSION)
+			w.hellos = { Bob = "1.1.5" }
+			assert(Menu("Bob-Realm").Find(L.VERSION_ASK), "the King's menu")
+			eq(AskAndConfirm(w, "Bob-Realm"), true); eq(w.whispered[1].msg, "V9~" .. ns.VERSION)
+		end)
+		WithVersions(AUTHOR_FULL, function(w)
+			w.hellos = { Bob = "1.0.0" }
+			assert(Menu("Bob-Realm").Find(L.VERSION_ASK), "the author's menu")
+		end)
+		-- Receiving: behind the release the author's presence named.
+		WithUI(function()
+			WithGamepadUI(false, function()
+				WithVersions("Tester-Realm", function(w, W)
+					local mine = ns.VERSION
+					ns.VERSION = "1.1.0"
+					local ok, err = pcall(function()
+						W.HeardVersion("1.1.2")
+						V.HandleAsk("WHISPER", "Nim-Realm", "V9~1.1.2")
+						eq(ns.Dialog.Find("OLYMPUS_UPDATE_ASKED"), nil, "a plain member's ask: dropped")
+						eq(ns.db.updateAskShown, nil, "spending nothing: a councillor's ask still shows today")
+						Council("Sage")
+						V.HandleAsk("WHISPER", "Sage-Realm", "V9~1.1.2")
+						local d = ns.Dialog.Find("OLYMPUS_UPDATE_ASKED")
+						assert(d, "a councillor's ask"); eq(d.text:GetText(), L.VERSION_NOTICE:format("Sage", "1.1.0", "1.1.2"))
+						d.buttons[2]:Click()
+						for _, who in ipairs({ KING, AUTHOR_FULL }) do
+							ns.db.updateAskShown = nil
+							V.HandleAsk("WHISPER", who, "V9~1.1.2")
+							d = ns.Dialog.Find("OLYMPUS_UPDATE_ASKED")
+							assert(d, who); d.buttons[2]:Click()
+						end
+					end)
+					ns.VERSION = mine
+					ns.ResetHeld()
+					if not ok then error(err, 0) end
+				end)
+			end)
+		end)
+	end)
+
 	test("Update notice and letter: gamepad stays on Olympus frames; details use reviewed copy and the official page", function()
 		WithUI(function()
 			WithGamepadUI(true, function(game)
@@ -58325,6 +58420,7 @@ end)()
 					local mine = ns.VERSION
 					ns.VERSION = "1.1.3"
 					local ok, err = pcall(function()
+						Council("Ann") -- (1.2.1: a councillor's ask)
 						W.HeardVersion("1.1.4")
 						V.HandleAsk("WHISPER", "Ann-Realm", "V9~9.9.9")
 						local d = ns.Dialog.Find("OLYMPUS_UPDATE_ASKED")
@@ -58928,7 +59024,8 @@ end)()
 			w.whispered[2].done(false)
 			eq((V.Status("Bob")), "unknown"); eq(w.printed[#w.printed], L.VERSION_NOT_SENT:format("Bob"))
 			eq(V.Check("Bob-Realm"), true, "checked again at once")
-			-- An ask to update dropped: the day's and the hour's slots come back.
+			-- An ask to update dropped: the day's and the hour's slots come back (a councillor's, 1.2.1).
+			Council("Tester")
 			W.HeardVersion(ns.VERSION)
 			w.hellos = { Cid = "1.1.5" }
 			eq(AskAndConfirm(w, "Cid-Realm"), true)
