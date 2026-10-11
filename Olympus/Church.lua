@@ -400,8 +400,12 @@ local function Derive()
 	return S
 end
 
+-- 1.2.1: inside one listing (KeepersOnline asks a role for every name heard) the state is taken
+-- once, at its start, instead of rechecking every correspondent for every name.
+local held
 -- The tree as this client holds it now (cached until the book or the signed list changes).
 function Church.State()
+	if held then return held end
 	local _, listAt = Church.SignedApostles()
 	if not derived or derived.rev ~= rev or derived.listAt ~= listAt or derived.blob ~= (signedMemo and signedMemo.blob) then
 		derived = Derive()
@@ -1276,6 +1280,13 @@ function Church.Heard() return heard end
 -- The keepers online (by their presence) and this client when it is one, in the desk's order:
 -- the Head, the Apostles by name, the author. Never the King's client.
 function Church.KeepersOnline(withSelf)
+	if not held then
+		held = Church.State()
+		local ok, out = pcall(Church.KeepersOnline, withSelf)
+		held = nil
+		if not ok then error(out, 0) end
+		return out
+	end
 	local out = {}
 	local function Order(role) return role == "H" and 1 or (role == "A" and 2 or 3) end
 	for _, h in pairs(heard) do

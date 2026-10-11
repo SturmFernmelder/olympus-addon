@@ -841,3 +841,24 @@ test("1.2.1 Church: a keeper's page can't take a guild's correspondent away: its
 	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.king.name, "K")), true, "a root's")
 	eq(Role(w, c.councillor, "Vale Second"), nil)
 end)
+
+test("1.2.1 Church: listing the keepers online rechecks the correspondents once, not once per name heard", function()
+	local w, c = Cast()
+	local calls = 0
+	local root = c.member.Church.RootCode
+	c.member.Church.RootCode = function(name, ...)
+		if type(name) == "string" and name:find(c.king.name, 1, true) then calls = calls + 1 end
+		return root(name, ...)
+	end
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Root Helper", World.GUILD2), true)
+	local H, cn = w:As(c.member, c.member.Church.Heard), c.member.ns
+	for i = 1, 40 do
+		local name = "Heard" .. i .. "-Realm"
+		H[c.member.Church.Key(name)] = { name = name, role = "M", t = w.clock }
+	end
+	local before = calls
+	w:As(c.member, c.member.Church.KeepersOnline, true)
+	local one = calls - before
+	assert(one >= 1 and one <= 4, "one listing: " .. one .. " correspondent checks")
+	c.member.Church.RootCode = root
+end)
