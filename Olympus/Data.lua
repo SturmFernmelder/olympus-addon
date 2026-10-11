@@ -25,22 +25,34 @@ Data.MAX_GUILDS = 300
 -- about one a second and up to nine in a burst, ran every DATA_CHANGED listener at once, inside
 -- the game's addon-message event. A report heard from someone else now marks the census changed,
 -- and DATA_CHANGED follows within NOTIFY_GAP, once for every report heard meanwhile (one timer
--- waits at a time). What the player does himself (his own roster's report, a /who, /oly reset, a
--- realm linked) still fires it at once. Data.Revision(): a number that grows with every change to
--- the census's reports, for what is worked out from them and kept (HonorsNet's level race).
+-- waits at a time); so does our own roster's report, read once a minute, on a frame of its own
+-- rather than the scan's. What the player does himself (a /who, /oly reset, a realm linked) still
+-- fires it at once. Data.Revision(): a number that grows with every change to the census's
+-- reports, for what is worked out from them and kept (HonorsNet's level race).
+-- Every report taken is seen by the listeners before it is replaced: a guild's row is its newest
+-- report, and a listener reads the rows as they stand (the level race keeps each sender it sees on
+-- a claim), so a second report of one guild within NOTIFY_GAP tells the first one's DATA_CHANGED
+-- at once, before it takes its place, as every report did before 1.2.1.
 Data.NOTIFY_GAP = 1
 local revision, notifyQueued, notifyDirty = 0, false, false
+local unseen = {} -- the rows taken since DATA_CHANGED last went out (emptied each time it does)
 function Data.Revision() return revision end
-local function Notify()
-	notifyQueued = false
-	if not notifyDirty then return end -- (fired at once meanwhile: Data.ChangedNow)
+local function Tell()
 	notifyDirty = false
+	for row in pairs(unseen) do unseen[row] = nil end
 	ns.Fire("DATA_CHANGED")
 end
--- A change heard from someone else: DATA_CHANGED within NOTIFY_GAP.
-function Data.ChangedSoon()
+local function Notify()
+	notifyQueued = false
+	if not notifyDirty then return end -- (fired at once meanwhile: Data.ChangedNow, or a row replaced)
+	Tell()
+end
+-- A change heard from someone else, or our roster's: DATA_CHANGED within NOTIFY_GAP. row: the
+-- report just taken, which the listeners see before another takes its place.
+function Data.ChangedSoon(row)
 	revision = revision + 1
 	notifyDirty = true
+	if row ~= nil then unseen[row] = true end
 	if notifyQueued then return end
 	notifyQueued = true
 	ns.After(Data.NOTIFY_GAP, "census changed", Notify)
@@ -48,8 +60,7 @@ end
 -- A change the player made: DATA_CHANGED now, which answers for what was waiting too.
 function Data.ChangedNow()
 	revision = revision + 1
-	notifyDirty = false
-	ns.Fire("DATA_CHANGED")
+	Tell()
 end
 
 -- The key a guild is stored under, whatever the case a report spells it in: a realm has one
@@ -215,10 +226,13 @@ local function SameReport(a, b, depth)
 	return true
 end
 
--- (1.2.1) The roster is read once a minute, and most minutes our guild's report comes out as the
+-- (1.2.1) The roster is read once a minute, and some minutes our guild's report comes out as the
 -- last one did: stored (its time is new) with no DATA_CHANGED, so nothing is worked out again for
 -- it. Only against the report stored by this session: the first one after login, a /oly reset or
--- another realm's store (Core.lua's ns.LinkRealms) is always news.
+-- another realm's store (Core.lua's ns.LinkRealms) is always news. A report that changed (most
+-- minutes in a big guild: who is online, where, at what level) tells DATA_CHANGED within
+-- NOTIFY_GAP (Data.ChangedSoon), never inside the scan (Roster.TryScan), so the scan and the
+-- listeners land on different frames.
 local lastLocal
 function Data.SetLocal(r)
 	r.t = ns.Now()
@@ -234,7 +248,7 @@ function Data.SetLocal(r)
 	ns.rdb.guilds[r.guild] = r
 	local same = old ~= nil and old == lastLocal and SameReport(old, r, 0)
 	lastLocal = r
-	if not same then Data.ChangedNow() end
+	if not same then Data.ChangedSoon() end
 end
 
 -- Sender names are set by the server and cannot be forged, so we tie every sender to the
@@ -483,9 +497,13 @@ function Data.Receive(r, sender)
 		ns.Log("conflict on %s: the senders are split on it", r.guild)
 	end
 	-- (1.2.1) A guild not kept yet: room for it first (MAX_GUILDS, Data.Trim).
-	if ns.rdb.guilds[r.guild] == nil then Data.Trim(1) end
+	local stored = ns.rdb.guilds[r.guild]
+	if stored == nil then Data.Trim(1) end
+	-- (1.2.1) Its row taken since DATA_CHANGED last went out: the listeners see it now, before
+	-- this one replaces it (one guild heard twice within NOTIFY_GAP).
+	if stored ~= nil and unseen[stored] then Tell() end
 	ns.rdb.guilds[r.guild] = r
-	Data.ChangedSoon() -- (1.2.1: within NOTIFY_GAP, once for a burst)
+	Data.ChangedSoon(r) -- (1.2.1: within NOTIFY_GAP, once for a burst)
 	return true
 end
 

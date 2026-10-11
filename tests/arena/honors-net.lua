@@ -251,7 +251,7 @@ test("1.2.1 the level race: a claim's vouch is what it was with the census looke
 	W3.NoErrors(w)
 end)
 
-test("1.2.1 the level race: a burst of census changes (50 in a second) looks at the claims at once and runs the race once, RACE_SOON later; an IL runs none in its handler; every sender of the burst is seen", function()
+test("1.2.1 the level race: a burst of census changes (50 in a second) looks at the claims at once and runs the race once, RACE_SOON later; an IL runs none in its handler; each report with a DATA_CHANGED of its own, every sender of the burst is seen (the census's own burst, one DATA_CHANGED for it: the next test)", function()
 	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } } } })
 	local viewer, young = cast.spectator, cast.young
 	local net = HN(w, viewer)
@@ -310,6 +310,70 @@ test("1.2.1 the level race: a vouched claim waiting CONFIRM_AFTER has one re-che
 	w:Run(viewer.ns.Honors.CONFIRM_AFTER - 300 + 1)
 	eq(s.levels[20] and s.levels[20][1] and s.levels[20][1].name, young.name, "the place once it is old enough")
 	eq(Waiting(), 0)
+	W3.NoErrors(w)
+end)
+
+-- (1.2.1) The census's own news: Data.Receive takes a report and DATA_CHANGED follows within
+-- Data.NOTIFY_GAP, once for a burst. A guild's row is its newest report, and the race keeps each
+-- sender it sees on a claim: a second report of one guild within the gap must not hide the first.
+
+-- The viewer's own census: the real Data.lua in its namespace (the test world's clients read the
+-- harness's). Its sightings go nowhere.
+local function OwnCensus(w, c)
+	return w:As(c, function()
+		rawset(c.ns, "Who", { Listen = function() end })
+		assert(loadfile(H.ADDON_DIR .. "Data.lua"))("Olympus", c.ns)
+		return rawget(c.ns, "Data")
+	end)
+end
+-- A report of `guild` from `sender` (a name) listing `top`, as the census's message gives it.
+local function Heard(w, c, guild, sender, top, faction)
+	return w:As(c, function()
+		return c.ns.Data.Receive({ guild = guild, faction = faction or "Alliance", total = 20, online = 2, zones = {}, leader = "Corin Ash",
+			officers = {}, top = top }, sender)
+	end)
+end
+
+test("1.2.1 the level race: two senders of her guild heard through the census within Data.NOTIFY_GAP (the first one's row replaced before the burst's DATA_CHANGED) are both kept on her claim, which is vouched; her own report, a level below or a refused report vouch nothing; the place after CONFIRM_AFTER", function()
+	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } } } })
+	local viewer, young = cast.spectator, cast.young
+	local net = HN(w, viewer)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	local D = OwnCensus(w, viewer)
+	w:Fire(young, "PLAYER_LEVEL_UP", 20)
+	w:Run(60 + net.RACE_SOON)
+	local s = net.Store()
+	local claim
+	for _, c in pairs(s.claims) do claim = c end
+	assert(claim and not claim.vouched, "her claim, waiting")
+	local realm = viewer.realm
+	local f1, f2, f3 = "Dovan Quell-" .. realm, "Elsa Thornby-" .. realm, "Ivo Marsh-" .. realm
+	local function Senders()
+		local out = {}
+		for k in pairs(claim.by and claim.by["olympus vale"] or {}) do out[#out + 1] = k end
+		table.sort(out)
+		return table.concat(out, ",")
+	end
+	-- Her own report, one listing her a level below, and one the census refuses (the other faction's).
+	eq(Heard(w, viewer, "Olympus Solo", young.name, { { name = young.short, level = 20, class = "MA" } }), true)
+	eq(Heard(w, viewer, "Olympus Vale", f3, { { name = young.short, level = 19, class = "MA" } }), true)
+	eq(Heard(w, viewer, "Olympus Vale", "Hal Brenn-" .. realm, { { name = young.short, level = 20, class = "MA" } }, "Horde"), false)
+	w:Run(D.NOTIFY_GAP)
+	eq(Senders(), "", "nothing kept")
+	eq(claim.vouched, false)
+	-- Two senders of her guild, 0.3 s apart: the second report takes the first one's place in the census
+	-- before the burst's DATA_CHANGED.
+	eq(Heard(w, viewer, "Olympus Vale", f1, { { name = "Corin Ash", level = 60, class = "WA" }, { name = young.short, level = 20, class = "MA" } }), true)
+	w:Run(0.3)
+	eq(Heard(w, viewer, "Olympus Vale", f2, { { name = young.short, level = 21, class = "MA" } }), true)
+	eq(viewer.rdb.guilds["Olympus Vale"].reporterFull, f2, "the first sender's row replaced")
+	w:Run(D.NOTIFY_GAP)
+	eq(Senders(), "dovan quell,elsa thornby", "both senders kept")
+	eq(claim.vouched, true, "vouched")
+	eq(#(s.levels[20] or {}), 0, "the race later")
+	w:Run(net.RACE_SOON)
+	w:Run(viewer.ns.Honors.CONFIRM_AFTER)
+	eq(s.levels[20] and s.levels[20][1] and s.levels[20][1].name, young.name, "first to 20")
 	W3.NoErrors(w)
 end)
 
