@@ -773,8 +773,19 @@ function H.Refresh()
 	if not ok then error(err, 0) end
 end
 
+-- The letter is the King's (L.HONOR_LETTER_SIGN): never to the King himself (1.2.1, the owner's
+-- ask, after Asmon's stream: a letter from himself about a frame he holds). The King is his
+-- character (ns.IsKingCharacter) or, where none is pinned by name, the guild master of his guild
+-- (King.IsKing). His honours switch on as anyone's; no letter comes, none is kept to read again.
+function H.LetterToSender()
+	if ns.IsKingCharacter(ns.me) then return true end
+	local K = ns.King
+	return type(K) == "table" and not K.missing and type(K.IsKing) == "function" and K.IsKing() == true
+end
+
 -- A letter queued (and kept, re-readable): shown now, or after the one open.
 function H.QueueLetter(key)
+	if H.LetterToSender() then return end
 	local P = ns.ArenaProfile
 	local m = P.Mine(true)
 	m.letters = type(m.letters) == "table" and m.letters or {}
@@ -785,6 +796,7 @@ function H.QueueLetter(key)
 	H.ShowLetter()
 end
 function H.Letters()
+	if H.LetterToSender() then return {} end
 	local m = ns.ArenaProfile.Mine()
 	return type(m.letters) == "table" and m.letters or {}
 end
@@ -835,6 +847,7 @@ local frame
 -- player's own portrait, "Wear it" and "Later". Built on first use; never the game's popups.
 -- key: a letter asked for (a click: shown at once); prompted: the player's click opened it.
 function H.ShowLetter(key, prompted)
+	if H.LetterToSender() then return false end
 	if key then letters[#letters + 1] = { key = key, t = Now() } end
 	local nextLetter = letters[1]
 	if not nextLetter then return false end
