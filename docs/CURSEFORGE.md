@@ -1611,9 +1611,10 @@ names above), the hello, signed-leadership synchronization after the author acti
 addons read through the bridge.
 
 **The first-open page (1.1).** It is the first question the addon asks. About 45 seconds after
-login, or when you open the Olympus window first (never in combat or in an instance, once a
-session, while something on it has no answer), a page of its own says in plain words what always
-goes out (the census, with the names it carries, and the hello) and asks **Yes** or **No** for
+login, or when you open the Olympus window first (never in combat or in an instance, and once for
+each question: closed with a line unanswered, it never opens by itself again for it), a page of
+its own says in plain words what always goes out (the census, with the names it carries, and the
+hello) and asks **Yes** or **No** for
 each of the rest: your zone and layer, layer help, your book of the treasury (keepers only), the
 Royal Inspection, the author's roll call, the Olympus chats and your patrols' findings to your
 guild's officers (officers only). Each one stays off until its Yes.

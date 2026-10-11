@@ -3,10 +3,11 @@ local L = ns.L
 
 -- The first-open page (1.1, Fern's #11): one page, in plain words, of what leaves this client,
 -- and the first question the addon asks: after login (LOGIN_WAIT, then on the minute until it
--- could), or when the Olympus window opens first, never in combat or an instance, once a session,
--- while a line waits for its answer. The 1.0 questions (the zone and layer's, a keeper's) open
--- this page instead of their popups (Layers.AskChoice, Treasury.AskConsent); their popups stay
--- for a client without this file (updated without a restart) and a keeper outside a guild.
+-- could), or when the Olympus window opens first, never in combat or an instance, while a line
+-- waits for an answer it was never asked (once for each question, 1.2.1). The 1.0 questions (the
+-- zone and layer's, a keeper's) open this page instead of their popups (Layers.AskChoice,
+-- Treasury.AskConsent); their popups stay for a client without this file (updated without a
+-- restart) and a keeper outside a guild.
 -- It has a Yes and a No for each thing the addon would otherwise share or show on its own: the
 -- zone and layer, layer help, a treasury keeper's book (keepers only), the Royal Inspection, the
 -- author's roll call, the Olympus chats and an officer's patrol findings (officers only). Each
@@ -31,8 +32,13 @@ local L = ns.L
 -- (`get` is what goes out now, shown on the line; `pending`, when given, says whether the line
 -- still waits for the player's answer: by default, while `get` is nil.)
 -- A line with `explicit = true` (1.2.0: Most Wanted sightings, Wanted.lua) is off until its own
--- Yes: it is pending until answered, so the page opens by itself for it (a member who answered
--- every other line before is shown it too), but the bulk Yes never answers it (BulkPending).
+-- Yes: it is pending until answered, so the page opens by itself for it once (a member who
+-- answered every other line before is shown it too), but the bulk Yes never answers it (BulkPending).
+-- (1.2.1, a player's report: "how many times do I need to update my settings?") A line the page
+-- showed counts as asked for good, kept in the saved data (ns.db.consentAsked): the page opens by
+-- itself once for each new question, never again for one closed unanswered or left off by Accept
+-- all. `version` (a value or a function) makes a changed question a new one; `perCharacter` keeps
+-- the record per character, for an answer kept per character (a keeper's book).
 -- A focused status section may also register a `readonly` item with `section`, `status` and no
 -- setter. It describes local/shared/derived/hidden/unknown/unavailable state and is never part of
 -- first-open or bulk authorization.
@@ -48,7 +54,7 @@ Consent.TOP = -36 -- the first line, under the title bar (1.1.5: the page's titl
 Consent.LOGIN_WAIT = 45 -- after login (the realm key and the channel settle first)
 
 local items, byKey = {}, {}
-local asked = {}   -- [key] = true: on the page this session (asked once a session)
+local asked = {}   -- [key] = true: on the page this session (and in ns.db.consentAsked for good)
 local frame
 local activeSection -- nil: every ordinary sharing choice; "profile": profile sources/visibility
 
@@ -126,6 +132,47 @@ local function Busy()
 	return (InCombatLockdown and InCombatLockdown()) or (IsInInstance and IsInInstance()) and true or false
 end
 
+-- Lines the page showed, kept across sessions: [key] = the question's version (true without one).
+local function AskedStore(make)
+	if type(ns.db) ~= "table" then return nil end
+	if type(ns.db.consentAsked) ~= "table" then
+		if not make then return nil end
+		ns.db.consentAsked = {}
+	end
+	return ns.db.consentAsked
+end
+local function AskedKey(item)
+	if item.perCharacter == true and type(ns.me) == "string" and ns.me ~= "" then return item.key .. "@" .. ns.me:lower() end
+	return item.key
+end
+local function Version(item)
+	local v = item.version
+	if type(v) == "function" then
+		local ok, res = pcall(v)
+		v = ok and res or nil
+	end
+	if type(v) == "number" or type(v) == "string" then return v end
+	return true
+end
+local function WasAsked(item)
+	if asked[item.key] then return true end
+	local store = AskedStore(false)
+	return store ~= nil and store[AskedKey(item)] == Version(item)
+end
+local function MarkAsked(item)
+	asked[item.key] = true
+	local store = AskedStore(true)
+	if store then store[AskedKey(item)] = Version(item) end
+end
+
+-- A line waiting for its answer that the page never showed (a new question).
+local function Fresh()
+	for _, item in ipairs(Consent.Pending()) do
+		if not WasAsked(item) then return true end
+	end
+	return false
+end
+
 -- The games' ledger's line (1.1.6, ArenaLedger.lua: Consent.Intro), where the build has the arena,
 -- or nil. A notice with no answer to give (every game is recorded): the page opens by itself for
 -- it once, a member who answered every line before included, and it counts as shown once the page
@@ -142,18 +189,14 @@ end
 
 -- By itself, after login, when the window opens, when a 1.0 question would have been asked (the
 -- zone and layer's, a keeper's) and when a player types in a chat still unanswered: only in an
--- Olympus guild, never in combat or an instance, and only for lines not on the page yet this
--- session (or a notice he was never shown). True when it showed.
+-- Olympus guild, never in combat or an instance, and only for lines the page never showed (1.2.1:
+-- not just this session) or a notice he was never shown. True when it showed.
 function Consent.Ask(reason)
 	if not ns.IsMember() or Busy() then return false end
 	-- An automatic first-open question always concerns the ordinary sharing choices, even if the
 	-- player last closed the focused Profile section.
 	activeSection = nil
-	local fresh = false
-	for _, item in ipairs(Consent.Pending()) do
-		if not asked[item.key] then fresh = true end
-	end
-	if not (fresh or Consent.NoticeDue()) or (frame and frame:IsShown()) then return false end
+	if not (Fresh() or Consent.NoticeDue()) or (frame and frame:IsShown()) then return false end
 	ns.Log("privacy page shown (%s)", tostring(reason or "?"))
 	Consent.Show()
 	return true
@@ -164,10 +207,7 @@ end
 -- guild it asks nothing.
 function Consent.Waiting()
 	if not ns.IsMember() then return false end
-	for _, item in ipairs(Consent.Pending()) do
-		if not asked[item.key] then return true end
-	end
-	return false
+	return Fresh()
 end
 
 local function Apply(item, on)
@@ -205,8 +245,11 @@ local function BulkPending()
 end
 
 -- Use every item's real setter and event. Close only after every requested choice is observable;
--- on a partial failure the page stays open and the same button can retry what remains.
+-- on a partial failure the page stays open and the same button can retry what remains. Every
+-- visible line still waiting counts as asked: an explicit one stays off, unanswered, and never
+-- opens the page by itself again (1.2.1).
 function Consent.AuthorizePending()
+	for _, item in ipairs(Consent.Pending(activeSection)) do MarkAsked(item) end
 	local targets = BulkPending()
 	local all = true
 	for _, item in ipairs(targets) do
@@ -479,10 +522,11 @@ function Consent.Refresh()
 end
 
 -- The page, whatever was answered (/oly privacy, and Consent.Ask). Every line not answered yet
--- counts as asked for this session.
+-- counts as asked, for good (1.2.1: it was for this session, so the page opened again at every
+-- login for a line closed unanswered).
 function Consent.Show(section)
 	activeSection = section == "profile" and "profile" or nil
-	for _, item in ipairs(Consent.Pending(activeSection)) do asked[item.key] = true end
+	for _, item in ipairs(Consent.Pending(activeSection)) do MarkAsked(item) end
 	if not activeSection and GamesLine() and type(ns.db) == "table" then
 		if type(ns.db.consentNotices) ~= "table" then ns.db.consentNotices = {} end
 		ns.db.consentNotices.games = true
@@ -497,9 +541,11 @@ end
 function Consent.Frame() return frame end
 function Consent.Hide() if frame then frame:Hide() end end
 
--- Tests start from a clean state (and a fresh frame when the toolkit was rebuilt).
+-- Tests start from a clean state, as a fresh install (and a fresh frame when the toolkit was
+-- rebuilt). (A new session keeps ns.db.consentAsked: only this file's state starts again.)
 function Consent.Reset()
 	wipe(asked)
+	if type(ns.db) == "table" then ns.db.consentAsked = nil end
 	activeSection = nil
 	if frame and rawget(_G, "OlympusConsentFrame") ~= frame then frame = nil elseif frame then frame:Hide() end
 end
@@ -539,6 +585,7 @@ Consent.Register({
 	shown = function() return TreasuryHas("RealKeeper") and ns.Treasury.RealKeeper() == true end,
 	get = function() return ns.Treasury.Consent() end,
 	pending = function() return ns.Treasury.ConsentAnswer() == nil end,
+	perCharacter = true, -- (his answer is his character's, Treasury.ConsentKey)
 	set = function(on) ns.Treasury.SetConsent(on) end,
 	note = function()
 		if ns.Treasury.ConsentAnswer() == nil and ns.Treasury.Consent() == true then return L.CONSENT_TREASURER_OLD_YES end
@@ -574,7 +621,7 @@ Consent.Register({
 })
 
 -- The first question after login: the page, once the login settled, then on the minute until it
--- could be asked (combat, an instance), once a session (Consent.Ask).
+-- could be asked (combat, an instance), once for each question (Consent.Ask).
 function Consent.OnLogin()
 	ns.After(Consent.LOGIN_WAIT, "privacy page", function() Consent.Ask("login") end)
 	ns.Every(60, "privacy page", function() Consent.Ask("login") end)
