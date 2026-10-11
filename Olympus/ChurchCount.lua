@@ -117,6 +117,7 @@ local evidenceRate = {}     -- sender key -> { hour, n, day, d }
 local checks, checkTimes, nextCheck = {}, {}, 0
 local heardChecks = {}      -- keeper key -> { times }
 local asks = {}             -- what|window|person -> when we asked
+local askedOf = {}          -- what:window:person key -> { k = the keeper asked, t } (1.2.1: only his answer is taken)
 local answersTo = {}        -- asker key -> { times }
 local incoming = {}         -- sender key|what|window|person -> rows being received
 local catch = { asked = {}, last = -math.huge, settled = false }
@@ -1507,6 +1508,52 @@ function Count.AnswerCatchUp(sender, since)
 	return SendLines(ns.FullName(sender), lines)
 end
 
+-- (1.2.1) Person lines refused while this book did not place their person yet (a naming it has not
+-- heard yet, just logged in): tried again each tick, LATER_KEEP at most and LATER_MAX of them, as
+-- Church.lua's acts wait for their actor's place (Church.RetryPending).
+Count.LATER_MAX, Count.LATER_KEEP = 200, 1800
+local later, retrying = {}, false
+local function Later(sender, text)
+	if retrying then return end
+	for _, l in ipairs(later) do if l.text == text then return end end
+	if #later >= Count.LATER_MAX then table.remove(later, 1) end
+	later[#later + 1] = { sender = sender, text = text, t = ns.Now() }
+end
+function Count.RetryLater()
+	if #later == 0 then return 0 end
+	local list, t, taken = later, ns.Now(), 0
+	later, retrying = {}, true
+	for _, l in ipairs(list) do
+		if t - l.t <= Count.LATER_KEEP then
+			local ok, why = Count.TakeLine(l.sender, l.text)
+			if ok then taken = taken + 1 elseif why == "person" then later[#later + 1] = l end
+		end
+	end
+	retrying = false
+	return taken
+end
+function Count.LaterLines() return later end
+
+-- (1.2.1) A keeper's record line, checked again as its evidence was: a recruit who is not his recruiter,
+-- nothing dated ahead, and witnesses who are neither the recruiter, the recruit nor a character linked to
+-- either (those go). A keeper's line vouches for the rest, which only a keeper of the pair's guild can
+-- check (VerifiedWitness). (Not the recruiter's place: one removed and named again later holds an
+-- older record every keeper took; refused on one, the keepers' numbers would part.)
+local function RecheckRecord(id, rec)
+	local xk, by = id:match("^([^:]+):(.+)$")
+	if not xk or xk == by then return Drop("self") end
+	local now = Clock()
+	if (rec.tc or 0) > now + 3600 or (rec.tj and rec.tj > now + 3600) then return Drop("ahead") end
+	if rec.ws then
+		local ws = {}
+		for _, s in ipairs(rec.ws) do
+			if s ~= by and s ~= xk and not Linked(s, rec.bn) and not Linked(s, rec.n) then ws[#ws + 1] = s end
+		end
+		rec.ws = #ws > 0 and ws or nil
+	end
+	return true
+end
+
 function Count.TakeLine(sender, text)
 	local kind = tostring(text or ""):match("^NL~1~(%a)~")
 	if not Church.IsKeeper(ns.me) or not Church.IsKeeper(sender) then return Drop("keeper") end
@@ -1517,13 +1564,21 @@ function Count.TakeLine(sender, text)
 	elseif kind == "r" then
 		local id, rec = ParseRecord(text)
 		if not id then return Drop("shape") end
-		if rec.tj and rec.tj > Clock() + 3600 then return Drop("ahead") end
+		local ok, why = RecheckRecord(id, rec)
+		if not ok then return false, why end
 		return Count.MergeIn(id, rec, false)
 	elseif kind == "p" then
 		local n, pub, pat, ap, aj, ay = text:match("^NL~1~p~([^~]+)~([01])~([0-9a-z]+)~(%d+)~(%d+)~(%d+)~[0-9a-z]+$")
 		local name = WireName(n)
 		if not name then return Drop("shape") end
-		return Count.TakePerson(Key(name), { n = Short(name), pub = pub == "1", pat = UnB36(pat), ap = tonumber(ap), aj = tonumber(aj), ay = tonumber(ay) })
+		-- (1.2.1: a Church person's line, or one this ledger holds; a choice not dated ahead, which would
+		-- outlast every later choice of his own; archive totals that add up: stays within joins, points
+		-- within what they make.)
+		pat, ap, aj, ay = UnB36(pat), tonumber(ap), tonumber(aj), tonumber(ay)
+		if not Church.IsPerson(name) and not Led().p[Key(name)] then Later(sender, text) return Drop("person") end
+		if not pat or pat > Clock() + Church.DATE_AHEAD then return Drop("ahead") end
+		if not (ap and aj and ay) or ay > aj or ap > aj * Count.POINTS_JOIN + ay * Count.POINTS_STAY then return Drop("totals") end
+		return Count.TakePerson(Key(name), { n = Short(name), pub = pub == "1", pat = pat, ap = ap, aj = aj, ay = ay })
 	elseif kind == "z" then
 		local n, bn, h, y = text:match("^NL~1~z~([^~]+)~([^~]+)~([0-9a-z]+)~([01])~[0-9a-z]+$")
 		local recruit, recruiter = WireName(n), WireName(bn)
@@ -1650,8 +1705,17 @@ function Count.Ask(what, window, person, force)
 	local k = Church.KeepersOnline(false)[1]
 	if not k then return false, "no keeper" end
 	asks[key] = t
+	local pk = what == "me" and Key(ns.me) or (person and Key(person)) or "-"
+	askedOf[what .. ":" .. window .. ":" .. tostring(pk)] = { k = Key(k.name), t = t }
 	ns.Comm.Whisper(k.name, ("NR~1~q~%s~%s~%s"):format(what, window, person and Short(person) or "-"), nil, false, false, nil, { owner = Count })
 	return true
+end
+
+-- (1.2.1) An answer is taken only from the keeper this client asked for it, while Church.ASKED_WINDOW:
+-- any keeper's unasked rows replaced the page's numbers.
+local function Asked(sender, key)
+	local a = askedOf[key]
+	return a ~= nil and a.k == Key(sender) and ns.Now() - a.t <= Church.ASKED_WINDOW
 end
 
 function Count.TakeAnswerLine(sender, text)
@@ -1662,6 +1726,7 @@ function Count.TakeAnswerLine(sender, text)
 		local list, window, rank, name, score, own, share, joins, stays, net, pub =
 			text:match("^NR~1~r~([amc])~([wma])~(%d+)~([^~]+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~([01])$")
 		if not list or not WireName(name) then return Drop("shape") end
+		if not Asked(sender, list .. ":" .. window .. ":-") then return Drop("unasked") end
 		local key = Key(sender) .. ":" .. list .. ":" .. window .. ":-"
 		incoming[key] = incoming[key] or {}
 		if #incoming[key] < Count.RANK_ROWS + 1 then
@@ -1672,6 +1737,7 @@ function Count.TakeAnswerLine(sender, text)
 	elseif kind == "m" then
 		local what, window, person, line, a, b, c, d = text:match("^NR~1~m~(%a+)~([wma])~([^~]+)~(%a)~([^~]*)~([^~]*)~([^~]*)~([^~]*)$")
 		if not what or not WireName(person) then return Drop("shape") end
+		if not Asked(sender, what .. ":" .. window .. ":" .. Key(person)) then return Drop("unasked") end
 		local key = Key(sender) .. ":" .. what .. ":" .. window .. ":" .. Key(person)
 		incoming[key] = incoming[key] or {}
 		if #incoming[key] < 40 then
@@ -1683,6 +1749,7 @@ function Count.TakeAnswerLine(sender, text)
 		local what, window, person, n, asOf = text:match("^NR~1~e~(%a+)~([wma])~([^~]+)~(%d+)~([0-9a-z]+)$")
 		if not what then return Drop("shape") end
 		local pk = person == "-" and "-" or Key(person)
+		if not Asked(sender, what .. ":" .. window .. ":" .. tostring(pk)) then return Drop("unasked") end
 		local key = Key(sender) .. ":" .. what .. ":" .. window .. ":" .. tostring(pk)
 		local rows = incoming[key] or {}
 		incoming[key] = nil
@@ -2065,6 +2132,7 @@ function Count.Tick(now)
 	if Church.IsKeeper(ns.me) and not Church.IsKing(ns.me) then
 		Count.DeskTick(Clock())
 		Count.CatchUp(false)
+		Count.RetryLater()
 		Count.SendPublic(now)
 		Count.SendTop(now)
 		if now - lastPruneCount >= 3600 then lastPruneCount = now; Count.Prune() end

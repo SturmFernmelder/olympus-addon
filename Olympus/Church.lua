@@ -1127,6 +1127,14 @@ function Church.TakeEntry(sender, text)
 	if onApostle and root ~= "W" and root ~= "H" then return Drop("apostle page") end
 	if kind == "C" and not ns.IsFederation(e.g) then return Drop("guild") end
 	if kind == "C" and not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true) then return Drop("issuer") end
+	-- (1.2.1: a correspondent's removal too, by whom the act could come from, Church.MayAct: a root, the
+	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.)
+	if kind == "Y" then
+		local held = (Book() or { c = {} }).c[slot]
+		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true or (held ~= nil and Same(held.n, e.ac))) then
+			return Drop("issuer")
+		end
+	end
 	e.via = Key(sender) ~= Key(e.ac) and ns.FullName(sender) or nil
 	local before, wasAudience = Church.Role(ns.me), Church.InAudience(ns.me)
 	if not Put(kind, slot, e) then return false, "same" end

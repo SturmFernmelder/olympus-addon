@@ -817,3 +817,23 @@ test("1.2.0 chat rooms: an M2 line whose guild field carries a pipe is dropped a
 	assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", plain)
 	eq(select(2, plain.ChatRooms.Receive("WHISPER", "Aldric Vane-Realm", "M2~1~guild~1~~Olympus II|cffff0000~hi")), "shape")
 end)
+
+test("1.2.1 Church: a keeper's page can't take a guild's correspondent away: its removal only from a root, the guild's master or the correspondent himself", function()
+	local w, c = Cast()
+	local B = ns.Codec.Base36
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Vale Helper", World.GUILD2), true)
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	w:Run(1)
+	eq(w:As(c.councillor, c.councillor.Church.AskPages, c.a1.name), true)
+	local function Y(actor, role) return ("NB~1~p~Y~%s~-~%s~%s~-~%s"):format(World.GUILD2, actor, role, B(w.clock)) end
+	eq(select(2, w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.member.name, "G"))), "issuer")
+	eq(select(2, w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.a1.name, "A"))), "issuer", "nor the relaying Apostle's own word")
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y("Vale Helper-Realm", "M")), true, "his own removal")
+	eq(Role(w, c.councillor, "Vale Helper"), nil)
+	w:Run(1)
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Vale Second", World.GUILD2), true)
+	w:Run(1)
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.king.name, "K")), true, "a root's")
+	eq(Role(w, c.councillor, "Vale Second"), nil)
+end)

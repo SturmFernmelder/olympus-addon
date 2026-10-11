@@ -1332,3 +1332,48 @@ test("1.2.1 Church: a witness is one the keeper can vouch for in the pair's guil
 	eq(StateOf(w, c.a2, "Off Ned", "Mira Wells"), "credited")
 	eq(Take(c.a2, "Plain Ember-Realm", PairText(w, "Mira Wells", "Plain Ned", 2)), "unverified", "a claimed member the chats could not verify")
 end)
+
+test("1.2.1 Church: a keeper's lines are checked again: no recruit his own recruiter, nothing dated ahead, no recruiter or recruit as witness, archive totals that add up, rows only from the keeper asked", function()
+	local w, c = Cast()
+	local B = ns.Codec.Base36
+	local K, from = c.a2, A1
+	local function Line(recruit, by, extra)
+		local rec = { n = recruit, bn = by, g = World.GUILD, kind = "i", tc = w.clock - 7200, tj = w.clock - 3600, u = w.clock }
+		for k, v in pairs(extra or {}) do rec[k] = v end
+		return w:As(c.a1, c.a1.Count.RecordLine, "x", rec)
+	end
+	local function Take(text) return w:As(K, K.Count.TakeLine, from, text) end
+	-- The recruiter, the recruit or the recruiter's linked character named as the witness: pending.
+	w.alts[Key("Mira Wells")] = { "Mira Alt-Realm" }
+	eq(Take(Line("Wit Selfa", "Mira Wells", { ws = { Key("Mira Wells") } })), true)
+	eq(Take(Line("Wit Selfb", "Mira Wells", { ws = { Key("Wit Selfb") } })), true)
+	eq(Take(Line("Wit Selfc", "Mira Wells", { ws = { Key("Mira Alt") } })), true)
+	for _, n in ipairs({ "Wit Selfa", "Wit Selfb", "Wit Selfc" }) do eq(StateOf(w, K, n, "Mira Wells"), "pending", n) end
+	eq(Take(Line("Wit Good", "Mira Wells", { ws = { Key("Wes Brook") } })), true)
+	eq(StateOf(w, K, "Wit Good", "Mira Wells"), "credited", "a witness the line vouches for")
+	-- A recruit his own recruiter; an invite dated ahead.
+	eq(select(2, Take(Line("Mira Wells", "Mira Wells", { ws = { Key("Wes Brook") } }))), "self")
+	eq(select(2, Take(Line("Far Ahead", "Mira Wells", { kind = "g", tc = w.clock + 2 * DAY, tj = false }))), "ahead")
+	eq(w:As(K, K.Count.Own, Key("Mira Wells"), "a").joins, 1)
+	-- Person lines: a choice dated ahead would outlast her own later one; totals that don't add up; no place.
+	local function P(name, at, ap, aj, ay) return ("NL~1~p~%s~1~%s~%d~%d~%d~%s"):format(name, B(at), ap, aj, ay, B(w.clock)) end
+	eq(select(2, Take(P("Mira Wells", w.clock + 30 * DAY, 0, 0, 0))), "ahead")
+	eq(select(2, Take(P("Mira Wells", 0, 99990, 1, 0))), "totals")
+	eq(select(2, Take(P("Mira Wells", 0, 15, 1, 2))), "totals", "more stays than joins")
+	eq(select(2, Take(P("Nobody Here", 0, 10, 1, 0))), "person")
+	eq(w:As(K, K.Count.Own, Key("Mira Wells"), "a").points, 10)
+	eq(Take(P("Mira Wells", w.clock, 30, 3, 0)), true, "one that adds up")
+	eq(w:As(K, K.Count.Own, Key("Mira Wells"), "a").points, 40, "her live record and the archive's three")
+	-- Rows nobody asked for, or from a keeper not asked, leave an audience page as it was.
+	local view = function() return (w:As(c.m2, c.m2.Count.RankingView, "m", "m")) end
+	local rows = { ("NR~1~r~m~m~1~Mira Wells~9999990~9999990~0~999~0~999~1"), ("NR~1~e~m~m~-~1~%s"):format(B(w.clock)) }
+	for _, l in ipairs(rows) do eq(select(2, w:As(c.m2, c.m2.Count.TakeAnswerLine, A2, l)), "unasked") end
+	eq(#view(), 0)
+	Give(w, c.a1, "Desk Rec", "Mira Wells", 2)
+	eq(w:As(c.m2, c.m2.Church.KeepersOnline, false)[1].name, A1, "the desk is asked")
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "m", nil, true), true)
+	for _, l in ipairs(rows) do eq(select(2, w:As(c.m2, c.m2.Count.TakeAnswerLine, A2, l)), "unasked", "another keeper's") end
+	w:Run(30)
+	eq(#view(), 1)
+	eq(view()[1].name, "Mira Wells"); eq(view()[1].score, 10, "the asked keeper's own rows")
+end)
