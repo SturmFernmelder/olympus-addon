@@ -211,9 +211,18 @@ end
 -- Channels.VerifiedLevel verified), never a stranger on an unsealed channel: only one gets an
 -- offer, a window or an invite, and only one's offer is taken. 1.2.1: a guild named in the sender's
 -- own messages is only his word (VerifiedLevel's 1, false): anyone on the channel can write it.
+-- The King's pinned name, his Steward and Hands, and the High Council (the author's signed list)
+-- are the King's or the author's word, whatever guild they play in: VerifiedLevel verifies the
+-- King's titles only for his own guild, and a councillor below an officer's rank nowhere.
 local function Member(sender)
 	local R = ns.Roster
 	if R and R.RankOf and R.RankOf(sender) ~= nil then return true end
+	local K = ns.King
+	if (ns.IsKingCharacter and ns.IsKingCharacter(sender))
+		or (type(K) == "table" and not K.missing and K.IsStewardName and (K.IsStewardName(sender) or K.IsHandName(sender)))
+		or (ns.IsHighCouncillor and ns.IsHighCouncillor(sender) == true) then
+		return true
+	end
 	local C, M = ns.Channels, ns.Moderation
 	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false end
 	local guild = M and M.GuildOf and M.GuildOf(sender)

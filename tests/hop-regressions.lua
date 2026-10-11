@@ -605,3 +605,68 @@ test("hop security (1.2.1): unanswered windows of members we cannot vouch for ne
 	end)
 end)
 
+-- Review of 1.2.1, after 395d290: the King's pinned name, his Steward and Hands, and the High
+-- Council (the author's signed list) are the King's or the author's word, not a guild claim.
+-- Channels.VerifiedLevel verifies the King's titles only for his own guild, and a councillor below
+-- an officer's rank nowhere, so one who plays in another Olympus guild got no offer, window or
+-- invite, and his offers were dropped. A guild only claimed still counts for nothing.
+test("hop security (1.2.1): a councillor or the King's Hand of another guild still hops; a claimed guild alone does not", function()
+	local function With(fn)
+		WithHop(function(w, H)
+			H.Trusted = RealTrusted
+			w.see(7)
+			local names = { ["Councilly-Realm"] = true, ["Handy-Realm"] = true, ["Claimant-Realm"] = true }
+			for name in pairs(names) do w.strangers[name] = true end
+			local guildOf, rdb, K, hand = ns.Moderation.GuildOf, ns.rdb, ns.King, ns.King.IsHandName
+			local council = rdb.council
+			ns.Moderation.GuildOf = function(n) if names[ns.FullName(n)] then return "Olympus III" end return guildOf(n) end
+			rdb.council = { names = { councilly = true } }
+			K.IsHandName = function(n) return ns.FullName(n) == "Handy-Realm" end
+			local ok, err = pcall(function()
+				for name in pairs(names) do
+					local level, verified = ns.Channels.VerifiedLevel(name, "Olympus III")
+					eq(level, 1); eq(verified, false, name .. ": the channel verifies none of them")
+				end
+				eq(ns.IsHighCouncillor("Councilly-Realm"), true, "the signed council names him")
+				fn(w, H)
+			end)
+			ns.Moderation.GuildOf, rdb.council, K.IsHandName = guildOf, council, hand
+			if not ok then error(err, 0) end
+		end)
+	end
+	With(function(w, H)
+		eq(H.Member("Councilly-Realm"), true, "a councillor")
+		eq(H.Member("Handy-Realm"), true, "the King's Hand")
+		eq(H.Member("Claimant-Realm"), false, "a claim alone")
+		-- Helping: the councillor gets the offer and the window, and is invited on the click.
+		H.HandleAsk("CHANNEL", "Councilly-Realm", "LQ~42~1453~7")
+		eq(w.whispered[1], "Councilly-Realm LO~42~0~0", "offered")
+		H.HandleRequest("WHISPER", "Councilly-Realm", "LR~42")
+		eq(#w.popups, 1, "the window")
+		H.Answer(w.popups[1].data, true)
+		eq(w.invited[1], "Councilly", "invited on the click")
+		-- The Hand, with Always invite: the addon vouches for him (Hop.Trusted), so on his own.
+		ns.db.layerAutoInvite = true
+		H.HandleAsk("CHANNEL", "Handy-Realm", "LQ~43~1453~7")
+		eq(w.whispered[#w.whispered], "Handy-Realm LO~43~0~1", "offered (one recent invite)")
+		H.HandleRequest("WHISPER", "Handy-Realm", "LR~43")
+		eq(w.invited[2], "Handy", "invited on his own"); eq(#w.popups, 1)
+		-- The claim alone: nothing, even with Always invite.
+		H.HandleAsk("CHANNEL", "Claimant-Realm", "LQ~44~1453~7")
+		H.HandleRequest("WHISPER", "Claimant-Realm", "LR~44")
+		eq(#w.invited, 2); eq(#w.popups, 1)
+		eq(w.whispered[#w.whispered], "Handy-Realm LO~43~0~1", "no offer to a claim")
+	end)
+	-- Asking: the councillor's and the Hand's offers are taken, the claimer's is not.
+	With(function(w, H)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Claimant-Realm", "LO~1~0~0")
+		eq(H.State().count, 0, "a claim's offer")
+		H.HandleOffer("WHISPER", "Councilly-Realm", "LO~1~0~0")
+		H.HandleOffer("WHISPER", "Handy-Realm", "LO~1~0~0")
+		eq(H.State().count, 2, "the councillor's and the Hand's")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		assert(w.whispered[1] == "Councilly-Realm LR~1" or w.whispered[1] == "Handy-Realm LR~1", tostring(w.whispered[1]))
+	end)
+end)
+
