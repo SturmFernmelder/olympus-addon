@@ -16,9 +16,12 @@ local ADDON, ns = ...
 --   HA1~at~realm-group~faction~enforce~epoch~issued~expires~sha256~part~parts~body~signature
 --
 -- Each part is independently signed by the same author key and binds the digest of the complete,
--- canonical body. A verified first part activates the one-way boundary (and therefore fails
--- closed); roles become usable only after every part of that exact set is present, all signatures
--- hold, the joined body's digest matches, and the whole manifest parses within the limits below.
+-- canonical body. Only a whole set moves the one-way boundary (1.2.1 security review): every part
+-- of that exact set present, all signatures holding, the joined body's digest matching, the whole
+-- manifest parsing within the limits below, and the set inside its issued/expires window when it
+-- completes. A part alone, or an old or expired set, never touches it, so signed material that was
+-- once genuine cannot be replayed to lock a client into "enforced, nobody authorized"; a legacy
+-- HT1 marker likewise moves it only inside its own window.
 -- Parts are requested on H3 and returned privately to the requester as H2. Clients that do not
 -- know H2 or H3 ignore them. No partial set, SavedVariables edit, Census claim or newer legacy HT1 can
 -- reactivate authority.
@@ -158,29 +161,44 @@ local function ListParts(blob)
 	return tonumber(at), realm ~= "" and realm or nil, list
 end
 
-local function Marker(entry)
+-- Signed material may move the boundary only while it is current (1.2.1): no more than
+-- CLOCK_SKEW before it is issued, never after it expires (Authority.Valid).
+local function Current(m, now)
+	return type(m) == "table" and tonumber(m.issued) ~= nil and tonumber(m.expires) ~= nil and Authority.Valid(m, now)
+end
+
+-- An enforce marker's faction and epoch, and whether its signed window is current (1.2.1: an
+-- old or expired marker sets no boundary). Its window is read even when the rest of the entry is
+-- malformed, and an over-long one counts for MAX_LIFETIME at most.
+local function Marker(entry, now)
 	local faction, epoch = entry:match("^%^leaders%^(%a+)%^enforce%^([^%^]*)")
 	if not FACTIONS[faction] then return nil end
 	epoch = epoch and epoch:match("^%d+$") and tonumber(epoch) or 0
 	if not epoch or epoch < 1 or epoch > Authority.MAX_EPOCH then epoch = 0 end
-	return faction, epoch
+	local issued, expires = entry:match("^%^leaders%^%a+%^enforce%^[^%^]*%^(%d+)%^(%d+)")
+	issued, expires = tonumber(issued), tonumber(expires)
+	local current = issued ~= nil and expires ~= nil and expires > issued
+		and Current({ issued = issued, expires = math.min(expires, issued + Authority.MAX_LIFETIME) }, now)
+	return faction, epoch, current
 end
 
 -- Parse all enforcing leadership entries. One malformed/duplicated entry invalidates the whole
 -- manifest. `present` is returned separately: the signed enforcement boundary remains meaningful
--- even if its payload is bad and therefore grants nobody.
-function Authority.Read(text, realmGroup)
+-- even if its payload is bad and therefore grants nobody, as long as its window is current at
+-- `now` (1.2.1; the clock by default).
+function Authority.Read(text, realmGroup, now)
 	if type(text) ~= "string" then return nil, "shape", {} end
 	if not CanonicalGroup(realmGroup) then return nil, "realm", {} end
-	local out, present = {}, {}
+	local out, present, marked = {}, {}, false
 	-- Find every explicit boundary before parsing. If one entry is malformed or duplicated, its
 	-- valid epoch is still a revocation floor; a later, lower generation cannot recover roles by
 	-- exploiting the malformed replacement. The whole signed HT1 is bounded before this reader in
 	-- production; keep the reader's own bound explicit for callers and tests too.
 	local scan = #text > Authority.MAX_TEXT and text:sub(1, Authority.MAX_TEXT) or text
 	for entry in scan:gmatch("[^;]+") do
-		local marked, epoch = Marker(entry)
-		if marked then present[marked] = math.max(tonumber(present[marked]) or 0, epoch) end
+		local faction, epoch, current = Marker(entry, now)
+		marked = marked or faction ~= nil
+		if current then present[faction] = math.max(tonumber(present[faction]) or 0, epoch) end
 	end
 	if #text > Authority.MAX_TEXT then return nil, "size", present end
 	for entry in text:gmatch("[^;]+") do
@@ -195,7 +213,7 @@ function Authority.Read(text, realmGroup)
 			out[faction] = manifest
 		end
 	end
-	if next(present) == nil then return nil, "absent", present end
+	if not marked then return nil, "absent", present end
 	return out, nil, present
 end
 
@@ -391,7 +409,7 @@ local function PutPart(p)
 			for k, v in pairs(pending) do if not oldestAt or v.t < oldestAt then oldest, oldestAt = k, v.t end end
 			if oldest then pending[oldest], pendingCount = nil, pendingCount - 1 end
 		end
-		set = { t = now, at = p.at, epoch = p.epoch, root = p.root, count = p.count, parts = {}, got = 0 }
+		set = { t = now, faction = p.faction, at = p.at, epoch = p.epoch, root = p.root, count = p.count, parts = {}, got = 0 }
 		pending[key], pendingCount = set, pendingCount + 1
 	end
 	if set.count ~= p.count then return false, "set" end
@@ -400,15 +418,29 @@ local function PutPart(p)
 	if set.got ~= set.count then return true, "partial" end
 	local blobs = {}
 	for i = 1, set.count do blobs[i] = set.parts[i] end
-	local record = Record(p.faction, p.realm)
 	-- TakePart verified every exact blob before admitting it to this set. Avoid another bounded but
 	-- expensive RSA pass when the last part arrives; BundleManifest still re-verifies persisted raw
 	-- blobs after reload, where this in-memory cache is deliberately empty.
-	local bundle, why = BundleFromBlobs(blobs, record, true)
+	local bundle, why = BundleFromBlobs(blobs, nil, true)
 	pending[key], pendingCount = nil, pendingCount - 1
 	if not bundle then return false, why end
+	-- (1.2.1) The whole set verified: only now may it move the account-wide boundary, and only while
+	-- it is still current (its last part can come well after its first).
+	if not Current(bundle) then return false, "window" end
+	local allowed, boundaryWhy = SetBoundary(bundle)
+	if not allowed then return false, boundaryWhy end
 	SaveBundle(bundle)
 	return true, "complete"
+end
+
+-- A set of this faction partly in, still coming (1.2.1: its parts no longer move the boundary
+-- before it is whole, so the client keeps asking for the rest).
+local function Pending(faction)
+	DropOldPending(ns.Now())
+	for _, set in pairs(pending) do
+		if set.faction == faction then return true end
+	end
+	return false
 end
 
 local function VerifyBudget(sender, dist, blob)
@@ -436,11 +468,17 @@ local function VerifyBudget(sender, dist, blob)
 	return true
 end
 
--- A signed logical HA1 part. A valid first part establishes the fail-closed boundary; only a
--- complete set reaches SaveBundle. `dist` is used solely for independent verification budgets.
+-- A signed logical HA1 part. Only a complete set, every part verified and the set current, moves
+-- the fail-closed boundary and reaches SaveBundle (PutPart). `dist` is used solely for independent
+-- verification budgets.
 function Authority.TakePart(blob, sender, dist)
 	local p, why = Part(blob)
 	if not p or not CurrentRealmIn(p.realm) then return false, why or "realm" end
+	-- (1.2.1) Refused before any signature check: a part outside its window, or older than the
+	-- boundary this client holds, can never be part of a set that moves it.
+	if not Current(p) then return false, "window" end
+	local record = Record(p.faction, p.realm)
+	if record and p.at < record.at then return false, "replay" end
 	local cachedPart = verified[blob]
 	if not cachedPart then
 		if not ns.Sign or not ns.Sign.Plausible(p.sig) then return false, "signature" end
@@ -451,8 +489,6 @@ function Authority.TakePart(blob, sender, dist)
 	else
 		p = cachedPart
 	end
-	local allowed, boundaryWhy = SetBoundary(p)
-	if not allowed then return false, boundaryWhy end
 	return PutPart(p)
 end
 
@@ -616,8 +652,10 @@ function Authority.Ask(force)
 	local gap = asks < Authority.ASKS and Authority.ASK_GAP or Authority.ASK_IDLE
 	if not force and now - lastAsk < gap then return false end
 	-- (1.2.0: while enforcement is dormant here, the login burst only, then no more asks until the
-	-- next login; a client past the boundary keeps recovering its parts.)
-	if not force and asks >= Authority.ASKS and not Authority.Enforced(ns.faction) then return false end
+	-- next login; a client past the boundary keeps recovering its parts, 1.2.1: and one holding
+	-- part of a set.)
+	if not force and asks >= Authority.ASKS and not Authority.Enforced(ns.faction)
+		and not Pending(ns.faction or "Alliance") then return false end
 	local bundle = HeldBundle(ns.faction or "Alliance")
 	local at, epoch = bundle and bundle.at or 0, bundle and bundle.epoch or 0
 	local msg = ("H3~%s~%d~%d"):format(ns.faction or "Alliance", at, epoch)

@@ -243,13 +243,17 @@ local ns, test, eq = ...
 					{ at = T0 + 10, epoch = 7 })
 				local ok, why = A.TakePart(parts[2], nil, "LOCAL")
 				eq(ok, true); eq(why, "partial")
-				eq(A.Enforced(), true, "one verified part establishes the fail-closed boundary")
+				-- (1.2.1: one verified part used to establish the boundary at once; a part alone, which
+				-- anyone holding an old one could replay, now moves nothing account-wide.)
+				eq(A.Enforced(), false, "one verified part moves no boundary: only the whole verified set does")
+				eq(next(ns.db.authorityEnforced), nil, "nothing account-wide is written for a part")
 				eq(A.Manifest(), nil, "a partial set grants nobody")
 				eq(A.Rank("Signed Captain-Other", "Olympus Ares"), nil)
 				ok, why = A.TakePart(parts[2], nil, "LOCAL")
 				eq(ok, true); eq(why, "partial", "a duplicate does not advance the part count")
 				ok, why = A.TakePart(parts[1], nil, "LOCAL")
 				eq(ok, true); eq(why, "complete")
+				eq(A.Enforced(), true, "the whole verified set establishes the fail-closed boundary")
 				eq(A.Rank("Signed Lord-Realm", "Olympus Zeus"), 0)
 				eq(A.Rank("Signed Captain-Other", "Olympus Ares"), 0,
 					"the first identity in each guild is that guild's Lord")
@@ -275,12 +279,18 @@ local ns, test, eq = ...
 				local replacement = Parts({ "Olympus Zeus=New Lord-Realm", "Olympus Ares=New Ares-Other" },
 					{ at = T0 + 20, epoch = 4 })
 				eq(select(2, A.TakePart(replacement[2], nil, "LOCAL")), "partial")
-				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), nil, "the first newer part revokes the older complete set")
+				-- (1.2.1: the first newer part used to revoke the older set at once, by moving the
+				-- account-wide boundary; a part alone no longer moves it, so the older set stands until
+				-- the newer one is whole.)
+				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), 0, "a partial newer set moves nothing")
+				eq(select(2, A.TakePart(replacement[1], nil, "LOCAL")), "complete")
+				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0, "the newer set, once whole")
+				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), nil, "revokes the older complete set")
 				local conflict = Parts({ "Olympus Zeus=Other Lord-Realm" }, { at = T0 + 20, epoch = 4, sig = "b" })
 				local ok, why = A.TakePart(conflict[1], nil, "LOCAL")
-				eq(ok, false); eq(why, "conflict"); eq(A.Manifest(), nil)
-				eq(select(2, A.TakePart(replacement[1], nil, "LOCAL")), "complete")
-				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0, "the exact pending root can still finish")
+				eq(ok, false); eq(why, "conflict")
+				eq(A.Rank("Other Lord-Realm", "Olympus Zeus"), nil, "another set of the same time never replaces it")
+				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0)
 
 				local downgrade = Parts({ "Olympus Zeus=Downgrade-Realm" }, { at = T0 + 30, epoch = 2 })
 				ok, why = A.TakePart(downgrade[1], nil, "LOCAL")
@@ -295,7 +305,9 @@ local ns, test, eq = ...
 					{ at = T0 + 50, epoch = 6, root = string.rep("0", 64) })
 				eq(select(2, A.TakePart(bad[1], nil, "LOCAL")), "partial")
 				ok, why = A.TakePart(bad[2], nil, "LOCAL")
-				eq(ok, false); eq(why, "digest"); eq(A.Manifest(), nil, "individually signed parts with a false root grant nobody")
+				eq(ok, false); eq(why, "digest")
+				eq(A.Rank("Digest One-Realm", "Olympus Zeus"), nil, "individually signed parts with a false root grant nobody")
+				eq(A.Rank("Recovered-Realm", "Olympus Zeus"), 0, "(1.2.1) nor move the boundary off the set held")
 
 				local tombstone = Parts({ "-" }, { at = T0 + 60, epoch = 7 })
 				eq(select(2, A.TakePart(tombstone[1], nil, "LOCAL")), "complete")
@@ -377,7 +389,7 @@ local ns, test, eq = ...
 		end)
 	end)
 
-	test("authority: while enforcement is dormant H3 asks stop after the login burst; past the boundary they keep recovering", function()
+	test("authority: while enforcement is dormant H3 asks stop after the login burst; past the boundary, or with part of a set in, they keep recovering", function()
 		WithState(function()
 			local comm, isMember, after, every = ns.Comm, ns.IsMember, ns.After, ns.Every
 			local sent = 0
@@ -397,11 +409,61 @@ local ns, test, eq = ...
 					local parts = Parts({ "Olympus Zeus=Answer Lord-Realm", "Olympus Ares=Answer Ares-Other" }, { at = T0 + 10, epoch = 2 })
 					eq(select(2, A.TakePart(parts[1], nil, "LOCAL")), "partial")
 				end)
-				eq(A.Enforced(), true)
-				eq(A.Ask(false), true)
+				-- (1.2.1: a part alone no longer moves the boundary; holding it, the client still asks.)
+				eq(A.Enforced(), false)
+				eq(A.Ask(false), true, "holding part of a set, the client keeps asking for the rest")
 				eq(sent, 2 * (A.ASKS + 1), "the channel and the guild each time")
 			end)
 			ns.Comm, ns.IsMember, ns.After, ns.Every = comm, isMember, after, every
 			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.1 security review: old or expired signed material used to lock a client for good into
+	-- "enforced, nobody authorized". It moves the account-wide boundary only while current, and a
+	-- set only once it is whole.
+	test("authority: an expired, not yet valid or unfinished signed set never moves the account-wide boundary", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				Census("Olympus Zeus", "Legacy-Realm", 0)
+				local expired = Parts({ "Olympus Zeus=Old Lord-Realm" }, { at = T0 + 10, epoch = 3, issued = T0 - 2000, expires = T0 - 1000 })
+				local ok, why = A.TakePart(expired[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				local early = Parts({ "Olympus Zeus=Early Lord-Realm" }, { at = T0 + 11, epoch = 3, issued = T0 + A.CLOCK_SKEW + 100, expires = T0 + 5000 })
+				ok, why = A.TakePart(early[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				eq(A.Enforced(), false, "an expired or future set sets no boundary")
+				eq(next(ns.db.authorityEnforced), nil, "nothing account-wide is written")
+				eq(select(2, D.AuthorizedRank("Legacy-Realm", "Olympus Zeus")), "census", "the documented census behaviour stays")
+				-- A set whose window ends before its last part comes: never whole, never a boundary.
+				local slow = Parts({ "Olympus Zeus=Slow Lord-Realm", "Olympus Ares=Slow Ares-Other" }, { at = T0 + 12, epoch = 3 })
+				eq(select(2, A.TakePart(slow[1], nil, "LOCAL")), "partial")
+				eq(A.Enforced(), false, "a part alone moves nothing")
+				ns.Now = function() return T0 + 1001 end
+				ok, why = A.TakePart(slow[2], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				-- The same kind of set, whole and current: the boundary, and its roles.
+				ns.Now = function() return T0 end
+				local current = Parts({ "Olympus Zeus=Current Lord-Realm" }, { at = T0 + 13, epoch = 3 })
+				eq(select(2, A.TakePart(current[1], nil, "LOCAL")), "complete")
+				eq(A.Enforced(), true); eq(A.Rank("Current Lord-Realm", "Olympus Zeus"), 0)
+			end)
+		end)
+	end)
+
+	test("authority: an old or expired legacy HT1 marker never moves the account-wide boundary", function()
+		WithState(function()
+			Census("Olympus Zeus", "Legacy-Realm", 0)
+			Install(Entry("Olympus Zeus=Zed-Realm", 2, T0 - 2000, T0 - 1000))
+			eq(A.Enforced(), false, "an expired marker sets no boundary")
+			eq(next(ns.db.authorityEnforced), nil)
+			eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), 0, "census authority as documented")
+			Install(Entry("Olympus Zeus=Zed-Realm", 2, T0 + A.CLOCK_SKEW + 100, T0 + 5000), T0 + 1)
+			eq(A.Enforced(), false, "nor one not valid yet")
+			Install(Entry("Olympus Zeus=Zed-Realm", 2), T0 + 2)
+			eq(A.Enforced(), true, "a current marker still does")
+			eq(D.AuthorizedRank("Zed-Realm", "Olympus Zeus"), 0)
+			eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), nil)
 		end)
 	end)
