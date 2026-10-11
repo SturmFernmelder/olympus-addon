@@ -147,7 +147,7 @@ local MEDIA = "Interface\\AddOns\\Olympus\\media\\borders\\"
 Borders.TIERS = {
 	{ name = "gold-elite", atlas = WINGED, metal = "gold", x = 11, y = -4, king = true },
 	{ name = "treasurer-dragon", file = MEDIA .. "treasurer-dragon", coords = { 0, 200 / 256, 0, 190 / 256 }, width = 100, height = 95,
-		x = 0, y = 1, fallback = PLAIN, treasurer = true, metal = "none", party = { x = -8, y = -4 } }, -- (its own art whole: no plain dragon under it; party: its ring on the smaller portrait, from the owner's screenshot)
+		x = 0, y = 1, fallback = PLAIN, treasurer = true, metal = "none", party = { x = 0, y = -2 } }, -- (its own art whole: no plain dragon under it; party: see PartyRig)
 	{ name = "silver-elite", atlas = "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Rare-Silver-Winged", x = 8, y = -7,
 		metal = "silver", council = true },
 	{ name = "silver", atlas = PLAIN_SILVER, metal = "silver", x = 0, y = 1, dev = true },
@@ -561,6 +561,13 @@ end
 
 -- A party member frame's textures: the target's art and offsets scaled to its portrait about the
 -- portrait's top corner, turned round (from the frame's top left); under its ring and name.
+-- A tier's party = { x, y } replaces its x, y here (the target's units). 1.2.1 (the owner's report:
+-- the Treasurer's dragon sat off round a party portrait): measured, the inner edge of the dragon's
+-- ring is centred 3.2 px higher in its art than the plain gold's (whose offsets it has) and on the
+-- same line across, so on the party portrait it goes 3 down (y -2) and nowhere across (x 0); the
+-- earlier -8, -4, read off a screenshot, put its ring 4 px right of the portrait's centre. Every
+-- other tier is the game's art or drawn over it, at the game's offsets: its ring is round the
+-- portrait as is. (An honour's frame never shows here: ShowHonor, the rank's borders alone.)
 local function PartyRig(frame)
 	local s = PARTY_SCALE
 	return MakeRig(frame, true, s, function(tex, t)
