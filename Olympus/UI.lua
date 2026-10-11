@@ -2807,8 +2807,8 @@ function UI.ShowCopy(title, text, action, opts)
 		end
 	end
 	ns.SetWindowTitle(copyFrame, title)
-	-- (1.2.1) The text the box shows already (the help opened again): kept, laid out as it is. A
-	-- long text set in the box is most of what opening it costs a slow PC.
+	-- (1.2.1) The text the box shows already (the help opened again): kept as it is laid out, never
+	-- set again for the client to lay out once more.
 	if copyFrame.text ~= text or copyFrame.eb:GetText() ~= text then
 		copyFrame.text = text
 		copyFrame.eb:SetText(text)
