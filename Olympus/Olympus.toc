@@ -32,6 +32,7 @@ Locales\ChurchText.lua
 Locales\WeeklyBriefText.lua
 Locales\GuildCharterText.lua
 Locales\MainKeyText.lua
+Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
 Core.lua
