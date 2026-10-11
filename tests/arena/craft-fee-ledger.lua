@@ -89,55 +89,68 @@ test("1.2.1 craft fee desk: with the Wallet off the desk books no made-up word o
 	NoErrors(w)
 end)
 
-test("1.2.1 craft fee desk: a member's characters cannot wedge a full ledger: a real sale is still booked, the oldest unconfirmed fee goes first, the desk's own confirmation never goes, and an evicted seller's fee comes back", function()
+test("1.2.1 craft fee desk: a flood cannot wedge a full ledger nor push out others' fees: room comes from whoever holds the most, a real sale is booked, an honest buyer's word and the desk's own confirmation stay, and each eviction is kept, logged and counted", function()
 	local w = World.New()
 	local a, b = Cast(w)
 	local c = K.Client(w, "Moss Harrow", { money = 500000 })
 	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local f = K.Client(w, "Fen Marlow", { money = 500000 })
+	local t = K.Client(w, "Tansy Brook", { money = 500000 })
 	local desk = K.Role(w, "treasurerMail")
-	HearsDesk({ a, b, c, d }, desk)
+	HearsDesk({ a, b, c, d, f, t }, desk)
 	w:As(desk, function()
-		desk.ns.CraftRequests.FEES_MAX = 5
+		desk.ns.CraftRequests.FEES_MAX = 6
 		desk.ns.CraftRequests.FEES_PER_SELLER = 3
 	end)
 	-- A fee on a buyer's word that the desk checked and confirmed by hand: the oldest row.
 	FeeWordTo(w, c, desk, "held01", "b", c.name, a.name, "8ow")
 	local held = assert(Entry(desk, "held01"))
 	eq(desk.Craft.SettleFee(held.key, "confirmed", "checked with both"), true)
+	-- An honest buyer's word of a sale its seller never told the desk of: older than any flood, it
+	-- waits apart (his client tells the desk no more once it answered).
+	FeeWordTo(w, t, desk, "real01", "b", t.name, b.name, "7ps")
 	-- Two characters of one member fill the rest with sales nobody made, each within his own cap.
 	w:Run(61)
 	for n = 1, 3 do FeeWordTo(w, c, desk, "fk00" .. n, "s", a.name, c.name, "h") end
-	w:Run(61)
 	FeeWordTo(w, d, desk, "fk004", "s", a.name, d.name, "h")
-	eq(Rows(desk), 5, "the ledger is full")
-	-- A real sale: booked all the same, in the oldest unconfirmed fee's place.
+	eq(Rows(desk), 6, "the ledger is full")
+	-- A real sale: booked all the same, in the place of the oldest fee of whoever holds the most.
 	w:Run(61)
-	local r, rb = Completed(w, a, b)
+	local r = Completed(w, a, b)
 	local e = assert(Entry(desk, r.id), "the real sale is booked on a full ledger")
 	eq(e.fee, 600)
 	assert(e.by.s and e.by.b, "both parties' words")
-	eq(Rows(desk), 5, "never over FEES_MAX")
-	eq(Entry(desk, "fk001"), nil, "the oldest fee nobody confirmed went")
-	assert(Entry(desk, "fk002") and Entry(desk, "fk003") and Entry(desk, "fk004"), "one row for one")
+	eq(Rows(desk), 6, "never over FEES_MAX")
+	eq(Entry(desk, "fk001"), nil, "the oldest fee of the one holding the most went")
+	assert(Entry(desk, "real01"), "never the honest buyer's word, older though it is")
+	-- More made-up words: a name holding fewer takes room from the one holding the most; once
+	-- nobody holds more than the sender would then, a full ledger takes no more.
+	w:Run(61)
+	FeeWordTo(w, f, desk, "fk005", "s", a.name, f.name, "h")
+	assert(Entry(desk, "fk005"))
+	eq(Entry(desk, "fk002"), nil, "the flood's own fee went")
+	FeeWordTo(w, f, desk, "fk006", "s", a.name, f.name, "h")
+	FeeWordTo(w, d, desk, "fk007", "s", a.name, d.name, "h")
+	eq(Entry(desk, "fk006"), nil, "nobody holds more than he would")
+	eq(Entry(desk, "fk007"), nil)
+	assert(Entry(desk, r.id), "the real sale stays")
+	assert(Entry(desk, "real01"), "the honest buyer's word stays")
 	assert(Entry(desk, "held01"), "the desk's own confirmation stays")
-	-- More made-up words push the real sale out in the end: never the confirmed fee.
-	w:Run(61)
-	for n = 5, 6 do FeeWordTo(w, d, desk, "fk00" .. n, "s", a.name, d.name, "h") end
-	w:Run(61)
-	FeeWordTo(w, c, desk, "fk007", "s", a.name, c.name, "h")
-	FeeWordTo(w, c, desk, "fk008", "s", a.name, c.name, "h")
-	eq(Entry(desk, r.id), nil, "the real sale's row was the oldest left")
-	assert(Entry(desk, "held01"), "the confirmed fee still stays")
-	eq(Rows(desk), 5)
-	-- The seller's fee is still open on his client: it tells the desk again, which books it again.
-	eq(rb.settlement.feeState, "due")
-	K.Jump(w, b.Craft.ASK_GAP + 1)
-	HearsDesk({ a, b, c, d }, desk)
-	w:Run(61)
-	e = assert(Entry(desk, r.id), "the seller's word came again")
-	assert(e.by.s, "his own word")
-	eq(e.fee, 600)
-	eq(Rows(desk), 5)
+	eq(Rows(desk), 6)
+	-- Each fee evicted is kept for its return, logged, and counted in /oly status on the desk.
+	local led = desk.Craft.FeeLedger()
+	eq(led.evicted, 2)
+	assert(type(led.gone) == "table", "the evicted are kept")
+	local kept = {}
+	for _, x in pairs(led.gone) do kept[#kept + 1] = x.id end
+	table.sort(kept)
+	eq(table.concat(kept, " "), "fk001 fk002")
+	local line = assert(desk.Craft.FeeStatusLine())
+	assert(line:find("evicted for room: 2", 1, true) and line:find("kept for their return: 2", 1, true), line)
+	local logged = 0
+	for _, l in ipairs(desk.log or {}) do if l:find("evicted for room", 1, true) then logged = logged + 1 end end
+	eq(logged, 2, "each eviction is logged")
+	eq(a.Craft.FeeStatusLine(), nil, "the line is the desk's alone")
 	NoErrors(w)
 end)
 
@@ -250,5 +263,207 @@ test("1.2.1 craft fee desk: a seller's fee mail on a sale only its buyer named w
 	eq(e.state, "paid")
 	eq(Rows(desk), 2, "one row for each sale")
 	eq(#desk.Craft.Debtors().ranking, 0, "he owes nothing")
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: a seller's own made-up sales never push out his buyer's word of a real one, nor its higher figure", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail")
+	HearsDesk({ a, b, d }, desk)
+	w:As(desk, function() desk.ns.CraftRequests.FEES_MAX = 5 end)
+	-- a bought for 100g; b says 1g: the gap waits for the desk.
+	FeeWordTo(w, a, desk, "own01", "b", a.name, b.name, "7ps")
+	FeeWordTo(w, b, desk, "own01", "s", a.name, b.name, "2s")
+	local e = assert(Fee(desk, "own01", b, a))
+	eq(e.fee, 600); eq(e.grossB, 10000); eq(e.grossS, 100)
+	-- b fills the ledger with sales nobody made, then his other character's word asks for room.
+	w:Run(61)
+	FeeWordTo(w, b, desk, "own02", "s", a.name, b.name, "h")
+	FeeWordTo(w, b, desk, "own03", "s", a.name, b.name, "h")
+	FeeWordTo(w, b, desk, "own06", "s", a.name, b.name, "h")
+	FeeWordTo(w, d, desk, "own04", "s", a.name, d.name, "h")
+	eq(Rows(desk), 5, "full")
+	w:Run(61)
+	FeeWordTo(w, d, desk, "own05", "s", a.name, d.name, "h")
+	assert(Fee(desk, "own05", d, a), "room was made")
+	eq(Fee(desk, "own02", b, a), nil, "from his own made-up sale")
+	e = assert(Fee(desk, "own01", b, a), "the buyer's word of the real sale stays")
+	eq(e.fee, 600, "with the buyer's figure")
+	local found = false
+	for _, x in ipairs(desk.Craft.Debtors().toCheck) do if x.id == "own01" then found = true end end
+	assert(found, "still waiting for the desk")
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: a fee evicted for room comes back as it was when its seller tells the desk again: its first deadline, the buyer's word and his figure above the seller's", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b, c, d }, desk)
+	w:As(desk, function() desk.ns.CraftRequests.FEES_MAX = 5 end)
+	-- A real sale, both parties' words, its deadline the desk's.
+	local r, rb = Completed(w, a, b)
+	local e = assert(Fee(desk, r.id, b, a))
+	local due = e.due
+	assert(e.by.s and e.by.b)
+	-- Another sale of b's to a, at 100g on a's word and 1g on b's: the desk is to check it.
+	w:Run(61)
+	FeeWordTo(w, a, desk, "gap01", "b", a.name, b.name, "7ps")
+	FeeWordTo(w, b, desk, "gap01", "s", a.name, b.name, "2s")
+	eq(Fee(desk, "gap01", b, a).fee, 600)
+	-- a holds most of the ledger (two more words of his), c the rest: full.
+	w:Run(61)
+	FeeWordTo(w, a, desk, "buy01", "b", a.name, b.name, "8ow")
+	FeeWordTo(w, a, desk, "buy02", "b", a.name, b.name, "8ow")
+	FeeWordTo(w, c, desk, "fk001", "s", b.name, c.name, "h")
+	eq(Rows(desk), 5, "full")
+	-- 71 hours on, d's words take room from a's oldest: the real sale, then the gap.
+	K.Jump(w, b.Craft.FEE_DUE - 3600)
+	FeeWordTo(w, d, desk, "fk002", "s", b.name, d.name, "h")
+	FeeWordTo(w, d, desk, "fk003", "s", b.name, d.name, "h")
+	eq(Fee(desk, r.id, b, a), nil, "evicted")
+	eq(Fee(desk, "gap01", b, a), nil, "evicted")
+	-- The desk waives c's and d's made-up sales: room for both to come back.
+	for _, x in ipairs({ Fee(desk, "fk001", c, b), Fee(desk, "fk002", d, b) }) do eq(desk.Craft.SettleFee(x.key, "waived", "no such sale"), true) end
+	-- b's client tells the desk again while his fee is open: the same fee, its first deadline.
+	eq(rb.settlement.feeState, "due")
+	K.Jump(w, b.Craft.ASK_GAP + 1)
+	HearsDesk({ a, b, c, d }, desk)
+	w:Run(61)
+	e = assert(Fee(desk, r.id, b, a), "his word came again")
+	eq(e.due, due, "its first deadline, never a fresh one")
+	assert(e.by.b and e.by.s, "the buyer's word with it")
+	eq(e.fee, 600)
+	-- b's word of the gap again: the buyer's 100g still sets the fee, which still waits apart.
+	FeeWordTo(w, b, desk, "gap01", "s", a.name, b.name, "2s")
+	e = assert(Fee(desk, "gap01", b, a), "booked again")
+	eq(e.grossB, 10000, "the buyer's figure kept")
+	eq(e.fee, 600)
+	local waiting = false
+	for _, x in ipairs(desk.Craft.Debtors().toCheck) do if x.id == "gap01" then waiting = true end end
+	assert(waiting, "not taken as confirmed on the seller's lower word")
+	w:Take(desk, w:Mail(b, desk, 6, "Olympus craft fee gap01"))
+	eq(Fee(desk, "gap01", b, a).state, "due", "a 6-copper mail pays none of it off")
+	-- Two hours past the first deadline, he is late with the real sale's fee.
+	K.Jump(w, due + 7200 - w.clock)
+	local late = 0
+	for _, x in ipairs(desk.Craft.Debtors().ranking) do if x.name == b.name then late = x.late end end
+	eq(late, 600, "late from the first deadline")
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: the gold on a fee evicted for room is still the seller's: his fee mail evicted joins his word when it comes, and his evicted word takes the mail he sent after", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b, c, d }, desk)
+	w:As(desk, function() desk.ns.CraftRequests.FEES_MAX = 3 end)
+	-- b's fee mails for two sales come before any word of them; c's word fills the ledger.
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee ml001"))
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee ml002"))
+	FeeWordTo(w, c, desk, "fk001", "s", a.name, c.name, "h")
+	eq(Rows(desk), 3, "full")
+	-- d's word takes room from b, who holds the most: his oldest mail.
+	FeeWordTo(w, d, desk, "fk002", "s", a.name, d.name, "h")
+	eq(Fee(desk, "ml001", b), nil, "evicted")
+	-- The desk waives c's made-up fee (room again), and b's word of the sale comes: his mail is on it.
+	eq(desk.Craft.SettleFee(Fee(desk, "fk001", c, a).key, "waived", "no such sale"), true)
+	w:Run(61)
+	FeeWordTo(w, b, desk, "ml001", "s", a.name, b.name, "7ps")
+	local e = assert(Fee(desk, "ml001", b, a))
+	eq(e.paid, 600, "the evicted mail's gold joined his word")
+	eq(e.state, "paid")
+	-- Now his word is the one evicted (he holds the most again), and his mail comes after it.
+	w:Run(61)
+	FeeWordTo(w, b, desk, "sl001", "s", a.name, b.name, "7ps")
+	local due = Fee(desk, "sl001", b, a).due
+	eq(desk.Craft.SettleFee(Fee(desk, "fk002", d, a).key, "waived", "no such sale"), true)
+	FeeWordTo(w, c, desk, "fk003", "s", a.name, c.name, "h") -- (the waived fee's room)
+	w:Run(61)
+	FeeWordTo(w, d, desk, "fk004", "s", a.name, d.name, "h")
+	eq(Fee(desk, "sl001", b, a), nil, "his word evicted")
+	eq(desk.Craft.SettleFee(Fee(desk, "fk003", c, a).key, "waived", "no such sale"), true)
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee sl001"))
+	eq(Fee(desk, "sl001", b).paid, 600, "the mail waits on its own")
+	K.Jump(w, 3600)
+	FeeWordTo(w, b, desk, "sl001", "s", a.name, b.name, "7ps")
+	e = assert(Fee(desk, "sl001", b, a))
+	eq(e.paid, 600); eq(e.state, "paid")
+	eq(e.due, due, "the same fee, its first deadline")
+	eq(Fee(desk, "sl001", b), nil, "no payment left waiting")
+	for _, x in ipairs(desk.Craft.Debtors().ranking) do assert(x.name ~= b.name, "he owes nothing") end
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: the fees kept for their return are bounded, whoever has the most kept losing his oldest first", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local names = { "Moss Harrow", "Brindle Ash", "Fen Marlow", "Tansy Brook", "Rook Elder", "Ivy Calder" }
+	local x = {}
+	for i, n in ipairs(names) do x[i] = K.Client(w, n, { money = 500000 }) end
+	local c, d, e, f, g, h = unpack(x)
+	local desk = K.Role(w, "treasurerMail")
+	HearsDesk({ a, b, c, d, e, f, g, h }, desk)
+	w:As(desk, function()
+		desk.ns.CraftRequests.FEES_MAX = 6
+		desk.ns.CraftRequests.FEES_GONE_MAX = 2
+	end)
+	-- a's two words of sales its seller never told; four others' one each: full.
+	FeeWordTo(w, a, desk, "ab001", "b", a.name, b.name, "7ps")
+	FeeWordTo(w, a, desk, "ab002", "b", a.name, b.name, "7ps")
+	for i, who in ipairs({ c, d, e, f }) do FeeWordTo(w, who, desk, "one0" .. i, "s", a.name, who.name, "h") end
+	eq(Rows(desk), 6, "full")
+	-- g's word: room from a, who holds the most; his fee is kept.
+	w:Run(61)
+	FeeWordTo(w, g, desk, "gg001", "s", a.name, g.name, "h")
+	local gone = desk.Craft.FeeLedger().gone
+	assert(gone and Fee(desk, "ab001", b, a) == nil, "a's oldest evicted")
+	-- c floods: the desk waives the others' made-up sales, and his words fill their room.
+	for i, who in ipairs({ d, e, f }) do eq(desk.Craft.SettleFee(Fee(desk, "one0" .. (i + 1), who, a).key, "waived", "no such sale"), true) end
+	w:Run(61)
+	for n = 1, 3 do FeeWordTo(w, c, desk, "cc00" .. n, "s", a.name, c.name, "h") end
+	-- h's words: room from c twice; three kept, over FEES_GONE_MAX: c's oldest kept goes, never a's.
+	w:Run(61)
+	FeeWordTo(w, h, desk, "hh001", "s", a.name, h.name, "h")
+	w:Run(61)
+	FeeWordTo(w, h, desk, "hh002", "s", a.name, h.name, "h")
+	local kept = {}
+	for _, k in pairs(gone) do kept[#kept + 1] = k.id end
+	table.sort(kept)
+	eq(table.concat(kept, " "), "ab001 cc001", "a's kept fee stays; c's oldest kept went")
+	eq(desk.Craft.FeeLedger().evicted, 3)
+	NoErrors(w)
+end)
+
+test("1.2.1 craft fee desk: a seller's evicted word that the buyer's late word brings back takes the fee mail he sent meanwhile", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b, c, d }, desk)
+	w:As(desk, function() desk.ns.CraftRequests.FEES_MAX = 3 end)
+	FeeWordTo(w, b, desk, "lw001", "s", a.name, b.name, "7ps")
+	FeeWordTo(w, b, desk, "lw002", "s", a.name, b.name, "7ps")
+	FeeWordTo(w, c, desk, "fk001", "s", a.name, c.name, "h")
+	w:Run(61)
+	FeeWordTo(w, d, desk, "fk002", "s", a.name, d.name, "h")
+	eq(Fee(desk, "lw001", b, a), nil, "his oldest word evicted")
+	for _, x in ipairs({ Fee(desk, "fk001", c, a), Fee(desk, "fk002", d, a) }) do eq(desk.Craft.SettleFee(x.key, "waived", "no such sale"), true) end
+	-- His fee mail finds no word of his on the ledger: it waits on its own.
+	w:Take(desk, w:Mail(b, desk, 600, "Olympus craft fee lw001"))
+	eq(Fee(desk, "lw001", b).paid, 600)
+	-- The buyer's word comes late: his seller's word is back with it, and so is his gold.
+	FeeWordTo(w, a, desk, "lw001", "b", a.name, b.name, "7ps")
+	local e = assert(Fee(desk, "lw001", b, a))
+	assert(e.by.s and e.by.b, "both words")
+	eq(e.paid, 600); eq(e.state, "paid")
+	eq(Fee(desk, "lw001", b), nil, "no payment left waiting")
 	NoErrors(w)
 end)

@@ -105,6 +105,7 @@ Requests.FEES_MAX = 1000              -- fees on the desk's ledger at most
 Requests.FEES_BUYER_ONLY = 20         -- open fees on the buyer's word alone, per buyer, at most (the desk's own confirmations aside)
 Requests.FEES_PER_SELLER = 50         -- open fees on a seller's own word or fee mail alone, per seller, at most (the same)
 Requests.FEES_KEEP = 30 * 86400       -- a paid or waived fee stays on the ledger this long
+Requests.FEES_GONE_MAX = 250          -- open fees evicted for room kept for their return, at most
 Requests.DEBTS_ANSWER_MAX = 40        -- fees one answer to the King names at most
 Requests.DEBTS_ASK_GAP = 300          -- the King asks the desk, and is answered, this often at most
 Requests.DEBTS_RETRY = 150            -- an ask the desk never answered may go again this soon (an answer takes 2 min at most)
@@ -1727,17 +1728,82 @@ do
 		return (tonumber(e.grossB) or 0) <= (tonumber(e.grossS) or 0)
 	end
 
+	-- Whose a fee the desk never confirmed by hand is, for room on a full ledger: the buyer's once his
+	-- word is on it (a seller's own flood never pushes out the word of his sale that the buyer gave),
+	-- the seller's on his own word alone, the payer's for his fee mail no word named.
+	local function Holder(e)
+		if e.fee and type(e.by) == "table" and e.by.b then return Lower(e.requester) or "-" end
+		return Lower(e.crafter) or "-"
+	end
+	-- Of one holder's fees, which goes first: one holding no gold before a payment, then the oldest.
+	local function GoesFirst(a, b)
+		local ga, gb = (tonumber(a.paid) or 0) > 0, (tonumber(b.paid) or 0) > 0
+		if ga ~= gb then return gb end
+		local ta, tb = tonumber(a.created) or 0, tonumber(b.created) or 0
+		if ta ~= tb then return ta < tb end
+		return tostring(a.key) < tostring(b.key)
+	end
+
+	-- An evicted fee is kept by its key (led.gone), whole: booked again (the seller's client tells the
+	-- desk again each ASK_GAP while his fee is open; a buyer's word that comes late), it comes back
+	-- as it was, its deadline the first one, a buyer's figure above the seller's still kept, the gold
+	-- on it still there. FEES_GONE_MAX at most: then the oldest kept of whoever has the most kept goes.
+	local function Gone(led)
+		if type(led.gone) ~= "table" then led.gone = {} end
+		return led.gone
+	end
+	local function KeptFirst(a, b)
+		local ta, tb = tonumber(a.goneAt) or 0, tonumber(b.goneAt) or 0
+		if ta ~= tb then return ta < tb end
+		return tostring(a.key) < tostring(b.key)
+	end
+	local function KeepGone(led, e, now)
+		local gone = Gone(led)
+		e.goneAt = now
+		gone[e.key] = e
+		while true do
+			local n, count, oldest = 0, {}, {}
+			for key, x in pairs(gone) do
+				if type(x) ~= "table" then
+					gone[key] = nil
+				else
+					n = n + 1
+					local h = Holder(x)
+					count[h] = (count[h] or 0) + 1
+					if not oldest[h] or KeptFirst(x, oldest[h]) then oldest[h] = x end
+				end
+			end
+			if n <= Requests.FEES_GONE_MAX then return end
+			local most
+			for h, k in pairs(count) do
+				if not most or k > count[most] or (k == count[most] and KeptFirst(oldest[h], oldest[most])) then most = h end
+			end
+			gone[oldest[most].key] = nil
+		end
+	end
+	-- The fee kept for this key, back on the ledger's side (nil when none was kept).
+	local function ReturnGone(led, key)
+		local gone = led.gone
+		local e = type(gone) == "table" and gone[key]
+		if type(e) ~= "table" then return nil end
+		gone[key], e.goneAt = nil, nil
+		ns.Log("craft fee %s back on the ledger as it was", tostring(key))
+		return e
+	end
+
 	-- Room for one more: the paid, the waived and a payment no word of a sale ever named go after
-	-- FEES_KEEP. Full, the oldest paid or waived goes first, then the oldest open fee the desk never
-	-- confirmed by hand (one party's word or both: two characters of one member can name any sale),
-	-- one holding no gold before a payment. Only a fee the desk confirmed by hand stays while open,
-	-- so a member's characters never leave a real sale without room (a seller's evicted fee comes
-	-- back: his client tells the desk again each ASK_GAP while it is open). One member's words fill a
-	-- bounded part of it (a modified client's flood of made-up sales): of the fees the desk never
-	-- confirmed by hand, the buyer's word alone opens FEES_BUYER_ONLY at most per buyer, the seller's
-	-- own word or his fee mail no word named FEES_PER_SELLER per seller (role "mail": the payer).
+	-- FEES_KEEP. Full, the oldest paid or waived goes first. Then a fee the desk never confirmed by
+	-- hand (one party's word or both: two characters of one member can name any sale) of whoever
+	-- holds the most of those, while he holds more than the new fee's holder would then (Holder):
+	-- a flood of made-up sales makes room from its own senders' fees, and someone holding one or two
+	-- keeps his. Of his, one holding no gold goes before a payment, then the oldest. It is kept
+	-- (KeepGone), logged and counted (/oly status). A fee the desk confirmed by hand stays while
+	-- open. One member's words fill a bounded part of it (a modified client's flood): of the fees the
+	-- desk never confirmed by hand, the buyer's word alone opens FEES_BUYER_ONLY at most per buyer,
+	-- the seller's own word or his fee mail no word named FEES_PER_SELLER per seller (role "mail":
+	-- the payer).
 	local function FeeRoom(led, role, requester, crafter, now)
-		local n, gone, buyerOnly, sellers = 0, {}, 0, 0
+		local n, settled, held, first, buyerOnly, sellers = 0, {}, {}, {}, 0, 0
 		for key, e in pairs(led.entries) do
 			if type(e) ~= "table" then
 				led.entries[key] = nil
@@ -1746,9 +1812,12 @@ do
 			else
 				n = n + 1
 				if FeeSettled(e) then
-					gone[#gone + 1] = { e = e, rank = 0, t = tonumber(e.paidAt or e.created) or 0 }
+					settled[#settled + 1] = e
 				elseif not e.checkedBy then
-					gone[#gone + 1] = { e = e, rank = (e.fee and (tonumber(e.paid) or 0) <= 0) and 1 or 2, t = tonumber(e.created) or 0 }
+					local h = Holder(e)
+					held[h] = held[h] or {}
+					held[h][#held[h] + 1] = e
+					if not first[h] or GoesFirst(e, first[h]) then first[h] = e end
 					local by = type(e.by) == "table" and e.by or {}
 					if role == "b" and by.b and not by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
 					if role ~= "b" and (by.s or not e.fee) and Same(e.crafter, crafter) then sellers = sellers + 1 end
@@ -1758,31 +1827,61 @@ do
 		if role == "b" and buyerOnly >= Requests.FEES_BUYER_ONLY then return false, "buyer-cap" end
 		if role ~= "b" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
 		if n < Requests.FEES_MAX then return true end
-		table.sort(gone, function(a, b)
-			if a.rank ~= b.rank then return a.rank < b.rank end
-			if a.t ~= b.t then return a.t < b.t end
-			return tostring(a.e.key) < tostring(b.e.key)
+		table.sort(settled, function(a, b)
+			local ta, tb = tonumber(a.paidAt or a.created) or 0, tonumber(b.paidAt or b.created) or 0
+			if ta ~= tb then return ta < tb end
+			return tostring(a.key) < tostring(b.key)
 		end)
-		for i = 1, math.min(#gone, n - Requests.FEES_MAX + 1) do
-			led.entries[gone[i].e.key] = nil
+		for i = 1, #settled do
+			if n < Requests.FEES_MAX then break end
+			led.entries[settled[i].key] = nil
 			n = n - 1
+		end
+		local mine = (role == "b" and Lower(requester) or Lower(crafter)) or "-"
+		local own = held[mine] and #held[mine] or 0
+		while n >= Requests.FEES_MAX do
+			local most
+			for h, list in pairs(held) do
+				if h ~= mine and #list > own + 1
+					and (not most or #list > #held[most] or (#list == #held[most] and GoesFirst(first[h], first[most]))) then most = h end
+			end
+			if not most then break end
+			local e, list = first[most], held[most]
+			for i = #list, 1, -1 do if list[i] == e then table.remove(list, i) break end end
+			first[most] = nil
+			for _, x in ipairs(list) do if not first[most] or GoesFirst(x, first[most]) then first[most] = x end end
+			led.entries[e.key] = nil
+			n = n - 1
+			KeepGone(led, e, now)
+			led.evicted, led.evictedAt = (tonumber(led.evicted) or 0) + 1, now
+			ns.Log("craft fee %s evicted for room: %s held %d", tostring(e.key), tostring(most), #held[most] + 1)
 		end
 		return n < Requests.FEES_MAX, "full"
 	end
 
-	-- A seller's fee mail that came before his word of the sale waits on its own (the request, the
-	-- payer, no buyer): his own word of that sale takes it, or the desk's confirmation by hand of a
-	-- fee naming him for it. Never a buyer's word alone: anyone may name himself the buyer of
-	-- another's sale, and so would take the gold its seller paid and leave his real fee unpaid.
-	local function JoinEarly(led, e)
-		local key = FeeKey(e.id, e.crafter, nil)
-		local early = led.entries[key]
-		if type(early) ~= "table" or early == e then return end
-		led.entries[key] = nil
+	-- A fee mail's row's gold, onto the fee it paid.
+	local function AddMail(e, early)
 		e.paid = (tonumber(e.paid) or 0) + (tonumber(early.paid) or 0)
 		e.payments = type(e.payments) == "table" and e.payments or {}
 		for _, p in ipairs(type(early.payments) == "table" and early.payments or {}) do e.payments[#e.payments + 1] = p end
 		while #e.payments > 10 do table.remove(e.payments, 1) end
+	end
+	-- A seller's fee mail that came before his word of the sale waits on its own (the request, the
+	-- payer, no buyer): his own word of that sale takes it, or the desk's confirmation by hand of a
+	-- fee naming him for it. Never a buyer's word alone: anyone may name himself the buyer of
+	-- another's sale, and so would take the gold its seller paid and leave his real fee unpaid. (A
+	-- mail's row evicted for room is still his: kept, it joins all the same.)
+	local function JoinEarly(led, e)
+		local key = FeeKey(e.id, e.crafter, nil)
+		local early = led.entries[key]
+		if type(early) == "table" and early ~= e then
+			led.entries[key] = nil
+		else
+			early = type(led.gone) == "table" and led.gone[key]
+			if type(early) ~= "table" or early == e then return end
+			led.gone[key] = nil
+		end
+		AddMail(e, early)
 	end
 
 	-- A party's word of a sale, on the desk. Each party's figure is kept, and the higher one is the
@@ -1794,11 +1893,14 @@ do
 		local key = FeeKey(id, crafter, requester)
 		local e = led.entries[key]
 		if not e and role == "s" then
-			-- The seller's fee mail came before his word of the sale: it was his, for this request.
+			-- The seller's fee mail came before his word of the sale: it was his, for this request (in
+			-- its place, the fee kept for this key when one was evicted, with that mail's gold).
 			local early = FeeKey(id, crafter, nil)
-			if type(led.entries[early]) == "table" then
-				e, led.entries[early] = led.entries[early], nil
-				e.key, e.requester = key, requester
+			local mail = led.entries[early]
+			if type(mail) == "table" then
+				led.entries[early] = nil
+				e = ReturnGone(led, key)
+				if e then AddMail(e, mail) else e, mail.key, mail.requester = mail, key, requester end
 				led.entries[key] = e
 			end
 		end
@@ -1808,12 +1910,12 @@ do
 				ns.Log("craft fee %s not booked: %s", tostring(id), tostring(why))
 				return nil, why
 			end
-			e = { key = key, id = id, crafter = crafter, requester = requester, created = now, paid = 0, by = {}, state = "due" }
+			e = ReturnGone(led, key) or { key = key, id = id, crafter = crafter, requester = requester, created = now, paid = 0, by = {}, state = "due" }
 			led.entries[key] = e
 		end
 		e.by = type(e.by) == "table" and e.by or {}
 		e.by[role] = e.by[role] or now
-		if role == "s" then JoinEarly(led, e) end
+		if e.by.s then JoinEarly(led, e) end
 		if role == "s" then e.grossS = gross else e.grossB = gross end
 		e.gross = math.max(tonumber(e.grossS) or 0, tonumber(e.grossB) or 0)
 		e.fee = Requests.FeeBreakdown(e.gross, 0).guildFee
@@ -1942,7 +2044,7 @@ do
 				ns.Log("craft fee mail %s from %s not booked: full", tostring(id), tostring(payer))
 				return nil
 			end
-			e = { key = key, id = id, crafter = payer, created = now, paid = 0, by = {}, state = "due" }
+			e = ReturnGone(led, key) or { key = key, id = id, crafter = payer, created = now, paid = 0, by = {}, state = "due" }
 			led.entries[key] = e
 		end
 		e.paid = (tonumber(e.paid) or 0) + copper
@@ -2314,6 +2416,22 @@ do
 	end
 	Fee.TakeReport, Fee.TakeState, Fee.SubjectId, Fee.MailSent, Fee.WarnOverdue = TakeFeeReport, TakeFeeState, FeeSubjectId, FeeMailSent, WarnOverdue
 	Fee.Answer, Fee.TakeDebt, Fee.TakeReminder, Fee.MailReturned, Fee.Arise = AnswerDebtors, TakeDebt, TakeFeeReminder, FeeMailReturned, Arise
+
+	-- /oly status and /oly bug (Diagnostics.lua: ns.statusLines), on the desk's own client: its
+	-- ledger's size, the fees evicted for room and those kept for their return.
+	function Requests.FeeStatusLine()
+		if not FeeDesk() then return nil end
+		local led, n, kept = Ledger(), 0, 0
+		for _ in pairs(led.entries) do n = n + 1 end
+		for _ in pairs(type(led.gone) == "table" and led.gone or {}) do kept = kept + 1 end
+		return ("craft fee desk: %d of %d fees on the ledger  |  evicted for room: %d (last %s)  |  kept for their return: %d"):format(
+			n, Requests.FEES_MAX, tonumber(led.evicted) or 0, ns.Ago(led.evictedAt), kept)
+	end
+	ns.statusLines = ns.statusLines or {}
+	table.insert(ns.statusLines, function(lines)
+		local line = Requests.FeeStatusLine()
+		if line then lines[#lines + 1] = line end
+	end)
 end
 
 -- (A real keeper: Treasury.IsKeeper is also true in the author's previews, on his screen only.)
