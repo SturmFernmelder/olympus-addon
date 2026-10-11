@@ -30,10 +30,14 @@ local L = ns.L
 -- lowers it (never below 0). Like the time, a call's KB includes the calls made inside it, so a
 -- DATA_CHANGED listener run inside an event's handler has its own line too. Each frame our
 -- OnUpdate reads the heap (every addon's and the game's own Lua, all one heap): the frames where
--- it grew 1 MB or more since the last are counted, the 10 biggest kept with what Olympus's
--- top-level calls allocated in that frame and the biggest of them; the highest heap seen and when.
--- The game's own figures per addon (GetAddOnMemoryUsage) are measured once as the report opens
--- (UpdateAddOnMemoryUsage walks every addon's memory: never on a timer, nor at each frame).
+-- it grew 1 MB or more since the last are counted, out of the frames whose heap was read (a
+-- session 1.2.2 measured goes on through the update: its frames had none, its calls no KB), the 10
+-- biggest kept with what Olympus's top-level calls allocated in that frame and the biggest of them;
+-- the highest heap seen and when. The game's own figures per addon (GetAddOnMemoryUsage) are
+-- measured once as the report opens (UpdateAddOnMemoryUsage walks every addon's memory: never on a
+-- timer, nor at each frame); the time that takes is the profiler's own, kept out of the call that
+-- opened the report (/oly perf, its Refresh or Clear) and of every call around it, and the report
+-- says how long it took.
 
 local Perf = {}
 ns.Perf = Perf
@@ -67,6 +71,7 @@ local frameSum, frameTopMs, frameTop = 0, 0, nil
 local frameKb, frameKbTop, frameKbTopKb = 0, nil, 0 -- what this frame's top-level calls allocated
 local lastHeap          -- the heap at the last frame's end (nil: no frame yet in this run)
 local own = 0           -- KB the profiler's own records allocated inside calls (only ever grows)
+local ownMs = 0         -- ms the profiler's own work took inside calls: the game's figures measured (only ever grows)
 local slowMin, worstMin, jumpMin = -1, -1, -1
 
 local function Now() return GetTime() end
@@ -166,16 +171,18 @@ local function ListenerKey(b, fn)
 end
 
 -- A label's row: its calls, their ms (total, slowest and when) and, 1.2.3, the KB they
--- allocated (kb: total; kbMax, kbAt: the biggest one call's, and when).
+-- allocated (kb: total, in kbN calls, those whose KB was measured; kbMax, kbAt: the biggest one
+-- call's, and when).
 local function Bump(t, key, dt, kb)
 	local s = t[key]
 	if not s then
-		s = { n = 0, total = 0, max = 0, at = 0, kb = 0, kbMax = 0, kbAt = 0 }
+		s = { n = 0, total = 0, max = 0, at = 0, kb = 0, kbN = 0, kbMax = 0, kbAt = 0 }
 		t[key] = s
 	end
 	s.n = s.n + 1
 	s.total = s.total + dt
 	if dt > s.max then s.max, s.at = dt, time() end
+	s.kbN = s.kbN + 1
 	if kb > 0 then
 		s.kb = s.kb + kb
 		if kb > s.kbMax then s.kbMax, s.kbAt = kb, time() end
@@ -228,14 +235,15 @@ end
 -- records of the calls inside it allocated is not the call's (a label's row and name at its first
 -- call; at the first listener met without a source, the namespace's names, 100 KB and more): the
 -- heap around a record made inside another call is read too, and that call's KB is without it.
+-- Nor is the time the game took to measure its figures inside it (Perf.Show, ownMs).
 local function Timed(where, fn, ...)
 	if not on then return inner(where, fn, ...) end
 	depth = depth + 1
-	local own0 = own
+	local own0, ownMs0 = own, ownMs
 	local m0 = heap("count")
 	local t0 = clock()
 	local ok = inner(where, fn, ...)
-	local dt = clock() - t0
+	local dt = clock() - t0 - (ownMs - ownMs0)
 	local kb = heap("count") - m0 - (own - own0)
 	depth = depth - 1
 	if on then
@@ -255,7 +263,8 @@ local function Timed(where, fn, ...)
 end
 
 -- One drawn frame done (our frame's OnUpdate): what Olympus's top-level calls took in it; 1.2.3,
--- the Lua heap now, how much it grew since the last frame's end, and what Olympus allocated in it.
+-- the Lua heap now, how much it grew since the last frame's end, and what Olympus allocated in it
+-- (heapFrames: the frames whose heap was read, out of which the jumps are counted).
 local function FrameDone()
 	if not on then return end
 	data.frames = data.frames + 1
@@ -267,6 +276,7 @@ local function FrameDone()
 		end
 	end
 	frameSum, frameTopMs, frameTop = 0, 0, nil
+	data.heapFrames = data.heapFrames + 1
 	local kb = heap("count")
 	if kb > data.peak then data.peak, data.peakAt = kb, time() end
 	local grew = lastHeap and kb - lastHeap or 0
@@ -297,8 +307,8 @@ local function CleanStats(t)
 	for k, s in pairs(t) do
 		if type(k) == "string" and type(s) == "table" and type(s.n) == "number" and type(s.total) == "number" and type(s.max) == "number" then
 			if type(s.at) ~= "number" then s.at = 0 end
-			-- (1.2.3's KB: none in a row saved by 1.2.2.)
-			if type(s.kb) ~= "number" or type(s.kbMax) ~= "number" then s.kb, s.kbMax = 0, 0 end
+			-- (1.2.3's KB: none in a row saved by 1.2.2, whose calls' KB were never measured.)
+			if type(s.kb) ~= "number" or type(s.kbMax) ~= "number" or type(s.kbN) ~= "number" then s.kb, s.kbN, s.kbMax = 0, 0, 0 end
 			if type(s.kbAt) ~= "number" then s.kbAt = 0 end
 			n = n + 1
 		else
@@ -350,7 +360,7 @@ local function Data(create)
 	p.worst = CleanList(Table(p.worst), Perf.WORST_KEEP, true)
 	p.jumps = CleanList(Table(p.jumps), Perf.JUMP_KEEP, true, "kb")
 	p.frames, p.heavy, p.measured = Num(p.frames), Num(p.heavy), Num(p.measured)
-	p.jumped, p.peak, p.peakAt = Num(p.jumped), Num(p.peak), Num(p.peakAt)
+	p.jumped, p.peak, p.peakAt, p.heapFrames = Num(p.jumped), Num(p.peak), Num(p.peakAt), Num(p.heapFrames)
 	if type(p.since) ~= "number" then p.since = time() end
 	return p
 end
@@ -415,7 +425,7 @@ function Perf.Reset()
 	if not p then return end
 	p.stats, p.events, p.slow, p.worst, p.jumps = {}, {}, {}, {}, {}
 	p.keys, p.frames, p.heavy, p.measured = 0, 0, 0, 0
-	p.jumped, p.peak, p.peakAt = 0, 0, 0
+	p.jumped, p.peak, p.peakAt, p.heapFrames = 0, 0, 0, 0
 	p.since = time()
 	runStart = Now()
 	slowMin, worstMin, jumpMin = -1, -1, -1
@@ -479,8 +489,9 @@ local function TotalRow(key, s)
 	return "  " .. L.PERF_TOTAL_ROW:format(key, Count(s.n), Count(s.total + 0.5), ("%.2f"):format(s.total / n), Ms(s.max))
 end
 
--- The report, as the copy window shows it.
-function Perf.ReportText()
+-- The report, as the copy window shows it; updateMs: how long the game took to measure its
+-- figures per addon as it opened (Perf.Show), unknown without it.
+function Perf.ReportText(updateMs)
 	local out = {}
 	local function Add(s) out[#out + 1] = s end
 	local game = "?"
@@ -492,7 +503,7 @@ function Perf.ReportText()
 	-- (Which session scripts/perf-listeners.lua is to model: a few listeners are registered by mode.)
 	if ns.GamepadUI then Add(ns.GamepadUI() and L.PERF_INPUT_PAD or L.PERF_INPUT_KEYS) end
 	-- (1.2.3: measured or not, the memory now; Perf.Show had the game measure it as it opened.)
-	Add(L.PERF_MEMORY_NOW:format(AddOnKb("Olympus"), AddOnKb("Olympus_Arena"), HeapNow()))
+	Add(L.PERF_MEMORY_NOW:format(type(updateMs) == "number" and Ms(updateMs) or "?", AddOnKb("Olympus"), AddOnKb("Olympus_Arena"), HeapNow()))
 	local p = ns.db and type(ns.db.perf) == "table" and Data(false) or nil
 	if not p then
 		Add(L.PERF_STATE_NEVER)
@@ -503,7 +514,12 @@ function Perf.ReportText()
 	local since = date("%Y-%m-%d %H:%M", p.since)
 	Add((on and L.PERF_STATE_ON or L.PERF_STATE_OFF):format(Duration(Perf.Elapsed()), since))
 	Add(L.PERF_FRAMES:format(Perf.FRAME_MS, Count(p.heavy), Count(p.frames)))
-	Add(L.PERF_JUMPED:format(Kb(Perf.JUMP_KB), Count(p.jumped), Count(p.frames)))
+	-- (Out of the frames whose heap was read: none in a session 1.2.2 measured.)
+	if p.heapFrames > 0 then
+		Add(L.PERF_JUMPED:format(Kb(Perf.JUMP_KB), Count(p.jumped), Count(p.heapFrames)))
+	else
+		Add(L.PERF_JUMPED_NONE:format(Kb(Perf.JUMP_KB)))
+	end
 	if p.peak > 0 then Add(L.PERF_HEAP_PEAK:format(Kb(p.peak), At(p.peakAt))) end
 	Add("")
 	Add(L.PERF_WORST_FRAMES)
@@ -537,7 +553,7 @@ function Perf.ReportText()
 	for _, r in ipairs(Sorted(p.stats, "kbMax", Perf.TOP_ALLOC)) do
 		if r.s.kbMax > 0 then
 			shown = shown + 1
-			Add("  " .. L.PERF_ALLOC_ROW:format(r.key, Kb(r.s.kbMax), At(r.s.kbAt), Kb(r.s.kb), Count(r.s.n)))
+			Add("  " .. L.PERF_ALLOC_ROW:format(r.key, Kb(r.s.kbMax), At(r.s.kbAt), Kb(r.s.kb), Count(r.s.kbN)))
 		end
 	end
 	if shown == 0 then Add("  " .. L.PERF_NONE) end
@@ -555,10 +571,20 @@ end
 
 -- The report in Olympus's copy window (chat as the fallback where the window is missing).
 function Perf.Show()
-	-- (1.2.3: the game's figures per addon measured now, once, as the report opens.)
+	-- (1.2.3: the game's figures per addon measured now, once, as the report opens. The time that
+	-- takes is the profiler's own: while on, it is in ownMs, out of the call that opened the report.)
 	local update = rawget(_G, "UpdateAddOnMemoryUsage")
-	if type(update) == "function" then pcall(update) end
-	local text = Perf.ReportText()
+	local updateMs
+	if type(update) == "function" then
+		local clk = on and clock or rawget(_G, "debugprofilestop")
+		local t0 = type(clk) == "function" and clk()
+		pcall(update)
+		if t0 then
+			updateMs = clk() - t0
+			if on then ownMs = ownMs + updateMs end
+		end
+	end
+	local text = Perf.ReportText(updateMs)
 	if ns.UI and ns.UI.ShowCopy then
 		return ns.UI.ShowCopy(L.PERF_TITLE, text, { label = L.PERF_REFRESH, fn = function() Perf.Show() end },
 			{ key = "perf", big = true, second = { label = L.PERF_RESET_BTN, fn = function() Perf.Reset(); Perf.Show() end } })

@@ -504,7 +504,7 @@ test("1.2.3 profiler: a session 1.2.2 measured (tests/fixtures/perf-1.2.2.lua) i
 	World(db, function(P, w, c)
 		WorldTime(w, F.t0, true, function() F.Session(c, w) end)
 	end)
-	local NEW = { kb = true, kbMax = true, kbAt = true, jumps = true, jumped = true, peak = true, peakAt = true }
+	local NEW = { kb = true, kbN = true, kbMax = true, kbAt = true, jumps = true, jumped = true, peak = true, peakAt = true, heapFrames = true }
 	Same(db.perf, F.saved, "perf", NEW)
 	eq(db.perf.stats["perf fixture inner"].kbMax, 2500, "and the KB")
 	eq(db.perf.stats["perf fixture outer"].kbMax, 2500, "the call inside counted in the outer's")
@@ -512,6 +512,8 @@ test("1.2.3 profiler: a session 1.2.2 measured (tests/fixtures/perf-1.2.2.lua) i
 	-- (The loop's 5 frames grew 940 + 300 i KB each, the outer's 2500; the collection's none.)
 	eq(db.perf.jumped, 6, "the frames whose heap grew 1 MB or more")
 	eq(db.perf.jumps[1].kb, 2500); eq(db.perf.jumps[1].top, "perf fixture outer"); eq(db.perf.jumps[6].kb, 1240)
+	eq(db.perf.heapFrames, 8, "out of the 8 frames, each one's heap read")
+	eq(db.perf.stats["perf fixture timer"].kbN, 5, "each call's KB measured")
 	-- What 1.2.2 saved, opened by 1.2.3.
 	local saved = Copy(F.saved)
 	World({ perf = saved }, function(P, w, c, L)
@@ -526,10 +528,13 @@ test("1.2.3 profiler: a session 1.2.2 measured (tests/fixtures/perf-1.2.2.lua) i
 		end
 		eq(j, #F.report + 1, "1.2.2's line " .. j .. " in its place: " .. tostring(F.report[j]))
 		local K = c.FormatNumber
-		local want = { L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(50000)), L.PERF_JUMPED:format(K(1024), "0", "8"),
+		-- (Its 8 frames had no heap read, its calls no KB measured: not measured yet, not 0 of 8.)
+		local want = { L.PERF_MEMORY_NOW:format("0.0", K(12346), "0.0", K(50000)), L.PERF_JUMPED_NONE:format(K(1024)),
 			L.PERF_JUMPS, "  " .. L.PERF_NONE, "", L.PERF_ALLOCS, "  " .. L.PERF_NONE, "", L.PERF_MEMORY_NOTES }
 		eq(table.concat(extra, "\n"), table.concat(want, "\n"), "the memory's lines alone added")
 		eq(saved.stats["perf fixture timer"].kb, 0, "a row 1.2.2 saved: no KB in it")
+		eq(saved.stats["perf fixture timer"].kbN, 0, "out of no call")
+		eq(saved.heapFrames, 0, "no frame's heap read")
 		eq(saved.stats["perf fixture timer"].total, 105)
 	end)
 end)
@@ -587,9 +592,10 @@ test("1.2.3 profiler: each call's KB (the Lua heap before and after it) by label
 			eq(w.updates, 0, "nothing measured the game's figures while measuring")
 			w.slash("perf")
 			eq(w.updates, 1, "once as the report opened")
+			eq(p.heapFrames, p.frames, "each frame's heap read")
 			local text = w.Report()
 			for _, want in ipairs({
-				L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(w.heap)),
+				L.PERF_MEMORY_NOW:format("0.0", K(12346), "0.0", K(w.heap)),
 				L.PERF_JUMPED:format(K(1024), K(15), K(p.frames)),
 				L.PERF_HEAP_PEAK:format(K(peak), At(p.peakAt)),
 				L.PERF_JUMP_ROW:format(K(1924), At(j.at), K(51924), K(2424), ke, K(2024)),
@@ -610,7 +616,7 @@ test("1.2.3 profiler: each call's KB (the Lua heap before and after it) by label
 			w.addons.Olympus_Arena = nil
 			w.slash("perf")
 			eq(w.updates, 2)
-			assert(w.Report():find(L.PERF_MEMORY_NOW:format(K(12346), "?", K(w.heap)), 1, true), w.Report())
+			assert(w.Report():find(L.PERF_MEMORY_NOW:format("0.0", K(12346), "?", K(w.heap)), 1, true), w.Report())
 			eq(#w.errors, 0, table.concat(w.errors, "; "))
 		end)
 	end)
@@ -653,7 +659,7 @@ test("1.2.3 profiler: off it reads no heap (no wrapper, no OnUpdate) and the gam
 		w.slash("perf")
 		eq(w.updates, 1)
 		eq(w.heapReads, 1, "the report's one read: the heap now")
-		assert(w.Report():find(L.PERF_MEMORY_NOW:format(K(12346), "0.0", K(55000)), 1, true), "the memory now, nothing measured yet")
+		assert(w.Report():find(L.PERF_MEMORY_NOW:format("0.0", K(12346), "0.0", K(55000)), 1, true), "the memory now, nothing measured yet")
 		assert(w.Report():find(L.PERF_STATE_NEVER, 1, true))
 		eq(c.db.perf, nil, "nothing saved")
 		w.slash("perf on")
@@ -695,9 +701,9 @@ test("1.2.3 profiler: off it reads no heap (no wrapper, no OnUpdate) and the gam
 		local p = c.db.perf
 		eq(#p.jumps, 2); eq(p.jumps[1].kb, 3000); eq(p.jumps[2].kb, 2000)
 		eq(p.jumped, 0); eq(p.peak, 0)
-		eq(p.stats["perf saved"].kb, 0); eq(p.stats["perf saved"].kbMax, 0); eq(p.stats["perf saved"].kbAt, 0)
+		eq(p.stats["perf saved"].kb, 0); eq(p.stats["perf saved"].kbMax, 0); eq(p.stats["perf saved"].kbAt, 0); eq(p.stats["perf saved"].kbN, 0)
 		c.SafeCall("perf saved", function() w.heap = w.heap + 10 end)
-		eq(p.stats["perf saved"].kb, 10); eq(p.stats["perf saved"].n, 2)
+		eq(p.stats["perf saved"].kb, 10); eq(p.stats["perf saved"].n, 2); eq(p.stats["perf saved"].kbN, 1)
 		w.Draw()
 		eq(p.peak, w.heap)
 		w.slash("perf")
@@ -705,5 +711,113 @@ test("1.2.3 profiler: off it reads no heap (no wrapper, no OnUpdate) and the gam
 		assert(text:find("  " .. L.PERF_JUMP_ROW_NONE:format(c.FormatNumber(3000), "-", "0.0"), 1, true), text)
 		assert(text:find("  " .. L.PERF_JUMP_ROW:format(c.FormatNumber(2000), "-", "0.0", "0.0", "a", "0.0"), 1, true), text)
 		eq(#w.errors, 0, table.concat(w.errors, "; "))
+	end)
+end)
+
+-- (The review of 1.2.3's draft.) The game's figures were measured inside the call that opened the
+-- report (/oly perf, its Refresh, its Clear: UI.lua's ns.SafeCall "copy action" and "copy
+-- second"), so the time UpdateAddOnMemoryUsage took, the profiler's own, was that call's: its
+-- frame heavy, its call among the slowest, each time the report opened. Here the game takes 40 ms
+-- to measure them; the copy window's buttons are called as UI.lua calls them.
+test("1.2.3 profiler: the time the game takes to measure its figures as the report opens is the profiler's own: /oly perf, Refresh and Clear make no heavy frame, no worst frame and no slow call, a call around it keeps its own time, and the report says what the game took", function()
+	World({}, function(P, w, c, L)
+		WorldTime(w, 1760000000, false, function()
+			local K = c.FormatNumber
+			UpdateAddOnMemoryUsage = function() w.updates = w.updates + 1; w.now = w.now + 40 end
+			w.slash("perf on")
+			local p = c.db.perf
+			-- The 40 slowest calls 5 ms each, one a frame: no heavy frame.
+			for _ = 1, 40 do
+				c.SafeCall("perf work", function() w.now = w.now + 5 end)
+				w.Draw()
+			end
+			eq(p.heavy, 0); eq(#p.worst, 0); eq(#p.slow, 40); eq(p.slow[1].ms, 5)
+			local slow = Copy(p.slow)
+			w.slash("perf")
+			w.Draw()
+			eq(w.updates, 1, "the game's figures measured")
+			eq(p.heavy, 0, "/oly perf: no heavy frame"); eq(#p.worst, 0, "no worst frame")
+			Same(p.slow, slow, "/oly perf: the slowest calls", {})
+			eq(p.stats["slash perf"].max, 0, "its call without the game's measuring")
+			assert(w.Report():find(L.PERF_MEMORY_NOW:format("40.0", K(12346), "0.0", K(w.heap)), 1, true), "what the game took: " .. w.Report())
+			-- Refresh.
+			local copy = w.copies[#w.copies]
+			c.SafeCall("copy action", function() if copy.action.fn() then error("the button stays on") end end)
+			w.Draw()
+			eq(w.updates, 2)
+			eq(p.heavy, 0, "Refresh: no heavy frame"); eq(#p.worst, 0)
+			Same(p.slow, slow, "Refresh: the slowest calls", {})
+			eq(p.stats["copy action"].max, 0)
+			-- Clear: what was measured cleared, the call that cleared it its one row, 0 ms.
+			copy = w.copies[#w.copies]
+			c.SafeCall("copy second", function() copy.opts.second.fn() end)
+			w.Draw()
+			eq(w.updates, 3)
+			eq(p.heavy, 0, "Clear: no heavy frame"); eq(#p.worst, 0)
+			eq(#p.slow, 1); eq(p.slow[1].label, "copy second"); eq(p.slow[1].ms, 0)
+			eq(p.stats["copy second"].total, 0)
+			for k in pairs(p.stats) do eq(k, "copy second", "cleared but the call itself") end
+			-- A call around the report keeps its own time, each call it is in too, and its frame.
+			c.SafeCall("perf around", function()
+				w.now = w.now + 7
+				c.SafeCall("perf around inner", function() w.now = w.now + 25; P.Show() end)
+			end)
+			w.Draw()
+			eq(p.stats["perf around inner"].total, 25); eq(p.stats["perf around"].total, 32)
+			eq(p.heavy, 1, "32 ms of Olympus's own"); eq(p.worst[1].ms, 32); eq(p.worst[1].top, "perf around")
+			-- Off, the report still says what the game took.
+			w.slash("perf off")
+			w.slash("perf")
+			assert(w.Report():find(L.PERF_MEMORY_NOW:format("40.0", K(12346), "0.0", K(w.heap)), 1, true), w.Report())
+			-- No clock in the client: "?".
+			debugprofilestop = nil
+			w.slash("perf")
+			assert(w.Report():find(L.PERF_MEMORY_NOW:format("?", K(12346), "0.0", K(w.heap)), 1, true), w.Report())
+			eq(#w.errors, 0, table.concat(w.errors, "; "))
+		end)
+	end)
+end)
+
+-- (The review of 1.2.3's draft.) On through an update, 1.2.3 goes on with what 1.2.2 measured: its
+-- frames had no heap read and its calls no KB. Counted out of them, the frames whose heap jumped
+-- and each line's KB looked rarer than they were.
+test("1.2.3 profiler: going on with a session 1.2.2 measured, the frames whose heap jumped are out of the frames whose heap was read (none yet: said so), each line's KB out of the calls whose KB was measured", function()
+	local F = assert(loadfile(ROOT .. "tests/fixtures/perf-1.2.2.lua"))()
+	local saved = Copy(F.saved)
+	saved.on = true
+	World({ perf = saved }, function(P, w, c, L)
+		WorldTime(w, F.t0, false, function()
+			local K = c.FormatNumber
+			eq(P.IsOn(), true, "on again from the saved word, over 1.2.2's numbers")
+			local p = c.db.perf
+			eq(p.frames, 8); eq(p.heapFrames, 0, "no frame's heap read yet")
+			eq(p.stats["perf fixture timer"].kbN, 0, "nor a call's KB")
+			w.slash("perf")
+			local text = w.Report()
+			assert(text:find(L.PERF_JUMPED_NONE:format(K(1024)), 1, true), text)
+			assert(not text:find(L.PERF_JUMPED:format(K(1024), "0", K(8)), 1, true), "no count out of 1.2.2's frames: " .. text)
+			assert(text:find(L.PERF_FRAMES:format(30, K(6), K(8)), 1, true), "the time's, out of every frame")
+			-- Two frames, one of them a jump.
+			c.SafeCall("perf fixture timer", function() w.heap = w.heap + 1500 end)
+			w.Draw()
+			w.Draw()
+			eq(p.frames, 10); eq(p.heapFrames, 2); eq(p.jumped, 1)
+			local s = p.stats["perf fixture timer"]
+			eq(s.n, 6); eq(s.kbN, 1); eq(s.kb, 1500)
+			w.slash("perf")
+			text = w.Report()
+			for _, want in ipairs({ L.PERF_JUMPED:format(K(1024), "1", "2"), L.PERF_FRAMES:format(30, K(6), K(10)),
+				L.PERF_ALLOC_ROW:format("perf fixture timer", K(1500), date("%H:%M:%S", s.kbAt), K(1500), "1") }) do
+				assert(text:find(want, 1, true), "the report lists: " .. want .. "\n" .. text)
+			end
+			-- Cleared, nothing read again yet.
+			w.slash("perf reset")
+			eq(p.heapFrames, 0)
+			w.slash("perf")
+			assert(w.Report():find(L.PERF_JUMPED_NONE:format(K(1024)), 1, true), w.Report())
+			w.Draw()
+			eq(p.heapFrames, 1)
+			eq(#w.errors, 0, table.concat(w.errors, "; "))
+		end)
 	end)
 end)
