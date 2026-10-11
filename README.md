@@ -1804,7 +1804,9 @@ the game is removed at login, with one line saying so.
   freezes) when an addon opens one. With mouse and keyboard, the game's popups as always, but
   while a guild window of the game's is open (1.2.1): its Remove from Guild fails with one of
   Olympus's popups up, so there Olympus asks in its own windows too, and one already up moves into
-  them when a member's card opens.
+  them when a member's card opens, with what you typed in its box. Escape closes those questions
+  as it closed the game's popups, though now together with the guild window; a death or a loading
+  screen leaves them up, a stun closes them with the guild window.
   Since 0.9.8 it also leaves the game's own frames alone there: no quiet `/who` on its own
   (**Refresh** and **Find Olympus online** still search, and so does the King's click on his
   Throne's /who line for his key rotation, 1.1: the answer shows in the game's

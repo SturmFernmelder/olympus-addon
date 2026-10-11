@@ -1842,21 +1842,39 @@ function ns.ShowDialog(which, a, b, data) -- gp:dialogs
 		-- Updated without restarting the game (Dialog.lua not loaded yet): never the game's
 		-- popup there, the player is told to restart.
 		if ns.Dialog.missing then ns.Print(L.RESTART_NEEDED) return nil end
-		return ns.Dialog.Show(which, a, b, data)
+		local f = ns.Dialog.Show(which, a, b, data)
+		-- (The game's popup it would have been closes on Escape: so does this one, Dialog.lua.)
+		if guild then ns.Dialog.CloseOnEscape(f) end
+		return f
 	end
 	if type(which) == "string" then gamePopups[which] = { a = a, b = b, data = data } end
 	return StaticPopup_Show(which, a, b, data)
 end
+-- What the player has in a game popup's box (StaticPopup_Visible's second value is the popup:
+-- Blizzard_StaticPopup's own lookup), read before its OnHide empties it; nothing is written there.
+local function TypedIn(popup)
+	local box = type(popup) == "table" and (popup.editBox or popup.EditBox) or nil
+	if type(box) ~= "table" or type(box.GetText) ~= "function" then return nil end
+	local ok, text = pcall(box.GetText, box)
+	if not ok or (issecretvalue and issecretvalue(text)) or type(text) ~= "string" then return nil end
+	return text
+end
 -- 1.2.1: each question of ours still up as the game's popup closes there unanswered (its OnHide
 -- alone, as ns.HideDialog closes one) and is asked again in Olympus's own window, with what it was
--- shown with (a note typed in its box is not carried over). How many moved.
+-- shown with and what the player has in its box (a note half typed, a prefilled line edited), put
+-- back after its OnShow. How many moved.
 function ns.MoveDialogsOffGame() -- gp:dialogs
 	if ns.Dialog.missing or not ns.Gate.Allowed("dialogs") or type(StaticPopup_Visible) ~= "function" then return 0 end
 	local moved = 0
 	for which, shown in pairs(gamePopups) do
-		if type(shown) == "table" and StaticPopup_Visible(which) then
+		local up, popup
+		if type(shown) == "table" then up, popup = StaticPopup_Visible(which) end
+		if up then
+			local typed = TypedIn(popup)
 			ns.HideDialog(which)
-			ns.Dialog.Show(which, shown.a, shown.b, shown.data)
+			local f = ns.Dialog.Show(which, shown.a, shown.b, shown.data)
+			if f and typed and f.def and f.def.hasEditBox and f.editBox then f.editBox:SetText(typed) end
+			ns.Dialog.CloseOnEscape(f)
 			moved = moved + 1
 		end
 	end

@@ -38,6 +38,20 @@ Automated checks and live multiplayer checks are separate gates; use
   Chronicle with its sender; this does not create a jury or another punishment system.
 - Invitations through the addon warn about a character blocked from the network, with a reason
   and date. The officer still chooses; native guild invitations are not silently declined.
+- Removing a member from the guild is no longer refused with "Interface action failed because of
+  an AddOn" because an Olympus question was open. With mouse and keyboard, while one of the game's
+  guild windows is open, Olympus asks its questions in its own windows. A question already open
+  as a game popup moves there when a member's card opens, keeping what was typed in its box.
+  Escape still closes these questions, now together with the guild window. One limit remains: if
+  an Olympus popup closed while another game popup stayed open, the removal can still be refused
+  until every game popup has closed. The gamepad UI is unchanged.
+- Any member can report a chat line from the Chat tab: right-click another player's line in the
+  Olympus channel, or the name on it, and choose **Report to Olympus**. Any line from the last day
+  can be reported, not only the 20 newest. The report goes to the online officers of the
+  reporter's own guild (the guild master, Captains, appointed Watchers and signed moderators) and
+  shows in their Watch under **Reports** and **Cases**. With no officer online it waits on the
+  reporter's client for a day. The King and the High Council see a case only after an officer
+  sends it to the King.
 - **Ask to update** in a player's right-click menu is now only for the author, the King and the
   High Council. A 1.2.1 client ignores an ask from anyone else, which older versions can still
   send. **Check version** stays available to every member.

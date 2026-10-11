@@ -14,6 +14,7 @@ local H = ...
 local test, eq, ns = H.test, H.eq, H.ns
 
 local WHICH = "OLYMPUS_TEST_GUILD_QUESTION"
+local NOTE = "OLYMPUS_TEST_GUILD_NOTE"
 
 -- The game's guild window, as GuildFrame.lua reads it: shown or not, its alpha (ClassicUI Forever
 -- keeps it open unseen at 0) and the scripts hooked on it.
@@ -36,24 +37,39 @@ end
 
 -- GuildFrame.lua in a namespace of its own (its gamepad gate too), logged in with mouse and
 -- keyboard, the harness's ns.ShowDialog reading it as ns.GuildFrameHook; the game's popups those
--- of WithGamepadUI (shown and hidden, recorded), StaticPopup_Visible answering from them.
+-- of WithGamepadUI (shown and hidden, recorded), StaticPopup_Visible answering from them as
+-- Forever's does (the popup's name, then the popup: Blizzard_StaticPopup/StaticPopup.lua), each
+-- popup with its EditBox, which the game's StaticPopup_OnHide empties.
 local function WithGuildWindow(fn)
 	H.WithUI(function()
 		H.WithGamepadUI(false, function(game)
 			local saved = { communities = rawget(_G, "CommunitiesFrame"), guild = rawget(_G, "GuildFrame"), social = rawget(_G, "FriendsFrame"),
-				panel = rawget(_G, "ClassicUIForeverGuildPanel"), visible = rawget(_G, "StaticPopup_Visible"), dialog = StaticPopupDialogs[WHICH] }
+				panel = rawget(_G, "ClassicUIForeverGuildPanel"), visible = rawget(_G, "StaticPopup_Visible"), dialog = StaticPopupDialogs[WHICH],
+				note = StaticPopupDialogs[NOTE] }
 			local up = {}
 			local show, hide = StaticPopup_Show, StaticPopup_Hide
-			StaticPopup_Show = function(which, ...) up[which] = true return show(which, ...) end
-			StaticPopup_Hide = function(which, ...) up[which] = nil return hide(which, ...) end
-			StaticPopup_Visible = function(which) return up[which] and ("StaticPopup1") or nil end
+			StaticPopup_Show = function(which, ...)
+				up[which] = { EditBox = { text = "", GetText = function(self) return self.text end } }
+				return show(which, ...)
+			end
+			StaticPopup_Hide = function(which, ...)
+				if up[which] then up[which].EditBox.text = "" end
+				up[which] = nil
+				return hide(which, ...)
+			end
+			StaticPopup_Visible = function(which) if up[which] then return "StaticPopup1", up[which] end return nil end
 			GuildFrame, FriendsFrame, ClassicUIForeverGuildPanel = nil, nil, nil
 			CommunitiesFrame = GuildWindow("CommunitiesFrame")
 			-- (The member's card, its Remove button the game's: Blizzard_Communities/CommunitiesFrame.xml.)
 			CommunitiesFrame.GuildMemberDetailFrame = GuildWindow(nil)
-			local answers = {}
-			StaticPopupDialogs[WHICH] = { text = "Question %s", button1 = "Yes", button2 = "No", timeout = 0, whileDead = true,
-				OnAccept = function(_, data) answers[#answers + 1] = data end }
+			local answers, cancels, notes = {}, {}, {}
+			StaticPopupDialogs[WHICH] = { text = "Question %s", button1 = "Yes", button2 = "No", timeout = 0, whileDead = true, hideOnEscape = true,
+				OnAccept = function(_, data) answers[#answers + 1] = data end,
+				OnCancel = function(_, data, reason) cancels[#cancels + 1] = tostring(data) .. " " .. tostring(reason) end }
+			-- (As Olympus's report note and whisper questions: an edit box their OnShow empties.)
+			StaticPopupDialogs[NOTE] = { text = "Note on %s", button1 = "Send", button2 = "Cancel", hasEditBox = true, timeout = 0, whileDead = true, hideOnEscape = true,
+				OnShow = function(self) self.editBox:SetText("") end,
+				OnAccept = function(self, data) notes[#notes + 1] = tostring(data) .. ": " .. tostring(self.editBox:GetText()) end }
 			local login = {}
 			local gns = setmetatable({}, { __index = ns })
 			gns.RegisterEvent = function() end
@@ -71,7 +87,8 @@ local function WithGuildWindow(fn)
 				local caught
 				H.WithStub("CaptureError", function(where, e) caught = caught or (tostring(where) .. ": " .. tostring(e)) end, function()
 					H.WithStub("GuildFrameHook", gns.GuildFrameHook, function()
-						fn({ game = game, answers = answers, window = CommunitiesFrame, card = CommunitiesFrame.GuildMemberDetailFrame })
+						fn({ game = game, answers = answers, cancels = cancels, notes = notes, popups = up, window = CommunitiesFrame,
+							card = CommunitiesFrame.GuildMemberDetailFrame })
 					end)
 				end)
 				assert(not caught, "an error the addon caught: " .. tostring(caught))
@@ -79,7 +96,7 @@ local function WithGuildWindow(fn)
 			ns.Dialog.Reset()
 			StaticPopup_Show, StaticPopup_Hide, StaticPopup_Visible = show, hide, saved.visible
 			CommunitiesFrame, GuildFrame, FriendsFrame, ClassicUIForeverGuildPanel = saved.communities, saved.guild, saved.social, saved.panel
-			StaticPopupDialogs[WHICH] = saved.dialog
+			StaticPopupDialogs[WHICH], StaticPopupDialogs[NOTE] = saved.dialog, saved.note
 			if not ok then error(err, 0) end
 		end)
 	end)
@@ -132,6 +149,113 @@ test("guild removal (1.2.1): a question of Olympus's up as a game popup when a m
 		f.buttons[1]:Click()
 		eq(w.answers[1], data, "the same question: the same data")
 		eq(ns.MoveDialogsOffGame(), 0, "nothing more to move")
+	end)
+end)
+
+-- (A reviewer: the move happens whenever a member's card opens, to look at a member too; a note the
+-- player was writing in the game's popup must not be wiped by that click.)
+test("guild removal (1.2.1): what the player has in the box of an Olympus game popup moves with it into Olympus's own window", function()
+	WithGuildWindow(function(w)
+		ns.ShowDialog(NOTE, "Ada", nil, "case 7")
+		local box = assert(w.popups[NOTE], "the game's popup").EditBox
+		box.text = "spam in the Olympus channel, twice"
+		w.window:Show()
+		w.card:Show()
+		eq(StaticPopup_Visible(NOTE), nil, "no longer the game's popup")
+		local f = assert(Shown(NOTE), "in Olympus's own window")
+		eq(f.editBox:GetText(), "spam in the Olympus channel, twice", "the note as the player left it, after the question's own OnShow")
+		f.buttons[1]:Click()
+		eq(w.notes[1], "case 7: spam in the Olympus channel, twice", "sent with that note")
+		-- An empty box stays empty; a question without a box gets nothing in one.
+		w.window:Hide()
+		ns.ShowDialog(NOTE, "Bo", nil, "case 8")
+		ns.ShowDialog(WHICH, "plain", nil, "plain")
+		w.window:Show()
+		w.card:Hide(); w.card:Show()
+		eq(assert(Shown(NOTE)).editBox:GetText(), "")
+		eq(assert(Shown(WHICH)).editBox:IsShown(), false)
+	end)
+end)
+
+-- (A reviewer: with mouse and keyboard Escape closed these questions as the game's popups; asked in
+-- Olympus's window while the guild window is open, Escape closed the guild window and left the
+-- question alone on screen.) The game's Escape past its own popups and menus is CloseAllWindows,
+-- whose CloseSpecialWindows hides every frame named on UISpecialFrames
+-- (Blizzard_UIParentPanelManager); its PLAYER_DEAD and PLAYER_ENTERING_WORLD handlers and the
+-- interface shown again sweep the same list, and the game's popups live through those.
+test("guild removal (1.2.1): with the guild window open Escape closes an Olympus question as it closed the game's popup, and the game's other sweeps of its windows leave it up", function()
+	WithGuildWindow(function(w)
+		local timers, clock, savedTime = {}, 100, GetTime
+		GetTime = function() return clock end
+		local ok, err = pcall(H.WithStub, "After", function(_, _, fn) timers[#timers + 1] = fn end, function()
+			local function NextFrame() local due = timers; timers = {}; for _, fn in ipairs(due) do fn() end end
+			local function Listed()
+				for _, name in ipairs(UISpecialFrames) do if name == "OlympusQuestionEscape" then return _G[name] end end
+				return nil
+			end
+			local function Sweep()
+				for _, name in pairs(UISpecialFrames) do
+					local frame = _G[name]
+					if frame and frame:IsShown() then frame:Hide() end
+				end
+			end
+			-- The game's popup (no guild window): nothing of ours on the list.
+			ns.ShowDialog(WHICH, "popup", nil, "popup")
+			eq(Listed(), nil, "the game's popup: the game's Escape")
+			ns.HideDialog(WHICH)
+			w.window:Show()
+			ns.ShowDialog(WHICH, "asked", nil, "first")
+			local f = assert(Shown(WHICH))
+			local catcher = assert(Listed(), "on the escape list while it is up")
+			eq(catcher:IsShown(), true)
+			Sweep()
+			eq(f:IsShown(), true, "not inside the game's walk of its list")
+			NextFrame()
+			eq(Shown(WHICH), nil, "Escape closed it")
+			eq(w.cancels[#w.cancels], "first clicked", "cancelled as the game's Escape cancels its popup")
+			eq(#w.answers, 0)
+			eq(catcher:IsShown(), false, "nothing up: off")
+			-- noCancelOnEscape: closed, not cancelled.
+			StaticPopupDialogs[WHICH].noCancelOnEscape = true
+			ns.ShowDialog(WHICH, "asked", nil, "second")
+			Sweep(); NextFrame()
+			eq(Shown(WHICH), nil); eq(#w.cancels, 1, "not cancelled")
+			StaticPopupDialogs[WHICH].noCancelOnEscape = nil
+			-- A death or a loading screen in that same frame: still up, and Escape still closes it.
+			ns.ShowDialog(WHICH, "asked", nil, "third")
+			clock = 101
+			ns.Dialog.Swept()
+			Sweep(); NextFrame()
+			assert(Shown(WHICH), "the game's death or loading sweep: still up")
+			eq(catcher:IsShown(), true, "back for the next Escape"); eq(#w.cancels, 1)
+			-- The interface hidden (Alt+Z) and shown again: the game's sweep then, still up.
+			clock = 102
+			catcher:Fire("OnHide")
+			clock = 103
+			catcher:Fire("OnShow")
+			Sweep(); NextFrame()
+			assert(Shown(WHICH), "the interface shown again: still up")
+			clock = 104
+			Sweep(); NextFrame()
+			eq(Shown(WHICH), nil, "the next Escape: closed"); eq(w.cancels[#w.cancels], "third clicked")
+			-- Answered by its button: nothing more on the list's frame, nothing cancelled after.
+			ns.ShowDialog(WHICH, "asked", nil, "fourth")
+			assert(Shown(WHICH)).buttons[1]:Click()
+			eq(catcher:IsShown(), false)
+			Sweep(); NextFrame()
+			eq(w.answers[#w.answers], "fourth"); eq(#w.cancels, 2)
+			-- One moved off the game's popups as a member's card opens closes on Escape too.
+			w.window:Hide()
+			ns.ShowDialog(WHICH, "moved", nil, "fifth")
+			w.window:Show(); w.card:Show()
+			assert(Shown(WHICH), "moved")
+			eq(catcher:IsShown(), true)
+			clock = 105
+			Sweep(); NextFrame()
+			eq(Shown(WHICH), nil); eq(w.cancels[#w.cancels], "fifth clicked")
+		end)
+		GetTime = savedTime
+		if not ok then error(err, 0) end
 	end)
 end)
 
