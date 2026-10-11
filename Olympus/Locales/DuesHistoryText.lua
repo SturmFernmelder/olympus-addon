@@ -23,6 +23,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.DUESHISTORY_HINT = "Os membros são registrados somente num reset observado continuamente. Semanas antigas podem ficar desconhecidas até este histórico se formar. A contagem de pagos conserva o valor e agrupamento conhecidos na época; recebimentos posteriores ou livros alterados tornam essa contagem desconhecida."
 	L.DUESHISTORY_BOOKS = "Só conta o ouro já recolhido nos livros disponíveis do Tesoureiro. Livros ausentes ou parciais nunca indicam que alguém não pagou."
 	L.DUESHISTORY_COLS = "membros / pagos / ouro recebido / ouro por membro"
+	L.DUESHISTORY_ROW = "%s / %s / %s / %s"
 	L.DUESHISTORY_WAIT = "Aguardando a resposta privada do Tesoureiro fixado."
 	L.DUESHISTORY_SOURCE = "Livros do Tesoureiro, recebidos %s"
 	L.DUESHISTORY_PARTIAL = "Histórico de recebimentos parcial ou reset não registrado: valores desconhecidos aparecem como ?."
