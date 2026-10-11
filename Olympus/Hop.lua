@@ -305,13 +305,17 @@ function Hop.HandleRequest(dist, sender, text)
 	-- "For Olympus!" invites on its own only for a King two reports confirm.
 	-- 1.2.1: both, only for a player the addon can vouch for (Hop.Trusted: roster, signed or
 	-- pinned); a member of another guild the census names gets the window, a click.
-	local auto = (ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))) and Hop.Trusted(sender)
+	local wanted = ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))
+	local auto = wanted and Hop.Trusted(sender)
 	if auto and (OnlyGuests() or GroupAutoActive()) then return Invite(sender, id, true) end
 	if auto then
 		stats.autoBlocked = stats.autoBlocked + 1
 		ns.Print(L.HOP_AUTO_PAUSED_GROUP)
 	end
-	pending = { from = sender, id = id, t = ns.Now(), mapID = offer.mapID, zoneUID = offer.zoneUID }
+	-- unvouched: the player chose not to be asked, and only Hop.Trusted brought this window up
+	-- (Answer: its no is no step towards the pause).
+	pending = { from = sender, id = id, t = ns.Now(), mapID = offer.mapID, zoneUID = offer.zoneUID,
+		unvouched = (wanted and not auto) and true or nil }
 	-- In an instance or on Busy (1.1, ns.Alert): no sound and no window; they come once the player
 	-- is out, while the asker still waits (Hop.WAIT), else the request only lapses.
 	local ask = pending
@@ -343,11 +347,16 @@ local function Answer(data, invite, always)
 		Invite(data.from, data.id, always)
 	else
 		SayNo(data.from, data.id)
-		-- Not now (or no answer) twice in a row: a break from requests.
-		declines = declines + 1
-		if declines >= Hop.DECLINES then
-			declines = 0
-			pausedUntil = ns.Now() + Hop.PAUSE
+		-- Not now (or no answer) twice in a row: a break from requests. 1.2.1: never for a window
+		-- of "Always invite" or "For Olympus!" that only trust brought up (unvouched): a helper away
+		-- from the keyboard would stop inviting his guildmates on their own too, and one member of
+		-- another guild could keep him switched off with two requests every 5 minutes.
+		if not data.unvouched then
+			declines = declines + 1
+			if declines >= Hop.DECLINES then
+				declines = 0
+				pausedUntil = ns.Now() + Hop.PAUSE
+			end
 		end
 	end
 	Changed()

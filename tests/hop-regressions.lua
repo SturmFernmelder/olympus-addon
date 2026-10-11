@@ -547,3 +547,61 @@ test("hop security (1.2.1): a namesake on another realm is not the helper we ask
 		eq(w.left, 1, "the helper's own does")
 	end)
 end)
+
+-- Review of 1.2.1, after 52b7a66: with Always invite or For Olympus! on, a member of another guild
+-- the addon cannot vouch for gets the window. Two of those windows left unanswered (a helper away
+-- from the keyboard, For Olympus!'s very case) paused all helping for 5 minutes, a guildmate's
+-- automatic invite too, and one census officer could keep automatic helpers switched off that way
+-- with two requests every 5 minutes. Such a window's no is still a no to him, never a step towards
+-- the pause: before 52b7a66 he was invited without one, so it could not pause the helper either.
+test("hop security (1.2.1): unanswered windows of members we cannot vouch for never pause an automatic helper", function()
+	for _, mode in ipairs({ "always", "king" }) do
+		WithHop(function(w, H)
+			WithCensusOfficer(w, H, function()
+				local S, saved = ns.HopSightings, ns.HopSightings.LocalKingLayer
+				local ok, err = pcall(function()
+					w.see(7)
+					if mode == "always" then ns.db.layerAutoInvite = true
+					else
+						S.LocalKingLayer = function(mapID, zoneUID) return mapID == 1453 and zoneUID == 7 end
+						H.ChooseKing("auto")
+					end
+					for i = 1, H.DECLINES do
+						H.HandleAsk("CHANNEL", "Officer-Realm", ("LQ~%d~1453~7"):format(40 + i))
+						H.HandleRequest("WHISPER", "Officer-Realm", ("LR~%d"):format(40 + i))
+						eq(#w.popups, i, mode .. ": window " .. i)
+						-- Not answered: its timeout (OnCancel), as Escape or Not now.
+						StaticPopupDialogs.OLYMPUS_HOP_REQUEST.OnCancel(nil, w.popups[i].data)
+						eq(w.whispered[#w.whispered], ("Officer-Realm LN~%d"):format(40 + i), mode .. ": still a no to him")
+						w.clock = w.clock + H.HELP_GAP + 1
+					end
+					eq(#w.invited, 0)
+					eq(H.CanHelp(1453, 7), true, mode .. ": no pause")
+					H.HandleAsk("CHANNEL", "Mate-Realm", "LQ~50~1453~7")
+					eq(w.whispered[#w.whispered], "Mate-Realm LO~50~0~0", mode .. ": a guildmate is offered")
+					H.HandleRequest("WHISPER", "Mate-Realm", "LR~50")
+					eq(w.invited[1], "Mate", mode .. ": and invited on his own"); eq(#w.popups, H.DECLINES)
+				end)
+				S.LocalKingLayer = saved
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end
+	-- The pause itself stays for windows the player has to answer: no automatic mode.
+	WithHop(function(w, H)
+		WithCensusOfficer(w, H, function()
+			w.see(7)
+			for i = 1, H.DECLINES do
+				H.HandleAsk("CHANNEL", "Officer-Realm", ("LQ~%d~1453~7"):format(40 + i))
+				H.HandleRequest("WHISPER", "Officer-Realm", ("LR~%d"):format(40 + i))
+				StaticPopupDialogs.OLYMPUS_HOP_REQUEST.OnCancel(nil, w.popups[i].data)
+				w.clock = w.clock + H.HELP_GAP + 1
+			end
+			eq(H.CanHelp(1453, 7), false, "two unanswered windows: a break")
+			w.clock = w.clock + H.PAUSE
+			w.see(7)
+			eq(H.CanHelp(1453, 7), true, "over after the pause")
+		end)
+	end)
+end)
+
