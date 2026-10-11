@@ -781,7 +781,7 @@ function H.Refresh()
 end
 
 -- The letter is the King's (L.HONOR_LETTER_SIGN): never to the King himself (1.2.1, the owner's
--- ask, after Asmon's stream: a letter from himself about a frame he holds). The King is his
+-- ask, after the King's stream: a letter from himself about a frame he holds). The King is his
 -- character (ns.IsKingCharacter) or, where none is pinned by name, the guild master of his guild
 -- (King.IsKing). His honours switch on as anyone's; no letter comes, none is kept to read again.
 function H.LetterToSender()
@@ -951,7 +951,7 @@ local function TextHeight(fs, width)
 	return lines * 18
 end
 
--- The letter (1.2.1, the owner's ask after Asmon's stream: its words ran off the paper and its
+-- The letter (1.2.1, the owner's ask after the King's stream: its words ran off the paper and its
 -- buttons under it, no window round it): a window of Olympus's own (ns.Window: the Olympus
 -- window's bronze metal without its portrait or logo, as the update letter), the head in its
 -- title bar, the parchment (the game's QuestBG, its paper's part alone) inside it, his own
