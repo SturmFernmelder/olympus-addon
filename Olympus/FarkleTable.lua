@@ -115,6 +115,8 @@ FT.WATCHERS_MAX = 40      -- watchers a table keeps
 FT.WATCH_TTL = 150        -- a watcher who has not asked again for this long is dropped
 FT.WATCH_ASK = 60         -- a watcher asks again this often
 FT.NOTICE_EVERY = 60      -- KN every minute while the table is open
+FT.NOTICES_MAX = 100      -- the live tables' notices (KN) this client keeps at once, the oldest heard going first
+FT.NOTICES_EACH = FT.ARBITRATE_MAX -- ...from one sender (a public arbiter holds that many tables), his oldest going first
 FT.KEEP_NOTICE = 259200   -- a public table's event kept this long where its crowd's market involves the client
 FT.ROLL_WAIT = 6          -- a Roll click with no /roll line after this asks for a typed /roll
 FT.KR_CODES = 20          -- event codes in one KR
@@ -3179,6 +3181,35 @@ local function OnState(dist, sender, mode, body)
 end
 ns.Comm.Handle("KS", ns.Arena.Handle("KS", OnState))
 
+-- Room for a new table's notice from this sender (1.2.1: anyone may announce a table naming
+-- himself, so made-up ids grew the list without end): FT.NOTICES_EACH from him at most and
+-- FT.NOTICES_MAX in all, the oldest heard going first (a live table's KN comes again every
+-- minute, so it is not the oldest for long). A table this client watches or sits at keeps its
+-- notice. false: no room (every notice that could go is such a table's). (heard: the order
+-- notices were last heard in, so two in the same second still have an oldest)
+local heard = 0
+local function NoticeRoom(sender)
+	local by = (Full(sender) or ""):lower()
+	local his, all, hisOldest, oldest = 0, 0, nil, nil
+	for id, n in pairs(notices) do
+		all = all + 1
+		local free = tables[id] == nil
+		if (n.by or ""):lower() == by then
+			his = his + 1
+			if free and (not hisOldest or n.heard < notices[hisOldest].heard) then hisOldest = id end
+		end
+		if free and (not oldest or n.heard < notices[oldest].heard) then oldest = id end
+	end
+	if his >= FT.NOTICES_EACH then
+		if not hisOldest then return false end
+		notices[hisOldest] = nil
+	elseif all >= FT.NOTICES_MAX then
+		if not oldest then return false end
+		notices[oldest] = nil
+	end
+	return true
+end
+
 -- KN: a table announced (a public arbiter's, raising the alert; or a player's who allows watchers).
 local function OnNotice(dist, sender, mode, body)
 	local f = Split(body)
@@ -3190,8 +3221,11 @@ local function OnNotice(dist, sender, mode, body)
 	if not official and not (Same(sender, p1) or Same(sender, p2)) then return end
 	if Hides(sender) then return end
 	local was = notices[id]
+	if not was and not NoticeRoom(sender) then return end
 	notices[id] = { id = id, p1 = p1, p2 = p2, arbiter = arb, official = official, target = R().TARGET_BY_CODE[tonumber(f[5] or "")] or 5000,
-		map = N36(f[6] or "", 1), state = f[7] == "e" and "e" or "o", winner = tonumber(f[8] or ""), by = Full(sender), mode = mode, at = Now() }
+		map = N36(f[6] or "", 1), state = f[7] == "e" and "e" or "o", winner = tonumber(f[8] or ""), by = Full(sender), mode = mode, at = Now(),
+		heard = heard + 1 }
+	heard = heard + 1
 	if official and not was then ns.Fire("FARKLE_PUBLIC", id, "open") end
 	FT.KeepNotice(notices[id])
 	A().Changed()
