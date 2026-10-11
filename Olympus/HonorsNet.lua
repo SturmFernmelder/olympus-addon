@@ -751,6 +751,7 @@ function H.Refresh()
 		local held = H.Holdings(ns.me, P.MyGk())
 		local before = P.Pick()
 		local first = before.seen == nil
+		H.FirstLook(held)
 		local pick, earned, lost = ns.Honors.Update(before, held, H.Known())
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
@@ -783,13 +784,64 @@ function H.LetterToSender()
 	return type(K) == "table" and not K.missing and type(K.IsKing) == "function" and K.IsKing() == true
 end
 
--- A letter queued (and kept, re-readable): shown now, or after the one open.
+-- Each honour's letter comes once per character, ever (1.2.1, the owner's ask: never again after
+-- a reload, a relog or an update, nor when an honour comes back after a gap in its source, or a
+-- place lost and won back): the profile's lettered = { [key] = true }, the honours told.
+-- The profiles 1.2.0 kept are read once, at the account's first login under 1.2.1 (ns.db's
+-- honorLetters, set then: every profile kept before it is 1.2.0's, one made after it starts with
+-- nothing told): every letter it queued (its letters, read or not) and every honour its pick
+-- remembered held (its seen) count as told; and, on the safe side (a letter that has left the
+-- list of 20), every honour held at that character's first look (H.FirstLook).
+H.LETTERS_RULE = 1
+function H.ReadOldLetters()
+	local db = ns.db
+	if type(db) ~= "table" or db.honorLetters ~= nil then return end
+	for _, m in pairs(type(db.arenaProfile) == "table" and db.arenaProfile or {}) do
+		if type(m) == "table" and m.lettered == nil and (type(m.letters) == "table" or type(m.seen) == "table") then
+			local told = {}
+			for _, x in ipairs(type(m.letters) == "table" and m.letters or {}) do
+				if type(x) == "table" and type(x.key) == "string" then told[x.key] = true end
+			end
+			for _, s in pairs(type(m.seen) == "table" and m.seen or {}) do
+				if type(s) == "table" then
+					if type(s.frame) == "string" then told[s.frame] = true end
+					if type(s.title) == "string" then told[s.title] = true end
+				end
+			end
+			m.lettered, m.letterLook = told, true
+		end
+	end
+	db.honorLetters = H.LETTERS_RULE
+end
+-- The honours told to this character (a table to read; QueueLetter keeps it).
+function H.Lettered()
+	H.ReadOldLetters()
+	local m = ns.ArenaProfile.Mine()
+	return type(m.lettered) == "table" and m.lettered or {}
+end
+-- A 1.2.0 profile's first look under 1.2.1 (H.Refresh's, before anything is earned): what it
+-- holds then counts as told.
+function H.FirstLook(held)
+	H.ReadOldLetters()
+	local m = ns.ArenaProfile.Mine()
+	if not m.letterLook then return end
+	m.lettered = type(m.lettered) == "table" and m.lettered or {}
+	for _, h in ipairs(type(held) == "table" and held or {}) do
+		if type(h) == "table" and type(h.key) == "string" then m.lettered[h.key] = true end
+	end
+	m.letterLook = nil
+end
+
+-- A letter queued (and kept, re-readable): shown now, or after the one open; never twice.
 function H.QueueLetter(key)
-	if H.LetterToSender() then return end
+	if H.LetterToSender() or type(key) ~= "string" then return end
+	local told = H.Lettered()
+	if told[key] then return end
 	local P = ns.ArenaProfile
 	local m = P.Mine(true)
+	m.lettered = told
+	told[key] = true
 	m.letters = type(m.letters) == "table" and m.letters or {}
-	for _, x in ipairs(m.letters) do if x.key == key and not x.read then return end end
 	m.letters[#m.letters + 1] = { key = key, t = Now() }
 	while #m.letters > H.LETTERS_MAX do table.remove(m.letters, 1) end
 	letters[#letters + 1] = { key = key, t = Now() }
@@ -908,6 +960,11 @@ function H.ShowLetter(key, prompted)
 		frame.wear = Btn(L.HONOR_LETTER_WEAR, -60, function() H.CloseLetter(true) end)
 		frame.later = Btn(L.HONOR_LETTER_LATER, 60, function() H.CloseLetter(false) end)
 		ns.EscapeCloses("OlympusKingsLetter")
+		-- Hidden another way (Escape, the game's window sweep): as "Later", so it never comes back by
+		-- itself with the next letter or the Olympus window's open.
+		frame:SetScript("OnHide", function()
+			if frame.key ~= nil then ns.SafeCall("kings letter", H.CloseLetter, false) end
+		end)
 	end
 	local text = H.LetterText(nextLetter.key)
 	frame.key = nextLetter.key
@@ -919,7 +976,10 @@ end
 -- "Wear it" (its frame and title picked) or "Later"; the next letter after it.
 function H.CloseLetter(wear)
 	local cur = table.remove(letters, 1)
-	if frame then frame:Hide() end
+	if frame then
+		frame.key = nil
+		frame:Hide()
+	end
 	if cur then
 		for _, x in ipairs(H.Letters()) do if x.key == cur.key then x.read = true end end
 		if wear then
@@ -959,6 +1019,8 @@ function H.WatchRoles()
 end
 
 ns.On("LOGIN", function()
+	-- (First: the account's profiles as 1.2.0 left them, before anything of this session writes one.)
+	H.ReadOldLetters()
 	H.WatchLevels()
 	H.WatchRoles()
 	-- Our own honours whenever the realm's words change (HONORS_CHANGED, below); at login only where
