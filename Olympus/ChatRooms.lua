@@ -34,9 +34,9 @@ local RACES = {
 	{ id = "race:6", label = "Tauren", race = 6 },
 	{ id = "race:7", label = "Gnome", race = 7 },
 	{ id = "race:8", label = "Troll", race = 8 },
-	{ id = "race:95", label = "Skyborn", race = 95 }, -- (1.2.1: Forever's Skyborn, an Alliance race)
+	{ id = "race:95", label = "Skyborn", race = 95 }, -- (1.2.1: Forever's Skyborn, of both factions)
 }
-local HORDE_RACE = { [1] = false, [2] = true, [3] = false, [4] = false, [5] = true, [6] = true, [7] = false, [8] = true, [95] = false }
+local HORDE_RACE = { [1] = false, [2] = true, [3] = false, [4] = false, [5] = true, [6] = true, [7] = false, [8] = true } -- (a race not listed, the Skyborn, is of both)
 local CLASSES = {
 	{ id = "class:WA", file = "WARRIOR", label = "Warrior" },
 	{ id = "class:PA", file = "PALADIN", label = "Paladin" },
@@ -354,7 +354,7 @@ function Rooms.Options(kind)
 	local known = ns.faction == "Horde" or ns.faction == "Alliance"
 	if kind == "race" then
 		for _, e in ipairs(RACES) do
-			if not known or HORDE_RACE[e.race] == horde then out[#out + 1] = Rooms.Info(e.id) end
+			if not known or HORDE_RACE[e.race] == nil or HORDE_RACE[e.race] == horde then out[#out + 1] = Rooms.Info(e.id) end
 		end
 	elseif kind == "class" then
 		for _, e in ipairs(CLASSES) do out[#out + 1] = Rooms.Info(e.id) end

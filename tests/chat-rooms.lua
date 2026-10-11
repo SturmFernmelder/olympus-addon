@@ -168,7 +168,8 @@ test("chat rooms: race and class are explicit open-topic choices with independen
 		for _, o in ipairs(R.Options("race")) do assert(o.id ~= "race:2", "no Orc room for the Alliance") end
 		eq(R.Options("race")[5].id, "race:95", "the Skyborn's room"); eq(R.Options("race")[5].raceName, "Skyborn")
 		c.faction = "Horde"
-		eq(#R.Options("race"), 4); eq(R.Options("race")[1].id, "race:2"); eq(#R.Options("class"), 9)
+		eq(#R.Options("race"), 5); eq(R.Options("race")[1].id, "race:2"); eq(#R.Options("class"), 9)
+		eq(R.Options("race")[5].id, "race:95", "the Skyborn are of both factions: the Horde's Windshapers too")
 		c.faction = faction
 
 		assert(R.Select("race:1")); assert(R.Select("class:MA"))
