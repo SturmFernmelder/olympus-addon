@@ -19,7 +19,11 @@ local function CensusWorld()
 		rdb = { guilds = {}, seen = {} },
 		Who = { Listen = function() end },
 		On = function() end,
-		Fire = function(name) if name == "DATA_CHANGED" then w.fires = w.fires + 1 end end,
+		Fire = function(name)
+			if name ~= "DATA_CHANGED" then return end
+			w.fires = w.fires + 1
+			if w.onFire then w.onFire() end
+		end,
 		After = function(seconds, where, fn) w.timers[#w.timers + 1] = { seconds = seconds, where = where, fn = fn } end,
 		Now = function() return w.clock end,
 	}, { __index = ns })
@@ -93,6 +97,74 @@ test("1.2.1 census news: a report the other senders outvote waits for the same o
 	eq(w.fires, fires + 1)
 end)
 
+test("1.2.1 census news: a guild heard twice within the gap: its first report is told to the listeners before the second takes its place, as each report was before", function()
+	local w = CensusWorld()
+	local D = w.D
+	local seen = {}
+	w.onFire = function()
+		local g = w.ns.rdb.guilds["Olympus Twice"]
+		seen[#seen + 1] = g and g.reporterFull or "-"
+	end
+	local revision = D.Revision()
+	eq(Receive(w, "Olympus Twice", "Firstvoice-Realm", "Leaderone"), true)
+	eq(w.fires, 0, "the first: nothing inside its handler")
+	eq(Receive(w, "Olympus Twice", "Secondvoice-Realm", "Leaderone"), true)
+	eq(w.fires, 1, "the second: the first one told before it is replaced")
+	eq(seen[1], "Firstvoice-Realm", "the listeners read the first report's row")
+	eq(w.ns.rdb.guilds["Olympus Twice"].reporterFull, "Secondvoice-Realm", "the second took its place")
+	eq(#w.timers, 1, "still the one timer")
+	eq(D.Revision(), revision + 2, "a revision a report, none for the telling")
+	eq(w.Run(), 1)
+	eq(w.fires, 2, "the timer tells the second")
+	eq(seen[2], "Secondvoice-Realm")
+	-- Told by the timer: the next report of that guild is no reason to fire inside its handler.
+	eq(Receive(w, "Olympus Twice", "Firstvoice-Realm", "Leaderone"), true)
+	eq(w.fires, 2)
+	w.Run()
+	eq(w.fires, 3)
+	-- Told at once by the player's own change (a /who) meanwhile: neither.
+	eq(Receive(w, "Olympus Twice", "Secondvoice-Realm", "Leaderone"), true)
+	D.RecordSightings({ { guild = "Olympus Seen" } })
+	eq(w.fires, 4, "the /who: at once")
+	eq(Receive(w, "Olympus Twice", "Firstvoice-Realm", "Leaderone"), true)
+	eq(w.fires, 4, "its row was told by the /who")
+	w.Run()
+	eq(w.fires, 5)
+	-- A burst of other guilds' reports: still nothing inside a handler.
+	for k = 1, 5 do eq(Receive(w, "Olympus Many " .. k, "Manyvoice" .. k .. "-Realm"), true) end
+	eq(w.fires, 5)
+	w.Run()
+	eq(w.fires, 6)
+end)
+
+test("1.2.1 census news: two senders of a guild heard within one second both count for a level-race claim (the review's probe)", function()
+	local W3 = assert(loadfile(H.ROOT .. "tests/arena/lib/fights-world.lua"))(H)
+	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } },
+		{ "reporter", "Dovan Quell" }, { "reporter2", "Elsa Thornby" } } })
+	local young, viewer = cast.young, cast.spectator
+	-- The viewer's own census (the world shares the harness's Data otherwise).
+	w:As(viewer, function() assert(loadfile(H.ADDON_DIR .. "Data.lua"))("Olympus", viewer.ns) end)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	w:Fire(young, "PLAYER_LEVEL_UP", 20)
+	w:Run(61)
+	local claim
+	for _, c in pairs(viewer.ns.HonorsNet.Store().claims) do claim = c end
+	assert(claim, "her claim heard")
+	eq(claim.vouched, false, "no census yet")
+	local function Rep()
+		return { guild = "Olympus Vale", faction = viewer.ns.faction or "Alliance", total = 20, online = 2, zones = {},
+			leader = "Corin Ash", officers = {}, top = { { name = "Brisa Vale", level = 20, class = "MA" } } }
+	end
+	eq(w:As(viewer, function() return viewer.ns.Data.Receive(Rep(), cast.reporter.name) end), true)
+	eq(w:As(viewer, function() return viewer.ns.Data.Receive(Rep(), cast.reporter2.name) end), true)
+	eq(viewer.rdb.guilds["Olympus Vale"].reporterFull, cast.reporter2.name, "the second report is the row")
+	w:Run(2)
+	local senders = 0
+	for _, list in pairs(claim.by or {}) do for _ in pairs(list) do senders = senders + 1 end end
+	eq(senders, 2, "both senders seen")
+	eq(claim.vouched, true, "two senders of her guild: vouched")
+end)
+
 -- Our guild's report as Roster.Scan builds it (the fields that matter here).
 local function Ours(online)
 	return { guild = "Olympus II", total = 100, online = online, zones = { m1453 = online }, classes = { MA = online },
@@ -101,11 +173,14 @@ local function Ours(online)
 		top = { { name = "Officerone", level = 60, class = "MA" } }, avgLevel = 42.5, leader = "Leaderone", leaderOnline = true }
 end
 
-test("1.2.1 census news: our roster's report fires DATA_CHANGED at once when it changed and not when it came out as the last one did", function()
+test("1.2.1 census news: our roster's report tells DATA_CHANGED through the one timer when it changed, never inside the scan, and not at all when it came out as the last one did", function()
 	local w = CensusWorld()
 	local D = w.D
 	D.SetLocal(Ours(5))
-	eq(w.fires, 1, "the session's first report of ours: news, at once")
+	eq(w.fires, 0, "nothing inside the scan")
+	eq(#w.timers, 1, "the session's first report of ours: news, through the timer")
+	eq(w.timers[1].where, "census changed"); eq(w.timers[1].seconds, D.NOTIFY_GAP)
+	eq(w.Run(), 1); eq(w.fires, 1)
 	local revision = D.Revision()
 	-- A minute later, the same roster.
 	w.clock = w.clock + 60
@@ -114,38 +189,49 @@ test("1.2.1 census news: our roster's report fires DATA_CHANGED at once when it 
 	eq(D.Revision(), revision, "nor a revision")
 	eq(w.ns.rdb.guilds["Olympus II"].t, w.clock, "stored all the same, its time the new one")
 	eq(#w.timers, 0, "nothing waits for it")
-	-- One more online, at once; so does a change deep in it (an officer gone offline).
+	-- One more online; so does a change deep in it (an officer gone offline), and a field the
+	-- last one lacked: each a timer, nothing inside the scan.
 	w.clock = w.clock + 60
 	D.SetLocal(Ours(6))
-	eq(w.fires, 2)
+	eq(w.fires, 1, "nothing inside the scan")
+	eq(#w.timers, 1)
 	assert(D.Revision() > revision, "a revision")
+	w.Run(); eq(w.fires, 2)
 	local r = Ours(6)
 	r.officers[1].online = false
 	D.SetLocal(r)
-	eq(w.fires, 3, "an officer's line changed")
+	eq(#w.timers, 1, "an officer's line changed")
+	w.Run(); eq(w.fires, 3)
 	r = Ours(6)
 	r.officers[1].online = false
 	r.users = 3
 	D.SetLocal(r)
-	eq(w.fires, 4, "a field the last one lacked")
-	-- Reports of others waiting, then ours: one DATA_CHANGED at once tells both, the timer nothing more.
+	eq(#w.timers, 1, "a field the last one lacked")
+	w.Run(); eq(w.fires, 4)
+	-- Reports of others waiting, then ours: the one timer tells both, once.
 	eq(Receive(w, "Olympus Burst 3", "Burstvoice3-Realm"), true)
 	eq(w.fires, 4); eq(#w.timers, 1)
 	D.SetLocal(Ours(7))
-	eq(w.fires, 5)
+	eq(w.fires, 4, "nothing inside the scan")
+	eq(#w.timers, 1, "the timer already waiting")
 	w.Run()
-	eq(w.fires, 5, "the timer waiting had nothing left to tell")
+	eq(w.fires, 5, "one DATA_CHANGED for both")
 	-- /oly reset (our row gone), or a row this session did not store (the saved one, another
 	-- realm's store): the next report is news though it is the same.
 	w.ns.rdb.guilds = {}
 	D.SetLocal(Ours(7))
-	eq(w.fires, 6)
+	eq(#w.timers, 1); w.Run(); eq(w.fires, 6)
 	w.ns.rdb.guilds["Olympus II"] = Ours(7)
 	D.SetLocal(Ours(7))
-	eq(w.fires, 7)
-	-- A /who of the player's: at once, as before.
+	eq(#w.timers, 1); w.Run(); eq(w.fires, 7)
+	-- A /who of the player's: at once, as before; the timer waiting then tells nothing more.
+	w.clock = w.clock + 60
+	D.SetLocal(Ours(8))
+	eq(#w.timers, 1)
 	D.RecordSightings({ { guild = "Olympus Seen" } })
-	eq(w.fires, 8)
+	eq(w.fires, 8, "the /who: at once")
+	w.Run()
+	eq(w.fires, 8, "the timer waiting had nothing left to tell")
 end)
 
 test("1.2.1 census news: a realm linked (another store) and /oly reset are the player's own: DATA_CHANGED at once, the census's revision with them", function()
@@ -208,20 +294,35 @@ local function RosterWorld()
 	return w
 end
 
-test("1.2.1 roster: a scan whose report came out as the last one fires no DATA_CHANGED; one that differs does", function()
+test("1.2.1 roster: a scan whose report came out as the last one fires no DATA_CHANGED; one that differs tells it through the census's timer, never inside the scan", function()
 	local w = RosterWorld()
 	local R = w.R
-	R.RequestScan(true); R.TryScan()
-	eq(w.fires, 1, "the first scan")
+	local function Scan()
+		w.timers = {}
+		R.RequestScan(true); R.TryScan()
+		eq(w.fires, w.told, "nothing fired inside the scan")
+		local due = w.Timers("census changed")
+		for _, t in ipairs(due) do eq(t.seconds, w.ns.Data.NOTIFY_GAP) end
+		for _, t in ipairs(due) do t.fn() end
+		w.told = w.fires
+		return #due
+	end
+	w.told = 0
+	eq(Scan(), 1, "the first scan: one timer")
+	eq(w.fires, 1, "the first scan: told")
 	assert(w.ns.rdb.guilds["Olympus II"], "our report stored")
 	w.clock = w.clock + 60
-	R.RequestScan(true); R.TryScan()
-	eq(w.fires, 1, "the same roster a minute later: no DATA_CHANGED")
+	eq(Scan(), 0, "the same roster a minute later: nothing waits")
+	eq(w.fires, 1, "no DATA_CHANGED")
 	eq(w.ns.rdb.guilds["Olympus II"].t, w.clock, "the report stored again, its time new")
+	-- A roster that changed (as a big guild's does most minutes: two guildmates' addons more).
 	w.clock = w.clock + 60
 	w.peers = 2
-	R.RequestScan(true); R.TryScan()
-	eq(w.fires, 2, "two guildmates' addons more: news")
+	eq(Scan(), 1, "news: one timer")
+	eq(w.fires, 2, "told once, a frame after the scan")
+	w.clock = w.clock + 60
+	w.peers = 3
+	eq(Scan(), 1); eq(w.fires, 3)
 end)
 
 test("1.2.1 roster: PLAYER_GUILD_UPDATE for another unit is no guild change of ours; a burst of ours waits for one timer", function()
