@@ -2846,6 +2846,7 @@ function UI.CopyFrame(key) return copyFrames[key or "copy"] end
 local minimapButton
 
 local function PositionMinimapButton() -- gp:minimap
+	if not (minimapButton and rawget(_G, "Minimap")) then return end -- (no minimap: nothing to place on)
 	local angle = math.rad(ns.db.minimapAngle or 200)
 	-- On the ring, like Blizzard's own minimap buttons (and LibDBIcon): 5 past the map's edge.
 	local radius = (Minimap:GetWidth() / 2) + 5
