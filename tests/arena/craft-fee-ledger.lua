@@ -89,3 +89,55 @@ test("1.2.1 craft fee desk: with the Wallet off the desk books no made-up word o
 	eq(Rows(desk), 0)
 	NoErrors(w)
 end)
+
+test("1.2.1 craft fee desk: a member's characters cannot wedge a full ledger: a real sale is still booked, the oldest unconfirmed fee goes first, the desk's own confirmation never goes, and an evicted seller's fee comes back", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local d = K.Client(w, "Brindle Ash", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail")
+	HearsDesk({ a, b, c, d }, desk)
+	w:As(desk, function()
+		desk.ns.CraftRequests.FEES_MAX = 5
+		desk.ns.CraftRequests.FEES_PER_SELLER = 3
+	end)
+	-- A fee on a buyer's word that the desk checked and confirmed by hand: the oldest row.
+	FeeWordTo(w, c, desk, "held01", "b", c.name, a.name, "8ow")
+	local held = assert(Entry(desk, "held01"))
+	eq(desk.Craft.SettleFee(held.key, "confirmed", "checked with both"), true)
+	-- Two characters of one member fill the rest with sales nobody made, each within his own cap.
+	w:Run(61)
+	for n = 1, 3 do FeeWordTo(w, c, desk, "fk00" .. n, "s", a.name, c.name, "h") end
+	w:Run(61)
+	FeeWordTo(w, d, desk, "fk004", "s", a.name, d.name, "h")
+	eq(Rows(desk), 5, "the ledger is full")
+	-- A real sale: booked all the same, in the oldest unconfirmed fee's place.
+	w:Run(61)
+	local r, rb = Completed(w, a, b)
+	local e = assert(Entry(desk, r.id), "the real sale is booked on a full ledger")
+	eq(e.fee, 600)
+	assert(e.by.s and e.by.b, "both parties' words")
+	eq(Rows(desk), 5, "never over FEES_MAX")
+	eq(Entry(desk, "fk001"), nil, "the oldest fee nobody confirmed went")
+	assert(Entry(desk, "fk002") and Entry(desk, "fk003") and Entry(desk, "fk004"), "one row for one")
+	assert(Entry(desk, "held01"), "the desk's own confirmation stays")
+	-- More made-up words push the real sale out in the end: never the confirmed fee.
+	w:Run(61)
+	for n = 5, 6 do FeeWordTo(w, d, desk, "fk00" .. n, "s", a.name, d.name, "h") end
+	w:Run(61)
+	FeeWordTo(w, c, desk, "fk007", "s", a.name, c.name, "h")
+	FeeWordTo(w, c, desk, "fk008", "s", a.name, c.name, "h")
+	eq(Entry(desk, r.id), nil, "the real sale's row was the oldest left")
+	assert(Entry(desk, "held01"), "the confirmed fee still stays")
+	eq(Rows(desk), 5)
+	-- The seller's fee is still open on his client: it tells the desk again, which books it again.
+	eq(rb.settlement.feeState, "due")
+	K.Jump(w, b.Craft.ASK_GAP + 1)
+	HearsDesk({ a, b, c, d }, desk)
+	w:Run(61)
+	e = assert(Entry(desk, r.id), "the seller's word came again")
+	assert(e.by.s, "his own word")
+	eq(e.fee, 600)
+	eq(Rows(desk), 5)
+	NoErrors(w)
+end)

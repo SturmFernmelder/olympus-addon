@@ -1728,11 +1728,15 @@ do
 	end
 
 	-- Room for one more: the paid, the waived and a payment no word of a sale ever named go after
-	-- FEES_KEEP, then the oldest paid or waived; an open fee never goes. One member's words fill a
+	-- FEES_KEEP. Full, the oldest paid or waived goes first, then the oldest open fee the desk never
+	-- confirmed by hand (one party's word or both: two characters of one member can name any sale),
+	-- one holding no gold before a payment. Only a fee the desk confirmed by hand stays while open,
+	-- so a member's characters never leave a real sale without room (a seller's evicted fee comes
+	-- back: his client tells the desk again each ASK_GAP while it is open). One member's words fill a
 	-- bounded part of it (a modified client's flood of made-up sales): the buyer's word alone opens
 	-- FEES_BUYER_ONLY fees at most per buyer, the seller's own FEES_PER_SELLER per seller.
 	local function FeeRoom(led, role, requester, crafter, now)
-		local n, settled, buyerOnly, sellers = 0, {}, 0, 0
+		local n, gone, buyerOnly, sellers = 0, {}, 0, 0
 		for key, e in pairs(led.entries) do
 			if type(e) ~= "table" then
 				led.entries[key] = nil
@@ -1740,7 +1744,11 @@ do
 				led.entries[key] = nil
 			else
 				n = n + 1
-				if FeeSettled(e) then settled[#settled + 1] = e end
+				if FeeSettled(e) then
+					gone[#gone + 1] = { e = e, rank = 0, t = tonumber(e.paidAt or e.created) or 0 }
+				elseif not e.checkedBy then
+					gone[#gone + 1] = { e = e, rank = (e.fee and (tonumber(e.paid) or 0) <= 0) and 1 or 2, t = tonumber(e.created) or 0 }
+				end
 				if e.state == "due" and type(e.by) == "table" then
 					if role == "b" and e.by.b and not e.by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
 					if role == "s" and e.by.s and Same(e.crafter, crafter) then sellers = sellers + 1 end
@@ -1750,9 +1758,13 @@ do
 		if role == "b" and buyerOnly >= Requests.FEES_BUYER_ONLY then return false, "buyer-cap" end
 		if role == "s" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
 		if n < Requests.FEES_MAX then return true end
-		table.sort(settled, function(a, b) return (a.paidAt or a.created or 0) < (b.paidAt or b.created or 0) end)
-		for i = 1, math.min(#settled, n - Requests.FEES_MAX + 1) do
-			led.entries[settled[i].key] = nil
+		table.sort(gone, function(a, b)
+			if a.rank ~= b.rank then return a.rank < b.rank end
+			if a.t ~= b.t then return a.t < b.t end
+			return tostring(a.e.key) < tostring(b.e.key)
+		end)
+		for i = 1, math.min(#gone, n - Requests.FEES_MAX + 1) do
+			led.entries[gone[i].e.key] = nil
 			n = n - 1
 		end
 		return n < Requests.FEES_MAX, "full"
