@@ -30,7 +30,7 @@ end
 
 print("HonorsNet: the King's letter (1.2.1)")
 
--- The owner after Asmon's stream (1.2.1): the King got the King's letter about a frame he holds.
+-- The owner after the King's stream (1.2.1): the King got the King's letter about a frame he holds.
 test("1.2.1 the King's letter: never to the King himself: his honour switches on, no letter shows, none is kept or opens on a click; where no King is pinned, the guild master of the King's guild the same; everyone else gets his", function()
 	local w, cast = W3.New({ more = { { "gm", "Bryn Halloway", { guild = World.KING_GUILD, rank = 0 } } } })
 	local king, A, gm = Kept(w, cast.king), Kept(w, cast.A), Kept(w, cast.gm)
@@ -268,7 +268,7 @@ test("1.2.1 the King's letter: a month's honour is told for its month: a reorder
 	W3.NoErrors(w)
 end)
 
--- The owner on Asmon's stream (1.2.1): the letter had no window round it, its words ran off the
+-- The owner on the King's stream (1.2.1): the letter had no window round it, its words ran off the
 -- paper in a small font and its two buttons sat under it. On the harness's widget toolkit (its
 -- templates and anchors, a 1366 x 768 screen), every letter in English and pt-BR: the window is
 -- Olympus's (ns.Window: the bronze metal, its plain corner, no portrait ring or logo), the head in
