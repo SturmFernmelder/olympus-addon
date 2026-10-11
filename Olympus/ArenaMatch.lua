@@ -1953,6 +1953,13 @@ function ArenaMatch.Vet(sender, game, stake)
 	return true, rec.mid
 end
 
+-- Whether sender is the partner of this player's match (nothing handed over): the Bones tables
+-- take his invitation while the player turned Bones invitations off (1.2.1: the player searched).
+function ArenaMatch.MatchedWith(sender)
+	local key = Lower(sender)
+	return key ~= nil and match ~= nil and Lower(match.name) == key
+end
+
 -- the fights part and the Bones tables, when the fight or the table a match handed off to ends: the group it formed goes.
 function ArenaMatch.Ended(mid)
 	if type(mid) ~= "string" or mid == "" then return false end

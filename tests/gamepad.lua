@@ -1972,7 +1972,9 @@ for _, initialPad in ipairs({ false, true }) do
 	end)
 end
 
-test("gamepad innkeeper offer: an actual NPC keeps the addon-only lesson offer across input switches", function()
+-- (1.2.1, a player's report: the addon-only window opened by itself at every conversation with an
+-- innkeeper. It now opens for a player who asked for the innkeeper on the Bones page, once an ask.)
+test("gamepad innkeeper offer: an actual NPC keeps the addon-only lesson offer across input switches, once the player asked for it", function()
 	local C, ns = Session(true)
 	local inn
 	for _, place in ipairs(ns.Places.list) do if place.id == "inn_goldshire" then inn = place end end
@@ -1989,10 +1991,14 @@ test("gamepad innkeeper offer: an actual NPC keeps the addon-only lesson offer a
 		C.Switch(pad); C.Advance(1)
 		local before = shown
 		ns.InnkeeperGossip.OnShow(); C.Advance(1)
-		eq(shown, before + 1, "the existing addon dialogue remains available")
+		eq(shown, before, "a visit alone opens nothing")
+		ns.FarkleTable.WantKeeper()
+		ns.InnkeeperGossip.OnShow(); C.Advance(1)
+		eq(shown, before + 1, "the existing addon dialogue remains available once asked for")
 		eq(ns.InnkeeperGossip.State().row, nil, "no native gossip child is needed")
 	end
 	C.units.npc = nil
+	ns.FarkleTable.WantKeeper()
 	ns.InnkeeperGossip.OnShow(); C.Advance(1)
 	eq(shown, 3, "an inn alone never impersonates the NPC")
 	GP.Covers("innkeeper-gossip")

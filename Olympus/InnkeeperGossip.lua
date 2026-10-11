@@ -20,6 +20,8 @@ local function Context()
 	if not InCombatLockdown or InCombatLockdown() then return nil, "combat" end
 	local FT = ns.FarkleTable
 	if not FT or not FT.Innkeeper or not FT.Live or FT.Live() then return nil, "game" end
+	-- (1.2.1: the player hid the offer, the privacy page's line or /oly farkle keeper off.)
+	if FT.KeeperOffer and not FT.KeeperOffer() then return nil, "off" end
 	local name, id = FT.Innkeeper(true)
 	if not name or not id then return nil, "npc" end
 	return name, id
@@ -222,12 +224,21 @@ function G.Confirm() -- gp:innkeeper-gossip
 	return true
 end
 
+-- The Olympus dialogue where no row can show: never by itself at each visit (1.2.1, a player's
+-- report), only once the player asked for the innkeeper on the Bones page (FT.KeeperWanted).
+local function Fallback()
+	local name = Context()
+	local FT = ns.FarkleTable
+	if not name or not (FT.KeeperWanted and FT.KeeperWanted()) then return false end
+	FT.WantKeeper(false)
+	return FT.ShowUI("innkeeper", nil, name)
+end
+
 function G.OnShow() -- gp:innkeeper-gossip
 	if not ns.Gate.Allowed(GATE) then
 		-- The existing Olympus dialogue has no child in Blizzard's NPC panel and
-		-- remains available with a controller, without registering native fonts.
-		local name = Context()
-		if name then ns.FarkleTable.ShowUI("innkeeper", nil, name) end
+		-- remains available with a controller once asked for, without registering native fonts.
+		Fallback()
 		return
 	end
 	G.Park()
@@ -238,10 +249,7 @@ function G.OnShow() -- gp:innkeeper-gossip
 		if not ns.Gate.Allowed(GATE) then return end
 		if current == generation then
 			local shown = G.ShowRow()
-			if not shown then
-				local name = Context()
-				if name then ns.FarkleTable.ShowUI("innkeeper", nil, name) end
-			end
+			if not shown then Fallback() end
 		end
 	end)
 end

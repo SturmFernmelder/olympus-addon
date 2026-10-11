@@ -333,7 +333,10 @@ test("Innkeeper gossip: confirmation starts the real free lesson with the NPC's 
 	end)
 end)
 
-test("Innkeeper gossip: missing native capability retains the existing Olympus offer", function()
+-- (1.2.1, a player's report: "I don't wanna play bones every time I go to an inn." The fallback
+-- window opened by itself at every conversation with an innkeeper; it now waits for the player's
+-- ask on the Bones page, FarkleTable.WantKeeper, and that ask serves one conversation.)
+test("Innkeeper gossip: missing native capability keeps the Olympus offer for a player who asked for the innkeeper, never by itself at each visit", function()
 	WithGossip(function(g, t)
 		GossipFrame = nil
 		local FT = t.a.ns.FarkleTable
@@ -344,7 +347,12 @@ test("Innkeeper gossip: missing native capability retains the existing Olympus o
 			shown = shown + 1; return true
 		end
 		g.OnShow(); t.pending[1]()
-		eq(shown, 1); eq(g.State().mode, "inactive")
+		eq(shown, 0, "a visit alone opens nothing"); eq(g.State().mode, "inactive")
+		FT.WantKeeper()
+		g.OnShow(); t.pending[2]()
+		eq(shown, 1, "asked for on the Bones page: the offer"); eq(g.State().mode, "inactive")
+		g.OnShow(); t.pending[3]()
+		eq(shown, 1, "the ask served that conversation")
 	end)
 end)
 

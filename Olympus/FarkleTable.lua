@@ -124,7 +124,12 @@ FT.HIST_MAX, FT.TX_MAX, FT.TX_EVENTS, FT.TX_DAYS = 100, 10, 600, 7
 FT.WHY = { target = "t", cap = "c", concede = "o", forfeit = "f", void = "v" }
 FT.WHY_OF = { t = "target", c = "cap", o = "concede", f = "forfeit", v = "void" }
 FT.HOUSE_PAUSE = { think = 0.6, bank = 0.85, next = 0.35, farkle = 1.6, roll = 0.45 } -- the House's pace (the lab's)
-FT.REASONS = { b = true, d = true, l = true, n = true, a = true, g = true, c = true, x = true, m = true, t = true, r = true, s = true, p = true, v = true, k = true, o = true, f = true }
+FT.REASONS = { b = true, d = true, l = true, n = true, a = true, g = true, c = true, x = true, m = true, t = true, r = true, s = true, p = true, v = true, k = true, o = true, f = true,
+	i = true } -- (1.2.1, "i": the guest turned Bones invitations off; an older host reads it as "d")
+-- (1.2.1, a player's report: "I don't wanna play bones every time I go to an inn. Or ever.")
+FT.INVITES_BURST = 2      -- invitations from this many different players...
+FT.INVITES_WINDOW = 600   -- ...within this many seconds: one question, stop receiving them?
+FT.KEEPER_WANT = 600      -- the Bones page's ask for the innkeeper holds this long (FT.WantKeeper)
 
 -- The stake sources by kind (the design): direct o/o; arbiter t/t or w/w; the King w/w.
 FT.SOURCES = { d = { o = true }, a = { t = true, w = true } }
@@ -2534,6 +2539,115 @@ local function Hides(sender)
 	return type(blocked) == "table" and blocked[Full(sender):lower()] ~= nil
 end
 
+---------------------------------------------------------------------------
+-- (1.2.1) Fewer pop-ups: Bones invitations and the innkeeper's offer, each with its switch
+---------------------------------------------------------------------------
+-- Invitations from other players are on until the player says No (ns.db.bonesInvites: nil on,
+-- true kept after the question, false off; the privacy page's line, /oly farkle invites). Off,
+-- each is refused quietly with "i", which the inviter's table names; a matched partner's still
+-- comes (the player searched). From INVITES_BURST different players within INVITES_WINDOW, one
+-- question in place of the invitation's own pop-up asks whether to stop them: answered, never
+-- again; dismissed, not again this session.
+-- The innkeeper's offer (ns.db.bonesKeeper: false hides it; the privacy page's line, /oly farkle
+-- keeper) is the quiet line in his conversation (InnkeeperGossip.lua). Where that line cannot show
+-- (the gamepad UI, a changed NPC panel) his Olympus window opens only after the player asked for
+-- him on the Bones page (WantKeeper), never by itself at each visit.
+local invitesSeen = {}    -- [sender, lower case] = when his invitation was last shown or told
+local invitesAsked = false -- the question came this session
+local keeperWanted        -- when the Bones page asked for the innkeeper
+
+function FT.InvitesOn() return not (type(ns.db) == "table" and ns.db.bonesInvites == false) end
+-- Off: every invitation still waiting for this player's answer is refused the same way.
+function FT.SetInvites(on)
+	if type(ns.db) ~= "table" then return false end
+	ns.db.bonesInvites = on and true or false
+	if not on then
+		for _, t in pairs(tables) do
+			if t.role == "guest" and t.state == "invite" then
+				t.state = "declined"
+				Refuse(t, t.host, "i")
+				Say(t, "FARKLE_LOG_DECLINED_ME")
+				Finished(t)
+			end
+		end
+	end
+	ns.Print(on and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF)
+	A().Changed()
+	return true
+end
+function FT.KeeperOffer() return not (type(ns.db) == "table" and ns.db.bonesKeeper == false) end
+function FT.SetKeeperOffer(on)
+	if type(ns.db) ~= "table" then return false end
+	ns.db.bonesKeeper = on and true or false
+	if not on and ns.InnkeeperGossip and ns.InnkeeperGossip.Park then ns.InnkeeperGossip.Park() end
+	ns.Print(on and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF)
+	return true
+end
+-- The player asked for the innkeeper (the Bones page): his next conversation may open the window.
+function FT.WantKeeper(on)
+	keeperWanted = on ~= false and Clock() or nil
+end
+function FT.KeeperWanted()
+	return FT.KeeperOffer() and keeperWanted ~= nil and Clock() - keeperWanted <= FT.KEEPER_WANT
+end
+
+-- The different players whose invitations reached this player within INVITES_WINDOW, his own
+-- counted now.
+local function InvitesFrom(key)
+	local now = Clock()
+	invitesSeen[key] = now
+	local n = 0
+	for k, at in pairs(invitesSeen) do
+		if now - at > FT.INVITES_WINDOW then invitesSeen[k] = nil else n = n + 1 end
+	end
+	return n
+end
+-- The newest invitation still waiting, in its own pop-up.
+local function ShowWaiting()
+	local newest
+	for id, t in pairs(tables) do
+		if t.role == "guest" and t.state == "invite" and (not newest or (t.invitedAt or 0) > (tables[newest].invitedAt or 0)) then newest = id end
+	end
+	if newest then FT.ShowUI("invite", newest) end
+end
+-- The question, once (true: it shows in place of the invitation's pop-up).
+local function AskStop(n)
+	if invitesAsked or n < FT.INVITES_BURST or type(ns.db) ~= "table" or ns.db.bonesInvites ~= nil then return false end
+	invitesAsked = true
+	ns.Alert("arena", "soft", { what = L.CONSENT_BONES_INVITES, key = "farkle-invites",
+		open = function() return type(ns.db) == "table" and ns.db.bonesInvites == nil end,
+		show = function() ns.ShowDialog("OLYMPUS_BONES_INVITES", L.FARKLE_INVITES_ASK:format(n)) end })
+	return true
+end
+function FT.InvitesAnswer(stop, clicked)
+	if stop then return FT.SetInvites(false) end
+	if clicked and type(ns.db) == "table" then ns.db.bonesInvites = true end
+	ShowWaiting()
+	return true
+end
+StaticPopupDialogs["OLYMPUS_BONES_INVITES"] = {
+	text = "%s",
+	button1 = L.FARKLE_INVITES_STOP,
+	button2 = L.FARKLE_INVITES_KEEP,
+	OnAccept = function() ns.SafeCall("bones invitations", FT.InvitesAnswer, true, true) end,
+	-- Keep them: kept, never asked again; Escape or another popup's place: not answered.
+	OnCancel = function(_, _, reason) ns.SafeCall("bones invitations", FT.InvitesAnswer, false, reason == "clicked") end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+	preferredIndex = 3,
+	buttonHeight = 24,
+	textFont = "GameFontHighlightMed2",
+}
+-- Their lines on the privacy page: on until the player says No, so they never open it by themselves.
+if ns.Consent and ns.Consent.Register then
+	local function Shown() return ns.IsMember() == true and not A().Off() end
+	ns.Consent.Register({ key = "bonesInvites", label = "CONSENT_BONES_INVITES", text = "CONSENT_BONES_INVITES_TEXT", shown = Shown,
+		get = function() return FT.InvitesOn() end, set = function(on) FT.SetInvites(on) end, pending = function() return false end })
+	ns.Consent.Register({ key = "bonesKeeper", label = "CONSENT_BONES_KEEPER", text = "CONSENT_BONES_KEEPER_TEXT", shown = Shown,
+		get = function() return FT.KeeperOffer() end, set = function(on) FT.SetKeeperOffer(on) end, pending = function() return false end })
+end
+
 -- KI: an invitation to this client (the design).
 local function OnInvite(dist, sender, mode, body)
 	if dist ~= "WHISPER" then return end
@@ -2557,12 +2671,16 @@ local function OnInvite(dist, sender, mode, body)
 		cur = ns.ArenaRoles.Currency(), target = R().TARGET_BY_CODE[tcode], secs = secs, hic = hic == "2", hiccupRule = "bones2", salt = salt,
 		src = { stake > 0 and hostSrc or "-" }, spec = { false, false }, created = Now(), invitedAt = now, state = "invite", seat = 2, log = {} }
 	t.players = { t.host, t.guest }
+	-- (1.2.1: invitations off: refused quietly, the host told why, "i"; a matched partner's comes.)
+	if not FT.InvitesOn() and Call("ArenaMatch", "MatchedWith", sender) ~= true then return Refuse(t, sender, "i") end
 	if invitedBy[key] and now - invitedBy[key] < FT.GUEST_GAP then return Refuse(t, sender, "b") end
 	invitedBy[key] = now
 	-- (1.2.0: his first game with an innkeeper still to play: he is told so, and the host why, "f".)
 	if not FT.CanPlayPlayers() then
 		ns.Print(L.FARKLE_INVITED_NOT_TRAINED:format(ns.DisplayName(sender) or "?"))
-		return Refuse(t, sender, "f")
+		Refuse(t, sender, "f")
+		AskStop(InvitesFrom(key))
+		return
 	end
 	if FT.Live() then return Refuse(t, sender, "b") end
 	if (InCombatLockdown and InCombatLockdown()) or A().Blocked() then return Refuse(t, sender, "c") end
@@ -2589,6 +2707,9 @@ local function OnInvite(dist, sender, mode, body)
 	Involve(t, true)
 	Say(t, "FARKLE_LOG_INVITE_FROM", ns.DisplayName(sender))
 	Changed(t, "invite")
+	-- (1.2.1: the second player's within the window: the question instead; it waits on the Bones
+	-- page, and Keep them shows it.)
+	if not t.from and AskStop(InvitesFrom(key)) then return end
 	-- the popup is Olympus's own (the companion's), raised as an arena alert
 	ns.Alert("arena", "soft", { text = L.FARKLE_ALERT_INVITE:format(ns.DisplayName(sender)), key = "farkle-invite " .. id,
 		open = function() local x = tables[id] return x ~= nil and x.state == "invite" end,
@@ -3398,12 +3519,13 @@ function FT.ShowUI(what, id, extra)
 end
 
 -- Prefer an opt-in local row inside a compatible native panel. Its capability checks retain
--- the separate Olympus dialogue on clients whose native layout is unavailable.
+-- the separate Olympus dialogue on clients whose native layout is unavailable, opened only
+-- once the player asked for the innkeeper (1.2.1: FT.KeeperWanted, never at each visit).
 pcall(ns.RegisterEvent, "GOSSIP_SHOW", function()
-	if not ns.IsMember() or FT.Live() then return end
+	if not ns.IsMember() or FT.Live() or not FT.KeeperOffer() then return end
 	if ns.InnkeeperGossip then ns.InnkeeperGossip.OnShow(); return end
 	local keeper = FT.Innkeeper(true)
-	if keeper then FT.ShowUI("innkeeper", nil, keeper) end
+	if keeper and FT.KeeperWanted() then FT.WantKeeper(false); FT.ShowUI("innkeeper", nil, keeper) end
 end)
 
 ---------------------------------------------------------------------------
@@ -3507,6 +3629,14 @@ A0.Slash("farkle", function(args)
 		FT.ChatFilter()
 		return ns.Print(o.chatRolls and L.FARKLE_CHATROLLS_ON or L.FARKLE_CHATROLLS_OFF)
 	end
+	-- (1.2.1) The two switches of the privacy page's Bones lines.
+	if sub == "invites" or sub == "keeper" then
+		local on = rest:lower()
+		local set, get = sub == "invites" and FT.SetInvites or FT.SetKeeperOffer, sub == "invites" and FT.InvitesOn or FT.KeeperOffer
+		if on == "on" or on == "off" then return set(on == "on") end
+		return ns.Print(sub == "invites" and (get() and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF)
+			or (get() and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF))
+	end
 	if sub == "rules" or sub == "help" then return FT.ShowUI("guide") end
 	if sub == "" or sub == "open" then return FT.ShowUI("board") end
 	ns.Print(L.FARKLE_USAGE)
@@ -3596,5 +3726,6 @@ function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
 	tables, invitedBy, notices = {}, {}, {}
 	selftest, lastSelfTest = nil, nil
+	invitesSeen, invitesAsked, keeperWanted = {}, false, nil
 end
 FT._ = { tables = function() return tables end, notices = function() return notices end, Split = Split, Terms = Terms, Fields = Fields }
