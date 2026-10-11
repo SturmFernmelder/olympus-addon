@@ -3185,8 +3185,10 @@ ns.Comm.Handle("KS", ns.Arena.Handle("KS", OnState))
 -- himself, so made-up ids grew the list without end): FT.NOTICES_EACH from him at most and
 -- FT.NOTICES_MAX in all, the oldest heard going first (a live table's KN comes again every
 -- minute, so it is not the oldest for long). A table this client watches or sits at keeps its
--- notice. false: no room (every notice that could go is such a table's). (heard: the order
--- notices were last heard in, so two in the same second still have an oldest)
+-- notice and takes none of its sender's room (a fan who watched three of one host's games, never
+-- pressing Stop watching, still hears his next); it counts towards FT.NOTICES_MAX. false: no room
+-- (every notice that could go is such a table's). (heard: the order notices were last heard in,
+-- so two in the same second still have an oldest)
 local heard = 0
 local function NoticeRoom(sender)
 	local by = (Full(sender) or ""):lower()
@@ -3194,14 +3196,13 @@ local function NoticeRoom(sender)
 	for id, n in pairs(notices) do
 		all = all + 1
 		local free = tables[id] == nil
-		if (n.by or ""):lower() == by then
+		if free and (n.by or ""):lower() == by then
 			his = his + 1
-			if free and (not hisOldest or n.heard < notices[hisOldest].heard) then hisOldest = id end
+			if not hisOldest or n.heard < notices[hisOldest].heard then hisOldest = id end
 		end
 		if free and (not oldest or n.heard < notices[oldest].heard) then oldest = id end
 	end
 	if his >= FT.NOTICES_EACH then
-		if not hisOldest then return false end
 		notices[hisOldest] = nil
 	elseif all >= FT.NOTICES_MAX then
 		if not oldest then return false end

@@ -77,3 +77,33 @@ test("1.2.1 Bones notices: many senders fill FT.NOTICES_MAX at most, the oldest 
 	eq(Notices(c)[("Kp%dn%d"):format(2, 1)], nil, "an old one went")
 	NoErrors(w)
 end)
+
+test("1.2.1 Bones notices: tables a fan watched and never stopped watching take none of their sender's room; his next table is heard, listed and watchable", function()
+	local w = FW.New()
+	local a, c = w:Player(P1), w:Player("Wenna Crale")
+	local each = FT(c).NOTICES_EACH or 3
+	-- the fan watches each of the host's games and closes the board without Stop watching
+	for i = 1, each do
+		Notice(w, a, "Kgame" .. i)
+		assert(FT(c).Watch("Kgame" .. i))
+		w:Run(1)
+	end
+	-- each game ends (its notice says so), the watches stay
+	for i = 1, each do
+		w:As(a, function() a.ns.Arena.Send("KN", "T", ("Kgame%d~%s~%s~-~2~-~e~1"):format(i, a.name, P2), {}) end)
+		w:Run(0)
+	end
+	for i = 1, each do eq(FT(c)._.tables()["Kgame" .. i] ~= nil, true, "still watched: Kgame" .. i) end
+	Notice(w, a, "Kgame" .. (each + 1))
+	eq(Notices(c)["Kgame" .. (each + 1)] ~= nil, true, "the host's next table is heard")
+	local listed = false
+	for _, n in ipairs(FT(c).LiveTables()) do if n.id == "Kgame" .. (each + 1) then listed = true end end
+	eq(listed, true, "listed in the live tables")
+	eq(FT(c).Watchable(a.name), "Kgame" .. (each + 1), "right-click Watch Bones finds it")
+	-- the watched tables keep their notices
+	for i = 1, each do eq(Notices(c)["Kgame" .. i] ~= nil, true, "Kgame" .. i .. "'s notice stays") end
+	-- his made-up tables still keep to his room: the watched ones aside, FT.NOTICES_EACH at most
+	for i = 1, 20 do Notice(w, a, "Kmore" .. i) end
+	eq(From(c, a), each + each, "his watched tables and his room")
+	NoErrors(w)
+end)
