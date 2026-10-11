@@ -539,3 +539,49 @@ local ns, test, eq = ...
 			end)
 		end)
 	end)
+
+	-- 1.2.1 security review: a signed list for another realm group used to replace ours (and, newer,
+	-- shut ours out until a list newer still came), though nobody here is on it.
+	test("authority: a signed council list for another realm group never replaces ours, nor shuts it out", function()
+		local W, S = ns.Workshop, ns.Sign
+		local saved = { council = ns.rdb.council, titles = ns.rdb.councilTitles, plausible = S.Plausible, verify = S.Verify,
+			me = ns.me, enforced = ns.db.authorityEnforced, chunked = ns.Comm.SendChunked }
+		local ok, err = pcall(function()
+			local SIG, sent = string.rep("a", 512), {}
+			ns.me, ns.db.authorityEnforced, ns.rdb.council, ns.rdb.councilTitles = "Tester-Realm", nil, nil, nil
+			S.Plausible = function(sig) return type(sig) == "string" and #sig == 512 end
+			S.Verify = function() return true end -- (the signatures are not what is tested here)
+			ns.Comm.SendChunked = function(msg) sent[#sent + 1] = msg end
+			W.ResetVerify()
+			local ours = "HS1~1800000001~Realm~Our Councillor~" .. SIG
+			local theirs = "HS1~1800000009~Elsewhere~Their Councillor~" .. SIG
+			eq(W.TakeCouncil(ours), true)
+			eq(W.TakeCouncil(theirs, "Relay-Realm"), false, "another realm group's list, newer than ours")
+			W.HandleCouncil("CHANNEL", "Relay-Realm", "HS~" .. theirs)
+			eq(ns.rdb.council.blob, ours, "ours stays")
+			eq(ns.IsHighCouncillor("Our Councillor-Realm"), true)
+			local oursT = "HT1~1800000002~Realm~0~^^Our Councillor=Speaker~" .. SIG
+			local theirsT = "HT1~1800000010~Elsewhere~1~^^Their Councillor=Speaker~" .. SIG
+			eq(W.TakeTitles(oursT), true)
+			eq(W.TakeTitles(theirsT, "Relay-Realm"), false, "nor its titles")
+			eq(ns.CouncilTitles() and ns.CouncilTitles().blob, oursT, "our titles stay")
+			-- A list naming our realm among others is ours.
+			local shared = "HS1~1800000020~Other+Realm~Our Councillor,Second Councillor~" .. SIG
+			eq(W.TakeCouncil(shared, "Relay-Realm"), true, "a group with our realm in it")
+			eq(ns.IsHighCouncillor("Second Councillor-Realm"), true)
+			-- Another group's list an older build kept: counts as none, so ours replaces it though
+			-- older, and it is never passed on.
+			ns.rdb.council = { at = 1800000050, names = { ["their councillor"] = "Their Councillor" }, realm = "Elsewhere", blob = theirs }
+			ns.rdb.councilTitles = { at = 1800000051, realm = "Elsewhere", depts = {}, blob = theirsT }
+			W.RelayCouncil(true)
+			eq(#sent, 0, "another group's lists are not relayed")
+			eq(W.NeedLists(), true, "this client asks for its own")
+			eq(W.TakeCouncil(ours), true, "ours replaces it")
+			eq(W.TakeTitles(oursT), true)
+			eq(ns.rdb.council.blob, ours); eq(ns.rdb.councilTitles.blob, oursT)
+		end)
+		ns.rdb.council, ns.rdb.councilTitles, S.Plausible, S.Verify = saved.council, saved.titles, saved.plausible, saved.verify
+		ns.me, ns.db.authorityEnforced, ns.Comm.SendChunked = saved.me, saved.enforced, saved.chunked
+		W.ResetVerify()
+		if not ok then error(err, 0) end
+	end)

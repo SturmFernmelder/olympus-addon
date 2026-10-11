@@ -13941,13 +13941,14 @@ test("0.9.9 the High Council's titles: on the channel (1.0.0: or from our guild)
 		ns.rdb.council.names["zed mod"] = "Zed Mod"
 		loose = W.CouncilTree()
 		eq(#loose, 2); eq(loose[1].name, "Test Councillor"); eq(loose[2].name, "Zed Mod"); eq(loose[2].title, nil)
-		-- Another realm group's titles list (newer, and public): as if none had come.
-		eq(W.TakeTitles(COUNCIL_TEST_ELSEWHERE), true)
-		eq(ns.CouncilTitles(), nil); eq(ns.CouncilTitle("Other Mod"), nil)
+		-- Another realm group's titles list (newer, and public). 1.2.1 security review: it used to
+		-- replace ours, leaving this realm group as if no titles list had come; it is refused now.
+		eq(W.TakeTitles(COUNCIL_TEST_ELSEWHERE), false, "never taken")
+		eq(ns.rdb.councilTitles.blob, COUNCIL_TEST_TITLES, "ours stays")
+		eq(ns.CouncilTitle("Other Mod").title, "Operations Director")
 		eq(ns.CouncilVisible(), false, "its public flag counts for nothing here")
 		loose, depts = W.CouncilTree()
-		eq(#depts, 0); eq(#loose, 5, "the name list alone")
-		for _, m in ipairs(loose) do eq(m.title, nil, m.name) end
+		eq(#loose, 2); eq(#depts, 2, "the same council as before it came")
 	end)
 end)
 
@@ -30437,8 +30438,9 @@ do
 			eq(ns.IsSteward(STEWARD), false, "a newer list without him ends it")
 			eq(K.StewardStatusLine():find("none named", 1, true) ~= nil, true, K.StewardStatusLine())
 			-- A list for another realm group (newer still): nobody on ours, not even its own Steward.
-			Signed(function() eq(W.TakeTitles(STEWARD_C, "Relay6-Realm"), true) end)
-			eq(ns.CouncilTitles(), nil); eq(ns.IsSteward("Test Steward-OtherRealm"), false); eq(ns.IsSteward(STEWARD), false)
+			-- (1.2.1 security review: it used to replace ours; it is refused now, and ours stays.)
+			Signed(function() eq(W.TakeTitles(STEWARD_C, "Relay6-Realm"), false) end)
+			eq(ns.CouncilTitles().blob, STEWARD_B); eq(ns.IsSteward("Test Steward-OtherRealm"), false); eq(ns.IsSteward(STEWARD), false)
 			-- The Horde's own Steward: the Horde King's alone.
 			ns.rdb.councilTitles = nil
 			Signed(function() eq(W.TakeTitles(STEWARD_D), true) end)
