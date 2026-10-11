@@ -434,6 +434,130 @@ local function UnitLevelOf(guid)
 	return level
 end
 
+-- Short names as H.Vouched compares them (Short), kept once worked out (1.2.1, the stutter players
+-- reported: every census report heard made the race work out again every name of every report for
+-- every claim waiting, a fifth of a second and more on a release client). Kept only for a name whose
+-- short form can't change with what this client learns of realms: one without "-", one whose first
+-- part has a space (Forever's "First Surname-Realm"), or any while names are not split (ns.Normal
+-- leaves them be). Returns the short name and whether it is such a name.
+H.SHORTS_MAX = 5000
+local shorts, shortsCount, shortsSplit = {}, 0, false
+local function ShortOf(name)
+	if type(name) ~= "string" then return nil, true end
+	local split = ns.splitNames and true or false
+	if split ~= shortsSplit then shorts, shortsCount, shortsSplit = {}, 0, split end
+	local v = shorts[name]
+	if v then return v, true end
+	v = Short(name)
+	local dash = name:find("-", 1, true)
+	local space = dash and name:find(" ", 1, true)
+	if split and dash and not (space and space < dash) then return v, false end
+	if shortsCount >= H.SHORTS_MAX then shorts, shortsCount = {}, 0 end
+	shorts[name], shortsCount = v, shortsCount + 1
+	return v, true
+end
+
+-- The census's tops by the short name of each player they list (1.2.1): the rows listing him, in
+-- the order pairs gives the rows (the order H.Vouched always went through them), each with the
+-- highest level it lists him at (by[short]: { r, guild, level, nxt }, a chain). Worked out again
+-- only when the rows changed: Data.Revision where the census has one, and in any case another row
+-- in a place, another top, or another name or level in one, or a name whose short form hangs on the
+-- realms this client knows (ShortOf: worked out again each time) that now reads otherwise. What a
+-- row says beside its top (its sender, its time, our own) is read from the row itself when it is
+-- looked at.
+local listing = { by = {}, tails = {}, pool = {}, used = 0, keys = {}, refs = {}, tops = {}, xs = {}, xn = {}, xl = {}, n = 0, m = 0,
+	loose = {}, looseShort = {}, nLoose = 0, builds = 0 }
+local function Revision()
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.Revision) ~= "function" then return nil end
+	local ok, rev = pcall(D.Revision)
+	return ok and rev or nil
+end
+local function ListingHolds(rows)
+	local T = listing
+	if T.rows ~= rows or T.split ~= (ns.splitNames and true or false) or T.rev ~= Revision() then return false end
+	local keys, refs, tops, xs, xn, xl = T.keys, T.refs, T.tops, T.xs, T.xn, T.xl
+	local i, j = 0, 0
+	for guild, r in pairs(rows) do
+		i = i + 1
+		if keys[i] ~= guild or refs[i] ~= r then return false end
+		local top = type(r) == "table" and r.top or nil
+		if tops[i] ~= top then return false end
+		if type(top) == "table" then
+			for _, x in ipairs(top) do
+				j = j + 1
+				if xs[j] ~= x or (type(x) == "table" and (xn[j] ~= x.name or xl[j] ~= x.level)) then return false end
+			end
+		end
+	end
+	if i ~= T.n or j ~= T.m then return false end
+	for k = 1, T.nLoose do
+		local at = T.loose[k]
+		if ShortOf(xn[at]) ~= T.looseShort[at] then return false end
+	end
+	return true
+end
+local function ListingBuild(rows)
+	local T = listing
+	local by, tails, pool = T.by, T.tails, T.pool
+	for k in pairs(by) do by[k] = nil end
+	for k in pairs(tails) do tails[k] = nil end
+	local keys, refs, tops, xs, xn, xl = T.keys, T.refs, T.tops, T.xs, T.xn, T.xl
+	local i, j, used, nLoose = 0, 0, 0, 0
+	local loose, looseShort = T.loose, T.looseShort
+	for k = 1, T.nLoose do
+		looseShort[loose[k]] = nil
+		loose[k] = nil
+	end
+	for guild, r in pairs(rows) do
+		i = i + 1
+		local top = type(r) == "table" and r.top or nil
+		keys[i], refs[i], tops[i] = guild, r, top
+		if type(top) == "table" then
+			for _, x in ipairs(top) do
+				j = j + 1
+				xs[j], xn[j], xl[j] = x, nil, nil
+				if type(x) == "table" then
+					xn[j], xl[j] = x.name, x.level
+					local who, fixed = ShortOf(x.name)
+					if not fixed then
+						nLoose = nLoose + 1
+						loose[nLoose], looseShort[j] = j, who
+					end
+					if who then
+						local level, last = tonumber(x.level) or 0, tails[who]
+						if last and last.i == i then
+							if level > last.level then last.level = level end
+						else
+							used = used + 1
+							local e = pool[used] or {}
+							pool[used] = e
+							e.i, e.r, e.guild, e.level, e.nxt = i, r, guild, level, nil
+							if last then last.nxt = e else by[who] = e end
+							tails[who] = e
+						end
+					end
+				end
+			end
+		end
+	end
+	for k = i + 1, T.n do keys[k], refs[k], tops[k] = nil, nil, nil end
+	for k = j + 1, T.m do xs[k], xn[k], xl[k] = nil, nil, nil end
+	for k = used + 1, T.used do pool[k].r, pool[k].guild, pool[k].nxt = nil, nil, nil end
+	T.n, T.m, T.used, T.nLoose = i, j, used, nLoose
+	T.rows, T.split, T.rev = rows, ns.splitNames and true or false, Revision()
+	T.builds = T.builds + 1
+	return by
+end
+-- The listing for the census as it stands (nil without one).
+local function Listing()
+	local rows = ns.rdb and ns.rdb.guilds
+	if type(rows) ~= "table" then return nil end
+	if ListingHolds(rows) then return listing.by end
+	return ListingBuild(rows)
+end
+function H.ListingBuilds() return listing.builds end
+
 -- Vouched (1.2.1, the security review: one census row of anyone else's was proof, so a forged
 -- report won the place): the claim is a verified member's, at or above that level.
 --   Our guildmate: our fresh roster, the server's, at or above it (another guild's rows say nothing
@@ -443,37 +567,37 @@ end
 --   senders of that one guild, none of them him (by his name alone, as Data.KnownRank asks). A
 --   guild's row is its newest report, so each sender seen is kept on the claim (c.by: guild ->
 --   senders) as his turn comes (the reporter every 3 minutes, its runner-up every 10).
-function H.Vouched(c)
+-- (1.2.1) by: the census's Listing, worked out once for all the claims looked at together: the
+-- rows that list him are found by his name, the rest never looked at.
+local function VouchedBy(c, by)
 	if type(c) ~= "table" or type(c.name) ~= "string" or not tonumber(c.level) then return false end
 	if Guildmate(c.name) then
 		local level, fresh = RosterLevel(c.name)
 		return fresh and level ~= nil and level >= c.level or false
 	end
-	local rows = ns.rdb and ns.rdb.guilds
-	if type(rows) ~= "table" then return false end
-	local who = Short(c.name)
+	if not by then return false end
+	local who = ShortOf(c.name)
 	local D = ns.Data
 	c.by = type(c.by) == "table" and c.by or {}
-	for guild, r in pairs(rows) do
-		if type(r) == "table" and type(r.top) == "table" and type(r.reporterFull) == "string" and not r.mine and type(guild) == "string"
-			and Short(r.reporterFull) ~= who and math.abs((r.t or 0) - (c.heardLocal or 0)) <= H.VOUCH_WINDOW
-			and ns.IsFederation(guild) and not (type(D) == "table" and type(D.NetOff) == "function" and D.NetOff(guild)) then
-			for _, x in ipairs(r.top) do
-				if type(x) == "table" and Short(x.name) == who and (tonumber(x.level) or 0) >= c.level then
-					local g = guild:lower()
-					local n = 0
-					for _ in pairs(c.by) do n = n + 1 end
-					if c.by[g] or n < 4 then
-						local senders = c.by[g] or {}
-						c.by[g] = senders
-						local k, m = Short(r.reporterFull), 0
-						for _ in pairs(senders) do m = m + 1 end
-						if k and (senders[k] or m < 4) then senders[k] = true end
-					end
-					break
-				end
+	local e = by[who]
+	while e do
+		local r, guild = e.r, e.guild
+		if type(r.reporterFull) == "string" and not r.mine and type(guild) == "string"
+			and ShortOf(r.reporterFull) ~= who and math.abs((r.t or 0) - (c.heardLocal or 0)) <= H.VOUCH_WINDOW
+			and ns.IsFederation(guild) and not (type(D) == "table" and type(D.NetOff) == "function" and D.NetOff(guild))
+			and e.level >= c.level then
+			local g = guild:lower()
+			local n = 0
+			for _ in pairs(c.by) do n = n + 1 end
+			if c.by[g] or n < 4 then
+				local senders = c.by[g] or {}
+				c.by[g] = senders
+				local k, m = ShortOf(r.reporterFull), 0
+				for _ in pairs(senders) do m = m + 1 end
+				if k and (senders[k] or m < 4) then senders[k] = true end
 			end
 		end
+		e = e.nxt
 	end
 	for _, senders in pairs(c.by) do
 		local n = 0
@@ -482,6 +606,7 @@ function H.Vouched(c)
 	end
 	return false
 end
+function H.Vouched(c) return VouchedBy(c, Listing()) end
 
 -- A place found false (1.2.1, the security review: a place stayed forever whatever came to light):
 -- the server's word puts its holder below its milestone, his unit's level (by his GUID), or our
@@ -531,6 +656,52 @@ function H.CheckPlaces()
 	return out
 end
 
+-- The claims against what this client knows now, the race's first half: the places held against
+-- the server's word, the claims past CLAIM_DAYS gone, and every unvouched one against the census
+-- (H.Vouched). A census change asks this at once (a guild's row is its newest report: a sender's
+-- report is seen now or may never be); the race itself waits RACE_SOON (H.RaceSoon, 1.2.1).
+local function Look(s, now)
+	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.)
+	if s.vouchRule ~= H.VOUCH_RULE then
+		for _, c in pairs(s.claims) do if type(c) == "table" then c.vouched = false end end
+		s.vouchRule = H.VOUCH_RULE
+	end
+	H.CheckPlaces()
+	local by, listed = nil, false
+	for key, c in pairs(s.claims) do
+		if now - (c.t or 0) > H.CLAIM_DAYS * 86400 then s.claims[key] = nil
+		elseif not c.vouched then
+			if not listed then by, listed = Listing(), true end
+			if VouchedBy(c, by) then c.vouched = true stats.vouched = stats.vouched + 1 end
+		end
+	end
+end
+
+-- The one race waiting to run (1.2.1, the stutter players reported): a census change and an IL
+-- look at the claims at once (Look) and leave the race to RACE_SOON later, once for a burst, never
+-- inside the game's message event; a vouched claim waiting CONFIRM_AFTER has one re-check, at the
+-- moment the first of them is old enough (each race used to start one more, 601 s on).
+H.RACE_SOON = 5
+local raceSoon = false
+function H.RaceSoon()
+	if raceSoon then return false end
+	raceSoon = true
+	ns.After(H.RACE_SOON, "arena level race soon", function() raceSoon = false H.RunRace() end)
+	return true
+end
+local recheckAt, recheckSeq = nil, 0
+local function Recheck(at)
+	if recheckAt and recheckAt <= at then return end
+	recheckSeq = recheckSeq + 1
+	local seq = recheckSeq
+	recheckAt = at
+	ns.After(math.max(1, at - Now()), "arena level race", function()
+		if seq ~= recheckSeq then return end -- (an earlier one took its place)
+		recheckAt = nil
+		H.RunRace()
+	end)
+end
+
 -- The book again: the claims (vouched where they are) through Honors.LevelRace; a new place said.
 -- A claim that can no longer be vouched (unvouched past VOUCH_WINDOW) stops holding the race up
 -- (it stays until CLAIM_DAYS, so its sender can't claim that milestone again meanwhile); a gk that
@@ -538,25 +709,16 @@ end
 -- vouched claims of it count.
 function H.RunRace()
 	local s = H.Store(true)
-	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.)
-	if s.vouchRule ~= H.VOUCH_RULE then
-		for _, c in pairs(s.claims) do if type(c) == "table" then c.vouched = false end end
-		s.vouchRule = H.VOUCH_RULE
-	end
-	H.CheckPlaces()
-	local claims = {}
 	local now = Now()
+	Look(s, now)
+	local claims = {}
 	local P = ns.ArenaProfile
 	local senders = {}
-	for key, c in pairs(s.claims) do
-		if now - (c.t or 0) > H.CLAIM_DAYS * 86400 then s.claims[key] = nil
-		else
-			if not c.vouched and H.Vouched(c) then c.vouched = true stats.vouched = stats.vouched + 1 end
-			if c.vouched or ns.Now() - (c.heardLocal or 0) <= H.VOUCH_WINDOW then
-				claims[#claims + 1] = { name = c.name, gk = c.gk, guid = GameGuid(c.gk), level = c.level, t = c.t, vouched = c.vouched }
-				senders[c.gk] = senders[c.gk] or {}
-				senders[c.gk][ns.FullName(c.name):lower()] = true
-			end
+	for _, c in pairs(s.claims) do
+		if c.vouched or ns.Now() - (c.heardLocal or 0) <= H.VOUCH_WINDOW then
+			claims[#claims + 1] = { name = c.name, gk = c.gk, guid = GameGuid(c.gk), level = c.level, t = c.t, vouched = c.vouched }
+			senders[c.gk] = senders[c.gk] or {}
+			senders[c.gk][ns.FullName(c.name):lower()] = true
 		end
 	end
 	local kept = {}
@@ -583,12 +745,17 @@ function H.RunRace()
 		stats.places = stats.places + 1
 		Changed(p.name)
 	end
-	-- A vouched claim waits CONFIRM_AFTER: looked at again then.
+	-- A vouched claim waits CONFIRM_AFTER: looked at again once the first of them is old enough.
+	local due
 	for _, list in pairs(pending or {}) do
 		for _, c in ipairs(list) do
-			if c.vouched then ns.After(ns.Honors.CONFIRM_AFTER + 1, "arena level race", H.RunRace) return fresh end
+			if c.vouched then
+				local at = (tonumber(c.t) or now) + ns.Honors.CONFIRM_AFTER + 1
+				if not due or at < due then due = at end
+			end
 		end
 	end
+	if due then Recheck(due) end
 	return fresh
 end
 
@@ -625,20 +792,29 @@ local function OnLevel(dist, sender, mode, body)
 		s.claims[key] = c
 		stats.claims = stats.claims + 1
 	end
-	H.RunRace()
+	-- (1.2.1) The claims against the census at once, the race RACE_SOON later.
+	Look(s, Now())
+	H.RaceSoon()
 end
 ns.Comm.Handle("IL", ns.Arena.Handle("IL", OnLevel))
 
 -- A census report came in, or our roster: the claims waiting are looked at again, and (1.2.1)
--- the places held (three at most: lookups alone) against the server's word.
+-- the places held (three at most: lookups alone) against the server's word, at once; the race
+-- RACE_SOON later (H.RaceSoon), once for a burst of reports.
 ns.On("DATA_CHANGED", function()
 	local s = H.Store()
 	if s and s.claims and next(s.claims) then
-		for _, c in pairs(s.claims) do if not c.vouched then ns.SafeCall("arena level vouch", H.RunRace) return end end
+		for _, c in pairs(s.claims) do
+			if not c.vouched then
+				ns.SafeCall("arena level vouch", Look, s, Now())
+				H.RaceSoon()
+				return
+			end
+		end
 	end
 	if s and type(s.levels) == "table" and next(s.levels) then
 		ns.SafeCall("arena level places", function()
-			if #H.CheckPlaces() > 0 then H.RunRace() end
+			if #H.CheckPlaces() > 0 then H.RaceSoon() end
 		end)
 	end
 end)
