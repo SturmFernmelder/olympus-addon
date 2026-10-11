@@ -1298,6 +1298,68 @@ test("the Realm lists every member online: our roster for our guild, /who for th
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.1 (an officer: his guild master "has been online for hours" while the addon showed him away):
+-- another guild's Lord and Captains came from its report whatever its age, and /who's sighting of
+-- them was dropped (MembersOf leaves them out of the members seen), so an old "offline 3d !" stayed
+-- red under a Lord /who had just seen online.
+test("1.2.1 another guild's Lord seen online by /who is online whatever an old report said; an old report's word is grey", function()
+	local savedGuild, savedSweep, savedOnline, savedMembers = GetGuildInfo, ns.Who.sweep, ns.Roster.online, ns.Roster.members
+	local now, L = os.time(), ns.L
+	GetGuildInfo = function() return "Olympus II", "Member", 3 end
+	ns.Roster.online, ns.Roster.members = {}, {}
+	ns.rdb.guilds = {
+		-- Its last report two days old: the Lord offline 3 days then, a Captain 1 day.
+		["Olympus Far"] = { total = 50, online = 0, zones = {}, t = now - 2 * 86400, leader = "Farlord", leaderOnline = false,
+			leaderDays = 3, officers = { { name = "Farcapt", online = false, days = 1 } } },
+		-- Three days old, its Lord online when it was made, and not seen since.
+		["Olympus Gone"] = { total = 40, online = 3, zones = {}, t = now - 3 * 86400, leader = "Gonelord", leaderOnline = true,
+			leaderDays = 0, officers = {} },
+		-- A fresh report: its word stands.
+		["Olympus Near"] = { total = 30, online = 2, zones = {}, t = now - 60, leader = "Nearlord", leaderOnline = false,
+			leaderDays = 5, officers = {} },
+	}
+	-- This quarter-hour's /who round sees Farlord in his guild.
+	ns.Who.sweep = { started = GetTime(), list = { { name = "Farlord", guild = "Olympus Far", level = 20, class = "WARRIOR" } } }
+	local ok, err = pcall(function()
+		ns.Views.ExpandAll(true)
+		local lines = ns.Views.RealmLines()
+		local function Row(key, header)
+			for _, l in ipairs(lines) do
+				if header and l.id == ns.Views.GuildId(key) then return l end
+				if not header and l.key == key then return l end
+			end
+			error("no row for " .. key)
+		end
+		local red = "|cffff4040"
+		local lord = Row("Farlord")
+		assert(lord.right:find(L.ONLINE_NOW, 1, true), "seen online: " .. lord.right)
+		eq(lord.offline, false)
+		assert(Row("Olympus Far", true).right:find(L.ONLINE_NOW, 1, true), "the guild's line too")
+		local grey = "|cff9d9d9d"
+		local capt = Row("Farcapt").right
+		assert(capt:find(L.OFFLINE_DAYS:format(1), 1, true) and capt:find(grey, 1, true) and not capt:find(red, 1, true), "what it said, grey: " .. capt)
+		local gone = Row("Gonelord").right
+		eq(gone, grey .. L.ONLINE_NOW .. "|r", "online when it was made, grey")
+		local farLord = ns.rdb.guilds["Olympus Far"]
+		farLord.leaderDays = 5
+		ns.Who.sweep = { started = GetTime(), list = {} }
+		lines = ns.Views.RealmLines()
+		local unseen = Row("Farlord").right
+		assert(unseen:find(L.OFFLINE_DAYS:format(5), 1, true) and unseen:find(grey, 1, true) and not unseen:find(red, 1, true),
+			"not seen, an old report: grey, no warning: " .. unseen)
+		ns.Who.sweep = { started = GetTime(), list = { { name = "Farlord", guild = "Olympus Far", level = 20, class = "WARRIOR" } } }
+		lines = ns.Views.RealmLines()
+		local near = Row("Nearlord").right
+		assert(near:find(L.OFFLINE_DAYS:format(5), 1, true) and near:find(red, 1, true), "a fresh report's word: " .. near)
+		-- The player page and the Realm's people lists read the same.
+		eq(ns.Views.Person("Farlord").online, true)
+		ns.Views.ExpandAll(false)
+	end)
+	GetGuildInfo, ns.Who.sweep, ns.Roster.online, ns.Roster.members = savedGuild, savedSweep, savedOnline, savedMembers
+	ns.rdb.guilds = {}
+	if not ok then error(err, 0) end
+end)
+
 test("layer sample is stable and about 1 in 8", function()
 	local saved, hits = ns.me, 0
 	for i = 1, 800 do
