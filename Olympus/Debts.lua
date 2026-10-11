@@ -376,7 +376,9 @@ local function OnClaim(dist, sender, mode, body)
 	local gk, pk64, sig64, level = ns.Arena.Fields(body, 4)
 	local guid = ns.Arena.GuidOf(gk)
 	local pk, sig = Raw(pk64, 32), Raw(sig64, 64)
-	if not guid or not pk or not sig or not ns.Ed25519.ValidPublicKey(pk) then return end
+	-- (1.2.1: the key's own check, a point decoded, is the signature job's, Ed25519.Verify, in its
+	-- time slices and one job per sender: never here, where every forged claim would pay for it.)
+	if not guid or not pk or not sig then return end
 	local key = Lower(sender)
 	local have = verified[key]
 	if have and have.gk == gk and have.pk == pk then return end

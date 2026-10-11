@@ -2,7 +2,8 @@
 -- stranger's receipts can do to an auditor's saved data. With the Wallet off (the release) a receipt
 -- is only its two parties' own, and crafting's guild rail still settles its custodian's debt by them;
 -- with the Wallet and the stakes on, a match counts toward an arbiter's exposure once both its
--- parties' receipts name it, only a party takes it off, and the records stay bounded. On the test
+-- parties' receipts name it, only a party takes it off, and the records stay bounded. Last, the
+-- account key's claims (ZT): a forged one costs no curve work in the message handler. On the test
 -- world. Every name is invented.
 local H = ...
 local test, eq = H.test, H.eq
@@ -179,5 +180,40 @@ test("1.2.1 the money part: one sender's receipts take at most his share of an a
 	end
 	eq(his, share, "his oldest went")
 	eq(other, 1, "the other sender's receipt stays")
+	NoErrors(w)
+end)
+
+test("1.2.1 the money part: a forged key claim costs no curve work in the message handler: the key's check waits for the signature queue's sliced job, one per sender; a bad key is refused there and a real claim still verifies", function()
+	local w = World.New()
+	local a, b = M.Client(w, "Lida Fenn"), M.Client(w, "Parric Stowe")
+	local Ed = a.ns.Ed25519
+	local main = coroutine.running()
+	local valid, inHandler = Ed.ValidPublicKey, 0
+	Ed.ValidPublicKey = function(...)
+		if coroutine.running() == main then inHandler = inHandler + 1 end
+		return valid(...)
+	end
+	local ok, err = pcall(function()
+		-- 30 claims from 30 names: a key that is no point of the curve, a signature of nothing.
+		local B64 = a.ns.Debts.B64
+		local key, sig = B64(("\255"):rep(32)), B64(("\1"):rep(64))
+		for i = 1, 30 do
+			local gk = w:As(a, a.ns.Arena.GK, ("Player-4999-%08X"):format(0x200000 + i))
+			assert(w:As(a, a.ns.Arena.Inject, "WHISPER", "Forger" .. i .. "-Emberfall", ("ZT~L1~%s~%s~%s~1o"):format(gk, key, sig)))
+		end
+		eq(inHandler, 0, "no point decoded in the message handler")
+		w:Run(1)
+		for i = 1, 30 do
+			eq(a.Debts.Verified("Forger" .. i .. "-Emberfall"), nil, "forger " .. i)
+			eq(a.Debts.Pending("Forger" .. i .. "-Emberfall"), false, "forger " .. i .. ": refused by the job")
+		end
+		eq(w:As(a, a.ns.Arena.VerifyQueue), 0, "the queue emptied")
+		-- A real claim still verifies.
+		eq(b.Debts.SendClaim(a.name), true)
+		w:Run(1)
+		eq(a.Debts.Verified(b.name), w:As(a, a.ns.Arena.GK, b.guid))
+	end)
+	Ed.ValidPublicKey = valid
+	if not ok then error(err, 0) end
 	NoErrors(w)
 end)
