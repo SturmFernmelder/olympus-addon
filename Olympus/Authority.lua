@@ -573,9 +573,12 @@ local function HeldBundle(faction)
 	return manifest and bundle or nil
 end
 
+-- (1.2.1: and still current; every receiver drops a part past its window, so an expired set is
+-- never sent, and a transfer under way stops when it expires.)
 local function StillHeld(bundle)
 	local held = HeldBundle(bundle.faction)
 	return held ~= nil and held.at == bundle.at and held.epoch == bundle.epoch and held.root == bundle.root
+		and Current(held)
 		and ns.IsMember and ns.IsMember()
 		and not (ns.Moderation and not ns.Moderation.missing and ns.Moderation.Blocks
 			and ns.Moderation.Blocks("H2~") == true)
@@ -667,6 +670,7 @@ function Authority.HandleAsk(dist, sender, text)
 	askedFrom[key] = now
 	local bundle = HeldBundle(faction)
 	if not bundle or (bundle.at < at or (bundle.at == at and bundle.epoch <= epoch)) then return false end
+	if not Current(bundle) then return false end -- (1.2.1: an expired set is no answer; TakePart drops it)
 	local author = ns.Workshop and ns.Workshop.IsAuthor and ns.Workshop.IsAuthor()
 	local users = dist == "GUILD" and (ns.Comm.PeerCount and ns.Comm.PeerCount() or 1)
 		or (ns.King and ns.King.AddonsOnline and ns.King.AddonsOnline() or 1)

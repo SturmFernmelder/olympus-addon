@@ -503,6 +503,52 @@ local ns, test, eq = ...
 		end)
 	end)
 
+	-- 1.2.1 review: every receiver drops a part past its window, so a holder used to whisper up to
+	-- eight large parts to each new asker for nothing once his set had expired.
+	test("authority: a holder answers no ask with a set past its window, and stops a transfer when it expires", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local parts = Parts({ "Olympus Zeus=Answer Lord-Realm", "Olympus Ares=Answer Ares-Other" },
+					{ at = T0 + 10, epoch = 2, expires = T0 + 1000 })
+				eq(select(2, A.TakePart(parts[1], nil, "LOCAL")), "partial")
+				eq(select(2, A.TakePart(parts[2], nil, "LOCAL")), "complete")
+				local comm, workshop, moderation, after, isMember = ns.Comm, ns.Workshop, ns.Moderation, ns.After, ns.IsMember
+				local queued, now = {}, T0
+				local ok, err = pcall(function()
+					ns.Comm = {
+						Handle = function() end, PeerCount = function() return 1 end,
+						QueueRoom = function() return 60 end, Send = function() return true end,
+						SendBatch = function(dist, pieces, key, target, urgent, done, options)
+							queued[#queued + 1] = { target = target, pieces = pieces, done = done, options = options }
+							return true
+						end,
+					}
+					ns.Workshop = setmetatable({ IsAuthor = function() return true end }, { __index = workshop })
+					ns.Moderation = { missing = false, Blocks = function() return false end }
+					ns.IsMember = function() return true end
+					ns.After = function(seconds, _, fn) if seconds < 5 then fn() end end
+					ns.Now = function() return now end
+					-- While current: answered, the first part on its way.
+					eq(A.HandleAsk("GUILD", "Early-Realm", "H3~Alliance~0~0"), true)
+					eq(#queued, 1); eq(queued[1].target, "Early-Realm")
+					eq(queued[1].options.guard(), true)
+					-- The set expires during the transfer: its next part never leaves.
+					now = T0 + 1001
+					eq(queued[1].options.guard(), false, "a part of an expired set is not sent")
+					queued[1].done(true)
+					eq(#queued, 1, "the transfer stops when the set expires")
+					-- Asked after it expired: no answer at all.
+					eq(A.HandleAsk("GUILD", "Late-Realm", "H3~Alliance~0~0"), false, "an expired set is no answer")
+					eq(A.HandleAsk("CHANNEL", "Later-Realm", "H3~Alliance~0~0"), false)
+					eq(#queued, 1, "nothing whispered")
+				end)
+				ns.Comm, ns.Workshop, ns.Moderation, ns.After, ns.IsMember = comm, workshop, moderation, after, isMember
+				A.Reset()
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end)
+
 	test("authority: signed material issued before this release's floor never moves the boundary, and an older build's record no longer counts", function()
 		WithState(function()
 			WithFakeSign(function(Parts)
