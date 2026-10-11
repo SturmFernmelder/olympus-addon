@@ -1873,7 +1873,7 @@
       ],
       "answer": "It shows on players you can reach, while you're in an Olympus guild: not on yourself, enemies, offline names or Battle.net friends. In a dungeon or raid its buttons are greyed. Game clients without the new right-click menus don't get it at all.",
       "in_game": "It only shows where it can help: not on yourself, enemies, offline names or Battle.net friends, and only while you're in an Olympus guild.",
-      "notes": "Hooked menus: PLAYER, PARTY, RAID_PLAYER, RAID, FRIEND, COMMUNITIES_GUILD_MEMBER, COMMUNITIES_WOW_MEMBER, GUILD, CHAT_ROSTER, RECENT_ALLY (Menu.ModifyMenu).",
+      "notes": "Hooked menus: PLAYER, PARTY, RAID_PLAYER, RAID, FRIEND, COMMUNITIES_WOW_MEMBER, CHAT_ROSTER, RECENT_ALLY (Menu.ModifyMenu). 1.2.1: never the game's guild roster menus (COMMUNITIES_GUILD_MEMBER, GUILD), which hold its promote, demote, rank and removal.",
       "sources": [
         "PlayerMenu.lua"
       ]

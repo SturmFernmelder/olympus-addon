@@ -304,10 +304,7 @@ same as their card); none on the King's screen while the council's names are hid
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the
-friends list, a community roster) and the game's menu gets an **Olympus** part at the bottom. Not
-the game's guild roster (1.2.1): its menu holds the game's own promote, demote, rank and Remove
-from Guild, which the game refuses from an addon's taint, so Olympus adds nothing there; a
-guildmate's lines stay in the other menus and on the Olympus window's rows.
+friends list, a community roster) and the game's menu gets an **Olympus** part at the bottom:
 - **Their version**: "Olympus 1.1.1 (out of date)", "up to date" or "not seen yet", and under it
   where it came from and when. Guildmates show up by themselves (their addon says hello to your
   guild), and so does a known version on the person card. Opening the menu sends nothing.
@@ -1807,8 +1804,10 @@ the game is removed at login, with one line saying so.
   freezes) when an addon opens one. With mouse and keyboard, the game's popups as always, but
   while a guild window of the game's is open (1.2.1): its Remove from Guild fails with one of
   Olympus's popups up, so there Olympus asks in its own windows too, and one already up moves into
-  them when the guild window or a member's card opens, with what you typed in its box. Escape closes those questions
-  as it closed the game's popups, though now together with the guild window; a death or a loading
+  them when the guild window or a member's card opens, with what you typed in its box. Nor does
+  Olympus add its lines to the game's guild roster right-click menu, where the game's own promote,
+  demote, rank and Remove from Guild are (a guildmate's lines stay in the other menus). Escape
+  closes those questions as it closed the game's popups, though now together with the guild window; a death or a loading
   screen leaves them up, a stun closes them with the guild window.
   Since 0.9.8 it also leaves the game's own frames alone there: no quiet `/who` on its own
   (**Refresh** and **Find Olympus online** still search, and so does the King's click on his

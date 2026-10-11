@@ -250,7 +250,7 @@ same as their card); none on the King's screen while the council's names are hid
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the
-friends list, the guild roster) and the game's menu gets an **Olympus** part at the bottom:
+friends list, a community roster) and the game's menu gets an **Olympus** part at the bottom:
 - **Their version**: "Olympus 1.1.1 (out of date)", "up to date" or "not seen yet", and under it
   where it came from and when. Guildmates show up by themselves (their addon says hello to your
   guild), and so does a known version on the person card. Opening the menu sends nothing.
