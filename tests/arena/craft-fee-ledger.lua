@@ -141,3 +141,37 @@ test("1.2.1 craft fee desk: a member's characters cannot wedge a full ledger: a 
 	eq(Rows(desk), 5)
 	NoErrors(w)
 end)
+
+test("1.2.1 craft fee desk: each sender's fees the desk never confirmed are capped, his fee mails no word named too; a fee the desk confirmed by hand frees his room, and a later word still finds its mail", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local desk = K.Role(w, "treasurerMail", { money = 1000 })
+	HearsDesk({ a, b, c }, desk)
+	w:As(desk, function()
+		desk.ns.CraftRequests.FEES_BUYER_ONLY = 2
+		desk.ns.CraftRequests.FEES_PER_SELLER = 3
+	end)
+	-- c names himself the buyer of sales nobody made: two at most wait apart.
+	for n = 1, 3 do FeeWordTo(w, c, desk, "by00" .. n, "b", c.name, n == 2 and a.name or b.name, "8ow") end
+	eq(Rows(desk, function(e) return e.requester == c.name end), 2, "FEES_BUYER_ONLY on his word alone")
+	eq(Entry(desk, "by003"), nil)
+	-- The desk checks both with the parties and confirms them by hand: his word alone no longer.
+	for _, id in ipairs({ "by001", "by002" }) do eq(desk.Craft.SettleFee(Entry(desk, id).key, "confirmed", "checked with both"), true) end
+	w:Run(61)
+	FeeWordTo(w, c, desk, "by003", "b", c.name, b.name, "8ow")
+	assert(Entry(desk, "by003"), "room again once the desk confirmed his others")
+	-- Fee mails for sales no word ever named: FEES_PER_SELLER per payer, never the whole ledger.
+	for n = 1, 4 do w:Take(desk, w:Mail(c, desk, 2, "Olympus craft fee ml00" .. n)) end
+	eq(Rows(desk, function(e) return e.crafter == c.name and not e.fee end), 3, "his fee mails alone open FEES_PER_SELLER rows at most")
+	eq(Entry(desk, "ml004"), nil)
+	-- Those count with his own words of sales: at his cap, a fourth sale of his is refused...
+	w:Run(61)
+	FeeWordTo(w, c, desk, "sl001", "s", a.name, c.name, "8ow")
+	eq(Entry(desk, "sl001"), nil, "his cap holds across his words and his mails")
+	-- ...while his word of the sale a mail paid takes that mail, with no room needed.
+	FeeWordTo(w, c, desk, "ml001", "s", a.name, c.name, "8ow")
+	local e = assert(Entry(desk, "ml001"))
+	eq(e.paid, 2); eq(e.requester, a.name); eq(e.fee, 675)
+	NoErrors(w)
+end)

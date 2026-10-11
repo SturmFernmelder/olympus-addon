@@ -102,8 +102,8 @@ Requests.FEE_DUE = 72 * 60 * 60       -- the seller's deadline for the guild's 6
 Requests.CONFIRM_WAIT = 72 * 60 * 60  -- a sale the buyer neither confirmed nor disputed: its fee is owed after this all the same
 Requests.FEE_WARN_GAP = 86400         -- an overdue fee's warning, once a session and a day
 Requests.FEES_MAX = 1000              -- fees on the desk's ledger at most
-Requests.FEES_BUYER_ONLY = 20         -- open fees on the buyer's word alone, per buyer, at most
-Requests.FEES_PER_SELLER = 50         -- open fees on a seller's own word, per seller, at most
+Requests.FEES_BUYER_ONLY = 20         -- open fees on the buyer's word alone, per buyer, at most (the desk's own confirmations aside)
+Requests.FEES_PER_SELLER = 50         -- open fees on a seller's own word or fee mail alone, per seller, at most (the same)
 Requests.FEES_KEEP = 30 * 86400       -- a paid or waived fee stays on the ledger this long
 Requests.DEBTS_ANSWER_MAX = 40        -- fees one answer to the King names at most
 Requests.DEBTS_ASK_GAP = 300          -- the King asks the desk, and is answered, this often at most
@@ -1733,8 +1733,9 @@ do
 	-- one holding no gold before a payment. Only a fee the desk confirmed by hand stays while open,
 	-- so a member's characters never leave a real sale without room (a seller's evicted fee comes
 	-- back: his client tells the desk again each ASK_GAP while it is open). One member's words fill a
-	-- bounded part of it (a modified client's flood of made-up sales): the buyer's word alone opens
-	-- FEES_BUYER_ONLY fees at most per buyer, the seller's own FEES_PER_SELLER per seller.
+	-- bounded part of it (a modified client's flood of made-up sales): of the fees the desk never
+	-- confirmed by hand, the buyer's word alone opens FEES_BUYER_ONLY at most per buyer, the seller's
+	-- own word or his fee mail no word named FEES_PER_SELLER per seller (role "mail": the payer).
 	local function FeeRoom(led, role, requester, crafter, now)
 		local n, gone, buyerOnly, sellers = 0, {}, 0, 0
 		for key, e in pairs(led.entries) do
@@ -1748,15 +1749,14 @@ do
 					gone[#gone + 1] = { e = e, rank = 0, t = tonumber(e.paidAt or e.created) or 0 }
 				elseif not e.checkedBy then
 					gone[#gone + 1] = { e = e, rank = (e.fee and (tonumber(e.paid) or 0) <= 0) and 1 or 2, t = tonumber(e.created) or 0 }
-				end
-				if e.state == "due" and type(e.by) == "table" then
-					if role == "b" and e.by.b and not e.by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
-					if role == "s" and e.by.s and Same(e.crafter, crafter) then sellers = sellers + 1 end
+					local by = type(e.by) == "table" and e.by or {}
+					if role == "b" and by.b and not by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
+					if role ~= "b" and (by.s or not e.fee) and Same(e.crafter, crafter) then sellers = sellers + 1 end
 				end
 			end
 		end
 		if role == "b" and buyerOnly >= Requests.FEES_BUYER_ONLY then return false, "buyer-cap" end
-		if role == "s" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
+		if role ~= "b" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
 		if n < Requests.FEES_MAX then return true end
 		table.sort(gone, function(a, b)
 			if a.rank ~= b.rank then return a.rank < b.rank end
