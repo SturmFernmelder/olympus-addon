@@ -504,7 +504,11 @@ function Count.Flush()
 		local o = out[i]
 		if type(o) ~= "table" or type(o.text) ~= "string" or now - (tonumber(o.at) or 0) > Count.OUTBOX_DAYS * DAY then table.remove(out, i) end
 	end
-	local keepers = Church.KeepersOnline(false)
+	local keepers = {}
+	for _, k in ipairs(Church.KeepersOnline(false)) do
+		local kk = Key(k.name)
+		if kk then keepers[#keepers + 1] = { name = k.name, key = kk } end
+	end
 	if #keepers == 0 then return 0 end
 	local rc, sent = Rcpt(), 0
 	for _, o in ipairs(out) do
@@ -515,10 +519,9 @@ function Count.Flush()
 			for k in pairs(o.to) do if rc[k] then o.to[k] = nil end end
 		end
 		for _, k in ipairs(keepers) do
-			local kk = Key(k.name)
-			if kk and not o.to[kk] then
+			if not o.to[k.key] then
 				if ns.Comm.QueueRoom() <= Count.SEND_ROOM then return sent end
-				o.to[kk] = true
+				o.to[k.key] = true
 				if o.n == 0 then o.n, o.w = 1, now end
 				ns.Comm.Whisper(k.name, o.text, nil, false, false, nil, { owner = Count })
 				sent, stats.sent = sent + 1, stats.sent + 1
@@ -2272,8 +2275,8 @@ function Count.StatusLines()
 	for why, k in pairs(stats.dropped) do dropped[#dropped + 1] = why .. "=" .. k end
 	table.sort(dropped)
 	return {
-		("log reads %d, events %d, pairs %d, evidence sent %d, outbox %d, memory %d names"):format(stats.reads, stats.events, stats.pairs,
-			stats.sent, #(Out() or {}), mem and mem.count or 0),
+		("log reads %d, events %d, pairs %d, evidence sent %d, outbox %d, receipts %d, memory %d names"):format(stats.reads, stats.events,
+			stats.pairs, stats.sent, #(Out() or {}), stats.receipts or 0, mem and mem.count or 0),
 		("ledger %d records, %d people, %d archived, %d let go; checks sent %d, open %d, answers %d"):format(n, p, archived, marks,
 			stats.checks, open, stats.answers),
 		"count dropped: " .. (#dropped > 0 and table.concat(dropped, ", ") or "-"),
