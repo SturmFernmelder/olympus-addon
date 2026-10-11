@@ -21,33 +21,59 @@ end
 local SCAN_EVERY = 60
 local MIN_GAP = 20
 Roster.AUTHORITY_FRESH = 120
+-- (1.2.3) GetGuildRosterLastOnline counts whole hours: one scan in LAST_ONLINE_EVERY reads it for
+-- every member offline; the others only for who logged in or out since the last scan, or is new to
+-- the roster (the rest keep the hours read before).
+Roster.LAST_ONLINE_EVERY = 5
+-- (1.2.3) The longest a GUID the client gave no race for waits before it is asked again.
+Roster.RACE_RETRY = 600
 local lastScan, pending = 0, false
-local raceByGUID = {}
+local raceByGUID = {} -- [guid] = its race: one of racePairs' entries, shared (no table per member)
+local racePairs = {}  -- [key .. "\0" .. name] = { key = raceFile (or the name), name = the game's name }
+local raceWait, raceTryAt = {}, {} -- [guid] = the wait after its last failed lookup, when it is asked again
 
 -- The guild roster gives every member's GUID but not their race.  The client can resolve that
 -- stable GUID locally through GetPlayerInfoByGUID, including for offline guildmates.  Keep the
 -- answer only on this client's in-memory roster: census reports deliberately do not grow a race
--- field, and a lookup which has not resolved yet is tried again on the next scan.
+-- field, and a lookup which has not resolved yet is tried again on the next scan, then (1.2.3) after
+-- a wait that doubles up to RACE_RETRY: a client that never answers for a GUID is no longer asked a
+-- thousand times a minute.
 local function PublicString(value)
 	if value == nil then return nil end
 	if type(issecretvalue) == "function" and issecretvalue(value) then return nil end
 	return type(value) == "string" and value ~= "" and value or nil
 end
 
-local function RaceForGUID(guid)
+local function RaceForGUID(guid, now)
 	guid = PublicString(guid)
 	if not guid then return nil end
 	local cached = raceByGUID[guid]
 	if cached then return cached.key, cached.name end
 	if type(GetPlayerInfoByGUID) ~= "function" then return nil end
+	local tryAt = raceTryAt[guid]
+	if tryAt and now < tryAt then return nil end
 	local ok, _, _, raceName, raceFile = pcall(GetPlayerInfoByGUID, guid)
-	if not ok then return nil end
-	raceName, raceFile = PublicString(raceName), PublicString(raceFile)
-	local key = raceFile or raceName
-	if not key then return nil end
-	cached = { key = key, name = raceName }
+	if ok then raceName, raceFile = PublicString(raceName), PublicString(raceFile) end
+	local key = ok and (raceFile or raceName) or nil
+	if not key then
+		-- (A scan comes about every SCAN_EVERY seconds, a few early or late: the scan due when the
+		-- wait ends asks, not the one after it.)
+		local wait = math.min(Roster.RACE_RETRY, (raceWait[guid] or SCAN_EVERY / 2) * 2)
+		raceWait[guid], raceTryAt[guid] = wait, now + wait - MIN_GAP
+		return nil
+	end
+	raceWait[guid], raceTryAt[guid] = nil, nil
+	local id = key .. "\0" .. (raceName or "")
+	cached = racePairs[id]
+	if not cached then
+		cached = { key = key, name = raceName }
+		racePairs[id] = cached
+	end
 	raceByGUID[guid] = cached
 	return cached.key, cached.name
+end
+local function DropRace(guid)
+	raceByGUID[guid], raceWait[guid], raceTryAt[guid] = nil, nil, nil
 end
 
 local function RequestServerRoster()
@@ -72,6 +98,130 @@ local function CountRaw(t, key)
 	t[key] = (t[key] or 0) + 1
 end
 
+-- (1.2.3) What the last scans made, kept to be used again. Before, a 1,000-member guild's scan made
+-- every row, byName and the order anew each minute and sorted every row, however little had changed
+-- (some 500 KB of garbage offline: a heap that climbs until the collector runs). Now a member whose
+-- every field is the same keeps his row: Roster.members' and Roster.online's rows are never written
+-- after the scan that makes them (Members, Views, War, ChatRooms, DuesHistory, Recruit, HonorsNet...
+-- only read them). The members' order is the last scan's when nobody moved in it, the few new or
+-- moved rows put in where they go; byName is the last one while every name and rank in it is the
+-- same. A table a reader has seen is never filled again: one held by a reader still says what it said
+-- (HonorsNet keeps its levels by Roster.members, Borders and Nominees know byName by the table), and
+-- a new table still means something changed.
+local rowOf, onlineOf = {}, {}   -- [raw name] = his member row, his online row (while online), as last made
+local seenAt, guidOf = {}, {}    -- [raw name] = the scan that last saw him, the GUID it gave
+local realmOf, serverOf = {}, {} -- [raw name] = the realm in it (false: none), his GUID's server id
+local rowCount = 0               -- the raw names in rowOf
+local scans = 0
+local rowsOf = {}                -- whose rows they are: guild, realm, ns.FullName and ns.DisplayName
+local byIndex, indexed = {}, 0   -- this scan's rows in the server's order (indexed: the last scan's count)
+local moved, movedAt = {}, {}    -- the rows new to the order or moved in it, and where each goes
+local order, orderScan, orderStrict -- Roster.members as last made, the scan that made it, no two rows tied
+local pubByName, pubCount        -- Roster.byName as last made, and how many names it holds
+local INSERT_MAX = 64            -- more rows new or moved than this: one sort of every row, as before
+
+local function Clear(t)
+	for k in pairs(t) do t[k] = nil end
+end
+local function CountKeys(t)
+	local n = 0
+	for _ in pairs(t) do n = n + 1 end
+	return n
+end
+
+-- Members by level, then name; Captains online first, then by days away; who is online by rank,
+-- level, then name (made once, not at each scan).
+local function MemberBefore(a, b)
+	if a.level ~= b.level then return a.level > b.level end
+	return a.name < b.name
+end
+local function OfficerBefore(a, b)
+	if a.online ~= b.online then return a.online end
+	return a.days < b.days
+end
+local function OnlineBefore(a, b)
+	if a.rankIndex ~= b.rankIndex then return a.rankIndex < b.rankIndex end
+	if a.level ~= b.level then return a.level > b.level end
+	return a.name < b.name
+end
+
+local function SameRow(row, level, code, race, raceName, rankIndex, rank, days, online)
+	return row.level == level and row.class == code and row.race == race and row.raceName == raceName
+		and row.rankIndex == rankIndex and row.rank == rank and row.days == days and row.online == online
+end
+local function SameOnline(o, short, level, code, zone, rank, rankIndex)
+	return o.name == short and o.level == level and o.class == code and o.zone == zone and o.rank == rank
+		and o.rankIndex == rankIndex
+end
+
+-- A member who left: what was kept of him, his GUID's race with it.
+local function Forget(raw)
+	if guidOf[raw] then DropRace(guidOf[raw]) end
+	if rowOf[raw] then rowCount = rowCount - 1 end
+	rowOf[raw], onlineOf[raw], seenAt[raw], guidOf[raw], realmOf[raw], serverOf[raw] = nil, nil, nil, nil, nil, nil
+end
+
+-- This scan's members (byIndex[1..n]) in the last scan's order: each of its rows still here at the
+-- same level and name in its place, the m rows new or moved (moved[1..m]) put in where they go. Nil
+-- when that might not be what one sort of every row gives: no order of the last scan to keep, a tie
+-- in it, more rows to put in than INSERT_MAX, or one of them tied with another row.
+local function KeptOrder(n, m, scan)
+	local old = order
+	if not (old and orderStrict and orderScan == scan - 1) or m > INSERT_MAX then return nil end
+	if m > 1 then table.sort(moved, MemberBefore) end
+	local size = #old
+	for j = 1, m do
+		local x = moved[j]
+		if j > 1 and not MemberBefore(moved[j - 1], x) then return nil end
+		local lo, hi = 1, size + 1
+		while lo < hi do
+			local mid = math.floor((lo + hi) / 2)
+			if MemberBefore(old[mid], x) then lo = mid + 1 else hi = mid end
+		end
+		if lo <= size and not MemberBefore(x, old[lo]) then return nil end
+		movedAt[j] = lo
+	end
+	-- (An array of the right size at once, every place of it written below: no array grown and
+	-- left behind.)
+	local out, k, j = { unpack(byIndex, 1, n) }, 0, 1
+	for i = 1, size do
+		while j <= m and movedAt[j] == i do
+			k = k + 1
+			out[k] = moved[j]
+			j = j + 1
+		end
+		local e = old[i]
+		if seenAt[e.raw] == scan then
+			local row = rowOf[e.raw]
+			if row.level == e.level and row.name == e.name then
+				k = k + 1
+				out[k] = row
+			end
+		end
+	end
+	while j <= m do
+		k = k + 1
+		out[k] = moved[j]
+		j = j + 1
+	end
+	if k ~= n then return nil end
+	return out
+end
+
+-- Every row sorted, as before 1.2.3, and whether no two of them tie (the next scan may keep it).
+local function SortedOrder(n, dup)
+	local out = { unpack(byIndex, 1, n) }
+	table.sort(out, MemberBefore)
+	local strict = not dup
+	for k = 2, strict and n or 0 do
+		if not MemberBefore(out[k - 1], out[k]) then
+			strict = false
+			break
+		end
+	end
+	return out, strict
+end
+
 function Roster.Scan()
 	-- The 4th return is the guild's home realm, nil when it is ours.
 	local guild, _, _, home = GetGuildInfo("player")
@@ -91,28 +241,70 @@ function Roster.Scan()
 	local numRanks = GuildControlGetNumRanks and GuildControlGetNumRanks() or 0
 	for i = 1, numRanks do r.ranks[i] = { name = GuildControlGetRankName(i) or ("Rank " .. i), count = 0 } end
 
+	-- (1.2.3) Rows kept for another guild, realm or way of naming are of no use: all made anew.
+	if rowsOf.guild ~= guild or rowsOf.realm ~= ns.realm or rowsOf.full ~= ns.FullName or rowsOf.display ~= ns.DisplayName then
+		Clear(rowOf); Clear(onlineOf); Clear(seenAt); Clear(guidOf); Clear(realmOf); Clear(serverOf)
+		Clear(raceByGUID); Clear(raceWait); Clear(raceTryAt)
+		rowCount, order = 0, nil
+		rowsOf.guild, rowsOf.realm, rowsOf.full, rowsOf.display = guild, ns.realm, ns.FullName, ns.DisplayName
+	end
+	if moved[1] or movedAt[1] then Clear(moved); Clear(movedAt) end -- (left by a scan that failed)
+	scans = scans + 1
+	local scan, now = scans, ns.Now()
+	local readAll = (scan - 1) % math.max(1, math.floor(tonumber(Roster.LAST_ONLINE_EVERY) or 1)) == 0
+	-- byName stays the last one while every row names the same rank in it (and nothing else in it).
+	local keep = pubByName ~= nil and Roster.byName == pubByName and pubByName or nil
+	local sameNames = keep ~= nil
 	local seen, seenOffline, zoneCount, levelSum = 0, 0, 0, 0
-	local everyone = {}
+	local distinct, bare, made, m, dup = 0, 0, 0, 0, false
 	local online = {} -- who is online now, for the Realm tab (Views.MembersOf)
-	local byName = {}
-	local rawRealms, servers, sample = {}, {}, nil -- for /oly status (names raw)
+	local rawRealms, servers, sample, sampleDash = {}, {}, nil, false -- for /oly status (names raw)
 	for i = 1, numTotal do
 		local name, rankName, rankIndex, level, _, zone, _, _, isOnline, _, classFile, _, _, _, _, _, guid = GetGuildRosterInfo(i)
 		if name then
-			local race, raceName = RaceForGUID(guid)
+			local at, prev = seenAt[name], rowOf[name]
+			local again = at == scan -- (the server gave him twice: each row as it came, as before)
+			local wasHere = prev ~= nil and at == scan - 1
+			-- (1.2.3) The realm his name came with and his GUID's server, worked out once for him.
+			local server
+			if not again then
+				local g = PublicString(guid)
+				if guidOf[name] ~= g then
+					if guidOf[name] then DropRace(guidOf[name]) end
+					guidOf[name], serverOf[name] = g, g and (g:match("^Player%-(%d+)%-") or "?")
+				end
+				server = serverOf[name]
+			end
+			local race, raceName = RaceForGUID(guid, now)
 			seen = seen + 1
-			local rawRealm = name:match("%-(.+)$")
+			local rawRealm = realmOf[name]
+			if rawRealm == nil then
+				rawRealm = name:match("%-(.+)$") or false
+				if not again then realmOf[name] = rawRealm end
+			end
 			CountRaw(rawRealms, rawRealm or "bare")
-			CountRaw(servers, type(guid) == "string" and guid:match("^Player%-(%d+)%-") or "?")
-			if not sample or (rawRealm and not sample:find("-", 1, true)) then sample = name end
-			-- Identity is "Name-Realm"; reports carry the short form for our own realm.
-			local full = ns.FullName(name)
-			local short = ns.DisplayName(full)
-			byName[full] = rankIndex or 9
-			local days = DaysOffline(i, isOnline)
+			CountRaw(servers, server or (type(guid) == "string" and guid:match("^Player%-(%d+)%-")) or "?")
+			if not sample or (rawRealm and not sampleDash) then sample, sampleDash = name, name:find("-", 1, true) ~= nil end
+			-- Identity is "Name-Realm"; reports carry the short form for our own realm (kept with his
+			-- row: the same raw name, realm and functions give the same).
+			local full, short
+			if prev then
+				full, short = prev.full, prev.name
+			else
+				full = ns.FullName(name)
+				short = ns.DisplayName(full)
+			end
+			if full ~= name then bare = bare + 1 end
+			rankIndex = rankIndex or 9
+			if sameNames and keep[full] ~= rankIndex then sameNames = false end
+			-- (1.2.3) The hours offline read before, unless this is a scan that reads them all or he
+			-- was online, or not here, at the last scan.
+			local days = 0
+			if not isOnline then
+				if wasHere and not prev.online and not readAll then days = prev.days else days = DaysOffline(i, isOnline) end
+			end
 			level = level or 1
 			levelSum = levelSum + level
-			rankIndex = rankIndex or 9
 			local rank = r.ranks[rankIndex + 1]
 			if not rank then
 				rank = { name = rankName or ("Rank " .. (rankIndex + 1)), count = 0 }
@@ -134,35 +326,63 @@ function Roster.Scan()
 			-- Every member, online or not, for our guild's members page (1.1, Members.lua): the
 			-- name as the server gave it (raw: what a removal takes), rank, days offline. Kept in
 			-- memory only, never in the report.
-			everyone[#everyone + 1] = { name = short, level = level, class = code, race = race, raceName = raceName,
-				raw = name, full = full, rankIndex = rankIndex, rank = rankName or rank.name, days = days,
-				online = isOnline and true or false }
+			local rankText, on = rankName or rank.name, isOnline and true or false
+			local row = prev
+			if again or not (row and SameRow(row, level, code, race, raceName, rankIndex, rankText, days, on)) then
+				row = { name = short, level = level, class = code, race = race, raceName = raceName,
+					raw = name, full = full, rankIndex = rankIndex, rank = rankText, days = days, online = on }
+				made = made + 1
+			end
+			if again then
+				dup = true
+			else
+				distinct = distinct + 1
+				-- New to the order, or moved in it (his level changed): put in where he goes.
+				if not (wasHere and prev.level == level and prev.name == short) then
+					m = m + 1
+					if m <= INSERT_MAX then moved[m] = row end
+				end
+				if not prev then rowCount = rowCount + 1 end
+				rowOf[name], seenAt[name] = row, scan
+			end
+			byIndex[seen] = row
 			if isOnline then
-				online[#online + 1] = { name = short, level = level, class = code, zone = zoneKey, rank = rankName, rankIndex = rankIndex }
+				local o = onlineOf[name]
+				if again or not (o and SameOnline(o, short, level, code, zoneKey, rankName, rankIndex)) then
+					o = { name = short, level = level, class = code, zone = zoneKey, rank = rankName, rankIndex = rankIndex }
+					if not again then onlineOf[name] = o end
+				end
+				online[#online + 1] = o
 				r.online = r.online + 1
-				local key = ns.Zones.KeyForName(zone)
-				if key then
-					if not r.zones[key] then zoneCount = zoneCount + 1 end
-					r.zones[key] = (r.zones[key] or 0) + 1
+				if zoneKey then
+					if not r.zones[zoneKey] then zoneCount = zoneCount + 1 end
+					r.zones[zoneKey] = (r.zones[zoneKey] or 0) + 1
 				end
 				if code then r.classes[code] = (r.classes[code] or 0) + 1 end
 				local band = math.min(7, math.floor(level / 10) + 1)
 				r.levels[band] = r.levels[band] + 1
 			else
+				if not again then onlineOf[name] = nil end
 				seenOffline = seenOffline + 1
 			end
 		end
 	end
+	for k = seen + 1, indexed do byIndex[k] = nil end
+	indexed = seen
 	-- Fill gaps so rank order is kept even if a rank has nobody in it.
 	for i = 1, #r.ranks do r.ranks[i] = r.ranks[i] or { name = "Rank " .. i, count = 0 } end
-	table.sort(r.officers, function(a, b)
-		if a.online ~= b.online then return a.online end
-		return a.days < b.days
-	end)
-	table.sort(everyone, function(a, b)
-		if a.level ~= b.level then return a.level > b.level end
-		return a.name < b.name
-	end)
+	table.sort(r.officers, OfficerBefore)
+	-- (1.2.3) The members' order: the last one itself when no row changed, kept with the new or
+	-- moved rows put in, or one sort of every row (KeptOrder).
+	local everyone, strict
+	if not dup and made == 0 and m == 0 and order and orderStrict and orderScan == scan - 1 and #order == seen then
+		everyone, strict = order, true
+	else
+		everyone = not dup and KeptOrder(seen, m, scan)
+		if everyone then strict = true else everyone, strict = SortedOrder(seen, dup) end
+	end
+	for j = 1, math.min(m, INSERT_MAX) do moved[j], movedAt[j] = nil, nil end
+	order, orderScan, orderStrict = everyone, scan, strict
 	-- The report is persisted locally before it is encoded.  Keep its public top-five rows to the
 	-- three fields the wire actually carries; GUID-derived race and the richer roster-only identity
 	-- fields must remain on Roster.members rather than leaking into OlympusDB through r.top.
@@ -171,6 +391,19 @@ function Roster.Scan()
 		r.top[i] = { name = member.name, level = member.level, class = member.class }
 	end
 	r.avgLevel = seen > 0 and levelSum / seen or 0
+	-- (1.2.3) byName: the last one while it holds every row's name and rank and nothing more (two
+	-- rows of one name, or names with and without their realm side by side: made anew, as before),
+	-- else a new one, filled in the server's order as before.
+	local byName = keep
+	if not (sameNames and not dup and not (bare > 0 and bare < seen) and seen == pubCount and CountKeys(keep) == pubCount) then
+		byName, pubCount = {}, 0
+		for k = 1, seen do
+			local row = byIndex[k]
+			if byName[row.full] == nil then pubCount = pubCount + 1 end
+			byName[row.full] = row.rankIndex
+		end
+		pubByName = byName
+	end
 	Roster.byName, Roster.guild = byName, guild -- (whose roster it is: Olympus Link's "r", Link.lua)
 	-- Consumers which use the roster as an authority boundary need to distinguish a current
 	-- server snapshot from rows left in memory after a guild/faction/realm-group change.  The
@@ -184,13 +417,16 @@ function Roster.Scan()
 	-- an absent protected target look like a non-member to The Watch.
 	Roster.complete = seen == numTotal and ns.me ~= nil and byName[ns.FullName(ns.me)] ~= nil
 	Roster.members = everyone -- (1.1: every member's row, Members.lua)
-	table.sort(online, function(a, b)
-		if a.rankIndex ~= b.rankIndex then return a.rankIndex < b.rankIndex end
-		if a.level ~= b.level then return a.level > b.level end
-		return a.name < b.name
-	end)
+	table.sort(online, OnlineBefore)
 	Roster.online = online
 	Roster.rawRealms, Roster.servers, Roster.rawSample = rawRealms, servers, sample
+	-- (1.2.3) Who left is forgotten, his GUID's race with him: at a complete scan (a partial one may
+	-- only not have his row yet), or when far more are kept than the roster has.
+	if rowCount > distinct and (Roster.complete or rowCount > 2 * distinct + 50) then
+		for raw, at in pairs(seenAt) do
+			if at ~= scan then Forget(raw) end
+		end
+	end
 	r.home = home ~= "" and home or ns.realm
 	r.faction = ns.faction or ns.Faction()
 	if numOnline and numOnline > r.online then r.online = numOnline end
@@ -200,8 +436,8 @@ function Roster.Scan()
 		leader = r.leader, leaderOnline = r.leaderOnline, zones = zoneCount, ms = ms, t = ns.Now(),
 		ranks = #r.ranks, officers = #r.officers,
 	}
-	ns.Log("scan %s: total=%d online=%d rows=%d offlineRows=%d leader=%s ranks=%d officers=%d zones=%d %.1fms",
-		guild, numTotal, r.online, seen, seenOffline, tostring(r.leader), #r.ranks, #r.officers, zoneCount, ms)
+	ns.Log("scan %s: total=%d online=%d rows=%d offlineRows=%d leader=%s ranks=%d officers=%d zones=%d newRows=%d %.1fms",
+		guild, numTotal, r.online, seen, seenOffline, tostring(r.leader), #r.ranks, #r.officers, zoneCount, made, ms)
 	return r
 end
 
