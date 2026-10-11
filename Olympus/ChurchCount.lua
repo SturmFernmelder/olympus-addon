@@ -97,6 +97,9 @@ Count.RECORDS_MAX, Count.RECORDS_DAYS, Count.PEOPLE_MAX = 6000, 120, 400
 Count.MONTH_DAYS = 30 -- the "last 30 days" window (WindowFrom)
 -- (1.2.1: the ledger's marks of what it let go are kept RECORDS_DAYS, as long as a keeper's line could
 -- bring one back; this many at most only against a flood, far past a busy Church's 120 days.)
+-- (1.2.3: not fewer. A full ledger lets go a record for each one it takes, a mark for each credited one
+-- or transfer: a Church taking a few hundred a day makes tens of thousands in RECORDS_DAYS, and a mark
+-- let go early lets its recruit count again. Count.Prune lists them only when they are past this many.)
 Count.GONE_MAX = 100000
 Count.REG_DAYS, Count.REG_OPEN, Count.REG_ALL = 14, 15, 300
 Count.REG_CHECKS = { 0, 1, 3, 7, 14 }
@@ -109,6 +112,16 @@ Count.EVIDENCE_HOUR, Count.EVIDENCE_DAY = 30, 100
 Count.VERIFIED_HOUR, Count.VERIFIED_DAY = 300, 2000
 Count.NEW_DAYS = 90
 Count.CHECK_TTL, Count.CHECK_ANSWERS, Count.CHECKS_HOUR, Count.CHECKS_HEARD_HOUR = 600, 8, 30, 60
+-- (1.2.3: the desk sends CHECKS_TICK checks a tick at most, so the hour's CHECKS_HOUR go out within five
+-- minutes. Just logged in, it sent all thirty in its first tick, each with its own list of who may answer
+-- walked from the 1,000-row roster: a fifth of a second and 5 MB of garbage on the author's laptop.)
+Count.CHECKS_TICK = 3
+-- (1.2.3) Which checks are due is looked for again when the ledger changed, else DUE_EVERY; the credits
+-- are kept CREDITS_KEEP at most while the ledger does not change (Count.Credits).
+Count.DUE_EVERY, Count.CREDITS_KEEP = 600, 600
+-- (1.2.3) The ledger's first upkeep of a session, PRUNE_AFTER to PRUNE_AFTER + PRUNE_SPREAD after its first
+-- tick (it came with the login's other work), then hourly.
+Count.PRUNE_AFTER, Count.PRUNE_SPREAD = 300, 600
 Count.STAY_DAYS, Count.STAY_TRIES = 7, 3
 Count.POINTS_JOIN, Count.POINTS_STAY = 10, 5
 Count.SHARES = { 0.25, 0.10, 0.05 }
@@ -161,6 +174,9 @@ local function Changed()
 	ns.Fire("CHURCH_COUNT_CHANGED")
 end
 Count.Changed = Changed
+-- (1.2.3) What only the tab shows changed (an answer kept, the public rows): the ledger did not, and
+-- its credits stay.
+local function ViewChanged() ns.Fire("CHURCH_COUNT_CHANGED") end
 
 ---------------------------------------------------------------------------
 -- Saved data (ns.rdb.church)
@@ -220,6 +236,11 @@ local function ReadMem(v)
 	return tonumber(gi), UnB36(first), UnB36(last)
 end
 
+-- (1.2.3) The names already written today in this guild of this memory, each as it is there: every roster
+-- scan, about every minute, wrote all thousand of them again the same. A new day, guild or memory starts
+-- over; a name the bounding below lets go is written again.
+local written = { keys = {} }
+
 -- After each complete scan of our roster (once per generation): every member's first and last day.
 function Count.Remember(force)
 	local R = ns.Roster
@@ -231,25 +252,38 @@ function Count.Remember(force)
 	local mem = Mem()
 	local gi = GuildIndex(mem, guild)
 	local today = Day(Clock())
+	if written.day ~= today or written.gi ~= gi or written.mem ~= mem or written.n ~= mem.n then
+		written = { day = today, gi = gi, mem = mem, n = mem.n, keys = {} }
+	end
+	local done = written.keys
 	for _, row in ipairs(R.members) do
 		local k = Key(row.full or row.name)
-		if k then
+		if k and not done[k] then
 			local g, first = ReadMem(mem.n[k])
 			if not mem.n[k] then mem.count = mem.count + 1 end
 			if g ~= gi or not first then first = today end
 			mem.n[k] = gi .. ":" .. B36(first) .. ":" .. B36(today)
+			done[k] = true
 		end
 	end
-	-- Bounded: names not seen for MEMORY_DAYS go, then the oldest last days.
+	-- Bounded: names not seen for MEMORY_DAYS go, then the oldest last days. (1.2.3: listed and sorted only
+	-- past MEMORY_MAX; a name that goes is written again the next time it is seen.)
 	if mem.count > Count.MEMORY_MAX or Count.random(1, 50) == 1 then
-		local list = {}
+		local n = 0
 		for k, v in pairs(mem.n) do
 			local _, _, last = ReadMem(v)
-			if not last or today - last > Count.MEMORY_DAYS then mem.n[k] = nil else list[#list + 1] = { k = k, last = last } end
+			if not last or today - last > Count.MEMORY_DAYS then mem.n[k], done[k] = nil, nil else n = n + 1 end
 		end
-		table.sort(list, function(a, b) if a.last ~= b.last then return a.last > b.last end return a.k < b.k end)
-		for i = Count.MEMORY_MAX + 1, #list do mem.n[list[i].k] = nil end
-		mem.count = math.min(#list, Count.MEMORY_MAX)
+		if n > Count.MEMORY_MAX then
+			local list = {}
+			for k, v in pairs(mem.n) do
+				local _, _, last = ReadMem(v)
+				list[#list + 1] = { k = k, last = last }
+			end
+			table.sort(list, function(a, b) if a.last ~= b.last then return a.last > b.last end return a.k < b.k end)
+			for i = Count.MEMORY_MAX + 1, #list do mem.n[list[i].k], done[list[i].k] = nil, nil end
+		end
+		mem.count = math.min(n, Count.MEMORY_MAX)
 	end
 	return true
 end
@@ -1130,61 +1164,67 @@ end
 -- confirmed comes before one only its own recruiter stands behind, then the earliest: a made-up
 -- report dated earlier takes no recruit from the one the log and a witness show.
 local function Confirmed(r) return r.ws ~= nil and #r.ws > 0 end
+-- The claim that comes first on one recruit: a confirmed one, then the earliest, then the smaller id.
+local function Before(id, r, bid, b)
+	local conf, bconf = Confirmed(r), Confirmed(b)
+	return (conf and not bconf) or (conf == bconf and ((r.tc or 0) < (b.tc or 0) or ((r.tc or 0) == (b.tc or 0) and id < bid)))
+end
 
+-- { states = id -> state, winners = "<recruit>:" -> the id his claim is, byPerson = person key -> the
+-- ids of his records, r = the records }. (1.2.3: kept while the ledger is the same, until the first open
+-- registration reaches REG_DAYS and CREDITS_KEEP at most, nothing else in it depends on the time; built
+-- in one pass over the ids, no table for each record: every minute's 1,932 records cost 30 ms and over
+-- 1 MB of garbage on the author's laptop, the same result each time.)
 function Count.Credits()
 	local now = Clock()
-	if credits and credits.rev == ledRev and now - credits.at < 60 then return credits end
-	local groups, states, byPerson = {}, {}, {}
-	for id, r in pairs(Led().r) do
-		local xk = id:match("^([^:]+):")
-		if xk then
-			groups[xk] = groups[xk] or {}
-			table.insert(groups[xk], { id = id, r = r })
+	local recs = Led().r
+	local c = credits
+	if c and c.rev == ledRev and c.r == recs and now >= c.at and now <= c.til then return c end
+	local states, byPerson, winners, G = {}, {}, {}, Gone()
+	local til = now + Count.CREDITS_KEEP
+	for id, r in pairs(recs) do
+		local xc = id:match("^[^:]+:")
+		if xc then
 			local by = Key(r.bn)
 			if by then
-				byPerson[by] = byPerson[by] or {}
-				table.insert(byPerson[by], { id = id, r = r })
+				local list = byPerson[by]
+				if not list then list = {}; byPerson[by] = list end
+				list[#list + 1] = id
 			end
-		end
-	end
-	local winners, G = {}, Gone()
-	for xk, list in pairs(groups) do
-		-- (1.2.1: a recruit the archive counts already, Gone, is no live claim's: he counts once.)
-		local archived = G[xk .. ":"] ~= nil
-		local best
-		for _, e in ipairs(list) do
-			local r = e.r
 			local state
 			if r.x then state = "withdrawn"
 			elseif r.t then state = "transfer"
 			elseif r.a then state = "alt"
-			elseif r.kind == "g" and not r.tj then state = now - (r.tc or 0) <= Count.REG_DAYS * DAY and "open" or "expired"
+			elseif r.kind == "g" and not r.tj then
+				state = now - (r.tc or 0) <= Count.REG_DAYS * DAY and "open" or "expired"
+				local ends = (r.tc or 0) + Count.REG_DAYS * DAY
+				if state == "open" and ends < til then til = ends end
 			elseif r.kind == "g" and r.tj > (r.tc or 0) + Count.REG_DAYS * DAY then state = "expired"
 			else state = "valid" end
-			states[e.id] = state
-			if not archived and (state == "valid" or state == "open") then
-				local conf, bconf = Confirmed(r), best ~= nil and Confirmed(best.r)
-				if not best or (conf and not bconf) or (conf == bconf and ((r.tc or 0) < (best.r.tc or 0)
-					or ((r.tc or 0) == (best.r.tc or 0) and e.id < best.id))) then best = e end
+			if state == "valid" or state == "open" then
+				-- (1.2.1: a recruit the archive counts already, Gone, is no live claim's: he counts once.)
+				local bid = winners[xc]
+				if G[xc] ~= nil then state = "taken"
+				elseif not bid then winners[xc] = id
+				elseif Before(id, r, bid, recs[bid]) then states[bid], winners[xc] = "taken", id
+				else state = "taken" end
 			end
+			states[id] = state
 		end
-		for _, e in ipairs(list) do
-			if states[e.id] == "valid" or states[e.id] == "open" then
-				if e == best then
-					if states[e.id] == "valid" then states[e.id] = Confirmed(e.r) and "credited" or "pending" end
-				else
-					states[e.id] = "taken"
-				end
-			end
-		end
-		if best then winners[xk] = { id = best.id, r = best.r, state = states[best.id] } end
 	end
-	credits = { rev = ledRev, at = now, states = states, winners = winners, byPerson = byPerson }
+	for _, id in pairs(winners) do
+		if states[id] == "valid" then states[id] = Confirmed(recs[id]) and "credited" or "pending" end
+	end
+	credits = { rev = ledRev, at = now, til = til, r = recs, states = states, winners = winners, byPerson = byPerson }
 	return credits
 end
 
+-- The claim a recruit counts for: { id, r, state }, or nil.
 function Count.CreditOf(recruitKey)
-	return Count.Credits().winners[recruitKey or ""]
+	local C = Count.Credits()
+	local id = C.winners[(recruitKey or "") .. ":"]
+	if not id then return nil end
+	return { id = id, r = C.r[id], state = C.states[id] }
 end
 function Count.StateOf(id) return Count.Credits().states[id] end
 
@@ -1209,8 +1249,8 @@ function Count.Own(key, window)
 	local C = Count.Credits()
 	local out = { points = 0, joins = 0, stays = 0, pending = 0, transfers = 0, taken = 0, open = 0, guilds = {},
 		archived = { joins = 0, stays = 0 } }
-	for _, e in ipairs(C.byPerson[key or ""] or {}) do
-		local id, r = e.id, e.r
+	for _, id in ipairs(C.byPerson[key or ""] or {}) do
+		local r = C.r[id]
 		do
 			local state = C.states[id]
 			if state == "credited" then
@@ -1375,17 +1415,18 @@ end
 -- the desk missed, the 14th day's too, runs later, up to REG_LATE days past the last; its answer
 -- still needs the player's arrival within REG_DAYS), 7 on the days after STAY_DAYS (STAY_TRIES).
 local function DueChecks(now)
-	local C = Count.Credits()
+	local C
 	for id, r in pairs(Led().r) do
-		local state = C.states[id]
 		if r.tj and not r.c and not r.t and not r.a and not r.x then Count.QueueCheck(id, "j")
 		elseif r.kind == "g" and not r.tj and not r.t and not r.x then
 			local nextDay = Count.REG_CHECKS[(r.rq or 0) + 1]
 			local age = now - (r.tc or now)
 			if nextDay and age >= nextDay * DAY and age <= (Count.REG_DAYS + Count.REG_LATE) * DAY then Count.QueueCheck(id, "r") end
-		elseif (state == "credited" or state == "pending") and r.y == nil and (r.q7 or 0) < Count.STAY_TRIES
-			and now >= r.tj + (Count.STAY_DAYS + (r.q7 or 0)) * DAY then
-			Count.QueueCheck(id, "7")
+		elseif r.y == nil and (r.q7 or 0) < Count.STAY_TRIES and r.tj and now >= r.tj + (Count.STAY_DAYS + (r.q7 or 0)) * DAY then
+			-- (1.2.3: the credits only for a record whose stay check is due; one with no join has none.)
+			C = C or Count.Credits()
+			local state = C.states[id]
+			if state == "credited" or state == "pending" then Count.QueueCheck(id, "7") end
 		end
 	end
 end
@@ -1477,16 +1518,23 @@ local function ExpectedAnswer(c, sender)
 	return false
 end
 
--- The desk's work each tick: due checks out within CHECKS_HOUR, open ones closed after CHECK_TTL.
+-- The desk's work each tick: due checks out within CHECKS_HOUR, CHECKS_TICK a tick, open ones closed
+-- after CHECK_TTL. (1.2.3: the due ones looked for when the ledger changed, else DUE_EVERY; the checks
+-- of one tick share one list of who may answer, read only.)
+local dueRev, dueAt = nil, -math.huge
 function Count.DeskTick(now)
 	local t = ns.Now()
 	for _, c in pairs(checks) do
 		if t - c.sent >= Count.CHECK_TTL then CloseCheck(c) end
 	end
 	if not Church.IsDesk() or Church.IsKing(ns.me) or Off() then return end
-	DueChecks(now)
+	if dueRev ~= ledRev or now - dueAt >= Count.DUE_EVERY or now < dueAt then
+		dueRev, dueAt = ledRev, now
+		DueChecks(now)
+	end
 	for i = #checkTimes, 1, -1 do if t - checkTimes[i] >= 3600 then table.remove(checkTimes, i) end end
-	while #queued > 0 and #checkTimes < Count.CHECKS_HOUR and ns.Comm.QueueRoom() > Count.SEND_ROOM do
+	local expected, n = nil, 0
+	while #queued > 0 and n < Count.CHECKS_TICK and #checkTimes < Count.CHECKS_HOUR and ns.Comm.QueueRoom() > Count.SEND_ROOM do
 		local q = table.remove(queued, 1)
 		queuedSet[q.id .. ":" .. q.why] = nil
 		local r = Led().r[q.id]
@@ -1494,9 +1542,10 @@ function Count.DeskTick(now)
 			openSet[q.id .. ":" .. q.why] = true
 			nextCheck = (nextCheck + 1) % 1679616
 			local cid = B36(nextCheck)
-			checks[cid] = { cid = cid, rid = q.id, why = q.why, sent = t, answers = {}, from = {}, expected = CheckRecipients() }
+			expected = expected or CheckRecipients()
+			checks[cid] = { cid = cid, rid = q.id, why = q.why, sent = t, answers = {}, from = {}, expected = expected }
 			checkTimes[#checkTimes + 1] = t
-			stats.checks = stats.checks + 1
+			stats.checks, n = stats.checks + 1, n + 1
 			ns.Comm.Send("CHANNEL", ("NS~1~q~%s~%s~%s"):format(cid, r.n, q.why), nil, false, false)
 		end
 	end
@@ -1949,7 +1998,7 @@ function Count.TakeAnswerLine(sender, text)
 		local rows = incoming[key] or {}
 		incoming[key] = nil
 		view[what .. ":" .. window .. ":" .. tostring(pk)] = { rows = rows, asOf = UnB36(asOf), from = Church.Key(sender) and ns.ShortName(sender) }
-		Changed()
+		ViewChanged()
 		return true
 	end
 	return Drop("kind")
@@ -2091,7 +2140,7 @@ function Count.TakePublicRow(sender, text)
 	if rank == 1 then v[list] = {} end
 	v[list][rank] = { name = Short(WireName(name)), s30 = tonumber(s30) / 10, sall = tonumber(sall) / 10 }
 	v.t = ns.Now()
-	Changed()
+	ViewChanged()
 	return true
 end
 
@@ -2108,7 +2157,7 @@ function Count.TakePublicCount(sender, text)
 	if type(v) ~= "table" or v.at ~= at then v = { at = at, a = {}, m = {} }; c.pubView = v end
 	if n == 0 then v[list] = {} else for rank in pairs(v[list]) do if type(rank) ~= "number" or rank > n then v[list][rank] = nil end end end
 	v.t = ns.Now()
-	Changed()
+	ViewChanged()
 	return true
 end
 
@@ -2123,19 +2172,28 @@ end
 
 -- The Head's or the author's client (a keeper): the top 3, while the switch is open, at once when it
 -- changes and TOP_EVERY apart otherwise (D8). A closed switch ends it on every client (Count.Top3).
+-- (1.2.3: worked out again only when what it is made of may have changed: the ledger, the book, the
+-- hour (the last 30 days move on), the top 3 held; and when TOP_EVERY sends it anyway. It was every tick,
+-- every person's numbers, only to find it the same.)
+local topFrom = {}
 function Count.SendTop(now)
 	local root = Church.RootCode(ns.me)
 	if (root ~= "H" and root ~= "W") or not Church.IsKeeper(ns.me) or Off() or not SettledSinceLogin() then return false end
 	if not Church.Public() then return false end
 	local t = ns.Now()
+	local S, held, hour = Church.State(), Count.Top3(), math.floor(Clock() / 3600)
+	local f = topFrom
+	if f.led == ledRev and f.rev == S.rev and f.listAt == S.listAt and f.blob == S.blob and f.hour == hour and f.held == held
+		and t - lastTop < Count.TOP_EVERY then return false end
+	topFrom = { led = ledRev, rev = S.rev, listAt = S.listAt, blob = S.blob, hour = hour, held = held }
 	local top = Count.ComputeTop3()
-	local held = Count.Top3()
 	local same = held and table.concat(held.apostles, ",") == table.concat(top.a, ",") and table.concat(held.missionaries, ",") == table.concat(top.m, ",")
 	if same and t - lastTop < Count.TOP_EVERY then return false end
 	lastTop = t
 	local at = Clock()
 	local text = ("NR~1~t~%s~%s~%s"):format(B36(at), #top.a > 0 and table.concat(top.a, ",") or "-", #top.m > 0 and table.concat(top.m, ",") or "-")
 	Count.TakeTop(ns.me, text)
+	topFrom.held = Count.Top3()
 	ns.Comm.Send("CHANNEL", text, "church-top", false, false)
 	if OwnGuild() then ns.Comm.Send("GUILD", text, "church-top-guild", false, false) end
 	return true
@@ -2237,25 +2295,29 @@ ns.Comm.Handle("NL", function(dist, sender, text) Count.Receive("NL", dist, send
 ns.Comm.Handle("NR", function(dist, sender, text) Count.Receive("NR", dist, sender, text) end)
 
 -- Records past RECORDS_DAYS fold into their recruiter's archive; registrations past REG_DAYS stay
--- (shown as expired) until then.
+-- (shown as expired) until then. (1.2.3: the ledger counts as changed only when something went, and
+-- the marks of what it let go are listed only when they are over GONE_MAX.)
+local WINDOW_HOURS = { "wj", "wy" }
 function Count.Prune()
 	local l = Led()
 	local now = Clock()
-	local C = Count.Credits()
+	local C, changed = nil, false
 	for id, r in pairs(l.r) do
 		if TooOld(r, now) then
+			C = C or Count.Credits() -- (before the first record goes: the claims as they were)
 			if C.states[id] == "credited" then Archive(r, now, id) end
 			l.r[id] = nil
+			changed = true
 		end
 	end
 	-- (1.2.1: archived records no window counts any more go; their person's all-time totals are first
 	-- made at least the archive's, so all time stays as it was.)
 	local keep = now - WindowKeep() - 3600
 	for by, set in pairs(Arc()) do
-		if type(set) ~= "table" then l.arc[by] = nil else
+		if type(set) ~= "table" then l.arc[by], changed = nil, true else
 			local aj, ay, old = 0, 0, false
 			for xk, a in pairs(set) do
-				if type(a) ~= "table" or type(a.h) ~= "number" then set[xk] = nil else
+				if type(a) ~= "table" or type(a.h) ~= "number" then set[xk], changed = nil, true else
 					aj, ay = aj + 1, ay + (a.y == 1 and 1 or 0)
 					if a.h < keep then old = true end
 				end
@@ -2268,29 +2330,34 @@ function Count.Prune()
 					p.ap, p.aj, p.ay, p.u = math.max(p.ap or 0, ap), math.max(p.aj or 0, aj), math.max(p.ay or 0, ay), Clock()
 				end
 				for xk, a in pairs(set) do if a.h < keep then set[xk] = nil end end
+				changed = true
 			end
-			if next(set) == nil then l.arc[by] = nil end
+			if next(set) == nil then l.arc[by], changed = nil, true end
 		end
 	end
 	-- (What it let go, Gone: RECORDS_DAYS, then GONE_MAX at most, the oldest first.)
-	local g, marks = Gone(), {}
+	local g, n = Gone(), 0
 	for k, t in pairs(g) do
-		if type(t) ~= "number" or now - t > Count.RECORDS_DAYS * DAY then g[k] = nil else marks[#marks + 1] = { k = k, t = t } end
+		if type(t) ~= "number" or now - t > Count.RECORDS_DAYS * DAY then g[k], changed = nil, true else n = n + 1 end
 	end
-	if #marks > Count.GONE_MAX then
+	if n > Count.GONE_MAX then
+		local marks = {}
+		for k, t in pairs(g) do marks[#marks + 1] = { k = k, t = t } end
 		table.sort(marks, function(a, b) if a.t ~= b.t then return a.t < b.t end return a.k < b.k end)
 		for i = 1, #marks - Count.GONE_MAX do g[marks[i].k] = nil end
+		changed = true
 	end
 	for _, p in pairs(l.p) do
-		for _, f in ipairs({ "wj", "wy" }) do
+		for _, f in ipairs(WINDOW_HOURS) do
 			local t = type(p) == "table" and p[f]
 			if type(t) == "table" then
-				for hour in pairs(t) do if type(hour) ~= "number" or hour < keep then t[hour] = nil end end
-				if next(t) == nil then p[f] = nil end
+				for hour in pairs(t) do if type(hour) ~= "number" or hour < keep then t[hour], changed = nil, true end end
+				if next(t) == nil then p[f], changed = nil, true end
 			end
 		end
 	end
-	Changed()
+	if changed then Changed() end
+	return changed
 end
 
 function Count.CheckSaved()
@@ -2323,7 +2390,7 @@ function Count.CheckSaved()
 	Changed()
 end
 
-local lastPruneCount = -math.huge
+local nextPruneCount
 function Count.Tick(now)
 	now = now or ns.Now()
 	Count.Remember(false)
@@ -2335,7 +2402,8 @@ function Count.Tick(now)
 		Count.RetryLater()
 		Count.SendPublic(now)
 		Count.SendTop(now)
-		if now - lastPruneCount >= 3600 then lastPruneCount = now; Count.Prune() end
+		nextPruneCount = nextPruneCount or now + Count.random(Count.PRUNE_AFTER, Count.PRUNE_AFTER + Count.PRUNE_SPREAD)
+		if now >= nextPruneCount then nextPruneCount = now + 3600; Count.Prune() end
 	end
 end
 

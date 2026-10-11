@@ -137,11 +137,25 @@ end
 local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
 
 -- A person however a name reaches us: folded, no realm (Forever's names are one across a group).
+-- (1.2.3: the key of a name ns.Normal leaves as it is, whatever realm groups this client knows, is kept,
+-- KEY_MEMO_MAX names at most: one with no "-" followed by more, or with a space before its first "-", as
+-- the server writes "First Surname-Realm". The roster's thousand names and the ledger's were folded again
+-- on every pass. "First-Surname" is never kept: a realm group learned later can change its key.)
+Church.KEY_MEMO_MAX = 5000
+local keyMemo, keyMemoN = {}, 0
 local function Key(name)
 	if type(name) ~= "string" or name == "" or name == "-" then return nil end
+	local k = keyMemo[name]
+	if k then return k end
 	local short = ns.ShortName(ns.Normal(name))
 	if not short or short == "" then return nil end
-	return ns.Fold(short)
+	k = ns.Fold(short)
+	local first = name:match("^([^%-]+)%-.")
+	if not first or first:find(" ", 1, true) then
+		if keyMemoN >= Church.KEY_MEMO_MAX then keyMemo, keyMemoN = {}, 0 end
+		keyMemo[name], keyMemoN = k, keyMemoN + 1
+	end
+	return k
 end
 Church.Key = Key
 
