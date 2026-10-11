@@ -47,6 +47,8 @@ local L = ns.L
 --   NV~1~w~<inviter>~<invitee>~<guild>~<invite hour36>~<join hour36>   a log pair  -> keepers
 --   NV~1~g~<recruit>~<at36>   a registration   NV~1~x~<recruit>~<at36>   its withdrawal  -> keepers
 --   NV~1~o~<0|1>~<at36>       my row in the public view (off by default)               -> keepers
+--   NV~1~k~<h1,h2,...>   (1.2.1) a keeper's receipt for the reports it took (Comm.Hash36 of each text,
+--                        RECEIPT_IDS at most) -> their reporter; clients before 1.2.1 drop it
 --   NS~1~q~<id36>~<name>~<j|r|7>    the desk's seen-check, CHANNEL (j: new to Olympus? r: arrived for
 --                                   a registration? 7: still in?)
 --   NS~1~a~<id36>~<guild>~<first day36>~<last day36>~<now 0|1>   an answer from roster memory -> desk
@@ -76,7 +78,11 @@ Count.PAIR_HOURS = 48
 Count.CLAIM_KEEP = 7 * 86400
 Count.MEMORY_MAX, Count.MEMORY_DAYS, Count.GUILDS_MAX = 2500, 120, 64
 Count.EV_MAX, Count.EV_DAYS, Count.INV_MAX, Count.ATT_MAX, Count.ATT_DAYS = 3000, 8, 300, 500, 14
-Count.OUTBOX_MAX, Count.OUTBOX_DAYS = 40, 7
+-- (1.2.1: 1500 reports, not 40: each waits here until a keeper's receipt, NV k, a busy Apostle's day of
+-- invites with them. RESEND_GAP after a round no keeper took one, it goes again, RESEND_TRIES rounds.)
+Count.OUTBOX_MAX, Count.OUTBOX_DAYS = 1500, 7
+Count.RESEND_GAP, Count.RESEND_TRIES = 3600, 4
+Count.RECEIPT_GAP, Count.RECEIPT_IDS, Count.RECEIPTS_FROM = 5, 24, 64
 -- (1.2.1: 6000 records, not 2000. One Apostle alone held 1316 within days of the Church opening, and
 -- a record must stay in the ledger for its 7-day stay check.)
 Count.RECORDS_MAX, Count.RECORDS_DAYS, Count.PEOPLE_MAX = 6000, 120, 400
@@ -87,7 +93,12 @@ Count.GONE_MAX = 100000
 Count.REG_DAYS, Count.REG_OPEN, Count.REG_ALL = 14, 15, 300
 Count.REG_CHECKS = { 0, 1, 3, 7, 14 }
 Count.REG_LATE = 7  -- a registration's check the desk missed on its day still runs this many days later
+-- What a keeper takes from one sender an hour and a day. (1.2.1: every report counts against the larger
+-- budget, sized for an Apostle's several hundred invites a day, each reported by his own client and by his
+-- guild's witnesses; one only the recruiter's alt stands behind against the smaller one too. 30 and 100
+-- for everyone cost the busiest Apostle most of his confirmations.)
 Count.EVIDENCE_HOUR, Count.EVIDENCE_DAY = 30, 100
+Count.VERIFIED_HOUR, Count.VERIFIED_DAY = 300, 2000
 Count.NEW_DAYS = 90
 Count.CHECK_TTL, Count.CHECK_ANSWERS, Count.CHECKS_HOUR, Count.CHECKS_HEARD_HOUR = 600, 8, 30, 60
 Count.STAY_DAYS, Count.STAY_TRIES = 7, 3
@@ -158,6 +169,8 @@ local function Ev() return Sub("ev", function() return { k = {}, n = 0 } end) en
 local function Inv() return Sub("inv", function() return {} end) end
 local function Att() return Sub("att", function() return {} end) end
 local function Out() return Sub("out", function() return {} end) end
+-- (1.2.1) The keepers whose receipts this client has had (key -> when): the ones a report goes to again.
+local function Rcpt() return Sub("rcpt", function() return {} end) end
 local function Claims() return Sub("claims", function() return {} end) end
 local function Fills() return Sub("fill", function() return {} end) end
 local function View() return Sub("view", function() return {} end) end
@@ -446,46 +459,132 @@ end
 -- Evidence to the keepers (or the outbox while none is online)
 ---------------------------------------------------------------------------
 
-local function Queue(text)
+-- A report into the outbox (once: the same text again is the same report). own: this keeper's own
+-- ledger took it; it goes once to each keeper online now, and none online, it waits for no one (the
+-- catch-up carries it).
+local function Queue(text, own)
 	local out = Out()
-	for _, o in ipairs(out) do if o.text == text then return end end
+	for _, o in ipairs(out) do if type(o) == "table" and o.text == text then return o end end
+	if own and #Church.KeepersOnline(false) == 0 then return nil end
 	if #out >= Count.OUTBOX_MAX then table.remove(out, 1) end
-	out[#out + 1] = { text = text, at = Clock() }
+	local o = { text = text, h = ns.Comm.Hash36(text), at = Clock(), n = 0, to = {}, own = own or nil }
+	out[#out + 1] = o
 	stats.queued = stats.queued + 1
+	return o
 end
 
--- To every keeper heard online, this client's own keeper book first. True when it went somewhere.
+-- To every keeper heard online, this client's own keeper book first, through the outbox. True when it
+-- went somewhere (or waits for a keeper's receipt).
 function Count.SendEvidence(text)
 	if Off() then return false end
 	local took = false
 	if Church.IsKeeper(ns.me) and not Church.IsKing(ns.me) then took = Count.TakeEvidence(ns.me, text) == true end
+	Queue(text, took)
+	Count.Flush()
+	return took or #Church.KeepersOnline(false) > 0
+end
+
+-- The outbox (1.2.1: every report waits here for a keeper's receipt, NV k, as Church.DeliverActs hands
+-- acts on). Each goes to every keeper heard online that has not had it this round, leaving room in Comm's
+-- queue (a busy read's reports, one whisper to each keeper, overflowed it and were lost); RESEND_GAP after
+-- a round no keeper took it (over its budget, away before it read, not yet able to vouch for the witness),
+-- again to the keepers whose receipts this client has had, RESEND_TRIES rounds; a keeper first heard later
+-- has it at once. OUTBOX_DAYS and OUTBOX_MAX at most. One this keeper's own ledger took goes once to each
+-- keeper online. The number sent.
+function Count.Flush()
+	local out = Out()
+	if not out or #out == 0 or Off() or (ns.ChatLocked and ns.ChatLocked()) then return 0 end
+	local now = Clock()
+	for i = #out, 1, -1 do
+		local o = out[i]
+		if type(o) ~= "table" or type(o.text) ~= "string" or now - (tonumber(o.at) or 0) > Count.OUTBOX_DAYS * DAY then table.remove(out, i) end
+	end
 	local keepers = Church.KeepersOnline(false)
-	if #keepers == 0 then
-		if not took then Queue(text) end
-		return took
+	if #keepers == 0 then return 0 end
+	local rc, sent = Rcpt(), 0
+	for _, o in ipairs(out) do
+		if type(o.to) ~= "table" then o.to = {} end
+		o.h, o.n = o.h or ns.Comm.Hash36(o.text), tonumber(o.n) or 0
+		if not o.own and o.n > 0 and o.n < Count.RESEND_TRIES and now - (tonumber(o.w) or 0) >= Count.RESEND_GAP then
+			o.n, o.w = o.n + 1, now
+			for k in pairs(o.to) do if rc[k] then o.to[k] = nil end end
+		end
+		for _, k in ipairs(keepers) do
+			local kk = Key(k.name)
+			if kk and not o.to[kk] then
+				if ns.Comm.QueueRoom() <= Count.SEND_ROOM then return sent end
+				o.to[kk] = true
+				if o.n == 0 then o.n, o.w = 1, now end
+				ns.Comm.Whisper(k.name, o.text, nil, false, false, nil, { owner = Count })
+				sent, stats.sent = sent + 1, stats.sent + 1
+			end
+		end
 	end
-	for _, k in ipairs(keepers) do
-		ns.Comm.Whisper(k.name, text, nil, false, false, nil, { owner = Count })
-		stats.sent = stats.sent + 1
+	for i = #out, 1, -1 do if out[i].own then table.remove(out, i) end end
+	return sent
+end
+
+-- A keeper's receipt (1.2.1): the reports it took leave the outbox (the catch-up carries them to the
+-- other keepers), and this keeper is one a report goes to again.
+function Count.TakeReceipt(sender, text)
+	local list = tostring(text or ""):match("^NV~1~k~([0-9a-z,]+)$")
+	if not list then return Drop("shape") end
+	if not Church.IsKeeper(sender) or Church.IsKing(sender) then return Drop("keeper") end
+	local got, n = {}, 0
+	for h in list:gmatch("[0-9a-z]+") do
+		n = n + 1
+		if n > Count.RECEIPT_IDS then break end
+		got[h] = true
 	end
+	local rc, k = Rcpt(), Key(sender)
+	if not rc[k] then
+		local m = 0
+		for _ in pairs(rc) do m = m + 1 end
+		if m >= Count.RECEIPTS_FROM then wipe(rc) end
+	end
+	rc[k] = Clock()
+	local out, done = Out(), 0
+	for i = #out, 1, -1 do
+		local o = out[i]
+		if type(o) == "table" and type(o.text) == "string" and got[o.h or ns.Comm.Hash36(o.text)] then table.remove(out, i); done = done + 1 end
+	end
+	stats.receipts = (stats.receipts or 0) + done
 	return true
 end
 
--- The outbox, once a keeper is heard: what waited OUTBOX_DAYS at most.
-function Count.Flush()
-	local out = Out()
-	if not out or #out == 0 or Off() then return end
-	local keepers = Church.KeepersOnline(false)
-	if #keepers == 0 then return end
-	local now = Clock()
-	local list = {}
-	for _, o in ipairs(out) do if now - (o.at or 0) <= Count.OUTBOX_DAYS * DAY then list[#list + 1] = o.text end end
-	wipe(out)
-	for _, text in ipairs(list) do
-		for _, k in ipairs(keepers) do ns.Comm.Whisper(k.name, text, nil, false, false, nil, { owner = Count }) end
-		stats.sent = stats.sent + 1
+-- The receipts this keeper owes (1.2.1): reporter key -> { name, ids }, sent RECEIPT_GAP after the first,
+-- RECEIPT_IDS to a line, leaving room in Comm's queue. A report refused for a reason another try could
+-- change (its budget, a witness not vouched for, a recruiter this book has not placed yet) gets none.
+local owed, owing = {}, false
+local FINAL = { shape = true, kind = true, times = true, self = true, guild = true, held = true, taken = true }
+local function SendReceipts()
+	owing = false
+	for k, r in pairs(owed) do
+		while #r.ids > 0 and ns.Comm.QueueRoom() > Count.SEND_ROOM do
+			local n = math.min(#r.ids, Count.RECEIPT_IDS)
+			ns.Comm.Whisper(r.name, "NV~1~k~" .. table.concat(r.ids, ",", 1, n), nil, false, false, nil, { owner = Count })
+			for _ = 1, n do table.remove(r.ids, 1) end
+		end
+		if #r.ids == 0 then owed[k] = nil end
 	end
+	if next(owed) then owing = true; Count.after(Count.RECEIPT_GAP, "church receipts", SendReceipts) end
 end
+function Count.Receipt(sender, text, ok, why)
+	if ok ~= true and not FINAL[why or ""] then return false end
+	local k = Key(sender)
+	if not k or k == Key(ns.me) then return false end
+	local r = owed[k]
+	if not r then
+		Church.Capped(owed, Count.PEOPLE_MAX)
+		r = { name = ns.FullName(sender), ids = {} }
+		owed[k] = r
+	end
+	if #r.ids >= Count.RECEIPT_IDS * 4 then return false end
+	r.ids[#r.ids + 1] = ns.Comm.Hash36(text)
+	if not owing then owing = true; Count.after(Count.RECEIPT_GAP, "church receipts", SendReceipts) end
+	return true
+end
+function Count.Owed() return owed end
 
 ---------------------------------------------------------------------------
 -- The keepers' ledger
@@ -759,14 +858,17 @@ function Count.MergeIn(id, rec, push)
 	return changed
 end
 
-local function Budget(sender, now)
+-- large: the larger budget (VERIFIED_HOUR, VERIFIED_DAY), every report's; else the smaller one.
+local function Budget(sender, now, large)
 	local k = Key(sender)
+	if not k then return false end
+	k = large and k or (k .. ":alt")
 	local b = evidenceRate[k]
 	local hour, day = math.floor(now / 3600), Day(now)
-	if not b then Church.Capped(evidenceRate, Count.PEOPLE_MAX) end
+	if not b then Church.Capped(evidenceRate, Count.PEOPLE_MAX * 2) end
 	if not b or b.hour ~= hour then b = { hour = hour, n = 0, day = b and b.day or day, d = b and b.d or 0 }; evidenceRate[k] = b end
 	if b.day ~= day then b.day, b.d = day, 0 end
-	if b.n >= Count.EVIDENCE_HOUR or b.d >= Count.EVIDENCE_DAY then return false end
+	if b.n >= (large and Count.VERIFIED_HOUR or Count.EVIDENCE_HOUR) or b.d >= (large and Count.VERIFIED_DAY or Count.EVIDENCE_DAY) then return false end
 	b.n, b.d = b.n + 1, b.d + 1
 	return true
 end
@@ -806,7 +908,7 @@ function Count.TakeEvidence(sender, text)
 	local now = Clock()
 	local M = ns.Moderation
 	if M and M.Hides and M.Hides(sender, nil) then return Drop("netoff") end
-	if not Budget(sender, now) then return Drop("budget") end
+	if not Budget(sender, now, true) then return Drop("budget") end
 	local sk = Key(sender)
 	if kind == "w" then
 		local inviter, invitee, guild, ti, tj = text:match("^NV~1~w~([^~]+)~([^~]+)~([^~]+)~([0-9a-z]+)~([0-9a-z]+)$")
@@ -825,6 +927,7 @@ function Count.TakeEvidence(sender, text)
 		-- counted as one: a single whisper credited a recruit, or took one from his real recruiter.)
 		local independent = not own and not alt and VerifiedWitness(sender, guild)
 		if not own and not alt and not independent then return Drop("unverified") end
+		if alt and not Budget(sender, now, false) then return Drop("budget") end
 		stats.taken = stats.taken + 1
 		local id = xk .. ":" .. ik
 		local held = Led().r[id]
@@ -851,7 +954,8 @@ function Count.TakeEvidence(sender, text)
 		if kind == "x" then
 			local r = Led().r[id]
 			if not r or r.kind ~= "g" or r.tj then return Drop("none") end
-			return Count.MergeIn(id, { x = 1 }, false)
+			Count.MergeIn(id, { x = 1 }, false)
+			return true
 		end
 		if Led().r[id] then return Drop("held") end
 		local mine, all = OpenRegs(sk, now)
@@ -867,7 +971,11 @@ function Count.TakeEvidence(sender, text)
 		at = UnB36(at)
 		if not on or not at or at > now + Church.DATE_AHEAD then return Drop("shape") end
 		if not Church.IsPerson(sender) then return Drop("person") end
-		return Count.TakePerson(sk, { n = Short(sender), pub = on == "1", pat = at })
+		-- (1.2.1: taken, too, when this ledger holds that choice or a newer one: its receipt.)
+		if Count.TakePerson(sk, { n = Short(sender), pub = on == "1", pat = at }) then return true end
+		local p = Led().p[sk]
+		if p and (tonumber(p.pat) or 0) >= at then return true end
+		return Drop("full")
 	end
 	return Drop("kind")
 end
@@ -1994,7 +2102,10 @@ function Count.Receive(kind, dist, sender, text)
 	sender = ns.FullName(sender)
 	if kind == "NV" then
 		if dist ~= "WHISPER" then return Drop("lane") end
-		return Count.TakeEvidence(sender, text)
+		if text:match("^NV~1~k~") then return Count.TakeReceipt(sender, text) end
+		local ok, why = Count.TakeEvidence(sender, text)
+		Count.Receipt(sender, text, ok, why)
+		return ok, why
 	elseif kind == "NS" then
 		local k = text:match("^NS~1~(%a)~")
 		if k == "q" then
@@ -2116,7 +2227,7 @@ function Count.CheckSaved()
 		end
 		if not ok then c.led = nil end
 	end
-	for _, key in ipairs({ "mem", "ev", "inv", "att", "claims", "fill", "view", "me" }) do
+	for _, key in ipairs({ "mem", "ev", "inv", "att", "claims", "fill", "view", "me", "rcpt" }) do
 		if c[key] ~= nil and type(c[key]) ~= "table" then c[key] = nil end
 	end
 	if type(c.out) == "table" and #c.out > Count.OUTBOX_MAX then c.out = nil end

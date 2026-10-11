@@ -73,7 +73,8 @@ test("1.1.6 Church: the guild log: an invite by a missionary then the join is a 
 	w:ClearSent()
 	w:Run(61)
 	w:ReadLog(c.m1); w:ReadLog(c.wes)
-	eq(#w:Sent(nil, "NV"), 0, "duplicates are not sent again")
+	-- (1.2.1: the keepers' receipts are NV too, NV k.)
+	eq(#w:Sent(nil, "NV", nil, "w"), 0, "duplicates are not sent again")
 	local n = 0
 	for _ in pairs(w:As(c.a1, c.a1.Count.Led).r) do n = n + 1 end
 	eq(n, 1)
@@ -111,9 +112,13 @@ test("1.1.6 Church: evidence the keeper refuses: a recruiter with no place, invi
 	w.alts[Key("Mira Wells")] = { "Mira Alt-Realm" }
 	eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Alt-Realm", Ev("Mira Wells-Realm", "Alt Pal-Realm", World.GUILD, hour, hour)), true)
 	eq(StateOf(w, c.a1, "Alt Pal", "Mira Wells"), "pending")
-	-- Over budget: past EVIDENCE_HOUR from one sender, refused for the hour.
-	for i = 1, c.a1.Count.EVIDENCE_HOUR do w:As(c.a1, c.a1.Count.TakeEvidence, "Spam Mer-Realm", "NV~1~q~" .. i) end
+	-- Over budget: past VERIFIED_HOUR from one sender, refused for the hour (1.2.1: every report counts
+	-- against the larger budget; one only the recruiter's alt stands behind against EVIDENCE_HOUR too).
+	for i = 1, c.a1.Count.VERIFIED_HOUR do w:As(c.a1, c.a1.Count.TakeEvidence, "Spam Mer-Realm", "NV~1~q~" .. i) end
 	eq(Take("Spam Mer-Realm", Ev("Mira Wells-Realm", "Late Pal-Realm", World.GUILD, hour, hour)), "budget")
+	local function Pal(i) return "Alt Pal" .. string.char(97 + i % 26, 97 + math.floor(i / 26)) .. "-Realm" end
+	for i = 2, c.a1.Count.EVIDENCE_HOUR do eq(w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Alt-Realm", Ev("Mira Wells-Realm", Pal(i), World.GUILD, hour, hour)), true) end
+	eq(Take("Mira Alt-Realm", Ev("Mira Wells-Realm", "Alt Palz-Realm", World.GUILD, hour, hour)), "budget")
 	-- A net-off sender.
 	w.off[Key("Off Man")] = { off = true }
 	eq(Take("Off Man-Realm", Ev("Mira Wells-Realm", "Off Pal-Realm", World.GUILD, hour, hour)), "netoff")
@@ -1376,4 +1381,60 @@ test("1.2.1 Church: a keeper's lines are checked again: no recruit his own recru
 	w:Run(30)
 	eq(#view(), 1)
 	eq(view()[1].name, "Mira Wells"); eq(view()[1].score, 10, "the asked keeper's own rows")
+end)
+
+-- One hour of Mira's: `n` players invited and joined, the log read by her client and Wes's, then the hour.
+local function InviteHour(w, c, n, first, prefix)
+	w:Presence()
+	for i = 1, n do
+		local name = (prefix or "Day Rec") .. Letters(first + i)
+		w:LogEvent(World.GUILD, "invite", "Mira Wells", name, 0)
+		w:LogEvent(World.GUILD, "join", name, nil, 0)
+		w.members[World.GUILD] = w.members[World.GUILD] or {}
+		table.insert(w.members[World.GUILD], name)
+	end
+	w:RefreshRosters()
+	w:ReadLog(c.m1); w:ReadLog(c.wes)
+	w.log[World.GUILD] = {} -- (the game's log keeps its newest events only)
+	w:Run(3600)
+end
+local function Outbox(w, cl) return #(w:As(cl, function() return cl.Church.Store().out or {} end)) end
+
+test("1.2.1 Church: 400 players invited in a day are 400 confirmed recruits on every keeper (not 100 a day: the old budget per witness)", function()
+	local w, c = Cast()
+	for h = 0, 19 do InviteHour(w, c, 20, h * 20) end
+	for _, k in ipairs({ c.a1, c.a2 }) do
+		eq(w:As(k, k.Count.Own, Key("Mira Wells"), "m").joins, 400, k.name)
+		eq(w:As(k, k.Count.Own, Key("Mira Wells"), "a").points, 4000, k.name)
+	end
+	eq(Outbox(w, c.wes), 0, "every report had its receipt"); eq(Outbox(w, c.m1), 0)
+end)
+
+test("1.2.1 Church: a report no keeper took waits and goes again: to a keeper heard later, and an hour after one over its budget refused it", function()
+	local w, c = Cast()
+	-- Aldric, the only keeper who can vouch for Wes, is away; Bera takes Mira's own reports, not Wes's.
+	c.a1.online = false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	InviteHour(w, c, 10, 0, "Away Rec")
+	eq(w:As(c.a2, c.a2.Count.Own, Key("Mira Wells"), "m").pending, 10)
+	eq(Outbox(w, c.wes), 10, "Wes's reports wait"); eq(Outbox(w, c.m1), 0, "Bera's receipts for Mira's")
+	c.a1.online = true
+	w:Presence()
+	w:Run(15)
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(w:As(k, k.Count.Own, Key("Mira Wells"), "m").joins, 10, k.name) end
+	eq(Outbox(w, c.wes), 0)
+	-- Over Aldric's budget for the hour, five of fifteen are refused; the next hour's round brings them.
+	c.a1.Count.EVIDENCE_HOUR, c.a1.Count.VERIFIED_HOUR = 10, 10
+	w:Run(3600)
+	InviteHour(w, c, 15, 100, "Busy Rec")
+	eq(w:As(c.a1, c.a1.Count.Own, Key("Mira Wells"), "m").joins, 20)
+	eq(Outbox(w, c.wes), 5)
+	w:Presence()
+	w:Tick()
+	w:Run(30)
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(w:As(k, k.Count.Own, Key("Mira Wells"), "m").joins, 25, k.name) end
+	eq(Outbox(w, c.wes), 0); eq(Outbox(w, c.m1), 0)
+	-- (A receipt's line fits one message at its fullest.)
+	local full = "NV~1~k~" .. table.concat((function() local t = {} for i = 1, c.a1.Count.RECEIPT_IDS do t[i] = ns.Comm.Hash36("r" .. i) end return t end)(), ",")
+	assert(#full <= 255, #full)
 end)
