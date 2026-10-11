@@ -1465,3 +1465,102 @@ test("1.2.1 Church: a busy guild's invites wait for their joins: 320 invited in 
 	for _ in pairs(inv) do n = n + 1 end
 	eq(n, c.m1.Count.INV_MAX)
 end)
+
+-- 1.2.1, the review of the fix: re-sends that converge, witnesses that can't mint, registrations dated when heard,
+-- receipts never to keepers.
+
+-- Sent from one client to another: NV messages of kind `sub` naming `name` (nil: any).
+local function SentTo(w, from, to, sub, name)
+	local n = 0
+	for _, e in ipairs(w:Sent(from, "NV", "WHISPER", sub)) do
+		if Key(e.target) == to.key and (not name or e.msg:find(name, 1, true)) then n = n + 1 end
+	end
+	return n
+end
+
+test("1.2.1 Church: a report the keeper who can vouch refused for now goes to him again, however long he was away: a missionary named while he was away has every recruit confirmed on every keeper", function()
+	local w, c = Cast()
+	-- Aldric, the only keeper who can vouch for Wes, is away; Mira names Nova then (Bera's book and Wes's have her).
+	c.a1.online = false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(w:Act(c.m1, c.m1.Church.NameMissionary, "Nova Miss"), true)
+	w:Run(2 * 3600)
+	w:Presence()
+	w.members[World.GUILD] = w.members[World.GUILD] or {}
+	for i = 1, 5 do
+		local name = "Nova Rec" .. Letters(i)
+		w:LogEvent(World.GUILD, "invite", "Nova Miss", name, 0)
+		w:LogEvent(World.GUILD, "join", name, nil, 0)
+		table.insert(w.members[World.GUILD], name)
+	end
+	w:RefreshRosters()
+	w:ReadLog(c.wes)
+	w.log[World.GUILD] = {} -- (a busy guild's log: gone before Aldric could read it himself)
+	eq(Outbox(w, c.wes), 5, "Bera can't vouch for Wes: his reports wait")
+	-- Five hours, Bera online all along: no round of Wes's is spent on Aldric, who has none of them.
+	for _ = 1, 5 do w:Run(3600); w:Presence(); w:Tick() end
+	eq(SentTo(w, c.wes, c.a1, "w"), 0)
+	-- Aldric is back while Mira is away: Wes's reports reach him before his book has Nova.
+	c.m1.online = false
+	c.a1.online = true
+	w:Presence()
+	w:Run(15)
+	eq(w:As(c.a1, c.a1.Church.IsPerson, "Nova Miss"), true, "his book has her now")
+	eq(Joins(w, c.a1, "Nova Miss", "m"), 0, "refused while his book had not placed her")
+	eq(w:As(c.a1, c.a1.Count.Stats).dropped.recruiter, 5)
+	-- The next round brings them, to him and from him to Bera.
+	w:Run(3600); w:Presence(); w:Tick(); w:Run(30)
+	for _, k in ipairs({ c.a1, c.a2 }) do eq(Joins(w, k, "Nova Miss", "m"), 5, k.name) end
+	eq(Outbox(w, c.wes), 0)
+	-- Bounded: a report a keeper keeps refusing for now goes to him RESEND_TRIES times, then waits for another.
+	c.a1.Count.VERIFIED_HOUR = 0
+	w:ClearSent()
+	w:LogEvent(World.GUILD, "invite", "Nova Miss", "Nova Last", 0)
+	w:LogEvent(World.GUILD, "join", "Nova Last", nil, 0)
+	table.insert(w.members[World.GUILD], "Nova Last")
+	w:RefreshRosters()
+	w:ReadLog(c.wes)
+	w.log[World.GUILD] = {}
+	for _ = 1, 8 do w:Run(3600); w:Presence(); w:Tick() end
+	eq(SentTo(w, c.wes, c.a1, "w", "Nova Last"), c.wes.Count.RESEND_TRIES)
+	eq(Outbox(w, c.wes), 1)
+end)
+
+test("1.2.1 Church: no receipt goes to a keeper (one before 1.2.1 counts each line against its budget for him); a keeper's report its own ledger refused is tried again there, then goes to the others", function()
+	local w, c = Cast()
+	w:Presence()
+	-- Bera invites in Olympus Vale; her client reports, Aldric takes it: Mira gets receipts, Bera none.
+	w:LogEvent(World.GUILD2, "invite", "Bera Stone", "Vale Rec", 1)
+	w:LogEvent(World.GUILD2, "join", "Vale Rec", nil, 0)
+	Join(w, World.GUILD2, "Vale Rec")
+	w:LogEvent(World.GUILD, "invite", "Mira Wells", "Ember Rec", 1)
+	w:LogEvent(World.GUILD, "join", "Ember Rec", nil, 0)
+	Join(w, World.GUILD, "Ember Rec")
+	w:ClearSent()
+	w:ReadLog(c.a2); w:ReadLog(c.m1)
+	w:Run(30)
+	eq(StateOf(w, c.a1, "Vale Rec", "Bera Stone"), "pending")
+	eq(SentTo(w, c.a1, c.a2, "k"), 0, "no receipt to a keeper")
+	eq(SentTo(w, c.a1, c.m1, "k") >= 1, true, "a missionary's")
+	eq(Outbox(w, c.a2), 0)
+	-- Her own ledger refuses her next report (her budget for herself spent): it goes to Aldric, and an hour later her
+	-- own ledger takes it and she sends it once more.
+	local budget = c.a2.Count.VERIFIED_HOUR
+	c.a2.Count.VERIFIED_HOUR = 0
+	w:LogEvent(World.GUILD2, "invite", "Bera Stone", "Vale Late", 0)
+	w:LogEvent(World.GUILD2, "join", "Vale Late", nil, 0)
+	Join(w, World.GUILD2, "Vale Late")
+	w:ReadLog(c.a2)
+	w:Run(30)
+	eq(StateOf(w, c.a2, "Vale Late", "Bera Stone"), nil)
+	eq(StateOf(w, c.a1, "Vale Late", "Bera Stone"), "pending")
+	eq(Outbox(w, c.a2), 1)
+	eq(SentTo(w, c.a2, c.a1, "w", "Vale Late"), 1)
+	c.a2.Count.VERIFIED_HOUR = budget
+	w:Run(3600); w:Presence(); w:Tick(); w:Run(30)
+	eq(Rec(w, c.a2, "Vale Late", "Bera Stone").s, 1, "her own ledger took her report")
+	eq(Outbox(w, c.a2), 0)
+	eq(SentTo(w, c.a2, c.a1, "w", "Vale Late"), 2, "and it went once more")
+	eq(SentTo(w, c.a1, c.a2, "k"), 0)
+end)
