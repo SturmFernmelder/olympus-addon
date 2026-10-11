@@ -207,8 +207,10 @@ function Hop.Chance(mapID, zoneUID)
 	return math.min(1, Hop.OFFERS / math.max(1, crowd))
 end
 
--- 1.2.0: an Olympus member (our roster, or his guild's claim the channel takes, Channels.VerifiedLevel
--- 1+), never a stranger on an unsealed channel: only one gets an offer, a window or an invite.
+-- 1.2.0: an Olympus member (our roster, or a member of another Olympus guild that
+-- Channels.VerifiedLevel verified), never a stranger on an unsealed channel: only one gets an
+-- offer, a window or an invite, and only one's offer is taken. 1.2.1: a guild named in the sender's
+-- own messages is only his word (VerifiedLevel's 1, false): anyone on the channel can write it.
 local function Member(sender)
 	local R = ns.Roster
 	if R and R.RankOf and R.RankOf(sender) ~= nil then return true end
@@ -216,8 +218,8 @@ local function Member(sender)
 	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false end
 	local guild = M and M.GuildOf and M.GuildOf(sender)
 	if type(guild) ~= "string" or guild == "" or not (ns.IsFederation and ns.IsFederation(guild)) then return false end
-	local ok, level = pcall(C.VerifiedLevel, sender, guild)
-	return ok and type(level) == "number" and level >= 1
+	local ok, level, verified = pcall(C.VerifiedLevel, sender, guild)
+	return ok and type(level) == "number" and level >= 1 and verified == true
 end
 Hop.Member = Member
 
@@ -635,6 +637,8 @@ function Hop.HandleOffer(dist, sender, text)
 	sender = ns.FullName(sender)
 	if ns.Moderation.Hides and ns.Moderation.Hides(sender) then return end -- (1.1: net-off: no offer of theirs)
 	if ask.offers[sender] or ask.count >= Hop.MAX_OFFERS then return end
+	-- 1.2.1: only a member's offer (Member): the ask's id is on the channel for anyone to answer.
+	if not Member(sender) then stats.strangers = (stats.strangers or 0) + 1 return end
 	ask.offers[sender] = { name = sender, group = math.min(tonumber(group), 40), load = math.min(tonumber(load), 99), t = ns.Now(),
 		trusted = Hop.Trusted(sender) }
 	ask.count = ask.count + 1

@@ -326,19 +326,81 @@ test("hop adversarial (1.2.0): a stranger on the channel gets no offer, and his 
 		eq(#w.whispered, 0, "no offer to a stranger")
 		H.HandleRequest("WHISPER", "Stranger-Realm", "LR~42")
 		eq(#w.invited, 0); eq(#w.popups, 0)
-		-- A member of another federation guild, whose guild claim the channel takes: helped.
+		-- A member of another federation guild the channel verified (Channels.VerifiedLevel's
+		-- level, verified: here an officer the census names) is helped: the offer and the window.
+		-- (Changed on purpose, 1.2.1: the stub returned 1, false, a guild only claimed, and expected
+		-- an invite; such a claim is anyone's word now, its own test below.)
 		w.strangers["Ally-Realm"] = true
 		local guildOf, level = ns.Moderation.GuildOf, ns.Channels.VerifiedLevel
 		ns.Moderation.GuildOf = function(n) return ns.FullName(n) == "Ally-Realm" and "Olympus III" or guildOf(n) end
-		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 1, false end return level(n, g) end
+		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 2, true, 1 end return level(n, g) end
+		ns.db.layerAutoInvite = nil
 		local ok, err = pcall(function()
 			H.HandleAsk("CHANNEL", "Ally-Realm", "LQ~43~1453~7")
 			eq(w.whispered[1], "Ally-Realm LO~43~0~0")
 			H.HandleRequest("WHISPER", "Ally-Realm", "LR~43")
-			eq(w.invited[1], "Ally", "Always invite: invited")
+			eq(#w.popups, 1, "the window")
+			H.Answer(w.popups[1].data, true)
+			eq(w.invited[1], "Ally", "invited on the click")
 		end)
 		ns.Moderation.GuildOf, ns.Channels.VerifiedLevel = guildOf, level
 		ns.db.layerAutoInvite = nil
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- Review of 1.2.1: a guild named in the sender's own messages (Moderation.GuildOf) is only his
+-- word, and anyone on the channel can write "Olympus" into one: Channels.VerifiedLevel answers
+-- 1, false for it. Not membership: no offer (it tells him who helps on that layer), no window and
+-- no invite, even with Always invite.
+test("hop security (1.2.1): a claimed Olympus guild gets no offer, window or invite, even with Always invite", function()
+	WithHop(function(w, H)
+		w.see(7)
+		w.strangers["Claimer-Realm"] = true
+		local guildOf = ns.Moderation.GuildOf
+		ns.Moderation.GuildOf = function(n) if ns.FullName(n) == "Claimer-Realm" then return "Olympus Claimed" end return guildOf(n) end
+		local ok, err = pcall(function()
+			local level, verified = ns.Channels.VerifiedLevel("Claimer-Realm", "Olympus Claimed")
+			eq(level, 1); eq(verified, false, "the channel's own answer: a claim, not verified")
+			ns.db.layerAutoInvite = true
+			H.HandleAsk("CHANNEL", "Claimer-Realm", "LQ~42~1453~7")
+			eq(#w.whispered, 0, "no offer")
+			H.HandleRequest("WHISPER", "Claimer-Realm", "LR~42")
+			eq(#w.invited, 0, "no invite"); eq(#w.popups, 0, "no window")
+			eq(H.Stats().strangers, 2)
+		end)
+		ns.Moderation.GuildOf = guildOf
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- The asker's side (HandleOffer had no check): the ask's id is on the channel, so anyone could
+-- answer it with an offer and be asked for the invite.
+test("hop security (1.2.1): the asker takes no offer from a claimed guild; a verified member of another guild still helps", function()
+	WithHop(function(w, H)
+		w.see(7)
+		w.strangers["Claimer-Realm"], w.strangers["Stranger-Realm"], w.strangers["Ally-Realm"] = true, true, true
+		local guildOf, level = ns.Moderation.GuildOf, ns.Channels.VerifiedLevel
+		ns.Moderation.GuildOf = function(n)
+			local full = ns.FullName(n)
+			if full == "Claimer-Realm" then return "Olympus Claimed" end
+			if full == "Ally-Realm" then return "Olympus III" end
+			return guildOf(n)
+		end
+		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 2, true, 1 end return level(n, g) end
+		local ok, err = pcall(function()
+			H.Ask(1453, 8, "destination")
+			H.HandleOffer("WHISPER", "Stranger-Realm", "LO~1~0~0")
+			H.HandleOffer("WHISPER", "Claimer-Realm", "LO~1~0~0")
+			eq(H.State().count, 0, "neither offer is taken")
+			w.clock = w.clock + H.WINDOW; H.Tick()
+			eq(#w.whispered, 0, "nobody is asked for the invite")
+			H.HandleOffer("WHISPER", "Ally-Realm", "LO~1~0~0")
+			eq(H.State().count, 1, "a verified member of another guild")
+			H.Tick()
+			eq(w.whispered[1], "Ally-Realm LR~1")
+		end)
+		ns.Moderation.GuildOf, ns.Channels.VerifiedLevel = guildOf, level
 		if not ok then error(err, 0) end
 	end)
 end)

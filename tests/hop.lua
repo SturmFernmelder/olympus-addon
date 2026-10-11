@@ -71,7 +71,9 @@ local function WithHop(fn)
 			end
 			return count
 		end
+		-- (1.2.1: the asker takes members' offers only: these helpers are guildmates.)
 		function w.offer(name)
+			w.ranks[name .. "-Realm"] = w.ranks[name .. "-Realm"] or 3
 			c.Hop.HandleOffer("WHISPER", name .. "-Realm", "LO~" .. c.Hop.State().id .. "~0~0")
 		end
 		fn(w, c.Hop, c.Comm)
