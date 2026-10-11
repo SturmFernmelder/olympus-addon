@@ -1713,11 +1713,18 @@ Refresh = function()
 	extraBtn:SetShown(what ~= nil)
 	if what then Set(extraBtn, label, true) end
 	if win.bar and win.bar.Relayout then win.bar.Relayout() end
-	-- this player's dice in play can be picked only while he chooses (not the ones set aside)
+	-- this player's dice in play can be picked only while he chooses (not the ones set aside).
+	-- (1.2.1) A die he picked stays lit while the table is busy for a moment, the mouse on it or
+	-- not: only its hover goes. Its light went with the hover, so a 2 picked looked put back while
+	-- it still counted, and Keep & roll stayed off ("the 2 doesn't score") until a click on it.
 	for _, d in ipairs(sides[1].dice) do
 		local on = Pickable(d)
 		d.f:EnableMouse(on)
-		if not on and (d.hover or (d.lit and not d.moving and not S.sel[d.i] and d.where == "lane")) then d.hover = nil; d.lit = nil; Draw(d) end
+		if not on and (d.hover or (d.lit and not d.moving and not S.sel[d.i] and d.where == "lane")) then
+			d.hover = nil
+			if not S.sel[d.i] then d.lit = nil end
+			Draw(d)
+		end
 	end
 	for _, d in ipairs(sides[2].dice) do d.f:EnableMouse(false) end
 	-- a clock on screen: one ticker while it shows
