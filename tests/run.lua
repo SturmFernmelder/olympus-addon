@@ -52037,6 +52037,10 @@ do
 				assert(loadfile(ADDON_DIR .. "Gamepad.lua"))("Olympus", cns)
 				assert(loadfile(ADDON_DIR .. "ChatWindow.lua"))("Olympus", cns)
 				w.CW = cns.ChatWindow
+				-- (1.2.1: the tab's redraws wait ten times what the last one cost, ChatWindow.RedrawGap.
+				-- Its clock here is none, so this machine's speed never spaces a test's redraws; the gap
+				-- has its own test, tests/views-perf.lua.)
+				w.CW.Clock = function() return nil end
 				ns.ChatWindow = w.CW
 				w.UI = LoadUI()
 				w.fire = function(name, ...) for _, f in ipairs(w.on[name] or {}) do f(...) end end
@@ -52062,6 +52066,9 @@ do
 	assert(loadfile(ROOT .. "tests/chat-guild-labels.lua"))(ns, test, eq, WithWindow)
 	assert(loadfile(ROOT .. "tests/letter-content.lua"))(ns, test, eq)
 	assert(loadfile(ROOT .. "tests/player-profile-fight-history.lua"))(ns, test, eq, WithWindow)
+	-- (1.2.1: the views' work while nobody looks: the world map, the crafters' board, the Chat tab.)
+	assert(loadfile(ROOT .. "tests/views-perf.lua"))(ns, test, eq, { ADDON_DIR = ADDON_DIR, WithWindow = WithWindow,
+		WithMapIcons = WithMapIcons, RecordingPins = RecordingPins, WithGamepadUI = WithGamepadUI, Widget = Widget, T0 = T0 })
 
 	local function Line(t, sender, text, extra)
 		local e = { t = t, sender = sender, guild = "Olympus II", text = text }
