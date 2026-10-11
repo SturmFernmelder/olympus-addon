@@ -19,8 +19,10 @@ ns.ProfileEdit = ProfileEdit
 -- window's Profile tab (the screens) draws the same view model (ProfileEdit.ViewModel) and calls the same
 -- pickers.
 --   ViewModel() -> { frames = { { key, label, art, shape, metal, selected } } (the rank's, none, and
---     every frame held), titles = { { key, label, selected } } (none, and every title held), nick =
---     { a, n, text, lists = { A, N } }, emblem, pub, locked, letters = { { key, title, t, read } },
+--     every frame held; 1.2.1: and a signed Apostle's own look, own = true: Borders.OwnLook, on his
+--     screen alone, never his pick, so never sent), titles = { { key, label, selected } } (none,
+--     and every title held), nick = { a, n, text, lists = { A, N } }, emblem, pub, locked,
+--     letters = { { key, title, t, read } },
 --     preview = Preview(), councillor, honours = the honours held (Honors.Holdings's) }
 --   Preview() -> what another client shows of this player now: { frame, title, titleText, mark,
 --     frameTexture, shape, markTexture, nick, emblem }
@@ -37,6 +39,11 @@ PE.PORTRAIT = 40 -- the preview's portrait (its art reaches past it: HonorsNet.N
 
 local function P() return ns.ArenaProfile end
 local function H() return ns.HonorsNet end
+-- (1.2.1: the borders' own looks, Borders.OWN_LOOKS; none where Borders.lua is a stand-in.)
+local function B()
+	local b = ns.Borders
+	return type(b) == "table" and not b.missing and type(b.OwnLookAllowed) == "function" and type(b.SetOwnLook) == "function" and b or nil
+end
 
 ---------------------------------------------------------------------------
 -- The view model
@@ -70,6 +77,22 @@ function PE.ViewModel()
 		end
 		if h.title then vm.titles[#vm.titles + 1] = { key = h.title, label = HN.TitleText(h.key) or h.key, selected = pick.title == h.title } end
 	end
+	-- 1.2.1: a signed Apostle's own look (the red cross), on his own screen alone: while he wears it,
+	-- the frame picked (what everyone else sees) is not the one selected here.
+	local borders = B()
+	if borders then
+		local look = borders.OwnLook()
+		for key in pairs(borders.OWN_LOOKS or {}) do
+			if borders.OwnLookAllowed(key) then
+				local art, shape, metal = ns.Honors.ArtOf(key)
+				vm.frames[#vm.frames + 1] = { key = key, label = L.PROFILE_FRAME_RED_CROSS, art = art, shape = shape, metal = metal, own = true,
+					selected = look == key }
+			end
+		end
+		if look then
+			for _, x in ipairs(vm.frames) do if not x.own then x.selected = false end end
+		end
+	end
 	local a, n = tostring(m.nick or "0.0"):match("^(%d+)%.(%d+)$")
 	vm.nick = { a = tonumber(a) or 0, n = tonumber(n) or 0, text = PR.NickText(m.nick), lists = { A = L.ARENA_EPI_A, N = L.ARENA_EPI_N } }
 	for _, x in ipairs(HN.Letters()) do
@@ -84,8 +107,17 @@ end
 ---------------------------------------------------------------------------
 
 function PE.PickFrame(key)
+	-- 1.2.1: an own look (Borders.OWN_LOOKS) is this screen's alone: the pick, sent to everyone,
+	-- stays as it is. Any other frame ends it.
+	local borders = B()
+	if borders and borders.OWN_LOOKS and borders.OWN_LOOKS[key] then
+		local ok, why = borders.SetOwnLook(key)
+		PE.Refresh()
+		return ok, why
+	end
 	local pick = P().Pick()
 	local ok, why = P().SetPick(key or "rank", pick.title)
+	if ok and borders and borders.OwnLook and borders.OwnLook() then borders.SetOwnLook(nil) end
 	PE.Refresh()
 	return ok, why
 end

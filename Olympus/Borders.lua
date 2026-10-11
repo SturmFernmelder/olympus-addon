@@ -819,15 +819,80 @@ function Borders.ShowHonour(rig, key, metal)
 	return first ~= nil and ShowHonor(rig, first, metal)
 end
 
+---------------------------------------------------------------------------
+-- An Apostle's own look (1.2.1, the owner's call, for an Apostle who asked for it)
+---------------------------------------------------------------------------
+-- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
+-- on his own screen alone, while everyone else sees his normal frame. Offered in the frame picker
+-- (ProfileEdit) to anyone the signed Apostles list names (Church.SignedApostles: the author's
+-- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the
+-- plain underlay tinted black (UNDERLAY.black). Kept in this account's save, by character
+-- (ns.db.ownLooks), and never sent: the profile's word (AP) carries his pick as ever, so every
+-- other client works out his frame from his pick and his honours. It shows where his own portrait
+-- is: his unit frame, his target or focus while that is himself, his Olympus portraits
+-- (Borders.ShowPreviewOn); never on one drawn as others see him (the Edit's preview, the letters).
+-- Off the signed list, it shows no more and the picker drops it. The author's preview beats it.
+Borders.OWN_LOOKS = { ["apostle-red"] = "black" } -- key -> the metal under it
+
+-- On the signed Apostles list of the titles list we hold (our faction's), by Church's key.
+function Borders.IsSignedApostle(name)
+	local C = ns.Church
+	if type(name) ~= "string" or name == "" or type(C) ~= "table" or C.missing
+		or type(C.SignedApostles) ~= "function" or type(C.Key) ~= "function" then return false end
+	local ok, list = pcall(C.SignedApostles)
+	local key = C.Key(name)
+	if not ok or type(list) ~= "table" or not key then return false end
+	for _, a in ipairs(list) do
+		if type(a) == "table" and a.key == key then return true end
+	end
+	return false
+end
+
+-- A look this character may take: one of OWN_LOOKS, while the signed list names him.
+function Borders.OwnLookAllowed(key)
+	return type(key) == "string" and Borders.OWN_LOOKS[key] ~= nil and type(ns.me) == "string" and Borders.IsSignedApostle(ns.me)
+end
+
+-- The look this character took and may still take, or nil.
+function Borders.OwnLook()
+	local looks = ns.db and ns.db.ownLooks
+	local key = type(looks) == "table" and type(ns.me) == "string" and looks[ns.me] or nil
+	if key and Borders.OwnLookAllowed(key) then return key end
+	return nil
+end
+
+-- Take a look (nil: none). False, and nothing changed, for one he may not take. Saved here alone.
+function Borders.SetOwnLook(key)
+	if key ~= nil and not Borders.OwnLookAllowed(key) then return false, "apostle" end
+	local db = ns.db
+	if type(db) ~= "table" or type(ns.me) ~= "string" then return false, "db" end
+	if key == nil and type(db.ownLooks) ~= "table" then return true end
+	db.ownLooks = type(db.ownLooks) == "table" and db.ownLooks or {}
+	db.ownLooks[ns.me] = key
+	if next(db.ownLooks) == nil then db.ownLooks = nil end
+	Borders.RefreshAll()
+	ns.Fire("BORDERS_PREVIEW")
+	return true
+end
+
+-- His own look on a rig of his own portrait: true when it shows there.
+local function ShowOwnLook(rig)
+	local look = Borders.OwnLook()
+	return look ~= nil and ShowHonor(rig, look, Borders.OWN_LOOKS[look])
+end
+
 -- An Olympus portrait of the author himself while his preview is on: the preview, as round his
 -- own portrait (his screen alone, as ever), and only while it shows there (Active: the borders
 -- on, mouse and keyboard, an Olympus member; SetPreview says why not), so the two always match.
+-- 1.2.1: else an Apostle's own look, the same way, round his own (Borders.OwnLook).
 -- True and what shows ("rank", "honour" or nil), or false for anyone else, no preview or not
 -- now, nothing changed.
 function Borders.ShowPreviewOn(rig, who)
-	if not preview or type(who) ~= "string" or who == "" or type(ns.me) ~= "string" or not Active() then return false end
+	if type(who) ~= "string" or who == "" or type(ns.me) ~= "string" or not Active() then return false end
 	if ns.FullName(who):lower() ~= ns.me:lower() then return false end
-	return true, ShowPreview(rig, preview)
+	if preview then return true, ShowPreview(rig, preview) end
+	if ShowOwnLook(rig) then return true, "honour" end
+	return false
 end
 -- His preview changed, or whether it shows (the borders on or off, the gamepad UI): his Olympus
 -- portraits already drawn follow at once, as his unit frame does (the Arena's Kit listens).
@@ -898,6 +963,8 @@ function Borders.Refresh(unit, fresh)
 	if fresh or not k or guid == nil or k.guid ~= guid then k = Compute(unit, guid) end
 	local chosen = preview and UnitExists(unit) and IsMe(unit, guid) and preview or nil
 	if chosen then return ShowPreview(rig, chosen) end
+	-- 1.2.1: an Apostle's own look, on his own portrait on his own screen (Borders.OwnLook).
+	if Borders.OwnLook() and UnitExists(unit) and IsMe(unit, guid) and ShowOwnLook(rig) then return end
 	if k.off then return Show(rig, nil) end
 	-- 1.2: Most Wanted may only return a frame after an authenticated global snapshot activates its
 	-- fail-closed authority gate. The ordinary local kill ledger can never award one.
