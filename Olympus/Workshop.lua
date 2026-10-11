@@ -1711,13 +1711,15 @@ local passing         -- lists taken from our guild, on their way to our channel
 
 -- A signed list is for the realm group it names ("A+B"; none: any). One for another group is not
 -- ours (1.2.1 security review): it never replaces our list nor shuts it out with a newer time, and
--- one kept from before counts as none. Ours when any realm of it is of our realm's group, as this
--- client groups realms (Core.lua: ns.GroupOf, so a realm linked since counts as the readers count it).
+-- one kept from before counts as none. Ours when any realm of it is one whose census we share
+-- (ns.InGroup: the group these saved lists belong to) or of our own realm's group, as this client
+-- groups realms (ns.GroupOf: a realm linked since counts, as the readers count it). In the game
+-- the two are one group.
 local function OurGroup(realm)
 	if realm == nil or realm == "" then return true end
 	local mine = ns.GroupOf(ns.realm or ns.CurrentRealm())
 	for _, r in ipairs(ns.GroupRealms(realm)) do
-		if ns.GroupOf(r) == mine then return true end
+		if ns.InGroup(r) or ns.GroupOf(r) == mine then return true end
 	end
 	return false
 end
