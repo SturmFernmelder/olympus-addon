@@ -2749,11 +2749,18 @@ local function CopyFrame(key, big)
 	return f
 end
 
+-- (1.2.1) Its first opening's parts each in a ns.SafeCall of their own (the window made, its text
+-- set, shown, the Issue Reporter's step, the keyboard), so the in-game timer that measured 2.7 s
+-- for a whole first opening of the help on a slow laptop says which part takes it.
 function UI.ShowCopy(title, text, action, opts)
 	text = ns.Codec.NoMentions(text)
 	opts = type(opts) == "table" and opts or {}
 	local key = type(opts.key) == "string" and opts.key or "copy"
-	local copyFrame = CopyFrame(key, opts.big)
+	local copyFrame = copyFrames[key]
+	if not copyFrame then
+		ns.SafeCall("copy window made", function() copyFrame = CopyFrame(key, opts.big) end)
+		if not copyFrame then return nil end
+	end
 	local button = copyFrame.action
 	button.fn = action and action.fn or nil
 	button:SetShown(action ~= nil)
@@ -2811,9 +2818,9 @@ function UI.ShowCopy(title, text, action, opts)
 	-- set again for the client to lay out once more.
 	if copyFrame.text ~= text or copyFrame.eb:GetText() ~= text then
 		copyFrame.text = text
-		copyFrame.eb:SetText(text)
+		ns.SafeCall("copy text", function() copyFrame.eb:SetText(text) end)
 	end
-	copyFrame:Show()
+	ns.SafeCall("copy show", function() copyFrame:Show() end)
 	-- At its own place it steps above the Issue Reporter, like our window (its hint is
 	-- right over the reporter's default spot).
 	if not copyFrame.movedByPlayer then
@@ -2824,8 +2831,10 @@ function UI.ShowCopy(title, text, action, opts)
 	-- opts.auto (1.1.2): opened by itself, not by the player's click (a bug report that came in,
 	-- a version check's answer): never the keyboard, in either input mode, or his movement keys
 	-- and the chat line he was typing would go into it. A click in the text (or Select all) takes it.
-	if opts.auto or not ns.Focus(copyFrame.eb) then copyFrame.eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end) end
-	copyFrame.eb:HighlightText()
+	ns.SafeCall("copy focus", function()
+		if opts.auto or not ns.Focus(copyFrame.eb) then copyFrame.eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end) end
+		copyFrame.eb:HighlightText()
+	end)
 	return copyFrame
 end
 function UI.CopyFrame(key) return copyFrames[key or "copy"] end
