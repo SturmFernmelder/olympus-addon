@@ -27,11 +27,13 @@ ns.HonorsNet = HonorsNet
 --                                 hour later, never once that milestone's place is known here. Each
 --                                 client keeps the claim (timed when it first heard it) and counts it
 --                                 vouched once it is a verified member's (H.Vouched, 1.2.1: our own
---                                 guild's roster, the server's, at or above that level; another
---                                 guild's census, two of its senders other than him listing him
---                                 there, within 24 hours; never one census row); only vouched claims
---                                 take the place, which stays unless the server's word shows it
---                                 false (H.CheckPlaces: then it goes, and he never takes it again).
+--                                 guild's roster, the server's, at or above that level, with his own
+--                                 GUID; another guild's census, two of its senders other than him
+--                                 listing him there, within 24 hours; never one census row); only
+--                                 vouched claims take the place, which stays unless the server's word
+--                                 shows it false (H.CheckPlaces: his unit or our roster below it, or
+--                                 the GUID not his; then it goes, and he never takes it again here,
+--                                 by that GUID or by his name).
 --   ID t~monthKey~m1,m2,m3~a1,a2,a3   names only: the month's top 3 donors and all time's (the
 --                                 the design dropped the week's), from the Treasurer's characters'
 --                                 client (or the King's), on the channel and on GUILD; the newest
@@ -433,19 +435,53 @@ local function UnitLevelOf(guid)
 	if not okL or Secret(level) or type(level) ~= "number" or level < 1 then return nil end
 	return level
 end
+-- The players this client has in view now, by their full names (a forged claim's GUID may be one
+-- the game never gives, so his unit is found by his name, which the server sets): { [name, lower
+-- case] = { guid, level (nil: not given) } }.
+H.SEEN_UNITS = { "target", "focus", "mouseover", "party1", "party2", "party3", "party4" }
+local function SeenUnits()
+	local out = {}
+	if type(UnitExists) ~= "function" or type(UnitGUID) ~= "function" then return out end
+	for _, token in ipairs(H.SEEN_UNITS) do
+		local ok, exists = pcall(UnitExists, token)
+		local okP, player = true, true
+		if type(UnitIsPlayer) == "function" then okP, player = pcall(UnitIsPlayer, token) end
+		if ok and not Secret(exists) and exists and okP and not Secret(player) and player then
+			local name = ns.UnitFullName(token)
+			local okG, guid = pcall(UnitGUID, token)
+			if type(name) == "string" and okG and type(guid) == "string" and not Secret(guid) then
+				local okL, level = true, nil
+				if type(UnitLevel) == "function" then okL, level = pcall(UnitLevel, token) end
+				if not okL or Secret(level) or type(level) ~= "number" or level < 1 then level = nil end
+				out[ns.FullName(name):lower()] = { guid = guid, level = level }
+			end
+		end
+	end
+	return out
+end
 
 -- Vouched (1.2.1, the security review: one census row of anyone else's was proof, so a forged
 -- report won the place): the claim is a verified member's, at or above that level.
 --   Our guildmate: our fresh roster, the server's, at or above it (another guild's rows say nothing
---   of one of ours).
+--   of one of ours), and the claim's GUID his as the game gives it (VerifyGk: a guildmate's
+--   resolves; a made-up one never does, and his claim waits).
 --   Anyone else: census reports (Data.Receive keeps one guild per sender) of an Olympus guild not
 --   netted off, heard within VOUCH_WINDOW of the claim, listing him at or above it, from VOUCHERS
 --   senders of that one guild, none of them him (by his name alone, as Data.KnownRank asks). A
 --   guild's row is its newest report, so each sender seen is kept on the claim (c.by: guild ->
 --   senders) as his turn comes (the reporter every 3 minutes, its runner-up every 10).
+--   This is the census's own trust bar (Data.KnownRank's two senders), not the server's word:
+--   nothing proves a sender is in the guild he reports, nor that the guild exists (any name the
+--   Olympus rule takes), so three characters acting together can still forge a place here. Such a
+--   place goes once the server's word shows it false (CheckPlaces). A claimant who is one of his
+--   guild's two census senders (or whose guild has one other sender) is vouched here only by our
+--   roster, when he is our guildmate.
 function H.Vouched(c)
 	if type(c) ~= "table" or type(c.name) ~= "string" or not tonumber(c.level) then return false end
 	if Guildmate(c.name) then
+		-- (His own GUID, as the game gives a guildmate's: never a made-up one beside our roster's level.)
+		local P = ns.ArenaProfile
+		if not (type(P) == "table" and type(P.VerifyGk) == "function" and P.VerifyGk(c.name, c.gk) == true) then return false end
 		local level, fresh = RosterLevel(c.name)
 		return fresh and level ~= nil and level >= c.level or false
 	end
@@ -486,42 +522,77 @@ end
 -- A place found false (1.2.1, the security review: a place stayed forever whatever came to light):
 -- the server's word puts its holder below its milestone, his unit's level (by his GUID), or our
 -- guild's fresh roster read STRIKE_AFTER past the place's time (so it had his level-up). Levels
--- never go down: the claim was false.
-function H.Falsified(p, m)
+-- never go down: the claim was false. Its GUID is his word too (a made-up one is never resolved):
+-- the game giving that GUID another character's name (ArenaProfile.VerifyGk), or his own unit in
+-- view (by his name: H.SEEN_UNITS) with another GUID, or below the milestone, shows it false too.
+-- seen: SeenUnits(), when the caller has it.
+function H.Falsified(p, m, gk, seen)
 	if type(p) ~= "table" or not tonumber(m) then return false end
-	local level = UnitLevelOf(GameGuid(p.guid))
+	local guid = GameGuid(p.guid)
+	local level = UnitLevelOf(guid)
 	if level and level < m then return true end
+	gk = gk or Arena.GK(guid)
+	local P = ns.ArenaProfile
+	if gk and type(p.name) == "string" and type(P) == "table" and type(P.VerifyGk) == "function" and P.VerifyGk(p.name, gk) == false then return true end
+	local unit = type(p.name) == "string" and (seen or SeenUnits())[ns.FullName(p.name):lower()] or nil
+	if unit then
+		local seenGk = Arena.GK(unit.guid)
+		if gk and seenGk and seenGk ~= gk then return true end
+		if unit.level and unit.level < m then return true end
+	end
 	if type(p.name) == "string" and Guildmate(p.name) and Now() - (tonumber(p.t) or Now()) >= H.STRIKE_AFTER then
 		local rl, fresh = RosterLevel(p.name)
 		if fresh and rl and rl < m then return true end
 	end
 	return false
 end
-local function Struck(s, m, gk) return gk ~= nil and type(s.struck) == "table" and type(s.struck[m]) == "table" and s.struck[m][gk] ~= nil end
--- The places found false go: from the book, with the claims that made them, and their holder is
--- kept as struck for that milestone (s.struck: no claim of his nor a clerk's record takes it again
--- here). Returns the places struck ({ milestone, gk, name }).
+-- Struck for that milestone here: by his gk, or by his name (s.struckNames: a forger's next claim
+-- may give another gk; his name is the server's).
+local function NameKey(name) return type(name) == "string" and ns.FullName(name):lower() or nil end
+local function Struck(s, m, gk, name)
+	if gk ~= nil and type(s.struck) == "table" and type(s.struck[m]) == "table" and s.struck[m][gk] ~= nil then return true end
+	local key = NameKey(name)
+	return key ~= nil and type(s.struckNames) == "table" and type(s.struckNames[m]) == "table" and s.struckNames[m][key] ~= nil
+end
+-- One more key kept for milestone m in store[m] (STRUCK_MAX each, the oldest goes).
+local function Remember(store, m, key)
+	if not key then return end
+	local list = type(store[m]) == "table" and store[m] or {}
+	store[m] = list
+	list[key] = Now()
+	local n, oldest = 0, nil
+	for k, t in pairs(list) do
+		n = n + 1
+		if k ~= key and (not oldest or t < list[oldest]) then oldest = k end
+	end
+	if n > H.STRUCK_MAX and oldest then list[oldest] = nil end
+end
+-- The places found false go: from the book, with the claims that made them (his gk's or his
+-- name's), and their holder is kept as struck for that milestone by gk and by name (no claim of
+-- his nor a clerk's record takes it again here). Once gone, the place is open here again: the
+-- next vouched claim this client holds or hears for it takes it (one heard before the false place
+-- was recorded, kept CLAIM_DAYS, or a new level-up to it); a player who reached it while the false
+-- place stood sent no claim then (SendClaim), so he is not among them. Returns the places struck
+-- ({ milestone, gk, name }).
 function H.CheckPlaces()
 	local s = H.Store()
 	local out = {}
 	if not s or type(s.levels) ~= "table" then return out end
+	local seen
 	for _, m in ipairs(ns.Honors.MILESTONES) do
 		local p = type(s.levels[m]) == "table" and s.levels[m][1] or nil
 		local gk = type(p) == "table" and Arena.GK(GameGuid(p.guid)) or nil
-		if gk and H.Falsified(p, m) then
+		if gk then seen = seen or SeenUnits() end
+		if gk and H.Falsified(p, m, gk, seen) then
 			s.struck = type(s.struck) == "table" and s.struck or {}
-			local list = type(s.struck[m]) == "table" and s.struck[m] or {}
-			s.struck[m] = list
-			list[gk] = Now()
-			local n, oldest = 0, nil
-			for k, t in pairs(list) do
-				n = n + 1
-				if k ~= gk and (not oldest or t < list[oldest]) then oldest = k end
-			end
-			if n > H.STRUCK_MAX and oldest then list[oldest] = nil end
+			s.struckNames = type(s.struckNames) == "table" and s.struckNames or {}
+			Remember(s.struck, m, gk)
+			Remember(s.struckNames, m, NameKey(p.name))
 			s.levels[m] = nil
 			for key, c in pairs(type(s.claims) == "table" and s.claims or {}) do
-				if type(c) == "table" and c.gk == gk and c.level == m then s.claims[key] = nil end
+				if type(c) == "table" and c.level == m and (c.gk == gk or (NameKey(c.name) ~= nil and NameKey(c.name) == NameKey(p.name))) then
+					s.claims[key] = nil
+				end
 			end
 			out[#out + 1] = { milestone = m, gk = gk, name = p.name }
 			stats.struck = (stats.struck or 0) + 1
@@ -538,7 +609,10 @@ end
 -- vouched claims of it count.
 function H.RunRace()
 	local s = H.Store(true)
-	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.)
+	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.
+	-- The places recorded under it stay: the claims that made them are gone after CLAIM_DAYS, or
+	-- past VOUCH_WINDOW, so most true ones could not be proven again; CheckPlaces looks at them as
+	-- at any other, and one the server's word shows false goes.)
 	if s.vouchRule ~= H.VOUCH_RULE then
 		for _, c in pairs(s.claims) do if type(c) == "table" then c.vouched = false end end
 		s.vouchRule = H.VOUCH_RULE
@@ -604,7 +678,7 @@ local function OnLevel(dist, sender, mode, body)
 	if ok == false then return Count("gk") end
 	local s = H.Store(true)
 	-- (1.2.1: a character whose place at that milestone was found false never claims it again here.)
-	if Struck(s, level, gk) then return Count("struck") end
+	if Struck(s, level, gk, sender) then return Count("struck") end
 	-- One claim per sender and milestone, in his own name (never another's slot, nor a book filled
 	-- by one sender); the book full, its oldest unvouched claim goes.
 	local key = ns.FullName(sender):lower() .. ":" .. level
@@ -666,9 +740,9 @@ function H.TakeRecords(sender, mode, rest)
 	for part in tostring(rest):gmatch("[^,]+") do
 		local m, gk, name, t = part:match("^([0-9a-z]+):([^:]+):([^:]+):([0-9a-z]+)$")
 		m = N(m, 1, 60)
-		if m and ns.Honors.LEVEL_METAL[m] and Gk(gk) and not Placed(m) and not Struck(s, m, gk) then
+		if m and ns.Honors.LEVEL_METAL[m] and Gk(gk) and not Placed(m) then
 			local full = ns.ArenaFights.Unwire(name, sender)
-			if full then
+			if full and not Struck(s, m, gk, full) then
 				s.levels[m] = { { guid = Arena.GuidOf(gk), name = full, t = N(t, 0, 4294967295) or Now(), place = 1 } }
 				any = true
 				Changed(full)
