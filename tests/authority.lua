@@ -502,3 +502,40 @@ local ns, test, eq = ...
 			end)
 		end)
 	end)
+
+	test("authority: signed material issued before this release's floor never moves the boundary, and an older build's record no longer counts", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local FLOOR = A.RELEASE_FLOOR
+				assert(FLOOR and FLOOR < T0 - 10, "this file's material is issued after the floor")
+				-- A clock just past the floor: material signed just before it is still inside its window.
+				ns.Now = function() return FLOOR + 100 end
+				local old = Parts({ "Olympus Zeus=Old Lord-Realm" }, { at = FLOOR - 50, epoch = 9, issued = FLOOR - 200, expires = FLOOR + 1000 })
+				local ok, why = A.TakePart(old[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window", "issued before the floor")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				Install(Entry("Olympus Zeus=Zed-Realm", 9, FLOOR - 200, FLOOR + 1000), FLOOR - 40)
+				eq(A.Enforced(), false, "nor an HT1 marker issued before it")
+				eq(next(ns.db.authorityEnforced), nil)
+				-- Material issued after the floor still does, at a lower epoch than the old one.
+				local new = Parts({ "Olympus Zeus=New Lord-Realm" }, { at = FLOOR + 60, epoch = 1, issued = FLOOR + 50, expires = FLOOR + 5000 })
+				eq(select(2, A.TakePart(new[1], nil, "LOCAL")), "complete")
+				eq(A.Enforced(), true); eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0)
+			end)
+		end)
+		WithState(function()
+			-- What an older build wrote from old material: no issued time on or after the floor.
+			Census("Olympus Zeus", "Legacy-Realm", 0)
+			local stale = { at = T0 - 100, epoch = 9, kind = "HA", root = string.rep("0", 64) }
+			ns.db.authorityEnforced = { ["realm|Alliance"] = stale, ["other|Alliance"] = stale }
+			A.Reset()
+			eq(A.Enforced(), false, "a boundary recorded from older material no longer locks the client")
+			eq(select(2, D.AuthorizedRank("Legacy-Realm", "Olympus Zeus")), "census", "the documented census behaviour is back")
+			WithFakeSign(function(Parts)
+				local fresh = Parts({ "Olympus Zeus=Fresh Lord-Realm" }, { at = T0 - 50, epoch = 1 })
+				eq(select(2, A.TakePart(fresh[1], nil, "LOCAL")), "complete", "a current set is not a replay of it")
+				eq(A.Rank("Fresh Lord-Realm", "Olympus Zeus"), 0)
+				eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), nil)
+			end)
+		end)
+	end)

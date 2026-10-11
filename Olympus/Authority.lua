@@ -37,6 +37,10 @@ Authority.MAX_EPOCH = 2147483647
 Authority.MAX_LIFETIME = 31 * 24 * 60 * 60
 Authority.CLOCK_SKEW = 5 * 60
 Authority.MIN_TIME = 1577836800 -- 2020-01-01; refuses zero/relative clocks.
+-- (1.2.1) This release's floor: signed leadership issued before it never moves the boundary, and a
+-- boundary recorded from older material (an older build's record carries no issued time) no longer
+-- counts. Early test material could otherwise be replayed for good. 2026-10-11 00:00 UTC.
+Authority.RELEASE_FLOOR = 1791676800
 Authority.MAX_TEXT = 3000 -- Workshop rejects the complete HT1 blob at this bound too.
 Authority.PART_BODY = 5000
 Authority.MAX_PARTS = 8
@@ -164,10 +168,17 @@ local function ListParts(blob)
 	return tonumber(at), realm ~= "" and realm or nil, list
 end
 
--- Signed material may move the boundary only while it is current (1.2.1): no more than
--- CLOCK_SKEW before it is issued, never after it expires (Authority.Valid).
+-- Signed material may move the boundary only while it is current (1.2.1): issued on or after this
+-- release's floor, no more than CLOCK_SKEW before it is issued, never after it expires
+-- (Authority.Valid).
 local function Current(m, now)
-	return type(m) == "table" and tonumber(m.issued) ~= nil and tonumber(m.expires) ~= nil and Authority.Valid(m, now)
+	return type(m) == "table" and tonumber(m.issued) ~= nil and tonumber(m.expires) ~= nil
+		and tonumber(m.issued) >= Authority.RELEASE_FLOOR and Authority.Valid(m, now)
+end
+
+-- A boundary this release honours (1.2.1): recorded from material issued on or after its floor.
+local function Live(r)
+	return type(r) == "table" and (tonumber(r.issued) or 0) >= Authority.RELEASE_FLOOR
 end
 
 -- An enforce marker's faction and epoch, and whether its signed window is current (1.2.1: an
@@ -182,7 +193,7 @@ local function Marker(entry, now)
 	issued, expires = tonumber(issued), tonumber(expires)
 	local current = issued ~= nil and expires ~= nil and expires > issued
 		and Current({ issued = issued, expires = math.min(expires, issued + Authority.MAX_LIFETIME) }, now)
-	return faction, epoch, current
+	return faction, epoch, current, issued
 end
 
 -- Parse all enforcing leadership entries. One malformed/duplicated entry invalidates the whole
@@ -192,32 +203,35 @@ end
 function Authority.Read(text, realmGroup, now)
 	if type(text) ~= "string" then return nil, "shape", {} end
 	if not CanonicalGroup(realmGroup) then return nil, "realm", {} end
-	local out, present, marked = {}, {}, false
+	local out, present, marked, issuedOf = {}, {}, false, {}
 	-- Find every explicit boundary before parsing. If one entry is malformed or duplicated, its
 	-- valid epoch is still a revocation floor; a later, lower generation cannot recover roles by
 	-- exploiting the malformed replacement. The whole signed HT1 is bounded before this reader in
 	-- production; keep the reader's own bound explicit for callers and tests too.
 	local scan = #text > Authority.MAX_TEXT and text:sub(1, Authority.MAX_TEXT) or text
 	for entry in scan:gmatch("[^;]+") do
-		local faction, epoch, current = Marker(entry, now)
+		local faction, epoch, current, issued = Marker(entry, now)
 		marked = marked or faction ~= nil
-		if current then present[faction] = math.max(tonumber(present[faction]) or 0, epoch) end
+		if current then
+			present[faction] = math.max(tonumber(present[faction]) or 0, epoch)
+			issuedOf[faction] = math.max(issuedOf[faction] or 0, issued)
+		end
 	end
-	if #text > Authority.MAX_TEXT then return nil, "size", present end
+	if #text > Authority.MAX_TEXT then return nil, "size", present, issuedOf end
 	for entry in text:gmatch("[^;]+") do
 		if entry:match("^%^leaders%^") then
 			local faction, epoch, issued, expires, body = entry:match("^%^leaders%^(%a+)%^enforce%^(%d+)%^(%d+)%^(%d+)%^([^%^]*)$")
 			epoch, issued, expires = tonumber(epoch), tonumber(issued), tonumber(expires)
 			if not faction or not FACTIONS[faction] or out[faction] or not epoch or epoch < 1 or epoch > Authority.MAX_EPOCH
 				or not issued or not expires or issued < Authority.MIN_TIME or expires <= issued
-				or expires - issued > Authority.MAX_LIFETIME then return nil, "shape", present end
+				or expires - issued > Authority.MAX_LIFETIME then return nil, "shape", present, issuedOf end
 			local manifest, why = ParseBody(body, realmGroup, epoch, issued, expires)
-			if not manifest then return nil, why, present end
+			if not manifest then return nil, why, present, issuedOf end
 			out[faction] = manifest
 		end
 	end
-	if not marked then return nil, "absent", present end
-	return out, nil, present
+	if not marked then return nil, "absent", present, issuedOf end
+	return out, nil, present, issuedOf
 end
 
 local function GroupKeys(realmGroup, faction)
@@ -243,7 +257,7 @@ function Authority.AcceptTitles(t)
 	if type(t) ~= "table" or type(t.blob) ~= "string" then return false end
 	local at, realm, list = ListParts(t.blob)
 	if not at or at ~= tonumber(t.at) or realm ~= t.realm then return false end
-	local parsed, _, present = Authority.Read(list, realm)
+	local parsed, _, present, issuedOf = Authority.Read(list, realm)
 	if not ns.db then return false end
 	local store = ns.db.authorityEnforced
 	if type(store) ~= "table" then
@@ -254,18 +268,20 @@ function Authority.AcceptTitles(t)
 	for faction in pairs(FACTIONS) do
 		for _, key in ipairs(GroupKeys(realm, faction)) do
 			local old = store[key]
-			if type(old) == "table" and at > (tonumber(old.at) or 0) then
+			if not Live(old) then old = nil end -- (1.2.1: older material's record counts for nothing)
+			if old and at > (tonumber(old.at) or 0) then
 				old.at, old.kind, old.root = at, "HT", nil
 			end
 			if present[faction] then
 				local manifest = parsed and parsed[faction]
 				local epoch = manifest and manifest.epoch or tonumber(present[faction]) or 0
-				if type(old) ~= "table" then
-					old = { at = at, epoch = epoch, kind = "HT" }
+				if not old then
+					old = { at = at, epoch = epoch, kind = "HT", issued = issuedOf[faction] }
 					store[key] = old
 				else
 					old.at = math.max(tonumber(old.at) or 0, at)
 					old.epoch = math.max(tonumber(old.epoch) or 0, epoch)
+					old.issued = math.max(tonumber(old.issued) or 0, issuedOf[faction] or 0)
 					if old.at == at then old.kind, old.root = "HT", nil end
 				end
 			end
@@ -280,7 +296,7 @@ local function Record(faction, realm)
 	local found
 	for _, key in ipairs(GroupKeys(realm or ns.group or ns.realm, faction)) do
 		local r = store[key]
-		if type(r) == "table" then
+		if Live(r) then
 			found = found or { at = 0, epoch = 0 }
 			local at, epoch = tonumber(r.at) or 0, tonumber(r.epoch) or 0
 			if at > found.at or (at == found.at and epoch > found.epoch) then
@@ -319,7 +335,9 @@ local function SetBoundary(p)
 	local allowed, reason = true, nil
 	for _, key in ipairs(GroupKeys(p.realm, p.faction)) do
 		local old = store[key]
-		if type(old) ~= "table" then old = { at = 0, epoch = 0 }; store[key] = old end
+		-- (1.2.1: a record of material from before this release's floor is replaced, not compared.)
+		if not Live(old) then old = { at = 0, epoch = 0 }; store[key] = old end
+		old.issued = math.max(tonumber(old.issued) or 0, p.issued)
 		local oldAt, oldEpoch = tonumber(old.at) or 0, tonumber(old.epoch) or 0
 		if p.at < oldAt or p.epoch < oldEpoch then
 			-- A genuinely newer signed downgrade still advances the replay floor, but never grants.
