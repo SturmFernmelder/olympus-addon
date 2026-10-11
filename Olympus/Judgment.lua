@@ -841,12 +841,15 @@ end
 
 -- A judgment as plain text, for the copy box (the King's record): who sent it, the council's
 -- votes and his word, each with its time.
+-- (1.2.1) The names and the guild come from other players: each through Codec.Discord, as written,
+-- never as Discord's markup.
 function J.Text(j)
 	if type(j) ~= "table" then return "" end
+	local D = ns.Codec.Discord
 	local up, down, n, size = Tally(j)
-	local out = { L.WATCH_CASE_TITLE:format(Accused(j)) .. "  <" .. j.guild .. ">",
+	local out = { L.WATCH_CASE_TITLE:format(D(Accused(j))) .. "  <" .. D(j.guild) .. ">",
 		AboutText(j),
-		L.JUDGMENT_SENT_BY:format(ShownBy(j.from), j.guild, Stamp(j.at)),
+		L.JUDGMENT_SENT_BY:format(D(ShownBy(j.from)), D(j.guild), Stamp(j.at)),
 		L.JUDGMENT_THEIR_FINDING:format(VerdictText(j.finding)),
 		L.JUDGMENT_PERIOD:format(Stamp(j.at), Stamp(j.closes)),
 		CouncilText(up, down, n, size), "" }
@@ -854,7 +857,7 @@ function J.Text(j)
 	for voter, vote in pairs(j.votes) do voters[#voters + 1] = { name = voter, v = vote.v, at = vote.at } end
 	table.sort(voters, function(a, b) return (a.at or 0) < (b.at or 0) end)
 	for _, x in ipairs(voters) do
-		out[#out + 1] = ("%s · %s · %s"):format(Stamp(x.at or 0), ShownBy(x.name), VerdictText(x.v))
+		out[#out + 1] = ("%s · %s · %s"):format(Stamp(x.at or 0), D(ShownBy(x.name)), VerdictText(x.v))
 	end
 	if j.final then
 		out[#out + 1] = ""

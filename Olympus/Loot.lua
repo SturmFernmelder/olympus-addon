@@ -802,9 +802,11 @@ end
 local function Date(t) return date("%Y-%m-%d", t) end
 -- A note's writer as a line names him, and the officer who passed it on to us, if one did: it
 -- comes on his word, so he is named with it (Konig's review of 1.1).
-local function Who(n)
-	local who = ns.ShortName(ns.DisplayName(n.writer) or "?")
-	if n.via then who = L.LOOT_VIA:format(who, ns.ShortName(ns.DisplayName(n.via) or "?")) end
+-- (esc: each name through it, the copy for Discord's Codec.Discord.)
+local function Who(n, esc)
+	esc = esc or tostring
+	local who = esc(ns.ShortName(ns.DisplayName(n.writer) or "?"))
+	if n.via then who = L.LOOT_VIA:format(who, esc(ns.ShortName(ns.DisplayName(n.via) or "?"))) end
 	return who
 end
 
@@ -916,19 +918,22 @@ function Loot.Lines(q)
 	return lines
 end
 
--- The book as text for Discord: the notes, then the points.
+-- The book as text for Discord: the notes, then the points. (1.2.1) The notes' words, the items and
+-- the names (another officer's, passed on) each through Codec.Discord: shown as written, never as
+-- Discord's markup.
 function Loot.DiscordText()
+	local D = ns.Codec.Discord
 	local guild = Loot.Guild() or "?"
-	local out = { "**" .. L.LOOT_TITLE:format(guild) .. "**" }
+	local out = { "**" .. L.LOOT_TITLE:format(D(guild)) .. "**" }
 	for _, e in ipairs(Loot.Notes()) do
 		local n = e.n
-		out[#out + 1] = ("%s %s%s%s (%s)"):format(Date(n.t), n.item and ("[" .. ItemName(n.item) .. "] ") or "",
-			n.to and ("> " .. n.to .. ": ") or "", n.text, Who(n))
+		out[#out + 1] = ("%s %s%s%s (%s)"):format(Date(n.t), n.item and ("[" .. D(ItemName(n.item)) .. "] ") or "",
+			n.to and ("> " .. D(n.to) .. ": ") or "", D(n.text), Who(n, D))
 	end
 	local points = Loot.Points()
 	if #points > 0 then
 		out[#out + 1] = "**" .. L.LOOT_POINTS_TITLE .. "**"
-		for _, p in ipairs(points) do out[#out + 1] = ("%s: %d"):format(ns.DisplayName(p.member), p.v) end
+		for _, p in ipairs(points) do out[#out + 1] = ("%s: %d"):format(D(ns.DisplayName(p.member)), p.v) end
 	end
 	return ns.Codec.NoMentions(table.concat(out, "\n"))
 end

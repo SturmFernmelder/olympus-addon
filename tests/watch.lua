@@ -1910,7 +1910,8 @@ test("watch: judgment: a case goes to the King, the High Council votes for a day
 		w.masked = true
 		local streamed = king.Judgment.Text(j)
 		assert(not streamed:find("Spammer Guy", 1, true), streamed)
-		assert(streamed:find(c.MaskName("Spammer Guy"), 1, true), streamed)
+		-- (1.2.1: the record is a copy for Discord, where the mask's asterisks would be markup: escaped, Codec.Discord.)
+		assert(streamed:find(c.Codec.Discord(c.MaskName("Spammer Guy")), 1, true), streamed)
 		assert(not streamed:find(L.JUDGMENT_ABOUT:format("-", 1, 0):match("· ([^·]+) ·"), 1, true), "no reporters' count: " .. streamed)
 		w.masked = false
 		-- Nothing happens by itself: no sanction, nothing to the player, nothing on a channel or a guild.

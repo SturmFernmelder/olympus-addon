@@ -2252,17 +2252,26 @@ end
 
 -- The case as plain text, for the copy box: no reporter's name (the count only), and on the
 -- King's stream no note or line either (ShownWords).
+-- (1.2.1) The accused's name, the notes and the reported lines are other players' words: each
+-- through Codec.Discord, as written, never as Discord's markup.
 function Watch.CaseText(c)
 	if type(c) ~= "table" then return "" end
-	local out = { L.WATCH_CASE_TITLE:format(Accused(c.target, Upheld(c))),
+	local D = ns.Codec.Discord
+	-- (Ours, the words hidden on the King's stream or by the block terms, as they are.)
+	local function Words(text, by)
+		local shown = ShownWords(text, by)
+		if shown == L.NETOFF_REASON_HIDDEN or shown == L.FILTER_WORDS_HIDDEN_SHORT then return shown end
+		return D(shown)
+	end
+	local out = { L.WATCH_CASE_TITLE:format(D(Accused(c.target, Upheld(c)))),
 		L.WATCH_CASE_ALLEGATION:format(CatsText(c.cats)),
 		OnStream() and "" or L.WATCH_CASE_REPORTED:format(c.reporters, Stamp(c.firstAt), Stamp(c.lastAt)),
 		RecordText(c.record), "" }
 	for _, r in ipairs(c.reports) do
-		out[#out + 1] = ("%s · %s · %s"):format(Stamp(r.at), CategoryLabel(r.cat), r.note ~= "" and ShownWords(r.note, r.reporter) or "-")
+		out[#out + 1] = ("%s · %s · %s"):format(Stamp(r.at), CategoryLabel(r.cat), r.note ~= "" and Words(r.note, r.reporter) or "-")
 		for i = 1, tonumber(r.n) or 0 do
 			local line = r.lines[i]
-			if line then out[#out + 1] = ("    [%s] %s: %s"):format(TierLabel(line.tier), Stamp(line.at), ShownWords(line.text)) end
+			if line then out[#out + 1] = ("    [%s] %s: %s"):format(TierLabel(line.tier), Stamp(line.at), Words(line.text)) end
 		end
 	end
 	out[#out + 1] = ""

@@ -512,6 +512,28 @@ function Codec.NoMentions(s)
 	return (s:gsub("@", "@" .. ZWSP):gsub("<#", "<" .. ZWSP .. "#"))
 end
 
+-- A value from another player (a name, a guild's, a note, a chat line) in a copy for Discord
+-- (1.2.1: every copy's builder, Data, Inspect, Loot, Chronicle, The Watch's cases, Judgment): shown
+-- there as written, never as Discord's markup, on one line. In a code block (code == true, nothing
+-- else: a gsub's count passed along is none; the copies' tables), where no backslash escapes
+-- anything, a backtick becomes an apostrophe: three would end the block and let the rest out as
+-- markup. Elsewhere a backslash, which Discord drops as it shows the text, goes before each
+-- character that makes markup anywhere in a line (bold, italics, strikes, code, masked links,
+-- <@id>, <t:...>), and before a "#", ">" or "-" the value starts with (a heading, a quote, a list
+-- at a line's start): "Name-Realm" and "(note)" stay as they are. A "|" goes in both (a spoiler's,
+-- the game's escape codes), and a line break becomes a space. Nobody is pinged either way
+-- (NoMentions; the copy box runs it over everything too). The copies' own words (Locales) are not
+-- passed through it.
+function Codec.Discord(s, code)
+	s = tostring(s == nil and "" or s):gsub("%c", " "):gsub("|", "")
+	if code == true then
+		s = s:gsub("`", "'")
+	else
+		s = s:gsub("[\\`*_~%[%]<]", "\\%0"):gsub("^(%s*)([#>%-])", "%1\\%2")
+	end
+	return Codec.NoMentions(s)
+end
+
 -- Room for the text in one message: CHAT_MAX minus "M1~", the tier, 4 separators, a 4 digit id,
 -- the guild and the class.
 function Codec.ChatBudget(guild, class)

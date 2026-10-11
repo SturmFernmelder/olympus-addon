@@ -424,15 +424,18 @@ function Inspect.Summary()
 	return out
 end
 
+-- (1.2.1) Names, guilds and notes come from other players (and other officers' shared findings):
+-- each through Codec.Discord, so none ends the table's block or shows as Discord's markup.
 function Inspect.DiscordText()
 	local s = Inspect.Summary()
 	local c = s.counts
+	local D = ns.Codec.Discord
 	local out = {}
 	out[#out + 1] = L.DISCORD_INSPECT_HEADER:format(s.total, c.GUILD, c.NONE, c.OTHER)
 	local guilds = {}
 	for _, g in ipairs(s.guilds) do
 		if g.bad > 0 or g.marked then
-			guilds[#guilds + 1] = ("%s%s %d/%d"):format(g.marked and "[!] " or "", g.name, g.bad, g.total)
+			guilds[#guilds + 1] = ("%s%s %d/%d"):format(g.marked and "[!] " or "", D(g.name), g.bad, g.total)
 		end
 	end
 	if #guilds > 0 then out[#out + 1] = "**Guilds:** " .. table.concat(guilds, " · ") end
@@ -442,7 +445,7 @@ function Inspect.DiscordText()
 		if p.status == "NONE" or p.status == "OTHER" or p.marked then
 			any = true
 			local label = p.status == "NONE" and "NO TABARD" or p.status == "OTHER" and "WRONG TABARD" or "MARKED"
-			out[#out + 1] = ("%-14s %-20s %-12s %s"):format(ns.ShortName(p.name), "<" .. (p.guild or "?") .. ">", label, p.note or "")
+			out[#out + 1] = ("%-14s %-20s %-12s %s"):format(D(ns.ShortName(p.name), true), "<" .. D(p.guild or "?", true) .. ">", label, D(p.note or "", true))
 		end
 	end
 	if not any then out[#out + 1] = L.DISCORD_INSPECT_CLEAN end

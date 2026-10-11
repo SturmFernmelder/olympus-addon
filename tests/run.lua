@@ -46753,7 +46753,8 @@ test("1.1 review (#11): for the Treasurer whose 0.9.3 yes stands, his line says 
 				-- The copy and /oly log.
 				ns.UI = { ShowCopy = function(_, text) copied[#copied + 1] = text end, Refresh = function() end, RefreshSoon = function() end }
 				SlashCmdList.OLYMPUS("log copy")
-				assert(copied[1] and not copied[1]:find("Steward", 1, true) and copied[1]:find(masked, 1, true), "the copy")
+				-- (1.2.1: the copy is for Discord, where the mask's asterisks would be markup: escaped there, Codec.Discord.)
+				assert(copied[1] and not copied[1]:find("Steward", 1, true) and copied[1]:find(ns.Codec.Discord(masked), 1, true), "the copy")
 				print = function(s) lines[#lines + 1] = tostring(s) end
 				SlashCmdList.OLYMPUS("log")
 				local chat = table.concat(lines, "\n")

@@ -617,23 +617,25 @@ ns.On("LOGIN", function()
 	ns.Every(Data.EVENING_EVERY, "evening count", function() Data.SampleEvening() end)
 end)
 
+-- (1.2.1) The guilds' names, their leaders' and the zones come from other players' reports: each
+-- through Codec.Discord, so none ends the table's block or shows as Discord's markup.
 function Data.DiscordText()
 	local s = Data.Summary()
-	local F = ns.FormatNumber
+	local F, D = ns.FormatNumber, ns.Codec.Discord
 	local out = {}
 	out[#out + 1] = L.DISCORD_HEADER:format(F(s.total), F(s.online), #s.guilds)
 	local where = {}
 	for i = 1, math.min(8, #s.zoneList) do
 		local z = s.zoneList[i]
-		where[#where + 1] = ns.Zones.NameForKey(z.key) .. " " .. F(z.count)
+		where[#where + 1] = D(ns.Zones.NameForKey(z.key)) .. " " .. F(z.count)
 	end
 	if #where > 0 then out[#out + 1] = L.DISCORD_WHERE .. table.concat(where, " · ") end
 	out[#out + 1] = "```"
 	out[#out + 1] = ("%-22s %7s %7s  %s"):format("Guild", "Members", "Online", "Leader")
 	for _, e in ipairs(s.guilds) do
 		local g = e.g
-		local leader = g.leader and (g.leader .. (g.leaderOnline and " (on)" or "")) or "?"
-		out[#out + 1] = ("%-22s %7s %7s  %s%s"):format(e.name, F(g.total), F(g.online), leader, e.fresh and "" or "  [stale]")
+		local leader = g.leader and (D(g.leader, true) .. (g.leaderOnline and " (on)" or "")) or "?"
+		out[#out + 1] = ("%-22s %7s %7s  %s%s"):format(D(e.name, true), F(g.total), F(g.online), leader, e.fresh and "" or "  [stale]")
 	end
 	out[#out + 1] = "```"
 	out[#out + 1] = ("_Olympus addon v%s_"):format(ns.VERSION)
