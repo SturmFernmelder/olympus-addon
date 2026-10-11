@@ -209,3 +209,17 @@ test("Main shortcut: Toggle Olympus is in the game's Key Bindings (AddOns) and t
 		eq(#w.calls, 0, "no binding changed by it")
 	end)
 end)
+
+test("Main shortcut: the 1.2.1 letter tells of Shift + the guild key and the game's Key Bindings, in English and pt-BR", function()
+	local saved = GetLocale
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+		GetLocale = function() return locale end
+		local ok, why = pcall(assert(loadfile(ROOT .. "Olympus/Locales.lua")), "Olympus", cns)
+		GetLocale = saved
+		if not ok then error(why, 0) end
+		local letter = cns.L.LETTER_1_2_1
+		assert(letter:find(locale == "enUS" and "Shift + your guild key (Shift-J by default)" or "Shift + a sua tecla da guilda (Shift-J por padrão)", 1, true), locale)
+		assert(letter:find(locale == "enUS" and "AddOns: Toggle Olympus" or "AddOns: Abrir/fechar o Olympus", 1, true), locale)
+	end
+end)

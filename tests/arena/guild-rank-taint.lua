@@ -168,3 +168,16 @@ test("guild rank (1.2.1): an Olympus question up as a game popup moves into Olym
 		ns.HideDialog(WHICH)
 	end)
 end)
+
+test("guild rank (1.2.1): the 1.2.1 letter tells of it, in English and pt-BR", function()
+	local saved = GetLocale
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+		GetLocale = function() return locale end
+		local ok, why = pcall(assert(loadfile(H.ADDON_DIR .. "Locales.lua")), "Olympus", cns)
+		GetLocale = saved
+		if not ok then error(why, 0) end
+		assert(cns.L.LETTER_1_2_1:find(locale == "enUS" and "no longer adds its lines to the game's guild roster right-click menu"
+			or "não acrescenta mais suas linhas ao menu do botão direito da lista da guilda do jogo", 1, true), locale)
+	end
+end)
