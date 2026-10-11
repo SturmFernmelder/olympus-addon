@@ -150,6 +150,24 @@ local MAX_BLOCKED = 10
 local blocked, toldGamepad = 0, false
 function ns.ResetBlocked() blocked, toldGamepad = 0, false end -- tests
 
+-- The game raises the event inside the refused call, so the stack read here starts with this
+-- handler's own frames (it, pcall, Core.lua's SafeCall and event dispatch), which never made the
+-- call. They are dropped (1.2.1): the report's 8 lines then start at the refused call and reach
+-- what called it, where they had stopped at UpdateInteractIcons under four lines of ours.
+local OWN_FRAMES = { "AddOns[\\/]Olympus[\\/]Diagnostics%.lua", "AddOns[\\/]Olympus[\\/]Core%.lua", "^%[C%]: in function [`']x?pcall'" }
+local function Own(line)
+	for _, p in ipairs(OWN_FRAMES) do if line:find(p) then return true end end
+	return false
+end
+function ns.RefusedStack(stack) -- (tests)
+	local out, ours = {}, true
+	for line in tostring(stack or ""):gmatch("[^\n]+") do
+		ours = ours and Own(line)
+		if not ours then out[#out + 1] = line end
+	end
+	return #out > 0 and table.concat(out, "\n") or tostring(stack or "")
+end
+
 -- Kept once per call; the first time it comes in a session its stack and probe are taken
 -- again (and it moves to the end, the newest), so the report shows this version's evidence.
 local function RecordBlocked(event, func)
@@ -169,7 +187,7 @@ local function RecordBlocked(event, func)
 	local stack = ""
 	if type(debugstack) == "function" then
 		local ok, s = pcall(debugstack, 2, 24, 6)
-		stack = ok and type(s) == "string" and s or ""
+		stack = ok and type(s) == "string" and ns.RefusedStack(s) or ""
 	end
 	local okProbe, taint = pcall(ns.TaintProbe)
 	b = b or { key = key, event = event, func = func, count = 1, first = now, last = now }
@@ -438,8 +456,9 @@ function ns.StatusText()
 	add("letters: %s", ns.Letters and ns.Letters.StatusLine and ns.Letters.StatusLine() or "not loaded")
 	-- The gamepad UI and what the game refused us this session; what its code reads, as now.
 	local refused = type(ns.db.actionsBlocked) == "table" and ns.db.actionsBlocked or {}
+	-- (1.2.1: the last one's version too: one kept from an older version is not this one's.)
 	add("gamepad UI: %s  |  blocked this session: %d  |  blocked calls kept: %d%s", ns.GamepadUI() and "on" or "off", blocked, #refused,
-		#refused > 0 and (" (last: %s)"):format(tostring(refused[#refused].func)) or "")
+		#refused > 0 and (" (last: %s, v%s)"):format(tostring(refused[#refused].func), tostring(refused[#refused].version or "?")) or "")
 	-- (1.1.5) The gamepad gate (Gamepad.lua): the switches this session and what stays until a /reload.
 	add("gamepad gate: %s", ns.Gate and type(ns.Gate.StatusLine) == "function" and ns.Gate.StatusLine() or "not loaded until the game restarts")
 	if ns.GamepadUI() or blocked > 0 then
@@ -465,7 +484,11 @@ function ns.BuildBugReport()
 	-- report: a report sent in game stops at Workshop.BUG_MAX bytes, and this is the part that
 	-- names what to fix.
 	local refused = type(ns.db.actionsBlocked) == "table" and ns.db.actionsBlocked or {}
-	if #refused > 0 then
+	-- (1.2.1: the heading only over this version's: an older version's calls alone, kept in the
+	-- saved variables, made it head an empty list, as if this version had been blocked.)
+	local current = false
+	for _, b in ipairs(refused) do if b.version == ns.VERSION then current = true break end end
+	if current then
 		out[#out + 1] = "Blocked by the game:"
 		-- This version's newest two, their stacks cut to 8 lines: the errors below must still fit.
 		local shown = 0

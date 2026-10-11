@@ -13110,6 +13110,51 @@ do
 		if not ok then error(err, 0) end
 	end)
 
+	test("1.2.1 a blocked action's report: its stack starts at the refused call, not at the handler that kept it; an older version's kept call never heads this version's report", function()
+		local saved = { gp = ns.GamepadUI, print = ns.Print, stack = debugstack, list = ns.db.actionsBlocked, sessions = ns.db.sessions }
+		local ok, err = pcall(function()
+			ns.ResetBlocked(); ns.db.actionsBlocked = nil
+			ns.Print = function() end
+			-- What the game's debugstack gives inside the handler: its own frames first, then the
+			-- refused call and its callers (MainActionBarFrame.lua's lines as in Forever's build 70291;
+			-- the two callers below them made up).
+			local callers = { "[C]: in function 'SetPreferredGamepadInteractTarget'",
+				"Interface/AddOns/Blizzard_GamepadActionBars/MainActionBarFrame.lua:291: in function 'UpdateInteractIcons'",
+				"Interface/AddOns/Blizzard_GamepadActionBars/MainActionBarFrame.lua:52: in function 'UpdateActionBarFocusedState'",
+				"Interface/AddOns/Blizzard_GamepadSharedUtility/InputBindingStack/InputBindingManager.lua:120: in function 'Push'",
+				"Interface/AddOns/Blizzard_StaticPopup/StaticPopupGamepad.lua:40: in function 'OnShow'" }
+			debugstack = function()
+				return table.concat({ "Interface/AddOns/Olympus/Diagnostics.lua:202: in function <Interface/AddOns/Olympus/Diagnostics.lua:200>",
+					"[C]: in function 'pcall'", "Interface/AddOns/Olympus/Core.lua:1595: in function 'SafeCall'",
+					"Interface/AddOns/Olympus/Core.lua:1623: in function <Interface/AddOns/Olympus/Core.lua:1620>" }, "\n")
+					.. "\n" .. table.concat(callers, "\n")
+			end
+			GamepadStyle(true)
+			for _, f in ipairs(EVENT_SCRIPTS) do f(nil, "ADDON_ACTION_FORBIDDEN", "Olympus", "SetPreferredGamepadInteractTarget()") end
+			local b = ns.db.actionsBlocked[1]
+			eq(b.stack, table.concat(callers, "\n"), "the handler's own frames dropped")
+			local report = ns.BuildBugReport()
+			local block = report:sub(report:find("Blocked by the game:", 1, true), report:find("Olympus v", 1, true))
+			assert(block:find("StaticPopupGamepad.lua:40", 1, true), "the report reaches the caller: " .. block)
+			assert(not block:find("AddOns/Olympus/", 1, true), "no line of ours: " .. block)
+			-- Olympus's own call refused (from one of its files): its lines stay.
+			eq(ns.RefusedStack("Interface/AddOns/Olympus/Core.lua:1595: in function 'SafeCall'\n[C]: in function 'FocusUnit'\nInterface/AddOns/Olympus/UI.lua:9: in function 'Pick'"),
+				"[C]: in function 'FocusUnit'\nInterface/AddOns/Olympus/UI.lua:9: in function 'Pick'")
+			-- The same call kept by 1.1.4 (before the gamepad gate) alone: this version's report names
+			-- it with its version and puts no heading over an empty list.
+			ns.ResetBlocked()
+			ns.db.actionsBlocked = { { key = "ADDON_ACTION_FORBIDDEN|SetPreferredGamepadInteractTarget()", event = "ADDON_ACTION_FORBIDDEN",
+				func = "SetPreferredGamepadInteractTarget()", count = 5, version = "1.1.4", gamepad = true, stack = callers[1],
+				taint = "taint: none of 55 values the gamepad UI reads" } }
+			report = ns.BuildBugReport()
+			assert(not report:find("Blocked by the game:", 1, true), report:sub(1, 200))
+			assert(report:find("blocked this session: 0  |  blocked calls kept: 1 (last: SetPreferredGamepadInteractTarget(), v1.1.4)", 1, true), "its version said")
+		end)
+		ns.Print, debugstack, ns.db.actionsBlocked, ns.db.sessions = saved.print, saved.stack, saved.list, saved.sessions; GamepadStyle(nil)
+		ns.ResetBlocked()
+		if not ok then error(err, 0) end
+	end)
+
 	test("0.9.8 the taint probe: which values of the gamepad's path an addon wrote, and whose", function()
 		local saved = { secure = issecurevariable, specials = UISpecialFrames }
 		local ok, err = pcall(function()
