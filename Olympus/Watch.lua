@@ -1571,10 +1571,11 @@ Watch.COUNCIL_HEARD = 20 * 60      -- the King's client passes a new report at o
 Watch.COUNCIL_ASK_GAP = 30         -- and answers one asker this often at most
 Watch.COUNCIL_SHOWN = 6            -- reports in one answer (the oldest first; a full one is asked again soon)
 Watch.COUNCIL_BACKLOG = 3 * 86400  -- a councillor's first ask goes this far back
-Watch.COUNCIL_RATE_ALL = 60        -- the King's client takes this many council reports from everyone...
+Watch.COUNCIL_RATE_ALL = 30        -- the King's client takes this many council reports from everyone...
 Watch.COUNCIL_RATE_ALL_WINDOW = 600 -- ...in this long
 Watch.COUNCIL_RELAY_WAIT = 15      -- a new report is passed on once its lines had this long to arrive
 Watch.COUNCIL_RELAY_RATE = 200     -- a councillor's client takes this many from the King's client in 10 minutes
+Watch.COUNCIL_QUEUE_KEEP = 20      -- the King's client passes reports on only while its queue keeps this much room for its own
 Watch.random = math.random         -- (tests)
 
 local councilHeard = {}   -- the King's client: [councillor key] = { name, t }: asked lately (session only)
@@ -1692,7 +1693,9 @@ local function RelayTo(name, r)
 	if Accused(name, r.target) or Same(name, ns.me) then return false end
 	local msgs = RelayWire(r)
 	if not msgs then return false end
-	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #msgs then return false end
+	-- (The King's client's own messages first: the lease, the Judgments. A councillor's next ask
+	-- brings what did not go.)
+	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < #msgs + Watch.COUNCIL_QUEUE_KEEP then return false end
 	for i, msg in ipairs(msgs) do
 		local guardKey = "council-relay#" .. Key(name) .. "#" .. Key(r.reporter) .. "#" .. Key(r.target) .. "#" .. i
 		ns.Comm.Whisper(name, msg, nil, false, true, nil, { owner = Watch, key = guardKey, permit = function(owner, key, dist, to, payload)

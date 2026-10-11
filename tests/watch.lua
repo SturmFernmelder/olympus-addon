@@ -2361,7 +2361,8 @@ local function WatchPeer(w, c, name, o)
 	p.On, p.Fire, p.PlayAlert, p.Every = function() end, function() end, function() end, function() end
 	p.After = function(_, _, call) p.timers[#p.timers + 1] = call end
 	p.Print = function(m) p.prints[#p.prints + 1] = tostring(m) end
-	p.Comm = { Handle = function(kind, call) p.handlers[kind] = call end, QueueRoom = function() return 60 end,
+	p.queueRoom = 60
+	p.Comm = { Handle = function(kind, call) p.handlers[kind] = call end, QueueRoom = function() return p.queueRoom end,
 		DeliveredLogged = function() return w.logged end,
 		Whisper = function(target, msg, _, _, logged, done, options)
 			w.bus[#w.bus + 1] = { from = name, target = target, msg = msg, logged = logged, done = done, options = options }
@@ -2562,10 +2563,18 @@ test("watch: council reports (1.2.1): each end checks what it can; spoofed, repl
 		eq(ok, false); eq(why, "sender", "the lease's King's client only")
 		w.lease = { name = KING, guild = "Olympus", id = "lease-1" }
 		eq(select(1, As(hc1, function() return H1.HandleReport("WHISPER", KING, relay) end)), true)
-		-- Q: a councillor's alone, answered once in a while.
+		-- Q: a councillor's alone, answered once in a while, while the King's client's queue keeps
+		-- room for its own messages.
 		ok, why = KingTakes(REPORTER, "MR~1~Q~0"); eq(ok, false); eq(why, "sender", "not on the council")
+		w.bus = {}
+		king.queueRoom = W.COUNCIL_QUEUE_KEEP
 		eq(select(1, KingTakes(HC1, "MR~1~Q~0")), true)
+		eq(#w.bus, 0, "its queue nearly full: nothing passed on")
+		king.queueRoom = 60
 		ok, why = KingTakes(HC1, "MR~1~Q~0"); eq(ok, false); eq(why, "rate")
+		w.epoch = w.epoch + W.COUNCIL_ASK_GAP
+		eq(select(1, KingTakes(HC1, "MR~1~Q~0")), true)
+		eq(#w.bus > 0, true, "room again: passed on")
 		w.bus = {}
 		-- A report on a councillor (or on a name his player linked) never goes to him.
 		w.links[c.Fold("Sage Alt-Realm")] = { HC2 }
