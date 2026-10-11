@@ -59812,6 +59812,7 @@ for _, name in ipairs(focused) do
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
+		or name == "census" and { FreshComm = FreshComm }
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,
 			WithGamepadUI = WithGamepadUI, WithUI = WithUI }) or (name == "hop-sightings" and WithHop or nil)
