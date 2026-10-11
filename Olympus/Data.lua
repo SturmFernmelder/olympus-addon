@@ -298,9 +298,10 @@ end
 -- census marks it, and sizes that disagree too: Data.Dispute, 1.1).
 -- (1.2.3) Every sender heard stayed, a table each, for the whole session. A claim CLAIM_TTL old
 -- binds nobody: once a minute (Data.Housekeeping) it keeps only the guild it spoke for, which
--- Data.ClaimedGuild still answers, and past CLAIMS_KNOWN senders those go.
+-- Data.ClaimedGuild still answers for the rest of the session, as before (the council copy of a
+-- report from a sender quiet since, Watch.lua; a guild master's mark on his Trade lines, Borders.lua).
+-- None is dropped: an old claim is a slot here holding its guild's one name string.
 local senderGuild = {} -- "Name-Realm" -> { guild, t }, or the guild alone once CLAIM_TTL old
-Data.CLAIMS_KNOWN = 3000
 
 -- One guild per sender, shared by reports and chat: a name that speaks for one guild can't
 -- speak for another. A player who really moved guilds speaks again after CLAIM_TTL quiet.
@@ -622,20 +623,13 @@ function Data.Receive(r, sender)
 end
 
 -- (1.2.3) Once a minute, with the evening count: the claims CLAIM_TTL old keep only their guild
--- (Data.ClaimGuild), and past CLAIMS_KNOWN senders those go; the kept reports whose row went
--- another way than a report (a reset, another realm's store) or is older than FRESH (its guild
--- quiet) go too: their sender's next report is decoded, as any.
+-- (Data.ClaimGuild), still answered by Data.ClaimedGuild; the kept reports whose row went another
+-- way than a report (a reset, another realm's store) or is older than FRESH (its guild quiet) go:
+-- their sender's next report is decoded, as any.
 function Data.Housekeeping(now)
 	now = now or ns.Now()
-	local n = 0
 	for who, c in pairs(senderGuild) do
-		n = n + 1
 		if type(c) == "table" and now - (c.t or 0) >= Data.CLAIM_TTL then senderGuild[who] = c.guild end
-	end
-	if n > Data.CLAIMS_KNOWN then
-		for who, c in pairs(senderGuild) do
-			if type(c) ~= "table" then senderGuild[who] = nil end
-		end
 	end
 	local guilds = ns.rdb and ns.rdb.guilds
 	for who, e in pairs(repeats) do

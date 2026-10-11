@@ -313,7 +313,7 @@ test("census (1.2.3): votes past VOUCH_TTL leave the rows at INIT and at logout,
 	Check("logout")
 end)
 
-test("census (1.2.3): a claim CLAIM_TTL old keeps only its guild: Data.ClaimedGuild still answers it, another guild may be claimed, and past CLAIMS_KNOWN senders those go", function()
+test("census (1.2.3): a claim CLAIM_TTL old keeps only its guild: Data.ClaimedGuild still answers it for the session however many senders were heard, and another guild may be claimed", function()
 	local w = CensusWorld()
 	local D = w.D
 	local t0 = w.clock
@@ -327,17 +327,29 @@ test("census (1.2.3): a claim CLAIM_TTL old keeps only its guild: Data.ClaimedGu
 	eq(D.ClaimGuild("Mover-Realm", "Olympus Beta"), true, "after CLAIM_TTL quiet")
 	eq(D.ClaimedGuild("Mover-Realm"), "Olympus Beta")
 	eq(D.ClaimGuild("Mover-Realm", "Olympus Alpha"), false, "and now bound to the new one")
-	-- Past CLAIMS_KNOWN senders, the claims that bind nobody go; one that binds stays.
-	D.CLAIMS_KNOWN = 3
-	for k = 1, 4 do eq(D.ClaimGuild("Quiet" .. k .. "-Realm", "Olympus Quiet"), true) end
+	-- The King's client on a stream hears thousands of senders (chat lines, census reports, board
+	-- posts, listings). Every old claim still answers, as in 1.2.2, however many: the council copy of
+	-- a report from one quiet since (Watch.CouncilReporter) and the bronze mark of a guild master
+	-- quiet since (Borders.ChatGuilds) need it. One that binds still binds.
+	local heard = 5000
+	for k = 1, heard do eq(D.ClaimGuild("Quiet" .. k .. "-Realm", "Olympus Quiet"), true) end
 	w.clock = w.clock + D.CLAIM_TTL
 	eq(D.ClaimGuild("Loud-Realm", "Olympus Loud"), true)
-	D.Housekeeping()
-	eq(D.ClaimedGuild("Quiet1-Realm"), nil, "an old claim past CLAIMS_KNOWN")
-	eq(D.ClaimedGuild("Mover-Realm"), nil)
+	for _ = 1, 3 do -- (a few minute ticks)
+		D.Housekeeping()
+		w.clock = w.clock + 60
+	end
+	local lost = 0
+	for k = 1, heard do
+		if D.ClaimedGuild("Quiet" .. k .. "-Realm") ~= "Olympus Quiet" then lost = lost + 1 end
+	end
+	eq(lost, 0, "old claims still answered past thousands of senders")
+	eq(D.ClaimedGuild("Mover-Realm"), "Olympus Beta")
 	eq(D.ClaimedGuild("Loud-Realm"), "Olympus Loud")
 	eq(D.ClaimGuild("Loud-Realm", "Olympus Other"), false, "still bound")
-	eq(D.ClaimGuild("Quiet1-Realm", "Olympus Other"), true)
+	eq(D.ClaimGuild("Quiet1-Realm", "Olympus Other"), true, "an old claim binds nobody")
+	eq(D.ClaimedGuild("Quiet1-Realm"), "Olympus Other")
+	eq(D.ClaimedGuild("Quiet2-Realm"), "Olympus Quiet")
 end)
 
 -- The source Alts module, with only identity/state/event/transport boundaries supplied by
