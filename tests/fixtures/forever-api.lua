@@ -441,6 +441,7 @@ return {
 		["SetItemButtonCount"] = "function",
 		["SetItemButtonQuality"] = "function",
 		["SetItemButtonTexture"] = "function",
+		["SetItemRef"] = "function",
 		["SetOverrideBindingClick"] = "used",
 		["SetPortraitTexture"] = "api",
 		["SetPortraitToTexture"] = false,

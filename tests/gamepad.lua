@@ -1024,6 +1024,14 @@ local function World(C, opts)
 	E.ChatEdit_InsertLink = Fn("ChatEdit_InsertLink", function(link) if C.chatBox then C.chatBox.text = (C.chatBox.text or "") .. link return true end return false end)
 	E.ChatFrame_RemoveChannel = Fn("ChatFrame_RemoveChannel", function(frame, name) C.removedChannels = (C.removedChannels or 0) + 1 end)
 	E.GetCurrentKeyBoardFocus = function() return C.focus end
+	-- A link clicked in a chat window: its OnHyperlinkClick calls SetItemRef (Blizzard_ChatFrameBase/
+	-- Shared/ChatFrame.lua:19; Blizzard_UIPanels_Game/Mainline/ItemRef.lua:6). Modelled for the link
+	-- types the pass clicks: "addon" goes to the game's AddOn handler, which only fires EventRegistry's
+	-- "SetItemRef" (ItemRefHandlersShared.lua:279); another type, the game's own work, kept in C.itemRefs.
+	E.SetItemRef = function(link, text, button, frame)
+		C.itemRefs = C.itemRefs or {}
+		C.itemRefs[#C.itemRefs + 1] = { link = link, button = button, handled = tostring(link):find("^addon:") and "AddOn" or "game" }
+	end
 
 	-- Channels (the census channel): joined, numbered, listed.
 	C.channels = {}
@@ -2693,6 +2701,60 @@ test("gamepad pass 6: the Arena's integrations: restricted calls from a click al
 	eq(A.loadedAddOns.Olympus_Arena, true)
 	GP.Covers("load-companion")
 	Check(A.ledger, "the Arena")
+end)
+
+-- 1.2.1: [Olympus], [Captains] and [Lords] before a line in the game's chat, links where the player
+-- may write there. A click on one the game's way: the chat window's OnHyperlinkClick calls SetItemRef
+-- (the hooks on it after).
+local function ClickTag(C, tier, button)
+	local E = C.env
+	C.chatBox = nil
+	local mark = C.Mark()
+	InClick(C, function() E.SetItemRef("addon:Olympus:chan:" .. tier, "[x]", button or "LeftButton", E.ChatFrame1) end)
+	return C.chatBox and C.chatBox.text or nil, C.Since(mark)
+end
+local function TagHooks(C)
+	local n = 0
+	for _, cb in ipairs(C.callbacks) do if cb.kind == "hooksecurefunc" and cb.key == "SetItemRef" then n = n + 1 end end
+	return n
+end
+test("gamepad pass 7: the chat's channel names as links: hooked once with mouse and keyboard, the chat box opened on a left click alone; with the gamepad UI no link, no hook at its login, and the hook left from before does nothing", function()
+	local C, ns = Session(false)
+	local Chan = ns.Channels
+	eq(TagHooks(C), 1, "the post-hook on SetItemRef, with mouse and keyboard")
+	eq(Chan.Tag("A"), "|Haddon:Olympus:chan:A|h[" .. ns.L.CHAN_ALL .. "]|h", "[Olympus] a link: the player writes there")
+	local text, ledger = ClickTag(C, "A")
+	eq(text, "/ol ", "a left click: the chat box, /ol in it")
+	eq(Ids(ledger)["chat-box"], 1, "the chat box, the gate's chat-box")
+	Check(ledger, "the click")
+	eq(C.itemRefs[#C.itemRefs].handled, "AddOn", "the game's own handling first, as for any link")
+	eq((ClickTag(C, "A", "RightButton")), nil, "a right-click: nothing, as on the plain name")
+	C.chatBox = nil
+	InClick(C, function() C.env.SetItemRef("item:19019", "[Thunderfury]", "LeftButton", C.env.ChatFrame1) end)
+	eq(C.chatBox, nil, "another link: the game's alone")
+	-- The gamepad UI: no link on a line printed now, and the hook (the game keeps it) does nothing.
+	C.Switch(true); C.Advance(1)
+	eq(Chan.Tag("A"), "[" .. ns.L.CHAN_ALL .. "]", "no link with the gamepad UI")
+	local padText, padLedger = ClickTag(C, "A")
+	eq(padText, nil, "a link printed before: no chat box with the gamepad UI")
+	eq(#padLedger, 0, "nothing of the game's reached")
+	-- Back to mouse and keyboard: the same hook, not a second one.
+	C.Switch(false); C.Advance(1)
+	eq(TagHooks(C), 1, "registered once a session")
+	eq((ClickTag(C, "A")), "/ol ")
+	Check(C.ledger, "the whole session")
+	NoErrors(C, "the chat's channel links")
+	-- A gamepad login: nothing hooked, no link; the first switch to mouse and keyboard hooks it, once.
+	local P, pns = Session(true)
+	eq(TagHooks(P), 0, "no hook at a gamepad login")
+	eq(pns.Channels.Tag("A"), "[" .. pns.L.CHAN_ALL .. "]")
+	eq((ClickTag(P, "A")), nil)
+	P.Switch(false); P.Advance(1)
+	eq(TagHooks(P), 1, "hooked at the switch to mouse and keyboard")
+	eq((ClickTag(P, "A")), "/ol ")
+	Check(P.ledger, "a gamepad login, then mouse and keyboard")
+	NoErrors(P, "a gamepad login, then mouse and keyboard")
+	GP.Covers("chat-links"); GP.Covers("chat-box")
 end)
 
 test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login, both input-style switches and saved binding changes preserve the native owner", function()

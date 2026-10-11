@@ -3170,7 +3170,9 @@ function Treasury.HandleDonations(dist, sender, text)
 		if f and f.AddMessage then
 			local c = chat.TIERS and chat.TIERS.A and chat.TIERS.A.color or { 1, 0.82, 0 }
 			local bare = f ~= DEFAULT_CHAT_FRAME and chat.IsTabName and chat.IsTabName(wname)
-			f:AddMessage((bare and "" or "[" .. L.CHAN_ALL .. "] ") .. Treasury.DonationText(sender, donors[sender]), c[1], c[2], c[3]) -- gp:chat-output
+			-- (1.2.1: "[Olympus]" a link where this client may write there, as on the chat's own lines.)
+			local tag = type(chat.Tag) == "function" and chat.Tag("A") or ("[" .. L.CHAN_ALL .. "]")
+			f:AddMessage((bare and "" or tag .. " ") .. Treasury.DonationText(sender, donors[sender]), c[1], c[2], c[3]) -- gp:chat-output
 		end
 	end
 	ns.Fire("TREASURY_CHANGED")
