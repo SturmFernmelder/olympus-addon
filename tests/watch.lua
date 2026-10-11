@@ -254,6 +254,134 @@ test("watch: report a selected public message keeps its exact evidence and refus
 	end)
 end)
 
+-- 1.2.1, the author's question (does a member's report from the chat really reach the staff?): a
+-- line right-clicked in the Chat tab (ChatWindow.lua hands it to Watch.LineMessage), any line of the
+-- public Olympus channel from the last day, not only the 20 newest the member page lists; the
+-- report goes by logged whisper (MR) to his guild's guild master and Captains online, never to a
+-- member or the one reported, and the officer's client takes those very messages into its Reports
+-- and Cases, telling him once with a sound.
+test("watch: a member reports a line he right-clicked in the chat, older ones too; it reaches his guild's officers and shows in their Reports and Cases", function()
+	WithWatch(function(w, W, c)
+		local RUDE = "Rude Guy-Realm"
+		w.setRank(c.me, 3); w.setRank("Lord Guy-Realm", 0); w.setRank("Captain One-Realm", 1); w.setRank("Member Two-Realm", 3)
+		w.setRank(RUDE, 3)
+		w.online(c.me, "Lord Guy-Realm", "Captain One-Realm", "Member Two-Realm", RUDE)
+		eq(W.CanRead(), false, "an ordinary member")
+		local old = { sender = RUDE, t = w.epoch - 3000, text = "an old rude line" }
+		w.chat.A = { old }
+		for i = 1, 24 do w.chat.A[#w.chat.A + 1] = { sender = "Chatty" .. i .. "-Realm", t = w.epoch - 1000 + i, text = "chatter " .. i } end
+		local own = { sender = c.me, t = w.epoch - 5, text = "my own line", mine = true }
+		local gone = { sender = RUDE, t = w.epoch - 4, text = "a deleted line", del = true }
+		local stale = { sender = RUDE, t = w.epoch - 90000, text = "a line of yesterday" }
+		w.chat.A[#w.chat.A + 1] = own; w.chat.A[#w.chat.A + 1] = gone; w.chat.A[#w.chat.A + 1] = stale
+		local captains = { sender = RUDE, t = w.epoch - 3, text = "a Captains' line" }
+		w.chat.C = { captains }
+		eq(#W.ReportMessages(), 20, "the member page still lists the 20 newest")
+		-- (Before 1.2.1 a selected line had to be among those 20: in a busy channel a line a minute
+		-- old could no longer be reported.)
+		assert(W.AskReport(RUDE, { sender = RUDE, t = old.t, text = old.text, tier = "A" }), "a line older than the 20 newest")
+
+		local message = W.LineMessage(old, "A")
+		assert(message, "a line older than the 20 newest may be reported from the chat")
+		eq(message.sender, RUDE); eq(message.t, old.t); eq(message.text, old.text); eq(message.tier, "A")
+		eq(W.LineMessage(old, "C"), nil, "never as another chat's line")
+		eq(W.LineMessage(captains, "C"), nil, "a Captains' line never goes in a report")
+		eq(W.LineMessage(own, "A"), nil, "nor his own")
+		eq(W.LineMessage(gone, "A"), nil, "nor a deleted one")
+		eq(W.LineMessage(stale, "A"), nil, "nor one older than a day")
+		eq(W.LineMessage({ sender = RUDE, t = old.t, text = "words he never wrote" }, "A"), nil, "only the words this client kept")
+
+		-- The click: what it is about, then the note with that line alone, then Send.
+		assert(W.AskReport(message.sender, message))
+		local what = w.dialogs[#w.dialogs]
+		eq(what.which, "OLYMPUS_WATCH_REPORT_WHAT"); eq(what.data.name, RUDE)
+		StaticPopupDialogs.OLYMPUS_WATCH_REPORT_WHAT.OnAccept({ data = what.data }, what.data)
+		local note = w.dialogs[#w.dialogs]
+		eq(note.which, "OLYMPUS_WATCH_REPORT_NOTE")
+		assert(note.b:find('"an old rude line"', 1, true), note.b)
+		eq(#w.jobs, 0, "nothing sent before Send")
+		StaticPopupDialogs.OLYMPUS_WATCH_REPORT_NOTE.OnAccept({ data = note.data, editBox = { GetText = function() return "insults" end } }, note.data)
+		local to = {}
+		for _, job in ipairs(w.jobs) do
+			eq(job.dist, "WHISPER"); eq(job.logged, true, "the logged API: the server keeps a player's words")
+			to[job.target] = (to[job.target] or 0) + 1
+		end
+		eq(to["Lord Guy-Realm"], 2, "the guild master: the report and its line"); eq(to["Captain One-Realm"], 2, "a Captain: the same")
+		eq(to["Member Two-Realm"], nil, "never an ordinary member"); eq(to[RUDE], nil, "never the one reported")
+		assert(w.prints[#w.prints]:find(ns.L.WATCH_REPORT_SENT:format("Rude Guy"), 1, true), w.prints[#w.prints])
+		local toCaptain = {}
+		for _, job in ipairs(w.jobs) do
+			if job.target == "Captain One-Realm" then
+				eq(w.finish(job), true, "still allowed when the game sends it")
+				toCaptain[#toCaptain + 1] = job.msg
+			end
+		end
+		assert(toCaptain[1]:find("^MR~1~R~%d+~%d+~Olympus II~RealmGroup~Alliance~A~Rude Guy%-Realm~1~insults$"), toCaptain[1])
+		assert(toCaptain[2]:find("^MR~1~E~%d+~1~%d+~A~an old rude line$"), toCaptain[2])
+
+		-- The Captain's client: those very messages, heard logged from the reporter.
+		local reporter = c.me
+		c.me = "Captain One-Realm"
+		w.setRank(c.me, 1); w.setRank(reporter, 3)
+		eq(W.CanRead(), true, "a Captain reads The Watch")
+		local before = #w.prints
+		for _, msg in ipairs(toCaptain) do assert(W.HandleReport("WHISPER", reporter, msg)) end
+		eq(#w.prints, before + 1, "told once"); assert(w.prints[#w.prints]:find(ns.L.WATCH_REPORT_IN:format("Rude Guy", ns.L.WATCH_REPORT_CAT_A), 1, true), w.prints[#w.prints])
+		eq(w.alert and w.alert[2], "watch", "with the Watch's sound")
+		local reports = W.Reports()
+		eq(#reports, 1)
+		eq(reports[1].reporter, reporter); eq(reports[1].target, RUDE); eq(reports[1].cat, "A"); eq(reports[1].note, "insults")
+		eq(reports[1].lines[1].text, "an old rude line", "the line he right-clicked")
+		local open = W.Cases()
+		eq(#open, 1); eq(open[1].target, RUDE); eq(open[1].reporters, 1); eq(open[1].lines, 1)
+		local nav = W.Build()[1].nav
+		local shown = {}
+		for _, item in ipairs(nav) do shown[#shown + 1] = item.text end
+		shown = table.concat(shown, "|")
+		assert(shown:find(ns.L.WATCH_NAV_REPORTS:format(1), 1, true) and shown:find(ns.L.WATCH_NAV_CASES:format(1), 1, true), shown)
+		W.Show("reports")
+		local page = {}
+		for _, l in ipairs(W.Build()) do page[#page + 1] = tostring(l.text or "") end
+		assert(table.concat(page, "\n"):find(ns.L.WATCH_REPORT_CAT_A, 1, true), "on the Reports page")
+		eq(W.Record(RUDE), nil, "a report is never a sanction")
+	end)
+end)
+
+-- The game's own chat: an Olympus line there carries the player's link, and its right-click menu
+-- (MENU_UNIT_FRIEND, PlayerMenu.lua's) has Report to Olympus for an ordinary member.
+test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report", function()
+	local line = ns.Channels.FormatLine("A", "Rude Guy-Realm", "Olympus II", "WA", "rude words")
+	assert(line:find("|Hplayer:" .. ns.TellName("Rude Guy-Realm") .. "|h", 1, true), "the name is the game's player link: " .. line)
+	WithWatch(function(w, W, c)
+		w.setRank(c.me, 3); w.setRank("Captain One-Realm", 1); w.online(c.me, "Captain One-Realm")
+		w.chat.A = { { sender = "Rude Guy-Realm", t = w.epoch - 10, text = "rude words" } }
+		local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
+			GamepadUI = function() return false end }, { __index = c })
+		assert(loadfile(ROOT .. "Olympus/PlayerMenu.lua"))("Olympus", pns)
+		local PM = pns.PlayerMenu
+		eq(w.menu.key, "report")
+		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order))
+		local root = { items = {} }
+		local function Desc(kind, text, cb)
+			local d = { kind = kind, text = text, cb = cb, enabled = true }
+			function d:SetTooltip(fn) self.tip = fn end
+			function d:SetEnabled(on) self.enabled = on end
+			root.items[#root.items + 1] = d
+			return d
+		end
+		function root:CreateDivider() return Desc("divider") end
+		function root:CreateTitle(text) return Desc("title", text) end
+		function root:CreateButton(text, cb) return Desc("button", text, cb) end
+		-- (A name in chat: the game's FRIEND menu, its context the link's name.)
+		eq(PM.Build("FRIEND", root, { name = "Rude Guy-Realm" }), 1)
+		local button
+		for _, d in ipairs(root.items) do if d.kind == "button" then button = d end end
+		assert(button, "the line"); eq(button.text, ns.L.WATCH_REPORT); eq(button.enabled, true)
+		button.cb()
+		eq(w.dialogs[#w.dialogs].which, "OLYMPUS_WATCH_REPORT_WHAT"); eq(w.dialogs[#w.dialogs].data.name, "Rude Guy-Realm")
+	end)
+end)
+
 test("watch: tab is Treasury > The Watch > Throne and reuses Court and Moderation", function()
 	WithWatch(function(w, W, c)
 		eq(w.handlerKind, "MW"); assert(w.handlers.MR, "and the players' reports (1.1.6)")

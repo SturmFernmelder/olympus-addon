@@ -495,6 +495,9 @@ local function NewBubble(pane)
 	b.header:SetScript("OnClick", function(self)
 		if self.whisper then ns.SafeCall("chat tab whisper", ns.UI.WhisperWindow, self.whisper) end
 	end)
+	b.header:SetScript("OnMouseUp", function(_, button)
+		if button == "RightButton" then ns.SafeCall("chat tab moderation", ChatWindow.ModerateLine, b) end
+	end)
 	b.header:SetScript("OnEnter", function(self)
 		-- (1.1.6: the moderator's button sits in the header: still shown with the cursor here.)
 		ns.SafeCall("chat tab moderation", ChatWindow.HeaderEnter, b)
@@ -525,7 +528,9 @@ local function NewBubble(pane)
 		end
 	end)
 	-- A line the block terms hide: a click shows it (this session). 1.1.6: a right-click opens a
-	-- moderator's choices on a line he may act on (ChatWindow.ModerateLine, WatchChat.lua).
+	-- moderator's choices on a line he may act on (ChatWindow.ModerateLine, WatchChat.lua); 1.2.1,
+	-- on another player's line of the public channel, Report to Olympus for anyone else (on its
+	-- name too, ChatWindow.ReportLine).
 	b:SetScript("OnMouseUp", function(self, button)
 		if button == "RightButton" then
 			ns.SafeCall("chat tab moderation", ChatWindow.ModerateLine, self)
@@ -732,10 +737,42 @@ end
 function ChatWindow.ModerateLine(b)
 	if b and b.mod then b.mod:Hide() end
 	local e, WC = ChatWindow.ModEntry(b)
-	if not e then return false end
+	-- (1.2.1: a line this client may not act on: Report to Olympus on it instead, for any member.)
+	if not e then return ChatWindow.ReportLine(b) end
 	if b.embedded then return b.embedded.moderate(b) end
 	ChatWindow.OpenSubMenu({ kind = "moderation", bubble = b, target = e, chat = b.chat }, b)
 	return true
+end
+
+-- 1.2.1 (the author's ask: a member who moderates nobody reports a line from the chat itself): a
+-- right-click on another player's line of the public Olympus channel opens Report to Olympus for
+-- that very line (The Watch's report, Watch.LineMessage: its words go with it, nothing else). Never
+-- in a fight room or another chat: a report carries the public channel's lines alone.
+function ChatWindow.ReportEntry(b)
+	local W = ns.Watch
+	if type(W) ~= "table" or W.missing or type(W.LineMessage) ~= "function" or type(W.AskReport) ~= "function" then return nil end
+	if not b or b.mine or b.embedded or type(b.entry) ~= "table" or b.entry.del then return nil end
+	local message = W.LineMessage(b.entry, b.chat)
+	if not message then return nil end
+	return b.entry, message, W
+end
+
+function ChatWindow.ReportLine(b)
+	local e = ChatWindow.ReportEntry(b)
+	if not e then return false end
+	ChatWindow.OpenSubMenu({ kind = "report", bubble = b, target = e, chat = b.chat }, b)
+	return true
+end
+
+-- Its one choice, rechecked at the click (the bubble may show another line by then).
+function ChatWindow.ReportOptions(entry)
+	local e = ChatWindow.ReportEntry(entry.bubble)
+	if not e or e ~= entry.target or entry.bubble.chat ~= entry.chat then return {} end
+	return { { label = L.WATCH_REPORT, onClick = function()
+		local current, message, W = ChatWindow.ReportEntry(entry.bubble)
+		if current ~= e or entry.bubble.chat ~= entry.chat then return end
+		W.AskReport(message.sender, message)
+	end } }
 end
 
 function ChatWindow.ModerationOptions(entry)
@@ -1039,6 +1076,7 @@ end
 
 function ChatWindow.SubMenuOptions(entry)
 	if entry.kind == "moderation" then return ChatWindow.ModerationOptions(entry) end
+	if entry.kind == "report" then return ChatWindow.ReportOptions(entry) end
 	local R = ns.ChatRooms
 	return entry.kind == "arena" and ChatWindow.ArenaOptions(true)
 		or (type(R) == "table" and type(R.Options) == "function" and R.Options(entry.kind) or {})
@@ -1131,7 +1169,7 @@ function ChatWindow.OpenSubMenu(entry, owner)
 		menu.rows[i].text:SetWordWrap(false)
 	end
 	menu:ClearAllPoints()
-	if entry.kind == "moderation" then
+	if entry.kind == "moderation" or entry.kind == "report" then
 		menu:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -2)
 	else
 	local top = owner:GetBottom() - frame:GetTop() - 2
@@ -3512,7 +3550,7 @@ end
 ns.On("DATA_CHANGED", function()
 	if frame and frame.subEntry then
 		local entry, available = frame.subEntry, false
-		if entry.kind == "moderation" then available = #ChatWindow.ModerationOptions(entry) > 0 end
+		if entry.kind == "moderation" or entry.kind == "report" then available = #ChatWindow.SubMenuOptions(entry) > 0 end
 		for _, current in ipairs(ChatWindow.SubtabEntries()) do if current.kind == entry.kind then available = true; break end end
 		if not available or frame.subSignature ~= ChatWindow.SubMenuSignature(entry, ChatWindow.SubMenuOptions(entry)) then ChatWindow.CloseSubMenu() end
 	end

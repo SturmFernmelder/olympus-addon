@@ -1402,7 +1402,9 @@ end
 
 -- Only messages the client can still read in the public Olympus channel may be selected.
 -- The selected line is rechecked before sending; callers cannot attach arbitrary private text.
-function Watch.ReportMessages()
+-- (1.2.1: every such line of the last day, newest first; the member page lists the 20 newest, but
+-- a right-click on an older line in the Chat tab, ChatWindow.lua, may report it too.)
+function Watch.ReportableMessages()
 	local C, out = ns.Channels, {}
 	if not Watch.MemberShown() or MemberPreview() or not (C and C.History) then return out end
 	for _, e in ipairs(C.History("A") or {}) do
@@ -1413,14 +1415,29 @@ function Watch.ReportMessages()
 		end
 	end
 	table.sort(out, function(a, b) return a.t > b.t end)
+	return out
+end
+function Watch.ReportMessages()
+	local out = Watch.ReportableMessages()
 	while #out > 20 do table.remove(out) end
 	return out
+end
+
+-- 1.2.1: the line a right-click in the Chat tab picked (ChatWindow.lua), as Watch.AskReport takes
+-- it: another player's line of the public Olympus channel that may still be reported, else nil (a
+-- Captains', Lords' or room line, one's own, the King's, a deleted one, one older than a day).
+function Watch.LineMessage(entry, chat)
+	if chat ~= "A" or type(entry) ~= "table" then return nil end
+	for _, m in ipairs(Watch.ReportableMessages()) do
+		if Same(m.sender, entry.sender) and m.t == entry.t and m.text == entry.text then return m end
+	end
+	return nil
 end
 
 local function SelectedEvidence(target, message)
 	if not message then return Watch.Evidence(target) end
 	if type(message) ~= "table" or message.tier ~= "A" or not Same(message.sender, target) then return nil end
-	for _, e in ipairs(Watch.ReportMessages()) do
+	for _, e in ipairs(Watch.ReportableMessages()) do
 		if Same(e.sender, target) and e.t == message.t and e.text == message.text then
 			return { { at = math.floor(e.t), tier = "A", text = CleanLine(e.text) } }
 		end

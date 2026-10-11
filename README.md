@@ -802,6 +802,18 @@ Personal report and restriction handlers remain separate from staff permissions;
 does not give anyone access to private rooms or other players' cases. The author's role preview
 never sends a member's report or appeal.
 
+**Report to Olympus** (1.1.6) is for any member, on anyone but himself and the King: from a
+player's right-click menu (a name in the game's chat, an Olympus line's included), from
+`/oly watch report <name>`, and since 1.2.1 with a right-click on another player's line in the
+Chat tab's Olympus channel, or on their name there, which reports that very line. He picks what
+it is about and may add a short note; he sees the lines that go with it (from the public Olympus
+channel his addon kept, never a whisper or a private room) before he sends. It goes as logged
+addon whispers to his guild's officers in The Watch who are online (its guild master, its
+Captains, the Watchers he names and a signed moderator), never to the one reported or a name his
+player linked; with none online it waits on his client for a day. Their client shows it in The
+Watch's **Reports** and **Cases** and tells them once, with a sound. A report is never a
+sanction: an officer decides, and may send the case to the King for the High Council's vote.
+
 The **Watch** tab's desk, Reports and Cases appear only for this guild's Lord and Captains, plus a
 signed moderator while the signed authority is active and that same character is still in the
 live guild roster. A net-off word on the character or guild closes them. It is deliberately

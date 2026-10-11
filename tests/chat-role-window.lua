@@ -97,3 +97,65 @@ test("role chat navigation: real dropdown redraws with the preview without openi
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- 1.2.1, the author's ask: a member who moderates nobody right-clicks another player's line of the
+-- public Olympus channel, on its words or on its name, and reports that very line (Report to
+-- Olympus, The Watch's: Watch.LineMessage says whether it may go, Watch.AskReport asks). Before,
+-- the right-click did nothing for him.
+test("chat: an ordinary member right-clicks another player's Olympus line, its words or its name, and reports that line", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = { history = C.History, watch = rawget(ns, "Watch"), wc = rawget(ns, "WatchChat") }
+		local theirs = { t = 100, sender = "Rude Guy-Realm", guild = "Olympus II", text = "rude words" }
+		local mine = { t = 101, sender = ns.me, guild = "Olympus II", text = "my own words", mine = true }
+		local asked, reported = {}, {}
+		C.History = function(t) if t == "A" then return { theirs, mine } end return {} end
+		rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+			CanModerateAny = function() return false end, CanModerateEntry = function() return false end })
+		rawset(ns, "Watch", {
+			LineMessage = function(entry, chat)
+				asked[#asked + 1] = { entry = entry, chat = chat }
+				if entry == theirs and chat == "A" and not entry.del then return { sender = entry.sender, t = entry.t, text = entry.text, tier = "A" } end
+			end,
+			AskReport = function(name, message) reported[#reported + 1] = { name = name, message = message } return true end,
+		})
+		local ok, err = pcall(function()
+			local f = w.CW.Open("A")
+			local function BubbleOf(e)
+				for _, b in ipairs(f.bubbles) do if b:IsShown() and b.entry == e then return b end end
+				error("no bubble for " .. tostring(e.text))
+			end
+			local b = BubbleOf(theirs)
+			b:Fire("OnMouseUp", "RightButton")
+			eq(f.subMenu:IsShown(), true, "the right-click opens the line's menu")
+			eq(f.subMenu.rows[1].text:GetText(), ns.L.WATCH_REPORT); eq(f.subMenu.rows[2]:IsShown(), false, "one choice")
+			eq(asked[#asked].entry, theirs); eq(asked[#asked].chat, "A", "asked about that line, in the Olympus channel")
+			eq(#reported, 0, "nothing before the click")
+			w.fire("DATA_CHANGED"); eq(f.subMenu:IsShown(), true, "a census redraw leaves it open")
+			f.subMenu.rows[1]:Click()
+			eq(#reported, 1); eq(reported[1].name, "Rude Guy-Realm")
+			eq(reported[1].message.t, 100); eq(reported[1].message.text, "rude words"); eq(reported[1].message.tier, "A")
+			eq(f.subMenu:IsShown(), false)
+			-- On his name (the header) too; a left click there stays the whisper's.
+			b.header:Fire("OnMouseUp", "LeftButton"); eq(f.subMenu:IsShown(), false)
+			b.header:Fire("OnMouseUp", "RightButton"); eq(f.subMenu:IsShown(), true, "the name's right-click")
+			-- The bubble showing another line by the click: nothing reported.
+			b.entry = { t = 102, sender = "Other-Realm", text = "other words" }
+			f.subMenu.rows[1]:Click(); eq(#reported, 1, "a reused bubble cannot change the line")
+			b.entry = theirs
+			-- A line deleted meanwhile: its menu closes.
+			w.CW.ModerateLine(b); eq(f.subMenu:IsShown(), true)
+			theirs.del = true; w.fire("DATA_CHANGED"); eq(f.subMenu:IsShown(), false, "closed once it may no longer go")
+			theirs.del = nil
+			-- His own line: no menu, and nothing asked.
+			local n = #asked
+			eq(w.CW.ModerateLine(BubbleOf(mine)), false); eq(f.subMenu:IsShown(), false); eq(#asked, n)
+			-- A client updated without a restart (The Watch a stand-in): nothing.
+			rawset(ns, "Watch", { missing = true })
+			eq(w.CW.ModerateLine(b), false); eq(f.subMenu:IsShown(), false)
+		end)
+		C.History = saved.history
+		rawset(ns, "Watch", saved.watch); rawset(ns, "WatchChat", saved.wc)
+		if not ok then error(err, 0) end
+	end)
+end)
