@@ -2621,7 +2621,11 @@ UI.LINKS = {
 -- for the privacy switches and the chats (the same strings, so they never disagree), and the
 -- links. In the copy box, so a link can be copied; its buttons are Report a bug and (1.1.5) the
 -- version letters, every one (Letters.lua): the Olympus window's "i" keeps them.
-function UI.ShowHelp()
+-- (1.2.1) Its text is made once a session (its lines never change in one), and the copy box keeps
+-- it while nothing else is shown there: the help opened again sets no text (UI.ShowCopy).
+local helpText
+function UI.HelpText()
+	if helpText then return helpText end
 	local lines = {
 		L.TITLE .. " " .. tostring(ns.VERSION),
 		"",
@@ -2657,7 +2661,11 @@ function UI.ShowHelp()
 		"  " .. L.HELP_ISSUES .. ": " .. UI.LINKS.issues,
 		"  CurseForge: " .. UI.LINKS.curseforge,
 	}
-	UI.ShowCopy(L.HELP_TITLE, table.concat(lines, "\n"), { label = L.REPORT_BUG, fn = function() UI.ShowBugReport() end },
+	helpText = table.concat(lines, "\n")
+	return helpText
+end
+function UI.ShowHelp()
+	UI.ShowCopy(L.HELP_TITLE, UI.HelpText(), { label = L.REPORT_BUG, fn = function() UI.ShowBugReport() end },
 		{ second = { label = L.LETTERS_BTN, fn = function() ns.Letters.ShowHistory() end } })
 end
 
@@ -2707,7 +2715,9 @@ local function CopyFrame(key, big)
 	eb:SetAutoFocus(false)
 	eb:SetScript("OnEscapePressed", function() f:Hide() end)
 	eb:SetScript("OnTextChanged", function(self, userInput)
-		if userInput then -- read only
+		-- Read only: what the player typed goes. (1.2.1) Only a text that is not the box's own is
+		-- set back: a client that called the box's own SetText typed would set it again and again.
+		if userInput and self:GetText() ~= (f.text or "") then
 			self:SetText(f.text or "")
 			self:HighlightText()
 		end
@@ -2797,8 +2807,12 @@ function UI.ShowCopy(title, text, action, opts)
 		end
 	end
 	ns.SetWindowTitle(copyFrame, title)
-	copyFrame.text = text
-	copyFrame.eb:SetText(text)
+	-- (1.2.1) The text the box shows already (the help opened again): kept, laid out as it is. A
+	-- long text set in the box is most of what opening it costs a slow PC.
+	if copyFrame.text ~= text or copyFrame.eb:GetText() ~= text then
+		copyFrame.text = text
+		copyFrame.eb:SetText(text)
+	end
 	copyFrame:Show()
 	-- At its own place it steps above the Issue Reporter, like our window (its hint is
 	-- right over the reporter's default spot).
