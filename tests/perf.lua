@@ -5,13 +5,15 @@ local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]perf%.lua
 -- addon on while its memory and the CPU shown looked low; the profiler tells which of Olympus's
 -- calls take the time, on their own computers. Each world here is Core.lua loaded into a table of
 -- its own (its ns.SafeCall, ns.Fire, events and the /oly dispatcher), the profiler over it, a clock
--- that moves only when a call here moves it (w.now, milliseconds) and GetTime (w.t, seconds).
+-- that moves only when a call here moves it (w.now, milliseconds) and GetTime (w.t, seconds). The
+-- game's next frame: w.Tick() runs the timers due (C_Timer.After), as the load's end does once.
+-- before(c, Perf): what else the files register after Perf.lua, before INIT.
 
-local GLOBALS = { "CreateFrame", "debugprofilestop", "GetTime", "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARENA1" }
+local GLOBALS = { "CreateFrame", "debugprofilestop", "GetTime", "C_Timer", "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARENA1" }
 local SLASH = { "OLYMPUS", "OLYMPUSARENA" }
 
-local function World(db, fn)
-	local w = { now = 0, t = 1000, frames = {}, printed = {}, errors = {}, copies = {} }
+local function World(db, fn, before)
+	local w = { now = 0, t = 1000, frames = {}, printed = {}, errors = {}, copies = {}, timers = {} }
 	local saved, slash = {}, {}
 	for _, k in ipairs(GLOBALS) do saved[k] = rawget(_G, k) end
 	for _, k in ipairs(SLASH) do slash[k] = SlashCmdList[k] end
@@ -24,6 +26,12 @@ local function World(db, fn)
 	end
 	debugprofilestop = function() return w.now end
 	GetTime = function() return w.t end
+	C_Timer = { After = function(_, f) w.timers[#w.timers + 1] = f end, NewTicker = function() return { Cancel = function() end } end }
+	function w.Tick()
+		local due = w.timers
+		w.timers = {}
+		for _, f in ipairs(due) do f() end
+	end
 	local c = setmetatable({}, { __index = ns })
 	c.L = setmetatable({}, { __index = ns.L })
 	local ok, err = pcall(function()
@@ -41,7 +49,9 @@ local function World(db, fn)
 		w.mark = #w.frames
 		assert(loadfile(ROOT .. "Olympus/Locales/PerfText.lua"))("Olympus", c)
 		assert(loadfile(ROOT .. "Olympus/Perf.lua"))("Olympus", c)
+		if before then before(c, c.Perf) end
 		c.Fire("INIT")
+		w.Tick() -- (the load is over: the next frame)
 		-- /oly as the login installs it with mouse and keyboard (Core.lua's own gate here).
 		c.Gate.Install("slash")
 		w.slash = SlashCmdList.OLYMPUS
@@ -150,7 +160,7 @@ test("1.2.1 profiler: on, each label and each listener has its own line, the slo
 		w.t = w.t + 125
 		w.slash("perf")
 		local text = w.Report()
-		for _, want in ipairs({ L.PERF_SLOW_ROW:format("120.0", date("%H:%M:%S", p.slow[1].at), "perf test slow"), k1, k2, ke,
+		for _, want in ipairs({ L.PERF_SLOW_ROW:format("120.0", date("%H:%M:%S", p.slow[1].at), "perf test slow"), k1, k2, ke, L.PERF_INPUT_KEYS,
 			L.PERF_FRAMES:format(30, "2", "4"), L.PERF_STATE_ON:format(L.PERF_DURATION_M:format(2, 5), date("%Y-%m-%d %H:%M", p.since)),
 			L.PERF_TOTAL_ROW:format(k2, "1", "45", "45.00", "45.0"), L.PERF_TOTAL_ROW:format("callback PERF_PROBE", "2", "47", "23.50", "45.0"),
 			L.PERF_FRAME_ROW:format("168.0", date("%H:%M:%S", p.worst[1].at), "perf test slow", "120.0") }) do
@@ -234,12 +244,14 @@ end)
 -- UI recorded): the profiler on from the saved variables, in a whole session with the gamepad UI
 -- on, then with mouse and keyboard and its report opened by /oly perf. It touches none of the
 -- game's frames (its frame is its own) and nothing it does is refused.
+-- The saved variables of a player who answered the login's questions, with the profiler on.
+local function Saved()
+	return { addonChat = true, royalInspection = true, rollCall = true, layerHelp = true, treasurerShares = true,
+		chatWarned = { A = true, C = true, L = true }, shareLocation = true, perf = { on = true } }
+end
+
 test("1.2.1 profiler in the gamepad pass's client: on from the saved variables it measures a whole session, gamepad UI on or not, and reaches nothing of the game's UI", function()
 	local GPM = assert(loadfile(ROOT .. "tests/gamepad.lua"))("--debug")
-	local function Saved()
-		return { addonChat = true, royalInspection = true, rollCall = true, layerHelp = true, treasurerShares = true,
-			chatWarned = { A = true, C = true, L = true }, shareLocation = true, perf = { on = true } }
-	end
 	for _, pad in ipairs({ true, false }) do
 		local what = pad and "the gamepad UI" or "mouse and keyboard"
 		local C, gns = GPM.Session(pad, { saved = Saved() })
@@ -249,6 +261,7 @@ test("1.2.1 profiler in the gamepad pass's client: on from the saved variables i
 		local p = gns.db.perf
 		assert(next(p.stats), what .. ": the session's calls measured")
 		assert(p.frames > 0, what .. ": its frame counted the frames")
+		assert(gns.Perf.ReportText():find(pad and gns.L.PERF_INPUT_PAD or gns.L.PERF_INPUT_KEYS, 1, true), what .. ": the report says which")
 		if not pad then
 			eq(GPM.TypeSlash(C, "/oly perf"), true, "/oly perf typed")
 			local f = gns.UI.CopyFrame("perf")
@@ -261,4 +274,167 @@ test("1.2.1 profiler in the gamepad pass's client: on from the saved variables i
 		local errs = GPM.Errors(C)
 		eq(#errs, 0, what .. ": " .. tostring(errs[1]))
 	end
+end)
+
+-- (A player's report: the game's Lua has no debug library, so a listener's line reads "callback
+-- DATA_CHANGED #18" alone, and only its place says which. Started from the saved word inside INIT,
+-- the 1.2.1 draft numbered the listeners of INIT after its own, and the ADDON_LOADED handlers after
+-- Core.lua's, from #1.) The model of the client with the debug library in its Lua, so each line has
+-- the file and line the profiler found: every listener's line of a whole session, started from the
+-- saved word, is the one scripts/perf-listeners.lua prints for its #n.
+test("1.2.1 profiler: each listener's #n is its place in the order of registration, the one scripts/perf-listeners.lua names, through a whole session started from the saved word", function()
+	local Map = assert(loadfile(ROOT .. "scripts/perf-listeners.lua"))("--module")
+	local GPM = assert(loadfile(ROOT .. "tests/gamepad.lua"))("--debug")
+	local C, gns = Map.Session(false, Saved())
+	eq(gns.Perf.IsOn(), true, "on again from the saved word")
+	GPM.WindowFlow(C)
+	C.Advance(90)
+	gns.Fire("DATA_CHANGED")
+	C.Fire("PLAYER_ENTERING_WORLD", false, true)
+	C.Fire("ZONE_CHANGED_NEW_AREA")
+	C.Fire("GUILD_ROSTER_UPDATE")
+	local map = Map.Map(gns)
+	local stats, checked, labels = gns.db.perf.stats, 0, {}
+	for key in pairs(stats) do
+		if key:find("^callback ") or key:find("^event ") then
+			local label, n, site = key:match("^(.-) #(%d+) (.+)$")
+			assert(label, "a listener's line, its #n and its file and line: " .. key)
+			local row = map[label] and map[label][tonumber(n)]
+			assert(row, key .. ": the script lists no such listener")
+			eq(site, row.site, key)
+			checked, labels[label] = checked + 1, true
+		end
+	end
+	assert(checked >= 30 and labels["callback DATA_CHANGED"], "the session's listeners: " .. checked)
+	for k in pairs(stats) do assert(not k:find("^callback INIT ") and not k:find("^event ADDON_LOADED "), "the load itself is not measured: " .. k) end
+	-- Each DATA_CHANGED listener on its own line, the script's line for its #n.
+	local rows = map["callback DATA_CHANGED"]
+	assert(#rows >= 10, "the census's listeners")
+	for n, row in ipairs(rows) do
+		assert(stats["callback DATA_CHANGED #" .. n .. " " .. row.site], "callback DATA_CHANGED #" .. n .. " " .. row.site)
+	end
+	local lines = Map.Lines(map, { "data_changed" })
+	eq(#lines, #rows, "a word keeps the labels holding it")
+	eq(lines[1], "callback DATA_CHANGED #1  " .. rows[1].site)
+	eq(lines[#rows], ("callback DATA_CHANGED #%d  %s"):format(#rows, rows[#rows].site))
+	assert(#Map.Lines(map) > #rows, "no word: every label")
+	eq(#GPM.Errors(C), 0, tostring(GPM.Errors(C)[1]))
+end)
+
+test("1.2.1 profiler: after a /reload it starts again on the frame after the load, never inside INIT, so no listener is numbered out of its order", function()
+	local during
+	World({ perf = { on = true } }, function(P, w, c)
+		eq(during, false, "not measuring inside INIT")
+		eq(P.IsOn(), true, "measuring from the frame after")
+		local p = c.db.perf
+		for k in pairs(p.stats) do assert(not k:find("^callback INIT"), "INIT is not measured: " .. k) end
+		c.On("PERF_ORDER", function() w.now = w.now + 1 end)
+		c.On("PERF_ORDER", function() w.now = w.now + 2 end)
+		c.Fire("PERF_ORDER")
+		local k1, k2 = KeyStarting(p.stats, "callback PERF_ORDER #1"), KeyStarting(p.stats, "callback PERF_ORDER #2")
+		eq(p.stats[k1].total, 1); eq(p.stats[k2].total, 2)
+		-- Cleared, each listener keeps its #n (its place).
+		w.slash("perf reset")
+		c.Fire("PERF_ORDER")
+		eq(p.stats[k1].total, 1); eq(p.stats[k2].total, 2)
+	end, function(c, P)
+		c.On("INIT", function() during = P.IsOn() end)
+		c.On("INIT", function() end)
+	end)
+	-- Off before the frame after the load (the saved word changed in between): it stays off.
+	local db = { perf = { on = true } }
+	World(db, function(P, w, c)
+		eq(P.IsOn(), false)
+		eq(c.SafeCall, w.core); eq(#w.frames, w.mark, "no frame")
+	end, function(c, P)
+		c.On("INIT", function() c.db.perf.on = false end)
+	end)
+	eq(db.perf.on, false)
+end)
+
+test("1.2.1 profiler: a label keeps nothing that changes from call to call (a name, a nonce, an id): a timer's key with a player's name is one line, no name is saved, and every listener has its own line once the labels are full", function()
+	World({}, function(P, w, c)
+		w.slash("perf on")
+		local p = c.db.perf
+		for i = 1, 1000 do c.SafeCall("arena after match:offer:q" .. i .. "|somename-realm", function() w.now = w.now + 1 end) end
+		eq(p.stats["arena after match:offer"].n, 1000, "one line")
+		for raw, kept in pairs({
+			["arena after witness 3fa2c:2"] = "arena after witness",
+			["arena after wallet auto Somebank-Realm"] = "arena after wallet auto",
+			["watch sync 1760000123 4"] = "watch sync",
+			["after combat room:w:somename-realm"] = "after combat room",
+			["arena after ~k:123456|somename"] = "arena after ~k:#",
+			["tabards v2"] = "tabards v2",
+			["button |cffffd100Somename|r"] = "button",
+			["arena every fights"] = "arena every fights",
+		}) do
+			c.SafeCall(raw, function() w.now = w.now + 1 end)
+			c.SafeCall(raw, function() w.now = w.now + 1 end)
+			eq(p.stats[kept] and p.stats[kept].n, 2, raw .. " is kept as " .. kept)
+		end
+		-- A long label: LABEL_MAX bytes at most, cut between two characters (é's 2 bytes are its 80th and 81st).
+		c.SafeCall(("x"):rep(79) .. "é" .. ("y"):rep(20), function() end)
+		eq(p.stats[("x"):rep(79)] and p.stats[("x"):rep(79)].n, 1, "cut before the é")
+		local function NoName(s) return not s:find("omename", 1, true) and not s:find("omebank", 1, true) end
+		for k in pairs(p.stats) do assert(NoName(k), "a saved label: " .. k) end
+		for k in pairs(p.events) do assert(NoName(k), k) end
+		for _, e in ipairs(p.slow) do assert(NoName(e.label), e.label) end
+		eq(p.keys < 20, true, "a few labels: " .. p.keys)
+		-- The labels full: a label never seen is "(other)", a listener's line is its own.
+		local was = P.MAX_KEYS
+		P.MAX_KEYS = p.keys
+		c.SafeCall("perf beyond", function() end)
+		c.On("PERF_LATE", function() end)
+		c.On("PERF_LATE", function() end)
+		c.Fire("PERF_LATE")
+		P.MAX_KEYS = was
+		eq(p.stats["perf beyond"], nil); assert(p.stats["(other)"])
+		assert(KeyStarting(p.stats, "callback PERF_LATE #1") and KeyStarting(p.stats, "callback PERF_LATE #2"), "each listener on its own line")
+		-- Labels as called past MAX_BASES: not remembered, kept the same; a listener's #n kept.
+		local wasB = P.MAX_BASES
+		P.MAX_BASES = 0
+		c.SafeCall("perf unremembered", function() end)
+		c.SafeCall("perf unremembered", function() end)
+		c.On("PERF_LATER", function() end)
+		c.Fire("PERF_LATER"); c.Fire("PERF_LATER")
+		P.MAX_BASES = wasB
+		eq(p.stats["perf unremembered"].n, 2)
+		eq(p.stats[KeyStarting(p.stats, "callback PERF_LATER #1")].n, 2, "its #n the same at each call")
+		eq(#w.errors, 0, table.concat(w.errors, "; "))
+	end)
+end)
+
+test("1.2.1 profiler: /oly help lists /oly perf, so does the README's table of commands, and each of its words has its pt-BR", function()
+	World({}, function(P, w, c, L)
+		local printed, savedPrint = {}, print
+		print = function(s) printed[#printed + 1] = tostring(s) end
+		local ok, err = pcall(w.slash, "no-such-command")
+		print = savedPrint
+		assert(ok, err)
+		assert(rawget(c.L, "HELP_CMD_PERF"), "its line, from PerfText.lua")
+		assert(table.concat(printed, "\n"):find(L.HELP_CMD_PERF, 1, true), "in /oly help")
+	end)
+	local readme = assert(io.open(ROOT .. "README.md")):read("*a")
+	assert(readme:find("\n| `/oly perf`", 1, true), "the README's commands")
+	-- Each word set in English and again for pt-BR, with the same format codes.
+	local function Load(locale)
+		local store, sets = {}, {}
+		local L = setmetatable({}, { __index = store, __newindex = function(_, k, v) sets[k] = (sets[k] or 0) + 1; store[k] = v end })
+		local saved = GetLocale
+		GetLocale = function() return locale end
+		local ok, err = pcall(function() assert(loadfile(ROOT .. "Olympus/Locales/PerfText.lua"))("Olympus", { L = L }) end)
+		GetLocale = saved
+		assert(ok, err)
+		return store, sets
+	end
+	local en = Load("enUS")
+	local pt, sets = Load("ptBR")
+	local function Codes(s) local out = {} for code in s:gmatch("%%[%d%.%-]*%a") do out[#out + 1] = code end return table.concat(out, " ") end
+	local n = 0
+	for k, v in pairs(en) do
+		n = n + 1
+		eq(sets[k], 2, "pt-BR: " .. k)
+		eq(Codes(pt[k]), Codes(v), "pt-BR codes: " .. k)
+	end
+	assert(n >= 25 and en.HELP_CMD_PERF and pt.HELP_CMD_PERF ~= en.HELP_CMD_PERF)
 end)

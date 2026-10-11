@@ -13,8 +13,11 @@ local L = ns.L
 -- and line where the game's Lua tells them (debug.getinfo) or its name in the namespace
 -- (ChatRooms.RefreshAuthority), so each DATA_CHANGED listener has its own line. Where the client's
 -- Lua has no debug library (the gamepad pass's model of Forever has none), #n alone names most:
--- the order is the TOC's and the files', the same on every client of one build, and the offline
--- harness (LuaJIT's debug.getinfo) gives each #n its file and line. An
+-- the order is the TOC's and the files', the same on every client of one version, and
+-- scripts/perf-listeners.lua prints each #n's file and line for the checkout. (So the profiler is
+-- never started inside a dispatch, whose later listeners would be numbered from #1: after a
+-- /reload it starts on the frame after the load.) A label is kept without what changes from call
+-- to call (Kept: a typed word, a name, an id), so it takes one line. An
 -- OnUpdate of its own frame (never one of the game's) adds up the top-level calls of each drawn
 -- frame and counts the frames where Olympus took 30 ms or more. Kept: each label's calls, total
 -- and slowest; the 40 slowest calls with their times; the 10 worst frames; the time measured.
@@ -26,7 +29,11 @@ ns.Perf = Perf
 Perf.FRAME_MS = 30   -- a frame with this much of Olympus's work is counted
 Perf.SLOW_KEEP = 40  -- the slowest calls kept
 Perf.WORST_KEEP = 10 -- the worst frames kept
-Perf.MAX_KEYS = 1000 -- labels kept; any further one is counted as "(other)"
+Perf.MAX_KEYS = 1000 -- labels kept; any further one is counted as "(other)" (a listener's never is)
+Perf.MAX_BASES = 2000 -- labels as called, remembered in this session (a listener's always are)
+Perf.LABEL_MAX = 80  -- a kept label's length at most, in bytes
+-- Labels whose rest is data (Kept): a name, a nonce, an id after these words.
+Perf.DATA_AFTER = { "arena after match:offer", "arena after witness", "arena after wallet auto", "watch sync", "after combat room" }
 Perf.MAX_LISTENERS = 200 -- listeners named one by one under one label
 Perf.TOP = 25        -- the report's "most time in all" lines
 Perf.TOP_EVENTS = 12 -- the report's "each event's listeners together" lines
@@ -77,20 +84,48 @@ local function NsName(fn)
 	return nsNames[fn]
 end
 
--- A label as kept: a typed command's words are never kept (a key, a name: "slash key ..." is
--- "slash key"), nor a menu line's (it can hold a player's name). [label] = { kept label,
--- listener?, its listeners' names by function, how many }.
-local bases = {}
+-- A label as kept: nothing in it that changes from call to call, so one label is one line and
+-- one saved slot, and no name is saved. A typed command's words never are (a key, a name: "slash
+-- key ..." is "slash key"), nor a menu line's (it can hold a player's name), nor what follows the
+-- words of DATA_AFTER (a timer's key with a player's name, a nonce, a fight's id: "arena after
+-- match:offer:<id>|<name>" is "arena after match:offer"); anywhere else what follows a "|" is
+-- dropped and a number of two digits or more is "#". An event's or a callback's label is its name
+-- (the code's own) and stays whole. The same answer for a label already kept.
+local function Kept(s)
+	local cmd = s:match("^slash%s+(%S*)")
+	if cmd then return "slash " .. cmd:lower() end
+	if s:find("^player menu ") then return "player menu" end
+	for _, p in ipairs(Perf.DATA_AFTER) do
+		if s:sub(1, #p) == p and (#s == #p or s:sub(#p + 1, #p + 1):find("[%s:|]")) then return p end
+	end
+	s = s:gsub("|.*$", ""):gsub("%d%d+", "#"):gsub("%s+$", "")
+	if #s > Perf.LABEL_MAX then
+		-- (Cut between two characters: a byte 0x80-0xBF continues one.)
+		local cut = Perf.LABEL_MAX
+		while cut > 0 and (s:byte(cut + 1) or 0) >= 0x80 and s:byte(cut + 1) < 0xC0 do cut = cut - 1 end
+		s = s:sub(1, cut)
+	end
+	return s
+end
+
+-- [kept label] = { label, listener?, its listeners' names by function, how many }. A label as
+-- called finds its own when it is kept as called; one with data in it is kept anew (Kept) at each
+-- call. Bounded: past MAX_BASES a new label that is no listener's is kept anew at each call, never
+-- remembered. A listener's is always remembered: its #n live here, for the whole session.
+local bases, nBases = {}, 0
 local function Base(where)
-	local b = where ~= nil and bases[where]
+	local b = bases[where]
 	if b then return b end
 	local s = tostring(where)
-	local kept = s
-	local cmd = s:match("^slash%s+(%S*)")
-	if cmd then kept = "slash " .. cmd:lower()
-	elseif s:find("^player menu ") then kept = "player menu" end
-	b = { label = kept, listener = (s:find("^callback ") or s:find("^event ")) and true or false, count = 0 }
-	if where ~= nil and kept == s then bases[where] = b end
+	local listener = (s:find("^callback ") or s:find("^event ")) and true or false
+	local kept = listener and s or Kept(s)
+	b = bases[kept]
+	if b then return b end
+	b = { label = kept, listener = listener, count = 0 }
+	if listener or nBases < Perf.MAX_BASES then
+		bases[kept] = b
+		nBases = nBases + 1
+	end
 	return b
 end
 
@@ -141,7 +176,8 @@ local function Record(where, fn, dt)
 	local key = b.listener and ListenerKey(b, fn) or b.label
 	local stats = data.stats
 	if not stats[key] then
-		if data.keys >= Perf.MAX_KEYS then
+		-- (A listener's line always: a label, kept, is the code's own, so these are bounded.)
+		if data.keys >= Perf.MAX_KEYS and not b.listener then
 			key = "(other)"
 		else
 			data.keys = data.keys + 1
@@ -314,7 +350,7 @@ function Perf.Reset()
 	runStart = Now()
 	slowMin, worstMin = -1, -1
 	frameSum, frameTopMs, frameTop = 0, 0, nil
-	for _, b in pairs(bases) do b.count, b.byFn = 0, nil end
+	-- (Each listener keeps its #n: it is its place in the order of registration, for the session.)
 end
 
 -- Seconds measured, this run's included.
@@ -362,6 +398,8 @@ function Perf.ReportText()
 		if ok then game = ("%s.%s (%s)"):format(tostring(version), tostring(build), tostring(interface)) end
 	end
 	Add(L.PERF_TITLE .. " - " .. L.PERF_VERSION:format(tostring(ns.VERSION), game))
+	-- (Which session scripts/perf-listeners.lua is to model: a few listeners are registered by mode.)
+	if ns.GamepadUI then Add(ns.GamepadUI() and L.PERF_INPUT_PAD or L.PERF_INPUT_KEYS) end
 	local p = ns.db and type(ns.db.perf) == "table" and Data(false) or nil
 	if not p then
 		Add(L.PERF_STATE_NEVER)
@@ -425,8 +463,19 @@ function Perf.Slash(rest)
 	end
 end
 
--- On through a /reload: the saved word starts it again as soon as the saved variables are read.
+-- A function's file and line where the game's Lua tells them (scripts/perf-listeners.lua's names).
+Perf.Site = Source
+
+-- On through a /reload: the saved word starts it again on the frame after the load, not in INIT
+-- itself. INIT runs inside Core.lua's ADDON_LOADED handler: started there, the listeners of INIT
+-- after this one and the ADDON_LOADED handlers after Core.lua's would be numbered from #1, and
+-- each #n of theirs would name another listener than its place in the order of registration.
 ns.On("INIT", function()
 	local p = ns.db and ns.db.perf
-	if type(p) == "table" and p.on == true then Perf.Start() end
+	if type(p) == "table" and p.on == true then
+		ns.After(0, "perf resume", function()
+			local q = ns.db and ns.db.perf
+			if type(q) == "table" and q.on == true then Perf.Start() end
+		end)
+	end
 end)
