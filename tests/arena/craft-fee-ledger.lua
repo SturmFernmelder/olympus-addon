@@ -441,6 +441,33 @@ test("1.2.1 craft fee desk: the fees kept for their return are bounded, whoever 
 	NoErrors(w)
 end)
 
+-- (The review's suggestion to refuse a word whose requester is not the one on the desk's card of that
+-- request: a card is the first one the desk heard for that id, from whoever sent it, so a card sent
+-- with another request's id while the desk missed the real one would have the real parties' words
+-- refused. Pinned here: the words of the sale's own parties are booked whatever card the desk holds.)
+test("1.2.1 craft fee desk: a card sent with another request's id, where the desk missed the real one, never keeps the sale's own parties' words off the ledger", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local c = K.Client(w, "Moss Harrow", { money = 500000 })
+	local r = DirectDeal(w, a, b)
+	-- The desk logs in after the card was taken: it never saw the real one. c sends one with its id.
+	local desk = K.Role(w, "treasurerMail")
+	HearsDesk({ a, b, c }, desk)
+	local text = w:As(a, function() return a.ns.CraftRequests.Card(a.ns.CraftRequests.Get(r.id)) end)
+	local f = {}
+	for part in (text .. "~"):gmatch("([^~]*)~") do f[#f + 1] = part end
+	f[11] = "o"
+	assert(desk.Craft.ReceiveSnapshot("CHANNEL", c.name, table.concat(f, "~")))
+	eq(K.Rec(w, desk, r.id).requester, c.name, "the desk's card of that request is c's")
+	-- The sale completes: both parties' words are booked all the same.
+	assert(b.Craft.Deliver(r.id, 1, 10000, "trade")); w:Run(0)
+	assert(a.Craft.ConfirmDelivery(r.id)); w:Run(0)
+	local e = assert(Fee(desk, r.id, b, a), "the real sale's fee")
+	assert(e.by.s and e.by.b, "both parties' words")
+	eq(e.fee, 600)
+	NoErrors(w)
+end)
+
 test("1.2.1 craft fee desk: a seller's evicted word that the buyer's late word brings back takes the fee mail he sent meanwhile", function()
 	local w = World.New()
 	local a, b = Cast(w)
