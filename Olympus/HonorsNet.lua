@@ -26,9 +26,12 @@ ns.HonorsNet = HonorsNet
 --                                 design's level race: the FIRST to each), again 10 minutes and an
 --                                 hour later, never once that milestone's place is known here. Each
 --                                 client keeps the claim (timed when it first heard it) and counts it
---                                 vouched once a census report of another sender lists him at or
---                                 above that level (within 24 hours); only vouched claims take the
---                                 place, which never changes once recorded (Honors.LevelRace).
+--                                 vouched once it is a verified member's (H.Vouched, 1.2.1: our own
+--                                 guild's roster, the server's, at or above that level; another
+--                                 guild's census, two of its senders other than him listing him
+--                                 there, within 24 hours; never one census row); only vouched claims
+--                                 take the place, which stays unless the server's word shows it
+--                                 false (H.CheckPlaces: then it goes, and he never takes it again).
 --   ID t~monthKey~m1,m2,m3~a1,a2,a3   names only: the month's top 3 donors and all time's (the
 --                                 the design dropped the week's), from the Treasurer's characters'
 --                                 client (or the King's), on the channel and on GUILD; the newest
@@ -55,6 +58,10 @@ local B36, N = Arena.B36, Arena.N
 H.MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
 H.IL_AFTER = { 60, 600, 3600 }  -- IL this long after the level-up (and on AQ~H)
 H.VOUCH_WINDOW = 86400          -- a census report this close to the claim vouches for it
+H.VOUCHERS = 2                  -- census senders of one guild, not him, who must list him (1.2.1)
+H.VOUCH_RULE = 2                -- the rule claims were vouched under (1.2.1: claims vouched before are looked at again)
+H.STRIKE_AFTER = 3600           -- a roster read this long after a place's time shows the level-up, or a lie
+H.STRUCK_MAX = 20               -- places found false kept per milestone (the oldest goes)
 H.CLAIMS_MAX = 200
 H.CLAIM_DAYS = 7
 H.DONOR_EVERY = 1800            -- the Treasurer's client says the donors again every 30 minutes
@@ -393,20 +400,135 @@ function H.WatchLevels()
 	return true
 end
 
--- Vouched: a census report of another sender lists him at or above that level, near the claim.
+-- A value the client hides from addons counts as none.
+local function Secret(v) return type(issecretvalue) == "function" and issecretvalue(v) == true end
+
+-- Our own guild's roster as the server gives it (Roster.Fresh: a whole, recent read of our guild):
+-- a member's level, by name; nil, true for a fresh roster without him; nil, false for none fresh.
+local rosterOf, rosterLevels
+local function RosterLevel(name)
+	local R = ns.Roster
+	local fresh = type(R) == "table" and type(R.Fresh) == "function" and R.Fresh() or nil
+	if type(fresh) ~= "table" or type(fresh.members) ~= "table" or type(name) ~= "string" then return nil, false end
+	if rosterOf ~= fresh.members then
+		rosterOf, rosterLevels = fresh.members, {}
+		for _, m in ipairs(fresh.members) do
+			if type(m) == "table" and type(m.full) == "string" and tonumber(m.level) then rosterLevels[m.full:lower()] = tonumber(m.level) end
+		end
+	end
+	return rosterLevels[ns.FullName(name):lower()], true
+end
+-- In our guild by our roster (fresh or not): the server's word on him, never another guild's census.
+local function Guildmate(name)
+	local R = ns.Roster
+	return type(R) == "table" and type(R.RankOf) == "function" and R.RankOf(name) ~= nil
+end
+-- A character's level as the game gives it for a unit it knows by his GUID (a party, a target, a
+-- nameplate), or nil.
+local function UnitLevelOf(guid)
+	if type(guid) ~= "string" or type(UnitTokenFromGUID) ~= "function" or type(UnitLevel) ~= "function" then return nil end
+	local ok, token = pcall(UnitTokenFromGUID, guid)
+	if not ok or type(token) ~= "string" or Secret(token) then return nil end
+	local okL, level = pcall(UnitLevel, token)
+	if not okL or Secret(level) or type(level) ~= "number" or level < 1 then return nil end
+	return level
+end
+
+-- Vouched (1.2.1, the security review: one census row of anyone else's was proof, so a forged
+-- report won the place): the claim is a verified member's, at or above that level.
+--   Our guildmate: our fresh roster, the server's, at or above it (another guild's rows say nothing
+--   of one of ours).
+--   Anyone else: census reports (Data.Receive keeps one guild per sender) of an Olympus guild not
+--   netted off, heard within VOUCH_WINDOW of the claim, listing him at or above it, from VOUCHERS
+--   senders of that one guild, none of them him (by his name alone, as Data.KnownRank asks). A
+--   guild's row is its newest report, so each sender seen is kept on the claim (c.by: guild ->
+--   senders) as his turn comes (the reporter every 3 minutes, its runner-up every 10).
 function H.Vouched(c)
+	if type(c) ~= "table" or type(c.name) ~= "string" or not tonumber(c.level) then return false end
+	if Guildmate(c.name) then
+		local level, fresh = RosterLevel(c.name)
+		return fresh and level ~= nil and level >= c.level or false
+	end
 	local rows = ns.rdb and ns.rdb.guilds
 	if type(rows) ~= "table" then return false end
 	local who = Short(c.name)
-	for _, r in pairs(rows) do
-		if type(r) == "table" and type(r.top) == "table" and type(r.reporterFull) == "string" and not Same(r.reporterFull, c.name)
-			and math.abs((r.t or 0) - (c.heardLocal or 0)) <= H.VOUCH_WINDOW then
+	local D = ns.Data
+	c.by = type(c.by) == "table" and c.by or {}
+	for guild, r in pairs(rows) do
+		if type(r) == "table" and type(r.top) == "table" and type(r.reporterFull) == "string" and not r.mine and type(guild) == "string"
+			and Short(r.reporterFull) ~= who and math.abs((r.t or 0) - (c.heardLocal or 0)) <= H.VOUCH_WINDOW
+			and ns.IsFederation(guild) and not (type(D) == "table" and type(D.NetOff) == "function" and D.NetOff(guild)) then
 			for _, x in ipairs(r.top) do
-				if type(x) == "table" and Short(x.name) == who and (tonumber(x.level) or 0) >= c.level then return true end
+				if type(x) == "table" and Short(x.name) == who and (tonumber(x.level) or 0) >= c.level then
+					local g = guild:lower()
+					local n = 0
+					for _ in pairs(c.by) do n = n + 1 end
+					if c.by[g] or n < 4 then
+						local senders = c.by[g] or {}
+						c.by[g] = senders
+						local k, m = Short(r.reporterFull), 0
+						for _ in pairs(senders) do m = m + 1 end
+						if k and (senders[k] or m < 4) then senders[k] = true end
+					end
+					break
+				end
 			end
 		end
 	end
+	for _, senders in pairs(c.by) do
+		local n = 0
+		for _ in pairs(senders) do n = n + 1 end
+		if n >= H.VOUCHERS then return true end
+	end
 	return false
+end
+
+-- A place found false (1.2.1, the security review: a place stayed forever whatever came to light):
+-- the server's word puts its holder below its milestone, his unit's level (by his GUID), or our
+-- guild's fresh roster read STRIKE_AFTER past the place's time (so it had his level-up). Levels
+-- never go down: the claim was false.
+function H.Falsified(p, m)
+	if type(p) ~= "table" or not tonumber(m) then return false end
+	local level = UnitLevelOf(GameGuid(p.guid))
+	if level and level < m then return true end
+	if type(p.name) == "string" and Guildmate(p.name) and Now() - (tonumber(p.t) or Now()) >= H.STRIKE_AFTER then
+		local rl, fresh = RosterLevel(p.name)
+		if fresh and rl and rl < m then return true end
+	end
+	return false
+end
+local function Struck(s, m, gk) return gk ~= nil and type(s.struck) == "table" and type(s.struck[m]) == "table" and s.struck[m][gk] ~= nil end
+-- The places found false go: from the book, with the claims that made them, and their holder is
+-- kept as struck for that milestone (s.struck: no claim of his nor a clerk's record takes it again
+-- here). Returns the places struck ({ milestone, gk, name }).
+function H.CheckPlaces()
+	local s = H.Store()
+	local out = {}
+	if not s or type(s.levels) ~= "table" then return out end
+	for _, m in ipairs(ns.Honors.MILESTONES) do
+		local p = type(s.levels[m]) == "table" and s.levels[m][1] or nil
+		local gk = type(p) == "table" and Arena.GK(GameGuid(p.guid)) or nil
+		if gk and H.Falsified(p, m) then
+			s.struck = type(s.struck) == "table" and s.struck or {}
+			local list = type(s.struck[m]) == "table" and s.struck[m] or {}
+			s.struck[m] = list
+			list[gk] = Now()
+			local n, oldest = 0, nil
+			for k, t in pairs(list) do
+				n = n + 1
+				if k ~= gk and (not oldest or t < list[oldest]) then oldest = k end
+			end
+			if n > H.STRUCK_MAX and oldest then list[oldest] = nil end
+			s.levels[m] = nil
+			for key, c in pairs(type(s.claims) == "table" and s.claims or {}) do
+				if type(c) == "table" and c.gk == gk and c.level == m then s.claims[key] = nil end
+			end
+			out[#out + 1] = { milestone = m, gk = gk, name = p.name }
+			stats.struck = (stats.struck or 0) + 1
+		end
+	end
+	for _, x in ipairs(out) do Changed(x.name) end
+	return out
 end
 
 -- The book again: the claims (vouched where they are) through Honors.LevelRace; a new place said.
@@ -416,6 +538,12 @@ end
 -- vouched claims of it count.
 function H.RunRace()
 	local s = H.Store(true)
+	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.)
+	if s.vouchRule ~= H.VOUCH_RULE then
+		for _, c in pairs(s.claims) do if type(c) == "table" then c.vouched = false end end
+		s.vouchRule = H.VOUCH_RULE
+	end
+	H.CheckPlaces()
 	local claims = {}
 	local now = Now()
 	local P = ns.ArenaProfile
@@ -475,6 +603,8 @@ local function OnLevel(dist, sender, mode, body)
 	local ok = P.VerifyGk(sender, gk)
 	if ok == false then return Count("gk") end
 	local s = H.Store(true)
+	-- (1.2.1: a character whose place at that milestone was found false never claims it again here.)
+	if Struck(s, level, gk) then return Count("struck") end
 	-- One claim per sender and milestone, in his own name (never another's slot, nor a book filled
 	-- by one sender); the book full, its oldest unvouched claim goes.
 	local key = ns.FullName(sender):lower() .. ":" .. level
@@ -499,11 +629,17 @@ local function OnLevel(dist, sender, mode, body)
 end
 ns.Comm.Handle("IL", ns.Arena.Handle("IL", OnLevel))
 
--- A census report came in: the claims waiting are looked at again.
+-- A census report came in, or our roster: the claims waiting are looked at again, and (1.2.1)
+-- the places held (three at most: lookups alone) against the server's word.
 ns.On("DATA_CHANGED", function()
 	local s = H.Store()
 	if s and s.claims and next(s.claims) then
 		for _, c in pairs(s.claims) do if not c.vouched then ns.SafeCall("arena level vouch", H.RunRace) return end end
+	end
+	if s and type(s.levels) == "table" and next(s.levels) then
+		ns.SafeCall("arena level places", function()
+			if #H.CheckPlaces() > 0 then H.RunRace() end
+		end)
 	end
 end)
 
@@ -530,7 +666,7 @@ function H.TakeRecords(sender, mode, rest)
 	for part in tostring(rest):gmatch("[^,]+") do
 		local m, gk, name, t = part:match("^([0-9a-z]+):([^:]+):([^:]+):([0-9a-z]+)$")
 		m = N(m, 1, 60)
-		if m and ns.Honors.LEVEL_METAL[m] and Gk(gk) and not Placed(m) then
+		if m and ns.Honors.LEVEL_METAL[m] and Gk(gk) and not Placed(m) and not Struck(s, m, gk) then
 			local full = ns.ArenaFights.Unwire(name, sender)
 			if full then
 				s.levels[m] = { { guid = Arena.GuidOf(gk), name = full, t = N(t, 0, 4294967295) or Now(), place = 1 } }

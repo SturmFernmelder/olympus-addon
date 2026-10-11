@@ -124,7 +124,8 @@ local ADDON, ns = ...
 --       Run by the level race's authority (above); everyone else keeps the book it broadcasts,
 --       passed through LevelRace(book, nil, now) to tidy it.
 --       book: the places recorded, { [milestone] = { { guid, name, t, place }, ... } } (kept
---       forever; a place in it never changes). GUIDs are compared as Holdings compares them (the
+--       forever; a place in it never changes here: 1.2.1, the caller takes out one the server's
+--       word shows false, HonorsNet.CheckPlaces). GUIDs are compared as Holdings compares them (the
 --       game's form and the short one are one) and kept as given.
 --       claims: level-ups seen happening, { name, guid, level, from, since, t, vouched }:
 --         t: when the voucher's census saw him at `level` (its clock, never the player's word);
@@ -132,7 +133,8 @@ local ADDON, ns = ...
 --         milestones it was seen crossing: from < m <= level; without from (the level-up itself
 --         seen, at t), m == level only. A player seen for the first time (who joined an Olympus
 --         guild at 25, or a veteran when 1.2 ships) makes no claim.
---         vouched: a guildmate's census saw it (not only the player's own word).
+--         vouched: the caller's proof that he is there (HonorsNet.Vouched: the server's roster, or
+--         two census senders of his guild; 1.2.1: never one census row), not only his own word.
 --       opts: { start }: the race's start (server time). A claim whose crossing may be earlier
 --       (since, or t without it, before start) counts for nothing.
 --       Returns the new book (a copy), fresh (the places recorded by this call: { milestone,

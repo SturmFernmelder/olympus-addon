@@ -37,9 +37,11 @@ end
 
 print("HonorsNet: the level race (IL)")
 
-test("1.2 the fights part: the level race (the design: the first to 20, 40, 60): a level-up claim goes 60 s after, is kept unvouched until a census report of another sender lists him there, then takes the place after CONFIRM_AFTER; a later claim never takes it; the place never moves", function()
+-- (1.2.1, the security review: one census row of anyone else's vouched for a claim, so a forged
+-- report could win a place. Two senders of the claimant's guild are asked now: the second report.)
+test("1.2 the fights part: the level race (the design: the first to 20, 40, 60): a level-up claim goes 60 s after, is kept unvouched until two census senders of his guild list him there, then takes the place after CONFIRM_AFTER; a later claim never takes it; the place never moves", function()
 	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } }, { "late", "Corin Ash", { level = 19 } },
-		{ "reporter", "Dovan Quell" } } })
+		{ "reporter", "Dovan Quell" }, { "reporter2", "Elsa Thornby" } } })
 	local young, viewer = cast.young, cast.spectator
 	-- (The race starts at the 1.2 release, after the test world's clock: here, a day before it.)
 	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
@@ -56,8 +58,12 @@ test("1.2 the fights part: the level race (the design: the first to 20, 40, 60):
 	for _, c in pairs(s.claims) do claim = c end
 	eq(claim.level, 20); eq(claim.vouched, false)
 	eq(#(s.levels[20] or {}), 0, "unvouched: no place")
-	-- The census: another sender's report of her guild, her at 20.
+	-- The census: another sender's report of her guild, her at 20: one row, no proof (1.2.1).
 	W3.Report(viewer, "Olympus Vale", cast.reporter, { { name = "Brisa Vale", level = 20, class = "MA" } })
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	eq(claim.vouched, false, "one census row")
+	-- Her guild's second sender, in his turn: vouched.
+	W3.Report(viewer, "Olympus Vale", cast.reporter2, { { name = "Brisa Vale", level = 20, class = "MA" } })
 	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
 	eq(claim.vouched, true)
 	eq(#(s.levels[20] or {}), 0, "vouched, still waiting CONFIRM_AFTER")
@@ -70,6 +76,8 @@ test("1.2 the fights part: the level race (the design: the first to 20, 40, 60):
 	w:Fire(cast.late, "PLAYER_LEVEL_UP", 20)
 	w:Run(61)
 	W3.Report(viewer, "Olympus Ash", cast.reporter, { { name = "Corin Ash", level = 20, class = "WA" } })
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	W3.Report(viewer, "Olympus Ash", cast.reporter2, { { name = "Corin Ash", level = 20, class = "WA" } })
 	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
 	w:Run(viewer.ns.Honors.CONFIRM_AFTER + 2)
 	eq(#s.levels[20], 1); eq(s.levels[20][1].name, young.name, "the place never moves")
