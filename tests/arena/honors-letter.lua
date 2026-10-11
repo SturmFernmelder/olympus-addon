@@ -148,3 +148,114 @@ test("1.2.1 the King's letter: after the update, a letter 1.2.0 gave (read or no
 	eq(E.ns.HonorsNet.LetterFrame().key, "donor-top-1")
 	W3.NoErrors(w)
 end)
+
+-- The owner on Asmon's stream (1.2.1): the letter had no window round it, its words ran off the
+-- paper in a small font and its two buttons sat under it. On the harness's widget toolkit (its
+-- templates and anchors, a 1366 x 768 screen), every letter in English and pt-BR: the window is
+-- Olympus's (ns.Window: the bronze metal, its plain corner, no portrait ring or logo), the head in
+-- its title bar, the parchment inside it; the words at the letter font's 15 px (the client's
+-- GetFont and SetFont, as it answers them) wrapped inside the paper, clear of the art; the seal,
+-- the signature and both buttons inside the window and apart.
+test("1.2.1 the King's letter: its window is Olympus's own metal with the parchment inside; the words at 15 px wrapped inside the paper, the seal, signature and both buttons inside the window, every letter in English and pt-BR", function()
+	local w, cast = W3.New()
+	-- (One client a language: the letter's window is made once a session, in the game's language.)
+	local CLIENTS = { enUS = cast.A, ptBR = cast.B }
+	local L = cast.A.ns.L
+	local KEYS = { "arena-champion", "arena-class-mage-2", "arena-race-orc-3", "donor-top-1", "donor-month-2", "level-race-40", "oracle-1", "guild-top-leader" }
+	local WORDS = { "HONOR_LETTER", "HONOR_LETTER_HEAD", "HONOR_LETTER_SIGN", "HONOR_LETTER_WEAR", "HONOR_LETTER_LATER", "HONOR_TITLES",
+		"HONOR_CLASS_TITLE", "HONOR_RACE_TITLE", "HONOR_CLASS_NAMES", "HONOR_RACE_NAMES", "HONOR_METAL_GOLD", "HONOR_METAL_SILVER", "HONOR_METAL_BRONZE" }
+	local pt = {}
+	local savedLocale = GetLocale
+	GetLocale = function() return "ptBR" end
+	local okPt, errPt = pcall(function() assert(loadfile(H.ADDON_DIR .. "Locales/ArenaFightsText.lua"))("Olympus", { L = pt }) end)
+	GetLocale = savedLocale
+	assert(okPt, errPt)
+	local saved = {}
+	for _, k in ipairs(WORDS) do saved[k] = rawget(L, k) end
+	H.WithUI(function()
+		-- The client's font API on the letter's words: the font it was made with at 12 px.
+		local create = CreateFrame
+		local function Create(...)
+			local f = create(...)
+			local make = f.CreateFontString
+			rawset(f, "CreateFontString", function(self, ...)
+				local fs = make(self, ...)
+				rawset(fs, "GetFont", function(s) return "Fonts\\FRIZQT__.TTF", s.px or 12, "" end)
+				rawset(fs, "SetFont", function(s, _, px) s.px = px end)
+				return fs
+			end)
+			return f
+		end
+		for _, c in pairs(CLIENTS) do c.globals.CreateFrame = Create end
+		local ok, err = pcall(function()
+			for _, lang in ipairs({ "enUS", "ptBR" }) do
+				if lang == "ptBR" then for _, k in ipairs(WORDS) do rawset(L, k, assert(pt[k], "pt-BR " .. k)) end end
+				local A = CLIENTS[lang]
+				local HN = A.ns.HonorsNet
+				for _, key in ipairs(KEYS) do
+					local where = lang .. " " .. key
+					eq(w:As(A, HN.ShowLetter, key), true, where)
+					local f = HN.LetterFrame()
+					eq(f.template, "DefaultPanelTemplate", where .. ": the Olympus window's metal")
+					eq(f.metal, true); eq(f.NineSlice.layoutType, "ButtonFrameTemplateNoPortrait", where .. ": its plain corner, no ring")
+					eq(f.PortraitContainer, nil, where .. ": no portrait of the window's own")
+					eq(f.TitleContainer.TitleText:GetText(), L.HONOR_LETTER_HEAD, where .. ": the head in its title bar")
+					local fl, fb, fw, fh = f:GetRect()
+					local fr, ft = fl + fw, fb + fh
+					assert(fb >= 0 and ft <= 768, where .. ": on the screen")
+					-- The parchment: inside the metal, under the title bar; the game's QuestBG, its paper alone.
+					local paper = f.bg
+					local pl, pb, pw, ph = paper:GetRect()
+					local pr, pt_ = pl + pw, pb + ph
+					assert(pl > fl and pr < fr and pb >= fb and pt_ <= ft - H.ns.Dialog.BAR, where .. ": the parchment inside the window")
+					if paper.texture and tostring(paper.texture):find("QuestBG", 1, true) then eq(paper.texCoord, "0 " .. 296 / 512 .. " 0 " .. 331 / 512, where) end
+					local function Inside(region, name)
+						local l, b, rw, rh = region:GetRect()
+						assert(l and b, where .. ": " .. name .. " placed")
+						assert(l >= pl and l + rw <= pr and b >= pb and b + rh <= pt_, ("%s: %s inside the parchment (%d %d %d %d in %d %d %d %d)"):format(where, name,
+							l, b, l + rw, b + rh, pl, pb, pr, pt_))
+						return l, b, l + rw, b + rh
+					end
+					-- The words: the letter font, 15 px, wrapped at their width; every line inside their box.
+					local body = f.body
+					eq(body:GetText(), (HN.LetterText(key)), where)
+					eq(body.px, 15, where .. ": the words at 15 px"); eq(f.sign.px, 15, where .. ": the signature too")
+					eq(body.wrap, true, where .. ": wrapped")
+					local bl, bb, br, bt = Inside(body, "the words")
+					local lines = 0
+					for line in (body:GetText() .. "\n"):gmatch("([^\n]*)\n") do
+						body.text = line
+						lines = lines + math.max(1, math.ceil(body:GetUnboundedStringWidth() / (br - bl)))
+					end
+					body.text = HN.LetterText(key)
+					assert(bt - bb >= lines * 15, ("%s: %d lines in %d px"):format(where, lines, bt - bb))
+					-- Clear of the art: the portrait's slot and its reach left of the words, inside the paper.
+					local rig = f.rig
+					local sl, sb, sr, st = Inside(rig.slot, "the portrait")
+					assert(sl - rig.reach.left >= pl and st + rig.reach.top <= pt_, where .. ": the art inside the paper")
+					assert(sr + rig.reach.right <= bl, where .. ": the words right of the art")
+					-- The seal and the signature under the words and the art; the buttons under them.
+					local _, _, _, sealTop = Inside(f.seal, "the seal")
+					local sealBottom = select(2, f.seal:GetRect())
+					assert(sealTop <= bb and sealTop <= sb - rig.reach.bottom, where .. ": the seal under the words and the art")
+					local sign = f.sign
+					local sgr, sgt = sign:GetRight(), sign:GetTop()
+					assert(sgr <= pr and sgr - sign:GetUnboundedStringWidth() >= bl - 1 and sgt <= bb, where .. ": the signature under the words, inside the paper")
+					local wl, wb, wr, wt = Inside(f.wear, "Wear it")
+					local ll, lb, lr, lt = Inside(f.later, "Later")
+					assert(wr <= ll, where .. ": the buttons apart")
+					assert(wt <= sealBottom and lt <= sealBottom, where .. ": the buttons under the seal")
+					eq(wb, lb)
+					for _, b in ipairs({ f.wear, f.later }) do
+						assert(b:GetText() and b:GetText() ~= "", where .. ": a label")
+					end
+					eq(w:As(A, HN.CloseLetter, false), true)
+					eq(f:IsShown(), false)
+				end
+			end
+		end)
+		for _, k in ipairs(WORDS) do rawset(L, k, saved[k]) end
+		if not ok then error(err, 0) end
+	end)
+	W3.NoErrors(w)
+end)

@@ -41,9 +41,10 @@ ns.HonorsNet = HonorsNet
 -- is the census's (Honors.GuildTop, its leader vouched by two senders).
 --
 -- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick),
--- and the King's letter tells him: a parchment of Olympus's own naming the honour and its title,
--- the new frame on his own portrait, "Wear it" and "Later"; queued when several come, re-readable
--- from the profile's Edit (ProfileEdit). Honours count only in the live arena (Arena.Counts).
+-- and the King's letter tells him: a parchment in a window of Olympus's own naming the honour and
+-- its title, the new frame on his own portrait, "Wear it" and "Later"; queued when several come,
+-- re-readable from the profile's Edit (ProfileEdit); once per honour per character, ever, and never
+-- to the King himself (1.2.1). Honours count only in the live arena (Arena.Counts).
 
 local L = ns.L
 local H = HonorsNet
@@ -59,6 +60,10 @@ H.DONOR_EVERY = 1800            -- the Treasurer's client says the donors again 
 H.ORACLE_EVERY = 1800
 H.LETTERS_MAX = 20
 H.LETTER_PORTRAIT = 60          -- the letter's portrait: the size of his own on his unit frame
+H.LETTER_W = 440                -- the letter's window across (its height follows its words)
+H.LETTER_PAD = 16               -- the parchment's margin
+H.LETTER_FONT = 15              -- its words' size at least
+H.LETTER_BUTTON = 120
 H.REFRESH_DELAY = 60            -- after login, the own honours looked at once the words came in
 -- The start of the level race: the 1.2 release (a claim timed before it counts for nothing).
 H.RACE_START = 1790812800
@@ -895,8 +900,126 @@ function H.WindowShown()
 end
 
 local frame
--- The letter: a parchment of Olympus's own (the game's QuestBG), a wax seal, the new frame on the
--- player's own portrait, "Wear it" and "Later". Built on first use; never the game's popups.
+local INK_R, INK_G, INK_B = 0.18, 0.10, 0.02
+-- The game's letter font (its mail's), else its quest font: dark ink on the parchment.
+local function LetterFont()
+	if _G.MailTextFontNormal then return "MailTextFontNormal" end
+	return _G.QuestFont and "QuestFont" or "GameFontHighlight"
+end
+-- A font string at px at least (the client's own font, only bigger).
+local function AtLeast(fs, px)
+	if not (fs and fs.GetFont and fs.SetFont) then return end
+	local ok, path, size, flags = pcall(fs.GetFont, fs)
+	if ok and type(path) == "string" and type(size) == "number" and size < px then fs:SetFont(path, px, flags) end
+end
+local function Ink(fs, wrap)
+	fs:SetTextColor(INK_R, INK_G, INK_B)
+	if fs.SetJustifyV then fs:SetJustifyV("TOP") end
+	if wrap and fs.SetWordWrap then fs:SetWordWrap(true) end
+	if wrap and fs.SetNonSpaceWrap then fs:SetNonSpaceWrap(true) end
+	AtLeast(fs, H.LETTER_FONT)
+end
+-- A text's height at `width`: the client's measure, else about 7 px a letter and 18 a line.
+local function TextHeight(fs, width)
+	local h = fs.GetStringHeight and fs:GetStringHeight()
+	if type(h) == "number" and h > 0 then return h end
+	local lines = 0
+	for line in ((fs:GetText() or "") .. "\n"):gmatch("([^\n]*)\n") do
+		lines = lines + math.max(1, math.ceil(#line / math.max(1, math.floor(width / 7))))
+	end
+	return lines * 18
+end
+
+-- The letter (1.2.1, the owner's ask after Asmon's stream: its words ran off the paper and its
+-- buttons under it, no window round it): a window of Olympus's own (ns.Window: the Olympus
+-- window's bronze metal without its portrait or logo, as the update letter), the head in its
+-- title bar, the parchment (the game's QuestBG, its paper's part alone) inside it, his own
+-- portrait with the new frame in its top left corner, the King's words right of it in the game's
+-- letter font (15 px at least), wrapped inside the paper; the wax seal and the signature under
+-- both, "Wear it" and "Later" at its foot. Its height follows the words. Never the game's popups.
+local function Build()
+	local f = ns.Window("OlympusKingsLetter", UIParent, { title = L.HONOR_LETTER_HEAD, inset = false, close = false })
+	f:SetSize(H.LETTER_W, 300)
+	f:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
+	f:SetFrameStrata("DIALOG")
+	f:SetToplevel(true)
+	f:SetClampedToScreen(true)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	f.head = f.TitleText
+	local inner, pad = f.inner, H.LETTER_PAD
+	f.bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+	f.bg:SetPoint("TOPLEFT", inner[1], inner[2])
+	f.bg:SetPoint("BOTTOMRIGHT", inner[3], inner[4])
+	local UI = ns.UI
+	local file = type(UI) == "table" and UI.FirstTexture and UI.FirstTexture(UI.PARCHMENTS or { "Interface\\QuestFrame\\QuestBG" })
+		or "Interface\\QuestFrame\\QuestBG"
+	if GetFileIDFromPath and not GetFileIDFromPath(file) then
+		f.bg:SetColorTexture(0.87, 0.80, 0.64, 0.97)
+	else
+		f.bg:SetTexture(file)
+		if file:find("QuestBG", 1, true) then f.bg:SetTexCoord(0, 296 / 512, 0, 331 / 512) end
+	end
+	-- His own portrait with the honour's frame, as round his unit frame's (H.NewPortrait: 60, his
+	-- frame's own size), its art clear of the paper's edge and the title bar.
+	local rig = H.NewPortrait(f, H.LETTER_PORTRAIT)
+	local reach = rig.reach
+	f.paperTop = -inner[2] + pad
+	rig.slot:SetPoint("TOPLEFT", inner[1] + pad + reach.left, -(f.paperTop + reach.top))
+	f.rig, f.portrait = rig, rig.portrait
+	-- The words right of the art, to the paper's right margin.
+	local x = inner[1] + pad + reach.left + H.LETTER_PORTRAIT + reach.right + 12
+	f.bodyWidth = H.LETTER_W + inner[3] - pad - x
+	f.body = f:CreateFontString(nil, "ARTWORK", LetterFont())
+	f.body:SetPoint("TOPLEFT", x, -f.paperTop)
+	f.body:SetWidth(f.bodyWidth)
+	f.body:SetJustifyH("LEFT")
+	Ink(f.body, true)
+	f.sign = f:CreateFontString(nil, "ARTWORK", LetterFont())
+	f.sign:SetJustifyH("RIGHT")
+	Ink(f.sign)
+	f.sign:SetText(L.HONOR_LETTER_SIGN)
+	f.seal = f:CreateTexture(nil, "ARTWORK")
+	f.seal:SetSize(40, 40)
+	-- The game's own wax seal (its quest letters from the King, QuestInfo.lua), the faction's.
+	local atlas = ns.faction == "Horde" and "Quest-Horde-WaxSeal" or "Quest-Alliance-WaxSeal"
+	local info = C_Texture and C_Texture.GetAtlasInfo
+	local okA, has = false, nil
+	if type(info) == "function" then okA, has = pcall(info, atlas) end
+	if okA and has then f.seal:SetAtlas(atlas) else f.seal:SetTexture("Interface\\Icons\\Spell_Holy_SealOfSacrifice") end
+	local function Btn(label, dx, fn)
+		local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+		b:SetSize(H.LETTER_BUTTON, 24)
+		b:SetPoint("BOTTOM", dx, inner[4] + 12)
+		b:SetText(label)
+		b:SetScript("OnClick", fn)
+		return b
+	end
+	f.wear = Btn(L.HONOR_LETTER_WEAR, -(H.LETTER_BUTTON / 2 + 6), function() H.CloseLetter(true) end)
+	f.later = Btn(L.HONOR_LETTER_LATER, H.LETTER_BUTTON / 2 + 6, function() H.CloseLetter(false) end)
+	-- Hidden another way (Escape, the game's window sweep): as "Later", so it never comes back by
+	-- itself with the next letter or the Olympus window's open.
+	f:SetScript("OnHide", function()
+		if f.key ~= nil then ns.SafeCall("kings letter", H.CloseLetter, false) end
+	end)
+	return f
+end
+-- Placed for the words it shows: the body's height measured, the seal and the signature under
+-- the words and the art, the window as tall as that and its buttons.
+local function Place(f)
+	local inner, reach, top = f.inner, f.rig.reach, f.paperTop
+	f.body:SetHeight(0) -- (a font string 0 tall is as tall as its words: measured whole)
+	local h = math.ceil(TextHeight(f.body, f.bodyWidth)) + 2
+	f.body:SetHeight(h)
+	local y = math.max(top + h, top + reach.top + H.LETTER_PORTRAIT + reach.bottom) + 10
+	f.seal:SetPoint("TOPLEFT", inner[1] + H.LETTER_PAD + 8, -y)
+	f.sign:SetPoint("TOPRIGHT", inner[3] - H.LETTER_PAD - 8, -(y + 12))
+	f:SetHeight(y + 40 + 12 + 24 + inner[4] + 12)
+end
+
 -- key: a letter asked for (a click: shown at once); prompted: the player's click opened it.
 function H.ShowLetter(key, prompted)
 	if H.LetterToSender() then return false end
@@ -913,62 +1036,11 @@ function H.ShowLetter(key, prompted)
 		ns.After(5, "kings letter", function() H.ShowLetter(nil, prompted) end)
 		return false
 	end
-	if not frame then
-		frame = CreateFrame("Frame", "OlympusKingsLetter", UIParent)
-		frame:SetSize(360, 300)
-		frame:SetPoint("CENTER", UIParent, "CENTER", 0, 60)
-		frame:SetFrameStrata("DIALOG")
-		frame:EnableMouse(true)
-		frame.bg = frame:CreateTexture(nil, "BACKGROUND")
-		frame.bg:SetAllPoints()
-		local UI = ns.UI
-		frame.bg:SetTexture(type(UI) == "table" and UI.FirstTexture and UI.FirstTexture(UI.PARCHMENTS or { "Interface\\QuestFrame\\QuestBG" })
-			or "Interface\\QuestFrame\\QuestBG")
-		frame.head = frame:CreateFontString(nil, "OVERLAY", "QuestTitleFont")
-		frame.head:SetPoint("TOP", 0, -18)
-		frame.head:SetText(L.HONOR_LETTER_HEAD)
-		-- His own portrait with the honour's frame, as round his unit frame's (H.NewPortrait: 60, his
-		-- frame's own size), its art clear of the edge, the head and the words.
-		local rig = H.NewPortrait(frame, H.LETTER_PORTRAIT)
-		local reach = rig.reach
-		rig.slot:SetPoint("TOPLEFT", 16 + reach.left, -(38 + reach.top))
-		frame.rig, frame.portrait = rig, rig.portrait
-		frame.body = frame:CreateFontString(nil, "OVERLAY", "QuestFont")
-		frame.body:SetPoint("TOPLEFT", 16 + reach.left + H.LETTER_PORTRAIT + reach.right + 10, -52)
-		frame.body:SetPoint("RIGHT", -24, 0)
-		frame.body:SetJustifyH("LEFT")
-		frame.sign = frame:CreateFontString(nil, "OVERLAY", "QuestFont")
-		frame.sign:SetPoint("BOTTOMRIGHT", -30, 52)
-		frame.sign:SetText(L.HONOR_LETTER_SIGN)
-		frame.seal = frame:CreateTexture(nil, "OVERLAY")
-		frame.seal:SetSize(40, 40)
-		frame.seal:SetPoint("BOTTOMLEFT", 26, 40)
-		-- The game's own wax seal (its quest letters from the King, QuestInfo.lua), the faction's.
-		local atlas = ns.faction == "Horde" and "Quest-Horde-WaxSeal" or "Quest-Alliance-WaxSeal"
-		local info = C_Texture and C_Texture.GetAtlasInfo
-		local okA, has = false, nil
-		if type(info) == "function" then okA, has = pcall(info, atlas) end
-		if okA and has then frame.seal:SetAtlas(atlas) else frame.seal:SetTexture("Interface\\Icons\\Spell_Holy_SealOfSacrifice") end
-		local function Btn(label, x, fn)
-			local b = CreateFrame("Button", nil, frame, "UIPanelButtonTemplate")
-			b:SetSize(110, 24)
-			b:SetPoint("BOTTOM", x, 14)
-			b:SetText(label)
-			b:SetScript("OnClick", fn)
-			return b
-		end
-		frame.wear = Btn(L.HONOR_LETTER_WEAR, -60, function() H.CloseLetter(true) end)
-		frame.later = Btn(L.HONOR_LETTER_LATER, 60, function() H.CloseLetter(false) end)
-		ns.EscapeCloses("OlympusKingsLetter")
-		-- Hidden another way (Escape, the game's window sweep): as "Later", so it never comes back by
-		-- itself with the next letter or the Olympus window's open.
-		frame:SetScript("OnHide", function()
-			if frame.key ~= nil then ns.SafeCall("kings letter", H.CloseLetter, false) end
-		end)
-	end
+	frame = frame or Build()
 	local text = H.LetterText(nextLetter.key)
 	frame.key = nextLetter.key
 	frame.body:SetText(text or "")
+	Place(frame)
 	H.DressPortrait(frame.rig, nextLetter.key)
 	frame:Show()
 	return true
