@@ -22,7 +22,8 @@ local ADDON, ns = ...
 -- completes. A part alone, or an old or expired set, never touches it, so signed material that was
 -- once genuine cannot be replayed to lock a client into "enforced, nobody authorized"; a legacy
 -- HT1 marker likewise moves it only inside its own window.
--- Parts are requested on H3 and returned privately to the requester as H2. Clients that do not
+-- Parts are requested on H3 and returned privately to the requester as H2, which takes them only
+-- as answers to its own ask (1.2.1). Clients that do not
 -- know H2 or H3 ignore them. No partial set, SavedVariables edit, Census claim or newer legacy HT1 can
 -- reactivate authority.
 
@@ -45,6 +46,7 @@ Authority.BUNDLE_LIFETIME = 10 * 60
 Authority.ASK_GAP = 150
 Authority.ASKS = 4
 Authority.ASK_IDLE = 10 * 60 -- after the login burst, keep recovering when no holder was online
+Authority.ANSWER_WINDOW = 10 * 60 -- (1.2.1) H2 parts count this long after our own H3 ask
 Authority.ANSWER_GAP = 120
 Authority.VERIFY_MAX = 16
 Authority.VERIFY_EACH = 4 -- one sender's share of a lane's checks a minute (a holder's parts come slower)
@@ -60,6 +62,7 @@ local verifyTimes = { channel = {}, guild = {}, by = {} }
 local askedFrom, askedCount = {}, 0
 local outgoing, outgoingCount = {}, 0
 local asks, lastAsk, started = 0, -math.huge, false
+local asked -- our last H3 ask (1.2.1): { t, faction, at, epoch }
 local realmInfo = {}
 
 local function Fold(s) return ns.Fold(tostring(s or "")) end
@@ -604,10 +607,21 @@ local function SendBundle(bundle, target)
 	return SendPart(1)
 end
 
+-- An H2 part counts only as an answer to this client's own H3 ask (1.2.1 security review: anyone
+-- can whisper one): within ANSWER_WINDOW of it, of the faction it asked for, and newer than the
+-- set it said this client held (what a holder answers with, HandleAsk).
+local function Answers(blob)
+	local a = asked
+	if not a or ns.Now() - a.t > Authority.ANSWER_WINDOW then return false end
+	local p = Part(blob)
+	return p ~= nil and p.faction == a.faction and (p.at > a.at or (p.at == a.at and p.epoch > a.epoch))
+end
+
 function Authority.HandlePart(dist, sender, text)
 	if dist ~= "WHISPER" or type(text) ~= "string" then return false, "route" end
 	local blob = text:match("^H2~(HA1~.*)$")
 	if not blob then return false, "shape" end
+	if not Answers(blob) then return false, "unasked" end
 	return Authority.TakePart(blob, ns.FullName(sender), dist)
 end
 
@@ -660,6 +674,7 @@ function Authority.Ask(force)
 	local at, epoch = bundle and bundle.at or 0, bundle and bundle.epoch or 0
 	local msg = ("H3~%s~%d~%d"):format(ns.faction or "Alliance", at, epoch)
 	asks, lastAsk = asks + 1, now
+	asked = { t = now, faction = ns.faction or "Alliance", at = at, epoch = epoch }
 	ns.Comm.Send("CHANNEL", msg, "authorityask")
 	ns.Comm.Send("GUILD", msg, "authorityaskguild")
 	return true
@@ -697,5 +712,5 @@ function Authority.Reset()
 	wipe(askedFrom); askedCount = 0
 	wipe(outgoing); outgoingCount = 0
 	wipe(realmInfo)
-	asks, lastAsk, started = 0, -math.huge, false
+	asks, lastAsk, started, asked = 0, -math.huge, false, nil
 end -- tests

@@ -61,6 +61,15 @@ local ns, test, eq = ...
 			blob = ("HT1~%d~Realm+Other~0~%s~a"):format(at, list or "^^") }
 		A.Reset()
 	end
+	-- This client's own H3 ask, its sends dropped (1.2.1: an H2 part counts only as an answer to one).
+	local function AskOnce()
+		local comm, isMember, after, every = ns.Comm, ns.IsMember, ns.After, ns.Every
+		ns.Comm = { Handle = function() end, Send = function() return true end }
+		ns.IsMember, ns.After, ns.Every = function() return true end, function() end, function() end
+		local ok, err = pcall(function() A.Start(); assert(A.Ask(true), "the ask") end)
+		ns.Comm, ns.IsMember, ns.After, ns.Every = comm, isMember, after, every
+		if not ok then error(err, 0) end
+	end
 	local function Census(guild, who, rank)
 		local ranks = { [who] = rank }
 		ns.rdb.guilds[guild] = { guild = guild, realm = "Realm", t = T0,
@@ -380,6 +389,7 @@ local ns, test, eq = ...
 		WithState(function()
 			WithFakeSign(function(Parts)
 				local function Junk(i) return Parts({ "Olympus Zeus=Junk" .. i .. "-Realm" }, { at = T0 + i, epoch = 2, unsigned = true })[1] end
+				AskOnce() -- (1.2.1: whispered parts count only as answers to our own ask)
 				for i = 1, A.VERIFY_EACH or 4 do eq(select(2, A.HandlePart("WHISPER", "Spammer-Realm", "H2~" .. Junk(i))), "signature") end
 				eq(select(2, A.HandlePart("WHISPER", "Spammer-Realm", "H2~" .. Junk(99))), "budget", "past his share")
 				-- Another sender's part is still checked, and a real holder's set completes.
@@ -465,5 +475,30 @@ local ns, test, eq = ...
 			eq(A.Enforced(), true, "a current marker still does")
 			eq(D.AuthorizedRank("Zed-Realm", "Olympus Zeus"), 0)
 			eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), nil)
+		end)
+	end)
+
+	test("authority: whispered H2 parts count only as answers to this client's own H3 ask", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local parts = Parts({ "Olympus Zeus=Answer Lord-Realm" }, { at = T0 + 10, epoch = 2 })
+				local ok, why = A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. parts[1])
+				eq(ok, false); eq(why, "unasked", "nobody asked: an unsolicited whisper is dropped unread")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				AskOnce()
+				local horde = Parts({ "Olympus Zeus=Horde Lord-Realm" }, { at = T0 + 11, epoch = 2, faction = "Horde" })
+				eq(select(2, A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. horde[1])), "unasked", "not the faction asked for")
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. parts[1])), "complete", "an answer to our ask")
+				eq(A.Enforced(), true); eq(A.Rank("Answer Lord-Realm", "Olympus Zeus"), 0)
+				-- The next ask says what we hold: the same set again is no answer to it.
+				AskOnce()
+				eq(select(2, A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. parts[1])), "unasked", "not newer than the set held")
+				-- Past the window of our last ask: nothing, however new.
+				local newer = Parts({ "Olympus Zeus=Newer Lord-Realm" }, { at = T0 + 20, epoch = 3 })
+				ns.Now = function() return T0 + A.ANSWER_WINDOW + 1 end
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. newer[1])), "unasked", "too long after our ask")
+				ns.Now = function() return T0 end
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. newer[1])), "complete", "within it")
+			end)
 		end)
 	end)
