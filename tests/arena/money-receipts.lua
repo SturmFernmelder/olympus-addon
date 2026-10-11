@@ -135,6 +135,75 @@ test("1.2.1 the money part: only a party of a match takes it off an arbiter's ex
 	NoErrors(w)
 end)
 
+test("1.2.1 the money part: an arbiter's own payout receipt alone, or the change he owes for an over-stake, never takes a match off his exposure; the payout his winner's own receipt confirms does", function()
+	local w = World.New()
+	local aud, arb, A, B = Arbitered(w)
+	-- A over-stakes by 50 s: the change is owed, and paid back, while both stakes are held.
+	local t = { id = "F3s", kind = "fight", A = { name = A.name }, B = { name = B.name }, stake = { A = G, B = G }, arbiter = N.arbiter }
+	for _, c in ipairs({ arb, A, B }) do assert(c.Stakes.Open(t)) end
+	w:Trade(A, arb, { aGives = G + 5000 })
+	w:Trade(B, arb, { aGives = G })
+	w:Run(5)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G)
+	local change
+	for _, o in ipairs(arb.Debts.Open()) do if o.kind == "n" then change = o end end
+	assert(change and change.copper == 5000, "the change owed")
+	arb.trade = nil
+	w:Trade(arb, A, { aGives = 5000 })
+	w:Run(5)
+	eq(change.state, "c", "the change paid back")
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G, "both stakes still held")
+	eq(aud.Debts.Busy(N.arbiter), true)
+	-- His own receipt of a payout he never traded.
+	SendReceipt(w, arb, aud, "PF3s", N.arbiter, A.name, 19400)
+	w:Run(0)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G, "the arbiter's word alone")
+	eq(aud.Debts.Busy(N.arbiter), true)
+	-- The payout traded: his receipt and the winner's own: off, and free again.
+	local lines = arb.Stakes.Result("F3s", "A")
+	arb.trade = nil
+	w:Trade(arb, A, { aGives = lines[1].copper })
+	w:Run(5)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 0)
+	eq(aud.Debts.Busy(N.arbiter), false)
+	NoErrors(w)
+end)
+
+test("1.2.1 the money part: a match never counts past its arbiter's cap, and a stranger who took a real match's slot neither ends it nor pins it: the winner the arbiter paid takes it off", function()
+	local w = World.New()
+	local aud, arb, A, B = Arbitered(w)
+	local x, y = M.Client(w, "Mabry Quell"), M.Client(w, "Tobin Rusk")
+	-- A real match, the stranger's receipt naming it before B's.
+	local t = { id = "F4s", kind = "fight", A = { name = A.name }, B = { name = B.name }, stake = { A = G, B = G }, arbiter = N.arbiter }
+	for _, c in ipairs({ arb, A, B }) do assert(c.Stakes.Open(t)) end
+	w:Trade(A, arb, { aGives = G })
+	w:Run(5)
+	SendReceipt(w, x, aud, "SF4s", x.name, N.arbiter, 3 * G)
+	w:Run(0)
+	w:Trade(B, arb, { aGives = G })
+	w:Run(5)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G, "never past his cap")
+	-- The stranger's own word that the arbiter paid him: nothing ends.
+	SendReceipt(w, x, aud, "PF4s", N.arbiter, x.name, 19400)
+	w:Run(0)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G, "the stranger ends nothing")
+	-- B wins and the arbiter pays him: off for good.
+	local lines = arb.Stakes.Result("F4s", "B")
+	eq(lines[1].name, B.name)
+	arb.trade = nil
+	w:Trade(arb, B, { aGives = lines[1].copper })
+	w:Run(5)
+	w:Run(3600)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 0, "the winner the arbiter paid took it off")
+	eq(aud.Debts.Busy(N.arbiter), false)
+	-- Two strangers' receipts for a match nobody holds: his cap at most, whatever they say.
+	SendReceipt(w, x, aud, "SF8q", x.name, N.arbiter, 1)
+	SendReceipt(w, y, aud, "SF8q", y.name, N.arbiter, 999999)
+	w:Run(0)
+	eq(aud.Stakes.ExposureOf(N.arbiter), 2 * G, "no more than his cap")
+	NoErrors(w)
+end)
+
 test("1.2.1 the money part: an arbiter's exposure record stays bounded per sender and per arbiter, and a real match still counts past a flood", function()
 	local w = World.New()
 	local aud, arb, A, B = Arbitered(w)

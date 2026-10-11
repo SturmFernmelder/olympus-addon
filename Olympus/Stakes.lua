@@ -466,11 +466,15 @@ ns.Comm.Handle("ZA", ns.Arena.Handle("ZA", OnBook))
 ---------------------------------------------------------------------------
 
 -- (1.2.1) Each arbiter's record: { name, matches = { [id] = copper counted }, stakes = { [id] =
--- { at, by = { [payer] = copper } } }, busy }. A match counts once both its parties' own receipts
--- name it (two players, neither the arbiter's own): one sender alone never makes an arbiter busy.
--- Only a party of a match the auditor knows takes it off, with the arbiter's payout, refund or
--- change. Bounded: EXPOSURE_MATCHES per arbiter (the oldest not yet counted go first) and
--- EXPOSURE_PER_SENDER for one payer, every arbiter together.
+-- { at, by = { [payer] = copper }, late = { [payer] = true }, out, back } }, busy }. A match counts
+-- once two parties' own receipts name it (neither the arbiter's own), never past the arbiter's cap
+-- (no real match holds more: each party refuses one past it): one sender alone opens no count, and
+-- with a real match's id he raises it to the cap at most. A payout or a refund takes it off once
+-- both its sides said so, the arbiter's own receipt (out) and its payee's (back), the payee one of
+-- the match's payers (by, or late: his stake's receipt came after two others had named it); the
+-- change for an over-stake never does, being owed while both stakes are held. Bounded:
+-- EXPOSURE_MATCHES per arbiter (the oldest not yet counted go first), EXPOSURE_PER_SENDER for one
+-- payer, every arbiter together, and two late payers a match.
 Stakes.EXPOSURE_MATCHES = 100
 Stakes.EXPOSURE_PER_SENDER = 8
 local function Exposure(mode)
@@ -528,7 +532,15 @@ table.insert(ns.Debts.receiptHooks, function(r, sender, mode)
 			-- A party new to this match: two at most, each within his share.
 			local parties = 0
 			for _ in pairs(m and m.by or {}) do parties = parties + 1 end
-			if parties >= 2 or PayerShare(exp, payer) >= Stakes.EXPOSURE_PER_SENDER then return end
+			if parties >= 2 then
+				-- (Kept as one the match may pay back, two at most: a stranger who named it first
+				-- does not keep its real party from ending it.)
+				local late = 0
+				for _ in pairs(m.late or {}) do late = late + 1 end
+				if late < 2 then m.late = m.late or {}; m.late[payer] = true end
+				return
+			end
+			if PayerShare(exp, payer) >= Stakes.EXPOSURE_PER_SENDER then return end
 			if not m then
 				if not MatchRoom(e) then return end
 				m = { at = Now(), by = {} }
@@ -540,12 +552,19 @@ table.insert(ns.Debts.receiptHooks, function(r, sender, mode)
 		m.by[payer] = m.by[payer] + r.copper
 		local parties, copper = 0, 0
 		for _, c in pairs(m.by) do parties, copper = parties + 1, copper + c end
-		if parties >= 2 then e.matches[id] = copper end
-	elseif (kind == "P" or kind == "R" or kind == "N") and R0.IsArbiter(r.payer, mode) then
+		local cap = R0.ArbiterCap(arbiter)
+		if parties >= 2 then e.matches[id] = cap > 0 and math.min(copper, cap) or copper end
+	elseif (kind == "P" or kind == "R") and R0.IsArbiter(r.payer, mode) then
 		arbiter = r.payer
 		local e = exp[Lower(arbiter)]
 		local m = e and e.stakes[id]
-		if not (m and m.by[Lower(r.payee)]) then return end
+		local payee = Lower(r.payee)
+		if not (m and (m.by[payee] or (m.late and m.late[payee]))) then return end
+		local said = Same(sender, r.payer) and "out" or (Same(sender, r.payee) and "back" or nil)
+		if not said then return end
+		m[said] = m[said] or {}
+		m[said][payee] = true
+		if not (m.out and m.out[payee] and m.back and m.back[payee]) then return end
 		e.matches[id], e.stakes[id] = nil, nil
 	end
 	if not arbiter then return end
