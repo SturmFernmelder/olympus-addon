@@ -54,7 +54,12 @@ end
 Views.ClassColored = ClassColored
 
 -- `dim`: what an old report said (older than Data.FRESH), all grey, as its guild is in the tree.
-local function Presence(online, days, dim)
+-- `at`: (1.2.1) when an old report said he was online, nobody seeing him now: "online <age> ago".
+local function Presence(online, days, dim, at)
+	if online == nil and type(at) == "number" then
+		local age = math.max(0, ns.Now() - at)
+		return Grey(age >= 86400 and L.ONLINE_DAYS_AGO:format(math.floor(age / 86400)) or L.ONLINE_AGO:format(ns.Ago(at)))
+	end
 	if online then return (dim and Grey or Green)(L.ONLINE_NOW) end
 	if not days or days < 1 then return Grey(L.OFFLINE_TODAY) end
 	local d = math.floor(days)
@@ -67,8 +72,10 @@ end
 -- A guild's report is its word when it was made; /who's is this quarter-hour's. Seen in that guild
 -- by /who now (its own search when its row was opened, or the round), a Lord or Captain of another
 -- guild is online whatever an old report said; otherwise a report older than Data.FRESH says what it
--- said, grey (Presence's `dim`), never in red as if it were today's. Our own guild is our roster,
--- the server's word. `e`: a guild of Data.Summary's list; returns online, days, dim.
+-- said, grey (Presence's `dim`), never in red as if it were today's; where it said online, he is not
+-- known to be online now: nil, and when it said so (Presence's `at`), as Members.CheckLords counts him
+-- away from then. Our own guild is our roster, the server's word. `e`: a guild of Data.Summary's
+-- list; returns online, days, dim, at.
 local roundIndex = {} -- the round's players as "<guild>\0<name folded>", made again when the round grows
 function Views.SeenNow(guild, name)
 	local W = ns.Who
@@ -92,6 +99,7 @@ end
 function Views.PresenceNow(e, name, online, days)
 	if type(e) ~= "table" or e.name == GetGuildInfo("player") then return online, days, false end
 	if Views.SeenNow(e.name, name) then return true, 0, false end
+	if e.fresh == false and online then return nil, nil, true, type(e.g) == "table" and tonumber(e.g.t) or nil end
 	return online, days, e.fresh == false
 end
 
@@ -1834,13 +1842,13 @@ local function RealmLines(s, q)
 			if ns.IsTreasurer(o.name, king.name) then t = o end
 		end
 		if t then
-			local on, days, dim = Views.PresenceNow(king, t.name, t.online, t.days)
+			local on, days, dim, at = Views.PresenceNow(king, t.name, t.online, t.days)
 			local person = { name = t.name, realm = king.g.realm, guild = king.name, class = t.class, level = t.level, zone = t.zone,
 				rank = L.CAPTAIN, online = on, days = days }
 			lines[#lines + 1] = {
 				key = t.name, player = t.name, offline = not on,
 				text = ns.COIN .. L.TREASURER .. ": " .. Gold(Plain(t.name)),
-				right = Presence(on, days, dim),
+				right = Presence(on, days, dim, at),
 				onClick = function() ns.UI.ShowPerson(person) end,
 			}
 			-- The treasury, when he shares it (Treasury.lua).
@@ -1889,11 +1897,11 @@ local function RealmLines(s, q)
 	-- closes and opens what the search opened, instead of the guild itself.
 	local function Guild(e, open, only, folds)
 		local g = e.g
-		local lordOn, lordDays, lordDim = Views.PresenceNow(e, g.leader, g.leaderOnline, g.leaderDays)
+		local lordOn, lordDays, lordDim, lordAt = Views.PresenceNow(e, g.leader, g.leaderOnline, g.leaderDays)
 		lines[#lines + 1] = {
 			id = Views.GuildId(e.name),
 			text = (open and "[-] " or "[+] ") .. Views.DisputeMark(g) .. Green("<" .. Plain(e.name) .. ">") .. " " .. Plain(g.leader or "?"),
-			right = Presence(lordOn, lordDays, lordDim),
+			right = Presence(lordOn, lordDays, lordDim, lordAt),
 			onClick = function()
 				if folds then
 					folded[e.name] = not folded[e.name] or nil
@@ -1916,7 +1924,7 @@ local function RealmLines(s, q)
 				key = g.leader, player = g.leader, offline = not lordOn,
 				indent = 1, text = Mark(g.leader, g.realm, lordOn) .. CROWN .. Gold(L.LORD) .. "  " .. ClassColored(g.leader, lord.class and ns.CLASS_FILES[lord.class])
 					.. Tag(g.leader, g.realm),
-				right = Presence(lordOn, lordDays, lordDim),
+				right = Presence(lordOn, lordDays, lordDim, lordAt),
 				onClick = function() ns.UI.ShowPerson(lord) end,
 			}
 		end
@@ -1933,14 +1941,14 @@ local function RealmLines(s, q)
 				end }
 		end
 		for _, o in ipairs(listed) do
-			local on, days, dim = Views.PresenceNow(e, o.name, o.online, o.days)
+			local on, days, dim, at = Views.PresenceNow(e, o.name, o.online, o.days)
 			local person = { name = o.name, realm = g.realm, class = o.class, level = o.level, zone = o.zone, guild = e.name,
 				rank = L.CAPTAIN, online = on, days = days }
 			lines[#lines + 1] = {
 				key = o.name, player = o.name, offline = not on,
 				indent = 2, text = Mark(o.name, g.realm, on) .. ASSIST .. ClassColored(o.name, o.class and ns.CLASS_FILES[o.class])
 					.. Tag(o.name, g.realm) .. (ns.IsTreasurer(o.name, e.name) and ("  " .. ns.COIN .. Grey(L.TREASURER)) or ""),
-				right = (o.level and Grey(L.LEVEL_N:format(o.level)) .. "  " or "") .. Presence(on, days, dim),
+				right = (o.level and Grey(L.LEVEL_N:format(o.level)) .. "  " or "") .. Presence(on, days, dim, at),
 				onClick = function() ns.UI.ShowPerson(person) end,
 			}
 		end
@@ -2198,12 +2206,15 @@ local function RealmPeople(s)
 			p = { full = full, name = ns.DisplayName(full), realm = ns.RealmOf(full), sources = {} }
 			byKey[key], out[#out + 1] = p, p
 		end
+		-- (1.2.1: our roster is the server's word now, over any report; /who's only while it is this
+		-- quarter-hour's, Views.SeenNow, and never over our roster: an hour-old round is no "online".)
+		local who = x.source == "who"
 		for _, field in ipairs({ "guild", "class", "race", "raceName", "level", "zone", "online", "days" }) do
-			if p[field] == nil and x[field] ~= nil then p[field] = x[field] end
+			if p[field] == nil and x[field] ~= nil and not (who and (field == "online" or field == "days")) then p[field] = x[field] end
 		end
 		if x.rank and (p.rank == nil or x.rankExact) then p.rank, p.rankExact = x.rank, x.rankExact or nil end
-		-- (1.2.1: our roster and /who say who is online now; a report, what it said when it was made.)
-		if (x.source == "roster" or x.source == "who") and x.online ~= nil then p.online, p.days = x.online, x.days end
+		if x.source == "roster" and x.online ~= nil then p.online, p.days = x.online, x.days
+		elseif who and not p.sources.roster and Views.SeenNow(x.guild, x.name) then p.online, p.days = true, 0 end
 		if x.source then p.sources[x.source] = true end
 		return p
 	end

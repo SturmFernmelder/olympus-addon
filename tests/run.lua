@@ -1338,8 +1338,12 @@ test("1.2.1 another guild's Lord seen online by /who is online whatever an old r
 		local grey = "|cff9d9d9d"
 		local capt = Row("Farcapt").right
 		assert(capt:find(L.OFFLINE_DAYS:format(1), 1, true) and capt:find(grey, 1, true) and not capt:find(red, 1, true), "what it said, grey: " .. capt)
-		local gone = Row("Gonelord").right
-		eq(gone, grey .. L.ONLINE_NOW .. "|r", "online when it was made, grey")
+		-- (1.2.1 review: what a 3-day-old report said is no "online now" (Members.CheckLords counts him
+		-- away from then): when it said so, grey, and his card and page say nothing of now.)
+		local gone = Row("Gonelord")
+		eq(gone.right, grey .. L.ONLINE_DAYS_AGO:format(3) .. "|r", "online when it was made, 3 days ago, grey")
+		eq(gone.offline, true)
+		eq(ns.Views.Person("Gonelord").online, nil)
 		local farLord = ns.rdb.guilds["Olympus Far"]
 		farLord.leaderDays = 5
 		ns.Who.sweep = { started = GetTime(), list = {} }
@@ -1353,6 +1357,46 @@ test("1.2.1 another guild's Lord seen online by /who is online whatever an old r
 		assert(near:find(L.OFFLINE_DAYS:format(5), 1, true) and near:find(red, 1, true), "a fresh report's word: " .. near)
 		-- The player page and the Realm's people lists read the same.
 		eq(ns.Views.Person("Farlord").online, true)
+		ns.Views.ExpandAll(false)
+	end)
+	GetGuildInfo, ns.Who.sweep, ns.Roster.online, ns.Roster.members = savedGuild, savedSweep, savedOnline, savedMembers
+	ns.rdb.guilds = {}
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.1 review: the player page and the class/race lists took /who's word over our roster and over
+-- a fresh report, from a /who round however old: a guildmate offline for 2 days read online, and a
+-- Lord the tree showed red "offline 5d !" read online on his page.
+test("1.2.1 the Realm's people: our roster is the word for our guild, an old /who round is no online, and the page says what the tree says", function()
+	local savedGuild, savedSweep, savedOnline, savedMembers = GetGuildInfo, ns.Who.sweep, ns.Roster.online, ns.Roster.members
+	local now, L = os.time(), ns.L
+	GetGuildInfo = function() return "Olympus II", "Member", 3 end
+	ns.Roster.online = {}
+	ns.Roster.members = { { name = "Ownmate", full = ns.FullName("Ownmate"), online = false, days = 2, level = 20 } }
+	ns.rdb.guilds = {
+		["Olympus Near"] = { total = 30, online = 2, zones = {}, t = now - 60, leader = "Nearlord", leaderOnline = false,
+			leaderDays = 5, officers = {} },
+	}
+	-- A /who round of an hour ago saw them both (nobody pressed Refresh since).
+	ns.Who.sweep = { started = GetTime() - 3600, done = true, list = {
+		{ name = "Ownmate", guild = "Olympus II", level = 20, class = "MAGE" },
+		{ name = "Nearlord", guild = "Olympus Near", level = 20, class = "WARRIOR" },
+		{ name = "Whoonly", guild = "Olympus Near", level = 12, class = "ROGUE" } } }
+	local ok, err = pcall(function()
+		ns.Views.ExpandAll(true)
+		local lord
+		for _, l in ipairs(ns.Views.RealmLines()) do if l.key == "Nearlord" then lord = l end end
+		assert(lord and lord.right:find("|cffff4040", 1, true) and lord.offline == true, "the tree: the fresh report's word")
+		local own = ns.Views.Person("Ownmate")
+		eq(own.online, false, "our roster"); eq(own.days, 2)
+		local near = ns.Views.Person("Nearlord")
+		eq(near.online, false, "as the tree says"); eq(near.days, 5)
+		eq(ns.Views.Person("Whoonly").online, nil, "an hour-old round: not known online now")
+		-- This quarter-hour's round: seen now is online, in another guild; our roster still says ours.
+		ns.Who.sweep.started = GetTime()
+		eq(ns.Views.Person("Nearlord").online, true)
+		eq(ns.Views.Person("Whoonly").online, true)
+		eq(ns.Views.Person("Ownmate").online, false, "our roster over /who")
 		ns.Views.ExpandAll(false)
 	end)
 	GetGuildInfo, ns.Who.sweep, ns.Roster.online, ns.Roster.members = savedGuild, savedSweep, savedOnline, savedMembers
@@ -34632,6 +34676,32 @@ test("1.1 a Lord away (Fern #39): a guild that stopped reporting while its Lord 
 		end)
 	end)
 	ns.db.warnDays, ns.King.CanCommand, ns.rdb.lordWarned, ns.Now = savedWarn, savedCan, savedWarned, savedNow
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.1 review: the Crown's "Lord away" line aged an old report even while /who saw the Lord online.
+test("1.2.1 a Lord away: a Lord /who sees online in his guild this quarter-hour is not named away, whatever an old report said", function()
+	local L, M = ns.L, ns.Members
+	local savedWarn, savedCan, savedWarned = ns.db.warnDays, ns.King.CanCommand, ns.rdb.lordWarned
+	local ok, err = pcall(function()
+		Fern.Census(function(w)
+			ns.db.warnDays, ns.rdb.lordWarned = 3, nil
+			local now = os.time()
+			ns.King.CanCommand = function() return true end
+			ns.Comm.loginAt = now - 1000
+			ns.rdb.guilds = {
+				-- Two days quiet, his Lord offline 3 days then.
+				["Olympus Far"] = { total = 50, online = 0, zones = {}, t = now - 2 * 86400, leader = "Farlord", leaderOnline = false, leaderDays = 3, officers = {} },
+			}
+			ns.Who.sweep = { started = GetTime(), list = { { name = "Farlord", guild = "Olympus Far", level = 20, class = "WARRIOR" } } }
+			eq(M.CheckLords(now), 0, "seen online now")
+			-- The round grows old: the report's word again.
+			ns.Who.sweep.started = GetTime() - 3600
+			eq(M.CheckLords(now), 1)
+			eq(w.printed[#w.printed], L.LORD_AWAY_CROWN:format("Farlord", "Olympus Far", 5))
+		end)
+	end)
+	ns.db.warnDays, ns.King.CanCommand, ns.rdb.lordWarned = savedWarn, savedCan, savedWarned
 	if not ok then error(err, 0) end
 end)
 
