@@ -11,7 +11,10 @@ local L = ns.L
 -- commands and clicks all go through it. A listener's label ("callback DATA_CHANGED", "event
 -- CHAT_MSG_ADDON") gets the listener's place in the order it was registered (#n), with its file
 -- and line where the game's Lua tells them (debug.getinfo) or its name in the namespace
--- (ChatRooms.RefreshAuthority), so each of the ~17 DATA_CHANGED listeners has its own line. An
+-- (ChatRooms.RefreshAuthority), so each DATA_CHANGED listener has its own line. Where the client's
+-- Lua has no debug library (the gamepad pass's model of Forever has none), #n alone names most:
+-- the order is the TOC's and the files', the same on every client of one build, and the offline
+-- harness (LuaJIT's debug.getinfo) gives each #n its file and line. An
 -- OnUpdate of its own frame (never one of the game's) adds up the top-level calls of each drawn
 -- frame and counts the frames where Olympus took 30 ms or more. Kept: each label's calls, total
 -- and slowest; the 40 slowest calls with their times; the 10 worst frames; the time measured.
