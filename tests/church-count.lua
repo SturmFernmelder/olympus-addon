@@ -1014,3 +1014,30 @@ test("1.2.1 Church: a reload keeps the ledger when one saved record fails the lo
 	eq(Records(w, K), 5, "the others stay")
 	eq(Joins(w, K, "Mira Wells", "m"), 5)
 end)
+
+test("1.2.1 Church: a ledger the old build had cut back counts its own let-go recruits again in the windows, once (893 live and 423 let go today: 1316)", function()
+	local w, c = Cast()
+	local K = c.a1
+	for i = 1, 893 do Give(w, K, "Ald Rec" .. Letters(i), A1, 30 + (i % 48)) end
+	-- What 1.2.0 left of the 423 it let go today: their Gone marks and the all-time archive, no join hours.
+	local l = w:As(K, K.Count.Led)
+	l.wv, l.gone = nil, {}
+	for i = 1, 423 do l.gone[Key("Lost Rec" .. Letters(i)) .. ":" .. Key(A1)] = w.clock - 3600 * (i % 10) end
+	l.gone[Key("Older Rec") .. ":" .. Key(A1)] = w.clock - 40 * DAY -- (let go before any window began)
+	l.gone[Key("Lost Reca") .. ":"] = w.clock -- (a recruit's own mark is no record)
+	l.p[Key(A1)] = { n = "Aldric Vane", ap = 4240, aj = 424, ay = 0, u = w.clock }
+	eq(Joins(w, K, A1, "m"), 893, "what the Apostle saw")
+	w:As(K, K.Count.CheckSaved)
+	eq(Joins(w, K, A1, "m"), 1316, "the last 30 days again")
+	eq(Joins(w, K, A1, "a"), 893 + 424, "all time as it was")
+	w:As(K, K.Count.CheckSaved)
+	eq(Joins(w, K, A1, "m"), 1316, "once")
+	-- A ledger this build began has nothing to restore: its archive keeps the hours itself.
+	local K2 = c.a2
+	local l2 = w:As(K2, K2.Count.Led)
+	eq(l2.wv, 1)
+	l2.gone = { [Key("Some Rec") .. ":" .. Key(A2)] = w.clock }
+	l2.p[Key(A2)] = { n = "Bera Stone", ap = 10, aj = 1, ay = 0, u = w.clock, wj = { [math.floor(w.clock / 3600) * 3600] = 1 } }
+	w:As(K2, K2.Count.CheckSaved)
+	eq(Joins(w, K2, A2, "m"), 1)
+end)

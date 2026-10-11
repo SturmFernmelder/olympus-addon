@@ -151,10 +151,11 @@ local function Claims() return Sub("claims", function() return {} end) end
 local function Fills() return Sub("fill", function() return {} end) end
 local function View() return Sub("view", function() return {} end) end
 local function Led()
-	local l = Sub("led", function() return { v = 1, r = {}, p = {}, from = {} } end)
+	-- (wv: its archive keeps join hours, 1.2.1's Archive: a new ledger's from the start.)
+	local l = Sub("led", function() return { v = 1, wv = 1, r = {}, p = {}, from = {} } end)
 	if l and (l.v ~= 1 or type(l.r) ~= "table" or type(l.p) ~= "table" or type(l.from) ~= "table") then
 		local c = Church.Store()
-		c.led = { v = 1, r = {}, p = {}, from = {} }
+		c.led = { v = 1, wv = 1, r = {}, p = {}, from = {} }
 		l = c.led
 	end
 	return l
@@ -605,8 +606,29 @@ end
 -- each, the id breaking ties, so keepers holding the same records let the same ones go. A credited
 -- one goes into its recruiter's archive with its join hour: no window's count drops. A fiftieth of
 -- the ledger goes at once, so the ledger is sorted once for that many new records.
+-- (1.2.1, once per ledger: what a full ledger archived before this version kept no join hour. Each
+-- record it let go itself, its Gone mark ("<recruit>:<recruiter>" -> when), counts again in the
+-- windows from the hour it went, never before its join: such a recruit stays in the last 30 days at
+-- most the days between his join and that hour longer than he should. Marks only: a total another
+-- keeper's archive lent (Count.TakePerson) is not this ledger's to date.)
+local function WindowsFromGone(l, now)
+	if l.wv == 1 then return end
+	l.wv = 1
+	local keep = now - WindowKeep()
+	for id, t in pairs(type(l.gone) == "table" and l.gone or {}) do
+		local by = type(id) == "string" and id:match("^[^:]+:(.+)$")
+		local p = by and l.p[by]
+		if type(p) == "table" and type(t) == "number" and t >= keep and t <= now + 3600 then
+			local hour = math.floor(t / 3600) * 3600
+			if type(p.wj) ~= "table" then p.wj = {} end
+			p.wj[hour] = (tonumber(p.wj[hour]) or 0) + 1
+		end
+	end
+end
+
 local LET_GO = { withdrawn = 1, transfer = 1, alt = 1, taken = 1, expired = 1, pending = 3, credited = 4, open = 5 }
 local function MakeRoom(l, now, n)
+	WindowsFromGone(l, now)
 	local C = Count.Credits()
 	local list = {}
 	for id, r in pairs(l.r) do
@@ -1813,6 +1835,7 @@ function Count.CheckSaved()
 			end
 			for _, id in ipairs(bad) do l.r[id] = nil end
 			if #bad > 0 then ns.Log("church ledger: %d saved records dropped at load", #bad) end
+			WindowsFromGone(l, Clock())
 		end
 		if not ok then c.led = nil end
 	end
