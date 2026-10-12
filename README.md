@@ -1086,7 +1086,9 @@ tools lives where it belongs:
   call, the inspection, the agenda, Vox Populi and the gates in his name. Never the court,
   writs, pardons or his crown on the map. Their addons learn the list from his, keep it across a
   `/reload`, and (1.2.4, until the author says otherwise) it stands until his newer list, also
-  while he is offline; it ended 20 minutes after he stopped sending it before. A Hand who is an
+  while he is offline; it ended 20 minutes after he stopped sending it before. His addon says an
+  emptied list again too, so a member who was away drops those names, and a list from a King an
+  update no longer names counts nowhere. A Hand who is an
   officer of `<Olympus>` keeps its Crown (Royal
   decrees, Tabard inspections, [Lords]) on every client, not only on its members' (1.0.0).
   Each Steward names Hands of his own beside his, in a list of his own, with the same tools and
@@ -1143,7 +1145,8 @@ Steward's page shows his own list, to change, and the King's and the other Stewa
 **The King can't take back a Hand his Steward named**: that Steward does, or the author, by
 removing him as Steward (both pages say so). The King's list is the same message as before
 1.0.0, from his client alone, and (1.2.4) stands until his newer list (it ended 20 minutes after
-his client stopped repeating it before). A Steward's list goes out from his own client alone, in
+his client stopped repeating it before; each owner's addon says an emptied list again, at his
+later sessions too). A Steward's list goes out from his own client alone, in
 a message of its own; every client keeps the last one it heard from him (by his name, which the
 server stamps), in its saved data, until his newer list (1.2.4; it ended 20 minutes after his
 client stopped repeating it), or at once, on every client, when a newer signed list no longer

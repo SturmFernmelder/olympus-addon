@@ -769,7 +769,9 @@ his tools lives where it belongs:
   of the voters when each picked several). `/oly vox off` keeps the questions in chat.
 - **Royal Writs** (in the Decrees tab): a letter from the King on parchment, to the Lords alone,
   to every Lord and Captain, or to the whole army. Lords and Captains can answer "As you
-  command"; the King sees how many did. (The audience is who the addon shows it to: like
+  command"; the King sees how many did. (1.2.4) His addon says each writ of the last seven days
+  again, one every 15 minutes, and a member's addon asks for them once a login, so a member who
+  was offline when it went still gets it, once. (The audience is who the addon shows it to: like
   everything on the channel, anyone on it can read the bytes.)
 - **Open the Gates** (in the Realm tab, Recruiting): the King picks the guild new recruits
   should join for the next two hours; everyone sees it on top of Recruiting.
@@ -806,8 +808,11 @@ his tools lives where it belongs:
   `/oly key` is dated, and wins for his guild, as ever.
 - **Hands of the King** (a button next to his map button): players he names use the roll
   call, the inspection, the agenda, Vox Populi and the gates in his name. Never the court,
-  writs, pardons or his crown on the map. Their addons learn the list from his, and it ends
-  when he stops sending it. A Hand who is an officer of `<Olympus>` keeps its Crown (Royal
+  writs, pardons or his crown on the map. Their addons learn the list from his, keep it across a
+  `/reload`, and (1.2.4, until the author says otherwise) it stands until his newer list, also
+  while he is offline; it ended 20 minutes after he stopped sending it before. His addon says an
+  emptied list again too, so a member who was away drops those names, and a list from a King an
+  update no longer names counts nowhere. A Hand who is an officer of `<Olympus>` keeps its Crown (Royal
   decrees, Tabard inspections, [Lords]) on every client, not only on its members' (1.0.0).
   Each Steward names Hands of his own beside his, in a list of his own, with the same tools and
   the same Crown, which the King can't change (1.0.0, below).
@@ -855,10 +860,12 @@ shows his own list, to change, and each Steward's, to read, under that Steward's
 Steward's page shows his own list, to change, and the King's and the other Stewards', to read.
 **The King can't take back a Hand his Steward named**: that Steward does, or the author, by
 removing him as Steward (both pages say so). The King's list is the same message as before
-1.0.0, from his client alone, and ends 20 minutes after his client stopped repeating it, as
-before. A Steward's list goes out from his own client alone, in a message of its own; every
-client keeps the last one it heard from him (by his name, which the server stamps), and it ends
-20 minutes after his client stopped repeating it, or at once, on every client, when a newer
+1.0.0, from his client alone, and (1.2.4) stands until his newer list (it ended 20 minutes after
+his client stopped repeating it before; each owner's addon says an emptied list again, at his
+later sessions too). A Steward's list goes out from his own client alone, in a message of its
+own; every client keeps the last one it heard from him (by his name, which the server stamps),
+in its saved data, until his newer list (1.2.4; it ended 20 minutes after his client stopped
+repeating it), or at once, on every client, when a newer
 signed list no longer names him: named again later, he starts from no Hands, as long as his
 addon saw the list without him (on any of his characters there). Clients before 1.0.0 follow
 the King's list alone, as they
@@ -1393,8 +1400,11 @@ account, `/oly discord forget` drops this character's request and proof.
   week's amount with them; on the Treasurer's characters his mail
   character's book too), the King's switches and keepers on his client or a Steward's, and your
   settings (sound, map, minimap, borders, nameplates, Vox, your chat windows and mutes, the
-  players you blocked). Keep it in a text file: when the beta wipes the saved variables, `/oly
-  restore` opens a box to paste it back, says what it restores and waits for your yes. Clipboard
+  players you blocked), and (1.2.4) your own signed halves of the Bones games and duels that count
+  (never the other player's: a Bones game's comes back when your addon asks him, a duel's from
+  his repeats or the clerk's carousel). Keep it in a text file: when the beta wipes the saved
+  variables, `/oly restore` opens a box to paste it back, says what it restores and waits for
+  your yes. Clipboard
   only: nothing is uploaded or sent anywhere (a keeper's book goes out afterwards as it always
   does). A book goes back only into that character's (merged with what it wrote since, nothing
   counted twice), a text that was cut or changed is refused, and it never holds your yeses to

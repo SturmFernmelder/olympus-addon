@@ -31133,7 +31133,78 @@ do
 		end)
 	end)
 
-	test("1.0.0 the Hands: the author removes a Steward: the Hands he named end at once on every client, the King's too, and leave its page; his client sends them no more; the King's list and the other Steward's stand", function()
+	-- (1.2.4, the review of the lists kept) A list heard stands until its owner's newer one, so that
+	-- newer one must reach the members who were away: an owner who emptied his list said nothing
+	-- at his later sessions ("nobody named yet"), and every client that missed the empty list kept
+	-- his former Hands, with the Throne's tools and the guild banks' snapshots, for good. And the
+	-- King's list counts while its sender is the King: kept in the saved data, a list from a King
+	-- an update no longer names would stand for good too.
+	test("1.2.4 the Hands: an owner who emptied his list says it again, empty, at his later sessions, and a member who missed it drops his former Hands; a list from a King no longer the King names nobody", function()
+		WithThrone(function(w, K)
+			WithStewardList(STEWARD_E, function()
+				local KING = ns.KingCharacter() .. "-Realm"
+				-- The King names Kingsman, a Steward names Helper; a member hears both.
+				Fresh(AsKing); K.AddHand("Kingsman"); K.SendHands(true)
+				local kingList = LastSent(w)
+				local kingSaved = ns.rdb.kingHands
+				ns.rdb.kingHands = nil
+				Fresh(AsSteward); K.AddHand("Helper"); K.SendStewardHands(true)
+				local stewardList = LastSent(w)
+				local stewardSaved = ns.rdb.stewardHands
+				Fresh(AsSoldier, "Other")
+				K.HandleCommand("CHANNEL", KING, kingList)
+				K.HandleCommand("CHANNEL", STEWARD, stewardList)
+				eq(K.IsHandName("Kingsman-Realm"), true); eq(K.IsHandName("Helper-Realm"), true)
+				local heard, stewardHeard = ns.rdb.handsHeard, ns.rdb.stewardHandsHeard
+				-- The member logs out. Each owner empties his list in a session of his own, then plays
+				-- another one later.
+				local function EmptiedThenLater(as, saved, key, remove, send)
+					K.Reset()
+					ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil
+					ns.rdb.kingHands, ns.rdb.stewardHands = nil, nil
+					ns.rdb[key] = saved
+					as(); K.LoadHands()
+					K.RemoveHand(remove)
+					K.Reset(); K.LoadHands() -- (his later session)
+					local n = #w.sent
+					send()
+					eq(#w.sent, n + 1, "his emptied list said again at his later session")
+					return LastSent(w)
+				end
+				local kingEmpty = EmptiedThenLater(AsKing, kingSaved, "kingHands", "Kingsman-Realm", function() K.SendHands() end)
+				assert(kingEmpty:find("^T1~H~%d+~Olympus~$"), kingEmpty)
+				local stewardEmpty = EmptiedThenLater(AsSteward, stewardSaved, "stewardHands", "Helper-Realm", function() K.SendStewardHands() end)
+				assert(stewardEmpty:find("^T1~N~%d+~Olympus II~$"), stewardEmpty)
+				-- The member's next session: the lists he kept, then each owner's newer, empty one.
+				Fresh(AsSoldier, "Other")
+				ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = heard, stewardHeard
+				K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's, as he kept it"); eq(K.IsHandName("Helper-Realm"), true)
+				K.HandleCommand("CHANNEL", KING, kingEmpty)
+				K.HandleCommand("CHANNEL", STEWARD, stewardEmpty)
+				eq(K.IsHandName("Kingsman-Realm"), false, "the King's newer list leaves him out")
+				eq(K.IsHandName("Helper-Realm"), false, "the Steward's newer list leaves him out")
+				-- A list from a King an update no longer names: nobody's Hand, kept or heard.
+				Fresh(AsSoldier, "Other")
+				K.HandleCommand("CHANNEL", KING, kingList)
+				eq(K.IsHandName("Kingsman-Realm"), true)
+				local pinned = ns.KING_CHARACTER.Alliance
+				local ok, err = pcall(function()
+					ns.KING_CHARACTER.Alliance = "Other Monarch"
+					eq(K.IsHandName("Kingsman-Realm"), false, "the former King's list names nobody")
+					eq(#K.OthersHands(), 0, "nor shows on the Hands page")
+					K.Reset(); K.LoadHands()
+					eq(K.IsHandName("Kingsman-Realm"), false, "nor once kept")
+				end)
+				ns.KING_CHARACTER.Alliance = pinned
+				if not ok then error(err, 0) end
+				K.Reset(); K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "his again while he is the King")
+			end, Signed2)
+		end)
+	end)
+
+	test("1.0.0 the Hands: the author removes a Steward:the Hands he named end at once on every client, the King's too, and leave its page; his client sends them no more; the King's list and the other Steward's stand", function()
 		WithThrone(function(w, K)
 			WithStewardList(STEWARD_E, function()
 				local KING, L = ns.KingCharacter() .. "-Realm", ns.L
@@ -45900,8 +45971,10 @@ do
 			w.clock = w.clock + T.PRIVATE_REPEAT + 60
 			T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); T.FlushPrivate(); Run()
 			eq(Got(w, SAGE), 0, "a routine ask")
-			-- The Hand holds the bank; the King is offline longer than HANDS_FRESH, so the Hand's
-			-- client drops it. The King comes back: the Hand's next ask says he holds nothing, once.
+			-- The Hand holds the bank; the King's newer list leaves him out (1.2.4: a list stands until
+			-- its owner's newer one; before, the King offline longer than HANDS_FRESH ended it), so the
+			-- Hand's client drops it. The King names him again: the Hand's next ask says he holds
+			-- nothing, once.
 			-- (The King's list heard again first: an hour went by above.)
 			AsKing(); K.SendHands(true)
 			hands = LastSent(w)
@@ -45917,8 +45990,12 @@ do
 			eq(#B.Sisters(), 1)
 			T.Ask(false); eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~1", "holding it, his routine asks")
 			w.clock = w.clock + ns.King.HANDS_FRESH + 1
+			eq(#B.Sisters(), 1, "the King away: his list stands (1.2.4)")
+			AsKing(); K.RemoveHand("Helper-Realm"); K.SendHands(true)
+			hands = LastSent(w)
+			AsSoldier("Helper"); K.HandleCommand("CHANNEL", KING, hands)
 			eq(#B.Sisters(), 0, "no longer a Hand here: dropped")
-			AsKing(); K.SendHands(true)
+			AsKing(); K.AddHand("Helper"); K.SendHands(true)
 			hands = LastSent(w)
 			AsSoldier("Helper"); K.HandleCommand("CHANNEL", KING, hands)
 			eq(B.SeesSisters(), true)
