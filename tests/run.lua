@@ -46144,6 +46144,137 @@ do
 			if not ok then error(err, 0) end
 		end)
 	end)
+
+	-- 1.2.4 (the author's call: "Não precisa ser temporário... As guildas podem ser definitivas, iguais à
+	-- guilda principal"): each guild's latest snapshot a viewer took is kept across logouts, as
+	-- <Olympus>'s own is. Before 1.2.4 it lived in memory alone ("it is never saved", README.md).
+	test("1.2.4 Guild treasuries: each guild's latest snapshot is kept across a logout (saved, bounded: one a guild, the census's guilds, a size cap), never dropped for its age; its sharer's no takes it from the save too; a viewer who leaves the audience drops them at once", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin, savedCap = ns.Comm.loginAt, B.SISTERS_SAVED_BYTES
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Stored(name)
+					local all = ns.rdb.sisterBanks
+					local mine = type(all) == "table" and all[name:lower()] or nil
+					local n = 0
+					for _ in pairs(mine or {}) do n = n + 1 end
+					return n, mine
+				end
+				ns.Comm.loginAt = w.clock - 3600
+				AsSage()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }, 3600), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 2, items = { { id = 2770, n = 20, s = 7 } } } }), HERA)
+				eq(#B.Sisters(), 2)
+				eq(Stored(SAGE), 2, "both in the saved variables")
+				-- A /reload or a logout: memory gone, both back as they came, its items too.
+				B.Reload()
+				local s = B.Sisters()
+				eq(#s, 2, "kept across the reload")
+				eq(s[1].guild, "Olympus Hera"); eq(s[1].money, 900000); eq(s[1].by, HERA)
+				eq(s[1].tabs[1].name, "Tab 2"); eq(s[1].tabs[1].items[1].id, 2770); eq(s[1].tabs[1].items[1].s, 7)
+				eq(s[2].guild, "Olympus Zeus"); eq(s[2].t, w.clock - 3600); eq(s[2].money, 424242)
+				T.Show("summary")
+				Key(T.Build(), "sister:Olympus Zeus").onClick()
+				local lines = T.Build()
+				eq(#Grids(lines), 1, "its bank opens as before"); eq(lines[Grids(lines)[1]].items[1].id, 2589)
+				Key(lines, "sister:Olympus Zeus").onClick()
+				-- The newest of a guild replaces the older, in the save too (one a guild).
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 2)
+				B.Reload()
+				s = B.Sisters()
+				eq(s[2].money, 525252); eq(s[2].tabs[1].items[1].n, 61)
+				-- No age takes one away: a month later it is still there, marked old.
+				w.clock = w.clock + 30 * 86400
+				Census(w)
+				B.Reload()
+				eq(#B.Sisters(), 2, "never dropped for its age")
+				lines = T.Build()
+				local zeus = Key(lines, "sister:Olympus Zeus")
+				assert(zeus, Texts(lines))
+				for i, l in ipairs(lines) do if l == zeus then assert(lines[i + 1].right:find("ff6060", 1, true), "marked old: " .. lines[i + 1].right) end end
+				-- His no takes it back, from the save too: from whoever sent it, whatever the census says now.
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - 2 * ns.Data.FRESH
+				B.HandleSister("WHISPER", "Faker Guy-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 2, "not from anyone")
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 1, "his own no")
+				eq(Stored(SAGE), 1, "gone from the save")
+				B.Reload()
+				eq(#B.Sisters(), 1, "and after a reload")
+				-- His addon tells it to the viewer's ask after a login too (a fresh one): before 1.2.4 such
+				-- an ask held nothing, now it may hold his snapshot from an earlier session.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } })
+				ns.db.sisterBankShares, ns.db.sisterBankSent = { ["zed-realm"] = false }, { ["zed-realm"] = "Olympus Zeus" }
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				eq(#w.whispered, 1, "the no, to an ask after a login"); eq(w.whispered[1].to, SAGE); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 1, "once a session")
+				ns.db.sisterBankShares, ns.db.sisterBankSent = nil, nil
+				-- A guild gone from the census goes from the save.
+				AsSage()
+				ns.rdb.guilds["Olympus Hera"] = nil
+				B.Reload()
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 0, "only the census's guilds")
+				-- Leaving the audience: what he held goes at once, the save too.
+				Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1)
+				local council = ns.rdb.council
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				eq(#B.Sisters(), 0, "no longer a viewer"); eq(Stored(SAGE), 0, "the save too, at once")
+				ns.rdb.council = council
+				B.Reload()
+				eq(#B.Sisters(), 0, "dropped, not hidden")
+				-- Taken off while offline: at his next login nothing shows, and once his role is known for
+				-- ROLE_SETTLE of that session (a Hand's waits for the King's list), the save goes too.
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 1)
+				B.Reload()
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				ns.Comm.loginAt = w.clock
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 1, "not yet: his role may come")
+				w.clock = w.clock + B.ROLE_SETTLE
+				Census(w)
+				B.Holding()
+				eq(Stored(SAGE), 0, "a session outside the audience: gone")
+				ns.rdb.council = council
+				ns.Comm.loginAt = w.clock - 3600
+				-- Another character of the account, never of the audience, neither sees nor drops them.
+				B.Reload()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				B.Reload()
+				AsSoldier()
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				Census(w)
+				eq(#B.Sisters(), 0); B.Holding()
+				eq(Stored(SAGE), 1, "a soldier's session leaves Sage's alone"); eq(Stored("Soldier-Realm"), 0)
+				B.Reload(); AsSage()
+				eq(#B.Sisters(), 1, "Sage's again")
+				-- The size cap: past SISTERS_SAVED_BYTES of text for the realm group, the one heard longest
+				-- ago leaves the save (still shown this session).
+				local _, mine = Stored(SAGE)
+				local one = #mine["olympus zeus"].text
+				B.SISTERS_SAVED_BYTES = one * 2 + 10
+				w.clock = w.clock + 1
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), HERA)
+				w.clock = w.clock + 1
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm" }, "W11-Realm", "W12-Realm")
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 1, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Hermy-Realm")
+				eq(#B.Sisters(), 3, "all three shown")
+				local n
+				n, mine = Stored(SAGE)
+				eq(n, 2, "two fit"); eq(mine["olympus zeus"], nil, "the one heard longest ago left the save")
+				B.Reload()
+				eq(#B.Sisters(), 2)
+			end)
+			ns.Comm.loginAt, B.SISTERS_SAVED_BYTES = savedLogin, savedCap
+			if not ok then error(err, 0) end
+		end)
+	end)
 end
 
 test("1.1 bank requests (Fern): a Lord or Captain asks for an item and a count, shown next to the bank; handing it over stays a trade or mail", function()
@@ -50572,15 +50703,19 @@ do
 				eq(#w.whispered, 1, "the no"); eq(w.whispered[1].to, KING); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
 				AsKing(); B.HandleSister("WHISPER", "Zed-Realm", w.whispered[1].msg)
 				eq(#B.Sisters(), 0, "withdrawn")
-				-- Once a session: his asks after that cost nothing; a Hand's addon asking afresh (after its
-				-- login: it holds nothing) is not told either.
+				-- Once a session: his asks after that cost nothing. (1.2.4, changed on purpose: a Hand's
+				-- addon asking afresh, after its login, is told too, once: a viewer's addon keeps a
+				-- guild's snapshot across logouts now, so an ask after a login may hold his.)
 				AsLord(); w.clock = w.clock + T.ASK_EVERY
 				T.HandleAsk("CHANNEL", KING, "TA~Olympus~1"); Run()
 				eq(#w.whispered, 1, "told once")
 				AsKing(); K.AddHand("Helper"); K.SendHands(true); local hands = LastSent(w)
 				AsLord(); K.HandleCommand("CHANNEL", KING, hands)
 				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~0"); Run()
-				eq(#w.whispered, 1, "a fresh ask holds nothing")
+				eq(#w.whispered, 2, "an ask after a login: told too")
+				eq(w.whispered[2].to, "Helper-Realm"); eq(w.whispered[2].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 2, "once")
 				-- The Lord's addon reloads (its session's memory gone) while the King still holds his bank
 				-- (sent before the no): remembered, the King's next ask gets the no.
 				B.Reset(); Holds()
