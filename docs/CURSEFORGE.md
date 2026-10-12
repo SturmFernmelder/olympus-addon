@@ -311,8 +311,8 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown, the High Council, the King's Hands | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown, the High Council, the King's Hands | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 

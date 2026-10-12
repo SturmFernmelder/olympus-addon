@@ -35,10 +35,8 @@
   camp; no arbiters without bets (duels and Bones between their two players); duel points that
   consider levels; Find a player by level, distance and game
 - v1.2.1 Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
-- v1.2.3 The King's stream fixes (the privacy page after the update, the window opening by itself, the letter's
-  wait, the crown's layer at login); the Chat tab's and the window's memory; guild masters' decrees and other
-  army-wide actions to their own guild; Most Wanted filled by members' own kills and deaths, with bounties by office
-  and level and revenge; the missionaries' crook; the race and class rooms gone
+- v1.2.3 The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
+  from members' own kills and deaths, bounties by office and level; the missionaries' crook
 - v1.2.2 The stutter fixed (the level race's checks off the message handler, data changes taken once
   a second, the map left alone while closed, the minute jobs spread out) and `/oly perf`; the
   privacy page and Bones invitations; guild removal and rank changes; Church counts; chat reports to

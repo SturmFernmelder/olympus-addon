@@ -29,10 +29,8 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
-- **1.2.3**: The King's stream fixes (the privacy page after the update, the window opening by itself, the letter's
-  wait, the crown's layer at login); the Chat tab's and the window's memory; guild masters' decrees and other
-  army-wide actions to their own guild; Most Wanted filled by members' own kills and deaths, with bounties by office
-  and level and revenge; the missionaries' crook; the race and class rooms gone
+- **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
+  from members' own kills and deaths, bounties by office and level; the missionaries' crook
 - **1.2.1**: Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
 - **1.2.0**: The Watch (each guild's moderation desk, the Tabards in it); crafting requests on the Crafters
   tab; the King's arrow on the minimap; Vox Populi's history and a guild master's own questions; the
@@ -326,8 +324,8 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown, the High Council, the King's Hands | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown, the High Council, the King's Hands | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 

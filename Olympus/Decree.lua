@@ -179,6 +179,11 @@ local function Steward() return ns.King ~= nil and ns.King.IsSteward ~= nil and 
 function Decree.Scope(kind)
 	if Steward() then return "army", "steward" end
 	if not CROWN_ONLY[kind] then
+		-- (1.2.3, the author's yes) The High Council (the signed list) and the King's Hands (his
+		-- list or a Steward's) call the whole army to arms and muster it, as the Crown does.
+		if ns.IsMember() and ns.IsHighCouncillor(ns.me) == true then return "army", "council" end
+		local K = ns.King
+		if ns.IsMember() and K ~= nil and type(K.IsHandName) == "function" and K.IsHandName(ns.me) == true then return "army", "hand" end
 		if not ns.Roster.IsOfficer() then return nil end
 		if ns.IsKingGuild(GetGuildInfo("player")) then return "army", "captain" end
 		return "guild", "officer"
@@ -265,8 +270,9 @@ end
 -- (Another guild's officer: his Calls to Arms and Musters reach his guild alone.)
 function Decree.YouCan()
 	local royal, why = Decree.Scope("ROYAL")
-	local arms = Decree.Scope("ARMS")
+	local arms, armsWhy = Decree.Scope("ARMS")
 	if why == "council" then return L.YOU_ARE_COUNCIL_DECREES end
+	if royal ~= "army" and armsWhy == "hand" then return L.YOU_ARE_HAND_DECREES end
 	if royal == "army" then return L.YOU_ARE_CROWN end
 	if royal == "guild" then return L.YOU_ARE_GUILD_LORD:format(GetGuildInfo("player") or "?") end
 	if arms == "guild" then return L.YOU_ARE_GUILD_OFFICER:format(GetGuildInfo("player") or "?") end
@@ -342,7 +348,7 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 	-- decree and Tabard inspection (1.2.3: the author's signed list, by the name the server
 	-- stamps) on every client, whichever guild he is in. Everyone else: the rank we can verify,
 	-- never the rank written in the message.
-	local king, steward, hand, council, rank, source
+	local king, steward, hand, council, named, rank, source
 	if dist == "GUILD" then
 		rank, source = GuildDecree(sender, d)
 		if not rank then return end
@@ -352,8 +358,12 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 		king = kings and ns.IsKingCharacter(sender)
 		steward = kings and not king and ns.King ~= nil and ns.King.IsStewardName(sender)
 		hand = kings and not king and not steward and not ns.IsKingGuild(mine) and ns.King ~= nil and ns.King.IsHandName(sender)
-		council = CROWN_ONLY[d.kind] and not (king or steward or hand) and ns.IsHighCouncillor(sender) == true
-		if king or steward or hand or council then
+		council = not (king or steward or hand) and ns.IsHighCouncillor(sender) == true
+		-- (1.2.3, the author's yes) A Hand of the King's by name, whatever guild he is in and
+		-- whichever guild's client this is, for a Call to Arms or a Muster.
+		named = not (king or steward or hand or council) and not CROWN_ONLY[d.kind] and ns.King ~= nil
+			and type(ns.King.IsHandName) == "function" and ns.King.IsHandName(sender) == true
+		if king or steward or hand or council or named then
 			rank, source = 0, "crown"
 		else
 			rank, source = ns.Data.AuthorizedRank(sender, d.guild)
@@ -369,6 +379,9 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 				return ns.Log("%s from %s <%s> refused: for the whole army only the Crown and the High Council (a guild master decrees for his guild alone)",
 					d.kind, sender, d.guild)
 			end
+		elseif council or named then
+			-- (1.2.3, the author's yes) The High Council's and the King's Hands' Call to Arms and
+			-- Muster reach the whole army, as the Crown's do.
 		elseif rank > ns.CAPTAIN_RANK then
 			return
 		elseif not kings then
@@ -400,7 +413,7 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 	-- inspection from the census master of the King's guild where no King is pinned, KingCharacter.)
 	-- A legacy census sender still speaks for one guild only, exactly as before the dormant
 	-- signed-authority migration (Data.ClaimGuild).
-	local sure = king or steward or hand or council or source == "roster" or source == "signed" or source == "pinned"
+	local sure = king or steward or hand or council or named or source == "roster" or source == "signed" or source == "pinned"
 	if source == "census" and not ns.Data.ClaimGuild(sender, d.guild) then
 		ns.Log("decree from %s ignored: speaks for another guild than %s", sender, d.guild)
 		return

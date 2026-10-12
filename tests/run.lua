@@ -31845,14 +31845,15 @@ do
 			ns.rdb.council = { names = { ["test councillor"] = true } }
 			cns, sent = Client("Olympus Zeus", 3, "Test Councillor-Realm")
 			eq(cns.Decree.Scope("ROYAL"), "army"); eq(cns.Decree.Scope("HERALDRY"), "army")
-			eq(cns.Decree.Scope("ARMS"), nil, "Calls to Arms stay the officers'")
+			-- (1.2.3, the author's yes: the High Council calls the whole army to arms too.)
+			eq(cns.Decree.Scope("ARMS"), "army", "a councillor's Call to Arms: the whole army")
 			cns.Decree.Send("HERALDRY", "")
 			eq(sent[1] and sent[1].dist, "CHANNEL"); eq(cns.Decree.Active()[1].scope, nil)
 			eq(cns.Decree.Label(cns.Decree.Active()[1]), ns.L.HERALDRY_CALL)
 			-- A councillor who is also a guild master: the council's, the whole army; his Calls to
-			-- Arms his guild master's rank's, as anyone's: his guild's alone (1.2.3).
+			-- Arms the council's too (1.2.3, the author's yes), never his guild's alone.
 			cns, sent = Client("Olympus Zeus", 0, "Test Councillor-Realm")
-			eq(cns.Decree.Scope("ROYAL"), "army"); eq(cns.Decree.Scope("ARMS"), "guild")
+			eq(cns.Decree.Scope("ROYAL"), "army"); eq(cns.Decree.Scope("ARMS"), "army")
 		end)
 		GetGuildInfo, ns.me, C_Map.GetBestMapForUnit, C_Map.GetPlayerMapPosition = saved.guild, saved.me, saved.map, saved.pos
 		ns.Print, ns.PlayAlert, RaidNotice_AddMessage, ns.rdb.council, C_ChatInfo = saved.print, saved.alert, saved.notice, saved.council, nil
@@ -31894,14 +31895,35 @@ do
 						s.clock = s.clock + 61
 						Logged("Test Councillor-Realm", "HERALDRY", "Olympus Zeus", "")
 						eq(cns.Decree.Active()[1].kind, "HERALDRY"); eq(cns.Decree.Active()[1].sender, "Test Councillor")
-						-- His Call to Arms still needs a rank this client verifies, as anyone's.
+						-- (1.2.3, the author's yes) His Call to Arms too, on the signed list's word, as the
+						-- Crown's: no rank this client verifies is needed.
 						s.clock = s.clock + 61
 						local count = #cns.Decree.Active()
 						Logged("Test Councillor-Realm", "ARMS", "Olympus Zeus", "x")
-						eq(#cns.Decree.Active(), count, "no Call to Arms on the council's word")
+						eq(#cns.Decree.Active(), count + 1, "a Call to Arms on the council's word")
 						-- A name the signed list lacks: refused, as another guild's master's is.
 						Logged("Test Counsellor-Realm", "ROYAL", "Olympus Zeus", "x")
-						eq(#cns.Decree.Active(), count)
+						eq(#cns.Decree.Active(), count + 1, "nothing more")
+						-- (1.2.3, the author's yes) A Hand of the King's by name, in another guild, calls
+						-- the whole army to arms on every client; his Royal decree stays refused, a guild's
+						-- master's or the Crown's alone; no Hand, no army.
+						local K = ns.King
+						local savedHand = K.IsHandName
+						K.IsHandName = function(n) return n == "Hal Hand-Realm" end
+						local okH, errH = pcall(function()
+							s.clock = s.clock + 61
+							Logged("Hal Hand-Realm", "MUSTER", "Olympus Zeus", "here")
+							eq(#cns.Decree.Active(), count + 2, "a Hand's Muster for the whole army")
+							eq(cns.Decree.Active()[1].sender, "Hal Hand"); eq(cns.Decree.Active()[1].scope, nil)
+							s.clock = s.clock + 61
+							Logged("Hal Hand-Realm", "ROYAL", "Olympus Zeus", "x")
+							eq(#cns.Decree.Active(), count + 2, "a Hand's Royal decree from another guild: not his")
+							s.clock = s.clock + 61
+							Logged("Hob Nohand-Realm", "ARMS", "Olympus Zeus", "x")
+							eq(#cns.Decree.Active(), count + 2, "no Hand: no Call to Arms for the army")
+						end)
+						K.IsHandName = savedHand
+						if not okH then error(errH, 0) end
 					end)
 				end
 			end)
@@ -32020,9 +32042,9 @@ do
 						K.HandleCommand("CHANNEL", ns.KingCharacter() .. "-Realm", "T1~H~8~Olympus~Tester-Realm")
 						eq(K.IsHand(), true, "the King's Hand")
 						As("Olympus", 3)
-						eq(ns.Decree.Scope("ARMS"), nil)
-						Calls({ L.ARMS_BTN, L.MUSTER_BTN }, { L.ARMS_BTN_TIP .. "\n" .. L.DECREE_PREVIEW_NOTE, L.MUSTER_BTN_TIP .. "\n" .. L.DECREE_PREVIEW_NOTE },
-							nil, L.DECREE_PREVIEW_NOTE)
+						-- (1.2.3, the author's yes: the King's Hands call the whole army to arms.)
+						eq(ns.Decree.Scope("ARMS"), "army")
+						Calls({ L.ARMS_BTN, L.MUSTER_BTN }, { L.ARMS_BTN_TIP, L.MUSTER_BTN_TIP }, { L.ARMS, L.MUSTER })
 					end)
 					K.Reset()
 					StaticPopup_Show = savedShow
@@ -32061,10 +32083,16 @@ do
 			for _, key in ipairs({ "ARMS_BTN_TIP", "MUSTER_BTN_TIP" }) do
 				assert(not L[key]:find("Captains only", 1, true) and not rawget(pt.L, key):find("Só Capitães", 1, true), key)
 			end
-			-- (1.2.3) The Crown's whole-army decrees are the King's, his Steward's and the officers of
-			-- <Olympus>'s: the Hands are no group of their own in the tips (one who is no officer of
-			-- <Olympus> only previews), and the other guilds hear the officers named Hands.
-			for _, key in ipairs({ "CROWN_ONLY", "ARMS_BTN_TIP", "MUSTER_BTN_TIP" }) do
+			-- (1.2.3, the author's yes) The whole army's Calls to Arms and Musters are the King's, his
+			-- Steward's, his Hands', the High Council's, and <Olympus>'s officers' for its members.
+			for _, key in ipairs({ "ARMS_BTN_TIP", "MUSTER_BTN_TIP" }) do
+				assert(L[key]:find("the King, his Steward, his Hands, the High Council, and the officers of <Olympus> for its members", 1, true), key)
+				assert(rawget(pt.L, key):find("o Rei, o Senescal, as Mãos, o Alto Conselho, e os oficiais da <Olympus> para os membros dela", 1, true), key .. " in pt-BR")
+			end
+			-- (1.2.3) The Crown's whole-army Royal decrees are the King's, his Steward's and the officers of
+			-- <Olympus>'s: the Hands are no group of their own there, and the other guilds hear the
+			-- officers named Hands.
+			for _, key in ipairs({ "CROWN_ONLY" }) do
 				assert(not L[key]:find("Steward and Hands", 1, true) and L[key]:find("the King, his Steward and the officers of <Olympus>; the other guilds hear those named Hands", 1, true), key)
 				local v = rawget(pt.L, key)
 				assert(not v:find("as Mãos dele", 1, true) and v:find("o Senescal e os o", 1, true) and v:find("as outras guildas ouvem os que forem nomeados Mãos", 1, true), key .. " in pt-BR")
