@@ -338,7 +338,8 @@ local function WithSightings(fn)
 			return table.concat(GameTooltip.lines, "\n")
 		end
 		function world:Recipients(cl) return table.concat(world:As(cl, cl.W.SightingRecipients), ",") end
-		-- The reviewer cl sends his evidence to (as Wanted.SendEvidence keeps him).
+		-- The reviewer cl chose for his sightings (as Wanted.SetReviewer keeps him: Sightings to on the
+		-- Most Wanted page; 1.2.2's Send evidence kept the same field).
 		function world:Choose(cl, reviewer)
 			if type(cl.rdb.wanted) ~= "table" then cl.rdb.wanted = { version = 1, group = "RealmGroup", faction = "Alliance" } end
 			cl.rdb.wanted.reviewer = reviewer and reviewer.name or nil
@@ -401,8 +402,8 @@ test("wanted sightings (1.2.0): off until the member's own Yes, a line of its ow
 		o.member = true
 		local text = L[item.text]
 		for _, part in ipairs({ "Horde player", "name and GUID", "your own map position (rounded) and layer", "the time, your name and your guild",
-			"15 minutes", "whispered to one reviewer", "the one you send your Most Wanted evidence to", "the King, a High Councillor or the author",
-			"until you have sent evidence to one, nobody gets it", "seen nearby", "Nothing goes while you keep your zone and layer private",
+			"15 minutes", "whispered to one reviewer", "the one you choose with Sightings to on the Most Wanted page", "the King, a High Councillor or the author",
+			"until you choose one, nobody gets it", "seen nearby", "Nothing goes while you keep your zone and layer private",
 			"the King's only while his crown shows on the map", "Never anyone off the list", "never on the Olympus channel", "never in an instance", "nothing saved",
 			"Accept all does not turn it on",
 			"No stops it at once", "take your pins off his map", "before you logged out stays there until its 15 minutes are up",
@@ -558,7 +559,7 @@ test("wanted sightings: only a listed Horde player (1.2.0: never just a hostile 
 	end)
 end)
 
-test("wanted sightings: each Horde player once per gap on one map (nothing more asked of the game); three a minute leave this client, the rest stay on its map; only to the reviewer this member sends his evidence to, while he takes them; whispers waiting are bounded", function()
+test("wanted sightings: each Horde player once per gap on one map (nothing more asked of the game); three a minute leave this client, the rest stay on its map; only to the reviewer this member chose (Sightings to), while he takes them; whispers waiting are bounded", function()
 	WithSightings(function(world)
 		local o = world:Client("Aldric-Realm", "Player-1-AB000001")
 		local king = world:Client("Kingly-Realm", "Player-1-AB0000F1", { role = "king" })
@@ -569,13 +570,15 @@ test("wanted sightings: each Horde player once per gap on one map (nothing more 
 		world:Lease(c2); world:Advance(1); world:Lease(king); world:Advance(1); world:Lease(c1)
 		-- (Review: they went to two reviewers, the King first among those the member never chose,
 		-- while his evidence goes to the one he chose alone. Now to that one alone.)
-		eq(world:Recipients(o), "", "a member who sent evidence to nobody sends his sightings to nobody")
+		eq(world:Recipients(o), "", "a member who chose nobody sends his sightings to nobody")
 		local ok, e = world:See(o, "nameplate1", Horde("Grom-Realm", GROM))
 		assert(ok, e); eq(e.sent, 0, "it stays on his own map"); eq(#world:Pins(o), 1)
 		world:Pump()
 		eq(#world:Pins(king), 0); eq(#world:Pins(c1), 0); eq(#world:Pins(c2), 0)
-		world:Choose(o, c2)
-		eq(world:Recipients(o), "Counciltwo-Realm", "the reviewer he sends his evidence to, and nobody else")
+		-- (1.2.3: chosen with Sightings to, Wanted.SetReviewer: only a reviewer, never himself.)
+		eq(select(2, world:As(o, o.W.SetReviewer, plain.name)), "reviewer")
+		assert(world:As(o, o.W.SetReviewer, c2.name))
+		eq(world:Recipients(o), "Counciltwo-Realm", "the reviewer he chose, and nobody else")
 		world:Choose(king, king)
 		eq(world:Recipients(king), "", "never himself")
 		world:Choose(o, plain)
@@ -818,7 +821,7 @@ test("wanted sightings: a reviewer takes a sighting only by whisper, fresh, from
 	end)
 end)
 
-test("wanted sightings: a pin per Horde player where he was seen last, on the minimap and (mouse and keyboard) the world map; its hover his name, his kills by the ledger, how long ago and who saw him, the layer; a target taken off the list keeps his kills and no bounty; gone after 15 minutes; 48 at most", function()
+test("wanted sightings: a pin per Horde player where he was seen last, on the minimap and (mouse and keyboard) the world map; its hover his name, his kills by the ledger, how long ago and who saw him, the layer; a target taken off: nothing of his counts, no bounty; gone after 15 minutes; 48 at most", function()
 	WithSightings(function(world)
 		local o = world:Client("Aldric-Realm", "Player-1-AB000001")
 		local o2 = world:Client("Brenna-Realm", "Player-1-AB000002")
@@ -865,11 +868,13 @@ test("wanted sightings: a pin per Horde player where he was seen last, on the mi
 		assert(tip:find(L.WANTED_SIGHT_OTHER_LAYER, 1, true), tip)
 		world:Advance(60)
 		assert(world:Hover(king, f.world.badge):find(L.WANTED_SIGHT_SEEN:format("60s", "Brenna"), 1, true), "its age")
-		-- The manager takes him off the list (review: the hover still gave his bounty, as if wanted).
+		-- The King takes him off (review: the hover still gave his bounty, as if wanted). 1.2.3, changed
+		-- on purpose: an entry a reviewer takes off is an abusive one, and nothing of his counts any
+		-- more, his kills neither (before, his history stayed counted).
 		assert(world:As(king, king.W.RemoveTarget, "Grom-Realm", GROM))
 		tip = world:Hover(king, f.world.badge)
 		eq(select(2, tip:gsub("\n", "\n")) + 1, 6, tip)
-		assert(tip:find(L.WANTED_LIFETIME:format(2), 1, true) and tip:find(L.WANTED_SIGHT_REMOVED, 1, true), tip)
+		assert(tip:find(L.WANTED_LIFETIME:format(0), 1, true) and tip:find(L.WANTED_SIGHT_REMOVED, 1, true), tip)
 		assert(not tip:find(L.WANTED_BOUNTY:format(2), 1, true) and not tip:find(L.WANTED_SIGHT_UNLISTED, 1, true), "no bounty, and not 'never listed'")
 		-- An older sighting arriving late does not move it back.
 		local late = ("WS~S~1~Olympus II~00000000000000bb~%d~1429~900~900~0~1.0a000001~Grom-Realm"):format(world.epoch - 300)
@@ -1202,9 +1207,14 @@ test("wanted sightings mixed versions: 1.1.4's Comm (what live clients run) igno
 		Deliver("CHANNEL", "Kingly-Realm", "WS~R~0")
 		Deliver("WHISPER", "Aldric-Realm", "WS~S~1~Olympus II~0123456789abcdef~1800000000~1429~410~680~0~1.0a000001~Grom-Realm")
 		Deliver("WHISPER", "Aldric-Realm", "WS~X~1")
+		-- (1.2.3: a member's own kill or death, a reviewer's relay of one, and his removal: none of
+		-- them is a type 1.1.4 handles either.)
+		Deliver("CHANNEL", "Aldric-Realm", "WK~1~0123456789abcdef~Olympus II~0123456789abcdef~1800000000~24321~S~1.0a000001~1.ab000001~Grom-Realm")
+		Deliver("CHANNEL", "Kingly-Realm", "WK~R~1~0123456789abcdef~Aldric-Realm~1~0123456789abcdef~1800000000~24321~S~1.0a000001~1.ab000001~Grom-Realm")
+		Deliver("CHANNEL", "Kingly-Realm", "WV~T~1~0123456789abcdef~1.0a000001~1800000000")
 		eq(#heard, 0, "no handler runs")
 		local stats = cns.Comm.Stats()
-		eq(stats.recv, 4, "heard by the old transport")
+		eq(stats.recv, 7, "heard by the old transport")
 		eq(stats.bad, 0, "none misread as a census report")
 	end)
 	C_ChatInfo = saved
@@ -1213,7 +1223,7 @@ test("wanted sightings mixed versions: 1.1.4's Comm (what live clients run) igno
 	local f = assert(io.open(ROOT .. "Olympus/Comm.lua"))
 	local src = f:read("*a")
 	f:close()
-	assert(src:find("Wanted WS WX WY", 1, true))
+	assert(src:find("Wanted WS WY W4 W5, and 1.2.3's WK", 1, true))
 end)
 
 test("wanted sightings (1.2.0): a member who keeps his zone and layer private sends none (his own map still shows them)", function()
