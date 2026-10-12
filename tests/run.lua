@@ -13581,6 +13581,9 @@ test("1.2 Workshop.IconPickerHost: the council icon picker inside a host (the pr
 				eq(f.cells[1].icon, "Spell_Holy_SealOfMight"); eq(f.cells[2].art.texture, 134400); eq(f.cells[3]:IsShown(), false, "junk and repeats left out")
 				eq(f.preview.texture, 134400, "the icon it had")
 				assert(not f.sample:GetText():find(ns.HIGH_COUNCIL_MARK, 1, true), "no council mark for a player who is none")
+				-- 1.2.3: hosted it picks the emblem: its title and words say so, never the council's
+				-- (which promised a silver dragon in the chat to anyone who opened it).
+				eq(f.titleText, ns.L.EMBLEM_ICON_TITLE); eq(f.hint:GetText(), ns.L.EMBLEM_ICON_HINT)
 				f.cells[1]:Click(); f.ok:Click()
 				eq(picked, "Spell_Holy_SealOfMight"); eq(f:IsShown(), false)
 				eq(ns.db.councilIcons, nil, "never a councillor's icon"); eq(#sent, 0, "nothing said")
@@ -13592,6 +13595,7 @@ test("1.2 Workshop.IconPickerHost: the council icon picker inside a host (the pr
 				ns.me = "Test Councillor-Realm"
 				eq(W.ShowIconPicker(), true)
 				eq(f.parent, UIParent); eq(f.close:IsShown(), true); eq(W.IconPickerHosted(), false)
+				eq(f.titleText, ns.L.COUNCIL_ICON_TITLE, "the council's own title again"); eq(f.hint:GetText(), ns.L.COUNCIL_ICON_HINT)
 			end)
 			GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons = saved[1], saved[2], saved[3], saved[4]
 			if not ok then error(err, 0) end
@@ -26752,7 +26756,7 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	test("1.1.5 borders, who wins when several hold: the King, the High Council, the dev's silver, a guild master, a nominee, then the star; the dev's plain silver (ns.AUTHOR on his realm group) on unit frames alone: no nameplate or chat mark of its own", function()
+	test("1.1.5 borders, who wins when several hold: the King, the High Council, the dev's silver, a guild master, a nominee, then the star; the dev's plain silver (ns.AUTHOR on his realm group) with its mark, the silver dragon, on nameplates and in the game's chat (1.2.3)", function()
 		local savedRoster = ns.Roster.byName
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
@@ -26772,17 +26776,21 @@ do
 			border, mark = Tier(ada)
 			eq(border, "silver-elite"); eq(mark, "silver")
 			ns.rdb.council.names["ada"] = nil
-			-- The dev: his plain silver, in any guild or none, before a guild master and a nominee; his
-			-- nameplate and chat mark what they would be without it.
+			-- The dev: his plain silver, in any guild or none, before a guild master and a nominee. 1.2.3
+			-- (the author's ask: "minhas msgs no chat têm o dragão prata, né?"): it has its mark, the
+			-- silver dragon, on his nameplate and before his name in the game's chat, where before it
+			-- left the mark he would have without it (none, the star, a nominee's or a master's bronze).
 			border, mark = Tier(BorderUnit(ns.AUTHOR, "Stormwind Traders", "Member", 3, { realm = AUTHOR_REALM }))
-			eq(border, "silver", "the dev, in no Olympus guild"); eq(mark, nil, "no mark of its own")
+			eq(border, "silver", "the dev, in no Olympus guild"); eq(mark, "silver", "his own mark")
 			border, mark = Tier(BorderUnit(ns.AUTHOR, OURS, "Member", 3, { realm = AUTHOR_REALM }))
-			eq(border, "silver"); eq(mark, "member", "an Olympus member's star, as without it")
+			eq(border, "silver"); eq(mark, "silver", "before an Olympus member's star")
 			border, mark = Tier(BorderUnit(ns.AUTHOR, THEIRS, "Member", 3, { realm = AUTHOR_REALM }))
-			eq(border, "silver", "before a nominee's bronze"); eq(mark, "bronze", "a nominee's mark")
+			eq(border, "silver", "before a nominee's bronze"); eq(mark, "silver", "before a nominee's mark")
 			border, mark = Tier(BorderUnit(ns.AUTHOR, OURS, "Zeus", 0, { realm = AUTHOR_REALM }))
-			eq(border, "silver", "before a guild master's wings"); eq(mark, "bronze", "a guild master's mark")
-			eq(w.B.MarkOfName(dev, nil), nil, "the game's chat: no mark of its own")
+			eq(border, "silver", "before a guild master's wings"); eq(mark, "silver", "before a guild master's mark")
+			eq(w.B.MarkOfName(dev, nil), "silver", "the game's chat: the silver dragon")
+			eq(w.B.MarkOfName(dev, OURS), "silver", "in an Olympus guild too")
+			eq(w.B.MarkOfName(ns.AUTHOR .. "-Elsewhere", nil), nil, "his name on another realm group: none")
 			-- The High Council and the King before the dev.
 			ns.rdb.council.names[ns.AUTHOR:lower()] = true
 			eq(Tier(BorderUnit(ns.AUTHOR, OURS, "Member", 3, { realm = AUTHOR_REALM })), "silver-elite")
@@ -53460,6 +53468,20 @@ do
 			eq(ns.Moderation.GuildOf("Hal Hand-Realm"), "Olympus Home", "not the King's guild, tried for him")
 			ns.King.IsHandName = function() return false end
 			ns.Data.KnownRank = saved.known
+			B.ChatForget()
+			-- 1.2.3 (the author's ask: "minhas msgs no chat têm o dragão prata, né?"): the dev's own
+			-- character (ns.AUTHOR on his realm group) has the silver dragon before his name, on
+			-- everyone's screen and on his own, in guild chat too; his name on another realm group none.
+			local dev = ns.AUTHOR .. "-" .. ns.AUTHOR_REALM
+			eq(cb("CHAT_MSG_CHANNEL", ns.AUTHOR, "hi", dev), SILVER .. ns.AUTHOR, "the dev's silver dragon")
+			eq(cb("CHAT_MSG_GUILD", ns.AUTHOR, "hi", dev), SILVER .. ns.AUTHOR, "a dragon: guild chat too")
+			local savedMe = ns.me
+			ns.me = dev
+			B.ChatForget()
+			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", dev), SILVER .. ns.AUTHOR, "on his own screen, on his own line")
+			ns.me = savedMe
+			B.ChatForget()
+			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", ns.AUTHOR .. "-Elsewhere"), nil, "his name on another realm group")
 			B.ChatForget()
 			-- Outside an Olympus guild (a list kept from before, a removed guild): no mark, kept or new.
 			eq(cb("CHAT_MSG_SAY", "Zeta Prime", "hi", "Zeta Prime-Realm"), BRONZE .. "Zeta Prime")

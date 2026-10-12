@@ -2854,6 +2854,8 @@ function Workshop.ShowIconPicker()
 	end
 	picker = picker or MakePicker()
 	Unhost()
+	ns.SetWindowTitle(picker, L.COUNCIL_ICON_TITLE)
+	picker.hint:SetText(L.COUNCIL_ICON_HINT)
 	local names
 	gameIcons, names = Workshop.GameIcons()
 	shownIcons, iconChoice = gameIcons, MyIcon()
@@ -2907,6 +2909,10 @@ function Workshop.IconPickerHost(parent, list, onPick, current)
 		end
 	end
 	host = { onPick = onPick }
+	-- 1.2.3: hosted, it picks the profile's emblem, not the council's icon: its own title and words
+	-- (the council's promised a silver dragon in the chat to anyone who opened it).
+	ns.SetWindowTitle(picker, L.EMBLEM_ICON_TITLE)
+	picker.hint:SetText(L.EMBLEM_ICON_HINT)
 	local icons, names = {}, false
 	local chosen = ns.CouncilIconValue(current)
 	if type(list) == "table" then

@@ -350,7 +350,8 @@ end
 -- King's the game's gold elite mark (his alone), the High Council's its silver, a guild master's
 -- the bronze, and the people a guild master names the same bronze (1.1.5). The dev's silver has
 -- none: his plate and his lines show what they would without it.
-Borders.MARK_OF = { ["gold-elite"] = "gold", ["silver-elite"] = "silver", ["bronze-elite"] = "bronze", bronze = "bronze" }
+-- (1.2.3, the author's ask: the dev's silver has its mark too, the High Council's silver dragon.)
+Borders.MARK_OF = { ["gold-elite"] = "gold", ["silver-elite"] = "silver", silver = "silver", ["bronze-elite"] = "bronze", bronze = "bronze" }
 
 -- The mark a unit gets next to its name on a nameplate, from the same facts and trust rules as
 -- its border: "gold" (the King), "silver" (the High Council), "bronze" (a guild master, or one he
@@ -392,6 +393,7 @@ function Borders.MarkOfName(who, guild)
 	f.off = NetOff(who, guild, true)
 	f.councillor = ns.IsHighCouncillor(who) == true
 	f.council = f.councillor and not ns.CouncilMasked()
+	f.dev = IsDev(who) -- (1.2.3: the dev's silver has its mark, before his name in the game's chat)
 	if f.off then return nil, f end
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
