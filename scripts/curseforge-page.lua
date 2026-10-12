@@ -40,14 +40,17 @@ M.CUTS = {
 	-- (1.2.4: the page grew past the budget with the API's section: the menu's lines stay, its
 	-- Explanations and Answers paragraph is the README's.)
 	{ title = "Right-click a player (1.1.2)", keep = 2 },
+	-- (1.2.4: the role rooms' list and its rules are the README's; its opening stays.)
+	{ title = "Role rooms (1.2.4)", keep = 1 },
 }
 
--- The commands table's rows that stay, by their first command as the table writes it.
+-- The commands table's rows that stay, by their first command as the table writes it. (1.2.4: the
+-- page past the budget with the role rooms' section: /oly approved's row is the README's.)
 M.COMMANDS_TITLE = "Commands"
 M.COMMANDS = {
 	"/oly", "/oly realm", "/oly privacy", "/oly chat on\\|off", "/ol <text>", "/oly talk [olympus\\|captains\\|lords]",
 	"/oly mute olympus", "/oly chatwindow tab", "/oly hop", "/oly lfg", "/oly week", "/oly craft [item or name]",
-	"/oly loot", "/oly approved", "/oly helpme [text]", "/oly location on", "/oly borders on",
+	"/oly loot", "/oly helpme [text]", "/oly location on", "/oly borders on",
 	"/oly nameplates on", "/oly chatmarks on", "/oly block <name>", "/oly filter add\\|remove <word>",
 	"/oly alt add Name", "/oly sound", "/oly discord <code>", "/oly bug", "/oly status",
 }

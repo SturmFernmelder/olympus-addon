@@ -475,6 +475,18 @@ local function AudienceLabel(a, field)
 	return ok and type(label) == "string" and label or nil
 end
 
+-- 1.2.4: a room whose people of other guilds this client verifies from the author's signed
+-- leadership list alone (Authority.lua: another guild's ranks come from the census until it counts,
+-- and the rooms never take the census): the masters', every guild's masters and centurions', the
+-- departments', another guild's own rooms (the author's view; the King's guild's are the pinned King
+-- and the list the King and the High Council name). While it does not count, such a room reaches
+-- this character's own guild and the signed people alone: the page says so (Rooms.StatusText).
+local function NeedsLeaders(k, arg)
+	if not k or Rooms.Enforced() then return false end
+	if k.id == "masters" or k.id == "allcenturions" or k.prefix == "dept" then return true end
+	return k.perGuild == true and not Same(arg, OwnGuild()) and not ns.IsKingGuild(arg)
+end
+
 local function Restricted(id)
 	local a = audiences[id]
 	if a then
@@ -490,6 +502,11 @@ local function Restricted(id)
 		info.label, info.guild = k.label(arg), arg
 	else
 		info.label = k.label()
+	end
+	if NeedsLeaders(k, arg) then
+		info.note = Text("CHATROOM_NEEDS_LEADERS", "Other guilds' members need the author's signed leadership list: until it is out, this room reaches your own guild and signed members only.")
+		-- (Another guild's own room, in the author's list: greyed, its people out of reach until then.)
+		info.dim = k.perGuild == true or nil
 	end
 	return info
 end
@@ -526,6 +543,14 @@ function Rooms.RegisterAudience(id, spec)
 	audiences[id] = spec
 	audienceOrder[#audienceOrder + 1] = id
 	return true
+end
+
+-- The line the Chat page shows over a room's lines, or nil (1.2.4: Restricted's note).
+function Rooms.StatusText(id)
+	if id == "guild" or audiences[id] or not Rooms.CanAccess(id) then return nil end
+	local k, arg = KindOf(id)
+	if not NeedsLeaders(k, arg) then return nil end
+	return Text("CHATROOM_NEEDS_LEADERS", "Other guilds' members need the author's signed leadership list: until it is out, this room reaches your own guild and signed members only.")
 end
 
 function Rooms.Info(id)

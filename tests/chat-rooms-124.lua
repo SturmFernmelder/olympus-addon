@@ -413,3 +413,61 @@ test("chat rooms (1.2.4): a room's recipients counted for a page at most every R
 		eq(R.RecipientCount("dept:war"), nil, "not a room of his")
 	end)
 end)
+
+-- 1.2.4: until the author's signed leadership list counts (Authority.Enforced), another guild's ranks
+-- come from the census alone, which the rooms never take: the rooms that reach other guilds reach
+-- this character's own guild and the signed people (the King, the High Council's, the author) alone,
+-- and the page says so over their lines; /oly status says whether the list counts.
+test("chat rooms (1.2.4): without the signed leadership list each room reaches its own guild and the signed people, the page says so, and /oly status tells", function()
+	WithRooms(function(w, R, c)
+		local cast, aCorr, aCent, bCorr, bCent = Guilds(w, R, c)
+		c.ApprovedGuilds = function() return {} end
+		w.authorName, w.authorOnline = "Quill Wright-Realm", true
+		local me = cast.aMaster
+		c.me = me
+		w.departments[me:lower()] = nil
+		local NOTE = ns.L.CHATROOM_NEEDS_LEADERS
+		-- The masters': our master (me), the King, the author; not another guild's census master.
+		eq(table.concat(R.Recipients("masters"), ","), table.concat({ w.authorName, w.king }, ","))
+		eq(R.StatusText("masters"), NOTE); eq(R.Info("masters").note, NOTE); eq(R.Info("masters").dim, nil)
+		-- Every guild's masters and centurions: ours, the King's, the author.
+		eq(table.concat(R.Recipients("allcenturions"), ","), table.concat({ w.authorName, w.king, cast.aOfficer, cast.aCenturion }, ","))
+		eq(R.StatusText("allcenturions"), NOTE)
+		-- A department's: its correspondent of ours, the author; not another guild's.
+		c.me = cast.aWar
+		eq(table.concat(R.Recipients("dept:war"), ","), w.authorName)
+		eq(R.StatusText("dept:war"), NOTE)
+		-- Our guild's own rooms, the High Council's: no note.
+		eq(R.StatusText(aCorr), nil); eq(R.Info(aCorr).note, nil)
+		w.council[cast.aWar:lower()] = true
+		eq(R.StatusText("council"), nil)
+		-- The author's list: another guild's rooms greyed, their note in the tooltip; ours and the King's not.
+		c.me = w.authorName
+		eq(R.Info(bCent).dim, true); eq(R.Info(bCent).note, NOTE); eq(R.StatusText(bCent), NOTE)
+		eq(R.Info(aCent).dim, nil); eq(R.Info(R.GuildRoom("gcent", "Olympus")).dim, nil, "the King's guild: the pinned King and the signed list")
+		-- Once the list counts: every guild's people, no note.
+		w.enforced = true
+		c.me = me
+		eq(table.concat(R.Recipients("masters"), ","), table.concat({ w.authorName, w.king, cast.bMaster }, ","))
+		eq(R.StatusText("masters"), nil); eq(R.Info("masters").note, nil)
+		c.me = cast.aWar
+		eq(table.concat(R.Recipients("dept:war"), ","), table.concat({ w.authorName, cast.bWar }, ","))
+		c.me = w.authorName
+		eq(R.Info(bCent).dim, nil); eq(R.StatusText(bCent), nil)
+	end)
+	-- /oly status: whether it counts here, and until when.
+	local A = ns.Authority
+	local saved = { enforced = A.Enforced, manifest = A.Manifest }
+	local ok, err = pcall(function()
+		A.Enforced = function() return false end
+		eq(A.StatusLine(), "off")
+		assert(ns.StatusText():find("signed leadership: off", 1, true), "in /oly status")
+		A.Enforced = function() return true end
+		A.Manifest = function() return nil end
+		assert(A.StatusLine():find("^on, %a+, no current list"), A.StatusLine())
+		A.Manifest = function() return { expires = 1800086400, guilds = {} } end
+		assert(A.StatusLine():find("^on, %a+, expires 2027%-01%-16 08:00 UTC$"), A.StatusLine())
+	end)
+	A.Enforced, A.Manifest = saved.enforced, saved.manifest
+	if not ok then error(err, 0) end
+end)

@@ -530,6 +530,17 @@ function Authority.Enforced(faction)
 	return Record(faction, realm) ~= nil
 end
 
+-- 1.2.4 (/oly status): whether the author's signed leadership list counts on this client, and until
+-- when. Another guild's guild masters and officers are verified from it alone (the role rooms that
+-- reach other guilds, ChatRooms.lua, among every cross-guild check).
+function Authority.StatusLine()
+	local faction = ns.faction or "Alliance"
+	if not Authority.Enforced(faction) then return "off" end
+	local m = Authority.Manifest(faction)
+	if not m then return ("on, %s, no current list: other guilds' leaders count nowhere"):format(faction) end
+	return ("on, %s, expires %s"):format(faction, date and date("!%Y-%m-%d %H:%M UTC", m.expires) or tostring(m.expires))
+end
+
 function Authority.Valid(manifest, now)
 	if type(manifest) ~= "table" then return false end
 	now = tonumber(now) or ns.Now()

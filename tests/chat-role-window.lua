@@ -415,3 +415,32 @@ test("Chat tab (1.2.4): ten rooms or fewer show as they come, without groups or 
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- 1.2.4: until the author's signed leadership list counts, a room reaching other guilds (a
+-- department's, the masters') says over its lines that it reaches this guild and the signed people
+-- alone (ChatRooms.StatusText); the High Council's says nothing.
+test("Chat tab (1.2.4): a department's room says over its lines that other guilds wait for the signed leadership list; the High Council's does not", function()
+	WithWindow(function(w)
+		local saved = { council = ns.IsHighCouncillor, title = ns.CouncilTitle, enforced = ns.Authority.Enforced }
+		local ok, err = pcall(function()
+			ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+			ns.CouncilTitle = function(name) if name == nil or name == ns.me then return { dept = "Department of War" } end end
+			ns.Authority.Enforced = function() return false end
+			ns.db.chatRooms = true
+			local f = w.CW.Open("A")
+			assert(w.CW.SelectLogical("dept:war"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), true)
+			assert(f.topicStatus.text:GetText():find(ns.L.CHATROOM_NEEDS_LEADERS, 1, true), tostring(f.topicStatus.text:GetText()))
+			assert(w.CW.SelectLogical("council"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), false, "the High Council's: signed people alone")
+			ns.Authority.Enforced = function() return true end
+			assert(w.CW.SelectLogical("dept:war"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), false, "once it counts")
+		end)
+		ns.IsHighCouncillor, ns.CouncilTitle, ns.Authority.Enforced = saved.council, saved.title, saved.enforced
+		if not ok then error(err, 0) end
+	end)
+end)

@@ -1510,7 +1510,10 @@ function ChatWindow.MenuRow(menu, i)
 	row.mark:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 4)
 	row.mark:SetColorTexture(1, 0.82, 0, 1)
 	row:SetScript("OnEnter", function(self)
-		Tip(self, function(tt) tt:AddLine(self.text:GetText(), 1, 1, 1, true) end)
+		Tip(self, function(tt)
+			tt:AddLine(self.text:GetText(), 1, 1, 1, true)
+			if self.note then tt:AddLine(self.note, 0.7, 0.7, 0.7, true) end -- (1.2.4: ChatRooms' word on the room)
+		end)
 	end)
 	row:SetScript("OnLeave", function(self) Untip(self) end)
 	row:SetScript("OnClick", function(self) ns.SafeCall("chat room menu", ChatWindow.ClickMenuRow, self) end)
@@ -1549,10 +1552,11 @@ function ChatWindow.FillMenu(menu, items, maxWidth)
 		row.roomId, row.dynamic, row.onClick = item.id, item.dynamic == true, item.onClick
 		row.pageTo, row.groupItem = item.pageTo, item.children and item or nil
 		row.previewOnly = item.disabled == true and not item.children and not item.pageTo
+		row.note = item.note
 		row.text:SetText(item.label)
 		row.mark:SetShown(on)
 		row.text:SetTextColor(on and 1 or 0.82, 0.82, on and 0 or 0.82)
-		row:SetAlpha(row.previewOnly and 0.5 or 1)
+		row:SetAlpha(row.previewOnly and 0.5 or item.dim and 0.6 or 1)
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", menu, "TOPLEFT", MENU_PAD, y)
 		row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -MENU_PAD, y)
@@ -1564,7 +1568,7 @@ function ChatWindow.FillMenu(menu, items, maxWidth)
 	end
 	for i = #items + 1, #menu.rows do
 		local row = menu.rows[i]
-		row.roomId, row.dynamic, row.onClick, row.pageTo, row.groupItem = nil, nil, nil, nil, nil
+		row.roomId, row.dynamic, row.onClick, row.pageTo, row.groupItem, row.note = nil, nil, nil, nil, nil, nil
 		row:Hide()
 	end
 	local menuWidth = math.min(width + MENU_PAD * 2, maxWidth)
@@ -1772,7 +1776,9 @@ function ChatWindow.DrawTopicStatus(y)
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local s = frame.topicStatus
-	local text = logical and logical.scope == "topic" and type(R) == "table" and type(R.StatusText) == "function" and R.StatusText(tier) or nil
+	-- (1.2.4: any room's, ChatRooms.StatusText: a role room's people of other guilds waiting for the
+	-- author's signed leadership list.)
+	local text = logical and type(R) == "table" and type(R.StatusText) == "function" and R.StatusText(tier) or nil
 	if not text then s:Hide(); return 0 end
 	s.text:SetText(Gold(text))
 	local width = StripWidth()
