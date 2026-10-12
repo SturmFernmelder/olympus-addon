@@ -22,7 +22,21 @@ local L = ns.L
 --   - spectators (the design): a player who allows them announces the table (KN) and relays its state
 --     (KS) to the watchers; watching never feeds settlement. Allowed unless a player says no (the
 --     owner's call, 2026-10-04); the host's no closes the table to watchers for everyone at it
---     (KG's trailing flag), his guest and its arbiter too;
+--     (KG's trailing flag), his guest and its arbiter too. Each player's yes or no is kept in the
+--     live record, so a /reload keeps announcing the table (1.2.3). A game against the House is
+--     never announced (nothing of practice is sent: the House's dice are this client's own);
+--   - what counts (1.2.3, the owner's decision 1): a free game between players (no gold, the only
+--     kind 1.2.x allows) counts for the history and the ranking whatever the King's live switch,
+--     which stays off and is the 2.0 bets' alone; a test build's never (FreeCounts). Both players'
+--     clients must count it (each says so: "c" on KI and KA): against a test build or a 1.2.2
+--     client, it is a rehearsal on both sides. Its records are the live realm's (L), its messages
+--     keep the mode the table was made in;
+--   - the Bones ranking (1.2.3, Best: the month's best players, the honours' source): each player's
+--     client signs its half of a game that counts with his account's key and publishes it as the
+--     game ends (KN "e" with the result, on the channel and to the other player); each player says
+--     both halves again at later logins, spaced; a client counts the game only when both players'
+--     halves agree, within the ledger's caps and never between one owner's characters (the
+--     halves' rules: TakeHalf, below);
 --   - the crowd's bets (2026-10-04): at a public arbiter's table whose host let watchers in and
 --     the crowd bet, the arbiter opens a winner market (Markets' MW) when the table opens; the game
 --     waits for its lock (his KH), then he declares it as he settles (the same agreement and
@@ -57,8 +71,23 @@ local L = ns.L
 --   AskArbiter(id, name), AnswerArbiter(id, yes)
 --   Roll(id), Keep(mask, act, id), Hiccup(id), Concede(id), Void(id), Sit()
 --   Live() -> the table this character plays, View(id) -> the screens' model, Tables(),
---   LiveTables() (the watchable ones), Watchable(name) -> the id of the live table that player
+--   LiveTables() (the watchable ones: { id, p1, p2, arbiter, official, target, map, by, at, mode,
+--   wire }, mode L where the announcing player says his game counts, wire the mode its messages
+--   travel in), Watchable(name) -> the id of the live table that player
 --   sits at, Watch(id), StopWatching(id), Practice(opts), SelfTest()
+--   Counted(id) -> whether that table's game counts (decision 1, above)
+--   Best(mode, opts) -> the month's Bones ranking (1.2.3, ArenaHome's Data.GamesRanking("bones"),
+--     the honours' source): { { name, key, games, won, lost, at, place } }, most wins first; a tie
+--     goes to fewer games, then to who reached his wins first (at: his last counted win), then by
+--     name. mode "L" (the games that count; any other mode: none). opts = { month (Honors.MonthOf's
+--     number; default this month), offset (the realm clock's, as Honors.MonthOf takes it) }. A
+--     game counts when both players' halves agree (the same id, seats, winner, scores, how it
+--     ended, steps and transcript hash, their starts within HALF_SKEW), its winner a player, its
+--     two players never one owner's (Debts.SameOwner) nor hidden here; then the ledger's caps
+--     (ArenaLedger's MIN_RATED_DUR, DAY_MAX, PAIR_MAX in PAIR_DAYS) in the order this client came
+--     to hold each game; void games never.
+--   Halves(id) -> what this client holds of a game's halves (the tests'), Pin(name) -> the key it
+--     holds for a player, RepeatHalves() (at login)
 --   the fill actions Pay(id), PayFee(id), PayStake(id), Payout(id), Refund(id), Change(id)
 --   Agreement(id) -> the KE agreement a bank settles an FK market on (the design)
 --   ReadDrunk(text) -> "self" | name, level; DrunkReadable()
@@ -66,9 +95,10 @@ local L = ns.L
 --   LedgerRecord(t, g) -> the games' ledger's record of a table that ended (ArenaLedger.Played's)
 -- It registers Arena.Events for K, and the actions farkle.*.
 -- Messages (the design; numbers in base 36):
---   KI id~d|a~stake~2|5|10~arbiter|-~hostSrc~secs~hic~salt4[~token][~iou]      host -> guest
---   KA id~1|0~guestSrc|reason~hic[~token][~iou]                                 guest -> host
---   KO id~host~guest~stake~target~srcs~secs~hic[~crowd]                         host -> arbiter
+--   KI id~d|a~stake~2|5|10~arbiter|-~hostSrc~secs~hic~salt4[~token][~iou][~c]  host -> guest
+--   KA id~1|0~guestSrc|reason~hic[~token][~iou][~c]                             guest -> host
+--   KO id~host~guest~stake~target~srcs~secs~hic[~crowd[~c]]                     host -> arbiter
+--      (c, 1.2.3: the sender's client counts the free game, decision 1; KO's: both players' do)
 --   KP id~1|0~reason                                                            arbiter -> host, guest
 --   KG id~digest8~host~guest~arbiter|-~target~secs~hic[~crowd[~watch]]          host -> the others
 --      (crowd 1|0; watch 0: the host keeps watchers out, every relayer of the table goes quiet)
@@ -84,6 +114,12 @@ local L = ns.L
 --   KS id~s1~s2~cur~turnPts~left~dice[.mask]~phase~step~lv~sk                   the relay (a public
 --        arbiter on the channel; a player who allows watchers)
 --   KN id~p1~p2~arbiter|-~target~mapID|-~o|e~winner|-                           the announcement
+--      ...~o~-~c: (1.2.3) the announcing player's game counts (decision 1)
+--      ...~e~winner~s1~s2~how~steps~hash8~end~began~seat~pk|-~sig|-: (1.2.3) a player's half of a
+--      game that counts (seat: whose, 1 the host's), on the channel and to the other player
+--      (must-deliver), both halves again at each player's later logins (the ranking's word; an
+--      older client reads its first eight fields, the end of the table). pk: the half's player's
+--      account key, sig: its signature over "OLYB1|" and every field before pk (base64url)
 --   KD id~p|r~copper~t|m                                                        payer, payee
 --   (The games' ledger's record of a finished game is ArenaLedger's AY.)
 local FarkleTable = {}
@@ -118,6 +154,21 @@ FT.NOTICE_EVERY = 60      -- KN every minute while the table is open
 FT.NOTICES_MAX = 100      -- the live tables' notices (KN) this client keeps at once, the oldest heard going first
 FT.NOTICES_EACH = FT.ARBITRATE_MAX -- ...from one sender (a public arbiter holds that many tables), his oldest going first
 FT.KEEP_NOTICE = 259200   -- a public table's event kept this long where its crowd's market involves the client
+-- 1.2.3, the Bones ranking (Best) and its halves (KN "e" with the result)
+FT.HALF_SKEW = 600        -- the two halves' starts within this many seconds of each other
+FT.HALVES_DAYS = 62       -- games kept this long (the month's and the last, the honours' closed one)
+FT.HALVES_MAX = 2000      -- games this client keeps, the ones with a single half going first
+FT.HALVES_OPEN_MAX = 50   -- games with a single half one sender may have opened here at once
+FT.HALVES_OPEN_DAYS = 7   -- a game with a single half (or two that differ) kept this long
+FT.HALVES_DAY_KEEP = 20   -- agreed games kept per player and server day (Best counts DAY_MAX of them)
+FT.HALVES_REPEAT = 5      -- this player's own games said again at a login (both halves), the newest first...
+FT.HALVES_REPEAT_GAPS = { 3600, 21600, 72000 } -- ...each at as many later logins, this long after its last telling...
+FT.HALVES_REPEAT_DELAY = 45  -- ...from this long after the login
+FT.HALVES_CHECKS = 20     -- relayed halves whose signature is checked at once
+FT.KEYS_MAX = 2000        -- players' keys (pins) kept
+-- The ledger's caps (ArenaLedger's, read there when it is loaded): a counted game lasts this long
+-- at least, a player counts this many in a server day, a pair this many in PAIR_DAYS days.
+FT.RANK_CAPS = { MIN_RATED_DUR = 15, DAY_MAX = 10, PAIR_MAX = 3, PAIR_DAYS = 7 }
 FT.ROLL_WAIT = 6          -- a Roll click with no /roll line after this asks for a typed /roll
 FT.KR_CODES = 20          -- event codes in one KR
 FT.LOG_MAX = 200          -- the tester log's lines
@@ -169,6 +220,16 @@ FT.Wagers = Wagers
 -- players' alone and no ask to hold one is taken).
 local function Arbiters() return Call("Compliance", "Arbiters") == true end
 FT.Arbiters = Arbiters
+-- Decision 1 (1.2.3, the owner's): a free game (no gold) counts for the history and the ranking
+-- whatever the King's live switch (ArenaRoles' live, which stays off: it is the 2.0 bets' alone);
+-- a test build's never, nor the sim's. The duels' lane gives this switch in ArenaNet/Compliance;
+-- until that is merged, this local helper says the same, and it is the one line to point there.
+local function FreeCounts() return not A().Sim() and not A().TestBuild() end
+-- The King's live switch, as this client has his word.
+local function LiveOn()
+	local Ro = ns.ArenaRoles
+	return type(Ro) == "table" and type(Ro.Live) == "function" and Ro.Live() == true
+end
 local function Clock() return GetTime and GetTime() or ns.Now() end
 local function Now() return A().Now() end
 local function B36(n) return A().B36(n) end
@@ -812,6 +873,28 @@ end
 ---------------------------------------------------------------------------
 
 local PARTICIPANT = { host = true, guest = true, arbiter = true }
+-- Whether this client counts a free game in T: no gold, the live switch off, a release (decision 1,
+-- FreeCounts). T while the switch is on is a rehearsal asked for (the create panel's box).
+local function FreeOffer(t)
+	return t.mode == "T" and (t.stake or 0) == 0 and not LiveOn() and FreeCounts()
+end
+-- Whether a game between players counts (history, ranking), on the client of one who sits at it
+-- (a player, its arbiter): its mode L (the live switch on), or a free game in T that both players'
+-- clients count (FreeOffer here, and the other's word: t.free, the "c" of his KI or KA, the host's
+-- KO for the arbiter). A test build's never, nor a 1.2.2 client's, which says no "c": the game is
+-- then a rehearsal on both sides, never counted on one alone. Never the House's.
+local function GameCounts(t)
+	if type(t) ~= "table" or not PARTICIPANT[t.role] or not (t.host and t.guest) then return false end
+	if A().Counts(t.mode) then return true end
+	return t.free == true and FreeOffer(t)
+end
+-- ...on a player's client (the one with a half to give).
+local function Counted(t) return GameCounts(t) and (t.role == "host" or t.role == "guest") end
+FT.Counted = function(id) local t = tables[id] return t ~= nil and Counted(t) end
+-- The mode a game's records go in (the games' ledger, Bones's history): L where it counts, so a
+-- free game of 1.2.x is the live realm's and no rehearsal's, on its players' and its arbiter's
+-- clients alike; else the table's own.
+local function RecordMode(t) return GameCounts(t) and "L" or t.mode end
 -- The games' ledger's record of a table that ended (ArenaLedger.Played's), or nil: a game between
 -- players (b) for its players and its arbiter, the House's (h, or p with the rules' hints) for
 -- the one who played it. Every participant of a game between players says the same: who, the
@@ -838,7 +921,7 @@ function FT.LedgerRecord(t, g)
 end
 local function Ledger(t, g)
 	local rec = FT.LedgerRecord(t, g)
-	if rec then Call("ArenaLedger", "Played", t.mode, rec) end
+	if rec then Call("ArenaLedger", "Played", RecordMode(t), rec) end
 end
 
 local function Keep(t)
@@ -848,7 +931,8 @@ local function Keep(t)
 	if not g then return end
 	-- (the games' ledger's record, whether or not the companion's saved data is loaded)
 	Ledger(t, g)
-	local h = Heavy(t.mode)
+	local mode = RecordMode(t)
+	local h = Heavy(mode)
 	if not h then return end
 	local seat = t.seat
 	local res
@@ -858,7 +942,7 @@ local function Keep(t)
 	local opp = seat and t.players[3 - seat] or nil
 	local entry = { id = t.id, t = Now(), opp = opp, arb = t.arbiter, mode = t.kind, src = seat and t.src[seat] or nil,
 		stake = t.stake, target = t.target, res = res, s1 = g.scores[1], s2 = g.scores[2], hash8 = R().Hash(g),
-		reh = t.mode == "T" or nil, practice = t.role == "practice" or nil, learn = t.learn or nil, ld = t.ld,
+		reh = mode == "T" or nil, practice = t.role == "practice" or nil, learn = t.learn or nil, ld = t.ld,
 		seat = seat, host = t.host, guest = t.guest, why = FT.WHY[g.reason] }
 	table.insert(h.hist, 1, entry)
 	while #h.hist > FT.HIST_MAX do table.remove(h.hist) end
@@ -871,8 +955,392 @@ local function Keep(t)
 	for i = FT.TX_MAX + 1, #ids do h.tx[ids[i].id] = nil end
 end
 
+---------------------------------------------------------------------------
+-- The Bones ranking's halves (1.2.3, the owner's decision 2: a game counts only when both players'
+-- clients said the same result, each its own signed half, as a direct duel's two halves)
+---------------------------------------------------------------------------
+-- Each player's client signs its half of a game that counts with his account's key (Debts.Sign,
+-- the key his IOUs and results sign with) and publishes it as the game ends (KN "e" with the
+-- result: on the channel, and to the other player must-deliver). It keeps its own half and the
+-- other player's signed one, and says both again at later logins, spaced (RepeatHalves), so a
+-- member who was away hears the game from either player. Every client keeps what it hears, for
+-- Best. A half is taken:
+--   - from its own player (the server stamps the sender); the key it carries is then this
+--     client's key for him (his pin);
+--   - relayed on the channel by the game's other player, only when it carries the key this client
+--     holds for its player (his claim Debts verified, else his pin) and its signature is good
+--     (checked in Ed25519.lua's time slices): nobody can say another player's half;
+--   - by whisper only where this client sits at the game (the other player's half of its own).
+-- Each player's first half of a game stays: a later one that says another result is refused
+-- ("changed"), and once both agree the game is fixed ("conflict" for any other word on it). A
+-- game is kept under its id and its seats (the host first, as the table has them), so a word
+-- naming other seats under that id is another game, which never spoils the real one. The two
+-- agree when they say the same result (winner, scores, how it ended, steps, transcript hash) and
+-- started within HALF_SKEW: the start is the one time both clients share whatever happens after
+-- the game (a player away at its end finishes it later, on his return).
+-- Kept per realm group and faction (the channel's) in the core's saved data, made only to keep
+-- one, small (an agreed game is one line):
+--   ns.rdb.bonesRank[faction] = {
+--     open = { [id:p1:p2] = { id, p1, p2, got, first, by = { [player, lower case] = word } } }:
+--       a game with a single half, or two that differ (or past HALVES_DAY_KEEP: full); word =
+--       "w.s1.s2.how.steps.hash8|began|end" (numbers in base 36, times server time, its sender's),
+--     done = { [id:p1:p2] = "w|t|dur|at|w.s1.s2.how.steps.hash8|p1|p2" }: both halves agree; t the
+--       game's time (the earlier end, never before the later start), dur the longer of the two
+--       lengths (a loser cannot shorten it under the ledger's minimum), at when this client first
+--       held both (the caps' order),
+--     keys = { [player, lower case] = his key, base64url } (the pins),
+--     own = { [id:p1:p2] = { t, mode, mine, theirs, n, last } }: this player's own games: his signed
+--       half and the other's (their bodies), the repeats said (n) and the last telling (last) }
+
+-- (The halves' helpers and state are one table's fields: this file's main chunk is near Lua 5.1's
+-- 200 locals.)
+local HV = {}
+local function Low(name) local f = Full(name) return f and f:lower() or nil end
+local function RankStore(make)
+	if A().Sim() or type(ns.rdb) ~= "table" then return nil end
+	local s = ns.rdb.bonesRank
+	if type(s) ~= "table" then
+		if not make then return nil end
+		s = { v = 2 }
+		ns.rdb.bonesRank = s
+	end
+	local side = tostring(ns.faction or "Alliance")
+	local b = s[side]
+	if type(b) ~= "table" then
+		if not make then return nil end
+		b = {}
+		s[side] = b
+	end
+	for _, k in ipairs({ "open", "done", "keys", "own" }) do
+		if type(b[k]) ~= "table" then b[k] = {} end
+	end
+	b.games = nil -- (the layout of 1.2.3's unreleased drafts: heard again)
+	return b
+end
+HV.gen = 0 -- a game kept or changed: Best works its list out again
+-- HV.held = { b, n, day }: the games held (open and done) and the agreed ones per player and day,
+-- worked out at the first need
+local function HalfKey(id, p1, p2) return ("%s:%s:%s"):format(id, Low(p1) or "?", Low(p2) or "?") end
+
+-- The result a half says, the part both must say alike; a word as the store keeps it.
+function HV.Said(h) return table.concat({ h.w, B36(h.s1), B36(h.s2), h.how, B36(h.steps), h.hash }, ".") end
+function HV.Word(h) return ("%s|%s|%s"):format(HV.Said(h), B36(h.began), B36(h.t)) end
+function HV.ReadWord(s)
+	if type(s) ~= "string" then return nil end
+	local said, began, fin = s:match("^([^|]+)|([0-9a-z]+)|([0-9a-z]+)$")
+	began, fin = said and N36(began, 0), said and N36(fin, 0)
+	if not (began and fin) then return nil end
+	return said, began, fin
+end
+function HV.DoneLine(r)
+	return table.concat({ r.w, B36(r.t), B36(r.dur), B36(r.at), r.said, r.p1, r.p2 }, "|")
+end
+function HV.ReadDone(s)
+	if type(s) ~= "string" then return nil end
+	local w, t, dur, at, said, p1, p2 = s:match("^([12])|([0-9a-z]+)|([0-9a-z]+)|([0-9a-z]+)|([^|]+)|([^|]+)|([^|]+)$")
+	t, dur, at = w and N36(t, 0), w and N36(dur, 0), w and N36(at, 0)
+	if not (t and dur and at) then return nil end
+	return { w = w, t = t, dur = dur, at = at, said = said, p1 = p1, p2 = p2 }
+end
+function HV.Held(b)
+	if HV.held and HV.held.b == b then return HV.held end
+	HV.held = { b = b, n = 0, day = {} }
+	for _ in pairs(b.open) do HV.held.n = HV.held.n + 1 end
+	for _, s in pairs(b.done) do
+		HV.held.n = HV.held.n + 1
+		local r = HV.ReadDone(s)
+		if r then
+			local d = floor(r.t / 86400)
+			for _, name in ipairs({ r.p1, r.p2 }) do
+				local k = (Low(name) or "?") .. "|" .. d
+				HV.held.day[k] = (HV.held.day[k] or 0) + 1
+			end
+		end
+	end
+	return HV.held
+end
+
+-- The game both halves agree on: { w, t (the earlier end, never before the later start), dur (the
+-- longer of the two lengths), said }, or nil.
+function HV.Agreed(e)
+	if type(e) ~= "table" or type(e.by) ~= "table" then return nil end
+	local sa, ba, ea = HV.ReadWord(e.by[Low(e.p1) or ""])
+	local sb, bb, eb = HV.ReadWord(e.by[Low(e.p2) or ""])
+	if not sa or sa ~= sb then return nil end
+	local w = sa:match("^([12])%.")
+	if not w or abs(ba - bb) > FT.HALF_SKEW then return nil end
+	local start = max(ba, bb)
+	local t = max(min(ea, eb), start)
+	return { w = w, t = t, dur = min(86400, max(0, ea - ba, eb - bb)), said = sa }
+end
+
+function HV.B64(raw) local Ed = ns.Ed25519 return type(Ed) == "table" and Ed.ToB64 and Ed.ToB64(raw) or nil end
+function HV.Raw(text, len)
+	local Ed = ns.Ed25519
+	local ok, r = pcall(function() return type(text) == "string" and type(Ed) == "table" and Ed.FromB64 and Ed.FromB64(text) or nil end)
+	return ok and type(r) == "string" and #r == len and r or nil
+end
+-- The key this client holds for a player (base64url): his claim Debts verified (his GUID's), else
+-- the one his own halves carried here (his pin); nil when none.
+function HV.PinOf(b, name)
+	local raw = Call("Debts", "KeyOf", name)
+	if type(raw) == "string" and #raw == 32 then return HV.B64(raw) end
+	local k = b and b.keys[Low(name) or ""]
+	return type(k) == "string" and k or nil
+end
+
+-- This player's own game: his half (mine) and the other player's signed one (theirs), for the repeats.
+function HV.KeepOwn(b, key, h, mine)
+	local o = b.own[key]
+	if type(o) ~= "table" then
+		o = { t = h.t, mode = h.mode == "L" and "L" or "T", n = 0 }
+		b.own[key] = o
+	end
+	if mine and type(o.mine) ~= "string" then
+		-- (its end is the game's first telling: the repeats' clock starts there)
+		o.mine, o.t, o.last, o.mode = h.body, h.t, Now(), h.mode == "L" and "L" or "T"
+	elseif not mine and h.pk and h.sig and type(o.theirs) ~= "string" then
+		o.theirs = h.body
+	end
+end
+
+local PruneHalves -- (below)
+-- A half h = { id, p1, p2, seat (whose: 1 the host's, 2 the guest's), w, s1, s2, how, steps, hash,
+-- t (its end), began, tc, mode, pk, sig, core, body } heard from sender (its player, or the game's
+-- other player relaying it, its signature checked; mine: this client's own, never refused for the
+-- flood rule): true (and "again" when it was held already), or false and why.
+local function TakeHalf(sender, h, mine)
+	local p1, p2, by = Low(h.p1), Low(h.p2), Low(sender)
+	local who = h.seat == 1 and p1 or (h.seat == 2 and p2 or nil)
+	if not p1 or not p2 or p1 == p2 or not who or not by or (by ~= p1 and by ~= p2) then return false, "sender" end
+	local now = Now()
+	local cut = now - FT.HALVES_DAYS * 86400
+	if h.t > now + 60 or h.t < cut or h.began > h.t or h.began < cut then return false, "time" end
+	local b = RankStore(true)
+	if not b then return false, "store" end
+	local key = HalfKey(h.id, h.p1, h.p2)
+	local said = HV.Said(h)
+	local me = Low(Me())
+	-- (this player's own game, one his client knows: his half and the other's, for his repeats)
+	local ownGame = (me == p1 or me == p2) and (b.own[key] ~= nil or tables[h.id] ~= nil)
+	-- (an agreed game is fixed: its word again, or a conflict)
+	local done = HV.ReadDone(b.done[key])
+	if done then
+		if done.said ~= said then return false, "conflict" end
+		if ownGame then HV.KeepOwn(b, key, h, who == me) end
+		return true, "again"
+	end
+	local e = b.open[key]
+	if type(e) == "table" and type(e.by) == "table" and e.by[who] ~= nil then
+		-- (each player's first half stays: an honest client never says another)
+		if HV.ReadWord(e.by[who]) ~= said then return false, "changed" end
+		if ownGame then HV.KeepOwn(b, key, h, who == me) end
+		return true, "again"
+	end
+	local hd = HV.Held(b)
+	if type(e) ~= "table" or type(e.by) ~= "table" then
+		if not mine then
+			local opened = 0
+			for _, x in pairs(b.open) do if type(x) == "table" and x.first == by then opened = opened + 1 end end
+			if opened >= FT.HALVES_OPEN_MAX then return false, "flood" end
+		end
+		e = { id = h.id, p1 = Full(h.p1), p2 = Full(h.p2), got = now, first = by, by = {} }
+		b.open[key] = e
+		hd.n = hd.n + 1
+	end
+	e.by[who] = HV.Word(h)
+	-- (a player's own word carries his key: this client's for him from now on)
+	if by == who and h.pk then b.keys[who] = h.pk end
+	if ownGame then HV.KeepOwn(b, key, h, who == me) end
+	local ok = not e.full and HV.Agreed(e)
+	if ok then
+		local d = floor(ok.t / 86400)
+		local ka, kb = p1 .. "|" .. d, p2 .. "|" .. d
+		if (hd.day[ka] or 0) >= FT.HALVES_DAY_KEEP or (hd.day[kb] or 0) >= FT.HALVES_DAY_KEEP then
+			e.full = true -- (kept as heard, never counted: its players' day is full here)
+		else
+			b.open[key] = nil
+			b.done[key] = HV.DoneLine({ w = ok.w, t = ok.t, dur = ok.dur, at = now, said = ok.said, p1 = e.p1, p2 = e.p2 })
+			hd.day[ka], hd.day[kb] = (hd.day[ka] or 0) + 1, (hd.day[kb] or 0) + 1
+		end
+	end
+	HV.gen = HV.gen + 1
+	if hd.n > FT.HALVES_MAX then PruneHalves(b) end
+	return true
+end
+
+-- Games past HALVES_DAYS out (by their time), single halves past HALVES_OPEN_DAYS; past
+-- HALVES_MAX, the games with a single half go first (the oldest heard), only then the oldest
+-- agreed: no flood of unanswered words ever pushes a counted game out. The pins of players no game
+-- here names go past KEYS_MAX.
+PruneHalves = function(b)
+	local now = Now()
+	local cut, openCut = now - FT.HALVES_DAYS * 86400, now - FT.HALVES_OPEN_DAYS * 86400
+	local open, done = {}, {}
+	for key, e in pairs(b.open) do
+		if type(e) ~= "table" or type(e.by) ~= "table" or (tonumber(e.got) or 0) < openCut then b.open[key] = nil
+		else open[#open + 1] = { key = key, t = tonumber(e.got) or 0 } end
+	end
+	for key, s in pairs(b.done) do
+		local r = HV.ReadDone(s)
+		if not r or r.t < cut then b.done[key] = nil else done[#done + 1] = { key = key, t = r.t } end
+	end
+	for key, o in pairs(b.own) do
+		if type(o) ~= "table" or (tonumber(o.t) or 0) < cut then b.own[key] = nil end
+	end
+	-- (past HALVES_MAX, down to nine tenths of it: a full store is not sorted again at every word)
+	local over = #open + #done > FT.HALVES_MAX and #open + #done - floor(FT.HALVES_MAX * 0.9) or 0
+	if over > 0 then
+		local function Older(x, y) if x.t ~= y.t then return x.t < y.t end return x.key < y.key end
+		table.sort(open, Older)
+		local n = min(over, #open)
+		for i = 1, n do b.open[open[i].key] = nil end
+		over = over - n
+		if over > 0 then
+			table.sort(done, Older)
+			for i = 1, min(over, #done) do b.done[done[i].key] = nil end
+		end
+	end
+	local keys = {}
+	for k, v in pairs(b.keys) do
+		if type(v) ~= "string" then b.keys[k] = nil else keys[#keys + 1] = k end
+	end
+	if #keys > FT.KEYS_MAX then
+		local named = { [Low(Me()) or ""] = true }
+		for _, e in pairs(b.open) do named[Low(e.p1) or ""], named[Low(e.p2) or ""] = true, true end
+		for _, s in pairs(b.done) do
+			local r = HV.ReadDone(s)
+			if r then named[Low(r.p1) or ""], named[Low(r.p2) or ""] = true, true end
+		end
+		table.sort(keys)
+		local n = #keys
+		for _, k in ipairs(keys) do
+			if n <= FT.KEYS_MAX then break end
+			if not named[k] then b.keys[k] = nil n = n - 1 end
+		end
+	end
+	HV.held = nil
+	HV.gen = HV.gen + 1
+end
+
+-- This player's half of a table that ended, or nil: a game that counts (Counted), with a winner;
+-- signed with his account's key where he has one (an unsigned half counts from him alone, and is
+-- never relayed).
+function HV.HalfCore(h)
+	return ("%s~%s~%s~-~%d~-~e~%s~%s~%s~%s~%s~%s~%s~%s~%d"):format(h.id, h.p1, h.p2, tonumber(h.tc) or 5, h.w, B36(h.s1), B36(h.s2), h.how,
+		B36(h.steps), h.hash, B36(h.t), B36(h.began), h.seat)
+end
+local function OwnHalf(t)
+	local g = t.own or t.game
+	if not g or not g.over or not g.winner or g.reason == "void" or not Counted(t) or (t.seat ~= 1 and t.seat ~= 2) then return nil end
+	local hash = R().Hash(g)
+	if type(hash) ~= "string" then return nil end
+	local now = Now()
+	local began = min(now, tonumber(t.began) or tonumber(t.created) or now)
+	local h = { id = t.id, p1 = Full(t.host), p2 = Full(t.guest), seat = t.seat, w = tostring(g.winner), s1 = g.scores[1], s2 = g.scores[2],
+		how = FT.WHY[g.reason] or "v", steps = g.step, hash = hash:lower(), t = now, began = began, tc = R().TARGET_CODE[t.target] or 5,
+		mode = t.mode }
+	h.core = HV.HalfCore(h)
+	local D = ns.Debts
+	if type(D) == "table" and type(D.MyKey) == "function" and type(D.Sign) == "function" then
+		local ok, gk, pk = pcall(D.MyKey)
+		if ok and gk and type(pk) == "string" and #pk == 32 then
+			local signed, sig = pcall(D.Sign, "OLYB1|" .. h.core)
+			if signed and type(sig) == "string" and #sig == 64 then h.pk, h.sig = HV.B64(pk), HV.B64(sig) end
+		end
+	end
+	h.body = h.core .. "~" .. (h.pk or "-") .. "~" .. (h.sig or "-")
+	return h
+end
+
+-- What this client holds of a game's halves (the tests'): { { id, p1, p2, agreed, by (a game with
+-- a single half or two that differ: { [player] = { said, w, began, t } }), and for an agreed one
+-- w, t, dur, at, said } }, one per seats named.
+function FT.Halves(id)
+	local b = RankStore(false)
+	local out = {}
+	if not b then return out end
+	for _, e in pairs(b.open) do
+		if type(e) == "table" and e.id == id and type(e.by) == "table" then
+			local by = {}
+			for who, s in pairs(e.by) do
+				local said, began, fin = HV.ReadWord(s)
+				if said then by[who] = { said = said, w = said:match("^(%d)"), began = began, t = fin } end
+			end
+			out[#out + 1] = { id = e.id, p1 = e.p1, p2 = e.p2, by = by, agreed = false, full = e.full }
+		end
+	end
+	for key, s in pairs(b.done) do
+		local r = key:match("^([^:]+):") == id and HV.ReadDone(s)
+		if r then out[#out + 1] = { id = id, p1 = r.p1, p2 = r.p2, agreed = true, w = r.w, t = r.t, dur = r.dur, at = r.at, said = r.said } end
+	end
+	return out
+end
+function FT.Pin(name) return HV.PinOf(RankStore(false), name) end
+
+-- The calendar month of server time t, as the honours number it (Honors.MonthOf: the same UTC
+-- month without it).
+local function MonthOf(t, offset)
+	local f = Api("Honors", "MonthOf")
+	if f then
+		local ok, n = pcall(f, t, offset)
+		if ok and type(n) == "number" then return n end
+	end
+	if type(offset) == "function" then offset = offset(t) end
+	local d = date and date("!*t", floor((tonumber(t) or 0) + (tonumber(offset) or 0)))
+	return type(d) == "table" and (d.year * 12 + d.month - 1) or 0
+end
+
+-- After a login: this player's own games of this month and the last said again on the channel (the
+-- low lane), both halves (his and the other's signed one), the newest first, HALVES_REPEAT games
+-- at most. Each game is said again at as many later logins as HALVES_REPEAT_GAPS has, each at
+-- least that long after its last telling (the first an hour after its end): a /reload or a login
+-- soon after the game spends nothing, and the members away then hear it at a later one. A repeat
+-- counts once it went (the send's done). Returns how many games went.
+HV.repeating = {} -- [key] = true while its repeat waits to go
+function FT.RepeatHalves()
+	local b = RankStore(false)
+	if not b then return 0 end
+	local now = Now()
+	local month = MonthOf(now)
+	local list = {}
+	for key, o in pairs(b.own) do
+		local n = type(o) == "table" and (tonumber(o.n) or 0) or nil
+		local gap = n and FT.HALVES_REPEAT_GAPS[n + 1]
+		if gap and type(o.mine) == "string" and not HV.repeating[key] and MonthOf(tonumber(o.t) or 0) >= month - 1
+			and now - (tonumber(o.last) or tonumber(o.t) or 0) >= gap then
+			list[#list + 1] = { key = key, o = o }
+		end
+	end
+	table.sort(list, function(x, y)
+		local tx, ty = tonumber(x.o.t) or 0, tonumber(y.o.t) or 0
+		if tx ~= ty then return tx > ty end
+		return x.key > y.key
+	end)
+	local sent = 0
+	for _, x in ipairs(list) do
+		if sent >= FT.HALVES_REPEAT then break end
+		local o, key = x.o, x.key
+		local id = key:match("^([^:]+):")
+		local mode = o.mode == "L" and "L" or "T"
+		local lane = A().Lane(mode, true)
+		local ok = lane and A().Send("KN", mode, o.mine, { dist = lane, low = true, key = "farklen " .. id .. " mine", done = function(went)
+			HV.repeating[key] = nil
+			if went then o.n, o.last = (tonumber(o.n) or 0) + 1, Now() end
+		end })
+		if ok == true then
+			HV.repeating[key] = true
+			sent = sent + 1
+			if type(o.theirs) == "string" then A().Send("KN", mode, o.theirs, { dist = lane, low = true, key = "farklen " .. id .. " theirs" }) end
+		end
+	end
+	return sent
+end
+
 -- Pruned at login and while involved: transcripts past 7 days, history past its cap.
 function FT.Prune()
+	local b = RankStore(false)
+	if b then PruneHalves(b) end
 	for _, mode in ipairs({ "L", "T" }) do
 		local h = Heavy(mode)
 		if h then
@@ -891,11 +1359,14 @@ end
 
 ---------------------------------------------------------------------------
 -- The live record, kept so a /reload finds its table (the design); on the beta it is gone at login,
--- and the table is found again from the next message about it.
+-- and the table is found again from the next message about it. (1.2.3: with each player's yes or no
+-- to watchers, spec: without it a reloaded player stopped announcing his table, ignored a watcher's
+-- ask, and his Play again opened the next table closed to watchers for both players; and with
+-- when the game began, its length in the games' ledger and the ranking's halves.)
 ---------------------------------------------------------------------------
 
 local RECORD = { "id", "mode", "role", "host", "guest", "arbiter", "kind", "stake", "cur", "target", "secs", "hic", "hiccupRule", "salt",
-	"state", "created", "inn", "camp", "campfire", "spot", "first", "crowd", "crowdOpen", "crowdLock", "noWatch", "bankRolls" }
+	"state", "created", "inn", "camp", "campfire", "spot", "first", "crowd", "crowdOpen", "crowdLock", "noWatch", "bankRolls", "began", "free" }
 local function Save(t)
 	if t.role == "watch" or t.role == "practice" then return end
 	local m = Mine(t.mode)
@@ -905,6 +1376,8 @@ local function Save(t)
 		rec = {}
 		for _, k in ipairs(RECORD) do rec[k] = t[k] end
 		rec.src = { t.src[1], t.src[2] }
+		local spec = type(t.spec) == "table" and t.spec or {}
+		rec.spec = { spec[1] == true, spec[2] == true }
 		rec.events = t.game and t.game.events or nil
 	end
 	if t.role == "arbiter" then m.arb[t.id] = rec else m.live = rec end
@@ -1421,8 +1894,11 @@ Finished = function(t)
 		return
 	end
 	-- Progress returns here before its ordinary SendState. Tell existing watchers and the
-	-- notice lane the game is over before settlement stops the relay's involvement.
+	-- notice lane the game is over before settlement stops the relay's involvement. (1.2.3: a game
+	-- that counts ends with this player's half of it, the ranking's word: the notice lane carries
+	-- it, whether or not the table let watchers in.)
 	if t.state == "end" and g and g.over then
+		if t.half == nil then t.half = OwnHalf(t) or false end
 		if SendState then SendState(t) end
 		if SendNotice then SendNotice(t) end
 	end
@@ -1439,6 +1915,14 @@ Finished = function(t)
 			if type(to) == "string" and to ~= "" then Send(t, "KE", body, to, { must = true }) end
 		end
 		Keep(t)
+		-- (this player's half, kept here and told the other player for sure: his own client counts
+		-- the game once both halves agree, whatever the channel lost)
+		if t.half and not t.halfSent then
+			t.halfSent = true
+			TakeHalf(Me(), t.half, true)
+			local other = t.seat and t.players[3 - t.seat]
+			if other then Send(t, "KN", t.half.body, other, { must = true }) end
+		end
 		t.endAt = Clock()
 		if t.from then Call("ArenaMatch", "Ended", t.from) end
 	end
@@ -2025,18 +2509,32 @@ SendState = function(t)
 	end
 end
 
+-- The announcement (KN): a relayer's open table every NOTICE_EVERY, then its end. Never a game
+-- against the House: practice sends nothing (the House's dice are this client's own, nobody could
+-- witness them), so a member at an innkeeper is in nobody's live tables, by design: training is no
+-- table to watch. (1.2.3: an open table whose game counts says so, "c"; the end of a game that
+-- counts is this player's half, whether or not the table let watchers in.)
 SendNotice = function(t)
-	if not Relayer(t) or not t.game or t.role == "practice" then return end
-	local now = Clock()
+	if not t.game or t.role == "practice" then return end
 	local g = t.game
+	if g.over and t.half == nil then t.half = OwnHalf(t) or false end
+	local half = g.over and t.half or nil
+	if not half and not Relayer(t) then return end
+	local now = Clock()
 	local state = g.over and "e" or "o"
 	local winner = g.over and g.winner and tostring(g.winner) or "-"
 	local key = state .. winner
 	if t.noticeKey == key and t.noticeAt and now - t.noticeAt < FT.NOTICE_EVERY then return end
 	t.noticeKey, t.noticeAt = key, now
-	local map = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-	local body = ("%s~%s~%s~%s~%s~%s~%s~%s"):format(t.id, t.host, t.guest, t.arbiter or "-", tostring(R().TARGET_CODE[t.target] or 5),
-		type(map) == "number" and B36(map) or "-", state, winner)
+	local body
+	if half then
+		body = half.body
+	else
+		local map = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+		body = ("%s~%s~%s~%s~%s~%s~%s~%s"):format(t.id, t.host, t.guest, t.arbiter or "-", tostring(R().TARGET_CODE[t.target] or 5),
+			type(map) == "number" and B36(map) or "-", state, winner)
+		if state == "o" and Counted(t) then body = body .. "~c" end
+	end
 	A().Send("KN", t.mode, body, { dist = A().Lane(t.mode, true), key = "farklen " .. t.id })
 end
 
@@ -2149,7 +2647,10 @@ function FT.Create(opts)
 	end
 	local body = ("%s~%s~%s~%d~%s~%s~%s~%d~%s"):format(id, kind, B36(stake), R().TARGET_CODE[t.target], t.arbiter or "-", t.src[1],
 		B36(t.secs), HicCode(t), t.salt)
-	if token ~= "" or iou ~= "" then body = body .. "~" .. token .. "~" .. iou end
+	-- (1.2.3: "c", this client counts the free game, decision 1: the guest's counts it only then)
+	local free = FreeOffer(t)
+	if token ~= "" or iou ~= "" or free then body = body .. "~" .. token .. "~" .. iou end
+	if free then body = body .. "~c" end
 	Send(t, "KI", body, guest, { urgent = true })
 	Say(t, "FARKLE_LOG_INVITED", ns.DisplayName(guest))
 	Involve(t, true)
@@ -2211,7 +2712,10 @@ function FT.Answer(id, yes, src, o)
 		iou = type(io) == "string" and io or ""
 	end
 	local body = ("%s~1~%s~%d"):format(t.id, src, HicCode(t))
-	if token ~= "" or iou ~= "" then body = body .. "~" .. token .. "~" .. iou end
+	-- (1.2.3: "c", this client counts the free game too: the host's counts it only then)
+	local free = FreeOffer(t)
+	if token ~= "" or iou ~= "" or free then body = body .. "~" .. token .. "~" .. iou end
+	if free then body = body .. "~c" end
 	t.state = "agreed"
 
 	t.agreedAt = t.agreedAt or Clock()
@@ -2236,7 +2740,10 @@ function FT.AskArbiter(id, name)
 	t.state, t.askedAt = "asked", Clock()
 	local body = ("%s~%s~%s~%s~%d~%s~%s~%d"):format(t.id, t.host, t.guest, B36(t.stake), R().TARGET_CODE[t.target],
 		(t.src[1] or "-") .. (t.src[2] or "-"), B36(t.secs), HicCode(t))
-	if t.crowd then body = body .. "~1" end
+	-- (1.2.3: "c", both players' clients count the free game: the arbiter's records it so too)
+	local free = GameCounts(t)
+	if t.crowd or free then body = body .. "~" .. (t.crowd and "1" or "0") end
+	if free then body = body .. "~c" end
 	Send(t, "KO", body, name, { urgent = true })
 	Say(t, "FARKLE_LOG_ASKED_ARBITER", ns.DisplayName(name))
 	Changed(t)
@@ -2687,7 +3194,8 @@ local function OnInvite(dist, sender, mode, body)
 	local now = Clock()
 	local t = { id = id, mode = mode, role = "guest", host = Full(sender), guest = Me(), arbiter = arbiter, kind = kind, stake = stake,
 		cur = ns.ArenaRoles.Currency(), target = R().TARGET_BY_CODE[tcode], secs = secs, hic = hic == "2", hiccupRule = "bones2", salt = salt,
-		src = { stake > 0 and hostSrc or "-" }, spec = { false, false }, created = Now(), invitedAt = now, state = "invite", seat = 2, log = {} }
+		src = { stake > 0 and hostSrc or "-" }, spec = { false, false }, created = Now(), invitedAt = now, state = "invite", seat = 2, log = {},
+		free = f[12] == "c" or nil } -- (1.2.3: the host's client counts the free game, decision 1)
 	t.players = { t.host, t.guest }
 	-- (1.2.1: invitations off: refused quietly, the host told why, "i"; a matched partner's comes.)
 	if not FT.InvitesOn() and Call("ArenaMatch", "MatchedWith", sender) ~= true then return Refuse(t, sender, "i") end
@@ -2762,6 +3270,9 @@ local function OnAnswer(dist, sender, mode, body)
 	end
 	t.src[2] = src
 	t.hic = t.hic and hic == "2"
+	-- (1.2.3: the guest's client counts the free game, decision 1; an older client's or a test
+	-- build's answer says no "c", and neither side counts it)
+	t.free = f[7] == "c" or nil
 	Say(t, "FARKLE_LOG_ACCEPTED", ns.DisplayName(sender))
 	if t.kind == "a" then
 		t.state = "agreed"
@@ -2795,7 +3306,8 @@ local function OnOfficiate(dist, sender, mode, body)
 	end
 	local t = { id = id, mode = mode, role = "arbiter", host = host, guest = guest, arbiter = Me(), kind = "a", stake = stake, cur = ns.ArenaRoles.Currency(),
 		target = R().TARGET_BY_CODE[tcode], secs = secs, hic = hic == "2", hiccupRule = "bones2", src = { srcs:sub(1, 1), srcs:sub(2, 2) }, spec = { false, false },
-		created = Now(), state = "asked", askedAt = Clock(), log = {}, crowd = f[9] == "1" or nil }
+		created = Now(), state = "asked", askedAt = Clock(), log = {}, crowd = f[9] == "1" or nil,
+		free = f[10] == "c" or nil } -- (1.2.3: both players' clients count the free game, the host says)
 	t.players = { host, guest }
 	local function No(reason)
 		A().Send("KP", mode, ("%s~0~%s"):format(id, reason), { to = host, urgent = true })
@@ -3211,7 +3723,71 @@ local function NoticeRoom(sender)
 	return true
 end
 
+-- A half in a KN's fields (1.2.3: the end of a game that counts, its result, start and seat after
+-- the end's eight fields, then its key and signature, "-" for none), or nil when it is none or out
+-- of shape.
+local function NoticeHalf(f, id, p1, p2, mode)
+	if #f ~= 18 then return nil end
+	local w, how, hash, seat = f[8], f[11], f[13], tonumber(f[16] or "")
+	if (w ~= "1" and w ~= "2") or not FT.WHY_OF[how or ""] or how == "v" or (seat ~= 1 and seat ~= 2) then return nil end
+	if type(hash) ~= "string" or not hash:find("^%x%x%x%x%x%x%x%x$") then return nil end
+	local s1, s2 = N36(f[9] or "", 0, 1000000), N36(f[10] or "", 0, 1000000)
+	local steps, t, began = N36(f[12] or "", 1, 5000), N36(f[14] or "", 0, 4294967295), N36(f[15] or "", 0, 4294967295)
+	if not (s1 and s2 and steps and t and began) then return nil end
+	local pk, sig = f[17], f[18]
+	if pk == "-" and sig == "-" then
+		pk, sig = nil, nil
+	elseif not (#pk == 43 and pk:find("^[%w%-_]+$") and #sig == 86 and sig:find("^[%w%-_]+$")) then
+		return nil
+	end
+	return { id = id, p1 = p1, p2 = p2, seat = seat, w = w, s1 = s1, s2 = s2, how = how, steps = steps, hash = hash:lower(), t = t, began = began,
+		tc = tonumber(f[5] or ""), mode = mode, pk = pk, sig = sig, core = table.concat(f, "~", 1, 16), body = table.concat(f, "~") }
+end
+
+-- Relayed halves' signatures, checked in Ed25519.lua's time slices, HALVES_CHECKS at once (a relay
+-- past them is dropped: its players say the game again at later logins). cb(good) once known.
+HV.checking, HV.checks = {}, 0
+function HV.CheckSig(key, pk, msg, sig, cb)
+	local Ed = ns.Ed25519
+	if HV.checking[key] or HV.checks >= FT.HALVES_CHECKS or not pk or not sig or type(Ed) ~= "table" or type(Ed.Run) ~= "function" then return false end
+	HV.checking[key], HV.checks = true, HV.checks + 1
+	local started = Ed.Run(function() return Ed.Verify(pk, msg, sig) end, function(ok, res)
+		HV.checking[key], HV.checks = nil, HV.checks - 1
+		cb(ok == true and res == true)
+	end)
+	if not started then HV.checking[key], HV.checks = nil, HV.checks - 1 end
+	return started == true
+end
+-- Whether this client holds a word of that half's player on its game already (the same or not: a
+-- relay can then change nothing, and needs no check).
+function HV.HeldAlready(b, h)
+	if not b then return false end
+	local key = HalfKey(h.id, h.p1, h.p2)
+	if b.done[key] ~= nil then return true end
+	local e, who = b.open[key], Low(h.seat == 1 and h.p1 or h.p2)
+	return type(e) == "table" and type(e.by) == "table" and e.by[who or ""] ~= nil
+end
+-- A half heard (KN "e"): its own player's taken at once; the game's other player's relay only on
+-- the channel, with the key this client holds for the half's player and its signature good.
+local function HearHalf(dist, sender, h)
+	local player = h.seat == 1 and h.p1 or h.p2
+	if Same(sender, player) then return TakeHalf(sender, h) end
+	if dist ~= "CHANNEL" then return false, "lane" end
+	local b = RankStore(false)
+	if HV.HeldAlready(b, h) then return TakeHalf(sender, h) end
+	local pin = HV.PinOf(b, player)
+	if not pin or h.pk ~= pin or not h.sig then return false, "pin" end
+	local ok = HV.CheckSig(h.body, HV.Raw(pin, 32), "OLYB1|" .. h.core, HV.Raw(h.sig, 64), function(good)
+		if good then TakeHalf(sender, h) end
+	end)
+	return ok, ok and "checking" or "busy"
+end
+
 -- KN: a table announced (a public arbiter's, raising the alert; or a player's who allows watchers).
+-- (1.2.3: or a player's half of a game that counts, the ranking's word: on the channel, its own
+-- player's or relayed by the game's other player; or whispered by the other player of this
+-- client's own game, never to a client not at the game: what every member counts, every member
+-- can hear. Kept whether or not the table was listed here.)
 local function OnNotice(dist, sender, mode, body)
 	local f = Split(body)
 	local id = f[1] or ""
@@ -3221,11 +3797,17 @@ local function OnNotice(dist, sender, mode, body)
 	local official = arb ~= nil and Same(sender, arb) and ns.ArenaRoles.IsPublicArbiter(sender, mode)
 	if not official and not (Same(sender, p1) or Same(sender, p2)) then return end
 	if Hides(sender) then return end
+	local half = f[7] == "e" and not arb and NoticeHalf(f, id, p1, p2, mode) or nil
+	if half and (dist ~= "WHISPER" or Same(Me(), p1) or Same(Me(), p2)) then HearHalf(dist, sender, half) end
+	-- (a whisper brings a half alone: the live list is the channel's)
+	if dist == "WHISPER" then return end
 	local was = notices[id]
+	-- (the end of a table never listed here: nothing to take off the list, nothing to keep)
+	if f[7] == "e" and not was and not official then return end
 	if not was and not NoticeRoom(sender) then return end
 	notices[id] = { id = id, p1 = p1, p2 = p2, arbiter = arb, official = official, target = R().TARGET_BY_CODE[tonumber(f[5] or "")] or 5000,
 		map = N36(f[6] or "", 1), state = f[7] == "e" and "e" or "o", winner = tonumber(f[8] or ""), by = Full(sender), mode = mode, at = Now(),
-		heard = heard + 1 }
+		heard = heard + 1, counts = f[7] ~= "e" and f[9] == "c" or nil }
 	heard = heard + 1
 	if official and not was then ns.Fire("FARKLE_PUBLIC", id, "open") end
 	FT.KeepNotice(notices[id])
@@ -3286,11 +3868,19 @@ ns.Comm.Handle("KD", ns.Arena.Handle("KD", OnReceipt))
 -- Watching (the design): the live tables from the notices; a watcher asks the relayer (KQ) and gets KS
 ---------------------------------------------------------------------------
 
+-- (1.2.3: each row a copy of its notice, mode L where the announcing player says his game counts,
+-- so the screens give it no rehearsal's tag; wire: the mode its messages travel in, which Watch
+-- uses from the notice itself.)
 function FT.LiveTables()
 	local out = {}
 	local cut = Now() - 3 * FT.NOTICE_EVERY
 	for id, n in pairs(notices) do
-		if n.state == "o" and n.at >= cut then out[#out + 1] = n end
+		if n.state == "o" and n.at >= cut then
+			local row = {}
+			for k, v in pairs(n) do row[k] = v end
+			row.wire, row.mode = n.mode, n.counts and "L" or n.mode
+			out[#out + 1] = row
+		end
 	end
 	table.sort(out, function(a, b)
 		if a.official ~= b.official then return a.official end
@@ -3331,6 +3921,119 @@ function FT.StopWatching(id)
 	A().Involve("watch:" .. id, false)
 	A().Changed()
 	return true
+end
+
+---------------------------------------------------------------------------
+-- The Bones ranking (1.2.3): the month's best players from the games both players' halves agree on
+-- (the halves above), the honours' source (ArenaHome's Data.GamesRanking("bones"))
+---------------------------------------------------------------------------
+
+-- The ledger's caps, ArenaLedger's own where it is loaded (FT.RANK_CAPS otherwise).
+local function RankCap(k)
+	local LG = rawget(ns, "ArenaLedger") or ns.ArenaLedger
+	return type(LG) == "table" and tonumber(LG[k]) or FT.RANK_CAPS[k]
+end
+-- Who the ranking leaves out here: a name moderation hides, one this player blocked. (A timeout
+-- from the games, Arena.Sanctioned, stops his play, not his games played: they stay.)
+function HV.RankHides(name)
+	local M = ns.Moderation
+	if M and not M.missing and M.Hides and M.Hides(name) then return true end
+	local blocked = ns.db and ns.db.blocked
+	return type(blocked) == "table" and blocked[Low(name) or ""] ~= nil
+end
+-- What Best's list rests on besides the games: a moderation word or a verified key heard (who is
+-- hidden, who is one owner's: Debts.SameOwner), the alt links (Alts.Version), the blocked list.
+HV.word = 0
+for _, event in ipairs({ "NETOFF_CHANGED", "NETOFF_TIMED_CHANGED", "ARENA_KEY" }) do
+	ns.On(event, function() HV.word = HV.word + 1 end)
+end
+function HV.Context()
+	local Alts = ns.Alts
+	local alts = type(Alts) == "table" and type(Alts.Version) == "function" and Alts.Version() or 0
+	local blocked = 0
+	for _ in pairs(type(ns.db) == "table" and type(ns.db.blocked) == "table" and ns.db.blocked or {}) do blocked = blocked + 1 end
+	return ("%d:%d:%s:%d"):format(HV.gen, HV.word, tostring(alts), blocked)
+end
+-- [month] = { ctx, rows }: worked out again only when a game, a moderation word, a key, an alt
+-- link or the blocked list changed (no clock: an open Games tab costs nothing while none did).
+local bestCache = {}
+function FT.Best(mode, opts)
+	opts = type(opts) == "table" and opts or {}
+	if (mode or "L") ~= "L" then return {} end
+	local b = RankStore(false)
+	if not b then return {} end
+	local month = tonumber(opts.month) or MonthOf(Now(), opts.offset)
+	local ctx = HV.Context()
+	local cached = opts.offset == nil and bestCache[month]
+	if cached and cached.ctx == ctx then return cached.rows end
+	-- every game both halves agree on, its players hidden by nobody here and never one owner's
+	-- characters (the alt check, Debts.SameOwner)
+	local games, hidden, same = {}, {}, {}
+	local function Hidden(name, k)
+		if hidden[k] == nil then hidden[k] = HV.RankHides(name) end
+		return hidden[k]
+	end
+	for key, s in pairs(b.done) do
+		local r = HV.ReadDone(s)
+		local a, c = r and Low(r.p1), r and Low(r.p2)
+		if a and c and a ~= c and not Hidden(r.p1, a) and not Hidden(r.p2, c) then
+			local pk = a < c and (a .. "|" .. c) or (c .. "|" .. a)
+			if same[pk] == nil then same[pk] = Call("Debts", "SameOwner", r.p1, r.p2) == true end
+			if not same[pk] then
+				games[#games + 1] = { key = key, p1 = r.p1, p2 = r.p2, a = a, c = c, pk = pk, w = r.w, t = r.t, dur = r.dur, at = r.at }
+			end
+		end
+	end
+	-- the ledger's caps, as ArenaLedger.Counted applies them to rated fights, over every game held
+	-- (the last days of the month before count towards the pair's), in the order this client came to
+	-- hold both halves of each (its time breaking a tie): a game told late may be capped itself, but
+	-- never pushes out one counted before it (games dated back into a day already counted); a game's
+	-- day, pair window and month are its own time's. Then the month's games alone.
+	table.sort(games, function(x, y)
+		if x.at ~= y.at then return x.at < y.at end
+		if x.t ~= y.t then return x.t < y.t end
+		return x.key < y.key
+	end)
+	local minDur, dayMax, pairMax, pairSecs = RankCap("MIN_RATED_DUR"), RankCap("DAY_MAX"), RankCap("PAIR_MAX"), RankCap("PAIR_DAYS") * 86400
+	local day, pairs_, rows, byKey = {}, {}, {}, {}
+	for _, x in ipairs(games) do
+		local d = floor(x.t / 86400)
+		local da, dc = x.a .. "|" .. d, x.c .. "|" .. d
+		local ok = x.dur >= minDur and (day[da] or 0) < dayMax and (day[dc] or 0) < dayMax
+		if ok then
+			local recent = 0
+			for _, at in ipairs(pairs_[x.pk] or {}) do if abs(x.t - at) < pairSecs then recent = recent + 1 end end
+			ok = recent < pairMax
+		end
+		if ok then
+			day[da], day[dc] = (day[da] or 0) + 1, (day[dc] or 0) + 1
+			pairs_[x.pk] = pairs_[x.pk] or {}
+			table.insert(pairs_[x.pk], x.t)
+			if MonthOf(x.t, opts.offset) == month then
+				for seat, name in ipairs({ x.p1, x.p2 }) do
+					local k = seat == 1 and x.a or x.c
+					local r = byKey[k]
+					if not r then
+						r = { name = name, key = k, games = 0, won = 0, lost = 0 }
+						byKey[k], rows[#rows + 1] = r, r
+					end
+					r.games = r.games + 1
+					if x.w == tostring(seat) then r.won, r.at = r.won + 1, max(r.at or 0, x.t) else r.lost = r.lost + 1 end
+				end
+			end
+		end
+	end
+	-- most wins; a tie to fewer games, then to who reached his wins first, then by name
+	table.sort(rows, function(x, y)
+		if x.won ~= y.won then return x.won > y.won end
+		if x.games ~= y.games then return x.games < y.games end
+		local ax, ay = x.at or math.huge, y.at or math.huge
+		if ax ~= ay then return ax < ay end
+		return x.key < y.key
+	end)
+	for i, r in ipairs(rows) do r.place = i end
+	if opts.offset == nil then bestCache[month] = { ctx = ctx, rows = rows } end
+	return rows
 end
 
 ---------------------------------------------------------------------------
@@ -3748,7 +4451,10 @@ function FT.Load()
 				for _, k in ipairs(RECORD) do t[k] = rec[k] end
 				t.src = type(rec.src) == "table" and { rec.src[1], rec.src[2] } or {}
 				t.players = { t.host, t.guest }
-				t.spec = { false, false }
+				-- (each player's word on watchers, as saved; a record of 1.2.2 and before has none:
+				-- nobody relays from it, as then)
+				local spec = type(rec.spec) == "table" and rec.spec or {}
+				t.spec = { spec[1] == true, spec[2] == true }
 				t.log = {}
 				t.seat = SeatOf(t, Me())
 				tables[t.id] = t
@@ -3769,6 +4475,10 @@ function FT.Load()
 	end
 	FT.Prune()
 	Subscribe()
+	-- (1.2.3: this player's own games of the ranking said again a little after the login, both
+	-- halves, for the members who were away when they ended; nothing where he has none)
+	local b = RankStore(false)
+	if b and next(b.own) then ns.After(FT.HALVES_REPEAT_DELAY + math.random(0, 30), "bones halves", FT.RepeatHalves) end
 end
 ns.On("LOGIN", function() ns.SafeCall("farkle load", FT.Load) end)
 
@@ -3776,6 +4486,7 @@ ns.On("LOGIN", function() ns.SafeCall("farkle load", FT.Load) end)
 function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
 	tables, invitedBy, notices = {}, {}, {}
+	bestCache, HV.held, HV.repeating, HV.checking, HV.checks = {}, nil, {}, {}, 0
 	selftest, lastSelfTest = nil, nil
 	invitesSeen, invitesAsked = {}, false
 end

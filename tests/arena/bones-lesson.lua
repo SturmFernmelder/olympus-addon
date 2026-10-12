@@ -214,6 +214,9 @@ test("1.1.6 points: while the gate allows no stake, a game for fun says points, 
 	check(P(b).ask and P(b).ask:IsShown(), "the guest's pop-up")
 	eq(P(b).ask.lines[3]:GetText(), L.FARKLE_B_POINTS_FUN)
 	said[#said + 1] = P(b).ask.lines[3]:GetText()
+	-- (1.2.3: the line after it says the free game counts, decision 1, and names no bet either)
+	eq(P(b).ask.lines[4]:GetText(), L.FARKLE_B_ASK_COUNTS)
+	said[#said + 1] = P(b).ask.lines[4]:GetText()
 	-- The result card of a game for fun (a live table's: a rehearsal's says it is one).
 	local v = { id = "Kx", role = "host", seat = 1, players = { a.name, b.name }, over = true, scores = { 2100, 900 }, stake = 0, target = 2000,
 		src = { "-", "-" }, kind = "d", state = "end", game = { over = true }, winner = 1 }

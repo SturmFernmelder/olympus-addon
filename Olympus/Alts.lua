@@ -45,6 +45,9 @@ local function Clock() return ns.Data and ns.Data.ServerTime and ns.Data.ServerT
 local function Key(name) return tostring(ns.FullName(ns.Normal(name)) or name):lower() end
 Alts.Key = Key
 local function Bump() version = version + 1 end
+-- (1.2.3) What the links rest on changed since a reader last looked when this number did (the
+-- Bones ranking keeps its list until then).
+function Alts.Version() return version end
 
 -- A character's name as the server writes it ("First Surname-Realm"), a short one on `realm`;
 -- nil if it can't be one.
