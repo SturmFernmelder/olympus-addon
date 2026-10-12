@@ -316,12 +316,12 @@ from it.
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
-`<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
-reach his own guild alone, as guild decrees, and so do his and his officers' Calls to Arms and
-Musters (the same alarm, sound and marker, for his guild's members alone): no guild master has
-a decree for the whole army, and every client refuses one of theirs sent to it, a 1.2.2
-officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
+For decrees *the Crown* means the King, his Steward and the officers of the main `<Olympus>`
+guild (a Hand sends them as one of its officers). Since 1.2.3 any other guild master's Royal
+decree and Tabard inspection reach his own guild alone, as guild decrees, and so do his and his
+officers' Calls to Arms and Musters (the same alarm, sound and marker, for his guild's members
+alone): no guild master has a decree for the whole army, and every client refuses one of
+theirs sent to it, a 1.2.2 officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
 officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
 names them. On every other client its Crown is the King himself (by his character's name) and
 the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its

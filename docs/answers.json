@@ -1037,7 +1037,7 @@
         "What's a Call to arms?",
         "How do I send a muster?"
       ],
-      "answer": "The Crown (the King, his Steward and Hands, the officers of <Olympus>) sends the army a Call to arms (alarm and map marker) or a Muster (30-minute rally point); another guild's officers call their own guild alone. Royal decrees: the Crown and the High Council. Others get a preview: /oly arms test.",
+      "answer": "The Crown (the King, his Steward, <Olympus>'s officers; other guilds hear those named Hands) sends the army a Call to arms (alarm, map marker) or a Muster (30-minute rally point); another guild's officers call their own guild alone. Royal decrees: the Crown and the High Council. Others get a preview: /oly arms test.",
       "in_game": "The Crown calls the army: Call to arms (/oly arms) or Muster (/oly muster); another guild's officers call their own guild alone. Add test for a preview only you see.",
       "sources": [
         "README.md: Decrees"

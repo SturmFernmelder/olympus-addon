@@ -276,7 +276,7 @@ ns.ANSWER_BANK = {
 		{ id = "feat-decrees", topic = "features",
 			q = { "What's a Call to arms?", "How do I send a muster?" },
 			text = "The Crown calls the army: Call to arms (/oly arms) or Muster (/oly muster); another guild's officers call their own guild alone. Add test for a preview only you see.",
-			long = "The Crown (the King, his Steward and Hands, the officers of <Olympus>) sends the army a Call to arms (alarm and map marker) or a Muster (30-minute rally point); another guild's officers call their own guild alone. Royal decrees: the Crown and the High Council. Others get a preview: /oly arms test." },
+			long = "The Crown (the King, his Steward, <Olympus>'s officers; other guilds hear those named Hands) sends the army a Call to arms (alarm, map marker) or a Muster (30-minute rally point); another guild's officers call their own guild alone. Royal decrees: the Crown and the High Council. Others get a preview: /oly arms test." },
 		{ id = "feat-alert-sounds", topic = "features",
 			q = { "How do I turn off the alert sounds?", "Why didn't I get the raid warning in my dungeon?" },
 			text = "Type /oly sound off for all, or /oly sound <kind> off. In instances alerts wait; /oly alerts always shows them at once.",

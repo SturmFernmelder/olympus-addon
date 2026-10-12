@@ -32010,6 +32010,23 @@ do
 					eq(#dialogs, 3); eq(dialogs[3].a, L.ROYAL)
 					eq(Detail(), L.YOU_ARE_CROWN)
 					Calls({ L.ARMS_BTN, L.MUSTER_BTN }, { L.ARMS_BTN_TIP, L.MUSTER_BTN_TIP }, { L.ARMS, L.MUSTER })
+					-- (1.2.3) A member of <Olympus> below its officers whom the King names his Hand: his
+					-- Calls to Arms and Musters are still a preview (a Hand sends the Crown's decrees as
+					-- one of its officers, as before), and the tips no longer list the Hands as having them.
+					local K, savedShow = ns.King, StaticPopup_Show
+					StaticPopup_Show = function() end
+					local okHand, errHand = pcall(function()
+						K.Reset()
+						K.HandleCommand("CHANNEL", ns.KingCharacter() .. "-Realm", "T1~H~8~Olympus~Tester-Realm")
+						eq(K.IsHand(), true, "the King's Hand")
+						As("Olympus", 3)
+						eq(ns.Decree.Scope("ARMS"), nil)
+						Calls({ L.ARMS_BTN, L.MUSTER_BTN }, { L.ARMS_BTN_TIP .. "\n" .. L.DECREE_PREVIEW_NOTE, L.MUSTER_BTN_TIP .. "\n" .. L.DECREE_PREVIEW_NOTE },
+							nil, L.DECREE_PREVIEW_NOTE)
+					end)
+					K.Reset()
+					StaticPopup_Show = savedShow
+					if not okHand then error(errHand, 0) end
 					-- A High Councillor: the whole army's Royal decrees and Tabard inspections.
 					ns.rdb.council = { names = { ["tester"] = true } }
 					eq(As("Olympus II", 3):GetText(), L.ROYAL_BTN); eq(Detail(), L.YOU_ARE_COUNCIL_DECREES)
@@ -32043,6 +32060,14 @@ do
 			-- (1.2.3) Nor is a Call to Arms every guild's officers' to the whole army.
 			for _, key in ipairs({ "ARMS_BTN_TIP", "MUSTER_BTN_TIP" }) do
 				assert(not L[key]:find("Captains only", 1, true) and not rawget(pt.L, key):find("Só Capitães", 1, true), key)
+			end
+			-- (1.2.3) The Crown's whole-army decrees are the King's, his Steward's and the officers of
+			-- <Olympus>'s: the Hands are no group of their own in the tips (one who is no officer of
+			-- <Olympus> only previews), and the other guilds hear the officers named Hands.
+			for _, key in ipairs({ "CROWN_ONLY", "ARMS_BTN_TIP", "MUSTER_BTN_TIP" }) do
+				assert(not L[key]:find("Steward and Hands", 1, true) and L[key]:find("the King, his Steward and the officers of <Olympus>; the other guilds hear those named Hands", 1, true), key)
+				local v = rawget(pt.L, key)
+				assert(not v:find("as Mãos dele", 1, true) and v:find("o Senescal e os o", 1, true) and v:find("as outras guildas ouvem os que forem nomeados Mãos", 1, true), key .. " in pt-BR")
 			end
 			assert(not L.YOU_ARE_GUILD_LORD:find("for the army", 1, true) and not rawget(pt.L, "YOU_ARE_GUILD_LORD"):find("convoca o exército", 1, true),
 				"a guild master's calls are no longer the army's")
