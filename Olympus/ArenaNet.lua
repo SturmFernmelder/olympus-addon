@@ -1403,8 +1403,11 @@ function Arena.Handle(kind, fn)
 		if not Accepts(kind, mode, dist) then Count(stats.dropped, Arena.TestBuild() and "live-in-test" or "lane") return end
 		-- (L while this realm's live switch is off: refused here as Refusal refuses it going out, a
 		-- modified client's too; a free game's types never, 1.2.3. The switch itself is the King's
-		-- T1, not an arena type.)
-		if mode == "L" and not (Arena.OBLIGATIONS[kind] or Arena.LIVE_EXEMPT[kind] or Arena.MAY_OBLIGE[kind] or Arena.FREE_TYPES[kind]) then
+		-- T1, not an arena type. The pieces' envelope EP is never asked here (1.2.3, the review: a
+		-- free type's long message, a best of 3's signed half or a clerk's relay, goes as EP pieces
+		-- in L and was dropped before it was whole): OnPiece hands the whole payload to its own
+		-- type's wrapper, which asks again for that type, the switch included.)
+		if mode == "L" and kind ~= "EP" and not (Arena.OBLIGATIONS[kind] or Arena.LIVE_EXEMPT[kind] or Arena.MAY_OBLIGE[kind] or Arena.FREE_TYPES[kind]) then
 			local R = Roles()
 			if not (R and R.Live and R.Live()) then Count(stats.dropped, "live-off") return end
 		end

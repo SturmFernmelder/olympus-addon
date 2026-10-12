@@ -22,14 +22,37 @@ local function Printed(c, text)
 end
 local function GK(c) return c.ns.Arena.GK(c.guid) end
 
+-- The game's GetPlayerInfoByGUID on a client: the world's characters by their GUID (a real
+-- character's resolves; a GUID nobody has gives nothing), as the client gives it: the realm left
+-- empty for one's own. (1.2.3, the review: a duel is rated on a client only once the game there
+-- pairs each fighter's name with his GUID, ArenaLedger's Bound; see the in-game checks.)
+local function Info(w, c)
+	c.globals.GetPlayerInfoByGUID = function(guid)
+		for _, o in ipairs(w.clients) do
+			if o.guid == guid then return "Warrior", "WARRIOR", "Human", "Human", 2, o.short, o.realm ~= c.realm and o.realm or "" end
+		end
+		return nil
+	end
+end
+
 -- A world as 1.2.3 ships (no wager anywhere, the Wallet off) with the King's live switch OFF
 -- unless opts.live; the two fighters target each other and read their own race (the weigh-in's
--- facts). opts.more: more clients, as W3.New's.
+-- facts). opts.more: more clients, as W3.New's. Every client, the ones made later too, has the
+-- game's GetPlayerInfoByGUID (Info) unless opts.info == false.
 local function World123(opts)
 	opts = opts or {}
 	local w, cast = W3.New({ live = opts.live == true, world = { compliance = opts.compliance or "shipped" }, more = opts.more })
 	cast.A.target, cast.B.target = cast.B.name, cast.A.name
 	for _, c in ipairs({ cast.A, cast.B }) do c.globals.UnitRace = function() return "Human", "Human", 1 end end
+	if opts.info ~= false then
+		for _, c in ipairs(w.clients) do Info(w, c) end
+		local client = w.Client
+		w.Client = function(self, ...)
+			local c = client(self, ...)
+			Info(self, c)
+			return c
+		end
+	end
 	return w, cast
 end
 -- A challenge from a to b (the fighters by default), agreed: its oid.
@@ -271,6 +294,15 @@ test("1.2.3 two halves: a member who was offline gets them from a clerk (a High 
 	local sig = w:As(clerk, clerk.ns.Debts.Sign, "OLYH1|" .. core)
 	local _, pk = w:As(clerk, clerk.ns.Debts.MyKey)
 	local forged = core .. "~" .. clerk.ns.Debts.B64(pk) .. "~" .. clerk.ns.Debts.B64(sig)
+	-- (The review: a key is pinned only once its own half's signature checked, so on a client with
+	-- the companion, where the halves are matched and checked. A client without it still refuses
+	-- the forged one: its fighter's own half holds that side, "conflict".)
+	w:As(clerk, clerk.ns.Arena.Send, "AX", "L", forged, { to = cast.spectator.name })
+	w:Run(0)
+	eq((cast.spectator.ns.ArenaLedger.Stats().refused.conflict or 0) >= 1, true, "no companion: its fighter's own half holds his side")
+	W3.Companion(w, cast.spectator)
+	w:Run(0)
+	eq(#Ledger(w, cast.spectator).Entries(), 1, "the halves that waited, checked")
 	w:As(clerk, clerk.ns.Arena.Send, "AX", "L", forged, { to = cast.spectator.name })
 	w:Run(0)
 	eq((cast.spectator.ns.ArenaLedger.Stats().refused.pin or 0) >= 1, true, "the spectator heard the real key first-hand")
@@ -545,4 +577,309 @@ test("1.2.3 bug 13: the words say what counts (English and pt-BR): direct duels 
 		local tab = Text(home, "ARENA_TAB_LIVE_OFF", which)
 		eq(tab:find("rehearsals", 1, true) or tab:find("ensaios", 1, true), nil, "events no longer run as rehearsals")
 	end
+end)
+
+-- (1.2.3, the review of v123/duels: three reviewers' findings, each test failing on that branch's
+-- 44e582e and on e04dd45.)
+print("1.2.3: the review of the duels")
+
+-- A half as a modified client makes it: the fields given, signed with the sender's own account key
+-- (Debts.lua's, as LG.Publish signs). o: { fid, side, gkA, A, gkB, B, bo, w, m, dur, t, lvl, opp }.
+local function Forge(w, c, o)
+	local A = c.ns.Arena
+	local m = o.m or "K"
+	local core = table.concat({ o.fid, o.side, o.gkA, o.A, o.gkB, o.B, tostring(o.bo or 1), o.cat or "A", o.w, m,
+		o.rounds or (o.w .. m .. A.B36(o.dur or 20)), A.B36(o.t or w.clock), o.facts or "-", o.lvl or "60", o.opp or "60" }, "~")
+	local sig = w:As(c, c.ns.Debts.Sign, "OLYH1|" .. core)
+	local _, pk = w:As(c, c.ns.Debts.MyKey)
+	return core .. "~" .. c.ns.Debts.B64(pk) .. "~" .. c.ns.Debts.B64(sig)
+end
+-- A half sent as that client sends it: on the channel, or whispered to `to`.
+local function SendHalf(w, c, body, to)
+	assert(w:As(c, c.ns.Arena.Send, "AX", "L", body, { to = to and to.name or nil }))
+	w:Run(0)
+end
+-- A fake duel between a and b, each half signed and sent by its own fighter (two modified clients):
+-- o as Forge's, its sides' names and gks a's and b's own unless o says otherwise.
+local function FakeDuel(w, a, b, o, to)
+	local f = {}
+	for k, v in pairs(o) do f[k] = v end
+	f.A, f.B = f.A or a.name, f.B or b.name
+	f.gkA, f.gkB = f.gkA or GK(a), f.gkB or GK(b)
+	f.side = "A"
+	local ha = Forge(w, a, f)
+	f.side = "B"
+	local hb = Forge(w, b, f)
+	SendHalf(w, a, ha, to)
+	SendHalf(w, b, hb, to)
+	return ha, hb
+end
+local function Refused(c, why) return c.ns.ArenaLedger.Stats().refused[why] or 0 end
+-- The game knows nobody on this client (GetPlayerInfoByGUID gives nothing yet).
+local function Unknown(c) c.globals.GetPlayerInfoByGUID = function() return nil end end
+
+test("1.2.3 review: a best of 3 free duel with the live switch off reaches a third client (its halves go as EP pieces), and a piece's inner type still asks for the switch", function()
+	local w, cast = World123()
+	local sp = cast.spectator
+	W3.Companion(w, sp)
+	local oid = Agreed(w, cast, { bo = 3 })
+	Round(w, cast, cast.A, cast.B, 25)
+	w:Run(30)
+	Round(w, cast, cast.A, cast.B, 25)
+	w:Run(5)
+	eq(State(w, cast.A, oid), "F"); eq(State(w, cast.B, oid), "F")
+	eq(#Fight(cast.A, oid).half > 240, true, "a best of 3's half is longer than one message's room")
+	eq(#w:Sent{ from = cast.A, type = "EP" } >= 2, true, "so it went as pieces")
+	local list = Ledger(w, sp).Entries()
+	eq(#list, 1, "the third client has it"); eq(list[1].fid, oid); eq(list[1].sc, "2:0"); eq(list[1].fl, "dr")
+	eq(sp.ns.Arena.Stats().dropped["live-off"], nil, "nothing dropped as live-off")
+	-- Pieces of a type that waits for the switch (an arbiter's AE): whole, then dropped by its own wrapper.
+	local before = sp.ns.Arena.Stats()
+	local assembled, off = before.assembled, before.dropped["live-off"] or 0
+	local whole = "AE~L1~" .. ("x"):rep(300)
+	sp.ns.Arena.Inject("CHANNEL", cast.A.name, ("EP~L1~zz1~1~2~%s"):format(whole:sub(1, 200)))
+	sp.ns.Arena.Inject("CHANNEL", cast.A.name, ("EP~L1~zz1~2~2~%s"):format(whole:sub(201)))
+	local after = sp.ns.Arena.Stats()
+	eq(after.assembled, assembled + 1, "the pieces were put together")
+	eq(after.dropped["live-off"], off + 1, "and the AE inside them still waits for the switch")
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a fighter whose client reads the other's level as ?? (-1) at the line: his half names none, and the duel is in a third client's history, not rated", function()
+	local w, cast = World123()
+	local sp = cast.spectator
+	W3.Companion(w, sp)
+	local oid = Agreed(w, cast)
+	-- (B's client: A's unit shows ?? once the duel is on, the game's skull for a hostile character
+	-- 10 or more levels above.)
+	local base = cast.B.globals.UnitLevel
+	cast.B.globals.UnitLevel = function(unit) if unit == "player" then return base(unit) end return -1 end
+	Round(w, cast, cast.A, cast.B, 25)
+	local fields = {}
+	for part in (assert(Fight(cast.B, oid).half) .. "~"):gmatch("([^~]*)~") do fields[#fields + 1] = part end
+	eq(fields[15], "-", "B's half names no level for A")
+	local list = Ledger(w, sp).Entries()
+	eq(#list, 1, "in the history"); eq(list[1].fl, "d", "not rated: B never saw A's level")
+	eq(Refused(sp, "level"), 0)
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a creature's fight that ends 20 s before the duel is not the duel's clock; the two clocks agree and the duel counts", function()
+	local w, cast = World123()
+	local sp = cast.spectator
+	W3.Companion(w, sp)
+	local oid = Agreed(w, cast)
+	w:Combat(cast.B, true); w:Run(40); w:Combat(cast.B, false); w:Run(20)
+	Round(w, cast, cast.A, cast.B, 25)
+	eq(Fight(cast.A, oid).reports[1].A.dur, 25)
+	eq(Fight(cast.B, oid).reports[1].B.dur, 25, "B's clock started again with the duel")
+	local list = Ledger(w, sp).Entries()
+	eq(#list, 1); eq(list[1].dur, 25); eq(Refused(sp, "times"), 0)
+	-- A combat that flickers inside the duel (dropped and taken again within COMBAT_GAP) keeps it.
+	local two = Agreed(w, cast)
+	w:Combat(cast.A, true); w:Combat(cast.B, true)
+	w:Run(10)
+	w:Combat(cast.A, false); w:Combat(cast.B, false)
+	w:Run(cast.A.ns.ArenaFights.COMBAT_GAP - 1)
+	Round(w, cast, cast.A, cast.B, 10)
+	eq(Fight(cast.A, two).reports[1].A.dur, 10 + cast.A.ns.ArenaFights.COMBAT_GAP - 1 + 10)
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a challenger who reloads before the yes (his AF never comes) keeps the pair busy only for the yes's short wait, not 30 minutes", function()
+	local w, cast = World123()
+	local F = cast.A.ns.ArenaFights
+	local oid = assert(Fights(w, cast.A).Challenge(cast.B.name, { bo = 1 }))
+	w:Run(0)
+	w:Logout(cast.A)
+	w:Login(cast.A)
+	W3.Rules(w, cast.A)
+	assert(Fights(w, cast.B).Answer(oid, true))
+	w:Run(5)
+	eq(Fight(cast.B, oid), nil, "no fight on B's side: A's client no longer knew the challenge")
+	eq(select(2, Fights(w, cast.B).CanChallenge(cast.A.name, {})), "busy", "the yes still waits for A's AF")
+	w:Run(F.CHALLENGE_TIME + F.CHALLENGE_SLACK)
+	eq(Fights(w, cast.B).CanChallenge(cast.A.name, {}), true, "B is free again")
+	local again = assert(Fights(w, cast.A).Challenge(cast.B.name, { bo = 1 }))
+	w:Run(0)
+	eq(cast.A.ns.ArenaFights.challenges[again].state, "asked", "A's new challenge is not answered busy")
+	assert(Fights(w, cast.B).Answer(again, true))
+	w:Run(0)
+	eq(State(w, cast.B, again), "S", "and it makes the fight")
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a clerk who logs in after the fighters' repeats still gets their duel (each fighter's own half to him), and a member after him from his carousel", function()
+	local w, cast = World123()
+	local F = cast.A.ns.ArenaFights
+	local oid = Agreed(w, cast)
+	Round(w, cast, cast.A, cast.B)
+	w:Run(F.HALF_FOR + 3600) -- (no clerk online: nobody keeps it for later logins)
+	local clerk = w:Client(N.councillor)
+	W3.Rules(w, clerk)
+	W3.Companion(w, clerk)
+	w:Run(cast.A.ns.ArenaLedger.CLERK_WAIT + 120)
+	local list = Ledger(w, clerk).Entries()
+	eq(#list, 1, "the fighters' own halves reached the clerk"); eq(list[1] and list[1].fid, oid); eq(list[1] and list[1].fl, "dr")
+	local late = w:Client("Idris Fold")
+	W3.Rules(w, late)
+	W3.Companion(w, late)
+	w:Run(cast.A.ns.ArenaLedger.CAROUSEL_GAP + 600)
+	eq(#Ledger(w, late).Entries(), 1, "and the clerk's carousel brought it to a later member")
+	-- (A fighter's own half goes to a clerk once a session, and never past HALF_LATE.)
+	local sent = #w:Sent{ from = cast.A, type = "AX" }
+	w:Run(cast.A.ns.ArenaLedger.DIGEST_EVERY + 200)
+	eq(#w:Sent{ from = cast.A, type = "AX" }, sent, "not again to the same clerk")
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: two modified clients writing a duel onto another member's GUID: refused where the game knows him, history only (never rated) where it does not yet, gone once it does", function()
+	local w, cast = World123({ more = { { "C", N.bettor2 }, { "D", N.bettor3 } } })
+	local sp, C, D, victim = cast.spectator, cast.C, cast.D, cast.A
+	W3.Companion(w, sp)
+	-- C writes himself as side A with the victim's gk; D signs the other half; D wins.
+	FakeDuel(w, C, D, { fid = "Fzz1", gkA = GK(victim), w = "B", dur = 20 })
+	eq(#Ledger(w, sp).Entries(), 0, "the game gives that GUID another character: refused")
+	eq(Refused(sp, "gk") >= 1, true)
+	eq(Ledger(w, sp).Record(GK(victim)).losses, 0)
+	-- Where the game knows nobody yet: kept for the history alone, never rated.
+	local w2, c2 = World123({ info = false, more = { { "C", N.bettor2 }, { "D", N.bettor3 } } })
+	local sp2, victim2 = c2.spectator, c2.A
+	W3.Companion(w2, sp2)
+	FakeDuel(w2, c2.C, c2.D, { fid = "Fzz1", gkA = GK(victim2), w = "B", dur = 20 })
+	local list = Ledger(w2, sp2).Entries()
+	eq(#list, 1); eq(list[1].fl, "d", "not rated"); eq(list[1].wait, "r")
+	eq(Ledger(w2, sp2).Record(GK(victim2)).losses, 0, "the victim's record stays empty")
+	eq(#Ledger(w2, sp2).RankingView("all", "A", 1).rows, 0, "nobody ranked")
+	-- The game answers later: that GUID is the victim's, so the entry goes.
+	Info(w2, sp2)
+	w2:Run(sp2.ns.ArenaLedger.GK_RECHECK + 1)
+	eq(#Ledger(w2, sp2).Entries(), 0, "gone once the game names its GUID's character")
+	-- An honest duel heard where the game knows nobody yet: history first, rated once it does.
+	local w3, c3 = World123()
+	local sp3 = c3.spectator
+	W3.Companion(w3, sp3)
+	Unknown(sp3)
+	Agreed(w3, c3)
+	Round(w3, c3, c3.A, c3.B)
+	eq(Ledger(w3, sp3).Entries()[1].fl, "d", "not rated yet")
+	eq(Ledger(w3, sp3).Record(GK(c3.A)).wins, 0)
+	Info(w3, sp3)
+	w3:Run(sp3.ns.ArenaLedger.GK_RECHECK + 1)
+	eq(Ledger(w3, sp3).Entries()[1].fl, "dr", "rated once the game pairs both")
+	eq(Ledger(w3, sp3).Record(GK(c3.A)).wins, 1)
+	W3.NoErrors(w)
+	W3.NoErrors(w2)
+	W3.NoErrors(w3)
+end)
+
+test("1.2.3 review: halves dated earlier and sent later never push a fighter's counted duel out of the day's limit, and a first-hand half from the past is refused", function()
+	local w, cast = World123({ more = { { "C", N.bettor2 } } })
+	local sp, A, B, C = cast.spectator, cast.A, cast.B, cast.C
+	W3.Companion(w, sp)
+	sp.ns.ArenaLedger.DAY_MAX = 2 -- (a smaller real cap: stands for 10)
+	local real = Agreed(w, cast)
+	Round(w, cast, A, B, 25)
+	eq(Ledger(w, sp).Record(GK(A)).wins, 1, "A's real win counts")
+	w:Run(60)
+	-- B, the loser, and a friend: two duels dated 15 and 20 minutes before the real one.
+	FakeDuel(w, C, B, { fid = "Fzz2", w = "B", t = w.clock - 20 * 60 })
+	FakeDuel(w, C, B, { fid = "Fzz3", w = "B", t = w.clock - 15 * 60 })
+	local list = Ledger(w, sp).Entries()
+	eq(#list, 3)
+	local counts = w:As(sp, sp.ns.ArenaLedger.Counted, list)
+	eq(counts[real], true, "the real duel, kept first, keeps its place")
+	eq(Ledger(w, sp).Record(GK(A)).wins, 1, "B did not erase his loss")
+	eq(counts.Fzz2 and counts.Fzz3, false, "one of them is past B's day")
+	-- A first-hand half older than the fighters' repeats: refused ("late"); a clerk takes it up to HALF_LATE.
+	local LG = sp.ns.ArenaLedger
+	FakeDuel(w, C, B, { fid = "Fzz4", w = "B", t = w.clock - LG.HalfFresh() - 60 })
+	eq(#Ledger(w, sp).Entries(), 3, "not kept")
+	eq(Refused(sp, "late") >= 2, true)
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a pair naming a new made-up GUID for every duel cannot fill the book: a day's duel entries are counted per fighter's name and key", function()
+	local w, cast = World123({ more = { { "C", N.bettor2 }, { "D", N.bettor3 } } })
+	local sp, C, D = cast.spectator, cast.C, cast.D
+	W3.Companion(w, sp)
+	sp.ns.ArenaLedger.DUEL_KEEP_DAY = 3 -- (a smaller real cap: stands for 30)
+	for i = 1, 5 do
+		local A = C.ns.Arena
+		FakeDuel(w, C, D, { fid = "Fmint" .. i, w = "A", dur = 20, gkA = A.GK(("Player-4999-00ABC%03X"):format(i)),
+			gkB = A.GK(("Player-4999-00DEF%03X"):format(i)) })
+	end
+	eq(#Ledger(w, sp).Entries(), 3, "DUEL_KEEP_DAY a day for those two names")
+	eq(Refused(sp, "duel-day"), 2)
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: a made-up half never blocks a late member's catch-up: no key pinned from an unchecked half, and every pair of a fight's halves is tried", function()
+	for _, how in ipairs({ "pin", "slots", "full" }) do
+		local w, cast = World123({ more = { { "councillor", N.councillor }, { "C", N.bettor2 } } })
+		local clerk, C = cast.councillor, cast.C
+		W3.Companion(w, clerk)
+		local oid = Agreed(w, cast)
+		Round(w, cast, cast.A, cast.B)
+		local ax = {}
+		for _, p in ipairs(w:As(clerk, clerk.ns.ArenaLedger.Pieces, "L")) do if p[1] == "AX" then ax[#ax + 1] = p[2] end end
+		eq(#ax, 2)
+		local late = w:Client("Idris Fold")
+		Unknown(late)
+		W3.Rules(w, late)
+		W3.Companion(w, late)
+		if how == "pin" then
+			-- C names himself side A of another fight with Torvin's gk (the game here knows nobody yet).
+			SendHalf(w, C, Forge(w, C, { fid = "Fzz5", side = "A", A = C.name, gkA = GK(cast.A), B = cast.spectator.name, gkB = GK(cast.spectator), w = "A" }), late)
+		elseif how == "slots" then
+			-- C takes both sides of the real fight's id first: himself as A against Selka, and as B against Torvin.
+			SendHalf(w, C, Forge(w, C, { fid = oid, side = "A", A = C.name, gkA = GK(C), B = cast.B.name, gkB = GK(cast.B), w = "A" }), late)
+			SendHalf(w, C, Forge(w, C, { fid = oid, side = "B", A = cast.A.name, gkA = GK(cast.A), B = C.name, gkB = GK(C), w = "A" }), late)
+		else
+			-- As many characters as a side has room for (HALF_CANDIDATES), each naming himself its side A.
+			local names = { "Doran Pike", "Mirel Ash", "Tobin Reed", "Ysa Lorn", "Garet Moss", "Hollis Fenwick" }
+			for i = 1, late.ns.ArenaLedger.HALF_CANDIDATES do
+				local x = i == 1 and C or w:Client(names[i - 1])
+				W3.Rules(w, x)
+				SendHalf(w, x, Forge(w, x, { fid = oid, side = "A", A = x.name, gkA = GK(x), B = cast.B.name, gkB = GK(cast.B), w = "A" }), late)
+			end
+		end
+		for _, body in ipairs(ax) do w:As(clerk, clerk.ns.Arena.Send, "AX", "L", body, { to = late.name }) end
+		w:Run(0)
+		local list = Ledger(w, late).Entries()
+		eq(#list, 1, how .. ": the real duel caught up"); eq(list[1] and list[1].fid, oid); eq(list[1] and list[1].w, "A")
+		eq(Refused(late, "pin"), 0, how); eq(Refused(late, "conflict"), 0, how)
+		W3.NoErrors(w)
+	end
+end)
+
+test("1.2.3 review: with the live switch off and no arbiters, a clerk's carousel piece carrying an arbiter's entry is refused", function()
+	local w, cast = World123({ more = { { "councillor", N.councillor } } })
+	local sp, hc = cast.spectator, cast.councillor
+	W3.Companion(w, sp)
+	local LG, A = hc.ns.ArenaLedger, hc.ns.Arena
+	local e = { season = 1, fid = "Fab1", t = w.clock, cat = "A", bo = 1, gkA = GK(cast.A), A = cast.A.name, gkB = GK(cast.B), B = cast.B.name,
+		sc = "1:0", w = "A", m = "K", dur = 60, gkArb = A.GK("Player-4999-00ABCDEF"), fl = "r" }
+	local text = w:As(hc, LG.Encode, e):gsub("^[^~]*~", "", 1)
+	assert(w:As(hc, A.Send, "AB", "L", table.concat({ "P", A.B36(1), A.B36(0), "1", "1", text }, "~")))
+	w:Run(0)
+	eq(#Ledger(w, sp).Entries(), 0, "no arbiter's entry while there are none")
+	eq(Ledger(w, sp).Record(GK(cast.A)).wins, 0)
+	eq(Refused(sp, "live-off"), 1)
+	W3.NoErrors(w)
+end)
+
+test("1.2.3 review: ArenaProfile.VerifyGk reads WoW: Forever's GetPlayerInfoByGUID as Debts.InfoName does (the surname where the realm goes)", function()
+	local w, cast = World123()
+	local sp, A = cast.spectator, cast.A
+	sp.ns.splitNames = true
+	local first, surname = A.short:match("^(%S+) (%S+)$")
+	sp.globals.GetPlayerInfoByGUID = function(guid) if guid == A.guid then return "Warrior", "WARRIOR", "Human", "Human", 2, first, surname end end
+	eq(w:As(sp, sp.ns.ArenaProfile.VerifyGk, A.name, GK(A)), true, "First + Surname is the fighter")
+	eq(w:As(sp, sp.ns.ArenaProfile.VerifyGk, cast.B.name, GK(A)), false, "and nobody else")
+	-- A realm of ours stays a realm.
+	sp.globals.GetPlayerInfoByGUID = function(guid) if guid == A.guid then return "Warrior", "WARRIOR", "Human", "Human", 2, A.short, World.REALMS[2] end end
+	eq(w:As(sp, sp.ns.ArenaProfile.VerifyGk, A.short .. "-" .. World.REALMS[2], GK(A)), true)
+	sp.ns.splitNames = nil
+	W3.NoErrors(w)
 end)

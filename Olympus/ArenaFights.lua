@@ -67,7 +67,8 @@ F.CHALLENGE_SLACK = 30  -- ...and the challenger hears that it went nowhere this
 F.DIRECT_EXPIRE = 1800  -- an agreed duel not fought, or a best-of left between rounds, this long: over
 F.AW_RESEND = 60        -- a fighter's own report again this often while the other's is missing
 F.AW_ANSWER = 20        -- a repeat of the other's report is answered with ours at most this often
-F.COMBAT_GAP = 30       -- out of combat this long before the next combat: the duel's clock starts again
+F.COMBAT_GAP = 3        -- out of combat longer than this before the next combat: the duel's clock starts again
+                        -- (the review: 30 s merged a creature's fight that ended 20 s before the duel)
 F.SEE_EVERY = 3         -- the opponent's unit looked for this often while the duel is on (his level, guild, GUID)
 F.DEATH_WINDOW = 120    -- a death of a fighter's own this close before his duel line: something else killed him
 F.QUAL_WAIT = 3         -- after a confirmed win, the qualification's word waits for the game's DUEL_FINISHED
@@ -1825,7 +1826,14 @@ F.SendDirectAW = SendDirectAW
 -- (1.2.3, bug 9) The duel's clock: it starts with this fighter's combat (PLAYER_REGEN_DISABLED)
 -- while his duel is agreed or between rounds, and again after COMBAT_GAP out of combat (a fight
 -- with a creature before the duel is not the duel); it stops at his duel line. No combat seen: the
--- length is unknown, never the time since the challenge.
+-- length is unknown, never the time since the challenge. (The review: a peace of a few seconds is
+-- enough, as the game gives no event when a duel begins. Asking for one, accepting it and its
+-- three seconds' count take longer than COMBAT_GAP, while a combat that only flickers inside the
+-- duel, dropped and taken again within it, keeps its clock; a peace inside the duel longer than that
+-- starts the clock again, on both fighters' clients about together, as a duel's combat drops on
+-- both sides within seconds (the halves take the shorter clock). With 30 s, a creature's fight that
+-- ended 20 s before the duel was one fighter's round, and the two clocks too far apart made the
+-- halves refuse each other, "times".)
 function F.Combat(on)
 	local now = Now()
 	for _, f in ipairs(All("fights")) do
@@ -2499,11 +2507,15 @@ F.Salt = Salt
 
 -- (1.2.3) Whether a challenge still waits on its answer (asked within CHALLENGE_TIME, and its
 -- slack on the challenger's side) or on its fight (agreed, the challenger's AF not here yet, within
--- DIRECT_EXPIRE). One that waited longer went nowhere.
+-- CHALLENGE_TIME and its slack of our yes). One that waited longer went nowhere. (The review: an
+-- agreed one waited DIRECT_EXPIRE, so a challenger who reloaded or went offline before our yes,
+-- whose AF never comes, kept the pair "busy" for 30 minutes on both sides with no fight on either.
+-- His AF is an urgent whisper his client repeats every minute, REPEAT_NEAR, so it comes within
+-- this wait; one that comes later still makes the fight, F.TakeDirect.)
 local function Pending(c, now)
 	now = now or Now()
 	if c.state == "asked" then return now - (c.t or 0) < F.CHALLENGE_TIME + (c.incoming and 0 or F.CHALLENGE_SLACK) end
-	if c.state == "yes" then return now - (c.t or 0) < F.DIRECT_EXPIRE end
+	if c.state == "yes" then return now - (c.yesAt or c.t or 0) < F.CHALLENGE_TIME + F.CHALLENGE_SLACK end
 	return false
 end
 F.Pending = Pending
@@ -2681,6 +2693,7 @@ function F.Answer(oid, yes, why)
 	local sent, whySend = Arena.Send("AS", c.mode, body, { to = c.A, urgent = true })
 	if not sent then return false, whySend or "send" end
 	c.state = yes and "yes" or "no"
+	if yes then c.yesAt = Now() end
 	Arena.Changed()
 	return true
 end
@@ -2827,7 +2840,7 @@ local function OnSign(dist, sender, mode, body)
 			end
 			c.theirIou = WireField(iou)
 		end
-		c.state = "yes"
+		c.state, c.yesAt = "yes", now
 		if c.how == "d" then StartDirect(c) else F.AskArbiter(oid, c.arbiter) end
 		ns.Fire("ARENA_CHALLENGE", oid)
 	elseif what == "Q" then

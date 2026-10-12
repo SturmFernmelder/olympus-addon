@@ -2563,9 +2563,13 @@ publishes its signed half of the duel it confirmed (AX, signed with the account 
 other client counts the duel only when both halves match (the fight, the pair, the winner, the
 method, the rounds, their lengths and times within a tolerance); one half alone, two that differ,
 or one account on both sides never count. The ledger's limits apply as to any entry (15 s a
-round, a fighter's 10 a day, a pair's 3 in 7 days), and a member who was offline gets the halves
-from the clerk's carousel (`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel
-counts whatever the King's live switch says: that switch is the bets' alone.
+round, a fighter's 10 a day, a pair's 3 in 7 days, filled in the order the entries arrived), and a
+member who was offline gets the halves from the clerk's carousel; a clerk who was offline too gets
+each fighter's own half from him later (up to a day). A client rates the duel only once the game
+there pairs each fighter's name with his GUID (a unit in view, or `GetPlayerInfoByGUID`); until
+then it is in the history alone, and it goes if the game names another character
+(`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel counts whatever the King's
+live switch says: that switch is the bets' alone.
 **Find a player** (`Olympus/ArenaMatch.lua`, the Find in the Arena and in the Bones window): each
 game has its own Find, a duel's or a Bones game's, so the game is the one it was opened from; a
 duel filters by level (Any, within 5 or within 10 of the player's own); both filter by distance (Nearby: the
