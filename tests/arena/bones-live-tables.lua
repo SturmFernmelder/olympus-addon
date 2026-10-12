@@ -4,7 +4,8 @@
 -- notice three minutes). The triple check of 1.2.2 (bug 6): the live record kept neither player's
 -- yes to watchers (spec), so after a /reload that player stopped announcing his table (both
 -- reloaded: gone from the member's list within three minutes), ignored a watcher's ask, and his
--- Play again opened the next table closed to watchers for both players.
+-- Play again opened the next table closed to watchers for both players. Practice against the
+-- House is never announced, by design (nothing of it is sent), and the empty page says so.
 -- On the release's gate (compliance "shipped": no wager, the King's live switch off as 1.2.x has
 -- it), the test world (tests/arena/lib/world.lua) with the table's additions
 -- (tests/arena/lib/farkle-world.lua). Every name is invented.
@@ -145,4 +146,29 @@ test("1.2.3 Bones live tables (bug 6): after a /reload, the board's Play again o
 	eq(Get(a, id2).noWatch, nil); eq(Get(b, id2).noWatch, nil, "the guest's table is not closed to watchers")
 	assert(Listed(w, c, id2), "the member lists the new table")
 	NoErrors(w)
+end)
+
+test("1.2.3 Bones live tables: practice with the innkeeper is never announced nor listed, by design; the empty page says so in both languages", function()
+	-- (pt-BR first: the world's clients share the harness's words, and the English load puts them back)
+	for _, locale in ipairs({ "ptBR", "enUS" }) do
+		local w = FW.New({ compliance = "shipped" })
+		local a = w:Player(P1)
+		local c = w:Player(VIEWER, { companion = {} })
+		c.K = BoardUI.New(function() return w.clock end)
+		c.K.Install(c.globals)
+		c.globals.GetLocale = function() return locale end
+		local id = assert(Do(w, a, "Practice", { target = 2000 }))
+		eq(Get(a, id).role, "practice")
+		w:Run(130)
+		eq(#w:Sent({ from = a, type = "KN" }), 0, "nothing of practice is sent")
+		eq(#Do(w, c, "LiveTables"), 0)
+		assert(w:As(c, c.ns.Arena.LoadUI))
+		local L, UI = c.ns.L, c.ns.Arena.ui
+		local lines = w:As(c, UI.Pane("bone.live").lines, { key = "bone.live" })
+		local said = false
+		for _, l in ipairs(lines) do if tostring(l.text or ""):find(L.ARENA_BONE_LIVE_NONE, 1, true) then said = true end end
+		assert(said, "the empty list's line")
+		assert(L.ARENA_BONE_LIVE_NONE:find(locale == "ptBR" and "taverneiro" or "innkeeper", 1, true), L.ARENA_BONE_LIVE_NONE)
+		NoErrors(w)
+	end
 end)
