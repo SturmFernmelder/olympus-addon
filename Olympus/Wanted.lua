@@ -1,28 +1,43 @@
 local ADDON, ns = ...
 local L = ns.L
 
--- Horde Most Wanted keeps observations local until a human review. A reviewer may receive a
--- bounded, private evidence summary (WX, WHISPER only), explicitly accept it, and publish the
--- resulting top three (WY). WY contains GUIDs and scores only: never victims, locations or raw
--- evidence. It is signed with the existing Arena account key and accepted only when the
--- server-stamped sender is currently the King, a signed High Councillor, or the author. Thus the
--- local kill ledger can never award a global frame by itself.
+-- Horde Most Wanted (1.2.3, Daniel: "that list should never have existed"): there is no list to
+-- be put on first. A Horde player enters by himself the moment an Olympus member's own client
+-- observes him killing that member (the member's own death recap) or being killed by that member
+-- (the member's own killing blow, PARTY_KILL), and the kill or death counts at once: a bounty on
+-- him, or a claim of his open bounty for the member's Slayers row. The faction is proven by this
+-- client, never guessed or typed: a Horde unit it sees (or saw within a minute), else the GUID's
+-- own race as the game gives it (GetPlayerInfoByGUID); a pet, a creature, the environment, an
+-- Alliance player (a free-for-all zone), an instance (a battleground, an arena) and a hidden
+-- (secret) payload never count.
 --
--- The reviewer's ledger is durable: every row he accepts is kept in his saved data (bounded;
--- the oldest fold into a base of open bounties and slayer totals), so his all-time top three
--- does not start over after a reload. The receivers keep the last word they accepted live, and
--- after a reload check it again (its signature, the key pinned for its issuer, its expiry, and
--- that its issuer still holds the role) before it shows any frame. A saved word is only ever
--- used by the client that heard it. W4 asks for catch-up; a real reviewer may relay an unchanged
--- signed word in W5. A receiver must already have independently pinned that issuer's key from a
--- verified direct word: a relay never supplies a first-use key or key rotation. Editing a word's
--- rows breaks its signature, and a word under
--- another key than the one pinned for its issuer is refused; whoever rewrites both in his own
--- saved data changes only what his own client shows, as editing the addon itself would.
+-- Each own row goes at once to the Olympus channel (WK, the section "Shared kills and deaths"
+-- below), and every member's client applies it to its own Wanted list straight away: no Send, no
+-- review, no accept. A receiver takes it only from a verified member (its own guild's roster, or
+-- a guild rank it can verify), about that member's own death or killing blow (the Olympian side is
+-- the server-stamped sender; his GUID only where this client can prove it is his), of this realm
+-- group and faction, fresh, once, within per-sender and per-Horde-player rate limits and caps. A
+-- reviewer (the King, a signed High Councillor or the author) relays what his client admitted, so
+-- members of other guilds hear it too, and answers a late login's catch-up ask (W4) with the
+-- recent rows. A reviewer can only take an abusive entry off afterwards, or void one row (WV): it
+-- stops counting on every client, and a later event does not bring the entry back.
+--
+-- The signed top three (WY) is the publisher's own Slayers board, by verified GUID: GUIDs and
+-- scores only, never victims, locations or rows. It is signed with the existing Arena account key
+-- and accepted only when the server-stamped sender is currently the King, a signed High
+-- Councillor, or the author. The receivers keep the last word they accepted live, and after a
+-- reload check it again (its signature, the key pinned for its issuer, its expiry, and that its
+-- issuer still holds the role) before it shows any frame. A saved word is only ever used by the
+-- client that heard it. W4 asks for catch-up; a real reviewer may relay an unchanged signed word
+-- in W5. A receiver must already have independently pinned that issuer's key from a verified
+-- direct word: a relay never supplies a first-use key or key rotation. Editing a word's rows
+-- breaks its signature, and a word under another key than the one pinned for its issuer is
+-- refused; whoever rewrites both in his own saved data changes only what his own client shows,
+-- as editing the addon itself would.
 --
 -- Sightings (the section "Most Wanted sightings" below): a Horde player this client saw,
--- where its own player stood then, on its map for 15 minutes and whispered to the same reviewers
--- as the evidence. On for members until their No; never on the channel, never in an instance.
+-- where its own player stood then, on its map for 15 minutes and whispered to the one reviewer
+-- the member chose. Off until the member's Yes; never on the channel, never in an instance.
 local Wanted = {}
 ns.Wanted = Wanted
 
@@ -39,10 +54,6 @@ Wanted.MAX_POINTS = 100000
 Wanted.RATE_MAX = 20
 Wanted.RATE_WINDOW = 60
 Wanted.GLOBAL_BORDERS_ACTIVE = true
-Wanted.REVIEW_MAX = 256
-Wanted.REVIEW_PER_SENDER = 32
-Wanted.REVIEW_RATE_MAX = 8
-Wanted.REVIEW_RATE_WINDOW = 60
 Wanted.GLOBAL_ROWS = 3
 -- A signed word holds for a month unless a newer one replaces it, its issuer loses the role or
 -- he revokes it (was 30 minutes, for one session). Publishing again starts a new month.
@@ -58,14 +69,27 @@ Wanted.GLOBAL_ASK_FIRST, Wanted.GLOBAL_ASK_GAP, Wanted.GLOBAL_ASK_TRIES = 45, 30
 Wanted.GLOBAL_DIRECT_PINS_MAX = 64
 -- One death has one killer: rows naming the same victim this close together describe one death.
 Wanted.DEATH_WINDOW = 5
-Wanted.EVIDENCE_AGE = 31 * 86400 -- a reviewer refuses evidence older than this
-Wanted.LEDGER_MAX = 512          -- accepted rows a reviewer keeps; older ones fold into the base
-Wanted.LEDGER_BASE_MAX = 512     -- open bounties, slayers and last deaths the base keeps
-Wanted.SEND_BATCH = 8            -- evidence rows one click sends (the reviewer's per-sender burst)
--- Between two clicks to one reviewer: his rate window (REVIEW_RATE_MAX rows a minute from one
--- sender, the rest dropped on his side), and a margin for the time the whispers take to go.
-Wanted.SEND_WAIT = Wanted.REVIEW_RATE_WINDOW + 5
-Wanted.REVIEW_SHOWN = 50         -- accepted rows the review page lists (the newest)
+-- Shared kills and deaths (WK, WV: see "Shared kills and deaths" below).
+Wanted.SHARE_AGE = 7 * 86400     -- a row heard older than this is refused (a live row is seconds old)
+Wanted.SHARE_RATE_MAX = 8        -- rows taken from one member a window...
+Wanted.SHARE_RATE_WINDOW = 60    -- ...of this many seconds
+Wanted.SHARE_TARGET_MAX = 20     -- rows taken about one Horde player a window...
+Wanted.SHARE_TARGET_WINDOW = 300 -- ...of this many seconds, from everyone
+Wanted.SHARE_DAY_MAX = 60        -- rows taken from one member a day (SHARE_DAY): a flood of made-up deaths
+Wanted.SHARE_DAY = 86400
+Wanted.SHARE_SENDERS_MAX = 1024  -- members (and Horde players) counted at once in a window
+Wanted.SHARE_DAY_SENDERS_MAX = 8192 -- members counted at once in a day
+Wanted.SHARE_RELAY_MAX = 40      -- rows taken from one reviewer's relays a window (SHARE_RATE_WINDOW)
+Wanted.SHARE_ROOM = 20           -- a relay or a catch-up answer leaves this much of Comm's queue free
+Wanted.SHARE_CATCH_ROWS = 24     -- rows one catch-up answer carries at most (the newest)
+Wanted.SHARE_CATCH_MARKS = 8     -- and removals, and voided rows, each
+Wanted.SHARE_RELAY_DELAY = 3     -- a reviewer relays a row this long after he took it (and a part of 8 s his own)
+Wanted.SHARE_RESEND_FIRST = 60   -- this client's own rows the channel did not take go again this long after login...
+Wanted.SHARE_RESEND_EVERY = 300  -- ...then this often...
+Wanted.SHARE_RESEND_MAX = 4      -- ...this many at a time
+Wanted.SHARE_HEARD_MAX = 512     -- relayed row ids remembered (a reviewer relays each once)
+Wanted.VOIDS_MAX = 256           -- voided rows remembered, so one heard later is refused too
+Wanted.DIAG_MAX = 40             -- this session's captures and refusals /oly wanted status lists
 Wanted.GLOBAL_MAX_SEQ = 2147483647
 Wanted.GLOBAL_MAX_EPOCH = 2147483647
 Wanted.GLOBAL_MAX_VERIFY = 8
@@ -112,17 +136,15 @@ local pendingGlobal, pendingGlobalCount = {}, 0
 -- The saved word being checked again after a load (its floor and pin hold meanwhile), and each
 -- saved text's signature, checked once a session.
 local restoring, restoreChecked = nil, {}
--- Pending submissions stay for the session only (untrusted, bounded); what a reviewer accepts
--- moves into his durable ledger (Ledger below).
-local reviewInbox, reviewOrder = {}, {}
-local reviewRate = {}
 local publishedGlobal
 Wanted.globalCatch = { asked = -math.huge, replied = -math.huge, generation = 0 }
--- [reviewer] = { [evidence id] = true }: sent this session. Only this session's: after a reload
--- the rows can go again, and the reviewer drops the ones he holds without counting them.
-local sentTo = {}
-local batches = {} -- [reviewer] = { name, at, ids }: the last batch sent him (Wanted.NotFound)
 local watchingNotFound = false
+-- 1.2.3: the shared kills and deaths' helpers and this session's state (the section "Shared kills
+-- and deaths" below; a table, as Wanted.lua's main chunk is at Lua's 200 locals): the senders'
+-- and Horde players' rate windows, the rows a reviewer heard relayed (he relays each once), and
+-- this session's captures and refusals for /oly wanted status.
+local Share = { rates = {}, days = {}, targets = {}, relayed = {}, relayedOrder = {},
+	log = {}, why = {}, counts = {}, catchReplied = -math.huge, catchHeard = -math.huge }
 local ScheduleGlobalRepeat
 -- Sightings, this session's only (nothing of them is saved): the pins ([Horde GUID] = the newest
 -- sighting of him), their frames, the ids taken (replays), this client's own last sighting of each
@@ -240,10 +262,13 @@ local function Store(create)
 	if type(s) ~= "table" or s.version ~= Wanted.VERSION or s.group ~= ns.group or s.faction ~= ns.faction then
 		if not create then return nil end
 		s = { version = Wanted.VERSION, group = ns.group, faction = ns.faction, targets = {}, aliases = {},
-		slayers = {}, slayerAliases = {}, baseSlayers = {}, evidence = {}, seen = {}, seenOrder = {}, recent = {}, audit = {}, seq = 0 }
+		slayers = {}, slayerAliases = {}, baseSlayers = {}, evidence = {}, seen = {}, seenOrder = {}, recent = {}, audit = {},
+		voids = {}, seq = 0 }
 		ns.rdb.wanted = s
 	end
-	for _, key in ipairs({ "targets", "aliases", "slayers", "slayerAliases", "baseSlayers", "evidence", "seen", "seenOrder", "recent", "audit" }) do
+	-- (voids, 1.2.3: [sender#digest] = when a reviewer voided that shared row, so a copy heard later
+	-- is refused too.)
+	for _, key in ipairs({ "targets", "aliases", "slayers", "slayerAliases", "baseSlayers", "evidence", "seen", "seenOrder", "recent", "audit", "voids" }) do
 		if type(s[key]) ~= "table" then s[key] = {} end
 	end
 	s.seq = Whole(s.seq, 0, 2147483647) or 0
@@ -448,6 +473,9 @@ end
 local function ApplyEvidence(s, e)
 	local t = s.targets[e.targetKey]
 	if not t then return false end
+	-- 1.2.3: an entry a reviewer took off (abuse) keeps its rows, and they count for nothing: no
+	-- bounty on him, no point paid for him (Wanted.RemoveTarget rebuilds the totals without them).
+	if t.active ~= true then return true end
 	if e.action == "bounty" then
 		if t.current >= Wanted.MAX_POINTS or t.lifetimeKills >= Wanted.MAX_POINTS then return false end
 		t.current, t.lifetimeKills = t.current + 1, t.lifetimeKills + 1
@@ -503,6 +531,12 @@ local function Checkpoint(s)
 	end
 	s.baseSlayers = CopySlayers(s.slayers)
 	for _, r in pairs(s.baseSlayers) do TrimMonths(r, MonthNow()) end
+	-- (1.2.3: the newest death folded. A shared row about a death before it can no longer take its
+	-- place in the order of the deaths, and is refused: "late".)
+	for _, e in ipairs(s.evidence) do
+		local at = Whole(type(e) == "table" and e.at, 0, 4294967295)
+		if at and at > (Whole(s.foldedAt, 0, 4294967295) or 0) then s.foldedAt = at end
+	end
 	s.evidence = {}
 	stats.checkpointed = stats.checkpointed + 1
 end
@@ -525,6 +559,11 @@ function Wanted.CanManage()
 	return W and W.IsAuthor and W.IsAuthor() == true or false
 end
 
+-- 1.2.3: nobody lists a Horde player first any more, and no button does it: he enters by himself
+-- from a member's own death or killing blow (RecordKill). This listing by name or GUID, for a
+-- Watch moderator or the author and through this function alone, stays for the targets 1.2.2
+-- saved and for the tests: such an entry is a Horde player like any other, and an own event
+-- about him counts against it (a name-only one learns his GUID then).
 function Wanted.AddTarget(value, guid, realm)
 	if not Wanted.CanManage() then return false, "access" end
 	local ident = Identity(value, guid, realm)
@@ -549,16 +588,31 @@ function Wanted.AddTarget(value, guid, realm)
 	return true, t.key
 end
 
+-- 1.2.3: who may take an abusive entry off, or void one row: the King, a signed High Councillor
+-- or the author (the roles every client checks on his word, WV), never a member, nor a review.
+function Wanted.CanRemove() return Wanted.CanPublish(ns.me) == true end
+
+-- An abusive entry taken off: here at once, and on every client through the reviewer's word on
+-- the channel (WV, Share.SendMark). Its rows stay, as an audit, and count for nothing any more
+-- (ApplyEvidence): no bounty on him, no point paid for him. A later event about him is refused
+-- ("removed"), so it never comes back by itself.
 function Wanted.RemoveTarget(value, guid, realm)
-	if not Wanted.CanManage() then return false, "access" end
+	if not Wanted.CanRemove() then return false, "access" end
 	local s, ident = Store(false), Identity(value, guid, realm)
 	local t = s and ResolveTarget(s, ident, false)
 	if not (t and t.active) then return false, "missing" end
-	t.active, t.removedAt, t.removedBy = false, math.floor(Clock()), ns.me
+	Share.TakeOff(s, t, CleanName(ns.me), math.floor(Clock()))
 	Audit(s, "remove", t.key)
 	if opened == t.key then mode, opened = "list", nil end
+	if t.guid then Share.SendMark("T", t.guid) end
 	Changed()
 	return true
+end
+
+-- (The entry off, and the totals again without its rows.)
+function Share.TakeOff(s, t, by, at)
+	t.active, t.removedAt, t.removedBy = false, at, by
+	Rebuild(s)
 end
 
 local function UnitIdentity(unit)
@@ -604,16 +658,24 @@ local function RememberHorde(ident)
 	end
 end
 
+-- A Horde player this client sees now (a unit with his GUID: the target, the focus, the mouse's,
+-- a nameplate, or the game's own token for that GUID) or saw within a minute, or nil. nil, true
+-- when a unit of his shows now and is no Horde player (or its faction is unknown): the current
+-- unit overrides an old observation.
 local function KnownHorde(ident)
 	if not ident or not ident.guid then return nil end
 	local units = { "target", "focus", "mouseover" }
 	for i = 1, 40 do units[#units + 1] = "nameplate" .. i end
+	if type(UnitTokenFromGUID) == "function" then
+		local ok, token = pcall(UnitTokenFromGUID, ident.guid)
+		if ok and type(token) == "string" and not Secret(token) then table.insert(units, 1, token) end
+	end
 	for _, unit in ipairs(units) do
 		local observed = UnitIdentity(unit)
 		if observed and observed.guid == ident.guid then
 			local ok, faction = pcall(function() return UnitFactionGroup and UnitFactionGroup(unit) end)
 			if ok and not Secret(faction) and faction == "Horde" then RememberHorde(observed); return observed end
-			return nil -- current contradictory/unknown faction overrides an old observation
+			return nil, true -- current contradictory/unknown faction overrides an old observation
 		end
 	end
 	local row, now = knownHorde[ident.guid], math.floor(Clock())
@@ -642,6 +704,72 @@ local function Zone()
 	if type(GetRealZoneText) ~= "function" then return nil end
 	local ok, zone = pcall(GetRealZoneText)
 	return ok and Clean(zone, 80) or nil
+end
+
+local function InInstance()
+	if type(IsInInstance) ~= "function" then return false end
+	local ok, inside = pcall(IsInInstance)
+	if not ok or Secret(inside) then return true end -- (not known: as if inside)
+	return inside == true
+end
+
+local function Hex(bytes)
+	return type(bytes) == "string" and (bytes:gsub(".", function(c) return ("%02x"):format(c:byte()) end)) or nil
+end
+
+local function Digest(text)
+	local S = ns.Sign
+	local raw = S and S.SHA256 and S.SHA256(tostring(text or "")) or nil
+	return raw and Hex(raw):sub(1, 16) or nil
+end
+
+-- 1.2.3: the races only the Horde plays, by the game's own file names (GetPlayerInfoByGUID's
+-- fourth return, as C_CreatureInfo.GetRaceInfo's clientFileString). Forever's Skyborn are of both
+-- factions (ChatRooms.lua), and a race this table does not name proves nothing either.
+Share.HORDE_RACES = { Orc = true, Scourge = true, Undead = true, Tauren = true, Troll = true, BloodElf = true,
+	Goblin = true, Nightborne = true, HighmountainTauren = true, MagharOrc = true, ZandalariTroll = true, Vulpera = true }
+
+-- A character's name as the game's lookup of his GUID gives it (Debts.InfoName: Forever splits a
+-- surname into the realm's place), or nil.
+function Share.InfoName(guid)
+	local D = ns.Debts
+	if type(D) == "table" and type(D.InfoName) == "function" then
+		local ok, name = pcall(D.InfoName, guid)
+		if ok and type(name) == "string" and name ~= "" and not Secret(name) then return name end
+		return nil
+	end
+	if type(GetPlayerInfoByGUID) ~= "function" then return nil end
+	local ok, _, _, _, _, _, name, realm = pcall(GetPlayerInfoByGUID, guid)
+	if not ok or type(name) ~= "string" or name == "" or Secret(name, realm) then return nil end
+	return ns.FullName(name, type(realm) == "string" and realm ~= "" and realm or nil)
+end
+
+-- A Horde player's identity as this client proves it, never as a row or a player names him: his
+-- entry here (a Horde player already), a unit of his it sees now or saw within a minute
+-- (KnownHorde: the target, the focus, the mouse's, a nameplate, the game's token for his GUID),
+-- else the game's lookup of his GUID (GetPlayerInfoByGUID: a race only the Horde plays, and his
+-- name). No unit, nameplate or target is needed: a killer never targeted, a stealth or ranged
+-- kill, nameplates off. nil, why otherwise: "identities" (no player GUID: a pet, a creature, the
+-- environment), "faction" (a unit of his shows no Horde player, or nothing proves it: an
+-- Alliance race, a race of both factions, no answer from the game). hint: the name the death
+-- recap gives him (no surname on Forever), used only when the game's lookup has none.
+function Share.HordeOf(guid, hint)
+	guid = Guid(guid)
+	if not guid then return nil, "identities" end
+	local s, key = Store(false), GuidKey(guid)
+	local t = s and s.targets[s.aliases[key] or key]
+	-- (One kept off by a reviewer's word may have no name here: the lookup's, so that the row is
+	-- refused as "removed".)
+	if type(t) == "table" and t.guid == guid then return Identity(t.name or Share.InfoName(guid) or hint, guid) end
+	local seen, contradicted = KnownHorde(Identity(nil, guid))
+	if seen then return seen end
+	if contradicted then return nil, "faction" end
+	if type(GetPlayerInfoByGUID) ~= "function" then return nil, "faction" end
+	local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, guid)
+	if not ok or Secret(race) or not Share.HORDE_RACES[race] then return nil, "faction" end
+	local ident = Identity(Share.InfoName(guid) or hint, guid)
+	if not ident or not ident.name then return nil, "identity" end
+	return ident
 end
 
 local function RateAllowed(now)
@@ -681,46 +809,107 @@ local function SameDeath(s, killer, victim, now)
 	return nil
 end
 
+-- A death at or before the newest one folded into the targets' base (Checkpoint): a shared row
+-- about it could no longer take its place in the order of the deaths.
+function Share.Late(s, at)
+	local folded = Whole(s.foldedAt, 0, 4294967295)
+	return folded ~= nil and at <= folded
+end
+
+-- Room for one more entry (MAX_TARGETS): the oldest one with nothing open and nothing it ever paid
+-- goes, with its rows (a Horde player seen once, killed for no bounty). An entry with an open
+-- bounty, one whose claims paid points, and one a reviewer took off (so that it never comes back
+-- by itself) stay: with none of them to drop, false ("full").
+function Share.MakeRoom(s)
+	if Count(s.targets) < Wanted.MAX_TARGETS then return true end
+	local drop, dropAt
+	for key, t in pairs(s.targets) do
+		local paid = false
+		for _, c in ipairs(type(t.claims) == "table" and t.claims or {}) do if (tonumber(c.points) or 0) > 0 then paid = true break end end
+		local at = tonumber(t.lastDeath) or tonumber(t.openSince) or tonumber(t.addedAt) or 0
+		if t.active == true and (tonumber(t.current) or 0) == 0 and not paid and (not drop or at < dropAt) then drop, dropAt = key, at end
+	end
+	if not drop then return false end
+	s.targets[drop] = nil
+	for alias, key in pairs(s.aliases) do if key == drop then s.aliases[alias] = nil end end
+	for i = #s.evidence, 1, -1 do if s.evidence[i].targetKey == drop then table.remove(s.evidence, i) end end
+	return true
+end
+
+-- One kill or death into this client's ledger, its entry made when the Horde player has none.
+-- opts: zone, precision (where this client's player stood: its own rows only); horde = "killer"
+-- or "victim", the side whose Horde faction the caller proved (Share.HordeOf, or the sharing
+-- member's client: Share.Take), the side whose entry the row may make; own = this client's own
+-- death or killing blow (shared on the channel by its caller); peer = a row another member
+-- shared: from (his server-stamped name), digest, id, at and month as he sent them.
 local function RecordKill(kind, rawId, killer, victim, opts)
+	opts = opts or {}
 	killer, victim = Identity(killer), Identity(victim)
+	local peer = opts.peer == true
+	local hordeSide = opts.horde == "killer" and killer or opts.horde == "victim" and victim or nil
+	local olympianSide = opts.horde == "killer" and victim or opts.horde == "victim" and killer or nil
 	-- Both sides must be players the row names and identifies (Guid takes Player- GUIDs only): a
 	-- pet, a creature or the environment never credits a kill, and a pet or an NPC that merely
-	-- carries a listed target's name never matches that target. (Prune keeps no other row.)
-	if not killer or not victim or not killer.name or not killer.guid or not victim.name or not victim.guid then
+	-- carries a listed target's name never matches that target. (Prune keeps no other row.) A
+	-- shared row's Olympian side is its sender by the name the server stamps: his GUID only where
+	-- this client proved it is his (Share.Take).
+	if not killer or not victim or not killer.name or not victim.name
+		or not killer.guid and not (peer and olympianSide == killer) or not victim.guid and not (peer and olympianSide == victim) then
 		stats.refused = stats.refused + 1
 		return false, "identities"
 	end
-	local s = Store(false)
-	if not s and opts and opts.autoHorde and kind == "SELF_DEATH" and VerifiedOlympian(victim)
-		and SameIdentity(UnitIdentity("player"), victim) then s = Store(true) end
+	local s = Store(true)
 	if not s then return false, "store" end
 	-- Resolve first without learning anything: a rejected/forged row must not be able to pin a
 	-- new GUID or spelling onto a listed target merely by naming it.
 	local killerTarget = ResolveTarget(s, killer, false)
 	local victimTarget = ResolveTarget(s, victim, false)
-	local auto = not killerTarget and not victimTarget and opts and opts.autoHorde
-		and kind == "SELF_DEATH" and SameIdentity(UnitIdentity("player"), victim) and VerifiedOlympian(victim)
-	if auto then
-		if Count(s.targets) >= Wanted.MAX_TARGETS then return false, "full" end
-		killerTarget = { key = killer.key, name = killer.name, realm = killer.realm, guid = killer.guid, active = true,
-			addedAt = math.floor(Clock()), addedBy = ns.me, source = "SELF_DEATH", current = 0, lifetimeKills = 0,
-			cycle = 1, openSince = math.floor(Clock()), victims = {}, claims = {}, victimOverflow = 0 }
-	end
-	if (killerTarget and victimTarget) or (not killerTarget and not victimTarget) then
+	if killerTarget and victimTarget then
 		stats.refused = stats.refused + 1
-		return false, killerTarget and "ambiguous" or "unlisted"
+		return false, "ambiguous"
+	end
+	local now = peer and opts.at or math.floor(Clock())
+	-- 1.2.3 (Daniel: "that list should never have existed"): a Horde player nobody listed enters
+	-- by himself, from the proven side of the row. Only a row without that proof (the combat-log
+	-- adapter's, CaptureCombatLog) still needs one side already here.
+	local fresh
+	if not killerTarget and not victimTarget then
+		if not hordeSide then
+			stats.refused = stats.refused + 1
+			return false, "unlisted"
+		end
+		-- A listed namesake pinned to another GUID keeps his name: no second entry under it.
+		local namesake = hordeSide.nameKey and s.targets[s.aliases[hordeSide.nameKey] or hordeSide.nameKey]
+		if type(namesake) == "table" and namesake.guid and namesake.guid ~= hordeSide.guid then
+			stats.refused = stats.refused + 1
+			return false, "identity"
+		end
+		fresh = { key = hordeSide.key, name = hordeSide.name, realm = hordeSide.realm, guid = hordeSide.guid, active = true,
+			addedAt = now, addedBy = peer and opts.from or CleanName(ns.me), source = peer and "shared" or kind, current = 0,
+			lifetimeKills = 0, cycle = 1, openSince = now, victims = {}, claims = {}, victimOverflow = 0 }
+		if opts.horde == "killer" then killerTarget = fresh else victimTarget = fresh end
 	end
 	local action, target, olympian
 	if killerTarget then action, target, olympian = "bounty", killerTarget, victim
 	else action, target, olympian = "claim", victimTarget, killer end
-	if not target.active or not VerifiedOlympian(olympian) then
+	-- The proven Horde side is the one the row is about: an Olympian found on the list instead is
+	-- no Horde player's entry.
+	if opts.horde and (opts.horde == "killer") ~= (action == "bounty") then
 		stats.refused = stats.refused + 1
-		return false, target.active and "olympus" or "removed"
+		return false, "ambiguous"
+	end
+	if not target.active then
+		stats.refused = stats.refused + 1
+		return false, "removed"
+	end
+	-- (A shared row's sender was verified as a member when it was taken: Share.Take.)
+	if not peer and not VerifiedOlympian(olympian) then
+		stats.refused = stats.refused + 1
+		return false, "olympus"
 	end
 	if action == "claim" and target.current > 0 and not ResolveSlayer(s, killer, false, false)
 		and Count(s.slayers) >= Wanted.MAX_SLAYERS then return false, "slayers" end
-	local now = math.floor(Clock())
-	local id = EvidenceId(kind, rawId, killer, victim)
+	local id = peer and opts.id or EvidenceId(kind, rawId, killer, victim)
 	local fingerprint = table.concat({ killer.guidKey or killer.nameKey, victim.guidKey or victim.nameKey, tostring(math.floor(now / 3)) }, ">")
 	if s.seen[id] or s.recent[fingerprint] and math.abs(now - s.recent[fingerprint]) <= 5 then
 		stats.replay = stats.replay + 1
@@ -729,22 +918,37 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	local death = SameDeath(s, killer, victim, now)
 	if death == "replay" then stats.replay = stats.replay + 1 return false, "replay" end
 	if death == "conflict" then stats.conflict = stats.conflict + 1 return false, "conflict" end
-	if not RateAllowed(now) then stats.refused = stats.refused + 1 return false, "rate" end
-	if auto then
-		s.targets[target.key] = target
-		s.aliases[killer.guidKey], s.aliases[killer.nameKey] = target.key, target.key
+	if peer and Share.Late(s, now) then stats.refused = stats.refused + 1 return false, "late" end
+	if not peer and not RateAllowed(now) then stats.refused = stats.refused + 1 return false, "rate" end
+	if fresh then
+		if not Share.MakeRoom(s) then stats.refused = stats.refused + 1 return false, "full" end
+		s.targets[fresh.key] = fresh
+		if hordeSide.guidKey then s.aliases[hordeSide.guidKey] = fresh.key end
+		if hordeSide.nameKey then s.aliases[hordeSide.nameKey] = fresh.key end
 	end
 	local learned = ResolveTarget(s, action == "bounty" and killer or victim, true)
-	if not learned or learned ~= target then return false, "identity" end
+	if not learned or learned ~= target then
+		if fresh and s.targets[fresh.key] == fresh then s.targets[fresh.key] = nil end
+		return false, "identity"
+	end
 	target = learned
 	if #s.evidence >= Wanted.MAX_EVIDENCE then Checkpoint(s) end
 	s.seq = s.seq + 1
-	local e = { id = id, seq = s.seq, at = now, month = MonthNow(), kind = kind, action = action, targetKey = target.key,
-		killerName = killer.name, killerGuid = killer.guid, victimName = victim.name, victimGuid = victim.guid,
-		zone = opts and opts.zone or nil, precision = opts and opts.precision or nil }
+	local e = { id = id, seq = s.seq, at = now, month = peer and opts.month or MonthNow(), kind = kind, action = action,
+		targetKey = target.key, killerName = killer.name, killerGuid = killer.guid, victimName = victim.name, victimGuid = victim.guid,
+		zone = opts.zone, precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
+		peer = peer or nil, own = opts.own == true or nil }
+	e.digest = peer and opts.digest or Digest(table.concat({ e.id, e.at, e.kind, e.action, e.killerGuid or "", e.victimGuid or "" }, "|"))
 	Remember(s, id, fingerprint, now, e.seq)
-	s.evidence[#s.evidence + 1] = e
-	if not ApplyEvidence(s, e) then
+	-- In the order of the deaths: a shared row may come after a later one (a relay, a catch-up),
+	-- and then the totals are built again, so that every client holding the same rows counts them
+	-- the same.
+	local at = #s.evidence + 1
+	while at > 1 and (tonumber(s.evidence[at - 1].at) or 0) > now do at = at - 1 end
+	table.insert(s.evidence, at, e)
+	if at < #s.evidence then
+		Rebuild(s)
+	elseif not ApplyEvidence(s, e) then
 		e.void = true
 		Rebuild(s)
 		return false, "bounds"
@@ -754,8 +958,12 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	return true, e
 end
 
--- The combat-log adapter accepts only PARTY_KILL, whose payload names both sides.  UNIT_DIED and
--- damage rows never identify a killer reliably and are intentionally ignored.
+-- The combat-log adapter accepts only PARTY_KILL, whose payload names both sides. UNIT_DIED and
+-- damage rows never identify a killer reliably and are intentionally ignored. Nothing registers
+-- it on Forever (its combat log is restricted: see the registrations at the end); it stays the
+-- ledger's adapter for a client that allows the combat log, and the tests'. Its rows carry no
+-- faction proof, so one of their sides must already have an entry ("unlisted" otherwise), and
+-- they are never shared.
 function Wanted.CaptureCombatLog(...)
 	local a = { ... }
 	if #a == 0 and type(CombatLogGetCurrentEventInfo) == "function" then
@@ -771,121 +979,104 @@ function Wanted.CaptureCombatLog(...)
 		{ name = destName, guid = destGuid }, { zone = Zone(), precision = "approximate" })
 end
 
--- Native frame event, distinct from the CLEU subevent: UnitDocumentation.lua, PartyKill,
--- https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua
--- Payload is attackerGUID, targetGUID, secret when unit identity is restricted. Forever's
--- extracted fixture confirms the event exists; its current payload still needs a live check.
--- Credit only our own killing blow against an already listed, active player GUID. Other party
--- members and pets are not attributed to us, and no target/nameplate supplies a guessed killer.
-function Wanted.CapturePartyKill(attackerGUID, targetGUID)
+-- Native frame event, distinct from the CLEU subevent: UnitDocumentation.lua, PartyKill (Forever
+-- 1.60.1's own API documentation): attackerGUID and targetGUID, nothing else, both secret while
+-- unit identity is restricted (an unfinished PvP match). Only our own killing blow counts: another
+-- party member's is his to share, and a pet's GUID is not ours. The victim needs no listing: his
+-- Horde faction is proven here (Share.HordeOf) and the row makes his entry, then goes to every
+-- member (Share.Send). Returns true and the row, or false and why, and the Horde player's name.
+function Share.PartyKill(attackerGUID, targetGUID)
 	if Secret(attackerGUID, targetGUID) then return false, "secret" end
 	local attacker, victim = Guid(attackerGUID), Guid(targetGUID)
 	if not attacker or not victim then return false, "identities" end
 	local mine = UnitIdentity("player")
 	if not mine or mine.guid ~= attacker then return false, "attacker" end
 	if not ns.IsMember or ns.IsMember() ~= true then return false, "olympus" end
-	local s = Store(false)
-	local target = s and ResolveTarget(s, Identity(nil, victim), false)
-	if not target or target.guid ~= victim then return false, "unlisted" end
-	if not target.active then return false, "removed" end
-	return RecordKill("PARTY_KILL", "native:" .. tostring(math.floor(Clock())), mine, Identity(target),
-		{ zone = Zone(), precision = "approximate" })
+	if ns.faction == "Horde" then return false, "faction" end
+	if InInstance() then return false, "instance" end
+	local horde, why = Share.HordeOf(victim)
+	if not horde then return false, why end
+	local ok, e = RecordKill("PARTY_KILL", "native:" .. tostring(math.floor(Clock())), mine, horde,
+		{ zone = Zone(), precision = "approximate", horde = "victim", own = true })
+	if ok then Share.Send(e) end
+	return ok, e, horde.name
 end
 
-local function FatalRecap(row)
-	if type(row) ~= "table" then return false end
-	local ok, fatal = pcall(function()
-		return row.killingBlow == true or row.isKillingBlow == true or row.fatal == true
-			or row.subEvent == "PARTY_KILL" or row.event == "PARTY_KILL"
-	end)
-	return ok and fatal == true
-end
-
--- A recap row is accepted only when it explicitly marks the fatal event and contains both
--- identities.  In particular, a target name by itself is never promoted to "killer".
-function Wanted.CaptureSelfDeathRecap(recap)
-	if type(UnitIsDeadOrGhost) == "function" then
-		local ok, dead = pcall(UnitIsDeadOrGhost, "player")
-		if not ok or dead ~= true then return false, "alive" end
+function Wanted.CapturePartyKill(attackerGUID, targetGUID)
+	local ok, e, who = Share.PartyKill(attackerGUID, targetGUID)
+	-- (/oly wanted status: a kill of a player only, or a hidden one (a PvP match); every creature a
+	-- party member kills fires it too.)
+	if Secret(attackerGUID, targetGUID) or Guid(targetGUID) then
+		Share.Note("kill", ok, e, who or (not ok and Share.InfoName(Guid(targetGUID))) or nil)
 	end
-	local rows = type(recap) == "table" and recap or {}
-	if rows[1] == nil and FatalRecap(rows) then rows = { rows } end
-	local mine = UnitIdentity("player") or Identity(ns.me)
-	for i = #rows, 1, -1 do
-		local row = rows[i]
-		if FatalRecap(row) then
-			local killer = Identity(row.killerName or row.sourceName, row.killerGUID or row.sourceGUID)
-			local victim = Identity(row.victimName or row.destName, row.victimGUID or row.destGUID)
-			if not killer or not victim then return false, "identities" end
-			if not mine or not SameIdentity(mine, victim) then return false, "victim" end
-			return RecordKill("SELF_DEATH", row.eventID or row.id or row.timestamp, killer, victim,
-				{ zone = Zone(), precision = "approximate" })
+	return ok, e
+end
+
+-- Forever's last-death reader: C_DeathRecap without a recap ID, as the game's own death dialog
+-- and feedback form read it (GameDialogDefs.lua, Blizzard_PTRFeedback_Events.lua: the client's
+-- UI source, 1.60.1). Its rows come newest first, and the first is the one that killed
+-- (Blizzard_DeathRecap.lua: causedDeath = i == 1). HeadHunter's Forever probe (build 69913,
+-- https://github.com/GudaAddons/HeadHunter/blob/main/Detection/ForeverDeaths.lua) gives the
+-- rest: sourceName "Given-Realm" (no surname), sourceFlags, overkill 0 or more on the killing
+-- blow and -1 on the others, timestamp in the server's seconds. The killing blow is the first
+-- row with overkill 0 or more; it counts when it is recent, a damage event, a hostile player's
+-- (flags 0x440, where the row has flags), with a player GUID whose Horde faction this client
+-- proves (Share.HordeOf): no target, nameplate or listing is needed. Never the latest damage, a
+-- pet's possible owner, or a death in an instance (a battleground, an arena). The victim is our
+-- own verified player unit. Returns true and the row, or false and why, and the killer's name.
+local function ReadSelfDeathRecap()
+	local recap = C_DeathRecap
+	if type(recap) ~= "table" or type(recap.HasRecapEvents) ~= "function" or type(recap.GetRecapEvents) ~= "function" then return false, "recap" end
+	local hasOK, has = pcall(recap.HasRecapEvents)
+	if not hasOK or Secret(has) or has ~= true then return false, "recap" end
+	local readOK, events = pcall(recap.GetRecapEvents)
+	if not readOK or type(events) ~= "table" then return false, "recap" end
+	local mine = UnitIdentity("player")
+	local deadOK, dead = pcall(function() return UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") end)
+	if not mine or not deadOK or Secret(dead) or dead ~= true then return false, "alive" end
+	if ns.faction == "Horde" then return false, "faction" end
+	if InInstance() then return false, "instance" end
+	local now = math.floor(Clock())
+	for i = 1, #events do
+		local row = events[i]
+		if type(row) == "table" then
+			if Secret(row.sourceGUID, row.sourceName, row.sourceFlags, row.event, row.overkill, row.timestamp) then return false, "secret" end
+			if Whole(row.overkill, 0, 2147483647) then
+				local stampOK, stamp = pcall(tonumber, row.timestamp)
+				local at = stampOK and stamp and stamp >= now - Wanted.DEATH_WINDOW and stamp <= now + 1 and stamp or nil
+				local name = Clean(row.sourceName, 72)
+				if not at then return false, "stale", name end
+				if type(row.event) ~= "string" or not row.event:match("_DAMAGE$") then return false, "event", name end
+				local flags = row.sourceFlags
+				if flags ~= nil and not (Whole(flags, 0, 2147483647) and bit.band(flags, 0x440) == 0x440) then return false, "flags", name end
+				local horde, why = Share.HordeOf(row.sourceGUID, row.sourceName)
+				if not horde then return false, why, name end
+				local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(at), horde, mine,
+					{ zone = Zone(), precision = "approximate", horde = "killer", own = true })
+				if ok then Share.Send(e) end
+				return ok, e, horde.name
+			end
 		end
 	end
 	return false, "fatal"
 end
 
-local function ReadSelfDeathRecap()
-	-- Forever's last-death reader (HeadHunter's native probe, build 69913, 2026-09-23):
-	-- https://github.com/GudaAddons/HeadHunter/blob/main/Detection/ForeverDeaths.lua
-	-- Require both APIs to work without an ID; other clients' ID-based readers fail closed.
-	-- Only an explicit, recent hostile player killing blow counts. Never guess from a target,
-	-- the latest damage, or a pet's possible owner. The victim is our own verified player unit.
-	local recap = C_DeathRecap
-	if type(recap) == "table" and type(recap.HasRecapEvents) == "function" and type(recap.GetRecapEvents) == "function" then
-		local hasOK, has = pcall(recap.HasRecapEvents)
-		local readOK, events
-		if hasOK and not Secret(has) and has == true then readOK, events = pcall(recap.GetRecapEvents) end
-		if readOK and type(events) == "table" then
-			local mine, s, now = UnitIdentity("player"), Store(false), math.floor(Clock())
-			local deadOK, dead = pcall(function() return UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") end)
-			if mine and deadOK and not Secret(dead) and dead == true then
-				for i = #events, 1, -1 do
-					local row = events[i]
-					if type(row) == "table" and not Secret(row.sourceGUID, row.sourceName, row.sourceFlags, row.event, row.overkill, row.timestamp) then
-						local stampOK, stamp = pcall(tonumber, row.timestamp)
-						local at = stampOK and stamp and stamp >= now - Wanted.DEATH_WINDOW and stamp <= now + 1 and stamp or nil
-						local flags = Whole(row.sourceFlags, 0, 2147483647)
-						local overkill = Whole(row.overkill, 0, 2147483647)
-						local kind = row.event
-						local killer = Identity(row.sourceName, row.sourceGUID)
-						local target = killer and s and ResolveTarget(s, killer, false)
-						-- A manual name-only listing is not yet a verified GUID. Its own fatal
-						-- recap may learn one only from a locally observed Horde unit, just as
-						-- an unlisted killer does. Never replace an already pinned namesake.
-						local known = killer and (not target or not target.guid) and KnownHorde(killer)
-						local named = known and s and ResolveTarget(s, Identity(known.name), false)
-						if named and named.guid and named.guid ~= known.guid then known = nil end
-						if at and flags and overkill and type(kind) == "string" and kind:match("_DAMAGE$")
-							and bit.band(flags, 0x440) == 0x440 and (target and target.guid == killer.guid or known) then
-							return RecordKill("SELF_DEATH", "native:" .. tostring(at), known or target and Identity(target), mine,
-								{ zone = Zone(), precision = "approximate", autoHorde = known ~= nil })
-						end
-					end
-				end
-			end
-		end
-	end
-	local D = C_DeathInfo
-	local fn = type(D) == "table" and (D.GetDeathRecapEvents or D.GetDeathRecap) or nil
-	if type(fn) ~= "function" then return false end
-	local ok, rows = pcall(fn, "player")
-	if not ok or type(rows) ~= "table" then ok, rows = pcall(fn) end
-	if not ok or type(rows) ~= "table" then return false end
-	return Wanted.CaptureSelfDeathRecap(rows)
-end
-
+-- A reviewer voids one row he finds wrong (the King, a signed High Councillor or the author:
+-- Wanted.CanRemove), with a reason: here, and on every client through his word (WV), as long as
+-- the row is still live (not yet folded into the base: Checkpoint).
 function Wanted.Correct(id, reason)
-	if not Wanted.CanManage() then return false, "access" end
+	if not Wanted.CanRemove() then return false, "access" end
 	id = Clean(id, 160)
 	if not id then return false, "id" end
 	local s = Store(false)
 	for _, e in ipairs(s and s.evidence or {}) do
 		if e.id == id and not e.void then
-			e.void, e.correctedAt, e.correctedBy, e.correction = true, math.floor(Clock()), ns.me, Clean(reason, 80)
+			e.void, e.correctedAt, e.correctedBy, e.correction = true, math.floor(Clock()), CleanName(ns.me), Clean(reason, 80)
 			Audit(s, "correct", e.targetKey, id)
+			Share.KeepVoid(s, e.from, e.digest, e.correctedAt)
 			Rebuild(s)
 			stats.corrected = stats.corrected + 1
+			if e.from and e.digest then Share.SendMark("V", e.from, e.digest) end
 			Changed()
 			return true
 		end
@@ -893,10 +1084,25 @@ function Wanted.Correct(id, reason)
 	return false, "expired"
 end
 
+-- A voided shared row remembered (VOIDS_MAX, the oldest go), so that a copy heard later is
+-- refused too: [folded sender#digest] = { at = when, from, digest }.
+function Share.KeepVoid(s, from, digest, at)
+	from = CleanName(from)
+	if not from or type(digest) ~= "string" then return end
+	s.voids[ns.Fold(from) .. "#" .. digest] = { at = Whole(at, 0, 4294967295) or 0, from = from, digest = digest }
+	local n = Count(s.voids)
+	while n > Wanted.VOIDS_MAX do
+		local oldest
+		for key, v in pairs(s.voids) do if not oldest or (v.at or 0) < (s.voids[oldest].at or 0) then oldest = key end end
+		s.voids[oldest], n = nil, n - 1
+	end
+end
+
 local function PublicTarget(t)
 	if type(t) ~= "table" then return nil end
 	return { key = t.key, name = t.name, realm = t.realm, guid = t.guid, active = t.active == true, addedAt = t.addedAt,
-		addedBy = t.addedBy, current = t.current or 0, lifetimeKills = t.lifetimeKills or 0, cycle = t.cycle or 1,
+		addedBy = t.addedBy, source = t.source, removedAt = t.removedAt, removedBy = t.removedBy,
+		current = t.current or 0, lifetimeKills = t.lifetimeKills or 0, cycle = t.cycle or 1,
 		openSince = t.openSince, lastDeath = t.lastDeath, lastSighting = t.lastSighting and CopyList({ t.lastSighting }, 1)[1] or nil,
 		victimOverflow = t.victimOverflow or 0, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), claims = CopyList(t.claims, Wanted.MAX_CLAIMS) }
 end
@@ -945,18 +1151,8 @@ function Wanted.Rankings(month)
 end
 
 ---------------------------------------------------------------------------
--- Human review and the signed global top three
+-- The signed global top three
 ---------------------------------------------------------------------------
-
-local function Hex(bytes)
-	return type(bytes) == "string" and (bytes:gsub(".", function(c) return ("%02x"):format(c:byte()) end)) or nil
-end
-
-local function Digest(text)
-	local S = ns.Sign
-	local raw = S and S.SHA256 and S.SHA256(tostring(text or "")) or nil
-	return raw and Hex(raw):sub(1, 16) or nil
-end
 
 local function Scope()
 	return Digest(tostring(ns.group or ns.realm or "?") .. "|" .. tostring(ns.faction or "?"))
@@ -1108,182 +1304,10 @@ local function CurrentGlobal()
 	return authenticatedGlobal
 end
 
--- A private, deliberately untrusted review inbox. The wire omits names, victims' guilds and
--- locations. Accepting a row is a human decision and still does not grant a border.
--- Each sender's rows count against this rate (REVIEW_RATE_MAX a window) once they are new here.
-local function ReviewAdmit(sender, now)
-	local key = ns.Fold(sender)
-	local bucket = reviewRate[key]
-	if not bucket then
-		if Count(reviewRate) >= Wanted.REVIEW_MAX then
-			for other, held in pairs(reviewRate) do
-				if now - held.at >= Wanted.REVIEW_RATE_WINDOW then reviewRate[other] = nil end
-			end
-			if Count(reviewRate) >= Wanted.REVIEW_MAX then return false end
-		end
-		bucket = { at = now, count = 0 }
-		reviewRate[key] = bucket
-	elseif now - bucket.at >= Wanted.REVIEW_RATE_WINDOW then
-		bucket.at, bucket.count = now, 0
-	end
-	if bucket.count >= Wanted.REVIEW_RATE_MAX then return false end
-	bucket.count = bucket.count + 1
-	return true
-end
-
----------------------------------------------------------------------------
--- The reviewer's durable ledger: the rows he accepted, oldest first by the time of the death,
--- and a base the oldest fold into once there are more than LEDGER_MAX:
---   s.ledger = { accepted = { row, ... }, folded = n, foldedAt = time of the newest folded death,
---                base = { targets = { [guid] = open bounty }, slayers = { [guid] = { points,
---                         claims, reachedAt } }, deaths = { [action|victim guid] = at } } }
--- A row: { key = sender#digest, digest, from, at, month, kind, action, killerGuid, victimGuid,
--- reviewedAt, reviewedBy }. Only accepted rows are kept: pending and rejected ones never are.
--- The base keeps totals, not rows: a row about a death at or before foldedAt is no longer taken
--- (Late). It may be one folded already (sent again), and none could be put back in its place
--- in the order of the deaths.
----------------------------------------------------------------------------
-
-local LEDGER_KINDS = { PARTY_KILL = true, SELF_DEATH = true }
-local LEDGER_ACTIONS = { bounty = true, claim = true }
-
-local function LedgerRow(e)
-	if type(e) ~= "table" then return nil end
-	local digest = type(e.digest) == "string" and e.digest:match("^%x+$") and #e.digest == 16 and e.digest or nil
-	local from = CleanName(e.from)
-	local at, month = Whole(e.at, 0, 4294967295), Whole(e.month, 0, 120000)
-	local killer, victim = Guid(e.killerGuid), Guid(e.victimGuid)
-	if not digest or not from or not at or not month or not killer or not victim
-		or not LEDGER_KINDS[e.kind] or not LEDGER_ACTIONS[e.action] then return nil end
-	return { key = ns.Fold(from) .. "#" .. digest, digest = digest, from = from, at = at, month = month, kind = e.kind,
-		action = e.action, killerGuid = killer, victimGuid = victim, reviewedAt = Whole(e.reviewedAt, 0, 4294967295) or 0,
-		reviewedBy = CleanName(e.reviewedBy) }
-end
-
-local function Earlier(a, b)
-	if a.at ~= b.at then return a.at < b.at end
-	return a.key < b.key
-end
-
-local function Ledger(create)
-	local s = Store(create)
-	if not s then return nil end
-	local l = s.ledger
-	if type(l) ~= "table" then
-		if not create then return nil end
-		l = {}
-		s.ledger = l
-	end
-	if type(l.accepted) ~= "table" then l.accepted = {} end
-	if type(l.base) ~= "table" then l.base = {} end
-	for _, key in ipairs({ "targets", "slayers", "deaths" }) do
-		if type(l.base[key]) ~= "table" then l.base[key] = {} end
-	end
-	l.folded = Whole(l.folded, 0, 2147483647) or 0
-	l.foldedAt = Whole(l.foldedAt, 0, 4294967295)
-	return l
-end
-
--- A death at or before the newest one folded into the base: refused (see above).
-local function Late(l, at)
-	return l ~= nil and l.foldedAt ~= nil and at <= l.foldedAt
-end
-
-local function DeathKey(e) return e.action .. "|" .. e.victimGuid end
-
--- One accepted row applied to the running totals. A row about a death already counted (the same
--- victim inside the death window: another observer's copy) is provenance, not points.
-local function ApplyReviewed(targets, slayers, deaths, e)
-	local death = DeathKey(e)
-	local last = deaths[death]
-	if last and math.abs(e.at - last) <= Wanted.DEATH_WINDOW then return false end
-	deaths[death] = e.at
-	if e.action == "bounty" then
-		targets[e.killerGuid] = math.min(Wanted.MAX_POINTS, (targets[e.killerGuid] or 0) + 1)
-	else
-		local points = targets[e.victimGuid] or 0
-		targets[e.victimGuid] = nil
-		if points > 0 then
-			local r = slayers[e.killerGuid] or { guid = e.killerGuid, points = 0, claims = 0, reachedAt = e.at }
-			r.points, r.claims, r.reachedAt = math.min(Wanted.MAX_POINTS, r.points + points),
-				math.min(Wanted.MAX_POINTS, r.claims + 1), e.at
-			r.months = type(r.months) == "table" and r.months or {}
-			local m = r.months[e.month] or { points = 0, claims = 0 }
-			m.points, m.claims, m.reachedAt = math.min(Wanted.MAX_POINTS, m.points + points),
-				math.min(Wanted.MAX_POINTS, m.claims + 1), e.at
-			r.months[e.month] = m
-			for month in pairs(r.months) do
-				if not Whole(month, MonthNow() - Wanted.MAX_MONTHS + 1, MonthNow()) then r.months[month] = nil end
-			end
-			slayers[e.killerGuid] = r
-		end
-	end
-	return true
-end
-
--- Keeps one of the base's tables within its bound: the entry `worse` ranks lowest goes first.
-local function Bound(t, worse)
-	local n = Count(t)
-	while n > Wanted.LEDGER_BASE_MAX do
-		local drop
-		for key, v in pairs(t) do if drop == nil or worse(v, t[drop], key, drop) then drop = key end end
-		t[drop], n = nil, n - 1
-	end
-end
-
-local function Fold(l, e)
-	local b = l.base
-	ApplyReviewed(b.targets, b.slayers, b.deaths, e)
-	l.folded = math.min(2147483647, l.folded + 1)
-	l.foldedAt = math.max(l.foldedAt or 0, e.at)
-	Bound(b.deaths, function(a, z) return a < z end)
-	Bound(b.targets, function(a, z) return a < z end)
-	Bound(b.slayers, function(a, z, ka, kz)
-		if a.points ~= z.points then return a.points < z.points end
-		if a.reachedAt ~= z.reachedAt then return a.reachedAt > z.reachedAt end
-		return ka > kz
-	end)
-end
-
-local function LedgerFind(l, key)
-	for i, e in ipairs(l and l.accepted or {}) do if e.key == key then return e, i end end
-	return nil
-end
-
-local function LedgerAdd(e)
-	local row = LedgerRow(e)
-	local l = row and Ledger(true)
-	if not l then return false end
-	if LedgerFind(l, row.key) then return true end
-	-- (Inserted before every row, it would fold at once, after newer deaths already folded.)
-	if Late(l, row.at) then return false, "late" end
-	local at = #l.accepted + 1
-	while at > 1 and Earlier(row, l.accepted[at - 1]) do at = at - 1 end
-	table.insert(l.accepted, at, row)
-	while #l.accepted > Wanted.LEDGER_MAX do Fold(l, table.remove(l.accepted, 1)) end
-	return true
-end
-
--- Another observer's account of the same death that names a different killer: accepted rows
--- (and, unless acceptedOnly, the pending ones). A reviewer accepts only one of them.
-local function ConflictOf(e, acceptedOnly)
-	local function Disagrees(o)
-		return o ~= e and o.key ~= e.key and o.action == e.action and o.victimGuid == e.victimGuid
-			and o.killerGuid ~= e.killerGuid and math.abs(o.at - e.at) <= Wanted.DEATH_WINDOW
-	end
-	local l = Ledger(false)
-	for _, o in ipairs(l and l.accepted or {}) do if Disagrees(o) then return o end end
-	if acceptedOnly then return nil end
-	for _, key in ipairs(reviewOrder) do
-		local o = reviewInbox[key]
-		if o and o.state == "pending" and Disagrees(o) then return o end
-	end
-	return nil
-end
-
 -- A fresh own-guild roster, or independently verified federation membership; a guild claim
--- alone (VerifiedLevel's numeric fallback) is not evidence authority.
-local function EvidenceMember(sender)
+-- alone (VerifiedLevel's numeric fallback) is not evidence authority. guild (1.2.3): the guild a
+-- shared row says its sender speaks for, when this client heard none of his own (M.GuildOf).
+local function EvidenceMember(sender, guild)
 	local R = ns.Roster
 	if R and type(R.Fresh) == "function" and type(R.RankOf) == "function" then
 		local ok, fresh = pcall(R.Fresh)
@@ -1291,7 +1315,7 @@ local function EvidenceMember(sender)
 	end
 	local C, M = ns.Channels, ns.Moderation
 	if type(C) ~= "table" or C.missing or type(C.VerifiedLevel) ~= "function" then return false end
-	local guild = M and M.GuildOf and M.GuildOf(sender)
+	guild = M and M.GuildOf and M.GuildOf(sender) or guild
 	if type(guild) ~= "string" or guild == "" or not (ns.IsFederation and ns.IsFederation(guild)) then return false end
 	local ok, level, verified = pcall(C.VerifiedLevel, sender, guild)
 	return ok and type(level) == "number" and level >= 1 and verified == true
@@ -1326,264 +1350,29 @@ local function GuidIsSender(guid, sender)
 	return nil
 end
 
-local function ReviewEvidence(sender, body)
-	if not Wanted.CanPublish(ns.me) then return false, "access" end
-	local version, digest, at, month, kind, action, killerWire, victimWire =
-		body:match("^WX~(%d+)~(%x+)~(%d+)~(%d+)~([PS])~([BC])~([^~]+)~([^~]+)$")
-	at, month = tonumber(at), tonumber(month)
-	local killer, victim = GameGuid(killerWire), GameGuid(victimWire)
-	if version ~= "1" or not digest or #digest ~= 16 or not at or not Whole(month, 0, 120000)
-		or not killer or not victim or (kind == "S") ~= (action == "B") then return false, "shape" end
-	local now = math.floor(Clock())
-	if at > now + Wanted.GLOBAL_SKEW or now - at > Wanted.EVIDENCE_AGE then return false, "stale" end
-	sender = CleanName(sender)
-	if not sender then return false, "sender" end
-	-- Only the sender's own kill or death: a positive server identity proof is required.
-	-- Unknown GUIDs cannot become fabricated Slayers after a manual review.
-	if ns.Moderation and ns.Moderation.Hides and ns.Moderation.Hides(sender) then return false, "olympus" end
-	if not EvidenceMember(sender) then return false, "olympus" end
-	local own = GuidIsSender(kind == "S" and victim or killer, sender)
-	if own ~= true then return false, own == false and "not-own" or "identity" end
-	local key = ns.Fold(sender) .. "#" .. digest
-	-- A row held already costs the sender's rate nothing: after his reload his client may send
-	-- again what it sent before. Pending here, or accepted (in this session or an earlier one:
-	-- already counted), or about a death the ledger's base already holds.
-	if reviewInbox[key] then return false, "replay" end
-	local l = Ledger(false)
-	if LedgerFind(l, key) then return false, "reviewed" end
-	if Late(l, at) then return false, "late" end
-	if not ReviewAdmit(sender, now) then return false, "rate" end
-	-- The inbox holds the pending rows only (an accepted one moves to the ledger), so these bounds
-	-- are on what waits for the reviewer, not on what he took.
-	local from, held = ns.Fold(sender), 0
-	for _, reviewKey in ipairs(reviewOrder) do
-		local existing = reviewInbox[reviewKey]
-		if existing and ns.Fold(existing.from) == from then held = held + 1 end
-	end
-	if held >= Wanted.REVIEW_PER_SENDER then return false, "sender-full" end
-	if #reviewOrder >= Wanted.REVIEW_MAX then return false, "full" end
-	local e = { key = key, digest = digest, from = sender, at = at, month = month,
-		kind = kind == "S" and "SELF_DEATH" or "PARTY_KILL", action = action == "C" and "claim" or "bounty",
-		killerGuid = killer, victimGuid = victim, receivedAt = now, state = "pending" }
-	-- Observers who disagree (another killer for the same death) are both shown, flagged; the
-	-- reviewer can accept only one of them (Wanted.Review).
-	e.conflict = ConflictOf(e) ~= nil
-	reviewInbox[key], reviewOrder[#reviewOrder + 1] = e, key
-	return true, key
-end
-
--- This client's live evidence rows that a reviewer can check (both GUIDs known, and not so old
--- that he refuses them: EVIDENCE_AGE, less a margin for his clock), newest first (after a
--- reload, the rows sent before are the older ones): one target's (its key) or every target's.
-local function Sendable(targetKey)
-	local s, out = Store(false), {}
-	local oldest = math.floor(Clock()) - Wanted.EVIDENCE_AGE + Wanted.GLOBAL_SKEW
-	local evidence = s and s.evidence or {}
-	for i = #evidence, 1, -1 do
-		local e = evidence[i]
-		if type(e) == "table" and not e.void and Guid(e.killerGuid) and Guid(e.victimGuid) and (tonumber(e.at) or 0) >= oldest
-			and (targetKey == nil or e.targetKey == targetKey) then out[#out + 1] = e end
-	end
-	return out
-end
-
--- done(sent, why): as Comm.Whisper's, once the whisper went (or did not).
-function Wanted.SubmitEvidence(reviewer, id, done)
-	reviewer = CleanName(reviewer)
-	if not reviewer or not Wanted.CanPublish(reviewer) then return false, "reviewer" end
-	local s, found = Store(false), nil
-	for _, e in ipairs(s and s.evidence or {}) do if e.id == id and not e.void then found = e break end end
-	if not found or not found.killerGuid or not found.victimGuid then return false, "evidence" end
-	if Clock() - found.at > Wanted.EVIDENCE_AGE - Wanted.GLOBAL_SKEW then return false, "stale" end
-	local digest = Digest(table.concat({ found.id, found.at, found.kind, found.action, found.killerGuid, found.victimGuid }, "|"))
-	local killer, victim = WireGuid(found.killerGuid), WireGuid(found.victimGuid)
-	if not digest or not killer or not victim then return false, "evidence" end
-	local body = ("WX~1~%s~%d~%d~%s~%s~%s~%s"):format(digest, found.at, found.month,
-		found.kind == "SELF_DEATH" and "S" or "P", found.action == "claim" and "C" or "B", killer, victim)
-	local C = ns.Comm
-	if not C or not C.Whisper then return false, "transport" end
-	return C.Whisper(ns.TellName(reviewer), body, nil, false, false, done)
-end
-
--- The server's "No player named ... is currently playing" (its pattern as Treasury reads it)
--- for a reviewer we have just sent a batch: none of it reached him. Those rows can be sent again,
--- and at once (his intake counted none of them). A reviewer we send sightings to who is offline
--- is not sent any more (SightingNotFound): his lease goes, and what waits for him.
-function Wanted.NotFound(text)
-	if type(text) ~= "string" or Secret(text) or (next(batches) == nil and next(reviewers) == nil) then return false end
-	local T = ns.Treasury
-	local pattern = T and T.NotFoundPattern and T.NotFoundPattern()
-	local who = pattern and text:match(pattern)
-	if not who then return false end
-	who = who:lower()
-	local s, now, back = Store(false), math.floor(Clock()), false
-	for key, batch in pairs(batches) do
-		local name = batch.name
-		if now - batch.at <= Wanted.SEND_WAIT
-			and ((ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who) then
-			for _, id in ipairs(batch.ids) do if sentTo[key] then sentTo[key][id] = nil end end
-			batches[key] = nil
-			if s and type(s.sentAt) == "table" then s.sentAt[key] = nil end
-			back = true
-		end
-	end
-	if next(reviewers) ~= nil and SightingNotFound and SightingNotFound(who) then back = true end
-	return back
-end
-
--- (Registered the first time a batch goes, as the Arena's whispers do.)
-local function WatchNotFound()
-	if watchingNotFound then return end
-	watchingNotFound = true
-	pcall(ns.RegisterEvent, "CHAT_MSG_SYSTEM", function(text) Wanted.NotFound(text) end)
-end
-
--- The Send evidence button: rows not yet sent to that reviewer this session, one target's or
--- all, at most what his intake takes from one sender in a window (REVIEW_RATE_MAX; more would be
--- dropped on his side), and the next batch SEND_WAIT later: before, false, "wait", seconds left.
--- When that batch went is kept in the saved data, so that a reload does not cut the wait short.
--- A row whose whisper failed, or that the server could not deliver (Wanted.NotFound), can be
--- sent again. Returns how many went, or false, why.
-function Wanted.SendEvidence(reviewer, targetKey)
-	reviewer = CleanName(reviewer)
-	if not reviewer or not Wanted.CanPublish(reviewer) then return false, "reviewer" end
-	local rows = Sendable(targetKey)
-	if #rows == 0 then return false, "evidence" end
-	local who, s, now = ns.Fold(reviewer), Store(false), math.floor(Clock())
-	local done = sentTo[who] or {}
-	sentTo[who] = done
-	local unsent = false
-	for _, e in ipairs(rows) do if not done[e.id] then unsent = true break end end
-	if not unsent then return false, "sent" end
-	if type(s.sentAt) ~= "table" then s.sentAt = {} end
-	local last = Whole(s.sentAt[who], 0, 4294967295)
-	if last and now - last < Wanted.SEND_WAIT and last <= now then return false, "wait", Wanted.SEND_WAIT - (now - last) end
-	local batch = { name = reviewer, at = now, ids = {} }
-	local sent, why = 0, nil
-	for _, e in ipairs(rows) do
-		if sent >= math.min(Wanted.SEND_BATCH, Wanted.REVIEW_RATE_MAX) then break end
-		local id = e.id
-		if not done[id] then
-			done[id] = true
-			local ok, refused = Wanted.SubmitEvidence(reviewer, id, function(went)
-				-- His window runs from the last whisper that actually went.
-				if went and batches[who] == batch and type(s.sentAt) == "table" then
-					s.sentAt[who] = math.max(Whole(s.sentAt[who], 0, 4294967295) or 0, math.floor(Clock()))
-				elseif not went then done[id] = nil end
-			end)
-			if not ok then done[id] = nil why = refused or "transport" break end
-			sent, batch.ids[#batch.ids + 1] = sent + 1, id
-		end
-	end
-	if sent == 0 then return false, why or "sent" end
-	batches[who], s.sentAt[who] = batch, now
-	WatchNotFound()
-	s.reviewer = reviewer
-	return sent
-end
-
-function Wanted.ReviewInbox()
-	local out = {}
-	for _, key in ipairs(reviewOrder) do
-		local e = reviewInbox[key]
-		if e then local c = {} for k, v in pairs(e) do c[k] = v end out[#out + 1] = c end
-	end
-	return out
-end
-
-local function Unlist(key)
-	reviewInbox[key] = nil
-	for i, reviewKey in ipairs(reviewOrder) do
-		if reviewKey == key then table.remove(reviewOrder, i) break end
-	end
-end
-
-function Wanted.Review(key, accept)
-	if not Wanted.CanPublish(ns.me) then return false, "access" end
-	local e = reviewInbox[key]
-	if not e or e.state ~= "pending" then return false, "missing" end
-	if accept == true then
-		-- Two accounts of one death with different killers: the reviewer keeps one. To take the
-		-- other instead, he withdraws the one he accepted first (Wanted.Withdraw).
-		if ConflictOf(e, true) then return false, "conflict" end
-		local added, why = LedgerAdd(e)
-		if not added then return false, why or "ledger" end
-		local row = LedgerFind(Ledger(false), key)
-		if row then row.reviewedAt, row.reviewedBy = math.floor(Clock()), CleanName(ns.me) end
-	end
-	-- Rejected, untrusted submissions do not consume the bounded inbox forever. An accepted row
-	-- leaves it too: it is in the ledger now (sent again, it is "reviewed"), and the inbox's bounds
-	-- are on what still waits for the reviewer, not on what he took.
-	Unlist(key)
-	stats.reviewed = stats.reviewed + 1
-	Changed()
-	return true
-end
-
--- The reviewer takes back a row he accepted (not one already folded into the base). The signed
--- top three changes only when he publishes again.
-function Wanted.Withdraw(key)
-	if not Wanted.CanPublish(ns.me) then return false, "access" end
-	local l = Ledger(false)
-	local row, i = LedgerFind(l, key)
-	if not row then return false, "missing" end
-	table.remove(l.accepted, i)
-	Changed()
-	return true
-end
-
--- The accepted rows (copies, newest first) and how many older ones folded into the base.
-function Wanted.Ledger()
-	local l, out = Ledger(false), {}
-	for i = #(l and l.accepted or {}), 1, -1 do
-		local c = {} for k, v in pairs(l.accepted[i]) do c[k] = v end out[#out + 1] = c
-	end
-	return out, l and l.folded or 0
-end
-
--- The reviewer's cumulative all-time top three: his ledger's base plus every row he accepted,
--- in the order the deaths happened. It survives reloads with the ledger.
-local function ReviewedMonths(source)
-	local out, now = {}, MonthNow()
-	for month, v in pairs(type(source) == "table" and source or {}) do
-		if Whole(month, now - Wanted.MAX_MONTHS + 1, now) and type(v) == "table"
-			and Whole(v.points, 1, Wanted.MAX_POINTS) and Whole(v.claims, 0, Wanted.MAX_POINTS)
-			and Whole(v.reachedAt, 0, 4294967295) then
-			out[month] = { points = v.points, claims = v.claims, reachedAt = v.reachedAt }
-		end
-	end
-	return out
-end
-function Wanted.ReviewedRankings(month)
-	if month ~= nil and not Whole(month, 0, 120000) then return {} end
-	local l = Ledger(false)
-	local targets, slayers, deaths = {}, {}, {}
-	if l then
-		for guid, points in pairs(l.base.targets) do
-			if Guid(guid) and Whole(points, 1, Wanted.MAX_POINTS) then targets[guid] = points end
-		end
-		for guid, r in pairs(l.base.slayers) do
-			if Guid(guid) and type(r) == "table" and Whole(r.points, 1, Wanted.MAX_POINTS) then
-				slayers[guid] = { guid = guid, points = r.points, claims = Whole(r.claims, 0, Wanted.MAX_POINTS) or 0,
-					reachedAt = Whole(r.reachedAt, 0, 4294967295) or 0, months = ReviewedMonths(r.months) }
-			end
-		end
-		for key, at in pairs(l.base.deaths) do if type(key) == "string" and Whole(at, 0, 4294967295) then deaths[key] = at end end
-		for _, e in ipairs(l.accepted) do ApplyReviewed(targets, slayers, deaths, e) end
-	end
+-- 1.2.3: the top three this client would sign, as its own Slayers board counts it (every member's
+-- shared kills and deaths it holds: Share.Take), all time, by verified GUID: a slayer this client
+-- knows by his name alone (a member of another guild whose GUID it could not prove) is left out,
+-- never awarded a frame by a name. No review: the rows counted as they came.
+function Wanted.SignableRankings()
 	local rows = {}
-	for guid, row in pairs(slayers) do
-		local m = month and row.months and row.months[month]
-		if not month then rows[#rows + 1] = row
-		elseif m then rows[#rows + 1] = { guid = guid, points = m.points, claims = m.claims, reachedAt = m.reachedAt } end
+	for _, r in ipairs(Wanted.Rankings().all) do
+		if Guid(r.guid) and #rows < Wanted.GLOBAL_ROWS then
+			rows[#rows + 1] = { guid = r.guid, points = math.min(r.points, Wanted.MAX_POINTS), claims = r.claims or 0, reachedAt = r.reachedAt or 0 }
+		end
 	end
-	table.sort(rows, function(a, b)
-		if a.points ~= b.points then return a.points > b.points end
-		if a.reachedAt ~= b.reachedAt then return a.reachedAt < b.reachedAt end
-		return a.guid < b.guid
-	end)
-	while #rows > Wanted.GLOBAL_ROWS do table.remove(rows) end
 	return CanonicalRows(rows) or {}
+end
+
+-- The Slayers ranked among the top three's places whom this client knows by name only, left out
+-- of what it would sign (the frames page names them).
+function Share.Unsignable()
+	local out, signable = {}, 0
+	for _, r in ipairs(Wanted.Rankings().all) do
+		if signable >= Wanted.GLOBAL_ROWS or #out >= Wanted.GLOBAL_ROWS then break end
+		if Guid(r.guid) then signable = signable + 1 else out[#out + 1] = r end
+	end
+	return out
 end
 
 local function ParseSnapshot(sender, text, relay)
@@ -1894,7 +1683,26 @@ local function PublishRows(rows)
 	return sent, why
 end
 
--- What this reviewer last published here (for his review page), or nil.
+-- The server's "No player named ... is currently playing" (its pattern as Treasury reads it)
+-- for a reviewer this client sends sightings to: he is not online, so his lease goes, and what
+-- waits for him (SightingNotFound).
+function Wanted.NotFound(text)
+	if type(text) ~= "string" or Secret(text) or next(reviewers) == nil then return false end
+	local T = ns.Treasury
+	local pattern = T and T.NotFoundPattern and T.NotFoundPattern()
+	local who = pattern and text:match(pattern)
+	if not who then return false end
+	return SightingNotFound ~= nil and SightingNotFound(who:lower()) == true
+end
+
+-- (Registered the first time a sighting goes, as the Arena's whispers do.)
+local function WatchNotFound()
+	if watchingNotFound then return end
+	watchingNotFound = true
+	pcall(ns.RegisterEvent, "CHAT_MSG_SYSTEM", function(text) Wanted.NotFound(text) end)
+end
+
+-- What this reviewer last published here (for his frames page), or nil.
 function Wanted.LastPublished()
 	local p = publishedGlobal
 	if not p then
@@ -1907,11 +1715,12 @@ function Wanted.LastPublished()
 	return { issued = tonumber(issued), expires = tonumber(expires), rows = rows or {} }
 end
 
--- The public publication path is deliberately tied to rows this client explicitly reviewed.
--- An authority may publish an empty reviewed table or use RevokeGlobal for an emergency removal,
--- but no caller can hand this API an arbitrary scoreboard.
+-- The public publication path is deliberately tied to this client's own Slayers board
+-- (Wanted.SignableRankings: every shared kill and death it counted, by verified GUID). An
+-- authority may publish an empty board or use RevokeGlobal for an emergency removal, but no
+-- caller can hand this API an arbitrary scoreboard.
 function Wanted.PublishGlobal()
-	return PublishRows(Wanted.ReviewedRankings())
+	return PublishRows(Wanted.SignableRankings())
 end
 
 function Wanted.RevokeGlobal()
@@ -2022,8 +1831,8 @@ function Wanted.OpenTarget(value, guid, realm)
 	return true
 end
 
--- The reviewer's page (the King, a signed High Councillor or the author): what waits for him,
--- what he accepted, and the top three he would sign.
+-- The frames page (the King, a signed High Councillor or the author): the top three he would
+-- sign from his own Slayers board, and his last word.
 function Wanted.OpenReview()
 	if not Wanted.CanPublish(ns.me) then return false end
 	mode, opened = "review", nil
@@ -2047,8 +1856,6 @@ local function OpenSlayer(r)
 	if not (r and r.name and ns.UI and ns.UI.ShowPerson) then return false end
 	return ns.UI.ShowPerson({ name = ns.ShortName(r.name), realm = ns.RealmOf(r.name), source = "addon", at = r.lastAt })
 end
-
-local function Red(s) return "|cffff4040" .. tostring(s or "") .. "|r" end
 
 -- A GUID as a name a person can read: what this client knows of it (its slayers, its targets,
 -- the game's own lookup through Debts.InfoName), else the GUID itself.
@@ -2134,9 +1941,9 @@ local function LiveEvidence(id)
 	return false
 end
 
--- A Watch moderator or the author voids a row still live (not yet checkpointed), with a reason.
+-- A reviewer (Wanted.CanRemove) voids a row still live (not yet checkpointed), with a reason.
 local function CorrectClick(id, label)
-	if not (id and Wanted.CanManage() and LiveEvidence(id)) then return nil end
+	if not (id and Wanted.CanRemove() and LiveEvidence(id)) then return nil end
 	return function() return ns.ShowDialog("OLYMPUS_WANTED_CORRECT", label, nil, id) end
 end
 
@@ -2151,6 +1958,13 @@ local function TargetLines()
 		{ indent = 1, text = L.WANTED_BOUNTY:format(t.current), right = L.WANTED_LIFETIME:format(t.lifetimeKills) },
 		{ indent = 1, text = L.WANTED_CYCLE:format(t.cycle, t.openSince and ns.Ago(t.openSince) or L.WANTED_UNKNOWN) },
 	}
+	-- (1.2.3: how he entered, by himself, and who took him off.)
+	if t.addedAt and t.addedBy then
+		lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_ENTERED:format(ns.Ago(t.addedAt), IssuerName(t.addedBy))) }
+	end
+	if not t.active and t.removedBy then
+		lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_TAKEN_OFF:format(IssuerName(t.removedBy), t.removedAt and ns.Ago(t.removedAt) or L.WANTED_UNKNOWN)) }
+	end
 	if t.lastSighting then
 		local precision = t.lastSighting.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE
 		lines[#lines + 1] = { indent = 1, text = L.WANTED_LAST_SIGHTING:format(t.lastSighting.zone or L.WANTED_UNKNOWN, precision,
@@ -2182,52 +1996,20 @@ local function TargetLines()
 	return lines
 end
 
-local function ReviewSummary(e)
-	return (e.action == "claim" and L.WANTED_CLAIM_LINE or L.WANTED_BOUNTY_LINE):format(GuidName(e.killerGuid), GuidName(e.victimGuid))
-end
-
-local function ReviewTip(e, conflict)
-	return function(tt)
-		tt:AddLine(ReviewSummary(e), 1, 0.82, 0, true)
-		tt:AddLine(L.WANTED_REVIEW_TIP:format(EvidenceLabel(e.kind), IssuerName(e.from or L.WANTED_UNKNOWN), ns.Ago(e.at)), 1, 1, 1, true)
-		tt:AddLine(L.WANTED_GUIDS:format(e.killerGuid, e.victimGuid), 0.7, 0.7, 0.7, true)
-		if conflict then tt:AddLine(L.WANTED_CONFLICT, 1, 0.25, 0.25, true) end
-	end
-end
-
-local function ReviewLines()
+-- The frames page: the top three this reviewer would sign (Wanted.SignableRankings), the Slayers
+-- left out of it for want of a verified GUID, and when he last published.
+local function FramesLines()
 	if not Wanted.CanPublish(ns.me) then mode, opened = "list", nil return ListLines() end
 	local lines = { { text = Gold(L.WANTED_BACK), onClick = Wanted.Back } }
-	local pending = {}
-	for _, e in ipairs(Wanted.ReviewInbox()) do if e.state == "pending" then pending[#pending + 1] = e end end
-	lines[#lines + 1] = { header = true, text = L.WANTED_PENDING, right = Grey(tostring(#pending)) }
-	if #pending == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_PENDING) } end
-	for _, e in ipairs(pending) do
-		local conflict = ConflictOf(e) ~= nil
-		local summary = ReviewSummary(e)
-		lines[#lines + 1] = { indent = 1, id = "wanted-review:" .. e.key, text = (conflict and Red("! ") or "") .. summary,
-			right = Grey(ns.Ago(e.at)), tooltip = ReviewTip(e, conflict),
-			onClick = function() return ns.ShowDialog("OLYMPUS_WANTED_REVIEW", summary, nil, e.key) end }
-	end
-	lines[#lines].gapAfter = true
-	local accepted, folded = Wanted.Ledger()
-	lines[#lines + 1] = { header = true, text = L.WANTED_ACCEPTED, right = Grey(tostring(#accepted + folded)) }
-	if #accepted + folded == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_ACCEPTED) } end
-	for i = 1, math.min(#accepted, Wanted.REVIEW_SHOWN) do
-		local e = accepted[i]
-		local summary = ReviewSummary(e)
-		lines[#lines + 1] = { indent = 1, id = "wanted-ledger:" .. e.key, text = summary, right = Grey(ns.Ago(e.at)),
-			tooltip = ReviewTip(e, false), onClick = function() return ns.ShowDialog("OLYMPUS_WANTED_WITHDRAW", summary, nil, e.key) end }
-	end
-	local older = math.max(0, #accepted - Wanted.REVIEW_SHOWN) + folded
-	if older > 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_OLDER_ACCEPTED:format(older)) } end
-	lines[#lines].gapAfter = true
 	lines[#lines + 1] = { header = true, text = L.WANTED_TO_PUBLISH }
-	local rows = Wanted.ReviewedRankings()
+	local rows = Wanted.SignableRankings()
 	if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_SLAYERS) } end
 	for i, row in ipairs(rows) do
 		lines[#lines + 1] = { indent = 1, key = row.key, text = (PLACE[i] or ("#" .. i)) .. "  " .. GuidName(row.guid),
 			right = L.WANTED_POINTS:format(row.points) }
+	end
+	for _, r in ipairs(Share.Unsignable()) do
+		lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_GUID:format(r.name and (ns.DisplayName(r.name) or r.name) or L.WANTED_UNKNOWN)) }
 	end
 	local last = Wanted.LastPublished()
 	lines[#lines + 1] = { indent = 1, text = Grey(last and last.issued and L.WANTED_LAST_PUBLISHED:format(ns.Ago(last.issued), DaysLeft(last.expires))
@@ -2237,7 +2019,7 @@ end
 
 function Wanted.Build()
 	if mode == "review" then
-		local lines = ReviewLines()
+		local lines = FramesLines()
 		if mode == "review" then return lines, L.WANTED_REVIEW_TITLE, L.WANTED_REVIEW_ABOUT end
 		return lines, L.WANTED_TITLE, L.WANTED_ABOUT
 	end
@@ -2247,45 +2029,42 @@ function Wanted.Build()
 	return lines, L.WANTED_TITLE, L.WANTED_ABOUT .. "\n" .. Grey(note)
 end
 
-local function PromptAdd()
-	if not Wanted.CanManage() then return false end
-	return ns.ShowDialog("OLYMPUS_WANTED_ADD")
+-- The entry open now, while it is on the list (a reviewer's Remove).
+local function OpenedActive()
+	local s = Store(false)
+	local t = mode == "target" and s and opened and s.targets[s.aliases[opened] or opened]
+	return type(t) == "table" and t.active == true and t or nil
 end
 
 local function PromptRemove()
-	if not Wanted.CanManage() or not opened then return false end
-	local s = Store(false)
-	local t = s and s.targets[s.aliases[opened] or opened]
-	if not (s and t) then return false end
+	local t = Wanted.CanRemove() and OpenedActive()
+	if not t then return false end
 	return ns.ShowDialog("OLYMPUS_WANTED_REMOVE", Display(t), nil, t.key)
 end
 
--- The open target's key (its current one), or nil on the list.
-local function OpenedKey()
-	local s = Store(false)
-	if mode ~= "target" or not (s and opened) then return nil end
-	local t = s.targets[s.aliases[opened] or opened]
-	return t and t.key or nil
-end
-
-local function HasSendable()
-	local key = OpenedKey()
-	if mode == "target" and not key then return false end
-	return #Sendable(key) > 0
-end
-
-local function PromptSend()
-	if not HasSendable() then return false end
-	return ns.ShowDialog("OLYMPUS_WANTED_SEND", nil, nil, OpenedKey())
-end
-
-local function PendingCount()
-	local n = 0
-	for _, key in ipairs(reviewOrder) do
-		local e = reviewInbox[key]
-		if e and e.state == "pending" then n = n + 1 end
+-- 1.2.3: the one reviewer this member's sightings are whispered to. He was the one the member sent
+-- his evidence to; there is no evidence to send any more, so the member names him here: the King,
+-- a signed High Councillor or the author, typed, or nobody (empty). Returns true, or false and why.
+function Wanted.SetReviewer(name)
+	name = type(name) == "string" and name:gsub("^%s+", ""):gsub("%s+$", "") or ""
+	if name == "" then
+		local s = Store(false)
+		if s then s.reviewer = nil end
+		ns.Print(L.WANTED_REVIEWER_NONE)
+		return true
 	end
-	return n
+	local reviewer = CleanName(ns.FullName and ns.FullName(name) or name)
+	if not reviewer or SameName(reviewer, ns.me) or not Wanted.CanPublish(reviewer) then return false, "reviewer" end
+	local s = Store(true)
+	if not s then return false, "store" end
+	s.reviewer = reviewer
+	ns.Print(L.WANTED_REVIEWER_SET:format(IssuerName(reviewer)))
+	return true
+end
+
+local function PromptReviewer()
+	if not Wanted.SightingsOn() then return false end
+	return ns.ShowDialog("OLYMPUS_WANTED_REVIEWER")
 end
 
 local function RowsSummary(rows)
@@ -2296,7 +2075,7 @@ end
 
 local function PromptPublish()
 	if not Wanted.CanPublish(ns.me) then return false end
-	return ns.ShowDialog("OLYMPUS_WANTED_PUBLISH", RowsSummary(Wanted.ReviewedRankings()))
+	return ns.ShowDialog("OLYMPUS_WANTED_PUBLISH", RowsSummary(Wanted.SignableRankings()))
 end
 
 local function PromptRevoke()
@@ -2309,32 +2088,6 @@ local function Failed(why) ns.Print(L.WANTED_ACTION_FAILED:format(tostring(why o
 local function Focus(eb)
 	if ns.Focus then ns.Focus(eb) elseif eb.SetFocus then eb:SetFocus() end
 end
-
-StaticPopupDialogs["OLYMPUS_WANTED_ADD"] = {
-	text = L.WANTED_ADD_PROMPT, button1 = ADD or "Add", button2 = CANCEL or "Cancel", hasEditBox = true,
-	editBoxWidth = 300, maxLetters = 72,
-	-- (Focus: with the gamepad UI, never the keyboard taken from another box, the chat's.)
-	OnShow = function(self) local eb = self.editBox or self.EditBox if eb then eb:SetText(""); Focus(eb) end end,
-	OnAccept = function(self)
-		local eb = self.editBox or self.EditBox
-		local text = eb and eb:GetText() or ""
-		local ok, why
-		if text:gsub("%s", "") == "" then ok, why = Wanted.AddTargetUnit("target")
-		else ok, why = Wanted.AddTarget(text) end
-		if not ok then ns.Print(L.WANTED_ACTION_FAILED:format(tostring(why or "?"))) end
-	end,
-	EditBoxOnEnterPressed = function(self)
-		local parent = self:GetParent()
-		local text = self:GetText() or ""
-		local ok, why
-		if text:gsub("%s", "") == "" then ok, why = Wanted.AddTargetUnit("target")
-		else ok, why = Wanted.AddTarget(text) end
-		if not ok then ns.Print(L.WANTED_ACTION_FAILED:format(tostring(why or "?"))) end
-		parent:Hide()
-	end,
-	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
 
 StaticPopupDialogs["OLYMPUS_WANTED_REMOVE"] = {
 	text = L.WANTED_REMOVE_PROMPT, button1 = REMOVE or "Remove", button2 = CANCEL or "Cancel",
@@ -2349,58 +2102,28 @@ StaticPopupDialogs["OLYMPUS_WANTED_REMOVE"] = {
 	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 }
 
--- Send evidence: to the reviewer typed (prefilled with the last one), this target's rows or all.
-local function SendTo(name, key)
-	name = type(name) == "string" and name:gsub("^%s+", ""):gsub("%s+$", "") or ""
-	if name == "" then return Failed("reviewer") end
-	local reviewer = ns.FullName and ns.FullName(name) or name
-	local sent, why, wait = Wanted.SendEvidence(reviewer, key)
-	if not sent and why == "wait" then return ns.Print(L.WANTED_SEND_WAIT:format(wait or Wanted.SEND_WAIT)) end
-	if not sent then return Failed(why) end
-	ns.Print(L.WANTED_SENT:format(sent, IssuerName(CleanName(reviewer) or reviewer)))
-end
-
-StaticPopupDialogs["OLYMPUS_WANTED_SEND"] = {
-	text = L.WANTED_SEND_PROMPT, button1 = L.WANTED_SEND_ACCEPT, button2 = CANCEL or "Cancel", hasEditBox = true,
+-- Sightings to: the reviewer typed (prefilled with the one chosen), or nobody.
+StaticPopupDialogs["OLYMPUS_WANTED_REVIEWER"] = {
+	text = L.WANTED_REVIEWER_PROMPT, button1 = L.WANTED_REVIEWER_ACCEPT, button2 = CANCEL or "Cancel", hasEditBox = true,
 	editBoxWidth = 300, maxLetters = 72,
+	-- (Focus: with the gamepad UI, never the keyboard taken from another box, the chat's.)
 	OnShow = function(self)
 		local eb = self.editBox or self.EditBox
 		local s = Store(false)
 		if eb then eb:SetText(s and s.reviewer and (ns.TellName(s.reviewer) or s.reviewer) or ""); Focus(eb) end
 	end,
-	OnAccept = function(self, key)
+	OnAccept = function(self)
 		local eb = self.editBox or self.EditBox
-		SendTo(eb and eb:GetText() or "", key)
+		local ok, why = Wanted.SetReviewer(eb and eb:GetText() or "")
+		if not ok then Failed(why) end
 	end,
-	EditBoxOnEnterPressed = function(self, key)
+	EditBoxOnEnterPressed = function(self)
 		local parent = self:GetParent()
-		SendTo(self:GetText() or "", key)
+		local ok, why = Wanted.SetReviewer(self:GetText() or "")
+		if not ok then Failed(why) end
 		parent:Hide()
 	end,
 	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
-	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
--- A pending row: Accept (into the ledger), Reject (gone), or Later (it stays pending).
-StaticPopupDialogs["OLYMPUS_WANTED_REVIEW"] = {
-	text = L.WANTED_REVIEW_PROMPT, button1 = L.WANTED_ACCEPT_BTN, button2 = L.WANTED_LATER_BTN, button3 = L.WANTED_REJECT_BTN,
-	OnAccept = function(self, key)
-		local ok, why = Wanted.Review(key or (self and self.data), true)
-		if not ok then Failed(why) end
-	end,
-	OnAlt = function(self, key)
-		local ok, why = Wanted.Review(key or (self and self.data), false)
-		if not ok then Failed(why) end
-	end,
-	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
-}
-
-StaticPopupDialogs["OLYMPUS_WANTED_WITHDRAW"] = {
-	text = L.WANTED_WITHDRAW_PROMPT, button1 = L.WANTED_WITHDRAW_BTN, button2 = CANCEL or "Cancel",
-	OnAccept = function(self, key)
-		local ok, why = Wanted.Withdraw(key or (self and self.data))
-		if not ok then Failed(why) end
-	end,
 	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 }
 
@@ -2441,16 +2164,15 @@ StaticPopupDialogs["OLYMPUS_WANTED_CORRECT"] = {
 	timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
 }
 
+-- 1.2.3: no Add (Horde players enter by themselves), no Send evidence and no review: a reviewer's
+-- Frames page (the top three he signs), his Remove on an entry, and a member's Sightings to.
 local buttons = {
 	{ "WANTED_BACK_BTN", Wanted.Back, shown = function() return mode ~= "list" end },
-	{ "WANTED_ADD_BTN", PromptAdd, shown = function() return mode == "list" and Wanted.CanManage() end },
-	{ "WANTED_REVIEW_BTN", Wanted.OpenReview, shown = function() return mode == "list" and Wanted.CanPublish(ns.me) end,
-		label = function()
-			local n = PendingCount()
-			return n > 0 and L.WANTED_REVIEW_BTN_COUNT:format(n) or L.WANTED_REVIEW_BTN
-		end },
-	{ "WANTED_SEND_BTN", PromptSend, shown = function() return mode ~= "review" and HasSendable() end },
-	{ "WANTED_REMOVE_BTN", PromptRemove, shown = function() return mode == "target" and Wanted.CanManage() end },
+	{ "WANTED_REVIEW_BTN", Wanted.OpenReview, shown = function() return mode == "list" and Wanted.CanPublish(ns.me) end },
+	{ "WANTED_REVIEWER_BTN", PromptReviewer, shown = function()
+		return mode == "list" and ns.IsMember ~= nil and ns.IsMember() == true and ns.faction ~= "Horde" and Wanted.SightingsOn()
+	end },
+	{ "WANTED_REMOVE_BTN", PromptRemove, shown = function() return mode == "target" and Wanted.CanRemove() and OpenedActive() ~= nil end },
 	{ "WANTED_PUBLISH_BTN", PromptPublish, shown = function() return mode == "review" and Wanted.CanPublish(ns.me) end },
 	{ "WANTED_REVOKE_BTN", PromptRevoke, shown = function() return mode == "review" and Wanted.CanPublish(ns.me) end },
 }
@@ -2459,23 +2181,23 @@ Wanted.buttons = buttons -- (tests)
 ---------------------------------------------------------------------------
 -- Most Wanted sightings
 --
--- A sighting is what this client saw itself: a Horde player its own list names, or a hostile one
--- flagged for PvP (never one of an Olympus guild unless listed), by his name and GUID as the game
--- gives them (a secret value is refused), and where this player stood then: his own map position,
--- rounded to SIGHT_GRID thousandths of the map, and his layer when Layers knows it. "Seen nearby":
--- never the Horde player's own coordinates. On for members by default, off by their No (the
--- privacy page, /oly sightings off), which stops collecting, cancels what waits in Comm and takes
--- back what reached a reviewer, at once. The privacy page asks it like its other lines until it is
--- answered (on meanwhile), so a member who answered the others before is shown it too. It is a
--- line of its own: it goes whatever the member answered about his zone and layer (Layers.Sharing),
--- and says so. The King's position is his crown on the map (King.SharingLocation, as for his
--- layer): while it is hidden his client sends none, and hiding it takes back what went. Nothing
--- is collected in an instance, nor by a client the moderators took off (net-off).
--- It shows on this client's own map, and goes where this member's evidence goes (WX): to the one
--- reviewer (the King, a signed High Councillor, the author) he sends it to (Wanted.SendEvidence),
--- by whisper only, never on the channel, and only while that reviewer's client says it takes
--- sightings (its lease: no place in it); a member who sent evidence to nobody sends his sightings
--- to nobody. SIGHT_SEND_MAX a window from this client, each Horde player once per SIGHT_GAP.
+-- A sighting is what this client saw itself: a Horde player on its own Most Wanted list (1.2.3:
+-- every Horde player who killed or was killed by a member it heard of, by himself), by his name
+-- and GUID as the game gives them (a secret value is refused), and where this player stood then:
+-- his own map position, rounded to SIGHT_GRID thousandths of the map, and his layer when Layers
+-- knows it. "Seen nearby": never the Horde player's own coordinates. Off until the member's own
+-- Yes on its line of the privacy page (1.2.0), off again by his No (/oly sightings off), which
+-- stops collecting, cancels what waits in Comm and takes back what reached a reviewer, at once.
+-- Nothing goes while he keeps his zone and layer private (Layers.Sharing). The King's position is
+-- his crown on the map (King.SharingLocation, as for his layer): while it is hidden his client
+-- sends none, and hiding it takes back what went. Nothing is collected in an instance, nor by a
+-- client the moderators took off (net-off).
+-- It shows on this client's own map, and goes to the one reviewer (the King, a signed High
+-- Councillor, the author) the member chose (Sightings to on the Most Wanted page:
+-- Wanted.SetReviewer; until 1.2.3, the one he sent his evidence to), by whisper only, never on
+-- the channel, and only while that reviewer's client says it takes sightings (its lease: no place
+-- in it); a member who chose nobody sends his sightings to nobody. SIGHT_SEND_MAX a window from
+-- this client, each Horde player once per SIGHT_GAP.
 -- Comm checks each whisper again when it leaves (the No, net-off, the crown, the reviewer's
 -- lease, its age).
 --   WS~R~1                                                             channel: a reviewer's lease
@@ -2505,13 +2227,6 @@ local function NetOff()
 	if type(M) ~= "table" or M.missing or type(M.SelfOff) ~= "function" then return false end
 	local ok, off = pcall(M.SelfOff)
 	return not ok or (off ~= nil and off ~= false)
-end
-
-local function InInstance()
-	if type(IsInInstance) ~= "function" then return false end
-	local ok, inside = pcall(IsInInstance)
-	if not ok or Secret(inside) then return true end -- (not known: as if inside)
-	return inside == true
 end
 
 -- A unit API's first answer, nil when it fails or is secret.
@@ -2648,9 +2363,9 @@ local function LeaseLive(r, now)
 		and Wanted.CanPublish(r.name)
 end
 
--- Whom a sighting goes to: the reviewer this member sends his evidence to (s.reviewer, set by
--- Wanted.SendEvidence), while his client says it takes them (his lease) and he holds the role;
--- never us, never anyone else. Nobody when this member sent evidence to nobody.
+-- Whom a sighting goes to: the reviewer this member chose (s.reviewer, set by Wanted.SetReviewer;
+-- by 1.2.2's Send evidence before), while his client says it takes them (his lease) and he holds
+-- the role; never us, never anyone else. Nobody when this member chose nobody.
 local function Recipients(now)
 	local s = Store(false)
 	local chosen = s and CleanName(s.reviewer) or nil
@@ -3226,9 +2941,504 @@ if ns.Consent and ns.Consent.Register then
 	})
 end
 
+---------------------------------------------------------------------------
+-- Shared kills and deaths (1.2.3)
+--
+-- This client's own row (its player's own death to a Horde player, or his own killing blow on one)
+-- goes at once to the Olympus channel, and every member's client counts it straight away:
+--   WK~1~<scope>~<guild>~<digest>~<at>~<month>~<S|P>~<horde guid>~<own guid>~<horde name>
+--       channel: one own row. S: the sender's death, a bounty on the Horde player. P: the
+--       sender's killing blow, a claim of the Horde player's open bounty.
+--   WK~R~1~<scope>~<from>~<b>~<digest>~<at>~<month>~<S|P>~<horde guid>~<own guid|->~<horde name>
+--       channel: a reviewer's relay of a row his client took from <from>: b is 1 when his client
+--       proved the GUID is the sender's (else 0, and no GUID: -).
+--   WK~C~1~...   the same, in his answer to a late login's catch-up ask (W4)
+--   WV~T~1~<scope>~<horde guid>~<at>            channel: a reviewer took that Horde player off
+--   WV~V~1~<scope>~<from>~<digest>~<at>         channel: a reviewer voided that member's row
+-- GUIDs as WY writes them (server.id), <scope> the realm group and faction (Scope), <digest> the
+-- row's own (16 hex), <at> its time and <month> its month as the sender's client counted them.
+-- What a receiver takes (Share.Take): a row of its own realm group and faction, fresh (SHARE_AGE,
+-- GLOBAL_SKEW), from a member it verifies (its own guild's fresh roster, a guild rank it can verify
+-- for the guild the row names, or a reviewer), whom the moderators do not hide, about the
+-- sender's own death or killing blow: the Olympian side is the sender, by the name the server
+-- stamps, his GUID only where this client proves it is his (GuidIsSender: a unit, or the game's
+-- lookup), refused where it proves it is someone else's. The Horde side as the sender's client
+-- proved it, refused where this client sees him as no Horde player (a unit, an Alliance race) or
+-- as an Olympian. Once (its id: the sender and the digest), unless voided, SHARE_RATE_MAX a window
+-- from one member and SHARE_TARGET_MAX about one Horde player from everyone. A relay only from a
+-- reviewer (the King, a signed High Councillor, the author), on whose word a member this client
+-- cannot verify (one of another guild, whose rank no census names) counts, SHARE_RELAY_MAX a
+-- window from one. A mark (WV) only from a reviewer, on his own word. A client before 1.2.3 has
+-- no handler for WK or WV, and ignores them.
+---------------------------------------------------------------------------
+
+Share.ALLIANCE_RACES = { Human = true, Dwarf = true, NightElf = true, Gnome = true, Draenei = true, Worgen = true,
+	VoidElf = true, LightforgedDraenei = true, DarkIronDwarf = true, KulTiran = true, Mechagnome = true }
+
+-- (This session's captures and refusals, the newest last, DIAG_MAX at most: /oly wanted status.)
+-- kind: "kill" (own killing blow), "death" (own death), "heard" (a member's row), "relay" (a
+-- reviewer's relay), "mark" (a reviewer's removal or void). why: the row recorded, or the reason.
+function Share.Note(kind, ok, why, who, from)
+	local reason = ok and "ok" or tostring(why or "?")
+	Share.counts[kind] = (Share.counts[kind] or 0) + 1
+	if ok then Share.counts.counted = (Share.counts.counted or 0) + 1 else Share.why[reason] = (Share.why[reason] or 0) + 1 end
+	local e = ok and type(why) == "table" and why or nil
+	local row = { at = math.floor(Clock()), kind = kind, ok = ok == true, why = not ok and reason or nil, who = Clean(who, 72),
+		from = Clean(from, 72), action = e and e.action or nil, points = e and e.points or nil }
+	Share.log[#Share.log + 1] = row
+	while #Share.log > Wanted.DIAG_MAX do table.remove(Share.log, 1) end
+	return row
+end
+
+-- One death's reading (PLAYER_DEAD and its retries): one line, the last answer.
+function Share.NoteDeath(serial, ok, why, who)
+	local last = Share.deathRow
+	if last and last.serial == serial then
+		Share.counts.death = math.max(0, (Share.counts.death or 1) - 1)
+		if last.ok then Share.counts.counted = math.max(0, (Share.counts.counted or 1) - 1)
+		else Share.why[last.why] = math.max(0, (Share.why[last.why] or 1) - 1) end
+		for i = #Share.log, 1, -1 do if Share.log[i] == last then table.remove(Share.log, i) break end end
+	end
+	local row = Share.Note("death", ok, why, who)
+	row.serial, Share.deathRow = serial, row
+	return row
+end
+
+-- (A reviewer's own part of a few seconds: two reviewers online do not relay at the same moment.)
+function Share.Offset()
+	local n, me = 0, tostring(ns.me or "")
+	for i = 1, #me do n = n + me:byte(i) end
+	return n
+end
+
+-- A window's count for key, one more within max: false when it is full. The table holds keysMax
+-- keys at most (SHARE_SENDERS_MAX by default; those whose window ended go first; none, false).
+function Share.Count(list, key, now, window, max, keysMax)
+	keysMax = keysMax or Wanted.SHARE_SENDERS_MAX
+	local b = list[key]
+	if not b then
+		if Count(list) >= keysMax then
+			for other, held in pairs(list) do if now - held.at >= window or held.at > now then list[other] = nil end end
+			if Count(list) >= keysMax then return false end
+		end
+		b = { at = now, n = 0 }
+		list[key] = b
+	elseif now - b.at >= window or b.at > now then
+		b.at, b.n = now, 0
+	end
+	if b.n >= max then return false end
+	b.n = b.n + 1
+	return true
+end
+
+-- SHARE_RATE_MAX rows a window from one member and SHARE_DAY_MAX a day (SHARE_RELAY_MAX a window
+-- from one reviewer's relays), and SHARE_TARGET_MAX about one Horde player from everyone.
+function Share.Admit(who, hordeGuid, now, relay)
+	local key, max = ns.Fold(who), Wanted.SHARE_RATE_MAX
+	if relay then key, max = "r:" .. key, Wanted.SHARE_RELAY_MAX end
+	if not Share.Count(Share.rates, key, now, Wanted.SHARE_RATE_WINDOW, max) then return false, "rate" end
+	if not relay and not Share.Count(Share.days, key, now, Wanted.SHARE_DAY, Wanted.SHARE_DAY_MAX, Wanted.SHARE_DAY_SENDERS_MAX) then
+		return false, "rate"
+	end
+	if not Share.Count(Share.targets, hordeGuid, now, Wanted.SHARE_TARGET_WINDOW, Wanted.SHARE_TARGET_MAX) then return false, "target" end
+	return true
+end
+
+-- A row's Horde side and Olympian side as the wire carries them: (horde GUID, Olympian GUID, the
+-- Horde player's name).
+function Share.Sides(e)
+	if e.action == "bounty" then return e.killerGuid, e.victimGuid, e.killerName end
+	return e.victimGuid, e.killerGuid, e.victimName
+end
+
+-- This client's own row on the channel (WK~1), its done marking it shared (saved); one the channel
+-- did not take goes again later (Share.Resend). Nothing goes from a client outside an Olympus
+-- guild, of the Horde, or one the moderators took off (net-off).
+function Share.Send(e)
+	if type(e) ~= "table" or not e.own or e.void or not e.digest then return false, "row" end
+	local C = ns.Comm
+	if type(C) ~= "table" or type(C.Send) ~= "function" then return false, "transport" end
+	if not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" or NetOff() then return false, "member" end
+	local guild = Sight.OwnGuild()
+	if not guild then return false, "guild" end
+	local horde, own, name = Share.Sides(e)
+	name = CleanName(name)
+	if not WireGuid(horde) or not WireGuid(own) or not name then return false, "shape" end
+	local scope = Scope()
+	local body = table.concat({ "WK", 1, scope, guild, e.digest, e.at, e.month, e.kind == "SELF_DEATH" and "S" or "P",
+		WireGuid(horde), WireGuid(own), name }, "~")
+	if #body > 255 then return false, "size" end
+	local sent = C.Send("CHANNEL", body, "wanted-kill:" .. e.digest, false, false, function(went)
+		if went then e.shared = true end
+		local key = went and "sent" or "unsent"
+		Share.counts[key] = (Share.counts[key] or 0) + 1
+	end, { owner = Wanted, guardKey = "wanted-kill", guard = function()
+		return ns.IsMember() == true and ns.faction ~= "Horde" and not NetOff() and Scope() == scope
+	end })
+	return sent == true
+end
+
+-- This client's own rows the channel did not take (sent while it was not on it, or refused there)
+-- go again, SHARE_RESEND_MAX at a time, while they are fresh (SHARE_AGE).
+function Share.Resend()
+	local s = Store(false)
+	if not s then return 0 end
+	local now, n = math.floor(Clock()), 0
+	for i = #s.evidence, 1, -1 do
+		if n >= Wanted.SHARE_RESEND_MAX then break end
+		local e = s.evidence[i]
+		local t = s.targets[e.targetKey]
+		if e.own and not e.shared and not e.void and type(t) == "table" and t.active == true
+			and now - (tonumber(e.at) or 0) <= Wanted.SHARE_AGE and Share.Send(e) then n = n + 1 end
+	end
+	return n
+end
+
+function Share.ScheduleResend(gen, wait)
+	if not ns.After then return end
+	ns.After(wait, "wanted resend", function()
+		if gen ~= Share.resendGen then return end
+		Share.Resend()
+		Share.ScheduleResend(gen, Wanted.SHARE_RESEND_EVERY)
+	end)
+end
+
+-- A relayed row's id remembered (SHARE_HEARD_MAX): this reviewer relays it no more.
+function Share.Heard(id)
+	if Share.relayed[id] then return end
+	Share.relayed[id] = true
+	Share.relayedOrder[#Share.relayedOrder + 1] = id
+	while #Share.relayedOrder > Wanted.SHARE_HEARD_MAX do Share.relayed[table.remove(Share.relayedOrder, 1)] = nil end
+end
+
+-- A reviewer's relay of a row his client holds (via "R": one he took now, "C": a catch-up answer),
+-- while Comm's queue has room (SHARE_ROOM kept free).
+function Share.Relay(e, via)
+	local C = ns.Comm
+	if type(C) ~= "table" or type(C.Send) ~= "function" or not Wanted.CanPublish(ns.me) then return false end
+	if type(C.QueueRoom) == "function" and C.QueueRoom() <= Wanted.SHARE_ROOM then return false end
+	local horde, own, name = Share.Sides(e)
+	local from = CleanName(e.from)
+	name = CleanName(name)
+	if not (e.own or e.peer) or e.void or not from or not name or not WireGuid(horde) or type(e.digest) ~= "string" then return false end
+	local scope = Scope()
+	local body = table.concat({ "WK", via, 1, scope, from, WireGuid(own) and 1 or 0, e.digest, e.at, e.month,
+		e.kind == "SELF_DEATH" and "S" or "P", WireGuid(horde), WireGuid(own) or "-", name }, "~")
+	if #body > 255 then return false end
+	Share.Heard(e.id)
+	return C.Send("CHANNEL", body, "wanted-relay:" .. via .. ":" .. e.id, false, false, nil, { owner = Wanted, guardKey = "wanted-relay",
+		guard = function() return Wanted.CanPublish(ns.me) and Scope() == scope end }) == true
+end
+
+-- A reviewer relays a row he took from a member (once, SHARE_RELAY_DELAY and a part of 8 s of his
+-- own later, unless another reviewer's relay of it came first), so that the members whose clients
+-- cannot verify its sender (other guilds') count it on his word.
+function Share.RelaySoon(e)
+	local function Go()
+		if Share.relayed[e.id] or e.void or not Wanted.CanPublish(ns.me) then return end
+		Share.Relay(e, "R")
+	end
+	if ns.After then ns.After(Wanted.SHARE_RELAY_DELAY + Share.Offset() % 8, "wanted relay", Go) else Go() end
+end
+
+-- WK's fields, or nil.
+function Share.Parse(text)
+	if type(text) ~= "string" or #text > 255 then return nil end
+	local r = {}
+	if text:sub(1, 5) == "WK~1~" then
+		r.scope, r.guild, r.digest, r.at, r.month, r.kind, r.horde, r.own, r.name =
+			text:match("^WK~1~(%x+)~([^~]+)~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~([^~]+)$")
+	else
+		r.via, r.scope, r.from, r.bound, r.digest, r.at, r.month, r.kind, r.horde, r.own, r.name =
+			text:match("^WK~([RC])~1~(%x+)~([^~]+)~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~([^~]+)$")
+	end
+	if not r.scope or #r.digest ~= 16 then return nil end
+	r.at, r.month = Whole(tonumber(r.at), 0, 4294967295), Whole(tonumber(r.month), 0, 120000)
+	r.horde = GameGuid(r.horde)
+	if r.own == "-" then r.own = nil elseif r.own then r.own = GameGuid(r.own) or false end
+	if not r.at or not r.month or not r.horde or r.own == false or not r.via and not r.own then return nil end
+	return r
+end
+
+-- One shared row (WK) taken into this client's ledger: true and the row recorded, or false, why.
+function Share.Take(dist, sender, row)
+	if dist ~= "CHANNEL" then return false, "lane" end
+	if not ns.IsMember or ns.IsMember() ~= true or not ns.me then return false, "member" end
+	if ns.faction == "Horde" then return false, "faction" end
+	if not row then return false, "shape" end
+	if row.scope ~= Scope() then return false, "scope" end
+	sender = CleanName(sender)
+	if not sender then return false, "sender" end
+	local relay = row.via ~= nil
+	local from = relay and CleanName(row.from) or sender
+	if not from then return false, "shape" end
+	-- (Our own row, back in a reviewer's relay: this client holds it.)
+	if SameName(from, ns.me) then return false, "own" end
+	if relay and not Wanted.CanPublish(sender) then return false, "authority" end
+	local now = math.floor(Clock())
+	if row.at > now + Wanted.GLOBAL_SKEW or now - row.at > Wanted.SHARE_AGE then return false, "stale" end
+	if not Whole(row.month, MonthNow() - Wanted.MAX_MONTHS + 1, MonthNow() + 1) then return false, "shape" end
+	local M = ns.Moderation
+	if type(M) == "table" and not M.missing and type(M.Hides) == "function" then
+		local ok, hidden = pcall(M.Hides, from)
+		if not ok or hidden then return false, "olympus" end
+	end
+	if not relay and not Wanted.CanPublish(from) and not EvidenceMember(from, Sight.GuildName(row.guild)) then return false, "olympus" end
+	local horde = Identity(row.name, row.horde)
+	if not horde or not horde.name then return false, "shape" end
+	-- The Horde side as the sender's client proved it, unless this client sees him otherwise.
+	if VerifiedOlympian(horde) then return false, "olympus" end
+	local seen, contradicted = KnownHorde(horde)
+	if contradicted then return false, "faction" end
+	if not seen and type(GetPlayerInfoByGUID) == "function" then
+		local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, horde.guid)
+		if ok and type(race) == "string" and not Secret(race) and Share.ALLIANCE_RACES[race] then return false, "faction" end
+	end
+	-- The Olympian side: the sender, his GUID only where this client proves it is his (or the
+	-- reviewer who relays it says his own client did).
+	local ownGuid = row.own
+	if ownGuid then
+		local mine = GuidIsSender(ownGuid, from)
+		if mine == false then return false, "not-own" end
+		if mine == nil and not (relay and row.bound == "1") then ownGuid = nil end
+	end
+	local s = Store(true)
+	if not s then return false, "store" end
+	local key = ns.Fold(from) .. "#" .. row.digest
+	if s.voids[key] then return false, "void" end
+	local id = "p:" .. key
+	if s.seen[id] then return false, "replay" end
+	local admitted, why = Share.Admit(relay and sender or from, horde.guid, now, relay)
+	if not admitted then return false, why end
+	local olympian = Identity(from, ownGuid)
+	local killer, victim, side = olympian, horde, "victim"
+	if row.kind == "S" then killer, victim, side = horde, olympian, "killer" end
+	local ok, e = RecordKill(row.kind == "S" and "SELF_DEATH" or "PARTY_KILL", id, killer, victim,
+		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side })
+	-- (A reviewer relays what he took from a member; another reviewer's own row every client takes
+	-- from him directly.)
+	if ok and not relay and Wanted.CanPublish(ns.me) and not Wanted.CanPublish(from) then Share.RelaySoon(e) end
+	return ok, e
+end
+
+-- The WK handler: a member's row, or a reviewer's relay of one.
+function Wanted.HandleShared(dist, sender, text)
+	local row = Share.Parse(text)
+	-- A reviewer's relay of a row, whatever this client makes of it: this reviewer's own relay of it
+	-- is not needed any more, nor, after a catch-up answer, his own answer.
+	if row and row.via and dist == "CHANNEL" and Wanted.CanPublish(CleanName(sender)) then
+		local from = CleanName(row.from)
+		if from then Share.Heard("p:" .. ns.Fold(from) .. "#" .. row.digest) end
+		if row.via == "C" then Share.catchHeard = math.floor(Clock()) end
+	end
+	local ok, e = Share.Take(dist, sender, row)
+	-- (Not noted: our own row coming back, and a relay of a row held already.)
+	if ok or not (e == "own" or e == "replay" and row and row.via) then
+		Share.Note(row and row.via and "relay" or "heard", ok, e, row and row.name, row and row.from or sender)
+	end
+	return ok, e
+end
+
+-- A reviewer's mark on the channel (WV): "T" a Horde player taken off (a: his GUID), "V" a row
+-- voided (a: its sender, b: its digest). at: when (now by default).
+function Share.SendMark(kind, a, b, at)
+	local C = ns.Comm
+	if type(C) ~= "table" or type(C.Send) ~= "function" or not Wanted.CanPublish(ns.me) then return false end
+	at = Whole(at, 0, 4294967295) or math.floor(Clock())
+	local scope, body, key = Scope(), nil, nil
+	if kind == "T" then
+		local wire = WireGuid(a)
+		if not wire then return false end
+		body, key = table.concat({ "WV", "T", 1, scope, wire, at }, "~"), wire
+	else
+		local from = CleanName(a)
+		if not from or type(b) ~= "string" or not b:match("^%x+$") or #b ~= 16 then return false end
+		body, key = table.concat({ "WV", "V", 1, scope, from, b, at }, "~"), ns.Fold(from) .. "#" .. b
+	end
+	if #body > 255 then return false end
+	return C.Send("CHANNEL", body, "wanted-mark:" .. kind .. ":" .. key, false, false, nil, { owner = Wanted, guardKey = "wanted-mark",
+		guard = function() return Wanted.CanPublish(ns.me) and Scope() == scope end }) == true
+end
+
+-- The WV handler: a reviewer's word that a Horde player is off (his rows count for nothing here
+-- any more, and a later event does not bring him in: an entry is kept for him, off), or that one
+-- member's row is void (and one heard later too).
+function Share.Mark(dist, sender, text)
+	if dist ~= "CHANNEL" then return false, "lane" end
+	if not ns.IsMember or ns.IsMember() ~= true or not ns.me then return false, "member" end
+	if type(text) ~= "string" or #text > 255 then return false, "shape" end
+	sender = CleanName(sender)
+	if not sender or SameName(sender, ns.me) then return false, "own" end
+	if not Wanted.CanPublish(sender) then return false, "authority" end
+	local kind, scope, a, b, at = text:sub(4, 4), nil, nil, nil, nil
+	if kind == "T" then scope, a, at = text:match("^WV~T~1~(%x+)~([^~]+)~(%d+)$")
+	elseif kind == "V" then scope, a, b, at = text:match("^WV~V~1~(%x+)~([^~]+)~(%x+)~(%d+)$") end
+	if not scope then return false, "shape" end
+	if scope ~= Scope() then return false, "scope" end
+	at = Whole(tonumber(at), 0, 4294967295)
+	local now = math.floor(Clock())
+	if not at or at > now + Wanted.GLOBAL_SKEW or now - at > Wanted.SHARE_AGE then return false, "stale" end
+	if not Share.Count(Share.rates, "m:" .. ns.Fold(sender), now, Wanted.SHARE_RATE_WINDOW, Wanted.SHARE_RELAY_MAX) then return false, "rate" end
+	local s = Store(true)
+	if not s then return false, "store" end
+	if kind == "T" then
+		local guid = GameGuid(a)
+		if not guid then return false, "shape" end
+		local key = GuidKey(guid)
+		local t = s.targets[s.aliases[key] or key]
+		if type(t) == "table" and t.guid == guid then
+			if t.active ~= true then return false, "held" end
+			Share.TakeOff(s, t, sender, at)
+		else
+			-- No entry here: one is kept for him, off, so that a later event does not bring him in.
+			if not Share.MakeRoom(s) then return false, "full" end
+			t = { key = key, guid = guid, active = false, removedAt = at, removedBy = sender, addedAt = at, source = "removed",
+				current = 0, lifetimeKills = 0, cycle = 1, openSince = at, victims = {}, claims = {}, victimOverflow = 0 }
+			s.targets[key], s.aliases[key] = t, key
+		end
+		Audit(s, "remove", t.key, sender)
+		if opened == t.key then mode, opened = "list", nil end
+	else
+		local from = CleanName(a)
+		if not from or #b ~= 16 then return false, "shape" end
+		if s.voids[ns.Fold(from) .. "#" .. b] then return false, "held" end
+		Share.KeepVoid(s, from, b, at)
+		for _, e in ipairs(s.evidence) do
+			if not e.void and e.digest == b and SameName(e.from, from) then
+				e.void, e.correctedAt, e.correctedBy = true, at, sender
+				Audit(s, "correct", e.targetKey, e.id)
+			end
+		end
+		Rebuild(s)
+	end
+	Changed()
+	return true
+end
+
+function Wanted.HandleMark(dist, sender, text)
+	local ok, why = Share.Mark(dist, sender, text)
+	if ok or why ~= "own" and why ~= "held" then Share.Note("mark", ok, why, nil, sender) end
+	return ok, why
+end
+
+-- A late login's catch-up ask (W4, AskGlobal): a reviewer answers with the Horde players taken off
+-- and the rows voided lately (SHARE_CATCH_MARKS each), then the newest rows his client holds
+-- (SHARE_CATCH_ROWS, of SHARE_AGE), once every GLOBAL_ASK_GAP at most, a part of 20 s of his own
+-- after the ask, and not when another reviewer's answer came first; only what Comm's queue has
+-- room for (SHARE_ROOM kept free).
+function Share.Answer(dist, sender, text)
+	if dist ~= "CHANNEL" or text ~= "W4~1" or SameName(sender, ns.me) or not Wanted.CanPublish(ns.me) then return false end
+	local now = math.floor(Clock())
+	if now - Share.catchReplied < Wanted.GLOBAL_ASK_GAP then return false, "rate" end
+	Share.catchReplied = now
+	local function Go()
+		if Share.catchHeard >= now or not Wanted.CanPublish(ns.me) then return end
+		Share.CatchUp()
+	end
+	if ns.After then ns.After(2 + Share.Offset() % 20, "wanted catch-up", Go) else Go() end
+	return true
+end
+
+function Share.CatchUp()
+	local s, C = Store(false), ns.Comm
+	if not s or type(C) ~= "table" then return 0 end
+	local now, n = math.floor(Clock()), 0
+	local function Fresh(at) return now - (tonumber(at) or 0) <= Wanted.SHARE_AGE end
+	local off = {}
+	for _, t in pairs(s.targets) do if t.active ~= true and Guid(t.guid) and Fresh(t.removedAt) then off[#off + 1] = t end end
+	table.sort(off, function(a, b) return (a.removedAt or 0) > (b.removedAt or 0) end)
+	for i = 1, math.min(#off, Wanted.SHARE_CATCH_MARKS) do
+		if type(C.QueueRoom) == "function" and C.QueueRoom() <= Wanted.SHARE_ROOM then return n end
+		if Share.SendMark("T", off[i].guid, nil, off[i].removedAt) then n = n + 1 end
+	end
+	local voids = {}
+	for _, v in pairs(s.voids) do if type(v) == "table" and Fresh(v.at) then voids[#voids + 1] = v end end
+	table.sort(voids, function(a, b) return (a.at or 0) > (b.at or 0) end)
+	for i = 1, math.min(#voids, Wanted.SHARE_CATCH_MARKS) do
+		if type(C.QueueRoom) == "function" and C.QueueRoom() <= Wanted.SHARE_ROOM then return n end
+		if Share.SendMark("V", voids[i].from, voids[i].digest, voids[i].at) then n = n + 1 end
+	end
+	-- The newest rows, sent oldest first: each client takes them in the order of the deaths.
+	local rows = {}
+	for i = #s.evidence, 1, -1 do
+		if #rows >= Wanted.SHARE_CATCH_ROWS then break end
+		local e = s.evidence[i]
+		local t = s.targets[e.targetKey]
+		if (e.own or e.peer) and not e.void and Fresh(e.at) and type(t) == "table" and t.active == true then rows[#rows + 1] = e end
+	end
+	for i = #rows, 1, -1 do if Share.Relay(rows[i], "C") then n = n + 1 end end
+	return n
+end
+
+-- /oly wanted status: what Most Wanted holds and did this session, in the copy window (a chat line
+-- cannot be copied): the store, the sources it reads (the game's own APIs, the native kill event's
+-- registration), what this client captured and shared, what it heard, and why each capture or row
+-- was refused, the newest first, with a key to the reasons.
+function Wanted.StatusText()
+	local s = Store(false)
+	local out = {}
+	local function Add(text) out[#out + 1] = text end
+	local function Yes(v) return v and L.WANTED_STATUS_YES or L.WANTED_STATUS_NO end
+	local active, off, rows, mine, unsent = 0, 0, 0, 0, 0
+	for _, t in pairs(s and s.targets or {}) do if t.active then active = active + 1 else off = off + 1 end end
+	for _, e in ipairs(s and s.evidence or {}) do
+		if not e.void then rows = rows + 1 end
+		if e.own then mine = mine + 1 if not e.shared then unsent = unsent + 1 end end
+	end
+	Add(L.WANTED_STATUS_STORE:format(tostring(ns.group or ns.realm or "?"), tostring(ns.faction or "?"), active, off, rows,
+		Count(s and s.slayers or {}), s and L.WANTED_STATUS_YES or L.WANTED_STATUS_NO))
+	local C = ns.Comm
+	Add(L.WANTED_STATUS_SOURCES:format(Yes(Share.partyKill), Yes(type(C_DeathRecap) == "table" and type(C_DeathRecap.GetRecapEvents) == "function"),
+		Yes(type(GetPlayerInfoByGUID) == "function"), Yes(InInstance()),
+		Yes(type(C) == "table" and type(C.ChannelReady) == "function" and C.ChannelReady() == true)))
+	local n = Share.counts
+	Add(L.WANTED_STATUS_SESSION:format(n.kill or 0, n.death or 0, n.sent or 0, n.unsent or 0, mine, unsent,
+		n.heard or 0, n.relay or 0, n.mark or 0, n.counted or 0))
+	local reasons = {}
+	for why, count in pairs(Share.why) do if count > 0 then reasons[#reasons + 1] = why .. " " .. count end end
+	table.sort(reasons)
+	Add(L.WANTED_STATUS_REFUSED:format(#reasons > 0 and table.concat(reasons, ", ") or "-"))
+	Add("")
+	Add(L.WANTED_STATUS_LAST)
+	local kinds = { kill = L.WANTED_STATUS_KILL, death = L.WANTED_STATUS_DEATH, heard = L.WANTED_STATUS_HEARD,
+		relay = L.WANTED_STATUS_RELAY, mark = L.WANTED_STATUS_MARK }
+	local dateFn = date or (os and os.date)
+	for i = #Share.log, 1, -1 do
+		local r = Share.log[i]
+		local when = type(dateFn) == "function" and dateFn("%H:%M:%S", r.at) or tostring(r.at)
+		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0) or L.WANTED_STATUS_BOUNTY)
+			or L.WANTED_STATUS_REFUSAL:format(r.why or "?")
+		Add(("  %s  %s  %s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "", result))
+	end
+	if #Share.log == 0 then Add("  " .. L.WANTED_STATUS_EMPTY) end
+	Add("")
+	Add(L.WANTED_STATUS_KEY)
+	return table.concat(out, "\n")
+end
+
+function Wanted.ShowStatus()
+	local text = Wanted.StatusText()
+	if ns.UI and ns.UI.ShowCopy then
+		ns.UI.ShowCopy(L.WANTED_STATUS_TITLE, text, { label = L.WANTED_STATUS_REFRESH, fn = function() Wanted.ShowStatus() end },
+			{ key = "wanted", big = true })
+		return true
+	end
+	for line in text:gmatch("[^\n]+") do ns.Print(line) end
+	return true
+end
+
+-- /oly wanted [status]
+function Wanted.Slash(rest)
+	local word = (tostring(rest or ""):match("^%s*(%S*)") or ""):lower()
+	if word == "" or word == "status" then return Wanted.ShowStatus() end
+	ns.Print(L.WANTED_STATUS_USAGE)
+	return false
+end
+
 function Wanted.Prune()
 	local s = Store(false)
 	if not s then return false end
+	local SOURCES = { manual = true, SELF_DEATH = true, PARTY_KILL = true, shared = true, removed = true }
 	for key, t in pairs(s.targets) do
 		local ident = type(t) == "table" and Identity(t.name, t.guid, t.realm) or nil
 		if not ident or type(key) ~= "string" then
@@ -3238,7 +3448,8 @@ function Wanted.Prune()
 			t.active = t.active == true
 			t.addedAt = Whole(t.addedAt, 0, 4294967295) or 0
 			t.addedBy = CleanName(t.addedBy)
-			t.source = "manual"
+			t.source = SOURCES[t.source] and t.source or "manual"
+			t.removedAt, t.removedBy = Whole(t.removedAt, 0, 4294967295), CleanName(t.removedBy)
 			local d = TargetDerived(t)
 			for field, value in pairs(d) do t[field] = value end
 			t.victims, t.claims = CopyList(t.victims, Wanted.MAX_VICTIMS), CopyList(t.claims, Wanted.MAX_CLAIMS)
@@ -3255,16 +3466,28 @@ function Wanted.Prune()
 		local killer = type(e) == "table" and Identity(e.killerName, e.killerGuid) or nil
 		local victim = type(e) == "table" and Identity(e.victimName, e.victimGuid) or nil
 		local targetIdentity = e and e.action == "bounty" and killer or victim
-		if id and target and killer and killer.name and killer.guid and victim and victim.name and victim.guid
+		-- (1.2.3: a shared row's Olympian side may be its sender's name alone.)
+		local peer = type(e) == "table" and e.peer == true
+		local olympian = e and e.action == "bounty" and victim or killer
+		if id and target and killer and killer.name and victim and victim.name and targetIdentity and targetIdentity.guid
+			and (olympian and olympian.guid or peer)
 			and (e.kind == "PARTY_KILL" or e.kind == "SELF_DEATH") and (e.action == "bounty" or e.action == "claim")
 			and SameIdentity(Identity(target), targetIdentity) and Whole(e.at, 0, 4294967295) and Whole(e.month, 0, 200000) then
+			local digest = type(e.digest) == "string" and e.digest:match("^%x+$") and #e.digest == 16 and e.digest or nil
 			evidence[#evidence + 1] = { id = id, seq = Whole(e.seq, 0, 2147483647) or 0, at = math.floor(e.at), month = math.floor(e.month),
 				kind = e.kind, action = e.action, targetKey = targetKey, killerName = killer.name, killerGuid = killer.guid,
 				victimName = victim.name, victimGuid = victim.guid, zone = Clean(e.zone, 80),
 				precision = e.precision == "consented" and "consented" or "approximate", void = e.void == true,
 				correctedAt = Whole(e.correctedAt, 0, 4294967295), correctedBy = CleanName(e.correctedBy),
-				correction = Clean(e.correction, 80) }
+				correction = Clean(e.correction, 80), from = CleanName(e.from), digest = digest,
+				peer = peer or nil, own = e.own == true and not peer or nil, shared = e.shared == true or nil }
 		end
+	end
+	-- (In the order of the deaths, as RecordKill keeps them.)
+	for i = 2, #evidence do
+		local e, j = evidence[i], i
+		while j > 1 and evidence[j - 1].at > e.at do evidence[j] = evidence[j - 1] j = j - 1 end
+		evidence[j] = e
 	end
 	s.evidence = evidence
 	local order, seen, have = {}, {}, {}
@@ -3283,46 +3506,20 @@ function Wanted.Prune()
 		if type(fingerprint) ~= "string" or not Whole(at, 0, 4294967295) or now - at > 30 then s.recent[fingerprint] = nil end
 	end
 	TrimList(s.audit, Wanted.MAX_AUDIT)
-	-- The reviewer's ledger, by shape: rows as LedgerRow keeps them, once each, in time order,
-	-- within LEDGER_MAX (the overflow folds), and a base of well-formed totals only.
-	if type(s.ledger) == "table" then
-		local l = Ledger(false)
-		local rows, have = {}, {}
-		for _, e in ipairs(l.accepted) do
-			local row = LedgerRow(e)
-			if row and not have[row.key] then rows[#rows + 1], have[row.key] = row, true end
-		end
-		table.sort(rows, Earlier)
-		l.accepted = rows
-		while #l.accepted > Wanted.LEDGER_MAX do Fold(l, table.remove(l.accepted, 1)) end
-		local b = l.base
-		for guid, points in pairs(b.targets) do
-			if Guid(guid) ~= guid or not Whole(points, 1, Wanted.MAX_POINTS) then b.targets[guid] = nil end
-		end
-		for guid, r in pairs(b.slayers) do
-			if Guid(guid) ~= guid or type(r) ~= "table" or not Whole(r.points, 1, Wanted.MAX_POINTS) then b.slayers[guid] = nil
-			else
-				b.slayers[guid] = { guid = guid, points = r.points, claims = Whole(r.claims, 0, Wanted.MAX_POINTS) or 0,
-					reachedAt = Whole(r.reachedAt, 0, 4294967295) or 0, months = ReviewedMonths(r.months) }
-			end
-		end
-		for key, at in pairs(b.deaths) do
-			if type(key) ~= "string" or #key > 96 or not Whole(at, 0, 4294967295) then b.deaths[key] = nil end
-		end
+	-- The voided shared rows, by shape (1.2.3), within SHARE_AGE and VOIDS_MAX.
+	for key, v in pairs(s.voids) do
+		if type(key) ~= "string" or #key > 120 or type(v) ~= "table" or not Whole(v.at, 0, 4294967295) or not CleanName(v.from)
+			or type(v.digest) ~= "string" or now - v.at > Wanted.SHARE_AGE then s.voids[key] = nil end
 	end
+	s.foldedAt = Whole(s.foldedAt, 0, 4294967295)
+	-- 1.2.2's review: its ledger (a reviewer's accepted rows) and when his evidence went to each
+	-- reviewer. There is no review any more (1.2.3); they count for nothing and are dropped.
+	s.ledger, s.sentAt = nil, nil
 	-- The saved word, by shape only: RestoreGlobal checks everything else before it shows it.
 	local g = s.global
 	if type(g) ~= "table" or type(g.text) ~= "string" or #g.text > 1200 or type(g.issuer) ~= "string" then s.global = nil end
 	if type(s.globalHeads) ~= "table" then s.globalHeads = nil end
 	if type(s.reviewer) ~= "string" or not CleanName(s.reviewer) then s.reviewer = nil end
-	-- When a batch of evidence last went to each reviewer (SendEvidence's wait): recent ones only.
-	if type(s.sentAt) == "table" then
-		for who, at in pairs(s.sentAt) do
-			if type(who) ~= "string" or not Whole(at, 0, 4294967295) or now - at >= Wanted.SEND_WAIT or at > now then s.sentAt[who] = nil end
-		end
-	else
-		s.sentAt = nil
-	end
 	Rebuild(s)
 	for _, r in pairs(s.slayers) do TrimMonths(r, MonthNow()) end
 	return true
@@ -3332,7 +3529,8 @@ end
 -- and the publisher's own last word repeated once he is back online (the same body and expiry),
 -- unless a newer one replaced it. On LOGIN (PLAYER_LOGIN), not INIT (ADDON_LOADED): only then
 -- does the client know the character's name (ns.me), and so whether the word is his, and its
--- faction's store (ns.CheckFaction).
+-- faction's store (ns.CheckFaction). 1.2.3: this client's own rows the channel did not take go
+-- again SHARE_RESEND_FIRST after login, then every SHARE_RESEND_EVERY.
 function Wanted.Load()
 	Wanted.Prune()
 	local p = type(ns.db) == "table" and type(ns.db.wantedPublisher) == "table" and ns.db.wantedPublisher.last or nil
@@ -3356,6 +3554,8 @@ function Wanted.Load()
 	-- its beat; the pins expire on theirs.
 	leaseGen = leaseGen + 1
 	ScheduleLease(leaseGen, Wanted.REVIEWER_FIRST)
+	Share.resendGen = (Share.resendGen or 0) + 1
+	Share.ScheduleResend(Share.resendGen, Wanted.SHARE_RESEND_FIRST)
 	if ns.Every and not pinTicker then
 		pinTicker = true
 		ns.Every(Wanted.SIGHT_TICK, "wanted pins", Wanted.RefreshPins)
@@ -3364,23 +3564,28 @@ function Wanted.Load()
 end
 
 function Wanted.Stats() return stats end
+-- (Tests: this session's shared-row state, as /oly wanted status reads it.)
+function Wanted.ShareState() return Share end
 function Wanted.ResetForTests()
 	deathSerial = deathSerial + 1
 	knownHorde = {}
 	rate, mode, opened = {}, "list", nil
 	authenticatedGlobal, globalFloor, publisherHeads = nil, nil, {}
-	pendingGlobal, pendingGlobalCount, reviewInbox, reviewOrder = {}, 0, {}, {}
-	reviewRate = {}
+	pendingGlobal, pendingGlobalCount = {}, 0
 	publishedGlobal = nil
 	Wanted.globalCatch.asked, Wanted.globalCatch.replied = -math.huge, -math.huge
 	Wanted.globalCatch.generation = Wanted.globalCatch.generation + 1
-	restoring, restoreChecked, sentTo, batches = nil, {}, {}, {}
+	restoring, restoreChecked = nil, {}
 	pins, pinFrames, spareFrames = {}, {}, {}
 	sightSeen, sightSeenOrder, ownSeen, ownSeenCount, sightSends = {}, {}, {}, 0, {}
 	sightJobs, sightJobCount, sightFrom, sightFromCount, sightIntake = {}, 0, {}, 0, { at = 0, n = 0 }
 	told.by, told.quiet = {}, {}
 	reviewers, reviewerCount, leaseGen, leaseAt = {}, 0, leaseGen + 1, nil
 	for key in pairs(stats) do stats[key] = 0 end
+	Share.rates, Share.days, Share.targets, Share.relayed, Share.relayedOrder = {}, {}, {}, {}, {}
+	Share.log, Share.why, Share.counts, Share.deathRow = {}, {}, {}, nil
+	Share.catchReplied, Share.catchHeard = -math.huge, -math.huge
+	Share.resendGen = (Share.resendGen or 0) + 1
 end
 
 if ns.UI and ns.UI.AddTab then
@@ -3391,20 +3596,25 @@ end
 -- Never COMBAT_LOG_EVENT_UNFILTERED: on Forever it is a restricted event (HasRestrictions in the
 -- client's CombatLog API documentation), and an addon's RegisterEvent on it is blocked with the
 -- game's "blocked from an action" pop-up at every login (Daniel's test build, taint.log:
--- Frame:RegisterEvent() from this line). Wanted.CaptureCombatLog stays for a source the client
--- allows (the player's own death recap, PLAYER_DEAD below).
+-- Frame:RegisterEvent() from this line). The native PARTY_KILL (our own killing blow) and the
+-- player's own death recap (PLAYER_DEAD) are what the client allows.
 -- Unsupported/restricted registration must not abort login; this is not the restricted CLEU.
-pcall(ns.RegisterEvent, "PARTY_KILL", Wanted.CapturePartyKill)
+-- (Whether it registered: /oly wanted status says so.)
+Share.partyKill = pcall(ns.RegisterEvent, "PARTY_KILL", Wanted.CapturePartyKill)
 ns.RegisterEvent("PLAYER_DEAD", function()
 	deathSerial = deathSerial + 1
 	local serial = deathSerial
-	local captured = ReadSelfDeathRecap()
+	local captured, why, who = ReadSelfDeathRecap()
+	Share.NoteDeath(serial, captured, why, who)
 	-- The native recap may arrive after PLAYER_DEAD. Bounded retries belong to this death
 	-- alone, and the native timestamp/identity/fatal checks still run on every attempt.
 	if not captured and ns.After and C_DeathRecap and type(C_DeathRecap.HasRecapEvents) == "function" then
 		for _, delay in ipairs({ 0.3, 1, 2 }) do
 			ns.After(delay, "wanted death recap", function()
-				if not captured and serial == deathSerial then captured = ReadSelfDeathRecap() end
+				if not captured and serial == deathSerial then
+					captured, why, who = ReadSelfDeathRecap()
+					Share.NoteDeath(serial, captured, why, who)
+				end
 			end)
 		end
 	end
@@ -3438,12 +3648,14 @@ ns.RegisterEvent("PLAYER_TARGET_CHANGED", function() Wanted.ObserveUnit("target"
 ns.RegisterEvent("UPDATE_MOUSEOVER_UNIT", function() Wanted.ObserveUnit("mouseover") end)
 ns.RegisterEvent("PLAYER_ENTERING_WORLD", function() Wanted.RefreshPins() end)
 ns.RegisterEvent("ZONE_CHANGED_NEW_AREA", function() Wanted.RefreshPins() end)
+-- (1.2.3: no WX handler, 1.2.2's evidence whispered for a review: there is none any more, and a
+-- member of 1.2.2 who still sends one is heard by nobody.)
 if ns.Comm and ns.Comm.Handle then
-	ns.Comm.Handle("WX", function(dist, sender, text)
-		if dist == "WHISPER" and type(text) == "string" then return ReviewEvidence(sender, text) end
-	end)
+	ns.Comm.Handle("WK", function(...) return Wanted.HandleShared(...) end)
+	ns.Comm.Handle("WV", function(...) return Wanted.HandleMark(...) end)
 	ns.Comm.Handle("WY", function(...) Wanted.HandleGlobalSnapshot(...) end)
-	ns.Comm.Handle("W4", function(...) Wanted.AnswerGlobal(...) end)
+	-- A late login's ask: the signed word, and (a reviewer's) the recent shared rows.
+	ns.Comm.Handle("W4", function(...) Wanted.AnswerGlobal(...) Share.Answer(...) end)
 	ns.Comm.Handle("W5", function(...) Wanted.HandleGlobalRelay(...) end)
 	ns.Comm.Handle("WS", function(...) Wanted.HandleSighting(...) end)
 end
