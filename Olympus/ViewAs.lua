@@ -74,9 +74,9 @@ function V.Set(want)
 	role = want
 	if ns.db then
 		ns.db.devKingView, ns.db.devTreasurerView, ns.db.devGMView = nil, nil, nil
-		-- (Asmon's view's own treasury switches and keepers, and the King's guild's centurions it
-		-- named, go with it, as King.SetDevView(false) takes them: 1.1.5.)
-		if want ~= "king" then ns.db.previewTreasuryFlags, ns.db.previewTreasuryKeepers, ns.db.previewMainNominees = nil, nil, nil end
+		-- (The King preview's own treasury switches and keepers go with it, as King.SetDevView(false) takes
+		-- them: 1.1.5. Since 1.2.4 it names no centurions: Nominees.Minute forgets 1.1.5's copy.)
+		if want ~= "king" then ns.db.previewTreasuryFlags, ns.db.previewTreasuryKeepers = nil, nil end
 	end
 	ns.Fire("DATA_CHANGED")
 	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end

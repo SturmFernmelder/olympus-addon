@@ -172,7 +172,7 @@ ns.ANSWER_BANK = {
 		{ id = "feat-nominees", topic = "features",
 			q = { "What are centurions and correspondents?", "How do I name a centurion?", "Why does someone have a bronze border without wings?" },
 			text = "Guild masters: /oly nominees, or your Guild tab. Up to 10 centurions and one correspondent per council department, from your guild.",
-			long = "Guild masters name up to 10 centurions and one correspondent per High Council department, members of their guild, in their Guild tab or with /oly nominees; the King and the High Council name the King's guild's 10 centurions on the Throne. They wear bronze without wings while in that guild." },
+			long = "Guild masters name up to 10 centurions and one correspondent per High Council department, members of their guild, in their Guild tab or with /oly nominees. They wear bronze without wings while in that guild. In the King's guild, the High Council are the King's centurions." },
 		{ id = "feat-recruiting-gates", topic = "features",
 			q = { "Which guild should new players join?", "What are the King's gates?" },
 			text = "Recruiting (Realm tab) lists guilds with room. When the King opens a guild's gates, it's on top for 2 hours: send recruits there.",

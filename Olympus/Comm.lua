@@ -384,7 +384,8 @@ end
 --   (The King's arena words are kinds of the King's type, King.Register in ArenaRoles.lua.)
 --   1.1.2, the right-click menus: Versions V7 V8 V9 | Workshop VR (the author asks for a bug report).
 --   1.1.5, the guild masters' centurions and correspondents: Nominees NM (a list in parts, never chunked;
---   the King's guild's centurions too, from the King or a High Councillor).
+--   1.2.4: for the King's guild only the empty list the King's or a councillor's client sends to end
+--   1.1.5's list of its centurions on older clients).
 --   1.1.6, moderation: Moderation O2 (a guild's word with notice) | The Watch MR (the players' reports).
 --   1.2, The Watch's judgments: Judgment MJ (a case to the King, the High Council's votes, his final
 --   word; logged whispers between an officer's or a councillor's client and the King's).

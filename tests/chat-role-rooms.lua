@@ -14,9 +14,12 @@ test("role chat navigation: one dropdown follows actual restricted audiences", f
 		local tabs = R.Tabs()
 		-- (1.2.3: Guild, then Roles; the Race and Class tabs are gone.)
 		eq(#tabs, 2); eq(tabs[2].kind, "role"); eq(tabs[2].dropdown, true)
-		eq(Ids(R.Options("role")), "council,secretariat,dept:war,departments,church")
+		-- (1.2.4, the author's rule: the High Council are the King's centurions, so a councillor is in All
+		-- Centurions too, wherever his own guild is; Guild Centurions is the King's guild's own, by its
+		-- roster: tests/king-centurions.lua. Was "council,secretariat,dept:war,departments,church".)
+		eq(Ids(R.Options("role")), "council,secretariat,dept:war,departments,allcenturions,church")
 		w.church, w.stewards[me] = false, nil
-		eq(Ids(R.Options("role")), "council,dept:war,departments", "audience removals reflected immediately")
+		eq(Ids(R.Options("role")), "council,dept:war,departments,allcenturions", "audience removals reflected immediately")
 		w.council[me] = nil
 		eq(#R.Options("role"), 0); eq(#R.Tabs(), 1)
 	end)

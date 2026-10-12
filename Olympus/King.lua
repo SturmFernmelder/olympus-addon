@@ -113,8 +113,8 @@ end
 function King.Visible() return King.IsKing() or King.IsSteward() or King.IsHand() or King.Preview() end
 
 -- 1.1.5 (the author's call): the tab in the Throne's place is the Throne for the King's people
--- (the King, his Steward, his Hands, Asmon's view, and the High Council: the King's guild's
--- centurions are theirs to name, Nominees.lua), and a guild master's Guild tab for the guild master of
+-- (the King, his Steward, his Hands, the King preview, and the High Council: 1.2.4, the King's
+-- centurions, Nominees.lua), and a guild master's Guild tab for the guild master of
 -- another Olympus guild (his centurions and correspondents). Under the author's guild master's
 -- view (Nominees.DevView), the Guild tab alone: it shows what a guild master sees.
 function King.ThroneShown()
@@ -1504,8 +1504,8 @@ local function Go(mode) return function() King.Show(mode) end end
 -- on their own tabs): here, the army's key. A Hand's: where their tools are. His Steward's
 -- (1.0.0): the King's, with what is his to do in the King's name (he holds no court). 1.1.5 (the
 -- author's calls): no treasury here any more (its own tab has it all), and under it all, the
--- King's guild's centurions (Nominees.lua: the King's and the High Council's to name, the
--- others' to read); a High Councillor who is none of them has the Throne for them alone. One who
+-- King's centurions (1.2.4, the author's rule: the High Council, to read, nobody named there:
+-- Nominees.MainLines); a High Councillor who is none of them has the Throne for that alone. One who
 -- also leads another Olympus guild has his Guild tab's section after it.
 local function HomeLines()
 	local mine = King.IsKing() or King.Preview()
@@ -1629,10 +1629,9 @@ end
 -- the Realm and the Tabards), to see and try them. Nothing the view does reaches anyone.
 function King.SetDevView(on)
 	ns.db.devKingView = on and true or false
-	-- The preview's treasury switches and keepers were its own: gone with it.
+	-- The preview's treasury switches and keepers were its own: gone with it. (1.2.4: it names no
+	-- centurions any more; 1.1.5's copy of the ones it named goes at the next minute, Nominees.Minute.)
 	if not on then ns.db.previewTreasuryFlags, ns.db.previewTreasuryKeepers = nil, nil end
-	-- (1.1.5: and the King's guild's centurions it named, Nominees.lua.)
-	if not on then ns.db.previewMainNominees = nil end
 	ns.Print(on and L.DEV_KING_VIEW_NOW_ON or L.DEV_KING_VIEW_NOW_OFF)
 	ns.Fire("DATA_CHANGED")
 	Changed()
