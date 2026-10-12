@@ -977,7 +977,9 @@ function Borders.Refresh(unit, fresh)
 	if Borders.OwnLook() and UnitExists(unit) and IsMe(unit, guid) and ShowOwnLook(rig) then return end
 	if k.off then return Show(rig, nil) end
 	-- 1.2: Most Wanted may only return a frame after an authenticated global snapshot activates its
-	-- fail-closed authority gate. The ordinary local kill ledger can never award one.
+	-- fail-closed authority gate. The ordinary local kill ledger can never award one. (1.2.4: the
+	-- skeletal horse, and only for a slayer whose pick this client doesn't know: a known pick is the
+	-- honours' below, Wanted.GlobalBorder.)
 	local wanted = ns.Wanted and ns.Wanted.GlobalBorder and k.who and ns.Wanted.GlobalBorder(k.who, guid)
 	if wanted and ShowHonor(rig, wanted) then return end
 	-- 1.2: a verified honour's frame (HonorsNet.lua), or none where its holder chose none.
@@ -1139,8 +1141,10 @@ function Borders.PreviewLines(lines)
 		right = Grey(preview and L.BORDERS_PREVIEW_NOW:format(preview) or L.BORDERS_PREVIEW_NONE) }
 	local names = {}
 	for _, t in ipairs(Borders.TIERS) do names[#names + 1] = t.name end
-	-- (1.2: the honours' frames, one of each kind.)
-	for _, key in ipairs({ "arena-champion", "donor-top-1", "level-race-60", "oracle-1", "guild-top-leader" }) do names[#names + 1] = key end
+	-- (1.2: the honours' frames, one of each kind; 1.2.4: the crook, the cross, the charm and the
+	-- slayers' skeletal horse too.)
+	for _, key in ipairs({ "arena-champion", "donor-top-1", "level-race-60", "oracle-1", "guild-top-leader", "missionary-1", "apostle-1",
+		"bones-1", "wanted-slayer-1" }) do names[#names + 1] = key end
 	names[#names + 1] = Borders.MEMBER
 	for _, name in ipairs(names) do
 		local on = preview == name

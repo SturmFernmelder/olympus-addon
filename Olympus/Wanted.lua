@@ -2024,12 +2024,20 @@ function Wanted.BorderAssignments(rows)
 	return out
 end
 
+-- 1.2.4: the slayers' frame is an honour (Honors' wanted-slayer-1/2/3: the skeletal horse, Honors.ArtOf;
+-- the orc's wolf until then), and a player's pick decides it as any other's. Where this client knows his
+-- pick (his own, or his profile heard: HonorsNet.PickKnown), nothing here: the honours show what it
+-- shows (HonorsNet.Verified: "none", another frame he holds, the horse he picked; until 1.2.4 this frame
+-- went over all of them). Only a slayer whose pick is unknown here wears it by his GUID, as before.
 function Wanted.GlobalBorder(name, guid)
 	if Wanted.GLOBAL_BORDERS_ACTIVE ~= true then return nil end
 	local snapshot = CurrentGlobal()
 	local key = GuidKey(guid)
 	if not snapshot or not key then return nil end -- never award a global frame by a name alone
-	return Wanted.BorderAssignments(snapshot.rows)[key]
+	local award = Wanted.BorderAssignments(snapshot.rows)[key]
+	local H = ns.HonorsNet
+	if award and type(H) == "table" and type(H.PickKnown) == "function" and H.PickKnown(name) == true then return nil end
+	return award
 end
 
 function Wanted.GlobalSnapshot()

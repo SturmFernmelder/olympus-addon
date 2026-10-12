@@ -2660,6 +2660,31 @@ if MODE == "--debug" then
 		TypeSlash = TypeSlash, Snapshot = Snapshot, Diff = Diff, Check = Check, NavigableOlympus = NavigableOlympus, Describe = Describe,
 		AllowedUnderPad = AllowedUnderPad }
 end
+-- 1.2.4: the honours' notices (HonorsNet.Notice: a place dropped, the list left, back on it, a place
+-- won back) are strips of Olympus's own, never the game's popups nor its raid warning: with the gamepad
+-- UI on from the login, a strip shows and reaches nothing of the game's, takes neither the mouse nor
+-- the keyboard, has no button the gamepad's cursor could stop on, never goes on the escape list, and
+-- goes by itself.
+test("gamepad honour notices (1.2.4): with the gamepad UI on, a notice's strip is Olympus's own on UIParent, shown without the mouse or the keyboard, no button, off the escape list, reaching nothing of the game's; gone by itself", function()
+	local C, ns = Session(true)
+	local mark = C.Mark()
+	local before = Snapshot(C)
+	eq(ns.HonorsNet.Notice("Top donors: you dropped to 2nd place.", "donor-top-2"), true, "a strip with the gamepad UI on")
+	local f = ns.HonorsNet.NoticeFrames()[1]
+	assert(f and f:IsShown(), "shown")
+	eq(f.olympus, true, "Olympus's own frame") eq(f.parent, C.env.UIParent, "on UIParent")
+	eq(f:IsMouseEnabled(), false, "no mouse") eq(f.keyboard, false, "no keyboard")
+	for _, ch in ipairs(f.children) do assert(not ch:IsObjectType("Button"), "no button on it") end
+	eq(#NavigableOlympus(C, true), 0, "nothing for the gamepad's cursor")
+	eq(#OlympusEscapeNames(C), 0, "never on the escape list")
+	C.Advance(ns.HonorsNet.NOTICE_SHOW + 1)
+	eq(f:IsShown(), false, "gone by itself")
+	OnlyAllowed(C.Since(mark), "a notice")
+	NoErrors(C, "a notice")
+	local diff = Diff(before, Snapshot(C))
+	eq(#diff, 0, "the game's state written: " .. table.concat(diff, ", "))
+end)
+
 -- 1.2 (the Blood Arena): its restricted calls only inside the player's click, the match's waypoint
 -- and the chat filters on the game's system lines never with the gamepad UI (the filter left from
 -- mouse and keyboard doing nothing), its companion loaded as Olympus's own addon.

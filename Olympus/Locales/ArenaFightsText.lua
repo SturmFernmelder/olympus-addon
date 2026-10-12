@@ -25,6 +25,10 @@ L.HONOR_TITLES = {
 	["guild-top-leader"] = "Wisest of Olympus",
 	["oracle-1"] = "Oracle", ["oracle-2"] = "Seer", ["oracle-3"] = "Soothsayer",
 	["missionary-1"] = "Good Shepherd", ["missionary-2"] = "Faithful Shepherd", ["missionary-3"] = "Shepherd",
+	-- (1.2.4)
+	["apostle-1"] = "Light of Olympus", ["apostle-2"] = "Voice of Olympus", ["apostle-3"] = "Herald of Olympus",
+	["bones-1"] = "Master of Bones", ["bones-2"] = "Luck's Favourite", ["bones-3"] = "Steady Hand",
+	["wanted-slayer-1"] = "Bane of the Horde", ["wanted-slayer-2"] = "Horde Hunter", ["wanted-slayer-3"] = "Bounty Hunter",
 	["the-dev"] = "The Royal Dev",
 }
 L.HONOR_CLASS_TITLE = { "%s Champion", "%s Contender", "%s Challenger" }
@@ -51,7 +55,28 @@ L.HONOR_LETTER = {
 	guild = "Lord,\n\nBy the levels of its members, your guild stands above every other in Olympus. You are named %s, and the owl watches over your banner while your guild leads. Keep them climbing.",
 	oracle = "Seer,\n\nLast month you read the arena better than anyone. You are named %s, and the raven is yours for this month. Olympus will be watching your next wager.",
 	missionary = "Missionary,\n\nThe flock of Olympus grows because of you: in the last thirty days few brought as many people into our guilds. You are named %s, and the shepherd's crook is yours while you stay among the three. May the flock keep growing.",
+	-- (1.2.4)
+	apostle = "Apostle,\n\nIn the last thirty days few Apostles brought as many souls to Olympus as you. You are named %s, and the cross is yours while you stay among the three. Keep the faith, and keep them coming.",
+	bones = "Player,\n\nThe tavern still talks of your throws last month. You are named %s, and the lucky charm is yours for the month ahead. May the bones fall your way.",
+	["wanted-slayer"] = "Slayer,\n\nThe Horde counts its dead, and your name keeps coming up. Olympus names you %s. Ride the skeletal horse where the Horde can see it.",
 }
+
+-- 1.2.4, the notices (HonorsNet.Tell): every move on a list after the King's first letter for its
+-- place, a strip at the top of the screen and a line in chat. Each list's name, a place's words,
+-- and the lines.
+L.HONOR_RANKING = { ["donor-top"] = "Top donors", ["donor-month"] = "Donors of the month", guild = "Best guild",
+	["wanted-slayer"] = "Slayers", apostle = "Apostles", missionary = "Missionaries", bones = "Bones" }
+L.HONOR_PLACE = { "1st", "2nd", "3rd" }
+L.HONOR_NOTICE_DOWN = "%s: you dropped to %s place."
+L.HONOR_NOTICE_OUT = "%s: you are off the list, and its frame is no longer yours."
+L.HONOR_NOTICE_BACK = "%s: you are back on the list, in %s place."
+L.HONOR_NOTICE_UP = "%s: you regained %s place."
+L.HONOR_NOTICE_GUILD_OUT = "Best guild: your guild is no longer first, and the owl is no longer yours."
+L.HONOR_NOTICE_GUILD_BACK = "Best guild: your guild is first again, and the owl is yours again."
+L.HONOR_NOTICE_SINCE = "Since your last visit: %s."
+L.HONOR_NOTICE_PART_PLACE = "%s, %s place"
+L.HONOR_NOTICE_PART_OUT = "%s, off the list"
+L.HONOR_NOTICE_MORE = "%d more"
 
 -- The rankings' switches (the owner's one compact view).
 L.ARENA_PERIOD_TODAY = "Today"
@@ -142,6 +167,9 @@ if GetLocale and GetLocale() == "ptBR" then
 		["guild-top-leader"] = "O Mais Sábio do Olympus",
 		["oracle-1"] = "Oráculo", ["oracle-2"] = "Vidente", ["oracle-3"] = "Adivinho",
 		["missionary-1"] = "Bom Pastor", ["missionary-2"] = "Pastor Fiel", ["missionary-3"] = "Pastor",
+		["apostle-1"] = "Luz do Olympus", ["apostle-2"] = "Voz do Olympus", ["apostle-3"] = "Arauto do Olympus",
+		["bones-1"] = "Mestre dos Ossos", ["bones-2"] = "Favorito da Sorte", ["bones-3"] = "Mão Firme",
+		["wanted-slayer-1"] = "Ruína da Horda", ["wanted-slayer-2"] = "Caçador da Horda", ["wanted-slayer-3"] = "Caçador de Recompensas",
 		["the-dev"] = "The Royal Dev",
 	}
 	L.HONOR_CLASS_TITLE = { "Campeão %s", "Desafiante %s", "Pretendente %s" }
@@ -165,7 +193,23 @@ if GetLocale and GetLocale() == "ptBR" then
 		guild = "Lorde,\n\nPelos níveis dos seus membros, a sua guilda está acima de todas as outras do Olympus. Você é chamado de %s, e a coruja guarda o seu estandarte enquanto a sua guilda liderar. Continue a fazê-los subir.",
 		oracle = "Vidente,\n\nNo último mês você leu a arena melhor que qualquer um. Você é chamado de %s, e o corvo é seu por este mês. O Olympus vai observar a sua próxima aposta.",
 		missionary = "Missionário,\n\nO rebanho do Olympus cresce por sua causa: nos últimos trinta dias, poucos trouxeram tanta gente para as nossas guildas. Você é chamado de %s, e o cajado é seu enquanto estiver entre os três. Que o rebanho continue a crescer.",
+		apostle = "Apóstolo,\n\nNos últimos trinta dias, poucos Apóstolos trouxeram tantas almas ao Olympus quanto você. Você é chamado de %s, e a cruz é sua enquanto estiver entre os três. Mantenha a fé, e que elas continuem a chegar.",
+		bones = "Jogador,\n\nA taverna ainda fala dos seus lances do último mês. Você é chamado de %s, e o amuleto da sorte é seu pelo mês que vem. Que os ossos caiam a seu favor.",
+		["wanted-slayer"] = "Slayer,\n\nA Horda conta os seus mortos, e o seu nome não para de aparecer. O Olympus o chama de %s. Cavalgue o cavalo esqueleto onde a Horda possa vê-lo.",
 	}
+	L.HONOR_RANKING = { ["donor-top"] = "Maiores doadores", ["donor-month"] = "Doadores do mês", guild = "Melhor guilda",
+		["wanted-slayer"] = "Slayers", apostle = "Apóstolos", missionary = "Missionários", bones = "Bones" }
+	L.HONOR_PLACE = { "1º", "2º", "3º" }
+	L.HONOR_NOTICE_DOWN = "%s: você caiu para o %s lugar."
+	L.HONOR_NOTICE_OUT = "%s: você saiu da lista, e a moldura não é mais sua."
+	L.HONOR_NOTICE_BACK = "%s: você voltou à lista, em %s lugar."
+	L.HONOR_NOTICE_UP = "%s: você recuperou o %s lugar."
+	L.HONOR_NOTICE_GUILD_OUT = "Melhor guilda: a sua guilda não é mais a primeira, e a coruja não é mais sua."
+	L.HONOR_NOTICE_GUILD_BACK = "Melhor guilda: a sua guilda é a primeira de novo, e a coruja é sua outra vez."
+	L.HONOR_NOTICE_SINCE = "Desde a sua última visita: %s."
+	L.HONOR_NOTICE_PART_PLACE = "%s, %s lugar"
+	L.HONOR_NOTICE_PART_OUT = "%s, fora da lista"
+	L.HONOR_NOTICE_MORE = "mais %d"
 	L.ARENA_PERIOD_TODAY = "Hoje"
 	L.ARENA_PERIOD_WEEK = "Esta semana"
 	L.ARENA_PERIOD_MONTH = "Este mês"
