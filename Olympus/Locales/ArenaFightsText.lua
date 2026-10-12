@@ -36,21 +36,22 @@ L.HONOR_RACE_NAMES = { human = "Human", dwarf = "Dwarf", nightelf = "Night Elf",
 L.HONOR_METAL_GOLD, L.HONOR_METAL_SILVER, L.HONOR_METAL_BRONZE = "gold", "silver", "bronze"
 
 -- The King's letter (the design): one per family, in his voice, naming the honour's title (%s);
--- signed by his title alone, never a name.
+-- signed by his title alone, never a name. (1.2.4, the author: the King talks the way he talks on
+-- stream, plain and blunt, not a herald's speech.)
 L.HONOR_LETTER_HEAD = "A letter from the King"
 L.HONOR_LETTER_SIGN = "- The King"
 L.HONOR_LETTER_WEAR = "Wear it"
 L.HONOR_LETTER_LATER = "Later"
 L.HONOR_LETTER = {
-	arena = "Warrior,\n\nThe sand remembers every blow, and so do I. You stood where others fell, and Olympus names you %s. Wear the gryphon with pride: every eye in the arena is on you now.\n\nDefend it well.",
-	class = "Champion,\n\nAmong all who share your calling, none fights as you do. Olympus names you %s. Let your rivals study your every move, and let them fail to match it.",
-	race = "Fighter,\n\nYour people have a new standard to follow. Olympus names you %s. Ride at the head of your kin, and let the arena hear of it.",
-	["donor-top"] = "Friend,\n\nThe treasury of Olympus stands taller for your generosity. You are named %s, and the cornucopia is yours while your name stays among the three. The realm does not forget those who give.",
-	["donor-month"] = "Friend,\n\nThis past month your gold kept Olympus strong. For it you are named %s, and the koi is yours for the month ahead. May your hand stay open.",
-	level = "Adventurer,\n\nNobody in Olympus got there before you. The comet is yours, and with it the name %s: a record written for as long as Olympus stands.",
-	guild = "Lord,\n\nBy the levels of its members, your guild stands above every other in Olympus. You are named %s, and the owl watches over your banner while your guild leads. Keep them climbing.",
-	oracle = "Seer,\n\nLast month you read the arena better than anyone. You are named %s, and the raven is yours for this month. Olympus will be watching your next wager.",
-	missionary = "Missionary,\n\nThe flock of Olympus grows because of you: in the last thirty days few brought as many people into our guilds. You are named %s, and the shepherd's crook is yours while you stay among the three. May the flock keep growing.",
+	arena = "Okay, listen.\n\nYou walked into the arena and beat everybody. Not most people. Everybody. So you're %s now, and the gryphon is yours.\n\nHeads up: every tryhard in Olympus wants it off you now. Don't let them.",
+	class = "Hey,\n\nI checked. Of everyone playing your class in Olympus, nobody fights like you. That's huge. You're %s now.\n\nThe rest of them are gonna study every move you make. Let them. They still won't keep up.",
+	race = "Hey,\n\nYour whole race just got a new name to brag about, and it's yours. You're %s now.\n\nGo show your people how it's done.",
+	["donor-top"] = "Dude,\n\nYou've put more gold into Olympus than almost anyone. That's not a little, that's insane. You're %s, and the cornucopia stays yours as long as you stay in the top three.\n\nI see it, and so does everybody else. Thank you.",
+	["donor-month"] = "Hey,\n\nLast month your gold kept the lights on in Olympus. Genuinely, thank you. You're %s, and the koi is yours for the month.\n\nKeep that hand open.",
+	level = "Holy.\n\nYou got there before anybody else in Olympus. First. Nobody can ever take that from you. The comet is yours, and so is the name %s.\n\nNow go touch some grass. Or don't. Respect either way.",
+	guild = "Listen,\n\nYour guild has the highest levels in all of Olympus. Top of the list. You're %s, and the owl sits on your banner while your guild stays first.\n\nKeep your people climbing, because the others are coming.",
+	oracle = "Okay,\n\nLast month you called the arena better than anyone. Fight after fight, you just knew. You're %s, and the raven is yours this month.\n\nEverybody's gonna copy your picks now. Can't blame them.",
+	missionary = "Hey,\n\nIn the last thirty days you brought more people into our guilds than almost anyone. That's how Olympus grows. You're %s, and the shepherd's crook is yours while you stay in the top three.\n\nKeep bringing them in.",
 }
 
 -- The rankings' switches (the owner's one compact view).
@@ -156,15 +157,15 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HONOR_LETTER_WEAR = "Usar"
 	L.HONOR_LETTER_LATER = "Depois"
 	L.HONOR_LETTER = {
-		arena = "Guerreiro,\n\nA areia se lembra de cada golpe, e eu também. Você ficou de pé onde outros caíram, e o Olympus o chama de %s. Use o grifo com orgulho: todos os olhos da arena estão em você agora.\n\nDefenda-o bem.",
-		class = "Campeão,\n\nEntre todos que seguem o seu caminho, ninguém luta como você. O Olympus o chama de %s. Que os rivais estudem cada movimento seu, e que não consigam igualá-lo.",
-		race = "Lutador,\n\nO seu povo tem um novo estandarte a seguir. O Olympus o chama de %s. Cavalgue à frente dos seus, e que a arena ouça falar disso.",
-		["donor-top"] = "Amigo,\n\nO tesouro do Olympus está mais alto pela sua generosidade. Você é chamado de %s, e a cornucópia é sua enquanto o seu nome estiver entre os três. O reino não esquece quem dá.",
-		["donor-month"] = "Amigo,\n\nNo último mês o seu ouro manteve o Olympus forte. Por isso você é chamado de %s, e o koi é seu pelo mês que vem. Que a sua mão siga aberta.",
-		level = "Aventureiro,\n\nNinguém no Olympus chegou lá antes de você. O cometa é seu, e com ele o nome %s: um recorde escrito enquanto o Olympus existir.",
-		guild = "Lorde,\n\nPelos níveis dos seus membros, a sua guilda está acima de todas as outras do Olympus. Você é chamado de %s, e a coruja guarda o seu estandarte enquanto a sua guilda liderar. Continue a fazê-los subir.",
-		oracle = "Vidente,\n\nNo último mês você leu a arena melhor que qualquer um. Você é chamado de %s, e o corvo é seu por este mês. O Olympus vai observar a sua próxima aposta.",
-		missionary = "Missionário,\n\nO rebanho do Olympus cresce por sua causa: nos últimos trinta dias, poucos trouxeram tanta gente para as nossas guildas. Você é chamado de %s, e o cajado é seu enquanto estiver entre os três. Que o rebanho continue a crescer.",
+		arena = "Olha só.\n\nVocê entrou na arena e ganhou de todo mundo. Não da maioria. De todo mundo. Agora você é %s, e o grifo é seu.\n\nSó avisando: todo tryhard do Olympus vai querer tirar ele de você. Não deixa.",
+		class = "E aí,\n\nEu conferi. De todo mundo da sua classe no Olympus, ninguém luta como você. Isso é enorme. Agora você é %s.\n\nO resto vai estudar cada movimento seu. Deixa. Mesmo assim não vão te acompanhar.",
+		race = "E aí,\n\nA sua raça inteira ganhou um nome novo pra se gabar, e é o seu. Agora você é %s.\n\nVai lá mostrar pro seu povo como se faz.",
+		["donor-top"] = "Cara,\n\nVocê colocou mais ouro no Olympus do que quase todo mundo. Isso não é pouca coisa, é insano. Você é %s, e a cornucópia fica com você enquanto estiver entre os três primeiros.\n\nEu vejo, e todo mundo vê também. Valeu mesmo.",
+		["donor-month"] = "E aí,\n\nNo mês passado o seu ouro manteve as luzes do Olympus acesas. Sério, obrigado. Você é %s, e o koi é seu este mês.\n\nContinua com essa mão aberta.",
+		level = "Caramba.\n\nVocê chegou lá antes de qualquer um no Olympus. Primeiro. Isso ninguém tira de você nunca mais. O cometa é seu, e o nome %s também.\n\nAgora vai tocar grama. Ou não. Respeito de qualquer jeito.",
+		guild = "Escuta,\n\nA sua guilda tem os níveis mais altos de todo o Olympus. Topo da lista. Você é %s, e a coruja fica no seu estandarte enquanto a sua guilda for a primeira.\n\nMantém o seu pessoal subindo, porque os outros estão vindo.",
+		oracle = "Olha,\n\nNo mês passado você leu a arena melhor que qualquer um. Luta após luta, você simplesmente sabia. Você é %s, e o corvo é seu este mês.\n\nAgora todo mundo vai copiar os seus palpites. Não dá pra culpar.",
+		missionary = "E aí,\n\nNos últimos trinta dias você trouxe mais gente pras nossas guildas do que quase todo mundo. É assim que o Olympus cresce. Você é %s, e o cajado é seu enquanto estiver entre os três primeiros.\n\nContinua trazendo.",
 	}
 	L.ARENA_PERIOD_TODAY = "Hoje"
 	L.ARENA_PERIOD_WEEK = "Esta semana"
