@@ -936,6 +936,21 @@ local sisterHeard = {}               -- [Name-Realm] = when one of the directory
 local sisterNoTold = {}              -- [Name-Realm] = true: he holds nothing of ours (told our no, or asked afresh)
 local sisterAsked = false
 local sisterSeen, sisterLapsed = false, false -- this client was of the audience; it left it since its last ask
+-- 1.2.4 (the author saw other guilds' treasuries, then <Olympus>'s alone): a snapshot (or a no)
+-- heard while the census cannot judge its sender yet was dropped without a word, and its sender's
+-- client, which took it as delivered, sent it again only SISTER_REPEAT later. The viewer's first ask
+-- goes Treasury.ASK_AFTER (40 s) after a login or a /reload and is answered at once, inside the
+-- census's Data.CROWN_AFTER (200 s), when no guild master counts yet: a guild master online before
+-- the viewer always landed there. Such a TS is now held (in memory, never shown) and handled again
+-- when the census changes (DATA_CHANGED) and once that window is over: taken if the census then
+-- confirms its sender, dropped if it says he is none, held while it still cannot say. Only for the
+-- census's own Olympus guilds; one a guild and one a sender (his newest), SISTERS_MAX at most. While
+-- one is held, its viewer's routine ask (Treasury.Ask) says he lacks it: the snapshot's time
+-- (LACK_MAX of them at most, never a guild or a name), and its sender sends it again (HeardAsk).
+Bank.LACK_MAX = 4
+local held, heldCount = {}, 0 -- [guild, lower case] = { sender, text, when, at }: a TS the census could not judge yet
+local heldTimer               -- the login (Comm.loginAt) whose window's end a check is due at
+local rechecking = false
 
 -- 1.1's audience: the King, his Steward, his Hands (their names, which the server stamps).
 local function CrownViewer(name)
@@ -971,6 +986,7 @@ local function Holding()
 	end
 	if sisterSeen then sisterSeen, sisterLapsed = false, true end
 	if sisterCount > 0 then wipe(sisters) sisterCount = 0 end
+	if heldCount > 0 then wipe(held) heldCount = 0 end
 	return false
 end
 Bank.Holding = Holding
@@ -990,6 +1006,25 @@ function Bank.LordOrCaptain(sender, guild)
 	local rank = ns.Data.AuthorizedRank(ns.FullName(sender), guild)
 	return rank ~= nil and rank <= ns.CAPTAIN_RANK
 end
+
+-- 1.2.4: the legacy census refused `sender` for `guild` only because it cannot say yet: inside our
+-- login's Data.CROWN_AFTER (the reports of this session still coming in), that guild's report older
+-- than Data.FRESH, or too few reports naming him a Lord or a Captain so far (one, where a guild
+-- master needs two: the soft rank Data.KnownRank gives what only shows). Never once the author's
+-- signed list is enforced (it says who is who at once), never for our own guild after the window
+-- (our roster says it), and for the census's Olympus guilds alone.
+local function Unsettled(sender, guild)
+	local D = ns.Data
+	if not D or (ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced()) then return false end
+	if not ns.IsFederation(guild) or not D.Guild(guild) then return false end
+	local now = ns.Now()
+	if now - (ns.Comm and ns.Comm.loginAt or 0) < D.CROWN_AFTER then return true end
+	if guild == GetGuildInfo("player") then return false end
+	if now - (tonumber(D.Guild(guild).t) or 0) > D.FRESH then return true end
+	local soft = D.KnownRank(ns.FullName(sender), guild, true)
+	return soft ~= nil and soft <= ns.CAPTAIN_RANK
+end
+Bank.Unsettled = Unsettled
 
 -- This character is its guild's treasurer for this: the guild master or an officer (the server's
 -- rank), of an Olympus guild that is not the King's.
@@ -1099,13 +1134,24 @@ end
 -- One of the directory's audience asked (TA): our guild's bank goes to him if our yes covers him
 -- (fresh: he holds none, RESET_GAP apart; empty: his ask says so, however soon: the same snapshot
 -- again PRIVATE_GAP after the last at the soonest, Treasury.Resend). While our no stands, after our
--- snapshot went out: the no, once a session (Konig's review of 1.1).
-function Bank.HeardAsk(sender, fresh, empty)
+-- snapshot went out: the no, once a session (Konig's review of 1.1). 1.2.4: `lacks`, the times of
+-- the snapshots his addon holds unconfirmed (HandleSister): ours among them, it goes again as an
+-- empty ask's does.
+local function Lacks(lacks)
+	local snap = Bank.Own()
+	local t = type(snap) == "table" and math.floor(tonumber(snap.t) or 0) or nil
+	for _, x in ipairs(type(lacks) == "table" and lacks or {}) do
+		if t and x == t then return true end
+	end
+	return false
+end
+function Bank.HeardAsk(sender, fresh, empty, lacks)
 	if not SisterViewer(sender) then return end
 	local name = ns.FullName(sender)
 	sisterHeard[name] = ns.Now()
 	KeptHeard()[name] = sisterHeard[name]
-	if fresh then ns.Treasury.ForgetSent(sender, "TS") elseif empty then ns.Treasury.Resend(sender, "TS") end
+	if fresh then ns.Treasury.ForgetSent(sender, "TS")
+	elseif empty or Lacks(lacks) then ns.Treasury.Resend(sender, "TS") end
 	if Bank.SisterConsent() == false then
 		local guild = SentGuild()
 		if guild and not sisterNoTold[name] then
@@ -1201,7 +1247,61 @@ end
 -- of that guild (the legacy census until enforcement, our roster or the signed manifest
 -- afterwards), the newest kept, in memory alone. 1.2: the one it replaces, the same sender's and
 -- older, is kept with it (prev: one, never a chain), for what left the bank since (Bank.Previous);
--- the same snapshot heard again (his addon repeats it) changes nothing.
+-- the same snapshot heard again (his addon repeats it) changes nothing. 1.2.4: one the census
+-- cannot judge yet is held (Hold), not dropped.
+local function Hold(key, sender, text, when)
+	for k, h in pairs(held) do -- (one a sender: his newest)
+		if k ~= key and h.sender == sender then held[k], heldCount = nil, heldCount - 1 end
+	end
+	if not held[key] then
+		if heldCount >= Bank.SISTERS_MAX then
+			local oldest
+			for k, h in pairs(held) do if not oldest or h.at < held[oldest].at then oldest = k end end
+			held[oldest], heldCount = nil, heldCount - 1
+		end
+		heldCount = heldCount + 1
+	end
+	held[key] = { sender = sender, text = text, when = when, at = ns.Now() }
+	-- Once our login's window is over, every snapshot held is handled again (one check a login).
+	local login, D = ns.Comm and ns.Comm.loginAt, ns.Data
+	if login and heldTimer ~= login and ns.Now() - login < D.CROWN_AFTER then
+		heldTimer = login
+		ns.After(D.CROWN_AFTER - (ns.Now() - login) + 1, "sister bank held", function() Bank.Recheck() end)
+	end
+end
+-- (Tests: how many are held.)
+function Bank.Held() return heldCount end
+-- Every snapshot held, handled again as it came (the census may confirm its sender now; one it
+-- still cannot judge is held again). Returns how many are no longer held (taken or dropped).
+function Bank.Recheck()
+	if rechecking or heldCount == 0 then return 0 end
+	rechecking = true
+	local list = {}
+	for _, h in pairs(held) do list[#list + 1] = h end
+	wipe(held); heldCount = 0
+	table.sort(list, function(a, b) return a.at < b.at end)
+	local ok, err = pcall(function()
+		for _, h in ipairs(list) do Bank.HandleSister("WHISPER", h.sender, h.text) end
+	end)
+	rechecking = false
+	if not ok then error(err, 0) end
+	return #list - heldCount
+end
+ns.On("DATA_CHANGED", function() if heldCount > 0 then Bank.Recheck() end end)
+-- What this client's ask says it lacks (Treasury.Ask): the times of the snapshots it holds
+-- unconfirmed, the newest first, LACK_MAX at most. A sender's addon that finds its own there sends
+-- it again; the time alone names no guild and no one on the channel.
+function Bank.Lacking()
+	local out = {}
+	if heldCount == 0 or not Bank.SeesSisters() then return out end
+	for _, h in pairs(held) do
+		if tonumber(h.when) and h.when > 0 then out[#out + 1] = math.floor(h.when) end
+	end
+	table.sort(out, function(a, b) return a > b end)
+	for i = #out, Bank.LACK_MAX + 1, -1 do out[i] = nil end
+	return out
+end
+
 function Bank.HandleSister(dist, sender, text)
 	if dist ~= "WHISPER" or type(text) ~= "string" or not Holding() then return end
 	local guild, when, money, rest = text:match("^TS~([^~]*)~(%d+)~(%d+)~?(.*)$")
@@ -1211,7 +1311,12 @@ function Bank.HandleSister(dist, sender, text)
 	when = tonumber(when)
 	-- (A no from whoever sent the snapshot held counts, whatever the census says of him now.)
 	local own = when == 0 and sisters[key] and ns.Treasury.SameChar(sisters[key].by, ns.FullName(sender))
-	if not own and not Bank.LordOrCaptain(sender, guild) then return end
+	if not own and not Bank.LordOrCaptain(sender, guild) then
+		if Unsettled(sender, guild) then Hold(key, ns.FullName(sender), text, when) end
+		return
+	end
+	-- (Taken now: what this sender's addon sent of it before, still held, is behind it.)
+	if held[key] and ns.Treasury.SameChar(held[key].sender, ns.FullName(sender)) then held[key], heldCount = nil, heldCount - 1 end
 	if when == 0 then
 		if sisters[key] then sisters[key], sisterCount = nil, sisterCount - 1 end
 		ns.Fire("TREASURY_CHANGED")
@@ -1788,7 +1893,8 @@ function Bank.Reset()
 	wipe(ownGuildReaders)
 	firstChange, lastChange, sharePending, openedAt = 0, 0, false, -math.huge
 	wipe(queried)
-	wipe(sisters); wipe(sisterHeard); wipe(sisterNoTold)
+	wipe(sisters); wipe(sisterHeard); wipe(sisterNoTold); wipe(held)
+	heldCount, heldTimer, rechecking = 0, nil, false
 	if ns.db then ns.db.sisterHeard = nil end
 	sisterCount, sisterAsked, sisterSeen, sisterLapsed = 0, false, false, false
 	wipe(indexed); wipe(foldedNames); wipe(nameMiss); wipe(nameAsked)

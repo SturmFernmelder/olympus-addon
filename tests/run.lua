@@ -46035,6 +46035,115 @@ do
 			eq(B.SisterConsent(), false); eq(B.AskSister(), false); eq(B.SisterMessage(), nil)
 		end)
 	end)
+
+	-- 1.2.4 (the author's report: other guilds' treasuries he had seen were gone, <Olympus>'s alone
+	-- stayed). A snapshot heard while the census could not judge its sender yet (the viewer's first
+	-- Data.CROWN_AFTER after a login or a /reload, when every guild master is refused, or that guild's
+	-- report missing or older than Data.FRESH) was dropped without a word, and its sender's client,
+	-- which took it as delivered, sent it again only SISTER_REPEAT (3 hours) later. The viewer's first
+	-- ask goes ASK_AFTER (40 s) after login and is answered at once: a guild master online before him
+	-- always landed in that window.
+	test("1.2.4 Guild treasuries: a snapshot the census cannot judge yet (the viewer's login window, a stale report) is held and taken once the census confirms its sender; meanwhile his 15-minute ask says he lacks it, and its sender sends it again", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin = ns.Comm.loginAt
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Pieces(to)
+					local out = {}
+					for _, x in ipairs(w.whispered) do if x.to == to and x.msg:find("^TW~TS~") then out[#out + 1] = x.msg end end
+					return out
+				end
+				local function Deliver(pieces, from) for _, m in ipairs(pieces) do T.HandlePrivate("WHISPER", from or "Zed-Realm", m) end end
+				-- Zed, the guild master of Olympus Zeus, says yes. Sage logs in; his addon's first ask is answered.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } })
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				local bank, when = ns.rdb.bank, math.floor(ns.rdb.bank.t)
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				local pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				-- It reaches Sage's client 60 s after his login, inside the census's window: not shown yet.
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				Deliver(pieces)
+				eq(#B.Sisters(), 0, "not shown before the census can confirm its sender")
+				-- The window over, the census confirms Zed: taken, with nothing sent again (before 1.2.4:
+				-- nothing for 3 hours).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Census(w)
+				Run() -- (the check due once the window is over)
+				local s = B.Sisters()
+				eq(#s, 1, "taken once the census confirms him"); eq(s[1].money, 424242); eq(s[1].by, "Zed-Realm"); eq(s[1].t, when)
+				-- An officer's snapshot while his guild's report is older than Data.FRESH (no window): held,
+				-- taken when a fresh report comes (DATA_CHANGED).
+				B.Reset()
+				AsSage(); ns.Comm.loginAt = w.clock - 3600
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60
+				Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 1111, { { i = 1, items = { { id = 2589, n = 5, s = 1 } } } }), "Zora-Realm")
+				eq(#B.Sisters(), 0, "a stale report: not yet")
+				Census(w)
+				CoreFire("DATA_CHANGED") -- (the harness keeps ns.Fire quiet: the real one, as a report heard fires it)
+				s = B.Sisters()
+				eq(#s, 1, "a fresh report confirms her"); eq(s[1].by, "Zora-Realm"); eq(s[1].money, 1111)
+				-- Refused for good: the census, fresh and settled, does not name the sender. Nothing held.
+				B.Reset()
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(#B.Sisters(), 0); eq(B.Held(), 0, "a sender the census does not name: dropped as before")
+				-- Inside the window he is held (the census can say nothing yet), and dropped once it says no.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1)
+				ns.Comm.loginAt = w.clock - 3600
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 0, "never shown"); eq(B.Held(), 0, "dropped once the census says no")
+				-- Bounded: one held snapshot a guild and a sender, of the census's Olympus guilds alone.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				Hear(Snap(w, "Olympus Hera", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1, "one a sender: his newest")
+				Hear(Snap(w, "Olympus Nowhere", "Other Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Other Guy-Realm")
+				eq(B.Held(), 1, "a guild the census does not know: never held")
+				-- The 15-minute ask while one is held: it names that snapshot (its time alone, never a guild
+				-- or a name on the channel), and Zed's client sends it again; a routine ask does not.
+				B.Reset(); T.ResetPrivate()
+				AsZed(); ns.rdb.bank = bank
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60 -- (and his guild's report stale)
+				Deliver(pieces)
+				eq(B.Held(), 1)
+				Run() -- (Sage's client's own timers, before this test plays Zed's: still held)
+				eq(B.Held(), 1)
+				w.sent = {}
+				eq(T.Ask(true), true); eq(LastSent(w), "TA~Olympus II~0", "his login's ask: he holds nothing")
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true)
+				local ask = LastSent(w)
+				eq(ask, ("TA~Olympus II/%d~1"):format(when), "it names the snapshot he lacks")
+				AsZed()
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(#Pieces(SAGE), 0, "a routine ask: nothing for SISTER_REPEAT")
+				T.HandleAsk("CHANNEL", SAGE, ask); Run()
+				pieces = Pieces(SAGE)
+				assert(#pieces > 0, "the ask that says he lacks it: sent again")
+				-- (A 1.2.3 addon reads that ask as it reads every one: the guild's field is its asker's own.)
+				eq(("TA~Olympus II/123~1"):match("^TA~[^~]*~([01])$"), "1")
+				AsSage(); Census(w)
+				Deliver(pieces)
+				eq(#B.Sisters(), 1, "taken"); eq(B.Held(), 0)
+				w.sent = {}
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~1", "nothing lacked: a routine ask")
+			end)
+			ns.Comm.loginAt = savedLogin
+			if not ok then error(err, 0) end
+		end)
+	end)
 end
 
 test("1.1 bank requests (Fern): a Lord or Captain asks for an item and a count, shown next to the bank; handing it over stays a trade or mail", function()

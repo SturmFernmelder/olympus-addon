@@ -2364,7 +2364,13 @@ function Treasury.Ask(fresh)
 	if lastAsk == -math.huge then fresh = true end
 	if ns.Bank and ns.Bank.Lapsed and ns.Bank.Lapsed() then fresh = true end
 	lastAsk = ns.Now()
-	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(Clean(GetGuildInfo("player")), fresh and 0 or 1), "treasuryask")
+	-- 1.2.4: a routine ask names, after its guild, the snapshots its client holds unconfirmed
+	-- (Bank.Lacking: their times, "/" apart; a guild's name never holds one, Clean). A 1.2.3 addon
+	-- reads the field as its asker's guild and leaves it unread, as before.
+	local field = Clean(GetGuildInfo("player"))
+	local lacks = not fresh and ns.Bank and ns.Bank.Lacking and ns.Bank.Lacking() or {}
+	if #lacks > 0 then field = field .. "/" .. table.concat(lacks, "/") end
+	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(field, fresh and 0 or 1), "treasuryask")
 	return true
 end
 function Treasury.AskDue() return ns.Now() - lastAsk >= Treasury.ASK_EVERY end
@@ -2376,8 +2382,14 @@ function Treasury.AskDue() return ns.Now() - lastAsk >= Treasury.ASK_EVERY end
 -- to him again inside it too, PRIVATE_GAP apart: Bank.HeardAsk, Treasury.Resend).
 function Treasury.HandleAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" then return end
-	local fresh = text:match("^TA~[^~]*~([01])$")
+	local head, fresh = text:match("^TA~([^~]*)~([01])$")
 	if not fresh then return end
+	-- (1.2.4: the snapshots it lacks, Treasury.Ask; LACK_MAX of them read at most.)
+	local lacks = {}
+	for t in head:gmatch("/(%d+)") do
+		if #lacks >= (ns.Bank and ns.Bank.LACK_MAX or 4) then break end
+		if #t <= 10 then lacks[#lacks + 1] = tonumber(t) end
+	end
 	sender = ns.FullName(sender)
 	local now = ns.Now()
 	local reset = fresh == "0" and now - (resetAt[sender] or -math.huge) >= Treasury.RESET_GAP
@@ -2388,7 +2400,7 @@ function Treasury.HandleAsk(dist, sender, text)
 		if reset then sentTo[sender] = nil end
 		Treasury.SendPrivate(sender)
 	end
-	if ns.Bank and ns.Bank.HeardAsk then ns.Bank.HeardAsk(sender, reset, fresh == "0") end
+	if ns.Bank and ns.Bank.HeardAsk then ns.Bank.HeardAsk(sender, reset, fresh == "0", lacks) end
 end
 ns.Comm.Handle("TA", function(...) Treasury.HandleAsk(...) end)
 
