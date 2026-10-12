@@ -74,6 +74,8 @@ test("1.2.3 Bones live tables: a two-player table with the default settings is a
 	eq(#w:Sent({ from = b, type = "KN", dist = "CHANNEL" }), 1, "the guest too")
 	local n = assert(Listed(w, c, id), "listed for the member")
 	eq(n.p1:lower(), a.name:lower()); eq(n.p2:lower(), b.name:lower())
+	-- (decision 1: a free game counts, so the row is no rehearsal's: the screens give it no TESTE tag)
+	eq(n.mode, "L"); eq(n.wire, "T")
 	eq(Do(w, c, "Watchable", a.name), id, "the right-click's Watch finds it")
 	-- A minute's notice at a time, the list keeping one three minutes: still there past them.
 	w:Run(200)

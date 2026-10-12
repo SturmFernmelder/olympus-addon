@@ -153,7 +153,8 @@ test("1.1.6 Bones ledger: on the 1.1.6 package, a game for fun between two playe
 	local g = a.ns.FarkleTable.Get(id).game
 	eq(g.over, true); eq(g.winner, 1); eq(g.reason, "concede")
 	eq(a.ns.FarkleTable.Get(id).stake, 0, "no stake")
-	eq(a.ns.FarkleTable.Get(id).mode, "T", "the King's live switch is off: a rehearsal's mode, as in 1.1.6")
+	eq(a.ns.FarkleTable.Get(id).mode, "T", "the King's live switch is off: its messages travel in T, as in 1.1.6")
+	eq(a.ns.FarkleTable.Counted(id), true, "1.2.3, decision 1: a free game counts whatever the live switch")
 	-- Both players told every auditor heard, and nobody else.
 	local auditors = Names(c.king, c.councillor, c.author)
 	eq(Targets(w, a), auditors)
@@ -167,7 +168,9 @@ test("1.1.6 Bones ledger: on the 1.1.6 package, a game for fun between two playe
 		eq(e.winner:lower(), a.name:lower()); eq(e.s1, 150); eq(e.s2, 0); eq(e.how, "o", "conceded")
 		assert(e.x:find("^d%.0%.2%."), "a direct table, no stake, to 2000: " .. tostring(e.x))
 		eq(e.reports, 2); eq(e.state, "agreed", aud.name .. ": both players' words agree")
-		eq(e.mode, "T")
+		-- (1.2.3, the owner's decision 1: a free game counts, so its record is the live realm's,
+		-- not a rehearsal's as in 1.1.6-1.2.2, while the live switch stays off)
+		eq(e.mode, "L")
 	end
 	eq(#Ledger(w, c.member), 0, "a member is told nothing")
 	eq(c.member.rdb.arenaGames and c.member.rdb.arenaGames.gamesLedger, nil, "and keeps no ledger")
@@ -197,6 +200,9 @@ test("1.1.6 Bones ledger: on the 1.1.6 package, a game for fun between two playe
 end)
 
 for _, mode in ipairs({ "T", "L" }) do
+-- (1.2.3, the owner's decision 1: a free game between players counts whatever the King's live switch, so
+-- its history is the live realm's in both modes the table is played in: T, the switch off, and L.)
+local rec = "L"
 test("Bones history persistence: actual " .. mode .. " peer target completion before the companion loads remains in both players' own history", function()
 	local w, c = Ledger116({ coreOnly = true, nativeUI = true })
 	if mode == "L" then assert(c.king.Roles.SetSettings({ live = 1 })); w:Run(0) end
@@ -208,7 +214,7 @@ test("Bones history persistence: actual " .. mode .. " peer target completion be
 		eq(p.companion.loaded, nil, "the optional companion was unavailable during play, not replaced by a history mock")
 		p.companion.state = "ok"
 		assert(w:As(p, p.ns.Arena.LoadUI), "load the actual companion and its saved-data handoff after completion")
-		local stored = M(w, p, "FarkleTable").History(mode)
+		local stored = M(w, p, "FarkleTable").History(rec)
 		eq(#stored, 0, "companion initialization has no transcript/history of the earlier completed game")
 		local history = M(w, p, "FarkleTable").MyGames()
 		eq(#history, 1, "late companion loading cannot hide a saved peer result from Bones history")
@@ -218,7 +224,7 @@ test("Bones history persistence: actual " .. mode .. " peer target completion be
 		eq(#M(w, p, "FarkleTable").MyGames(), 1, "repeated reads do not duplicate the entry")
 		w:As(p, function()
 			local UI, L = p.ns.Arena.ui, p.ns.L
-			eq(p.ns.FarkleTable.History(mode), stored); eq(#stored, 0, "recovery does not write a new saved history/transcript")
+			eq(p.ns.FarkleTable.History(rec), stored); eq(#stored, 0, "recovery does not write a new saved history/transcript")
 			local row = assert(Find(UI.Pane("bone.history").lines({ key = "bone.history" }), UI.Kit.Name(history[1].opp)))
 			assert(row.text:find(L[p == c.a and "ARENA_WON" or "ARENA_LOST"], 1, true))
 			local canvas = CreateFrame("Frame")
@@ -236,7 +242,7 @@ test("Bones history persistence: already loaded " .. mode .. " peer histories re
 	for _, p in ipairs({ c.a, c.b }) do assert(w:As(p, p.ns.Arena.LoadUI)) end
 	local id = Play(w, c.a, c.b, nil, true)
 	for _, p in ipairs({ c.a, c.b }) do
-		local saved = M(w, p, "FarkleTable").History(mode)
+		local saved = M(w, p, "FarkleTable").History(rec)
 		eq(#saved, 1); eq(saved[1].id, id)
 		local history = M(w, p, "FarkleTable").MyGames()
 		eq(#history, 1); eq(history[1], saved[1], "the richer actual heavy record wins over its compact duplicate")
@@ -244,19 +250,19 @@ test("Bones history persistence: already loaded " .. mode .. " peer histories re
 	end
 	local practice = assert(M(w, c.a, "FarkleTable").Practice({ target = 2000, first = 1 }))
 	assert(M(w, c.a, "FarkleTable").Concede(practice)); w:Run(10)
-	local before = M(w, c.a, "FarkleTable").History(mode)
+	local before = M(w, c.a, "FarkleTable").History(rec)
 	eq(#M(w, c.a, "FarkleTable").MyGames(), 2, "one peer game and one House game, no compact practice duplicate")
 	eq(#M(w, c.king, "ArenaLedger").AllGames(), 2, "the auditor holds their actual records")
 	eq(#M(w, c.king, "FarkleTable").MyGames(), 0, "audited games of others never enter the auditor's own Bones history")
 	-- The game's actual logout/login saved-data path, not a fabricated history row.
 	w:Logout(c.a); w:Login(c.a)
 	assert(w:As(c.a, c.a.ns.Arena.LoadUI))
-	local saved = M(w, c.a, "FarkleTable").History(mode)
+	local saved = M(w, c.a, "FarkleTable").History(rec)
 	eq(#saved, #before)
 	local history = M(w, c.a, "FarkleTable").MyGames()
 		eq(#history, 2)
 		eq(history[1], M(w, c.a, "FarkleTable").History("T")[1], "House practice is always T, even beside a live peer game")
-		eq(history[2], saved[mode == "L" and 1 or 2])
+		eq(history[2], saved[1], "the peer game alone in the live history: the House's is T")
 	eq(history[1].id, practice); eq(history[2].id, id, "older saved peer facts are retained on reload")
 	NoErrors(w)
 end)
@@ -268,14 +274,18 @@ test("Bones history persistence: compact recovery keeps the existing per-mode hi
 		assert(w:As(p, p.ns.Arena.LoadUI))
 		p.ns.FarkleTable.HIST_MAX = 2 -- smaller real cap exercises pruning with three actual completions
 	end
+	-- (1.2.3, decision 1: the peer games count, their history the live realm's, and the House's
+	-- practice stays T: three completions of one mode are three peer games now)
 	local first = Play(w, c.a, c.b, nil, true)
 	w:Run(31)
 	local second = Play(w, c.a, c.b)
+	w:Run(31)
+	local third = Play(w, c.a, c.b)
 	local practice = assert(M(w, c.a, "FarkleTable").Practice({ target = 2000, first = 1 }))
 	assert(M(w, c.a, "FarkleTable").Concede(practice)); w:Run(0)
 	local history = M(w, c.a, "FarkleTable").MyGames()
-	eq(#M(w, c.a, "ArenaLedger").MyGames(), 3, "all three compact records still exist")
-	eq(#history, 2); eq(history[1].id, practice); eq(history[2].id, second)
+	eq(#M(w, c.a, "ArenaLedger").MyGames(), 4, "all four compact records still exist")
+	eq(#history, 3); eq(history[1].id, practice); eq(history[2].id, third); eq(history[3].id, second)
 	for _, h in ipairs(history) do assert(h.id ~= first, "recovery cannot resurrect the oldest game past the Bones cap") end
 	NoErrors(w)
 end)
@@ -352,8 +362,11 @@ test("1.1.6 Bones ledger: the auditor takes a game's word only by whisper from a
 	local id = Play(w, a, b)
 	local king, member = c.king, c.member
 	local LGk = M(w, king, "ArenaLedger")
-	local body = w:Sent({ from = a, type = "AY", to = king.name })[1].msg:match("^AY~T%d+~(.*)$")
+	-- (1.2.3, the owner's decision 1: the free game counts, so its record is the live realm's, L,
+	-- not a rehearsal's as before; every word below is said in that mode)
+	local mode, body = w:Sent({ from = a, type = "AY", to = king.name })[1].msg:match("^AY~(%a)%d+~(.*)$")
 	assert(body, "the host's record")
+	eq(mode, "L")
 	local f = {}
 	for part in (body .. "~"):gmatch("([^~]*)~") do f[#f + 1] = part end
 	eq(#f, 13)
@@ -363,29 +376,29 @@ test("1.1.6 Bones ledger: the auditor takes a game's word only by whisper from a
 	local claim = { unpack(f) }
 	claim[8], claim[9], claim[10] = "2", "0", king.ns.Arena.B36(2000)
 	claim = table.concat(claim, "~")
-	eq(select(2, LGk.TakeGame(member.name, "T", claim)), "sender")
-	assert(w:As(b, b.ns.Arena.Send, "AY", "T", claim, { dist = "CHANNEL" }))
+	eq(select(2, LGk.TakeGame(member.name, mode, claim)), "sender")
+	assert(w:As(b, b.ns.Arena.Send, "AY", mode, claim, { dist = "CHANNEL" }))
 	w:Run(5)
 	eq(#w:Sent({ from = b, type = "AY", dist = "CHANNEL" }), 1, "it went on the channel")
 	eq(LGk.AllGames()[1].state, "agreed", "a word on the channel is not taken")
-	eq(select(2, M(w, member, "ArenaLedger").TakeGame(b.name, "T", claim)), "auditor")
+	eq(select(2, M(w, member, "ArenaLedger").TakeGame(b.name, mode, claim)), "auditor")
 	eq(member.rdb.arenaGames and member.rdb.arenaGames.gamesLedger, nil)
 	local relayed = claim:gsub("~[^~]*$", "~" .. b.short)
-	eq(select(2, LGk.TakeGame(member.name, "T", relayed)), "relay")
+	eq(select(2, LGk.TakeGame(member.name, mode, relayed)), "relay")
 	-- Out of shape, or ahead of the clock: refused.
 	local bad = { unpack(f) }
 	bad[8] = "q"
-	eq(select(2, LGk.TakeGame(a.name, "T", table.concat(bad, "~"))), "shape")
-	eq(select(2, LGk.TakeGame(a.name, "T", body .. "~-")), "shape", "a field too many")
+	eq(select(2, LGk.TakeGame(a.name, mode, table.concat(bad, "~"))), "shape")
+	eq(select(2, LGk.TakeGame(a.name, mode, body .. "~-")), "shape", "a field too many")
 	local ahead = { unpack(f) }
 	ahead[3] = king.ns.Arena.B36(w:As(king, king.ns.Arena.Now) + 3600)
-	eq(select(2, LGk.TakeGame(a.name, "T", table.concat(ahead, "~"))), "time")
+	eq(select(2, LGk.TakeGame(a.name, mode, table.concat(ahead, "~"))), "time")
 	-- The same id with other players: the first kept.
 	local other = { unpack(f) }
 	other[6] = member.short
-	eq(select(2, LGk.TakeGame(a.name, "T", table.concat(other, "~"))), "conflict")
+	eq(select(2, LGk.TakeGame(a.name, mode, table.concat(other, "~"))), "conflict")
 	-- The guest (a modified client) whispers he won: the King's ledger says the words differ.
-	assert(w:As(b, b.ns.Arena.Send, "AY", "T", claim, { to = king.name }))
+	assert(w:As(b, b.ns.Arena.Send, "AY", mode, claim, { to = king.name }))
 	w:Run(5)
 	local e = LGk.AllGames()[1]
 	eq(e.id, id); eq(e.state, "differ"); eq(e.winner:lower(), a.name:lower(), "the host's word is the one shown")
