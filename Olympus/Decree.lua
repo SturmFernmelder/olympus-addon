@@ -22,10 +22,13 @@ local L = ns.L
 -- level of the whole army, and the King's Crown's other actions were checked for it): any officer
 -- of any Olympus guild sounded his raid warning, sound and map marker on every Olympus client.
 -- For the whole army they are the King's guild's alone now: the King, his Steward and his Hands,
--- and its own officers, as before. The master or an officer of any other Olympus guild calls his
--- guild alone, over GUILD, as a guild call to arms or a guild muster, shown by his guildmates'
--- clients alone (their roster names him one of its officers); on the channel every client
--- refuses his, a 1.2.2 officer's among them:
+-- and its own officers, as its members' roster or the signed list has them (never a census rank,
+-- anyone's word: one report named anyone an officer of <Olympus>; on every other guild's client,
+-- until the signed list counts, the officers of <Olympus> the King's list or a Steward's names
+-- Hands). The master or an officer of any other Olympus guild calls his guild alone, over GUILD,
+-- as a guild call to arms or a guild muster, shown by his guildmates' clients alone (their roster
+-- names him one of its officers); on the channel every client refuses his, a 1.2.2 officer's
+-- among them:
 --   D1 on the channel   the whole army's (any kind)
 --   D1 over GUILD       a guild decree: a Royal decree or a Tabard inspection, from our guild's
 --                       own master; a Call to Arms or a Muster, from one of our guild's officers
@@ -374,13 +377,29 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 			-- another guild's master's or officers': theirs go to their own guild over GUILD.
 			return ns.Log("%s from %s <%s> refused: for the whole army only the Crown (a guild's officers call their own guild alone)",
 				d.kind, sender, d.guild)
+		elseif source == "census" then
+			-- (1.2.3) Nor on a census rank of the King's guild, which is anyone's word: one report
+			-- from a second character named anyone its officers on every client no member of it
+			-- reported to (three against its own reporter), the master or an officer of another
+			-- guild among them, and they sounded the whole army's raid warning, sound and marker,
+			-- six a minute to fill its flood guard. Its Call to Arms and Muster come from the King,
+			-- his Steward and his Hands by name (above), and from its officers as its own members'
+			-- roster has them (the server's word) or, once the author's signed enforcement is on, the
+			-- signed list (Data.AuthorizedRank), as the officer musters' (OfficerMuster.lua) and its
+			-- Royal decrees (ns.IsCrownRank) already did: on every other client an officer of the
+			-- King's guild is heard while the King's list or a Steward's names him a Hand.
+			return ns.Log("%s from %s <%s> refused: a census rank of the King's guild is no officer of it here (the King, his Steward, his Hands, its roster or the signed list)",
+				d.kind, sender, d.guild)
 		end
 	end
 	d.rank = rank
 	-- The King, his Steward, his Hands, the High Council, signed identities and our own guild's
 	-- officers and master (our roster: the server's word) never wait behind the flood guard, which
-	-- legacy census ranks (anyone's votes) can fill. A legacy census sender still speaks for one
-	-- guild only, exactly as before the dormant signed-authority migration (Data.ClaimGuild).
+	-- legacy census ranks (anyone's votes) could fill. (1.2.3: no census rank calls the whole army
+	-- to arms or musters it, above; it reaches the guard only with a Royal decree or a Tabard
+	-- inspection from the census master of the King's guild where no King is pinned, KingCharacter.)
+	-- A legacy census sender still speaks for one guild only, exactly as before the dormant
+	-- signed-authority migration (Data.ClaimGuild).
 	local sure = king or steward or hand or council or source == "roster" or source == "signed" or source == "pinned"
 	if source == "census" and not ns.Data.ClaimGuild(sender, d.guild) then
 		ns.Log("decree from %s ignored: speaks for another guild than %s", sender, d.guild)

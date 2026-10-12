@@ -334,19 +334,17 @@ from it.
 For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
 `<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
 reach his own guild alone, as guild decrees, and so do his and his officers' Calls to Arms and
-Musters (a guild call to arms, a guild muster: the same alarm, sound and marker, for his
-guild's members alone): no guild master has a decree for the whole army, and every client
-refuses one of theirs sent to it, a 1.2.2 officer's too.
-Everyone else gets a local preview when they press the buttons. Since 1.0.0
-the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
-server's word) names them: on every other client, where only the census could, they count as
-Captains, and the Crown of `<Olympus>` there is the King himself (by his character's name) and
-the Hands his list or a Steward's own list names, on their word alone: while a list names them,
-a Hand who is one of its officers has its Royal decrees, Tabard inspections and [Lords] lines
-on every client. The King can't take back a Hand his Steward named: that Steward does, or the
-author, by removing him. The
-King's Steward (1.0.0, below) sends the Crown's decrees for `<Olympus>` on every client,
-whatever his rank, like the King.
+Musters (the same alarm, sound and marker, for his guild's members alone): no guild master has
+a decree for the whole army, and every client refuses one of theirs sent to it, a 1.2.2
+officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
+officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
+names them. On every other client its Crown is the King himself (by his character's name) and
+the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its
+officers has all its decrees and [Lords] lines there. A census officer of `<Olympus>` counts as
+a Captain there and, since 1.2.3, calls nobody to arms (one report can name anyone) until the
+author's signed list counts. The King can't take back a Hand his Steward named: that Steward
+does, or the author, by removing him. The King's Steward (1.0.0, below) sends the Crown's
+decrees for `<Olympus>` on every client, whatever his rank, like the King.
 
 **Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
 Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:

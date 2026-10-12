@@ -30009,9 +30009,10 @@ end
 -- reports and chat lines speak for (Data.ClaimGuild). A decree's words come through the logged
 -- API, as a chat line's do. Names are made up; the King's is read from ns.KingCharacter().
 -- (1.2.3: the whole army's Calls to Arms and Musters are the King's guild's alone, and another
--- guild's officers call their own guild over GUILD. The census Captains who still reach the flood
--- guard are <Olympus>'s, as one report names them on another guild's client: these tests flood
--- with those, and our own guild's officers call us over GUILD.)
+-- guild's officers call their own guild over GUILD. The census Captains of <Olympus>, whom one
+-- report names on another guild's client, still reached the whole army and filled its flood
+-- guard; no census rank calls it now: these tests send those floods and see none of it shown,
+-- and our own guild's officers call us over GUILD.)
 ---------------------------------------------------------------------------
 do
 	local D = ns.Data
@@ -30069,11 +30070,12 @@ do
 	end
 
 	-- Eight census Captains of <Olympus> (one report on another guild's client names them, the
-	-- King at its head); six of them send six raid warnings in six seconds: the army's flood guard
-	-- is full for a minute. (1.2.3: six census Captains of a made-up guild did before; theirs reach
-	-- the whole army no more.) keep: the picture of <Olympus> this client already has (its
-	-- officers, size and online), kept in the flood's report, which four heralds send so it leads
-	-- (the first ones outvoted by the three senders of Forged's).
+	-- King at its head); six of them send six Calls to Arms in six seconds. They were six raid
+	-- warnings that filled the army's flood guard for a minute (six census Captains of a made-up
+	-- guild before 1.2.3, then <Olympus>'s); a census rank calls the whole army no more (1.2.3):
+	-- none of the six shows, and the guard stays empty. keep: the picture of <Olympus> this client
+	-- already has (its officers, size and online), kept in the flood's report, which four heralds
+	-- send so it leads (the first ones outvoted by the three senders of Forged's).
 	local function Flood(s, Decree, prefix, keep)
 		local caps = {}
 		for i = 1, 8 do caps[i] = prefix .. string.char(96 + i) .. ":1:0" end
@@ -30084,13 +30086,15 @@ do
 			if not keep then eq(taken, true) end
 		end
 		eq(D.KnownRank(prefix .. "a-Realm", "Olympus"), 1, "the census names them officers of <Olympus>")
+		local warned = #s.warnings
 		for i = 1, 6 do
 			s.clock = s.clock + 1
 			Decree(prefix .. string.char(96 + i) .. "-Realm", "ARMS", "Olympus")
 		end
+		eq(#s.warnings, warned, "no census Captain's Call to Arms raises a raid warning (1.2.3)")
 	end
 
-	test("1.0.0 decrees: our own guild's officers get through however many census Captains filled the flood guard", function()
+	test("1.0.0 decrees: our own guild's officers get through however many census Captains call (1.2.3: none of theirs shows, nor fills the flood guard)", function()
 		Scene(3, function(s)
 			local cns, Decree, _, Deliver = DecreeClient(s)
 			-- (1.2.3) Our own guild's officers call us over GUILD.
@@ -30098,69 +30102,81 @@ do
 				Deliver("GUILD", sender, Codec.EncodeDecree(kind, 1453, 0.5, 0.5, "Olympus II", 1, text or "x"))
 			end
 			Flood(s, Decree, "Blare")
-			eq(#cns.Decree.Active(), 6, "six raid warnings")
+			eq(#cns.Decree.Active(), 0, "no raid warning from six census Captains (they were six)")
 			s.clock = s.clock + 1
 			Decree("Blareg-Realm", "ARMS", "Olympus")
-			eq(#cns.Decree.Active(), 6, "a seventh census decree still waits")
+			eq(#cns.Decree.Active(), 0, "nor a seventh")
 			-- Our officer (Member2, rank 1 in our roster: the server's word).
 			Guild("Member2-Realm", "ARMS", "real attack")
-			eq(#cns.Decree.Active(), 7, "our officer's Call to Arms is shown")
+			eq(#cns.Decree.Active(), 1, "our officer's Call to Arms is shown")
 			eq(cns.Decree.Active()[1].sender, "Member2"); eq(cns.Decree.Active()[1].scope, "guild")
-			-- And it takes no room in the guard: the census still waits.
 			Decree("Blareh-Realm", "ARMS", "Olympus")
-			eq(#cns.Decree.Active(), 7)
+			eq(#cns.Decree.Active(), 1)
 			-- (Each sender keeps its own minute: our officer's second decree waits.)
 			s.clock = s.clock + 1
 			Guild("Member2-Realm", "MUSTER")
-			eq(#cns.Decree.Active(), 7, "one a minute per sender")
+			eq(#cns.Decree.Active(), 1, "one a minute per sender")
 		end)
 	end)
 
-	test("1.0.0 decrees: the King's own needs no census and gets through a flood guard six census Captains filled", function()
+	test("1.0.0 decrees: the King's own needs no census and gets through whatever six census Captains send", function()
 		Scene(3, function(s)
 			local KING = ns.KingCharacter()
 			local cns, Decree = DecreeClient(s)
 			Flood(s, Decree, "Clang")
-			eq(#cns.Decree.Active(), 6)
+			eq(#cns.Decree.Active(), 0, "the census Captains' Calls to Arms: none (1.2.3)")
 			-- One report of <Olympus> on this client (the flood's), which vouches for no master of it
 			-- (the Crown's rank needs two): his pinned name is enough.
 			eq(D.KnownRank(KING .. "-Realm", "Olympus"), nil)
 			s.clock = s.clock + 1
 			Decree(KING .. "-Realm", "ROYAL", "Olympus", "the King's real decree")
-			eq(#cns.Decree.Active(), 7, "the King's decree is shown")
+			eq(#cns.Decree.Active(), 1, "the King's decree is shown")
 			eq(cns.Decree.Active()[1].guild, "Olympus"); eq(cns.Decree.Active()[1].kind, "ROYAL")
-			-- A namesake on another realm group is not him: census rules, and the flood guard, apply.
+			-- His Call to Arms too, by his name.
+			s.clock = s.clock + 61
+			Decree(KING .. "-Realm", "ARMS", "Olympus", "the King's call")
+			eq(#cns.Decree.Active(), 2, "the King's Call to Arms is shown"); eq(cns.Decree.Active()[1].kind, "ARMS")
+			-- A namesake on another realm group is not him: the census rules for him, and calls nobody.
 			s.clock = s.clock + 1
 			Decree(KING .. "-Elsewhere", "ARMS", "Olympus", "a namesake")
-			eq(#cns.Decree.Active(), 7, "the namesake's decree is not shown")
+			eq(#cns.Decree.Active(), 2, "the namesake's decree is not shown")
 		end)
 	end)
 
-	test("1.0.0 decrees: a sender speaks for the one guild it speaks for (Data.ClaimGuild), as in the chats", function()
+	-- 1.2.3: one report from a second character named Quill an officer of <Olympus> on every client
+	-- no member of it reported to, and Quill's Call to Arms as <Olympus> sounded the whole army (the
+	-- flood guard let six a minute through). A census rank calls nobody now; the chats' one-guild
+	-- rule (Data.ClaimGuild) still holds for the lines.
+	test("1.0.0 decrees: a sender speaks for the one guild it speaks for (Data.ClaimGuild), as in the chats; a census Captain of <Olympus> calls nobody (1.2.3)", function()
 		Scene(3, function(s)
 			-- Xander reports Olympus Xanadu; Yorick's report names Xander, Pansy and Quill officers of
-			-- <Olympus> (1.2.3: the King's guild, whose census Captains' calls still reach the army).
+			-- <Olympus>, the King's guild.
 			eq(D.Receive(R("Olympus Xanadu", "Nobody", "Yorick:1:0"), "Xander-Realm"), true)
 			eq(D.Receive(R("Olympus", ns.KingCharacter(), "Xander:1:0,Pansy:1:0,Quill:1:0"), "Yorick-Realm"), true)
 			eq(D.KnownRank("Xander-Realm", "Olympus"), 1, "the census names him an officer there")
+			eq(D.KnownRank("Quill-Realm", "Olympus"), 1, "and Quill, on Yorick's report alone")
 			local cns, Decree = DecreeClient(s)
 			Decree("Xander-Realm", "MUSTER", "Olympus")
 			eq(#cns.Decree.Active(), 0, "he reports Olympus Xanadu: no decree as <Olympus>")
-			-- A census Captain who reports nothing still sends his (the claim is his guild's).
+			-- A census Captain who reports nothing: one report is anyone's word, no Call to Arms.
 			Decree("Quill-Realm", "ARMS", "Olympus")
-			eq(#cns.Decree.Active(), 1)
+			eq(#cns.Decree.Active(), 0, "Quill's Call to Arms as <Olympus> is refused")
+			eq(#s.warnings, 0, "no raid warning")
+			s.clock = s.clock + 61
+			Decree("Quill-Realm", "MUSTER", "Olympus")
+			eq(#cns.Decree.Active(), 0, "nor his Muster")
 			-- Pansy, a census Captain of Olympus Gust too: her chat lines as that guild show...
 			eq(D.Receive(R("Olympus Gust", "Nobody", "Pansy:1:0"), "Vance-Realm"), true)
 			GetGuildInfo = function() return "Olympus II", "rank", 1 end
 			eq(Line("Pansy-Realm", "C", "Olympus Gust"), "shown")
-			-- ...and, having spoken for Olympus Gust, she calls nobody as <Olympus> (for CLAIM_TTL).
+			-- ...and she calls nobody, as <Olympus> or as Olympus Gust: another guild's officers call
+			-- their own guild alone (1.2.3).
 			s.clock = s.clock + 61
 			Decree("Pansy-Realm", "ARMS", "Olympus")
-			eq(#cns.Decree.Active(), 1, "not as <Olympus>")
-			-- Nor as Olympus Gust: another guild's officers call their own guild alone (1.2.3).
+			eq(#cns.Decree.Active(), 0, "not as <Olympus>")
 			s.clock = s.clock + 61
 			Decree("Pansy-Realm", "ARMS", "Olympus Gust")
-			eq(#cns.Decree.Active(), 1, "not as Olympus Gust either")
+			eq(#cns.Decree.Active(), 0, "not as Olympus Gust either")
 		end)
 	end)
 
@@ -30205,34 +30221,37 @@ do
 	-- a message put together from pieces is never taken as logged.
 	test("1.0.0 decrees: one put together from pieces is never taken as logged, whichever piece came logged: shown without its words", function()
 		Scene(3, function(s)
+			-- (1.2.3) A member of <Olympus>, whose officers (our roster: Member2 to Member6) call the
+			-- whole army on the channel (a census officer of it calls nobody, our own guild's officers
+			-- call us over GUILD).
+			GetGuildInfo = function() return "Olympus", "rank", 3 end
+			ns.Roster.Scan()
 			local cns, _, _, Deliver, DeliverLogged = DecreeClient(s)
 			C_ChatInfo.SendAddonMessageLogged = function() end -- (this client has both APIs, as Forever's)
-			-- (1.2.3) Officers of <Olympus> as the census names them here: their calls still reach
-			-- the whole army, our own guild's officers' go over GUILD.
-			eq(D.Receive(R("Olympus", ns.KingCharacter(), "Knightc:1:0,Knightd:1:0,Knighte:1:0,Peggy:1:0"), "Victor-Realm"), true)
 			local msg = Codec.EncodeDecree("MUSTER", 1453, 0.5, 0.5, "Olympus", 1, "words the server never logged")
 			-- The words in a plain piece, an empty last piece with the logged API.
-			Deliver("CHANNEL", "Knightc-Realm", "C77:1:2:" .. msg)
-			DeliverLogged("CHANNEL", "Knightc-Realm", "C77:2:2:")
+			Deliver("CHANNEL", "Member3-Realm", "C77:1:2:" .. msg)
+			DeliverLogged("CHANNEL", "Member3-Realm", "C77:2:2:")
 			local d = cns.Decree.Active()[1]
-			eq(d and d.sender, "Knightc", "the decree shows, as one sent with the plain API does")
+			eq(d and d.sender, "Member3", "the decree shows, as one sent with the plain API does")
 			eq(d.text, "", "without the words the server never logged")
 			eq(s.warnings[#s.warnings]:find("never logged", 1, true), nil, "nor in the raid warning")
 			-- Every piece logged: still pieces, which no version sends.
 			s.clock = s.clock + 1
-			DeliverLogged("CHANNEL", "Knightd-Realm", "C78:1:2:" .. msg)
-			DeliverLogged("CHANNEL", "Knightd-Realm", "C78:2:2:")
-			eq(cns.Decree.Active()[1].sender, "Knightd"); eq(cns.Decree.Active()[1].text, "")
+			DeliverLogged("CHANNEL", "Member4-Realm", "C78:1:2:" .. msg)
+			DeliverLogged("CHANNEL", "Member4-Realm", "C78:2:2:")
+			eq(cns.Decree.Active()[1].sender, "Member4"); eq(cns.Decree.Active()[1].text, "")
 			-- The whole decree with the logged API, as 1.0.0 sends it: its words.
 			s.clock = s.clock + 1
-			DeliverLogged("CHANNEL", "Knighte-Realm", msg)
-			eq(cns.Decree.Active()[1].sender, "Knighte"); eq(cns.Decree.Active()[1].text, "words the server never logged")
+			DeliverLogged("CHANNEL", "Member5-Realm", msg)
+			eq(cns.Decree.Active()[1].sender, "Member5"); eq(cns.Decree.Active()[1].text, "words the server never logged")
 			-- The same for a Call to Arms.
 			local other = Codec.EncodeDecree("ARMS", 1453, 0.5, 0.5, "Olympus", 1, "an unlogged insult")
-			Deliver("CHANNEL", "Peggy-Realm", "C5:1:2:" .. other)
-			DeliverLogged("CHANNEL", "Peggy-Realm", "C5:2:2:")
-			eq(cns.Decree.Active()[1].sender, "Peggy"); eq(cns.Decree.Active()[1].text, "")
+			Deliver("CHANNEL", "Member6-Realm", "C5:1:2:" .. other)
+			DeliverLogged("CHANNEL", "Member6-Realm", "C5:2:2:")
+			eq(cns.Decree.Active()[1].sender, "Member6"); eq(cns.Decree.Active()[1].text, "")
 		end)
+		ns.Roster.Scan() -- (the roster as Scene read it)
 	end)
 
 	test("1.0.0 decrees: ours go out with the logged API where the client has it, the plain one where it has not", function()
@@ -30389,6 +30408,13 @@ do
 				Logged("Baron-Realm", "ROYAL", "Olympus", "too soon")
 				eq(#cns.Decree.Active(), 0, "a census officer of <Olympus>: no Royal decree")
 				eq(Line("Baron-Realm", "L", "Olympus"), "rank", "nor [Lords]")
+				-- (1.2.3) Nor the whole army's Call to Arms: a census rank is anyone's word (three
+				-- outsiders made Sapper one), and neither of them calls it.
+				s.clock = s.clock + 61
+				Logged("Baron-Realm", "ARMS", "Olympus", "too soon")
+				Logged("Sapper-Realm", "ARMS", "Olympus", "the outsiders' call")
+				eq(#cns.Decree.Active(), 0, "no census officer's Call to Arms")
+				eq(#s.warnings, 0, "no raid warning")
 				-- The King names him his Hand.
 				K.HandleCommand("CHANNEL", KING, "T1~H~8~Olympus~Baron-Realm")
 				eq(K.IsHandName("Baron-Realm"), true)
@@ -30410,18 +30436,21 @@ do
 				Logged("Sapper-Realm", "ROYAL", "Olympus")
 				eq(#cns.Decree.Active(), 2, "no Crown for Sapper")
 				eq(Line("Sapper-Realm", "L", "Olympus"), "rank")
-				-- Like the King's, a Hand's decree never waits behind the flood guard (1.2.3: of census
-				-- Captains of <Olympus>, the only ones who still reach it here; Forged's picture kept).
+				-- Like the King's, a Hand's Call to Arms reaches the whole army on his name, whatever
+				-- census Captains of <Olympus> send (1.2.3: none of theirs shows; Forged's picture kept).
 				Flood(s, Decree, "Din", { officers = "Baron:1:0,Sapper:1:0", total = 1000, online = 300 })
-				eq(#cns.Decree.Active(), 8)
+				eq(#cns.Decree.Active(), 2)
 				Logged("Baron-Realm", "ARMS", "Olympus", "the Hand's call")
-				eq(#cns.Decree.Active(), 9, "past six census Captains")
-				eq(cns.Decree.Active()[1].sender, "Baron")
-				-- The King takes him off his list: a Captain here again.
+				eq(#cns.Decree.Active(), 3, "the Hand's Call to Arms")
+				eq(cns.Decree.Active()[1].sender, "Baron"); eq(cns.Decree.Active()[1].kind, "ARMS")
+				-- The King takes him off his list: a Captain here again, who calls nobody.
 				K.HandleCommand("CHANNEL", KING, "T1~H~10~Olympus~")
 				s.clock = s.clock + 61
 				Logged("Baron-Realm", "ROYAL", "Olympus")
-				eq(#cns.Decree.Active(), 9, "no longer his Hand")
+				eq(#cns.Decree.Active(), 3, "no longer his Hand")
+				s.clock = s.clock + 61
+				Logged("Baron-Realm", "MUSTER", "Olympus")
+				eq(#cns.Decree.Active(), 3, "nor his Muster")
 				eq(Line("Baron-Realm", "L", "Olympus"), "rank")
 				-- And a list the King stopped repeating ends (King.HANDS_FRESH).
 				K.HandleCommand("CHANNEL", KING, "T1~H~11~Olympus~Baron-Realm")
@@ -31255,21 +31284,23 @@ do
 					Logged("Baron-Realm", "ROYAL", "Olympus", "the Steward's Hand's royal decree")
 					eq(cns.Decree.Active()[1] and cns.Decree.Active()[1].text, "the Steward's Hand's royal decree")
 					eq(Line("Baron-Realm", "L", "Olympus"), "shown", "his [Lords] line")
-					-- Never behind the flood guard (1.2.3: of census Captains of <Olympus>, the only
-					-- ones who still reach it here; Forged's picture kept).
+					-- His Call to Arms on his name, whatever census Captains of <Olympus> send (1.2.3:
+					-- none of theirs shows; Forged's picture kept).
 					s.clock = s.clock + 61
 					local before = #cns.Decree.Active()
 					Flood(s, Decree, "Dun", { officers = "Baron:1:0,Sapper:1:0", total = 1000, online = 300 })
-					local count = #cns.Decree.Active()
-					eq(count, before + 6, "the flood guard is full")
+					eq(#cns.Decree.Active(), before, "no census Captain's Call to Arms")
 					Decree("Dung-Realm", "ARMS", "Olympus")
-					eq(#cns.Decree.Active(), count, "a seventh census Captain waits")
+					eq(#cns.Decree.Active(), before, "nor a seventh")
 					Logged("Baron-Realm", "ARMS", "Olympus", "the Hand's call")
-					eq(#cns.Decree.Active(), count + 1, "past six census Captains")
-					-- His Steward takes him off his list: a Captain here again.
+					eq(#cns.Decree.Active(), before + 1, "the Hand's Call to Arms")
+					-- His Steward takes him off his list: a Captain here again, who calls nobody (1.2.3).
 					K.HandleCommand("CHANNEL", STEWARD, "T1~N~9~Olympus II~")
 					eq(K.IsHandName("Baron-Realm"), false)
 					eq(Line("Baron-Realm", "L", "Olympus"), "rank")
+					s.clock = s.clock + 61
+					Logged("Baron-Realm", "ARMS", "Olympus", "no Hand now")
+					eq(#cns.Decree.Active(), before + 1, "no longer the Steward's Hand: no Call to Arms")
 				end)
 				StaticPopup_Show = savedShow
 				K.Reset()
@@ -31283,24 +31314,29 @@ do
 			Scene(0, function(s)
 				local cns, Decree, Logged = DecreeClient(s)
 				Flood(s, Decree, "Stew")
-				eq(#cns.Decree.Active(), 6, "the flood guard is full")
+				eq(#cns.Decree.Active(), 0, "no census Captain's Call to Arms (1.2.3)")
 				s.clock = s.clock + 1
 				Logged(STEWARD, "ROYAL", "Olympus", "the Steward's royal decree")
-				eq(#cns.Decree.Active(), 7, "past six census Captains, no census of him needed")
+				eq(#cns.Decree.Active(), 1, "no census of him needed")
 				eq(cns.Decree.Active()[1].sender, "Test Steward"); eq(cns.Decree.Active()[1].kind, "ROYAL")
 				eq(cns.Decree.Active()[1].text, "the Steward's royal decree")
 				eq(Line(STEWARD, "L", "Olympus"), "shown", "his [Lords] line for <Olympus>")
 				-- Only for the King's guild: for another, the census rules as for anyone.
 				s.clock = s.clock + 61
 				Logged(STEWARD, "ROYAL", "Olympus Zeus")
-				eq(#cns.Decree.Active(), 7)
+				eq(#cns.Decree.Active(), 1)
+				-- His Call to Arms, the whole army's, on his name as before (1.2.3).
+				s.clock = s.clock + 61
+				Logged(STEWARD, "ARMS", "Olympus", "the Steward's call")
+				eq(#cns.Decree.Active(), 2, "the Steward's Call to Arms"); eq(cns.Decree.Active()[1].kind, "ARMS")
 				-- Nobody else: a namesake on another realm group, a councillor the titles list names
 				-- (1.2.3: the High Council's own Royal decrees go by the signed name list, which
 				-- names nobody here; tested with the guild masters' decrees).
 				eq(ns.IsHighCouncillor("Test Councillor-Realm"), false, "no signed name list here")
+				s.clock = s.clock + 61
 				Logged("Test Steward-OtherRealm", "ROYAL", "Olympus")
 				Logged("Test Councillor-Realm", "ROYAL", "Olympus")
-				eq(#cns.Decree.Active(), 7)
+				eq(#cns.Decree.Active(), 2)
 			end)
 			-- <Olympus>'s own members' clients: the King's Steward too, as the King (not in its roster).
 			Scene(1, function(s)
@@ -31589,12 +31625,38 @@ do
 			assert(Logs("MUSTER from Member1-Realm <Olympus II> refused"))
 			assert(Logs("ARMS from Member2-Realm <Olympus II> refused"))
 			eq(#s.warnings, 0, "no raid warning at all")
-			-- The King's guild's officers (the census names one here): the whole army's, as before.
-			eq(D.Receive(R("Olympus", ns.KingCharacter(), "Knightb:1:0"), "Herald-Realm"), true)
-			Logged("Knightb-Realm", "ARMS", "Olympus", "Horde at the gates")
-			eq(#cns.Decree.Active(), 1, "a Call to Arms of <Olympus>'s officer"); eq(cns.Decree.Active()[1].kind, "ARMS")
-			eq(cns.Decree.Active()[1].scope, nil); eq(cns.Decree.Label(cns.Decree.Active()[1]), ns.L.ARMS)
-			for _, w in ipairs(s.warnings) do assert(not w:find(ns.L.ROYAL, 1, true), w) end
+			-- (1.2.3) Nor as an officer of <Olympus> on a census rank, anyone's word: while none of
+			-- its members reports here, one report from Zeta's alt names the King its leader and
+			-- Zeta its officer, and Zeta's Call to Arms as <Olympus> sounded the whole army.
+			eq(D.Receive(R("Olympus", ns.KingCharacter(), "Zeta:1:0,Knightb:1:0"), "Zetalt-Realm"), true)
+			eq(D.KnownRank("Zeta-Realm", "Olympus"), 1, "the census names Zeta an officer of <Olympus>")
+			s.clock = s.clock + 61
+			Logged("Zeta-Realm", "ARMS", "Olympus", "Horde at the farm")
+			eq(#cns.Decree.Active(), 0, "no Call to Arms as <Olympus> on the census's word")
+			assert(Logs("ARMS from Zeta-Realm <Olympus> refused: a census rank of the King's guild is no officer of it here"))
+			Logged("Knightb-Realm", "MUSTER", "Olympus", "at the gates")
+			eq(#cns.Decree.Active(), 0, "nor a Muster")
+			assert(Logs("MUSTER from Knightb-Realm <Olympus> refused: a census rank of the King's guild"))
+			eq(#s.warnings, 0, "no raid warning at all")
+			-- The King's guild's officer the King names his Hand: the whole army's, on the King's word.
+			local K, KING = ns.King, ns.KingCharacter() .. "-Realm"
+			local savedShow = StaticPopup_Show
+			StaticPopup_Show = function() end
+			local ok, err = pcall(function()
+				K.Reset()
+				K.HandleCommand("CHANNEL", KING, "T1~H~8~Olympus~Knightb-Realm")
+				s.clock = s.clock + 61
+				Logged("Knightb-Realm", "ARMS", "Olympus", "Horde at the gates")
+				eq(#cns.Decree.Active(), 1, "a Call to Arms of <Olympus>'s officer, the King's Hand"); eq(cns.Decree.Active()[1].kind, "ARMS")
+				eq(cns.Decree.Active()[1].scope, nil); eq(cns.Decree.Label(cns.Decree.Active()[1]), ns.L.ARMS)
+				for _, w in ipairs(s.warnings) do assert(not w:find(ns.L.ROYAL, 1, true), w) end
+				-- And the King's own, by his name.
+				Logged(KING, "MUSTER", "Olympus", "at the gates")
+				eq(#cns.Decree.Active(), 2, "the King's Muster"); eq(cns.Decree.Active()[1].sender, ns.KingCharacter())
+			end)
+			StaticPopup_Show = savedShow
+			K.Reset()
+			if not ok then error(err, 0) end
 		end)
 		-- On his own guild's clients (Zed's guildmates: their roster names him its master): refused too.
 		Scene(3, function(s)
@@ -31807,12 +31869,13 @@ do
 						GetGuildInfo = function() return home[1], "rank", home[2] end
 						ns.Roster.Scan()
 						local cns, Decree, Logged = DecreeClient(s)
-						-- (1.2.3: the census Captains who still fill the guard are <Olympus>'s on another
-						-- guild's client; on its own members', its roster vouches for every sender the
-						-- army's decrees take, and none waits behind the guard.)
+						-- (1.2.3: the census Captains of <Olympus> filled the guard on another guild's
+						-- client and fill it no more, none of theirs shown; on its own members', its
+						-- roster vouches for every sender the army's decrees take, and none waits
+						-- behind the guard.)
 						if home[1] ~= "Olympus" then
 							Flood(s, Decree, "Floodm")
-							eq(#cns.Decree.Active(), 6, "the flood guard is full")
+							eq(#cns.Decree.Active(), 0, "no census Captain's Call to Arms")
 						end
 						local before = #cns.Decree.Active()
 						s.clock = s.clock + 1
@@ -60483,7 +60546,7 @@ for _, name in ipairs(focused) do
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
-		or name == "census" and { FreshComm = FreshComm }
+		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,
 			WithGamepadUI = WithGamepadUI, WithUI = WithUI }) or (name == "hop-sightings" and WithHop or nil)

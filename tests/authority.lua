@@ -1,6 +1,7 @@
 -- GitHub #23: signed cross-guild leadership is a dormant, explicit migration. Old HT1 lists keep
 -- legacy behaviour; an author-signed enforce marker creates a sticky fail-closed boundary.
-local ns, test, eq = ...
+local ns, test, eq, extra = ...
+	local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]authority%.lua$")) or "./"
 	local A, D, T0 = ns.Authority, ns.Data, 1800000000
 	local function Hex(s)
 		return (s:gsub(".", function(c) return ("%02x"):format(c:byte()) end))
@@ -215,6 +216,48 @@ local ns, test, eq = ...
 			-- Our own roster still vouches for our guild's master, whichever guild it is.
 			ns.Roster.byName = { ["Zeus Lord-Realm"] = 0 }
 			eq(ns.Hop.Trusted("Zeus Lord-Realm"), true, "a guildmate")
+		end)
+	end)
+
+	-- (1.2.3) No census rank calls the whole army to arms or musters it (Decree.lua: one report
+	-- named anyone an officer of <Olympus> on the clients its members did not report to). Once
+	-- the author's signed enforcement is on, the King's guild's signed officers call it on every
+	-- other guild's client, as its roster's do on its own members'; another guild's signed master
+	-- and officers never do, and a name the signed list lacks is nobody.
+	test("authority: under enforcement the King's guild's signed Captain calls the whole army to arms on another guild's client; another guild's signed master never does (1.2.3)", function()
+		WithState(function()
+			local saved = { guild = GetGuildInfo, notice = RaidNotice_AddMessage, frame = RaidWarningFrame, alert = ns.PlayAlert,
+				print = ns.Print, chat = C_ChatInfo }
+			local ok, err = pcall(function()
+				GetGuildInfo = function() return "Olympus II", "rank", 3 end
+				local warnings = {}
+				RaidWarningFrame = {}
+				RaidNotice_AddMessage = function(_, text) warnings[#warnings + 1] = text end
+				ns.PlayAlert, ns.Print = function() end, function() end
+				-- The real receive path (tests/run.lua's FreshComm) with Decree.lua loaded on it.
+				local cns, Deliver = extra.FreshComm()
+				cns.Now = function() return T0 end
+				cns.Comm.loginAt = T0 - 3600
+				assert(loadfile(ROOT .. "Olympus/Decree.lua"))("Olympus", cns)
+				local function Call(sender, kind, guild)
+					Deliver("CHANNEL", sender, ns.Codec.EncodeDecree(kind, 1453, 0.5, 0.5, guild, 1, "x"))
+				end
+				Install(Entry("Olympus Zeus=Zeus Lord-Realm,Zeus Captain-Other!Olympus=Crown Lord-Realm,Crown Captain-Other", 4), T0)
+				eq(A.Enforced(), true)
+				Call("Zeus Lord-Realm", "ARMS", "Olympus Zeus")
+				Call("Zeus Captain-Other", "MUSTER", "Olympus Zeus")
+				eq(#cns.Decree.Active(), 0, "another guild's signed master and Captain: never the whole army's")
+				Call("Crown Captain-Other", "ARMS", "Olympus")
+				eq(#cns.Decree.Active(), 1, "the King's guild's signed Captain: the whole army's Call to Arms")
+				eq(cns.Decree.Active()[1].kind, "ARMS"); eq(cns.Decree.Active()[1].scope, nil); eq(#warnings, 1, "its raid warning")
+				Call("Crown Lord-Realm", "MUSTER", "Olympus")
+				eq(#cns.Decree.Active(), 2, "and its signed master's Muster")
+				Call("Nobody Signed-Realm", "ARMS", "Olympus")
+				eq(#cns.Decree.Active(), 2, "a name the signed list lacks")
+			end)
+			GetGuildInfo, RaidNotice_AddMessage, RaidWarningFrame = saved.guild, saved.notice, saved.frame
+			ns.PlayAlert, ns.Print, C_ChatInfo = saved.alert, saved.print, saved.chat
+			if not ok then error(err, 0) end
 		end)
 	end)
 
