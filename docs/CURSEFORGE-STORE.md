@@ -210,7 +210,8 @@ Layer"** with his crown. One click (or `/oly hop`) and the addon does the asking
   saved: a later group asks first again, after a `/reload` the window asks once more, and
   `/oly layerauto off` ends it at once.
 - The invite is accepted for you when that player is one the addon can vouch for (a member of
-  your own guild, or a Lord or Captain the census confirms); anyone else's, and every invite
+  your own guild, the King, his Steward or Hands, or, once the author's signed list is on, a Lord
+  or Captain of `<Olympus>` it names; never a census rank); anyone else's, and every invite
   while Blizzard's gamepad UI is on, waits for your click in the game's own invite window. The
   game moves you to the layer, and the addon takes you out of the group as soon as it sees the
   move (or offers a **Leave group** button if it can't tell).

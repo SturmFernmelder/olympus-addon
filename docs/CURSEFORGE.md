@@ -195,7 +195,8 @@ Layer"** with his crown. One click (or `/oly hop`) and the addon does the asking
   saved: a later group asks first again, after a `/reload` the window asks once more, and
   `/oly layerauto off` ends it at once.
 - The invite is accepted for you when that player is one the addon can vouch for (a member of
-  your own guild, or a Lord or Captain the census confirms); anyone else's, and every invite
+  your own guild, the King, his Steward or Hands, or, once the author's signed list is on, a Lord
+  or Captain of `<Olympus>` it names; never a census rank); anyone else's, and every invite
   while Blizzard's gamepad UI is on, waits for your click in the game's own invite window. The
   game moves you to the layer, and the addon takes you out of the group as soon as it sees the
   move (or offers a **Leave group** button if it can't tell).
@@ -1839,8 +1840,9 @@ code.
   until its reporter's next report (800 members as 1, the King offline). Each made-up guild
   adds up to 1,000 soldiers to every client's army total for a day, and one character can
   start a new one every 15 minutes.
-- **Trust elsewhere.** A made-up Captain who answers a layer-hop ask is a helper the addon
-  vouches for, so his party invite is accepted for the player (never with the gamepad UI). His
+- **Trust elsewhere.** A made-up Captain who answers a layer-hop ask is no helper the addon
+  vouches for (since 1.2.1 never on a census rank, and since 1.2.3 never another guild's officer,
+  signed or not): his party invite waits for the player's click. His
   report on a Royal Inspection can put an innocent player on the King's untabarded list, which
   the King's share sends to the army. A made-up Captain of a real guild (above: three
   outsiders take its picture) can ask the Treasurer's addon for that guild's dues list (1.1):

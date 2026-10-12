@@ -182,7 +182,8 @@ local ns, test, eq = ...
 			eq(ns.King.Verified("Forger-Realm", "Olympus Zeus"), false, "nor write names onto the King's page")
 			eq(ns.King.Verified("Real Captain-Other", "Olympus Zeus"), true)
 			eq(ns.Hop.Trusted("Forger-Realm"), false, "nor auto-accept a layer invite")
-			eq(ns.Hop.Trusted("Real Captain-Other"), true)
+			-- (1.2.3: another guild's signed Captain no more either: the King's guild's alone.)
+			eq(ns.Hop.Trusted("Real Captain-Other"), false)
 			Install(Entry("Olympus Zeus=Rollback-Realm", 3), T0 + 1)
 			eq(D.AuthorizedRank("Rollback-Realm", "Olympus Zeus"), nil, "lower epoch")
 			Install(Entry("Olympus Zeus=Next-Realm", 5), T0 + 2)
@@ -193,6 +194,27 @@ local ns, test, eq = ...
 			eq(A.Enforced(), true); eq(D.AuthorizedRank("Next-Realm", "Olympus Zeus"), nil, "empty tombstone")
 			Install("^^", T0 + 4)
 			eq(A.Enforced(), true); eq(D.AuthorizedRank("Forger-Realm", "Olympus Zeus"), nil, "newer absence cannot reopen")
+		end)
+	end)
+
+	-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) Under signed
+	-- enforcement Hop.Trusted vouched for any guild's signed Lord or Captain on every client: his
+	-- invite accepted for the player, "Always invite" and "For Olympus!" inviting him without a
+	-- click. Now only the King's guild's signed Lord and Captains, beside our roster, the King, his
+	-- Steward and his Hands.
+	test("authority: under enforcement layer-hop trust is the King's guild's signed Lord and Captains', never another guild's (1.2.3)", function()
+		WithState(function()
+			Install(Entry("Olympus Zeus=Zeus Lord-Realm,Zeus Captain-Other!Olympus=Crown Lord-Realm,Crown Captain-Other", 4), T0)
+			eq(A.Enforced(), true)
+			eq(D.AuthorizedRank("Zeus Lord-Realm", "Olympus Zeus"), 0, "signed, as the author's list has him")
+			eq(D.AuthorizedRank("Crown Captain-Other", "Olympus"), 1)
+			eq(ns.Hop.Trusted("Zeus Lord-Realm"), false, "another guild's signed master")
+			eq(ns.Hop.Trusted("Zeus Captain-Other"), false, "another guild's signed Captain")
+			eq(ns.Hop.Trusted("Crown Lord-Realm"), true, "the King's guild's signed master")
+			eq(ns.Hop.Trusted("Crown Captain-Other"), true, "the King's guild's signed Captain")
+			-- Our own roster still vouches for our guild's master, whichever guild it is.
+			ns.Roster.byName = { ["Zeus Lord-Realm"] = 0 }
+			eq(ns.Hop.Trusted("Zeus Lord-Realm"), true, "a guildmate")
 		end)
 	end)
 
