@@ -7,6 +7,8 @@ ns.OfficerMuster = Muster
 -- Olympus channel already separates factions; the envelope also binds the current realm group.
 -- OM~1~P~<A|H>~<group>~<sequence>~<postedAt>~<guild>~<zoneID>~<title>
 -- OM~1~E~<A|H>~<group>~<sequence>~<postedAt> : that poster ends the same call.
+-- On the channel the Crown's, for the whole army; over GUILD (1.2.3) another guild's master's, for
+-- his guild alone (Authorized, below). Clients before 1.2.3 hear OM on the channel alone.
 -- Nothing here publishes attendee names, coordinates, units, invites or new census records.
 Muster.LIFE, Muster.REPEAT, Muster.GAP = 20 * 60, 300, 60
 Muster.TITLE_MAX, Muster.MAX, Muster.FLOORS_MAX = 60, 20, 256
@@ -37,22 +39,42 @@ local function Zone(id)
 	return type(info) == "table" and type(info.mapType) == "number" and info.mapType == 3
 end
 local function ZoneName(id) return ns.Zones.NameForKey("m" .. id) end
-local function Authorized(by, guild)
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) Who may post where:
+--   CHANNEL  the whole army: the Crown alone, the King (his pinned name), his Steward and his Hands
+--            (by name), and the King's guild's own master (its roster's, the signed list's or the
+--            pinned King's rank 0)
+--   GUILD    his own guild alone: the master of any Olympus guild, as our roster has him (the
+--            server's word); the server carries GUILD between that guild's members only
+-- Once the author's signed enforcement was on, every guild master in the signed list would have
+-- reached the whole army on the channel: another guild's master's muster there is refused,
+-- whatever the source of his rank. A row kept from before 1.2.3 (no dist) is the channel's, and an
+-- ending counts only on the distribution of its call.
+local function Dist(row) return row.dist or "CHANNEL" end
+local CROWN_SOURCES, ROSTER = { roster = true, signed = true, pinned = true }, { roster = true }
+local function Rank0(by, guild, sources)
+	local rank, source = ns.Data.AuthorizedRank(by, guild)
+	return rank == 0 and sources[source] == true
+end
+local function Authorized(by, guild, dist)
 	if not Full(by) or not Field(guild, 72) or not ns.IsFederation(guild) then return false end
 	local WC, M, K = ns.WatchChat, ns.Moderation, ns.King
 	if WC and not WC.missing and WC.Barred and WC.Barred("powers", by) then return false end
 	if M and M.Hides and M.Hides(by, guild) then return false end
+	if dist == "GUILD" then return guild == GetGuildInfo("player") and Rank0(by, guild, ROSTER) end
 	if ns.IsKingCharacter and ns.IsKingCharacter(by) then return true end
 	if K and not K.missing and ((K.IsStewardName and K.IsStewardName(by)) or (K.IsHandName and K.IsHandName(by))) then return true end
-	local rank, source = ns.Data.AuthorizedRank(by, guild)
-	return rank == 0 and (source == "roster" or source == "signed" or source == "pinned")
+	return ns.IsKingGuild ~= nil and ns.IsKingGuild(guild) and Rank0(by, guild, CROWN_SOURCES)
 end
+-- Whether this player may post, his guild, and where his muster goes: "CHANNEL" (the Crown's, for
+-- the whole army) or "GUILD" (another guild's master's, for his guild alone).
 function Muster.CanPost()
 	if not ns.IsMember() or not Scope() then return false end
 	local V = ns.ViewAs
 	if V and V.Previewing and V.Previewing() then return false end
 	local guild = GetGuildInfo("player")
-	return Authorized(ns.me, guild), guild
+	if Authorized(ns.me, guild, "CHANNEL") then return true, guild, "CHANNEL" end
+	if Authorized(ns.me, guild, "GUILD") then return true, guild, "GUILD" end
+	return false, guild
 end
 local function Store()
 	local scope = Scope()
@@ -70,6 +92,7 @@ end
 local function Valid(row)
 	return type(row) == "table" and Full(row.by) == row.by and row.scope == Scope() and Int(row.seq) and Int(row.at)
 		and Field(row.guild, 72) and Field(row.title, Muster.TITLE_MAX) and Zone(row.zone)
+		and (row.dist == nil or row.dist == "CHANNEL" or row.dist == "GUILD")
 end
 local function Refresh()
 	if ns.Views and ns.Views.PageShown and ns.Views.PageShown() == "officermuster" and ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
@@ -96,7 +119,7 @@ local function Prune(s)
 	local now = Clock()
 	for key, row in pairs(s.active) do
 		if not Valid(row) or key ~= Key(row.by) or row.at > now + Muster.DATE_AHEAD then s.active[key] = nil
-		elseif not Authorized(row.by, row.guild) then EndCall(s, key, row, nil, true)
+		elseif not Authorized(row.by, row.guild, Dist(row)) then EndCall(s, key, row, nil, true)
 		elseif now >= row.at + Muster.LIFE then EndCall(s, key, row, L.OFFICER_MUSTER_END_EXPIRED) end
 	end
 	for key, f in pairs(s.floors) do
@@ -123,17 +146,18 @@ local function Send(s, row, ending)
 	local scope, by, key = Scope(), ns.me, Key(row.by)
 	local msg = Encode(row, ending)
 	if #msg > 255 then return false end
-	return ns.Comm.Send("CHANNEL", msg, "officermuster:" .. key, false, true, nil, { guard = function()
+	-- (1.2.3) On its own distribution: the Crown's on the channel, another guild's master's over GUILD.
+	return ns.Comm.Send(Dist(row), msg, "officermuster:" .. key, false, true, nil, { guard = function()
 		if ns.me ~= by or Scope() ~= scope or Clock() >= row.at + Muster.LIFE then return false end
-		local can, guild = Muster.CanPost()
-		if not can or guild ~= row.guild or Store() ~= s then return false end
+		local can, guild, dist = Muster.CanPost()
+		if not can or guild ~= row.guild or dist ~= Dist(row) or Store() ~= s then return false end
 		local floor = s.floors[key]
 		if ending then return floor ~= nil and floor.seq == row.seq and floor.ended == true end
-		return s.active[key] == row and Authorized(row.by, row.guild)
+		return s.active[key] == row and Authorized(row.by, row.guild, Dist(row))
 	end }) ~= false
 end
 function Muster.Handle(dist, sender, text)
-	if dist ~= "CHANNEL" or type(text) ~= "string" or #text > 255 then return false, "shape" end
+	if (dist ~= "CHANNEL" and dist ~= "GUILD") or type(text) ~= "string" or #text > 255 then return false, "shape" end
 	local by = Full(sender)
 	if not by then return false, "realm" end
 	if C_ChatInfo and C_ChatInfo.SendAddonMessageLogged and ns.Comm.DeliveredLogged and not ns.Comm.DeliveredLogged() then return false, "unlogged" end
@@ -146,9 +170,9 @@ function Muster.Handle(dist, sender, text)
 	local row
 	if op == "P" then
 		local guild, zone, title = rest:match("^~([^~]+)~(%d+)~([^~]+)$")
-		row = { by = by, scope = Scope(), seq = seq, at = at, guild = guild, zone = tonumber(zone), title = title }
+		row = { by = by, scope = Scope(), seq = seq, at = at, guild = guild, zone = tonumber(zone), title = title, dist = dist }
 		if not Valid(row) then return false, "shape" end
-		if not Authorized(by, guild) then return false, "role" end
+		if not Authorized(by, guild, dist) then return false, "role" end
 	elseif rest ~= "" then return false, "shape" end
 	local s, key = Store(), Key(by)
 	if not s then return false, "store" end
@@ -156,11 +180,12 @@ function Muster.Handle(dist, sender, text)
 	local old, floor = s.active[key], s.floors[key]
 	if op == "E" then
 		if floor and floor.seq >= seq and floor.ended then return true, "repeat" end
-		if not old or old.seq ~= seq or old.at ~= at then return false, "unknown" end
+		if not old or old.seq ~= seq or old.at ~= at or Dist(old) ~= dist then return false, "unknown" end
 		return EndCall(s, key, old, L.OFFICER_MUSTER_END_WITHDRAWN)
 	end
 	if floor and seq <= floor.seq then
-		if old and old.seq == seq and old.at == at and old.guild == row.guild and old.zone == row.zone and old.title == row.title then return true, "repeat" end
+		if old and old.seq == seq and old.at == at and old.guild == row.guild and old.zone == row.zone and old.title == row.title
+			and Dist(old) == dist then return true, "repeat" end
 		return false, "older"
 	end
 	if floor and at - floor.at < Muster.GAP then return false, "rate" end
@@ -172,7 +197,7 @@ function Muster.Handle(dist, sender, text)
 	Changed(); return true
 end
 function Muster.Post(title, zone)
-	local can, guild = Muster.CanPost()
+	local can, guild, dist = Muster.CanPost()
 	if not can then return false, "role" end
 	title = Clean(title, Muster.TITLE_MAX)
 	if not Field(title, Muster.TITLE_MAX) or not Zone(zone) then return false, "shape" end
@@ -185,7 +210,7 @@ function Muster.Post(title, zone)
 	if not old and Count(s.active) >= Muster.MAX then return false, "full" end
 	local seq = math.max(at, s.seq + 1, floor and floor.seq + 1 or 1)
 	if not Int(seq) then return false, "sequence" end
-	local row = { by = ns.me, scope = Scope(), seq = seq, at = at, guild = guild, zone = zone, title = title }
+	local row = { by = ns.me, scope = Scope(), seq = seq, at = at, guild = guild, zone = zone, title = title, dist = dist }
 	if not Send(s, row) then return false, "queue" end
 	if old then EndCall(s, key, old, L.OFFICER_MUSTER_END_REPLACED) end
 	s.seq, s.active[key], s.floors[key], lastSent = seq, row, { seq = seq, at = at }, ns.Now()
@@ -225,7 +250,10 @@ function Muster.Lines(q)
 	if not ns.IsMember() then return {} end
 	local lines = { { text = L.OFFICER_MUSTER_BACK, onClick = function() ns.Views.ShowPage(nil) end, gapAfter = true },
 		{ header = true, text = L.OFFICER_MUSTER_TITLE }, { text = L.OFFICER_MUSTER_HINT }, { text = L.OFFICER_MUSTER_COUNTS_NOTE, gapAfter = true } }
-	if not q and Muster.CanPost() then
+	local can, guild, dist = Muster.CanPost()
+	if not q and can then
+		-- (1.2.3) Another guild's master is told his reach his guild alone.
+		if dist == "GUILD" then lines[#lines + 1] = { text = L.OFFICER_MUSTER_GUILD_ONLY:format(guild) } end
 		lines[#lines + 1] = { text = L.OFFICER_MUSTER_DRAFT, input = { text = draft.title, maxLetters = Muster.TITLE_MAX,
 			onChange = function(text) draft.title = Clean(text, Muster.TITLE_MAX) end } }
 		lines[#lines + 1] = { text = L.OFFICER_MUSTER_ZONE:format(draft.zone and ZoneName(draft.zone) or L.OFFICER_MUSTER_NO_ZONE) }
@@ -248,7 +276,8 @@ function Muster.Lines(q)
 			shown = shown + 1
 			lines[#lines + 1] = { text = "|cffffd200" .. title .. "|r  -  " .. zone,
 				right = L.OFFICER_MUSTER_OBSERVED:format(Headcount(row), math.max(0, math.ceil((row.at + Muster.LIFE - Clock()) / 60))) }
-			lines[#lines + 1] = { indent = 1, text = L.OFFICER_MUSTER_BY:format(who) }
+			lines[#lines + 1] = { indent = 1, text = Dist(row) == "GUILD" and L.OFFICER_MUSTER_BY_GUILD:format(who, row.guild)
+				or L.OFFICER_MUSTER_BY:format(who) }
 			if row.by == ns.me then lines[#lines + 1] = { indent = 1, text = L.OFFICER_MUSTER_END, onClick = Muster.Withdraw } end
 		end
 	end
