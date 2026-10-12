@@ -131,8 +131,8 @@ UI.personRows = {}
 -- the card then shows "Edit my profile", which calls it (ProfileEdit.lua's Edit in this window).
 UI.profileEditors = {}
 
--- (1.2.3) The send box names where it goes: a guild master's Royal decree or Tabard inspection,
--- his own guild alone (Decree.Ask).
+-- (1.2.3) The send box names where it goes: another guild's master's Royal decree or Tabard
+-- inspection, his or its officers' Call to Arms or Muster, his own guild alone (Decree.Ask).
 local function DecreeAction(kind)
 	return function()
 		if ns.Decree.CanSend(kind) then
@@ -143,9 +143,9 @@ local function DecreeAction(kind)
 		end
 	end
 end
--- (1.2.3) A Royal decree's or a Tabard inspection's button says what this player's does: its
--- name (a guild master's: the guild decree's) and whom it reaches, or that a click is a preview.
-local function CrownButton(key, kind)
+-- (1.2.3) A decree's button says what this player's does: its name (another guild's master's or
+-- officer's: his guild's) and whom it reaches, or that a click is a preview.
+local function DecreeButton(key, kind)
 	return { key, DecreeAction(kind),
 		label = function() return ns.Decree.ButtonLabel(kind) end,
 		tooltip = function(tt)
@@ -176,9 +176,9 @@ local BUTTONS = {
 		{ "COPY_BTN", function() UI.ShowCopy(L.COPY_DISCORD, ns.Data.DiscordText()) end },
 	},
 	decrees = {
-		{ "ARMS_BTN", DecreeAction("ARMS") },
-		{ "MUSTER_BTN", DecreeAction("MUSTER") },
-		CrownButton("ROYAL_BTN", "ROYAL"),
+		DecreeButton("ARMS_BTN", "ARMS"),
+		DecreeButton("MUSTER_BTN", "MUSTER"),
+		DecreeButton("ROYAL_BTN", "ROYAL"),
 	},
 	heraldry = {
 		{ "PATROL_BTN", function() ns.Inspect.SetPatrol(not ns.Inspect.IsPatrolling()) end },
@@ -307,7 +307,7 @@ local DETAIL_BUTTONS = {
 			label = function() return ns.ViewAs.Previewing() and L.VIEW_AS_PREVIEW_BTN:format(ns.ViewAs.Label()) or L.VIEW_AS_TITLE end },
 	},
 	heraldry = {
-		CrownButton("HERALDRY_BTN", "HERALDRY"),
+		DecreeButton("HERALDRY_BTN", "HERALDRY"),
 		{ "CLEAR", function() ns.ShowDialog("OLYMPUS_CLEAR_INSPECT") end },
 	},
 	-- The King's switches: what the army sees of the treasury (each its own).

@@ -364,14 +364,17 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
 For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
 `<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
-reach his own guild alone, as guild decrees; every client refuses one he sends the whole army.
+reach his own guild alone, as guild decrees, and so do his and his officers' Calls to Arms and
+Musters (a guild call to arms, a guild muster: the same alarm, sound and marker, for his
+guild's members alone): no guild master has a decree for the whole army, and every client
+refuses one of theirs sent to it, a 1.2.2 officer's too.
 Everyone else gets a local preview when they press the buttons. Since 1.0.0
 the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
 server's word) names them: on every other client, where only the census could, they count as
@@ -2314,15 +2317,18 @@ code.
 
 - **Two characters make a Lord.** Two characters, even two alts of one account logged in one
   after the other (a report counts as a vote for 30 minutes), make one of them the Lord of a
-  made-up Olympus guild on every client. He gets [Lords] lines, and Calls to Arms and Musters as
-  raid warnings on every screen (since 1.2.3 never a Royal decree or a Tabard inspection: a guild
-  master's reach his own guild alone), for as long as their reports keep coming (15 minutes
-  after the last one). Anyone who really founds such a guild can do
+  made-up Olympus guild on every client. He gets [Lords] lines (since 1.2.3 never a decree on
+  another guild's screen: a guild master's and his officers' Calls to Arms, Musters, Royal decrees
+  and Tabard inspections reach his own guild alone), for as long as their reports keep coming (15
+  minutes after the last one). Anyone who really founds such a guild can do
   the same.
 - **One report makes Captains.** One character's report names others the officers of a
-  made-up guild. On every other client each of them is a Captain, with [Captains] lines, Calls
-  to Arms and Musters. Six of them fill the army's flood guard (6 decrees a minute) with raid
-  warnings, and every other decree that a census rank vouches for is dropped for that minute.
+  made-up guild. On every other client each of them is a Captain, with [Captains] lines (since
+  1.2.3 no Call to Arms or Muster: another guild's officers call their own guild alone). Census
+  officers of `<Olympus>` still call the whole army on other guilds' clients (one report where
+  none of its members reports, three against its own: below): six of them fill the army's flood
+  guard (6 decrees a minute) with raid warnings, and every other decree that a census rank
+  vouches for is dropped for that minute.
 - **A real guild: two contest it, three take it.** A real guild is pictured by its reporter and
   runner-up, two votes at most. Two outsiders who send another picture leave it contested: its
   Lord and officers lose their rank on every other client ([Lords], [Captains], their decrees)

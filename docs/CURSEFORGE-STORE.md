@@ -325,14 +325,17 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
 For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
 `<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
-reach his own guild alone, as guild decrees; every client refuses one he sends the whole army.
+reach his own guild alone, as guild decrees, and so do his and his officers' Calls to Arms and
+Musters (a guild call to arms, a guild muster: the same alarm, sound and marker, for his
+guild's members alone): no guild master has a decree for the whole army, and every client
+refuses one of theirs sent to it, a 1.2.2 officer's too.
 Everyone else gets a local preview when they press the buttons. Since 1.0.0
 the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
 server's word) names them: on every other client, where only the census could, they count as
