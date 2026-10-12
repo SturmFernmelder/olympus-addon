@@ -1009,6 +1009,10 @@ test("1.2 the fights part: the words of fights and honours exist in English and 
 	local saved = GetLocale
 	GetLocale = function() return "enUS" end
 	local ok, err = pcall(function() assert(loadfile(H.ADDON_DIR .. "Locales.lua"))("Olympus", base) end)
+	-- (1.2.4: the history's Consent line, which ArenaProfile.lua names by its keys, is defined in
+	-- ArenaHomeText.lua alone, the file that loads after this one and so always won: defined there
+	-- counts. tests/arena/profile-edit.lua checks its words as the TOC loads them.)
+	if ok then ok, err = pcall(function() assert(loadfile(H.ADDON_DIR .. "Locales/ArenaHomeText.lua"))("Olympus", base) end) end
 	GetLocale = saved
 	assert(ok, err)
 	for k in pairs(used) do assert(rawget(E, k) ~= nil or rawget(base.L, k) ~= nil, "not defined: " .. k) end

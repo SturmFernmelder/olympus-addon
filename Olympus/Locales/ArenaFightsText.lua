@@ -94,13 +94,12 @@ L.ARENA_CHRONICLE_DRAW = "draw disputed: tournament %s, step %d (the roll seen h
 L.ARENA_CHRONICLE_WORD = "belt word %s for %s"
 L.ARENA_CHRONICLE_DISPUTED = "fight %s, round %d: the arbiter's duel line against the reports (disputed)"
 
--- The person card, the history's Consent line.
+-- The person card. (The history's Consent line, ARENA_CONSENT_HISTORY and its _TEXT, is
+-- ArenaHomeText.lua's alone: that file loads after this one, so a copy here never showed.)
 L.ARENA_PERSON_LINE = "Arena: %d  (%d-%d)"
 L.ARENA_PERSON_PROFILE = "Arena profile"
 -- (1.1.6, the games' ledger: the privacy page's one line, Consent.Intro)
 L.CONSENT_GAMES_RECORDED = "Game results are recorded: each game you play (Bones, the Arena, the Lottery's practice: when, who, the result and the score) shows in your own list and goes to the King, the High Council and the author (and the auditors he signs), nobody else."
-L.ARENA_CONSENT_HISTORY = "Show my list of fights on my profile"
-L.ARENA_CONSENT_HISTORY_TEXT = "Your record, rating, tier and belts always show (the rankings need them). This chooses whether your list of fights shows too. Fights of public events (a Fight Night, a tournament, a public arbiter's bout) show whatever you choose: their cards and brackets show them anyway. The Olympus channel can be read by anyone on it: this chooses what the addon shows, not what a modified client could read."
 
 -- "My profile" (ProfileEdit.lua, 1.2.4: the player's own page in the Olympus window). Frames,
 -- titles and honours are the whole addon's, not the arena's alone: no "arena profile" in these words.
@@ -133,6 +132,7 @@ L.MYPROFILE_FRAME_LATER = "comes in a later version"
 L.MYPROFILE_EPITHET = "Epithet: %s"
 L.MYPROFILE_BEAST = "Beast: %s"
 L.MYPROFILE_NONE_WORD = "none"
+L.MYPROFILE_NICK_NONE = "No nickname"
 L.MYPROFILE_CHOOSE_EMBLEM = "Choose an emblem"
 L.MYPROFILE_CHOOSE_ICON = "Choose your council icon"
 L.MYPROFILE_LOCK_TIP = "A new honour no longer switches your frame and title by itself."
@@ -142,6 +142,7 @@ L.MYPROFILE_EMBLEM_HINT = "Your emblem stands for you on the Games' cards where 
 L.MYPROFILE_ICON_HINT = "Your mark, the silver dragon, always shows before your name in the game's chat (channels, say, party, whispers, guild chat); an icon after it is optional. Click one, then Use this icon."
 L.MYPROFILE_USE = "Use this icon"
 L.MYPROFILE_LOOK_PUBLIC = "Your frame, title, nickname and emblem go out on the Olympus channel: every member's addon shows them."
+L.MYPROFILE_LOOK_KEPT = "Your frame, title, nickname and emblem don't go out on the Olympus channel from this character now: no member's addon gets them."
 L.MYPROFILE_FACTS_HEAD = "What your page shows"
 L.MYPROFILE_CHOICES_HEAD = "Your choices"
 L.MYPROFILE_PRIVACY_PAGE = "Open the privacy page"
@@ -225,8 +226,6 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_PERSON_LINE = "Arena: %d  (%d-%d)"
 	L.ARENA_PERSON_PROFILE = "Perfil da arena"
 	L.CONSENT_GAMES_RECORDED = "Os resultados dos jogos ficam registrados: cada jogo que você joga (Bones, a Arena, o treino da Loteria: quando, quem, o resultado e o placar) aparece na sua própria lista e vai para o Rei, o Alto Conselho e o autor (e os auditores que ele assina), mais ninguém."
-	L.ARENA_CONSENT_HISTORY = "Mostrar a minha lista de lutas no meu perfil"
-	L.ARENA_CONSENT_HISTORY_TEXT = "O seu cartel, rating, divisão e cinturões sempre aparecem (os rankings precisam deles). Isto escolhe se a sua lista de lutas aparece também. Lutas de eventos públicos (uma Noite da Luta, um torneio, uma luta de árbitro público) aparecem seja qual for a sua escolha: os cards e chaves delas já as mostram. O canal do Olympus pode ser lido por quem estiver nele: isto escolhe o que o addon mostra, não o que um cliente modificado poderia ler."
 	L.PROFILE_ICON_REFUSED = "Esse ícone não serve aqui: escolha a marca de uma das suas honras (ou, para o emblema, um ícone do jogo)."
 	L.HONOR_LETTER_WAITING = "Uma carta do Rei espera por você: abra a janela do Olympus (ou o Meu perfil, nela) para lê-la."
 	L.PROFILE_FRAME_RANK = "A moldura do meu posto"
@@ -256,6 +255,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.MYPROFILE_EPITHET = "Epíteto: %s"
 	L.MYPROFILE_BEAST = "Fera: %s"
 	L.MYPROFILE_NONE_WORD = "nenhum"
+	L.MYPROFILE_NICK_NONE = "Sem apelido"
 	L.MYPROFILE_CHOOSE_EMBLEM = "Escolher um emblema"
 	L.MYPROFILE_CHOOSE_ICON = "Escolher o seu ícone do Conselho"
 	L.MYPROFILE_LOCK_TIP = "Uma honraria nova não troca mais a sua moldura e o seu título sozinha."
@@ -265,6 +265,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.MYPROFILE_ICON_HINT = "Sua marca, o dragão prateado, sempre aparece antes do seu nome no chat do jogo (canais, dizer, grupo, sussurros, chat da guilda); um ícone depois dela é opcional. Clique em um e em Usar este ícone."
 	L.MYPROFILE_USE = "Usar este ícone"
 	L.MYPROFILE_LOOK_PUBLIC = "A sua moldura, título, apelido e emblema saem no canal do Olympus: o addon de todo membro os mostra."
+	L.MYPROFILE_LOOK_KEPT = "A sua moldura, título, apelido e emblema não saem agora no canal do Olympus deste personagem: nenhum addon de membro os recebe."
 	L.MYPROFILE_FACTS_HEAD = "O que a sua página mostra"
 	L.MYPROFILE_CHOICES_HEAD = "As suas escolhas"
 	L.MYPROFILE_PRIVACY_PAGE = "Abrir a página de privacidade"

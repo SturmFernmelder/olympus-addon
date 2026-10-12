@@ -160,18 +160,28 @@ function PE.Nick(a, n)
 	PE.Refresh()
 	return ok, why
 end
--- A step through a list (-1 or +1, wrapping through none). A nickname is two words: a side stepped
--- to none takes it away; from none, one step gives both sides a word (the first, or the last
--- stepping back). 1.2.4: the page's "<" too, so a step back from the first word is never a dead click.
+-- A step through one list (-1 or +1): the side clicked alone, wrapping within the list (past the
+-- last word the first, back from the first the last; 1.2.4: the page's "<" too, never a dead
+-- click); the other side keeps its word. A nickname is two words: from none, one step gives both
+-- sides a word (the first, or the last stepping back). No step takes it away: its own row does
+-- (Look's "No nickname", Nick(0, 0)). (1.2.4's first page cleared the whole nickname when one list
+-- wrapped through none, and gave the other side back its first or last word, not his.)
 function PE.NickStep(which, delta)
 	local m = P().Mine()
 	local a, n = tostring(m.nick or "0.0"):match("^(%d+)%.(%d+)$")
 	a, n = tonumber(a) or 0, tonumber(n) or 0
 	local size = ns.ArenaProfile.EPITHETS
-	if which == "a" then a = (a + delta) % (size + 1) else n = (n + delta) % (size + 1) end
-	if (which == "a" and a == 0) or (which ~= "a" and n == 0) then return PE.Nick(0, 0) end
-	if a == 0 then a = delta < 0 and size or 1 end
-	if n == 0 then n = delta < 0 and size or 1 end
+	local d = tonumber(delta) or 0
+	local back = d < 0
+	-- (A side with no word, or one past the list: the first word, or the last stepping back.)
+	local function Fresh(x) return x < 1 or x > size end
+	local function Step(x)
+		if Fresh(x) then return back and size or 1 end
+		return (x - 1 + d) % size + 1
+	end
+	if which == "a" then a = Step(a) else n = Step(n) end
+	if Fresh(a) then a = back and size or 1 end
+	if Fresh(n) then n = back and size or 1 end
 	return PE.Nick(a, n)
 end
 function PE.Emblem(icon)
@@ -467,7 +477,8 @@ local function CouncilIconLines(lines)
 end
 
 -- Look: the frame (one row each, one click each), the title, the nickname (two strips of the
--- fixed lists), the emblem (a row into Icons), a councillor's chat icon, the lock, the honours held.
+-- fixed lists, and a row taking it away), the emblem (a row into Icons), a councillor's chat icon,
+-- the lock, the honours held.
 local function LookLines(lines, vm)
 	if not GamesOn() then
 		Words(lines, L.MYPROFILE_GAMES_OFF)
@@ -506,6 +517,10 @@ local function LookLines(lines, vm)
 				{ text = ">", onClick = function() PE.NickStep(w, 1) end },
 			} }
 		end
+		-- (No nickname: its own row, as No frame and No title; marked, and no click, while he has none.)
+		local none = nick.text == nil
+		lines[#lines + 1] = { indent = 1, text = none and Gold("> " .. L.MYPROFILE_NICK_NONE) or L.MYPROFILE_NICK_NONE,
+			onClick = not none and function() PE.Nick(0, 0) end or nil }
 		lines[#lines + 1] = { text = L.MYPROFILE_EMBLEM_HEAD, header = true,
 			right = vm.emblem and Texture(ns.CouncilIconTexture(vm.emblem)) or L.MYPROFILE_NONE_WORD }
 		lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.MYPROFILE_CHOOSE_EMBLEM), onClick = function() PE.SetSection("icons", "emblem") end }
@@ -573,8 +588,14 @@ end
 -- Who sees what: what goes out, his page as others open it (the person page's facts, each with
 -- its source and freshness), and his choices of the privacy page's Profile section (Consent.lua),
 -- each one click; the page itself for its long texts.
+-- What goes out is what the profile's word (AP) does: with the Games off on this character (/oly
+-- arena off) Arena.Send refuses it, so nothing of his look goes out and the page says so. (An
+-- older companion refused, Arena.companionRefused, hides the pickers but not the word: still sent.)
+local function LookGoesOut()
+	return type(Arena.Refusal) ~= "function" or Arena.Refusal("AP", "L") == nil
+end
 local function PrivacyLines(lines, facts)
-	Words(lines, L.MYPROFILE_LOOK_PUBLIC)
+	Words(lines, LookGoesOut() and L.MYPROFILE_LOOK_PUBLIC or L.MYPROFILE_LOOK_KEPT)
 	lines[#lines + 1] = { text = L.MYPROFILE_FACTS_HEAD, header = true }
 	for _, line in ipairs(facts or {}) do lines[#lines + 1] = line end
 	local C = ns.Consent

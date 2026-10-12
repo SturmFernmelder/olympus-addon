@@ -261,9 +261,49 @@ test("1.2.4 My profile, Look: the section strip first (page chrome); a row per f
 	eq(lines[nat + 1].nav[2].text, A.ns.L.MYPROFILE_EPITHET:format(A.ns.L.ARENA_EPI_A[1]))
 	eq(lines[nat + 2].nav[2].text, A.ns.L.MYPROFILE_BEAST:format(A.ns.L.ARENA_EPI_N[2]))
 	eq(Line(lines, A.ns.L.MYPROFILE_NICK_HEAD).right, "the Unbroken Hammer")
-	-- (A step back from the first word: none, a nickname being two words; from none, the last.)
+	-- A step is the side clicked alone, wrapping within its list; the other word stays, and each AP
+	-- carries the nickname. (The branch's first page wrapped a list through none: the nickname gone,
+	-- an AP without it, and the other word then replaced by its first or last. Fails there: "back
+	-- from the first word" gave no nickname, and a lap of the epithets from "3.7" ended "1.1".)
+	local function SentNick()
+		w:Run(0)
+		local sent = w:Sent{ from = A, type = "AP" }
+		local fields = {}
+		for f in (sent[#sent].msg .. "~"):gmatch("([^~]*)~") do fields[#fields + 1] = f end
+		return fields[8]
+	end
+	local clear = lines[nat + 3]
+	eq(Plain(clear.text), A.ns.L.MYPROFILE_NICK_NONE, "No nickname: its own row, under the strips"); eq(type(clear.onClick), "function")
 	w:As(A, lines[nat + 1].nav[1].onClick)
-	eq(A.ns.ArenaProfile.Mine().nick, nil, "back from the first word: no nickname")
+	eq(A.ns.ArenaProfile.Mine().nick, "32.2", "back from the first epithet: the last one, the beast kept"); eq(SentNick(), "32.2")
+	w:As(A, lines[nat + 1].nav[3].onClick)
+	eq(A.ns.ArenaProfile.Mine().nick, "1.2", "past the last epithet: the first"); eq(SentNick(), "1.2")
+	-- The review's case: "3.7", a whole lap of the epithets with '>': the beast stays 7, every AP
+	-- carries a nickname, and the lap ends where it began.
+	local size = A.ns.ArenaProfile.EPITHETS
+	eq(Prof(w, A).SetNick(3, 7), true)
+	for i = 1, size do
+		w:As(A, lines[nat + 1].nav[3].onClick)
+		local want = ("%d.7"):format((3 + i - 1) % size + 1)
+		eq(A.ns.ArenaProfile.Mine().nick, want, "step " .. i); eq(SentNick(), want, "step " .. i .. ": its AP")
+	end
+	eq(A.ns.ArenaProfile.Mine().nick, "3.7", "a lap: back where he was")
+	-- The beast's '<' from its first word: the last beast, the epithet kept; '>' back.
+	eq(Prof(w, A).SetNick(3, 1), true)
+	w:As(A, lines[nat + 2].nav[1].onClick)
+	eq(A.ns.ArenaProfile.Mine().nick, "3.32", "back from the first beast: the last one, the epithet kept")
+	w:As(A, lines[nat + 2].nav[3].onClick)
+	eq(A.ns.ArenaProfile.Mine().nick, "3.1")
+	-- No nickname: its row takes it away (one AP, without it); marked then, and no click.
+	local sent = #w:Sent{ from = A, type = "AP" }
+	w:As(A, clear.onClick)
+	eq(A.ns.ArenaProfile.Mine().nick, nil, "No nickname"); eq(SentNick(), "0.0", "the AP says none")
+	eq(#w:Sent{ from = A, type = "AP" }, sent + 1, "one AP")
+	lines = Page(w, A)
+	eq(Plain(lines[nat + 3].text), "> " .. A.ns.L.MYPROFILE_NICK_NONE, "marked"); eq(lines[nat + 3].onClick, nil, "none already: no click")
+	eq(lines[nat + 1].nav[2].text, A.ns.L.MYPROFILE_EPITHET:format(A.ns.L.MYPROFILE_NONE_WORD))
+	eq(Line(lines, A.ns.L.MYPROFILE_NICK_HEAD).right, A.ns.L.MYPROFILE_NONE_WORD)
+	-- (From none, one step gives both sides a word: the last ones, stepping back.)
 	w:As(A, lines[nat + 2].nav[1].onClick)
 	eq(A.ns.ArenaProfile.Mine().nick, "32.32", "back from none: the last words")
 	-- The emblem's row opens Icons; the lock's row keeps his pick.
@@ -408,8 +448,11 @@ test("1.2.4 My profile, Who sees what: what goes out, his page's facts as others
 	local fact = { text = "Level 60 Warrior", right = "census, fresh" }
 	local lines, _, _, buttons = Page(w, A, { fact })
 	eq(#buttons, 1, "Back alone")
-	assert(Plain(lines[2].text):find(A.ns.L.MYPROFILE_LOOK_PUBLIC:sub(1, 20), 1, true), "what goes out")
+	-- (The whole sentence: its first words are also the Games-off one's.)
 	local _, fat = Line(lines, A.ns.L.MYPROFILE_FACTS_HEAD)
+	local said = {}
+	for i = 2, fat - 1 do said[#said + 1] = Plain(lines[i].text) end
+	eq(table.concat(said, " "), A.ns.L.MYPROFILE_LOOK_PUBLIC, "what goes out")
 	eq(lines[fat + 1], fact, "his page's facts, as PlayerProfile makes them")
 	local _, cat = Line(lines, A.ns.L.MYPROFILE_CHOICES_HEAD)
 	local items = w:As(A, A.ns.Consent.Items, "profile")
@@ -427,6 +470,10 @@ test("1.2.4 My profile, Who sees what: what goes out, his page's facts as others
 		end
 	end
 	assert(history, "the history's choice"); assert(readonly, "a read-only line")
+	-- (The design's words, as the row shows them: the branch's first edit of this label was a copy
+	-- in ArenaFightsText.lua that ArenaHomeText.lua, loading after it, overrode. pt-BR: the test below.)
+	eq(history.text, "Show my list of fights on my profile", "the fight list's choice, rendered")
+	eq(w:As(A, A.ns.Consent.Describe, "arenaHistory").label, "Show my list of fights on my profile")
 	eq(w:As(A, A.ns.Consent.Answer, "arenaHistory"), nil)
 	local before = #w:Sent{ from = A, type = "AP" }
 	w:As(A, history.onClick)
@@ -440,6 +487,46 @@ test("1.2.4 My profile, Who sees what: what goes out, his page's facts as others
 	eq(shown, "profile")
 	A.ns.Consent.Show = show
 	W3.NoErrors(w)
+end)
+
+-- The design reworded the fight list's choice ("my profile", the whole addon's), but the edit went
+-- to a copy of the key in ArenaFightsText.lua: ArenaHomeText.lua, after it in Olympus.toc, set the
+-- key again, and Consent reads the last one. The words loaded as the game loads them (Locales.lua,
+-- then every Locales file in the TOC's order), in both languages; and each of its two keys has one
+-- definition, so a later edit is never dead. Fails on the branch's first page: "Your arena fight
+-- history" / "Seu histórico de lutas na arena", and the keys in two files.
+test("1.2.4 My profile, Who sees what: the fight list's choice reads the design's words, as the TOC loads them, in English and pt-BR; its keys have one definition", function()
+	local files = {}
+	for line in io.lines(H.ADDON_DIR .. "Olympus.toc") do
+		local file = line:match("^Locales\\(.-)%.lua%s*$")
+		if file then files[#files + 1] = file end
+	end
+	assert(#files > 5, "the TOC's locale files")
+	local function Loaded(locale)
+		local lns = {}
+		local saved = GetLocale
+		GetLocale = function() return locale end
+		local ok, err = pcall(function()
+			assert(loadfile(H.ADDON_DIR .. "Locales.lua"))("Olympus", lns)
+			for _, file in ipairs(files) do assert(loadfile(H.ADDON_DIR .. "Locales/" .. file .. ".lua"))("Olympus", lns) end
+		end)
+		GetLocale = saved
+		assert(ok, err)
+		return lns.L
+	end
+	eq(rawget(Loaded("enUS"), "ARENA_CONSENT_HISTORY"), "Show my list of fights on my profile")
+	eq(rawget(Loaded("ptBR"), "ARENA_CONSENT_HISTORY"), "Mostrar a minha lista de lutas no meu perfil")
+	for _, key in ipairs({ "ARENA_CONSENT_HISTORY", "ARENA_CONSENT_HISTORY_TEXT" }) do
+		local where = {}
+		for _, file in ipairs(files) do
+			local f = assert(io.open(H.ADDON_DIR .. "Locales/" .. file .. ".lua", "rb"))
+			local src = f:read("*a")
+			f:close()
+			local _, n = ("\n" .. src):gsub("\n\t?L%." .. key .. " =", "")
+			if n > 0 then where[#where + 1] = file .. " x" .. n end
+		end
+		eq(table.concat(where, ", "), "ArenaHomeText x2", key .. ": English and pt-BR, in one file")
+	end
 end)
 
 test("1.2.4 My profile, Letters: the King's, newest first, unread in gold, a click opens one in the King's letter window; none: says so", function()
@@ -499,11 +586,35 @@ test("1.2.4 My profile with the Games off: no picker in Look but one grey line s
 	eq(PE(w, A).Icons(), nil, "no emblem's list")
 	lines = Page(w, A)
 	for _, l in ipairs(lines) do eq(l.items, nil, "no slots") end
+	-- Who sees what says the same: nothing of his look goes out (Arena.Send refuses AP: a nickname
+	-- set sends none), never "every member's addon shows them". (Fails on the branch's first page:
+	-- that line was MYPROFILE_LOOK_PUBLIC whatever the Games.)
+	local function Said()
+		PE(w, A).SetSection("privacy")
+		local said = {}
+		for i, l in ipairs(Page(w, A)) do if i > 1 and not l.header then said[#said + 1] = Plain(l.text) end end
+		return table.concat(said, " ")
+	end
+	local said = Said()
+	assert(said:find(A.ns.L.MYPROFILE_LOOK_KEPT, 1, true), "nothing goes out: " .. said)
+	eq(said:find(A.ns.L.MYPROFILE_LOOK_PUBLIC, 1, true), nil, "Games off: not 'every member's addon shows them'")
+	local before = #w:Sent{ from = A, type = "AP" }
+	eq(Prof(w, A).SetNick(3, 7), true)
+	w:Run(0)
+	eq(#w:Sent{ from = A, type = "AP" }, before, "no AP while the Games are off")
 	A.ns.db.arenaOff = nil
 	A.ns.Arena.companionRefused = "version"
 	PE(w, A).SetSection("look")
 	lines = Page(w, A)
 	eq(Line(lines, A.ns.L.MYPROFILE_FRAME_HEAD), nil, "an older companion refused: the same")
+	-- (An older companion refused hides the pickers, not the word: AP still goes out, so Who sees
+	-- what still says it does.)
+	said = Said()
+	assert(said:find(A.ns.L.MYPROFILE_LOOK_PUBLIC, 1, true), "an older companion refused: " .. said)
+	before = #w:Sent{ from = A, type = "AP" }
+	eq(Prof(w, A).SetNick(4, 7), true)
+	w:Run(0)
+	eq(#w:Sent{ from = A, type = "AP" }, before + 1, "an older companion refused: AP still goes out")
 	A.ns.Arena.companionRefused = nil
 	W3.NoErrors(w)
 end)
