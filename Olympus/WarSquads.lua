@@ -84,12 +84,23 @@ local function Store(make)
 	end
 	return type(s) == "table" and s.guild == guild and type(s.rows) == "table" and type(s.chats) == "table" and s or nil
 end
+-- (1.2.3: found first by the names as given, roomOf, without folding them: each census notice
+-- reads the leaders, Signature, and so does the Chat tab's ticker on a squad's room.)
+local roomOf, roomOfCount = {}, 0 -- guild -> leader -> room
 local function Room(guild, leader)
+	local known = roomOf[guild]
+	if known and known[leader] then return known[leader] end
 	local key = Fold(guild) .. "|" .. Fold(leader)
-	if roomCache[key] then return roomCache[key] end
-	local digest = ns.Sign.SHA256(key)
-	local room = "squad:" .. (digest:sub(1, 12):gsub(".", function(byte) return ("%02x"):format(byte:byte()) end))
-	if roomCacheCount < 256 then roomCache[key], roomCacheCount = room, roomCacheCount + 1 end
+	local room = roomCache[key]
+	if not room then
+		local digest = ns.Sign.SHA256(key)
+		room = "squad:" .. (digest:sub(1, 12):gsub(".", function(byte) return ("%02x"):format(byte:byte()) end))
+		if roomCacheCount < 256 then roomCache[key], roomCacheCount = room, roomCacheCount + 1 end
+	end
+	if roomOfCount < 256 then
+		if not known then known = {}; roomOf[guild] = known end
+		known[leader], roomOfCount = room, roomOfCount + 1
+	end
 	return room
 end
 function Squads.Leaders()
@@ -98,9 +109,10 @@ function Squads.Leaders()
 	local main = ns.IsKingGuild and ns.IsKingGuild(guild)
 	local function Add(name)
 		local full = Member(name)
-		if not full or seen[Fold(full)] or #list >= Squads.MAX_LEADERS then return end
+		local key = full and Fold(full) -- (1.2.3: folded once; each census notice reads the leaders, Signature)
+		if not full or seen[key] or #list >= Squads.MAX_LEADERS then return end
 		if main and ns.IsHighCouncillor(full) ~= true then return end
-		seen[Fold(full)] = true
+		seen[key] = true
 		list[#list + 1] = { name = full, index = #list + 1, kind = main and "councillor" or "centurion", room = Room(guild, full) }
 	end
 	if main then
@@ -168,7 +180,11 @@ local function List(leader, members)
 	return out
 end
 local function Encode(e) return ("WU~1~S~%s~%d~%s"):format(e.leader, e.rev, table.concat(e.members, ",")) end
-local function Changed()
+local told      -- (1.2.3) what the squads' rooms rested on when they were last told changed (Signature's)
+local Signature -- (below)
+-- now: Signature's, when the caller has it already.
+local function Changed(now)
+	told = now or Signature()
 	ns.Fire("SQUADS_CHANGED"); ns.Fire("CHAT_ROOMS_CHANGED")
 end
 -- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
@@ -467,10 +483,38 @@ function Squads.Lines(query, baseIndent, manage)
 	if #lines > 0 then table.insert(lines, 1, { indent = indent, header = true, text = Label("SQUAD_TITLE", "Military squads - your guild") }) end
 	return lines
 end
+-- 1.2.3: what the squads' rooms rest on, as one text: our guild, our own place (in the roster, a
+-- preview, the chats on) and each leader's room, kind and place in the list (his room's label).
+-- The rows change only through Put, which tells at once; whether we read a room follows from
+-- these and the rows (Reads). A soldier gone from the guild changes nothing the Chat tab keeps for
+-- its era (a room's lines and anyone's access are asked at each redraw), and the War page is the
+-- window's, redrawn at every DATA_CHANGED (UI.lua). The census tells DATA_CHANGED every second or
+-- so on a busy realm (Data.NOTIFY_GAP), and each was told as the squads changed: the Chat tab
+-- starts a new era at CHAT_ROOMS_CHANGED, and on the author's game (the King's guild) it worked
+-- every line and room out again 0.2 s after every notice, never waiting for its DATA_GAP.
+-- (A name holds no ",", Full; a room is "squad:" and hex.)
+local parts = {}
+Signature = function()
+	parts[1], parts[2] = Guild() or "", Member(ns.me) or ""
+	parts[3], parts[4] = Preview() and "preview" or "", ChatOn() and "on" or ""
+	local n = 4
+	for _, e in ipairs(Squads.Leaders()) do
+		parts[n + 1], parts[n + 2], parts[n + 3] = e.room, e.kind, e.name
+		n = n + 3
+	end
+	for i = #parts, n + 1, -1 do parts[i] = nil end
+	return table.concat(parts, ",", 1, n)
+end
 if ns.ChatRooms then ns.ChatRooms.RegisterProvider(provider) end
 ns.Comm.Handle("WU", Squads.Handle)
 ns.Comm.Handle("SC", Squads.ReceiveChat)
 -- Event driven only: no per-frame task or periodic enumeration while idle; a roster scan asks
--- for rows only until an officer's came (Squads.Request's own limits).
-ns.On("DATA_CHANGED", function() indexedRoster = nil; Changed(); Squads.Request() end)
+-- for rows only until an officer's came (Squads.Request's own limits). (1.2.3: told only when
+-- what the squads' rooms rest on changed, Signature.)
+ns.On("DATA_CHANGED", function()
+	indexedRoster = nil
+	local now = Signature()
+	if now ~= told then Changed(now) end
+	Squads.Request()
+end)
 ns.On("LOGIN", Squads.Request)

@@ -368,3 +368,96 @@ test("1.2.3 memory: the Chat tab's ticker (OnUpdate, a look every 0.2 s while it
 		assert(room <= 30, ("fifty looks on a room: %.1f KB"):format(room))
 	end)
 end)
+
+-- WarSquads.lua loaded beside the tab as in the game: its listeners hear what the tab hears
+-- (w.fire) and what it tells reaches the tab's listeners (the game's one ns.Fire; ns.Fire is none in
+-- this harness), in the King's guild with a fresh roster and the High Council's signed list naming
+-- two of the writers, its squads' leaders. (Its rooms are not given to ChatRooms here, nor its
+-- messages to Comm: neither outlives the test.) Returns WarSquads, what it told, and the undo.
+local function WithSquads(w)
+	local R = ns.Roster
+	local saved = { guild = GetGuildInfo, inGuild = IsInGuild, byName = R.byName, complete = R.complete, generation = R.generation,
+		guildOf = R.guild, group = R.group, faction = R.faction, at = R.snapshotAt }
+	GetGuildInfo = function() return "Olympus", "Officer", 1 end
+	IsInGuild = function() return true end
+	ns.rdb.council.blob = "HS1~1~Alliance~Writer3-Realm,Writer7-Realm~abcdef"
+	R.byName = { [ns.me] = 1 }
+	for i = 1, 30 do R.byName["Writer" .. i .. "-Realm"] = 3 end
+	R.complete, R.generation, R.guild, R.group, R.faction, R.snapshotAt = true, 1, "Olympus", ns.group, ns.faction, ns.Now()
+	local told = {}
+	local sns = setmetatable({ ChatRooms = false, Comm = { Handle = function() end, Send = function() return true end } }, { __index = ns })
+	sns.On = function(name, f) w.on[name] = w.on[name] or {}; table.insert(w.on[name], f) end
+	sns.Fire = function(name, ...) told[#told + 1] = name; w.fire(name, ...) end
+	assert(loadfile(h.ADDON_DIR .. "WarSquads.lua"))("Olympus", sns)
+	return sns.WarSquads, told, function()
+		GetGuildInfo, IsInGuild, R.byName, R.complete, R.generation = saved.guild, saved.inGuild, saved.byName, saved.complete, saved.generation
+		R.guild, R.group, R.faction, R.snapshotAt = saved.guildOf, saved.group, saved.faction, saved.at
+	end
+end
+
+-- 1.2.3, the review of the Chat tab's eras: on the author's game the census tells DATA_CHANGED every
+-- second or so (Data.NOTIFY_GAP; 891 census redraws in his 50 minutes), and WarSquads told
+-- CHAT_ROOMS_CHANGED at each: the tab started a new era 0.2 s after every notice and worked every line
+-- and room out again, never waiting for its DATA_GAP (the census's own redraw, at most every 5 s).
+test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second or so on the author's game) that changed no squad keeps the Chat tab's era: the next line costs what a line costs and nothing is worked out again before DATA_GAP; a squad that changed is drawn at once", function()
+	WithChannel(function(w)
+		local CW = w.CW
+		local s, told, undo = WithSquads(w)
+		local real = CW.Render
+		local renders = 0
+		CW.Render = function(...) renders = renders + 1; return real(...) end
+		local ok, err = pcall(function()
+			eq(#s.Leaders(), 2, "the council's two writers lead squads")
+			-- The first notice it hears tells (what the squads were it never told), and the census's
+			-- redraw comes DATA_GAP after the last.
+			w.fire("DATA_CHANGED"); w.tick(5.1)
+			w.arrive("warm-up")
+			local plain = Allocated(function() w.arrive("a plain line") end)
+			local era = CW.era
+			for k = 1, #told do told[k] = nil end
+			w.fire("DATA_CHANGED")
+			eq(#told, 0, "a notice that changed no squad tells nothing")
+			local after = Allocated(function() w.arrive("a line after a census notice") end)
+			eq(CW.era, era, "the line drawn in the era it came in")
+			local direct = Allocated(function() CW.Render() end)
+			-- (Before, here: a line after a notice 30.6 KB, a plain one 7.4, a direct redraw 26.6; with a
+			-- 150-guild census and four vouches a guild, 240, 7.4 and 236.)
+			assert(after <= plain * 1.5 + 1, ("a line after a notice %.1f KB, a plain line %.1f KB"):format(after, plain))
+			assert(after * 2 <= direct, ("a line after a notice %.1f KB, a direct redraw %.1f KB"):format(after, direct))
+			-- A notice every second and no line: no redraw before DATA_GAP from the census's last, one at it.
+			w.fire("DATA_CHANGED"); w.tick(5.1)
+			renders, era = 0, CW.era
+			for i = 1, 24 do
+				w.tick(0.2)
+				if i % 5 == 0 then w.fire("DATA_CHANGED") end
+			end
+			eq(renders, 0, "four notices in 4.8 s: no redraw")
+			eq(CW.era, era, "nothing worked out again")
+			w.tick(0.2); w.tick(0.2)
+			eq(renders, 1, "the census's own redraw, at DATA_GAP")
+			assert(CW.era ~= era, "in a new era")
+			-- A squad that changed (a leader off the council's list: one squad fewer) is drawn at once,
+			-- in a new era: his name has the council's colour no more.
+			local function Header(sender)
+				for _, b in ipairs(w.f.bubbles) do
+					if b:IsShown() and b.entry and b.entry.sender == sender and b.header:IsShown() then return b.who:GetText() end
+				end
+			end
+			w.fire("DATA_CHANGED"); w.tick(5.1)
+			assert(Header("Writer7-Realm"):find(ns.HIGH_COUNCIL_COLOR, 1, true), "a councillor's line")
+			renders, era = 0, CW.era
+			for k = 1, #told do told[k] = nil end
+			ns.rdb.council.names.writer7 = nil
+			w.fire("DATA_CHANGED")
+			eq(table.concat(told, " "), "SQUADS_CHANGED CHAT_ROOMS_CHANGED", "told")
+			w.tick(0.2)
+			eq(renders, 1, "drawn at the next look"); assert(CW.era ~= era, "in a new era")
+			eq(#s.Leaders(), 1)
+			assert(not Header("Writer7-Realm"):find(ns.HIGH_COUNCIL_COLOR, 1, true), "his line without the council's colour")
+			SameDrawn(Drawn(w.f), Fresh(w), "as a redraw working it all out")
+		end)
+		CW.Render = real
+		undo()
+		if not ok then error(err, 0) end
+	end)
+end)
