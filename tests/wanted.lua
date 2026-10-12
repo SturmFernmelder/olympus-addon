@@ -6,7 +6,56 @@ local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]wanted%.
 -- here so that a dialog an older build defined is put back as it was.)
 local DIALOGS = { "OLYMPUS_WANTED_ADD", "OLYMPUS_WANTED_REMOVE", "OLYMPUS_WANTED_SEND", "OLYMPUS_WANTED_REVIEW",
 	"OLYMPUS_WANTED_WITHDRAW", "OLYMPUS_WANTED_PUBLISH", "OLYMPUS_WANTED_REVOKE", "OLYMPUS_WANTED_CORRECT",
-	"OLYMPUS_WANTED_REVIEWER" }
+	"OLYMPUS_WANTED_REVIEWER", "OLYMPUS_WANTED_AVENGED" }
+
+-- 1.2.4, the notices: Olympus's own windows as stand-ins that keep what they show (ns.Window: the
+-- death's toast), Olympus's dialogs (Dialog.Show and Find: the avenged notice and the whisper
+-- windows its buttons open), the King's letter (HonorsNet's QueueLetter, LetterToSender and
+-- LetterFrame) and the Olympus window's whisper window, profile and state (UI.WhisperText,
+-- ShowPerson, IsShown), each kept in `into` (a test world, or a world's client).
+local function StandInFrame(kind)
+	local o = { kind = kind, shown = false, points = {} }
+	function o:Show() self.shown = true end
+	function o:Hide() self.shown = false end
+	function o:IsShown() return self.shown end
+	function o:SetText(text) self.text = text end
+	function o:GetText() return self.text end
+	function o:ClearAllPoints() self.points = {} end
+	function o:SetPoint(...) self.points[#self.points + 1] = { ... } end
+	function o:EnableMouse(on) self.mouse = on end
+	function o:SetFrameStrata(strata) self.strata = strata end
+	function o:CreateTexture() return StandInFrame("texture") end
+	function o:CreateFontString() return StandInFrame("font") end
+	return setmetatable(o, { __index = function() return function() end end })
+end
+local function NoticeStandIns(c, into)
+	into.windows, into.shownDialogs, into.letters = into.windows or {}, into.shownDialogs or {}, into.letters or {}
+	into.whispers, into.people = into.whispers or {}, into.people or {}
+	c.Window = function(name, _, opts)
+		local f = StandInFrame("window")
+		f.name, f.opts = name, opts
+		into.windows[name] = f
+		return f
+	end
+	c.Dialog = {
+		Show = function(which, a, b, data)
+			local f = StandInFrame("dialog")
+			f.which, f.a, f.b, f.data, f.def, f.shown = which, a, b, data, StaticPopupDialogs[which], true
+			into.shownDialogs[#into.shownDialogs + 1] = f
+			return f
+		end,
+		Find = function(which)
+			for _, f in ipairs(into.shownDialogs) do if f.which == which and f.shown then return f end end
+			return nil
+		end,
+	}
+	c.HonorsNet = { QueueLetter = function(key) into.letters[#into.letters + 1] = key end,
+		LetterToSender = function() return into.kingLetter == true end, LetterFrame = function() return into.letterFrame end }
+	c.UI = c.UI or {}
+	c.UI.WhisperText = function(name, text) into.whispers[#into.whispers + 1] = { name = name, text = text } return true end
+	c.UI.IsShown = function() return into.windowOpen == true end
+	if not c.UI.ShowPerson then c.UI.ShowPerson = function(p) into.people[#into.people + 1] = p return true end end
+end
 
 local function WithWanted(fn)
 	local globals = { "UnitGUID", "UnitIsPlayer", "UnitFactionGroup", "GetGuildInfo", "GetRealZoneText",
@@ -118,6 +167,9 @@ local function WithWanted(fn)
 		-- (1.2.3: the privacy page, as the earlier deaths' notice waits for it: w.consentShown, w.consentWaiting.)
 		c.Consent = { Frame = function() return w.consentShown and { IsShown = function() return true end } or nil end,
 			Waiting = function() return w.consentWaiting == true end }
+		-- (1.2.4: the notices' windows, dialogs, letters and the update letter, w.updateLetter.)
+		NoticeStandIns(c, w)
+		c.Letters = { Frame = function() return w.updateLetter and { IsShown = function() return true end } or nil end }
 
 		w.olympians[c.Fold(c.me)] = true
 		function w.olympian(name)
@@ -1404,7 +1456,9 @@ test("wanted 1.2.3 (no list): an ordinary member's own death to a Horde player h
 		local horde = "Player-1-0D000002"
 		w.hordePlayer("Given Ganker-Realm", horde) -- his full name, as the game's lookup gives it
 		local retries = {}
-		c.After = function(_, _, fn) retries[#retries + 1] = fn end
+		-- (1.2.4, changed on purpose: the death's toast hides itself on a timer of its own, "wanted
+		-- toast"; only the recap's retries are counted here, as before.)
+		c.After = function(_, label, fn) if label == "wanted death recap" then retries[#retries + 1] = fn end end
 		eq(w.units.target, nil, "no target"); eq(w.units.nameplate1, nil, "no nameplate")
 		w.die(w.forever("Given-Realm", horde)) -- (Forever's recap: "Given-Realm", no surname)
 		local t = assert(W.Target(nil, horde), "no unit, nameplate, target or listing was needed")
@@ -2165,6 +2219,8 @@ local function WithWorld(fn)
 			c.UI = { Refresh = function() end, RefreshSoon = function() end,
 				ShowCopy = function(title, text, _, opts) cl.copies = cl.copies or {} cl.copies[#cl.copies + 1] = { title = title, text = text, opts = opts } end }
 			c.Consent = { Waiting = function() return false end }
+			-- (1.2.4: the notices' windows, dialogs and letters, kept on the client across its reloads.)
+			NoticeStandIns(c, cl)
 			cl.handlers, cl.listeners, cl.events, cl.ns, cl.online = {}, {}, {}, c, true
 			local commLogin
 			if cl.realComm then
@@ -3863,6 +3919,424 @@ test("wanted 1.2.3 repair: a full Most Wanted keeps an open bounty, and a member
 		-- A fifth: the grudge goes before any open bounty.
 		local fifth = Horde(5); Die(fifth, 5)
 		eq(W.Target(nil, grudged), nil); eq(W.Target(nil, open).current, 40); assert(W.Target(nil, fourth))
+	end)
+end)
+
+---------------------------------------------------------------------------
+-- 1.2.4, the notices (Daniel: a message at every death to a Horde player; one, when that player
+-- is killed, saying who avenged it, with See, Whisper and Thank; the Slayer letter to the killer,
+-- in the King's letter's model). Each of these fails on the build before it (release/1.2.3: no
+-- toast, no avenged notice, no letter).
+---------------------------------------------------------------------------
+
+-- A test's own timers (ns.After): Fire(label) runs the first one of that label, and says its wait.
+local function Timers(c)
+	local list = {}
+	c.After = function(seconds, label, fn) list[#list + 1] = { seconds = seconds, label = label, fn = fn } end
+	return function(label)
+		for i, t in ipairs(list) do if t.label == label then table.remove(list, i) t.fn() return t.seconds end end
+		return nil
+	end, function() list = {} end
+end
+-- The avenged notices a client was shown (Dialog.Show's), in order.
+local function AvengedShown(into)
+	local out = {}
+	for _, f in ipairs(into.shownDialogs) do if f.which == "OLYMPUS_WANTED_AVENGED" then out[#out + 1] = f end end
+	return out
+end
+
+test("wanted 1.2.4 notices: at each own death to a Horde player, a toast at the death: Olympus's own window at the bottom of the screen (the release popup is at its top), no button, no mouse, off the escape list, his name and the points his bounty grew by; once a death (the recap's retries, a second reading); 'again' inside the corpse-camping gap; nothing for a death that does not count; in both input modes, never a game popup", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		w.units.player.level = 40
+		local savedPopup = StaticPopup_Show
+		StaticPopup_Show = function(which) error("the game's popup: " .. tostring(which)) end
+		local ok, err = pcall(function()
+			local Fire = Timers(c)
+			local ganker = "Player-1-0D00E001"
+			w.hordePlayer("Toast Ganker-Realm", ganker)
+			local name = c.DisplayName("Toast Ganker-Realm")
+			-- The recap a moment after PLAYER_DEAD: its retry reads it.
+			local rows, ready = w.forever("Toast-Realm", ganker), false
+			C_DeathInfo = nil
+			C_DeathRecap = { HasRecapEvents = function() return ready end, GetRecapEvents = function() return rows end }
+			w.dead = true
+			w.handlers.PLAYER_DEAD()
+			eq(w.windows.OlympusWantedToast, nil, "nothing before the recap")
+			ready = true
+			Fire("wanted death recap")
+			local f = assert(w.windows.OlympusWantedToast, "the toast")
+			eq(f.shown, true, "at the death, the player still dead: no wait for the release")
+			eq(f.text.text, ns.L.WANTED_DEATH_TOAST:format(name, 40), "his name and what this death added (a member of level 40)")
+			eq(W.Target(nil, ganker).current, 40)
+			eq(f.opts.title, ns.L.TAB_WANTED); eq(f.opts.close, false, "no button")
+			eq(f.opts.escape, false, "off the escape list: the game's sweep at a death leaves it")
+			eq(f.mouse, false, "no mouse: nothing under it is blocked")
+			local at = f.points[#f.points]
+			eq(at[1], "BOTTOM"); eq(at[3], "BOTTOM"); eq(at[5], W.Bounty.TOAST_Y, "the bottom centre: the release popup is at the top")
+			eq(#w.shownDialogs, 0); eq(#w.dialogs, 0, "no dialog")
+			-- Its other retries, and the same death read again: no second toast.
+			Fire("wanted death recap"); Fire("wanted death recap")
+			w.handlers.PLAYER_DEAD()
+			Fire("wanted death recap")
+			eq(W.Bounty.session.toasts, 1, "once a death")
+			eq(Fire("wanted toast"), W.Bounty.TOAST_SECONDS); eq(f.shown, false, "gone after its seconds")
+			-- Killed again inside the corpse-camping gap: "again", no points.
+			w.advance(60)
+			rows = w.forever("Toast-Realm", ganker)
+			w.handlers.PLAYER_DEAD()
+			eq(f.shown, true); eq(f.text.text, ns.L.WANTED_DEATH_TOAST_AGAIN:format(name)); eq(W.Target(nil, ganker).current, 40)
+			-- Past it, his bounty grows again.
+			w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+			rows = w.forever("Toast-Realm", ganker)
+			w.handlers.PLAYER_DEAD()
+			eq(f.text.text, ns.L.WANTED_DEATH_TOAST:format(name, 40)); eq(W.Target(nil, ganker).current, 80)
+			eq(W.Bounty.session.toasts, 3)
+			-- A death that does not count shows nothing: a killer the game knows as no Horde player,
+			-- a death in a battleground.
+			w.advance(W.DEATH_WINDOW + 1)
+			rows = w.forever("Unproven-Realm", "Player-1-0D00E002")
+			w.handlers.PLAYER_DEAD()
+			w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+			w.inside, rows = true, w.forever("Toast-Realm", ganker)
+			w.handlers.PLAYER_DEAD()
+			w.inside = false
+			eq(W.Bounty.session.toasts, 3, "nothing for a death that does not count")
+			eq(W.Target(nil, ganker).current, 80)
+			-- With the gamepad UI the same toast: it takes no focus and has no button.
+			GamepadStyle(true)
+			w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+			rows = w.forever("Toast-Realm", ganker)
+			w.handlers.PLAYER_DEAD()
+			eq(W.Bounty.session.toasts, 4); eq(f.shown, true); eq(f.text.text, ns.L.WANTED_DEATH_TOAST:format(name, 40))
+			eq(#w.shownDialogs, 0); eq(#w.dialogs, 0)
+			GamepadStyle(false)
+		end)
+		StaticPopup_Show = savedPopup
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("wanted 1.2.4 notices: a death avenged: another member's own kill of that Horde player, reaching this client, brings one notice in Olympus's own dialog (who slew him, his guild, the Horde player, how many times he had killed this member); Thank writes the thanks in Olympus's whisper window and sends nothing, Whisper opens that window empty, See his profile and keeps the dialog; nothing for a kill before the death, a stranger's or a hidden sender's row, a second avenger, the member's own kill, or after a reload", function()
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		local saved = { popup = StaticPopup_Show, chat = SendChatMessage }
+		StaticPopup_Show = function(which) error("the game's popup: " .. tostring(which)) end
+		SendChatMessage = function() error("a message sent") end
+		local ok, err = pcall(function()
+			local H = assert(w.commHandlers.WK)
+			local me = w.units.player.guid
+			local ganker = "Player-1-0D00E101"
+			w.hordePlayer("Avenged Ganker-Realm", ganker)
+			local avenger = w.participant("Avenger Hand-Realm", "Player-1-CC00E101")
+			local second = w.participant("Second Hand-Realm", "Player-1-CC00E102")
+			local n = 0
+			local function Kill(from, own, at)
+				n = n + 1
+				return H("CHANNEL", from, BountyRow(c, W, { kind = "P", digest = ("%016x"):format(0xe100 + n), at = at or w.epoch,
+					horde = "1.0d00e101", own = own, worth = "M~50~60", name = "Avenged Ganker-Realm" }))
+			end
+			local function Die()
+				w.die(w.forever("Avenged-Realm", ganker))
+				w.dead = false
+				w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+			end
+			local firstAt = w.epoch
+			Die(); Die()
+			eq(W.Target(nil, ganker).current, 80, "his two deaths")
+			-- A kill dated before those deaths (a late row): it avenges none of them.
+			assert(Kill(avenger, "1.cc00e101", firstAt - 30))
+			eq(#AvengedShown(w), 0, "a kill before the deaths")
+			-- Rows refused before they count: a stranger's, a sender the moderators hide.
+			w.strangers[c.Fold("Outsider-Realm")] = true
+			eq(select(2, Kill("Outsider-Realm", "1.dd00e101")), "olympus")
+			c.Moderation.Hides = function(name) return c.Fold(name) == c.Fold(second) end
+			eq(select(2, Kill(second, "1.cc00e102")), "olympus")
+			c.Moderation.Hides = nil
+			eq(#AvengedShown(w), 0)
+			-- The avenger's own kill, now: one notice, at once.
+			local sentBefore = #w.sent
+			assert(Kill(avenger, "1.cc00e101"))
+			local shown = AvengedShown(w)
+			eq(#shown, 1, "one notice")
+			local d = shown[1]
+			eq(d.a, ns.L.WANTED_AVENGED:format(c.DisplayName(avenger), "Olympus II", c.DisplayName("Avenged Ganker-Realm"),
+				ns.L.WANTED_AVENGED_TIMES:format(2)), "who, his guild, the Horde player, twice")
+			eq(d.def.button1, ns.L.WANTED_AVENGED_THANK); eq(d.def.button2, ns.L.WANTED_AVENGED_CLOSE)
+			eq(d.def.button3, ns.L.WANTED_AVENGED_WHISPER); eq(d.def.extra.label, ns.L.WANTED_AVENGED_SEE)
+			eq(d.def.hasEditBox, nil, "no edit box")
+			eq(#w.dialogs, 0, "never through the game's popups (ns.ShowDialog)")
+			eq(c.rdb.wanted.mine[ganker], nil, "his deaths closed")
+			-- Thank: Olympus's whisper window with the words in it; nothing sent until the player's own Send.
+			d.def.OnAccept(d, d.data)
+			eq(#w.whispers, 1); eq(w.whispers[1].name, c.TellName(avenger)); eq(w.whispers[1].text, ns.L.WANTED_THANK_TEXT)
+			eq(#w.sent, sentBefore, "nothing sent")
+			-- Whisper: that window, empty (Olympus's own dialog in both input modes).
+			d.def.OnAlt(d, d.data)
+			local box = w.shownDialogs[#w.shownDialogs]
+			eq(box.which, "OLYMPUS_WHISPER"); eq(box.a, c.TellName(avenger)); eq(box.data, c.TellName(avenger))
+			-- See: his Olympus profile; the dialog stays (Dialog.lua's extra button answers nothing).
+			d.def.extra.onClick(d, d.data)
+			eq(w.profile.name, "Avenger Hand"); eq(w.profile.realm, "Realm"); eq(w.profile.guild, "Olympus II"); eq(w.profile.source, "addon")
+			eq(#w.sent, sentBefore, "still nothing sent")
+			d.shown, box.shown = false, false
+			-- A second avenger finds nothing open.
+			w.advance(60)
+			assert(Kill(second, "1.cc00e102"))
+			eq(#AvengedShown(w), 1, "a second avenger: nothing")
+			-- He kills this member again, and this member kills him: no notice (his own revenge), his letter.
+			w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+			Die()
+			w.units.target = { name = "Avenged Ganker-Realm", guid = ganker, faction = "Horde", level = 60 }
+			assert(w.handlers.PARTY_KILL(me, ganker))
+			w.units.target = nil
+			eq(#AvengedShown(w), 1, "the member's own kill: no notice")
+			eq(#w.letters, 1, "his letter instead")
+			eq(c.rdb.wanted.mine[ganker], nil)
+			-- A reload: nothing again.
+			assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+			W = c.Wanted
+			assert(W.Load())
+			eq(#AvengedShown(w), 1); eq(#w.letters, 1)
+		end)
+		StaticPopup_Show, SendChatMessage = saved.popup, saved.chat
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("wanted 1.2.4 notices: the avenged notice waits out combat, an instance, a death, the privacy page (shown or waiting), the update letter and the King's letter, saved across a reload, then shows once, one at a time; with the gamepad UI it waits for the Olympus window and chat says so once; five at most wait, the oldest go", function()
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		local Fire, Clear = Timers(c)
+		local avenger = w.participant("Waiting Hand-Realm", "Player-1-CC00E201")
+		local function Hunt(i)
+			local guid = ("Player-1-0D00E2%02d"):format(i)
+			local name = "Waiting Ganker" .. i .. "-Realm"
+			w.hordePlayer(name, guid)
+			w.die(w.forever("Waiting-Realm", guid))
+			w.dead = false
+			w.advance(60)
+			local ok, e = w.commHandlers.WK("CHANNEL", avenger, BountyRow(c, W, { kind = "P", digest = ("%016x"):format(0xe200 + i), at = w.epoch,
+				horde = ("1.0d00e2%02d"):format(i), own = "1.cc00e201", name = name }))
+			assert(ok, tostring(e))
+			return name
+		end
+		local function Waits() local k = 0 for _ in ipairs(c.rdb.wanted.avenged) do k = k + 1 end return k end
+		w.combat = true
+		local first = Hunt(1)
+		eq(#AvengedShown(w), 0, "in combat: it waits"); eq(Waits(), 1, "saved")
+		-- A reload meanwhile: still waiting, tried again NOTICE_LOGIN after the login.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted
+		Clear()
+		assert(W.Load())
+		w.advance(W.Bounty.NOTICE_LOGIN)
+		eq(Fire("wanted notices"), W.Bounty.NOTICE_LOGIN)
+		eq(#AvengedShown(w), 0)
+		for _, case in ipairs({ "combat", "inside", "dead", "consentWaiting", "consentShown", "updateLetter", "letterFrame" }) do
+			w.combat, w.inside, w.dead, w.consentWaiting, w.consentShown, w.updateLetter, w.letterFrame = false, false, false, false, false, nil, nil
+			if case == "letterFrame" then w.letterFrame = { IsShown = function() return true end } else w[case] = true end
+			assert(Fire("wanted notices"), case .. ": tried again later")
+			eq(#AvengedShown(w), 0, case)
+		end
+		w.letterFrame = nil
+		Fire("wanted notices")
+		local shown = AvengedShown(w)
+		eq(#shown, 1, "nothing in the way: shown")
+		assert(shown[1].a:find(c.DisplayName(first), 1, true))
+		eq(Fire("wanted notices"), nil, "and done"); eq(Waits(), 0)
+		shown[1].shown = false
+		-- With the gamepad UI nothing of Olympus opens by itself: it waits for the Olympus window.
+		GamepadStyle(true)
+		local function Said() local k = 0 for _, p in ipairs(w.prints) do if p == ns.L.WANTED_AVENGED_WAITING then k = k + 1 end end return k end
+		Hunt(2)
+		eq(#AvengedShown(w), 1, "it waits for the window"); eq(Said(), 1, "chat says so")
+		eq(Fire("wanted notices"), W.Bounty.WINDOW_TICK)
+		eq(Said(), 1, "once")
+		w.windowOpen = true
+		Fire("wanted notices")
+		eq(#AvengedShown(w), 2, "the Olympus window open: shown")
+		AvengedShown(w)[2].shown = false
+		GamepadStyle(false)
+		w.windowOpen = nil
+		-- Seven while it waits: the newest five stay, shown one at a time, oldest first.
+		w.combat = true
+		local names = {}
+		for i = 3, 9 do names[i] = Hunt(i) end
+		eq(Waits(), W.Bounty.AVENGED_MAX)
+		-- The fight's end: at once, one at a time, the oldest first.
+		w.combat = false
+		w.handlers.PLAYER_REGEN_ENABLED()
+		shown = AvengedShown(w)
+		eq(#shown, 3, "one at a time")
+		assert(shown[3].a:find(c.DisplayName(names[5]), 1, true), "the oldest two went: " .. shown[3].a)
+		assert(Fire("wanted notices"), "(the beat that waited out the fight)")
+		eq(#AvengedShown(w), 3, "the next waits for this one")
+		eq(Fire("wanted notices"), W.Bounty.WINDOW_TICK, "looking for it to close")
+		eq(#AvengedShown(w), 3)
+		-- Closed: the next one.
+		shown[3].shown = false
+		shown[3].def.OnHide(shown[3], shown[3].data)
+		assert(Fire("wanted notices"))
+		shown = AvengedShown(w)
+		eq(#shown, 4); assert(shown[4].a:find(c.DisplayName(names[6]), 1, true), shown[4].a)
+	end)
+end)
+
+test("wanted 1.2.4 notices: the Slayer letter, the King's letter at this member's own kill that paid points: whom he slew, how many of ours that one had slain, his bounty, his level's points, the revenge and the total, as this client counted them with every member's rows; never in combat, an instance, a death, over the privacy page or the update letter (it waits, saved); once; a '??' as its floor; none for a kill that paid nothing; the King a toast instead", function()
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 45
+		local me = w.units.player.guid
+		local Fire = Timers(c)
+		local function Corpse(name, guid, level)
+			w.hordePlayer(name, guid)
+			w.units.target = level and { name = name, guid = guid, faction = "Horde", level = level } or nil
+		end
+		local function Name(n) return c.DisplayName(n) end
+		-- Two members' deaths to him, as the channel brings them: 40 and 50 on his bounty.
+		local ganker = "Player-1-0D00E301"
+		w.hordePlayer("Letter Ganker-Realm", ganker)
+		local first = w.participant("First Fallen-Realm", "Player-1-CC00E301")
+		local second = w.participant("Second Fallen-Realm", "Player-1-CC00E302")
+		assert(w.commHandlers.WK("CHANNEL", first, BountyRow(c, W, { digest = "00000000000e3001", at = w.epoch, horde = "1.0d00e301",
+			own = "1.cc00e301", worth = "M~40~0", name = "Letter Ganker-Realm" })))
+		w.advance(60)
+		assert(w.commHandlers.WK("CHANNEL", second, BountyRow(c, W, { digest = "00000000000e3002", at = w.epoch, horde = "1.0d00e301",
+			own = "1.cc00e302", worth = "M~50~0", name = "Letter Ganker-Realm" })))
+		eq(W.Target(nil, ganker).current, 90, "every member's own deaths reached this client")
+		-- This member kills him in the fight: his corpse at level 60.
+		w.advance(60)
+		w.combat = true
+		Corpse("Letter Ganker-Realm", ganker, 60)
+		local ok, e = w.handlers.PARTY_KILL(me, ganker)
+		assert(ok, tostring(e))
+		eq(e.points, 210)
+		eq(#w.letters, 0, "in combat: it waits"); eq(#c.rdb.wanted.slayerLetters, 1, "saved")
+		-- Then an instance, a death, the privacy page, the update letter: still waiting.
+		for _, case in ipairs({ "inside", "dead", "consentWaiting", "consentShown", "updateLetter" }) do
+			w.combat, w.inside, w.dead, w.consentWaiting, w.consentShown, w.updateLetter = false, false, false, false, false, nil
+			w[case] = true
+			assert(Fire("wanted notices"), case .. ": tried again later")
+			eq(#w.letters, 0, case)
+		end
+		-- The fight's end, or the next beat, with nothing in the way: the letter.
+		w.combat, w.inside, w.dead, w.consentWaiting, w.consentShown, w.updateLetter = true, false, false, false, false, nil
+		Fire("wanted notices")
+		w.combat = false
+		w.handlers.PLAYER_REGEN_ENABLED()
+		eq(#w.letters, 1)
+		eq(#c.rdb.wanted.slayerLetters, 0, "handed to the King's letter")
+		local key = w.letters[1]
+		eq(key:sub(1, 7), "wanted@")
+		local text, title = W.LetterText(key)
+		eq(text, ns.L.WANTED_LETTER:format(Name("Letter Ganker-Realm"), "60", 2, 90, ns.L.WANTED_LETTER_LEVEL:format(120), 210))
+		eq(title, ns.L.WANTED_LETTER_TITLE:format(Name("Letter Ganker-Realm"))); eq(W.LetterTitle(key), title)
+		-- His own revenge: the Horde player who killed him, killed by him.
+		w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+		local avenger = "Player-1-0D00E302"
+		w.hordePlayer("Revenge Ganker-Realm", avenger)
+		w.die(w.forever("Revenge-Realm", avenger))
+		w.dead = false
+		w.advance(60)
+		Corpse("Revenge Ganker-Realm", avenger, 60)
+		ok, e = w.handlers.PARTY_KILL(me, avenger)
+		assert(ok, tostring(e)); eq(e.points, 120 + 45 + W.Bounty.SCORE.REVENGE)
+		eq(#w.letters, 2)
+		eq(W.LetterText(w.letters[2]), ns.L.WANTED_LETTER:format(Name("Revenge Ganker-Realm"), "60", 1, 45,
+			ns.L.WANTED_LETTER_LEVEL:format(120) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 265))
+		-- Nobody's killer: his level alone; a "??" as its floor.
+		w.advance(W.DEATH_WINDOW + 1)
+		Corpse("Fresh Ganker-Realm", "Player-1-0D00E303", 52)
+		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E303"))
+		eq(W.LetterText(w.letters[3]), ns.L.WANTED_LETTER_FIRST:format(Name("Fresh Ganker-Realm"), "52", ns.L.WANTED_LETTER_LEVEL:format(104), 104))
+		w.advance(W.DEATH_WINDOW + 1)
+		Corpse("Skull Ganker-Realm", "Player-1-0D00E304", -1)
+		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E304"))
+		eq(W.LetterText(w.letters[4]), ns.L.WANTED_LETTER_FIRST:format(Name("Skull Ganker-Realm"), ns.L.WANTED_LEVEL_FLOOR:format(55),
+			ns.L.WANTED_LETTER_LEVEL:format(110), 110), "'??' to a level 45: 55 at least")
+		-- A kill that paid nothing (no level seen, no bounty): no letter.
+		w.advance(W.DEATH_WINDOW + 1)
+		Corpse("Unseen Ganker-Realm", "Player-1-0D00E305", nil)
+		ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00E305")
+		assert(ok, tostring(e)); eq(e.points, 0)
+		eq(#w.letters, 4, "nothing paid, no letter")
+		-- The King: no letter from himself, a toast.
+		w.kingLetter = true
+		w.advance(W.DEATH_WINDOW + 1)
+		Corpse("Royal Ganker-Realm", "Player-1-0D00E306", 50)
+		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E306"))
+		eq(#w.letters, 4, "the King: no letter")
+		eq(w.windows.OlympusWantedToast.text.text, ns.L.WANTED_LETTER_TOAST:format(Name("Royal Ganker-Realm"), 100))
+		w.kingLetter = nil
+		-- Once: a reload sends none again; the words still read from the key alone.
+		w.units.target = nil
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted
+		assert(W.Load())
+		eq(#w.letters, 4); eq(W.LetterText(key), text)
+		-- A key that is no Slayer letter's has no words.
+		for _, bad in ipairs({ "wanted@", "wanted@zz~1~1~1~1~1~1~X-Realm", "wanted@0000000000000001~1~1~1~1~1~1", "donor-top-1" }) do
+			eq(W.LetterText(bad), nil, bad); eq(W.LetterTitle(bad), nil, bad)
+		end
+	end)
+end)
+
+test("wanted 1.2.4 notices world: the killer's client knows the whole bounty at the kill (every member's own deaths reached it) and its letter says so; each member he had killed who is online is told at once who avenged him; one offline then is told at his next login (the King's catch-up answer), once", function()
+	WithWorld(function(world)
+		local king = world:Client("Varrick-Realm", "Player-1-0A0000F1", "king")
+		local online = world:Client("Online-Realm", "Player-1-0A0000F2")
+		local away = world:Client("Away-Realm", "Player-1-0A0000F3")
+		local slayer = world:Client("Slayer-Realm", "Player-1-0A0000F4")
+		online.units.player.level, away.units.player.level, slayer.units.player.level = 40, 30, 50
+		local horde = "Player-1-0B0000F1"
+		world.horde[horde] = "Ganker-Realm"
+		local name = ns.DisplayName("Ganker-Realm")
+		local function Die(cl)
+			cl.dead, cl.recap = true, { { event = "SPELL_DAMAGE", sourceGUID = horde, sourceName = "Ganker-Realm", sourceFlags = 0x548,
+				overkill = 90, timestamp = world.epoch - 0.2 } }
+			world:As(cl, cl.events.PLAYER_DEAD)
+			cl.dead, cl.recap = false, nil
+			world:Deliver()
+			world.epoch = world.epoch + 60
+		end
+		Die(online); Die(away)
+		eq(online.windows.OlympusWantedToast.text.text, ns.L.WANTED_DEATH_TOAST:format(name, 40), "the toast on his own client")
+		eq(king.windows.OlympusWantedToast, nil, "on nobody else's")
+		world:Offline(away)
+		-- The slayer kills him: the whole bounty (40 + 30) on his client at the kill.
+		slayer.units.target = { name = "Ganker-Realm", guid = horde, faction = "Horde", level = 60 }
+		local ok, claim = world:As(slayer, slayer.events.PARTY_KILL, slayer.guid, horde)
+		slayer.units.target = nil
+		assert(ok, tostring(claim)); eq(claim.points, 190)
+		world:Deliver()
+		local key = assert(slayer.letters[1], "the slayer's letter")
+		eq(world:As(slayer, slayer.W.LetterText, key), ns.L.WANTED_LETTER:format(name, "60", 2, 70, ns.L.WANTED_LETTER_LEVEL:format(120), 190))
+		-- The member online is told at once; the King and the slayer are not.
+		local told = AvengedShown(online)
+		eq(#told, 1)
+		local words = ns.L.WANTED_AVENGED:format(ns.DisplayName(slayer.name), "Olympus II", name, "")
+		eq(told[1].a, words)
+		eq(#AvengedShown(king), 0); eq(#AvengedShown(slayer), 0)
+		-- The one offline logs in: the King's catch-up answer brings the kill, and his notice. (A
+		-- reviewer's relay names no guild, WK~C: the words name the avenger's where this client heard
+		-- it, Moderation.GuildOf, and leave it out here.)
+		world:Load(away)
+		world:Run(away.W.GLOBAL_ASK_FIRST + 30)
+		eq(#world:As(away, away.W.Target, nil, horde).claims, 1, "the kill caught up")
+		eq(#AvengedShown(away), 0, "nothing in the first NOTICE_LOGIN after login (the privacy page's, the update letter's)")
+		world:Run(away.W.Bounty.NOTICE_LOGIN)
+		told = AvengedShown(away)
+		eq(#told, 1, "told at his next login")
+		eq(told[1].a, ns.L.WANTED_AVENGED_NOGUILD:format(ns.DisplayName(slayer.name), name, ""))
+		told[1].shown = false
+		-- Another login: nothing again.
+		world:Load(away)
+		world:Run(away.W.GLOBAL_ASK_FIRST + 30 + away.W.Bounty.NOTICE_LOGIN)
+		eq(#AvengedShown(away), 1, "once")
+		eq(#AvengedShown(online), 1)
 	end)
 end)
 

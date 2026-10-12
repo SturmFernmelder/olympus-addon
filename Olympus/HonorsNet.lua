@@ -336,6 +336,12 @@ local CLASS_FILE = { warrior = "WARRIOR", paladin = "PALADIN", hunter = "HUNTER"
 local RACE_ID = { human = 1, orc = 2, dwarf = 3, nightelf = 4, undead = 5, tauren = 6, gnome = 7, troll = 8 }
 function H.TitleText(key)
 	if type(key) ~= "string" then return nil end
+	-- (1.2.4: the Most Wanted Slayer letter's family, "wanted@": its title is Wanted.lua's, read
+	-- from its key alone, Wanted.LetterTitle.)
+	if key:find("^wanted@") then
+		local W = ns.Wanted
+		return type(W) == "table" and not W.missing and type(W.LetterTitle) == "function" and W.LetterTitle(key) or nil
+	end
 	local fixed = L.HONOR_TITLES and L.HONOR_TITLES[key]
 	if fixed then return fixed end
 	local base, place = key:match("^(.-)%-([23])$")
@@ -1329,6 +1335,13 @@ function H.LetterFamily(key)
 end
 -- The letter's words: the King's, naming the honour and its title (never a real name).
 function H.LetterText(key)
+	-- (1.2.4: the Slayer letter's words, and its title, are Wanted.lua's, from its key alone:
+	-- Wanted.LetterText. It is queued, shown once and kept to read again as every letter is.)
+	if type(key) == "string" and key:find("^wanted@") then
+		local W = ns.Wanted
+		if type(W) == "table" and not W.missing and type(W.LetterText) == "function" then return W.LetterText(key) end
+		return nil
+	end
 	local family = H.LetterFamily(key)
 	local fmt = family and L.HONOR_LETTER and L.HONOR_LETTER[family]
 	if not fmt then return nil end
