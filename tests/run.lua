@@ -599,14 +599,16 @@ test("1.1.5 Census and Realm default guild order puts OLYMPUS first on a size ti
 		eq(table.concat(realmRows, ","), "OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Alpha Olympus,Beta Olympus,Olympus Old",
 			"the Realm uses the same default order")
 
-		-- A Members click the other way is the plain column: smallest first, a tie by name.
+		-- A Members click the other way is the plain column: smallest first, no standard-bearer.
+		-- (Changed on purpose, 1.2.4, the author's ask: a tie goes to the higher average level
+		-- first, whichever way the column runs, then the name; before, to the name alone.)
 		ns.Views.SortBy("members")
 		guildRows = {}
 		for _, line in ipairs(ns.Views.Build("census")) do
 			if line.cols then guildRows[#guildRows + 1] = line.cols[1] end
 		end
-		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,OLYMPUS,Olympus II,Olympus III,Olympus Old",
-			"an ascending Members sort keeps its header's meaning")
+		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,Olympus III,Olympus II,OLYMPUS,Olympus Old",
+			"an ascending Members sort keeps its header's meaning, a tie by average level")
 	end)
 	ns.rdb.guilds, ns.rdb.seen, ns.Views.sort, ns.UI, ns.rdb.realmKey = savedGuilds, savedSeen, savedSort, savedUI, savedKey
 	if not ok then error(err, 0) end
@@ -1537,6 +1539,19 @@ test("map refresh runs end to end with a map library (continent totals included)
 	GameTooltip = savedTip
 	assert(okTip, errTip)
 	assert(table.concat(tip, "\n"):find(ns.Answers.Find("count-map-zones").text, 1, true), table.concat(tip, "\n"))
+	-- 1.2.4: its guilds, as many soldiers there, the higher average level first, then the name (no
+	-- tie-break before: the order the table gave).
+	ns.rdb.guilds = { ["Olympus Low"] = { total = 50, avgLevel = 20, t = os.time() }, ["Olympus High"] = { total = 50, avgLevel = 50, t = os.time() },
+		["Olympus Many"] = { total = 50, avgLevel = 10, t = os.time() } }
+	rawset(pin, "guilds", { ["Olympus Low"] = 4, ["Olympus High"] = 4, ["Olympus Many"] = 9, ["Olympus Unknown"] = 4, ["Olympus Also"] = 4 })
+	tip = {}
+	GameTooltip = setmetatable({ AddLine = function() end,
+		AddDoubleLine = function(_, a, b) tip[#tip + 1] = tostring(a) .. " " .. tostring(b) end }, { __index = function() return function() end end })
+	okTip, errTip = pcall(pin.scriptOnEnter, pin)
+	GameTooltip = savedTip
+	ns.rdb.guilds = {}
+	assert(okTip, errTip)
+	eq(table.concat(tip, ","), "Olympus Many 9,Olympus High 4,Olympus Low 4,Olympus Also 4,Olympus Unknown 4")
 end)
 
 ---------------------------------------------------------------------------
@@ -4886,7 +4901,8 @@ test("census: guilds only seen with /who are grey rows after the reported ones",
 		eq(lines[3].cols[3], Grey("30")); eq(lines[3].dim, nil)
 		eq(lines[4].cols[1], Grey("OLYMPUS VII")); eq(lines[4].cols[2], Grey("?"))
 		eq(lines[4].cols[3], Grey("12+"), "capped: at least")
-		eq(lines[4].cols[4], Grey(L.NO_ADDON))
+		-- (Changed on purpose, 1.2.4: the average level's column before the Lord's, unknown too.)
+		eq(lines[4].cols[4], Grey("?"), "no average level known"); eq(lines[4].cols[5], Grey(L.NO_ADDON))
 		eq(lines[5].text, Grey(L.SEEN_HINT)); eq(#lines, 5)
 		local tip = {}
 		local tt = { AddLine = function(_, text) tip[#tip + 1] = text end,
@@ -34161,8 +34177,9 @@ test("1.1 census search (Fern #16): 'recruiting' lists every guild with room, th
 			names[#names + 1] = Fern.Bare(lines[i].text) .. " " .. Fern.Bare(lines[i].right)
 		end
 		-- Olympus (990) and Olympus II (500) of SampleGuilds count too; Olympus R8 is full.
+		-- (Changed on purpose, 1.2.4: a guild's average level after its free slots, where its report has one.)
 		eq(table.concat(names, ","), "<Olympus R6> 500 free,<Olympus R1> 900 free,<Olympus R2> 800 free,<Olympus R3> 700 free,<Olympus R4> 600 free,"
-			.. "<Olympus R5> 550 free,<Olympus II> 500 free,<Olympus R7> 50 free,<Olympus> 10 free", "all nine, not five")
+			.. "<Olympus R5> 550 free,<Olympus II> 500 free,<Olympus R7> 50 free,<Olympus> 10 free  (avg lvl 14.0)", "all nine, not five")
 		assert(lines[at + 1].text:find("LeaderIcon", 1, true), "the gates' guild wears the crown")
 		eq(head.right, "|cff9d9d9d" .. ns.L.SEARCH_RECRUITING_COUNT:format(9) .. "|r")
 		-- At least 600 free.
@@ -60589,7 +60606,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
 		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-view", "church-head", "department-access", "watch-council-view", "innkeeper-arrow", "squads", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
-		"chat-channel-links", "perf", "roster" }
+		"chat-channel-links", "perf", "roster", "census-avg-level" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -60599,6 +60616,7 @@ for _, name in ipairs(focused) do
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
+		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,

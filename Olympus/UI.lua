@@ -1040,7 +1040,8 @@ local function CreateMain(style)
 	f.colHeader:SetHeight(g.header.h)
 	if f.listBox then f.colHeader:SetFrameLevel(f.listBox:GetFrameLevel() + 2) end
 	f.colHeader.buttons = {}
-	for c = 1, 4 do
+	-- (1.2.4: five, the Census's average level among them; a layout of four hides the fifth.)
+	for c = 1, ns.Views.MAX_COLS or 4 do
 		local b = ColumnHeader(f, c)
 		b:SetHeight(g.header.h)
 		b:SetScript("OnClick", function(self)

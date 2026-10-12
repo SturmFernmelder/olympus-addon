@@ -1556,11 +1556,8 @@ local function TableLines(lines, q)
 	local own = GetGuildInfo("player")
 	if own and ns.IsFederation(own) and not seen[own:lower()] then rows[#rows + 1] = { name = own, paid = 0, copper = 0, payers = 0 } end
 	for _, r in ipairs(rows) do r.members = Dues.Members(r.name) end
-	table.sort(rows, function(a, b)
-		if a.copper ~= b.copper then return a.copper > b.copper end
-		if (a.members or 0) ~= (b.members or 0) then return (a.members or 0) > (b.members or 0) end
-		return a.name < b.name
-	end)
+	-- (1.2.4: as much paid by as many members, the higher average level first, then the name.)
+	ns.Data.SortGuildCounts(rows, "copper", "members")
 	local shown = 0
 	for _, r in ipairs(rows) do
 		if ns.Holds(q, r.name) then

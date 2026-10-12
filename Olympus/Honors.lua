@@ -733,8 +733,10 @@ function Honors.GuildRanking(rows, opts)
 			if guild and fresh and leader and members and members == floor(members) and members >= Honors.GUILD_MIN_MEMBERS
 				and avg and avg >= 1 and avg <= Honors.MAX_LEVEL and not (skip and skip(guild, r)) then
 				-- To the tenth, as the census carries it (Codec: avgLevel10): no tie lost to a rounding.
-				list[#list + 1] = { guild = guild, leader = leader, members = members, avgLevel = floor(avg * 10 + 0.5) / 10,
-					tenths = floor(avg * 10 + 0.5) }
+				-- (1.2.4: cut down as the census carries it and shows it, Data.AvgTenths, not rounded:
+				-- our own guild's unrounded 47.96 ranked as 48.0 on our client, 47.9 on every other.)
+				local tenths = floor(avg * 10 + 1e-6)
+				list[#list + 1] = { guild = guild, leader = leader, members = members, avgLevel = tenths / 10, tenths = tenths }
 			end
 		end
 	end

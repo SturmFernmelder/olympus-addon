@@ -732,10 +732,73 @@ function Data.AuthorizedRank(sender, guild)
 	return rank, rank ~= nil and "signed" or "enforced"
 end
 
+-- 1.2.4 (the author's ask: the average level shown and sorted everywhere guilds are listed, and
+-- one of the first tie-breaks, a guild master's charge). A guild's average level as every client
+-- shows and ranks it, in tenths: a report carries it so, cut down (Codec: math.floor(avgLevel * 10)),
+-- and our own guild's, from our roster unrounded, is cut the same way here, so that this client
+-- and every other show and order it alike (it was 48.0 in our own tooltip for a 47.96 the others
+-- heard as 47.9). None (nil): no report yet, a report of a version that sent none (0), or what no
+-- guild can have, under level 1 or over the game's highest level (a malformed or forged report:
+-- the field reads up to 1000.0).
+Data.AVG_LEVEL_MAX = 60 -- the highest level when the game gives none (GetMaxPlayerLevel)
+local maxLevel
+local function MaxLevel()
+	if maxLevel then return maxLevel end
+	if type(GetMaxPlayerLevel) == "function" then
+		local ok, v = pcall(GetMaxPlayerLevel)
+		v = ok and tonumber(v)
+		if v and v >= 1 and v <= 255 and v == math.floor(v) then
+			maxLevel = v
+			return v
+		end
+	end
+	return Data.AVG_LEVEL_MAX
+end
+function Data.AvgTenths(g)
+	local v = type(g) == "table" and tonumber(g.avgLevel) or nil
+	if not v or v ~= v then return nil end
+	local tenths = math.floor(v * 10 + 1e-6) -- (1e-6: a report's 47.9 times 10 is 479, never 478.99...)
+	if tenths < 10 or tenths > MaxLevel() * 10 then return nil end
+	return tenths
+end
+-- As the rows show it, one decimal with the language's mark ("47.9", "47,9"); nil for none.
+function Data.AvgLevelText(g)
+	local tenths = Data.AvgTenths(g)
+	if not tenths then return nil end
+	return ("%d%s%d"):format(math.floor(tenths / 10), L.DECIMAL_MARK or ".", tenths % 10)
+end
+-- A guild's tenths by its name, from the census kept (0 for none: lowest), for the lists that
+-- hold names alone (a zone's guilds, the map's pins, the Throne's inspection, the dues).
+function Data.AvgTenthsOf(name)
+	return Data.AvgTenths(Data.Guild(name)) or 0
+end
+-- The lists of guilds by a count of theirs (free slots, soldiers in a zone, players inspected,
+-- dues paid), sorted in place: the larger first by each count named in turn; then, all alike, the
+-- higher average level first (1.2.4), then the name, so the order is the same every time. `rows`:
+-- { name = <guild>, [count] = n, ... } each, its census entry as `e` where it has one (Data.Summary's:
+-- read from it, else from the census kept by its name); each row gets its tenths as `avg` (0 for none).
+function Data.SortGuildCounts(rows, ...)
+	local counts = { ... }
+	for _, r in ipairs(rows) do
+		local g = type(r.e) == "table" and r.e.g or nil
+		r.avg = (g and (Data.AvgTenths(g) or 0)) or Data.AvgTenthsOf(r.name)
+	end
+	table.sort(rows, function(a, b)
+		for _, k in ipairs(counts) do
+			local na, nb = tonumber(a[k]) or 0, tonumber(b[k]) or 0
+			if na ~= nb then return na > nb end
+		end
+		if a.avg ~= b.avg then return a.avg > b.avg end
+		return tostring(a.name) < tostring(b.name)
+	end)
+	return rows
+end
+
 -- The shared default order of guilds in the Census and the Realm. A current report stays
 -- ahead of an old one; the army's largest guild comes first. If two guilds are the same size,
--- the exact <OLYMPUS> is the standard-bearer, then the higher average level breaks the next
--- tie. Names make the final order deterministic when a report has no average level yet.
+-- the exact <OLYMPUS> is the standard-bearer (1.1.5), then the higher average level breaks the
+-- next tie (1.2.4: in tenths, Data.AvgTenths, as every client has it). Names make the final order
+-- deterministic when a report has no average level yet.
 -- (Each name is folded once, not at every comparison of every sort: the Realm's search keeps
 -- its folds to the text typed.)
 local guildSortNames, guildSortNamesCount = {}, 0
@@ -756,7 +819,7 @@ function Data.GuildDefaultLess(a, b)
 	local nameA, nameB = GuildSortName(a.name), GuildSortName(b.name)
 	local olympusA, olympusB = nameA == "olympus", nameB == "olympus"
 	if olympusA ~= olympusB then return olympusA end
-	local levelA, levelB = tonumber(a.g.avgLevel) or 0, tonumber(b.g.avgLevel) or 0
+	local levelA, levelB = Data.AvgTenths(a.g) or 0, Data.AvgTenths(b.g) or 0
 	if levelA ~= levelB then return levelA > levelB end
 	if nameA ~= nameB then return nameA < nameB end
 	return a.name < b.name
@@ -886,11 +949,13 @@ function Data.DiscordText()
 	end
 	if #where > 0 then out[#out + 1] = L.DISCORD_WHERE .. table.concat(where, " · ") end
 	out[#out + 1] = "```"
-	out[#out + 1] = ("%-22s %7s %7s  %s"):format("Guild", "Members", "Online", "Leader")
+	-- (1.2.4: each guild's average level too, "-" for none, as the Census's column.)
+	out[#out + 1] = ("%-22s %7s %7s %7s  %s"):format("Guild", "Members", "Online", "Avg lvl", "Leader")
 	for _, e in ipairs(s.guilds) do
 		local g = e.g
 		local leader = g.leader and (D(g.leader, true) .. (g.leaderOnline and " (on)" or "")) or "?"
-		out[#out + 1] = ("%-22s %7s %7s  %s%s"):format(D(e.name, true), F(g.total), F(g.online), leader, e.fresh and "" or "  [stale]")
+		out[#out + 1] = ("%-22s %7s %7s %7s  %s%s"):format(D(e.name, true), F(g.total), F(g.online), Data.AvgLevelText(g) or "-", leader,
+			e.fresh and "" or "  [stale]")
 	end
 	out[#out + 1] = "```"
 	out[#out + 1] = ("_Olympus addon v%s_"):format(ns.VERSION)

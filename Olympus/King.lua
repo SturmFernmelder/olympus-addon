@@ -1438,9 +1438,10 @@ function King.InspectionLines()
 		local left = inspect.t + King.INSPECT_TIME + 10 - ns.Now()
 		if left > 0 then lines[#lines + 1] = { indent = 1, text = Gold(L.THRONE_INSPECT_RUNNING:format(math.ceil(left))) } end
 		lines[#lines + 1] = { indent = 1, text = L.THRONE_INSPECT_SUMMARY:format(reporters, total, pct) }
+		-- (1.2.4: as many inspected, the higher average level first, then the name: one order every time.)
 		local guilds = {}
 		for guild, g in pairs(byGuild) do guilds[#guilds + 1] = { name = guild, ok = g.ok, n = g.ok + g.bad } end
-		table.sort(guilds, function(a, b) return a.n > b.n end)
+		ns.Data.SortGuildCounts(guilds, "n")
 		for _, g in ipairs(guilds) do
 			lines[#lines + 1] = { indent = 2, text = Green("<" .. g.name .. ">"),
 				right = ("%d%%  (%d/%d)"):format(g.n > 0 and math.floor(g.ok * 100 / g.n + 0.5) or 0, g.ok, g.n) }
