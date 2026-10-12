@@ -1346,6 +1346,8 @@ end
 -- (The owner's decision, 2026-10-04: every pending conversation opens its own tab on the Chat page,
 -- the Olympus window in front, kept while the matter is open, reopened from the matter's page.
 -- Before it a claim opened nothing, and a tab removed from a finished deal never came back.)
+-- (1.2.3: on the requester's side, only into the Olympus window he has open; both windows are open
+-- here, ChatHost's default. The test below closes the requester's.)
 test("1.2 craft requests: the claim won opens the deal's own tab on both parties' clients with the Olympus window in front; its page reopens it, a removed tab too; a fight holds it until the end", function()
 	local w = World.New()
 	local a, b = Cast(w)
@@ -1385,6 +1387,53 @@ test("1.2 craft requests: the claim won opens the deal's own tab on both parties
 	assert(a.Craft.Cancel(r3.id, "")); w:Run(0)
 	CH.CombatOver(w, a)
 	eq(#ha.calls, 0, "a deal over before the fight ended opens nothing")
+	NoErrors(w)
+end)
+
+-- (1.2.3, the King's stream: "the Olympus window opened by itself", a minute or two after his login.
+-- A request of his from the last three days, published again after the login, claimed by another
+-- member: his client showed the closed window on the deal's room, with no click or key of his.)
+test("1.2.3 craft requests: another member's claim never opens the requester's closed Olympus window, after an instance or a fight too: his line and the deal's tab tell him, its page opens it; the crafter who claimed still gets the room", function()
+	local w = World.New()
+	local a, b = Cast(w)
+	local ha, hb = ChatHost(a), ChatHost(b)
+	local L = a.ns.L
+	local r = K.Request(w, a, ITEM, "Mooncloth", 1)
+	ha.shown = false -- (the requester closed the Olympus window)
+	assert(b.Craft.Accept(r.id)); w:Run(0)
+	eq(K.Rec(w, a, r.id).state, "accepted", "the claim is his crafter's")
+	eq(#ha.calls, 0, "the requester's window stays closed")
+	eq(ha.shown, false)
+	local said = L.CRAFT_REQUEST_ACCEPTED_ALERT:format(w:As(a, a.ns.DisplayName, b.name), "Mooncloth")
+	assert(Printed(a, said), "his chat line tells him: " .. said)
+	local room = "craft:" .. r.id
+	assert(Tabbed(a, room), "the deal's tab waits on his Chat page")
+	eq(table.concat(hb.calls, ","), "open,select " .. room .. ",raise", "the crafter, who just claimed it: as before")
+	-- His click on the request's page: the window, on the deal's room.
+	assert(a.Craft.OpenChat(r.id), "its page opens it")
+	eq(table.concat(ha.calls, ","), "open,select " .. room .. ",raise")
+	-- In an instance, then out of it with the window closed: still closed.
+	w:Run(61)
+	local r2 = K.Request(w, a, ITEM, "Mooncloth", 2)
+	ha.calls, ha.shown = {}, false
+	a.instance = true
+	assert(b.Craft.Accept(r2.id)); w:Run(0)
+	a.instance = nil
+	w:Run(10) -- (the held alerts' look)
+	eq(#ha.calls, 0, "out of the instance: still closed")
+	-- In a fight, then its end: still closed.
+	w:Run(61)
+	local r3 = K.Request(w, a, ITEM, "Mooncloth", 3)
+	a.combat = true
+	assert(b.Craft.Accept(r3.id)); w:Run(0)
+	CH.CombatOver(w, a)
+	eq(#ha.calls, 0, "the fight over: still closed")
+	-- The window open: the next deal's room comes by itself, as before.
+	w:Run(61)
+	local r4 = K.Request(w, a, ITEM, "Mooncloth", 4)
+	ha.shown = true
+	assert(b.Craft.Accept(r4.id)); w:Run(0)
+	eq(table.concat(ha.calls, ","), "open,select craft:" .. r4.id .. ",raise", "into his open window")
 	NoErrors(w)
 end)
 

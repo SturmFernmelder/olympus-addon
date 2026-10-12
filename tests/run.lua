@@ -52621,6 +52621,54 @@ do
 		end)
 	end)
 
+	-- (1.2.3, the King's stream: "the Olympus window opened by itself", a minute or two after his
+	-- login. The door above was the one way it could with no click or key of his: another member's
+	-- claim on a request of his, published again after the login, showed the closed window on the
+	-- deal's room. The requester's side, Requests.OpenChat's ifOpen, comes only into the window he
+	-- has open; a match found for a search of his own, or the claim a crafter just made, as before.)
+	test("1.2.3 pending conversations: another member's claim never opens the requester's closed Olympus window, after an instance too; his click on the request's page still opens the room, and with the window open the room still comes to the front", function()
+		WithWindow(function(w)
+			local wasArenaChat, wasRaise, wasCraft, wasInstance = ns.ArenaChat, rawget(Widget, "Raise"), ns.rdb.craftRequests, IsInInstance
+			local wasSound = ns.PlayAlert
+			local raised, sounds = {}, {}
+			Widget.Raise = function(self) raised[#raised + 1] = self end
+			ns.PlayAlert = function(_, kind) sounds[#sounds + 1] = tostring(kind) end
+			ns.ArenaChat = { Open = function(id) return { id = id } end, Close = function() end,
+				Lines = function() return {} end, Send = function() return true end }
+			local ok, err = pcall(function()
+				local now = ns.Now()
+				ns.rdb.craftRequests = { records = { c1os = { id = "c1os", requester = ns.me, crafter = "Wren Thistle-Realm", state = "accepted",
+					itemName = "Mooncloth", itemID = 14342, quantity = 1, details = "", created = now, updated = now, guild = "Olympus II" } }, invites = {} }
+				w.UI.SelectTab("census")
+				local main = OlympusFrame
+				main:Hide()
+				-- The claim won while the window is closed (WinClaim's Requests.OpenChat(id, true, true)).
+				local pane, why = ns.CraftRequests.OpenChat("c1os", true, true)
+				eq(pane, false, "nothing opened by itself"); eq(why, "closed")
+				eq(main:IsShown(), false, "the window stays closed")
+				eq(#raised, 0)
+				eq(sounds[#sounds], "craft", "its sound still tells it")
+				-- Held in an instance, then out of it with the window still closed: still closed.
+				IsInInstance = function() return true end
+				eq(select(2, ns.CraftRequests.OpenChat("c1os", true, true)), "held")
+				IsInInstance = wasInstance
+				ns.ReleaseHeld()
+				eq(main:IsShown(), false, "the held alert shown: the window still closed")
+				-- His own click (the request's page): the window, on the deal's room.
+				assert(ns.CraftRequests.OpenChat("c1os"), "his click opens it")
+				eq(main:IsShown(), true); eq(main.tab, "chat"); eq(w.CW.Tier(), "craft:c1os")
+				-- The window open on another page: the deal's room comes to the front by itself, as before.
+				w.UI.SelectTab("realm")
+				local before = #raised
+				assert(ns.CraftRequests.OpenChat("c1os", true, true), "into his open window")
+				eq(main.tab, "chat"); eq(w.CW.Tier(), "craft:c1os"); eq(raised[#raised], main); eq(#raised, before + 1)
+			end)
+			ns.ArenaChat, Widget.Raise, ns.rdb.craftRequests, IsInInstance, ns.PlayAlert = wasArenaChat, wasRaise, wasCraft, wasInstance, wasSound
+			ns.ResetHeld()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
 	-- (Review of the door: the pins it made lived for the session alone and never heard the
 	-- player's own pin button, so after a reload its pin passed for his and was never taken back, and
 	-- his own pin of a room it had pinned was taken at the end; and a room it opened by itself was

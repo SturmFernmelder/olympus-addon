@@ -947,7 +947,8 @@ Requests.Publish = Publish
 -- A line and the "craft" sound switch's soft sound, as a treasury donation is told: never a window
 -- or a tab that opens by itself (ns.Alert's show would switch the player's page at once). The one
 -- exception is the deal's own room once a claim is won (Requests.OpenChat: the owner's pattern for
--- every pending conversation, ChatRooms.OpenMatter).
+-- every pending conversation, ChatRooms.OpenMatter), on the requester's side only into the Olympus
+-- window he has open (1.2.3).
 local function Notify(r, text)
 	if not Bucket(alertTimes, "alerts", 600, 5) then return end
 	ns.Print(text)
@@ -1156,7 +1157,9 @@ local function WinClaim(r, crafter, guild, nonce)
 	SendPrivate(r, "accepted", r.rev, nonce)
 	Notify(r, L.CRAFT_REQUEST_ACCEPTED_ALERT:format(ns.DisplayName(crafter), r.itemName))
 	Changed()
-	ns.SafeCall("craft request room", Requests.OpenChat, r.id, true)
+	-- (1.2.3: another member's claim is no click of the requester's, hours after his request maybe:
+	-- its room comes only into the Olympus window he has open, Requests.OpenChat's ifOpen.)
+	ns.SafeCall("craft request room", Requests.OpenChat, r.id, true, true)
 	return true
 end
 
@@ -3718,9 +3721,10 @@ end
 -- The deal's own room, as every pending conversation opens (ChatRooms.OpenMatter): its tab on the
 -- Chat page with the Olympus window in front. By itself (`auto`) once a claim is won, on both
 -- parties' clients (in an instance or Busy, a fight, or while the player writes in the Chat page's
--- box, it waits; its sound, the "craft" switch's); then from the request's page, where a tab the
--- player removed comes back.
-function Requests.OpenChat(id, auto)
+-- box, it waits; its sound, the "craft" switch's); `ifOpen` (1.2.3, the requester's: another
+-- member's claim), only into the Olympus window he has open, never opening it; then from the
+-- request's page, where a tab the player removed comes back.
+function Requests.OpenChat(id, auto, ifOpen)
 	local r = Requests.Get(id)
 	if not r or not Mine(r) or not r.crafter then return false, "state" end
 	local R = rawget(ns, "ChatRooms")
@@ -3729,7 +3733,8 @@ function Requests.OpenChat(id, auto)
 		r.chatRemoved = nil
 		ns.Fire("CHAT_ROOMS_CHANGED")
 	end
-	return R.OpenMatter({ room = RoomId(id), auto = auto == true, kind = "craft", live = function() return Active(Requests.Get(id)) == true end })
+	return R.OpenMatter({ room = RoomId(id), auto = auto == true, ifOpen = auto == true and ifOpen == true, kind = "craft",
+		live = function() return Active(Requests.Get(id)) == true end })
 end
 function Requests.RemoveChat(id)
 	local r = Requests.Get(id)
