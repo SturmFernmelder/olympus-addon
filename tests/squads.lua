@@ -396,3 +396,48 @@ test("Squads: malformed saved chat lines and seen maps fail closed without overw
 		end
 	end)
 end)
+-- 1.2.3 (the author's measure on his game: each redraw of the Chat tab made 2.5 MB of garbage, most of
+-- it here): ChatRooms asks every provider about every room id it is given, the Olympus channels',
+-- the race, class, guild and role rooms' too, a few hundred times a redraw of the tab's destinations,
+-- and each ask read the squads' leaders again (in the King's guild, the signed council list parsed
+-- and each councillor's name checked). An id that is not a squad's reads none; the Roles menu reads
+-- them once, and offers what each room's own checks (CanAccess, ChatInfo) say.
+test("Squads (1.2.3): a room id that is not a squad's reads no leaders; the Roles menu reads them once and offers what each room's own checks say", function()
+	World(function(w, s)
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		eq(s.Replace("OtherLeader", { "Soldier2", "Soldier3" }), true)
+		local room = s.Get("Leader").room
+		local reads, leaders = 0, s.Leaders
+		s.Leaders = function(...) reads = reads + 1; return leaders(...) end
+		local ok, err = pcall(function()
+			local p = w.provider
+			for _, id in ipairs({ "guild", "race:human", "class:WA", "council", "secretariat", "dept:war", "masters", "craft:d00r",
+				"arena:x", "squad", "A" }) do
+				eq(p.Info(id), nil, id); eq(p.CanAccess(id, "Leader"), false, id); eq(p.IsOpen(id), false, id); eq(p.Select(id), false, id)
+			end
+			eq(reads, 0, "no leaders read for another room's id")
+			eq(p.Info(room).id, room, "its own room still found")
+			assert(reads > 0, "(its own room reads them)")
+			for _, me in ipairs({ "Officer-Realm", "Leader-Realm", "OtherLeader-Realm", "Soldier1-Realm", "Soldier3-Realm", "Outsider-Realm" }) do
+				w.c.me = me
+				-- Each room's own checks, as the menu asked them before.
+				local want = {}
+				for _, e in ipairs(leaders()) do
+					if s.CanAccess(e.room) then
+						local info = s.ChatInfo(e.room)
+						want[#want + 1] = table.concat({ info.id, info.kind, info.scope, info.label }, " ")
+					end
+				end
+				reads = 0
+				local got = {}
+				for _, info in ipairs(p.Options("role")) do got[#got + 1] = table.concat({ info.id, info.kind, info.scope, info.label }, " ") end
+				eq(reads, 1, me .. ": the leaders read once")
+				eq(table.concat(got, ", "), table.concat(want, ", "), me .. ": the rooms offered")
+			end
+			w.c.me = "Leader-Realm"; w.preview = true
+			eq(#p.Options("role"), 0, "a preview offers none, as before")
+		end)
+		s.Leaders = leaders
+		if not ok then error(err, 0) end
+	end)
+end)

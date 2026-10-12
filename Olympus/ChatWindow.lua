@@ -50,7 +50,9 @@ local L = ns.L
 -- Nothing is drawn while the tab is hidden: a change marks it dirty and it redraws at most every
 -- 0.2 s while shown (the census at most every 5 s); 1.2.1: after a slow redraw, ten times what it
 -- cost (up to 5 s, ChatWindow.RedrawGap), and a bubble whose look did not change is only moved
--- (Bubble, ChatWindow.SameLook, ChatWindow.KeepBubbles).
+-- (Bubble, ChatWindow.SameLook, ChatWindow.KeepBubbles). 1.2.3: what each line shows, the
+-- destinations' rooms and the history read are worked out once an era and kept (ChatWindow.era,
+-- ChatWindow.ViewOf, ChatWindow.NavItems): a redraw for a line that came reads them again.
 
 local ChatWindow = {}
 ns.ChatWindow = ChatWindow
@@ -122,6 +124,45 @@ local syncing = false
 local DrawMatchContext       -- built below with the tab's ordinary button helper
 ChatWindow.requestMinute = nil
 
+---------------------------------------------------------------------------
+-- 1.2.3 (the author's measure on his game with 1.2.2: each redraw of the tab made about 2.5 MB of
+-- garbage, one redraw every second or two while it showed a busy channel, and the Lua heap's peaks
+-- were his worry; "the addon must not hurt the game"): what the tab draws from more than the
+-- lines themselves is worked out once an era and kept until the next. That is each line's look
+-- (ChatWindow.ViewOf: its words made safe to show, the block terms' verdict, its writer's name with
+-- the High Council's colour, the Treasurer's coin and the Stewards' and Hands' tags, the whisper's
+-- name), whom a moderator's word takes out of the history (Channels.History's memo), the rooms the
+-- destinations offer (ChatWindow.NavItems) and the rooms' own descriptions (ChatWindow.Logical).
+-- A new era starts with every change the tab hears of but a line come or a note (a setting, the
+-- block terms, a moderator's word, the council's names masked or shown, a room picked, opened or
+-- gone, a click, the opening), with the census's own redraw (DATA_CHANGED, which the King's lists,
+-- the council's, the Treasurer's and the alts fire too: as before, at most every DATA_GAP), and
+-- whenever ERA_MAX seconds went by: nothing drawn rests on anything older. A redraw for lines
+-- that came (the throttled one, OnUpdate) keeps the era it is in; any other starts one.
+---------------------------------------------------------------------------
+ChatWindow.era, ChatWindow.eraAt, ChatWindow.ERA_MAX = 0, -math.huge, DATA_GAP
+ChatWindow.views = setmetatable({}, { __mode = "k" })   -- history entry -> what it shows (ViewOf)
+ChatWindow.offMemo = setmetatable({}, { __mode = "k" }) -- history entry -> its writer hidden by a word (this era)
+ChatWindow.logicalOf = {}                                 -- room id -> ChatRooms.Info's (this era), false for none
+function ChatWindow.Wipe(t)
+	for k in pairs(t) do t[k] = nil end
+	return t
+end
+function ChatWindow.NewEra()
+	ChatWindow.era = ChatWindow.era + 1
+	ChatWindow.eraAt = GetTime and GetTime() or 0
+	ChatWindow.Wipe(ChatWindow.offMemo)
+	ChatWindow.Wipe(ChatWindow.logicalOf)
+	if ChatWindow.nameOf then ChatWindow.Wipe(ChatWindow.nameOf); ChatWindow.Wipe(ChatWindow.tellOf) end
+	ChatWindow.navCache = nil
+end
+-- The era a redraw draws in: a new one when ERA_MAX went by (or the clock went back).
+function ChatWindow.Era()
+	local now = GetTime and GetTime() or 0
+	if now - ChatWindow.eraAt >= ChatWindow.ERA_MAX or now < ChatWindow.eraAt then ChatWindow.NewEra() end
+	return ChatWindow.era
+end
+
 local function Grey(s) return GREY .. s .. "|r" end
 local function Gold(s) return "|cffffd200" .. s .. "|r" end
 local function Green(s) return "|cff40ff40" .. s .. "|r" end
@@ -135,9 +176,20 @@ function ChatWindow.Localized(key, fallback)
 	return type(value) == "string" and value ~= key and value or fallback
 end
 local function Dynamic(t) return type(t) == "string" and dynamicRooms[t] or nil end
+-- (1.2.3: kept for the era, ChatWindow.logicalOf. ChatRooms.Info makes a new description at each
+-- call and asks every provider of private rooms about the id first: the tab asked it a few
+-- hundred times a redraw, and every 0.2 s while it showed.)
 function ChatWindow.Logical(t)
 	local R = ns.ChatRooms
-	return type(t) == "string" and type(R) == "table" and type(R.Info) == "function" and R.Info(t) or nil
+	if type(t) ~= "string" or type(R) ~= "table" or type(R.Info) ~= "function" then return nil end
+	local known = ChatWindow.logicalOf
+	if ChatWindow.logicalFrom ~= R.Info then ChatWindow.Wipe(known); ChatWindow.logicalFrom = R.Info end
+	local info = known[t]
+	if info == nil then
+		info = R.Info(t) or false
+		known[t] = info
+	end
+	return info or nil
 end
 local function Label(t)
 	local r = Dynamic(t)
@@ -147,16 +199,20 @@ local function Label(t)
 	local d = ns.Channels.TIERS[t]
 	return d and L[d.label] or "?"
 end
+-- (1.2.3: the same tables each time, read only: every bubble asks.)
+ChatWindow.SCOPE_COLOURS = { guild = { 0.35, 0.82, 0.45 }, restricted = { 0.72, 0.55, 0.92 }, other = { 0.40, 0.72, 0.95 },
+	none = { 1, 1, 1 } }
 local function Colour(t)
 	if Dynamic(t) then return ROOM_COLOUR end
 	local logical = ChatWindow.Logical(t)
+	local colours = ChatWindow.SCOPE_COLOURS
 	if logical then
-		if logical.scope == "guild" then return { 0.35, 0.82, 0.45 } end
-		if logical.scope == "restricted" then return { 0.72, 0.55, 0.92 } end
-		return { 0.40, 0.72, 0.95 }
+		if logical.scope == "guild" then return colours.guild end
+		if logical.scope == "restricted" then return colours.restricted end
+		return colours.other
 	end
 	local d = ns.Channels.TIERS[t]
-	return d and d.color or { 1, 1, 1 }
+	return d and d.color or colours.none
 end
 local function Hex(c)
 	local function B(v) return math.floor(math.max(0, math.min(1, v)) * 255 + 0.5) end
@@ -263,6 +319,8 @@ local function PutTabLineAway()
 end
 
 local function MarkDirty() dirty = true end
+-- (1.2.3) A change the lines' looks may rest on: a new era (ChatWindow.era), and a redraw.
+function ChatWindow.Changed() ChatWindow.NewEra(); dirty = true end
 
 function ChatWindow.SaveDraft()
 	if not frame or not tier or not frame.input then return end
@@ -288,13 +346,16 @@ local function Choices()
 	return out
 end
 
+-- Whether `key` is one of them now (or one of the logical rooms this character may open). 1.2.3: a
+-- yes or no, no table (the tab's ticker asks every 0.2 s); a preview only blocks a restricted room
+-- (ChatRooms.PreviewOnly), asked of no other.
 local function Choice(key)
-	if ns.Channels.TIERS[key] and ns.Channels.CanUse(key) then return { key = key, tier = key } end
+	if ns.Channels.TIERS[key] and ns.Channels.CanUse(key) then return true end
 	local R = ns.ChatRooms
-	if R and type(R.PreviewOnly) == "function" and R.PreviewOnly(key) then return nil end
-	if ChatWindow.Logical(key) and type(R) == "table" and type(R.IsOpen) == "function" and R.IsOpen(key) then return { key = key, logical = ChatWindow.Logical(key) } end
-	local r = Dynamic(key)
-	return r and { key = key, room = r } or nil
+	local logical = ChatWindow.Logical(key)
+	if logical and logical.scope == "restricted" and type(R.PreviewOnly) == "function" and R.PreviewOnly(key) then return false end
+	if logical and type(R.IsOpen) == "function" and R.IsOpen(key) then return true end
+	return Dynamic(key) ~= nil
 end
 
 function ChatWindow.IsShown()
@@ -635,6 +696,73 @@ local function Own(e)
 	return e.mine and ns.Channels.IsMe(e.sender) and true or false
 end
 
+-- 1.2.3: line `e` of the history as the tab shows it (with `hides`, the block terms' test, or nil):
+-- { at, when, day, dayRow, full, body } from the line alone, kept while the line is (its words, its
+-- writer, his guild and class, its time and "mine" unchanged); { own, veiled, shown } and the
+-- header's words (ChatWindow.HeaderOf) for this era, these terms and the line not deleted since.
+-- The same words, bubble for bubble, as the redraw that worked them out each time.
+function ChatWindow.ViewOf(e, hides)
+	local views = ChatWindow.views
+	local v = views[e]
+	if not v or v.text ~= e.text or v.sender ~= e.sender or v.guild ~= e.guild or v.class ~= e.class or v.t ~= e.t
+		or v.mine ~= e.mine then
+		v = v or {}
+		views[e] = v
+		v.text, v.sender, v.guild, v.class, v.t, v.mine = e.text, e.sender, e.guild, e.class, e.t, e.mine
+		local t = tonumber(e.t) or 0
+		v.at, v.when, v.day = t, Grey(date("%H:%M", t)), date("%Y-%m-%d", t)
+		v.dayRow, v.full = Grey(v.day), ns.FullName(e.sender)
+		v.body = ns.Codec.SanitizeChat(e.text)
+		v.era, v.found = nil, nil
+	end
+	if v.era ~= ChatWindow.era or v.hides ~= hides or v.del ~= e.del then
+		v.era, v.hides, v.del = ChatWindow.era, hides, e.del
+		v.own = Own(e)
+		v.veiled = not v.own and hides ~= nil and hides(e.text or "") or false
+		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. v.body
+		v.headed = false
+	end
+	return v
+end
+
+-- The header of a group's first bubble, for view `v` of line `e` (deleted: a moderator took its
+-- words): who, when, the name a whisper goes to and its tooltip's full name. Worked out at the
+-- first bubble of the era that starts a group with it; a writer's name and whisper once an era
+-- for all his lines (ChatWindow.nameOf, ChatWindow.tellOf: NameText rests on his name, guild and
+-- class alone, with what the era keeps).
+ChatWindow.nameOf, ChatWindow.tellOf = {}, {}
+function ChatWindow.HeaderOf(v, e, deleted)
+	if not v.headed then
+		local mine = v.own
+		if mine then
+			v.who, v.whisper, v.tip = L.CHATWIN_YOU, nil, nil
+		else
+			local who = ns.Codec.Plain(ns.DisplayName(e.sender) or "?")
+			if deleted then
+				local deletedGuild = ns.Channels.ShowGuildNames() and (" <" .. ns.Codec.Plain(e.guild or "?") .. ">") or ""
+				v.who = Grey(who .. deletedGuild)
+			else
+				local key = tostring(e.sender) .. "\1" .. tostring(e.guild or "\2") .. "\1" .. type(e.class) .. tostring(e.class)
+				local named = ChatWindow.nameOf[key]
+				if not named then
+					named = NameText(e)
+					ChatWindow.nameOf[key] = named
+				end
+				v.who = named
+			end
+			local tell = e.sender ~= nil and ChatWindow.tellOf[e.sender]
+			if tell == nil then
+				tell = ns.TellName(e.sender) or false
+				if e.sender ~= nil then ChatWindow.tellOf[e.sender] = tell end
+			end
+			v.whisper = tell or nil
+			v.tip = who .. "  <" .. ns.Codec.Plain(e.guild or "?") .. ">"
+		end
+		v.headed = true
+	end
+	return v.who, v.when, v.whisper, v.tip
+end
+
 -- One line of the history in its bubble. Returns its height.
 -- 1.2.1 (players' stutter that stopped with Olympus off): every redraw laid out every bubble again,
 -- the 100 lines of a busy channel a few times a second. A bubble whose look is just what it was
@@ -645,10 +773,12 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	local bubbles = pane.bubbles
 	local b = bubbles[i] or NewBubble(pane.embedded and pane or nil)
 	bubbles[i] = b
-	local mine = Own(e)
+	-- (1.2.3: its words as this era worked them out, ChatWindow.ViewOf.)
+	local v = ChatWindow.ViewOf(e, hides)
+	local mine = v.own
 	-- A line the block terms hide: a grey bubble until a click, then its words marked (as the Realm
 	-- tab's chats page marked them) and its border still grey.
-	local veiled = not mine and hides ~= nil and hides(e.text or "") or false
+	local veiled = v.veiled
 	local hidden = veiled and not revealed[e]
 	b.entry, b.hidden, b.mine, b.y = e, hidden, mine, y
 	-- 1.1.6: a line a moderator deleted (WatchChat.lua): the name stays, greyed; its words are gone.
@@ -659,16 +789,8 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	local c = pane.colour or Colour(tier)
 	-- Its words: the header's at a group's start, then the line's.
 	local who, when, whisper, full
-	if start then
-		local deletedGuild = ns.Channels.ShowGuildNames() and (" <" .. ns.Codec.Plain(e.guild or "?") .. ">") or ""
-		who = mine and L.CHATWIN_YOU or deleted and Grey(ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. deletedGuild)
-			or NameText(e)
-		when = Grey(date("%H:%M", tonumber(e.t) or 0))
-		whisper = not mine and ns.TellName(e.sender) or nil
-		full = not mine and (ns.Codec.Plain(ns.DisplayName(e.sender) or "?") .. "  <" .. ns.Codec.Plain(e.guild or "?") .. ">") or nil
-	end
-	local text = deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN)
-		or ((veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. ns.Codec.SanitizeChat(e.text))
+	if start then who, when, whisper, full = ChatWindow.HeaderOf(v, e, deleted) end
+	local text = deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN) or v.shown
 	local bodyFont, bodySize, bodyFlags = ChatWindow.FontOf(b.body)
 	local whoFont, whoSize, whoFlags = ChatWindow.FontOf(b.who)
 	-- (Written into the bubble's second look, b.lookNext, not a new table: no garbage each redraw.)
@@ -753,7 +875,7 @@ end
 ChatWindow.lookEra = 0
 function ChatWindow.ForgetLooks()
 	ChatWindow.lookEra = ChatWindow.lookEra + 1
-	MarkDirty()
+	ChatWindow.Changed() -- (1.2.3: every bubble laid out again whole, its words worked out again too: a new era)
 end
 
 -- 1.2.1: true when bubble `b` was laid out, whole, from look `k` the last time (Bubble: k[1..k.n]);
@@ -897,17 +1019,32 @@ end
 -- The lines the tab's search box keeps (Views.Query: folded, as every tab's search): whose
 -- writer, guild or words hold it. A line the block terms hide is found by its writer and guild
 -- alone (its words are not shown).
+-- (1.2.3: each line's writer, guild and words as a search reads them, ns.Searchable, kept with its
+-- view: ns.Holds made them again for every line at every redraw while a search was typed.)
 local function Searched(list, q, hides)
 	if not q then return list end
 	local out = {}
-	local Plain = ns.Codec.Plain
 	for _, e in ipairs(list) do
-		local hidden = hides ~= nil and not Own(e) and not revealed[e] and hides(e.text or "")
+		local v = ChatWindow.ViewOf(e, hides)
+		local hidden = v.veiled and not revealed[e]
 		-- (1.1.6: a line a moderator deleted is found by its writer and guild alone: no words left.)
-		local words = not hidden and not e.del and ns.Codec.SanitizeChat(e.text) or nil
-		if ns.Holds(q, ns.DisplayName(e.sender) or "?", Plain(e.guild or ""), words) then out[#out + 1] = e end
+		if ChatWindow.Finds(v, e, q, not hidden and not e.del) then out[#out + 1] = e end
 	end
 	return out
+end
+
+-- Does query `q` hold line `e`'s writer, guild or (withWords) words, as ns.Holds reads them?
+function ChatWindow.Finds(v, e, q, withWords)
+	if q == "" then return true end
+	if not v.found then
+		local name, guild = ns.DisplayName(e.sender) or "?", ns.Codec.Plain(e.guild or "")
+		v.findName = type(name) == "string" and name ~= "" and ns.Searchable(name) or nil
+		v.findGuild = guild ~= "" and ns.Searchable(guild) or nil
+		v.findWords = v.body ~= "" and ns.Searchable(v.body) or nil
+		v.found = true
+	end
+	return (v.findName ~= nil and v.findName:find(q, 1, true) ~= nil) or (v.findGuild ~= nil and v.findGuild:find(q, 1, true) ~= nil)
+		or (withWords and v.findWords ~= nil and v.findWords:find(q, 1, true) ~= nil) or false
 end
 
 local function Query()
@@ -922,14 +1059,21 @@ local function Hides()
 end
 
 -- The lines of `all` (the channel's history) that the block terms hide (never ours), in its order.
-local function HiddenLines(all)
-	local hides, out = Hides(), {}
-	if not hides then return out end
-	for _, e in ipairs(all) do
-		if not Own(e) and not e.del and hides(e.text or "") then out[#out + 1] = e end -- (1.1.6: never a deleted line)
+-- (1.2.3: the block terms' verdict of each line's view, ChatWindow.ViewOf; the list made only when one is hidden.)
+function ChatWindow.HiddenLines(all)
+	local hides, out = Hides(), nil
+	if hides then
+		for _, e in ipairs(all) do
+			if not e.del and ChatWindow.ViewOf(e, hides).veiled then -- (1.1.6: never a deleted line)
+				out = out or {}
+				out[#out + 1] = e
+			end
+		end
 	end
-	return out
+	return out or ChatWindow.NONE
 end
+ChatWindow.NONE = {} -- (an empty list, read only)
+local HiddenLines = ChatWindow.HiddenLines
 
 -- The lines of `all`, the channel's history (Render reads it once for the strips and the lines).
 local function DrawLines(all)
@@ -954,23 +1098,22 @@ local function DrawLines(all)
 	end
 	local maxInner = math.max(BUBBLE_MIN, math.floor(width * SHARE)) - 2 * PAD
 	ChatWindow.KeepBubbles(frame.bubbles, list)
-	local prev, prevDay
+	local prev, prevDay -- (1.2.3: the line before's view, ChatWindow.ViewOf)
 	for _, e in ipairs(list) do
-		local t = tonumber(e.t) or 0
-		local day = date("%Y-%m-%d", t)
-		local newDay = day ~= prevDay
+		local v = ChatWindow.ViewOf(e, hides)
+		local t = v.at
+		local newDay = v.day ~= prevDay
 		if newDay then
 			if prev then y = y + GAP_OUT end
 			nr = nr + 1
-			y = y + Row(nr, Grey(day), y, width) + 4
-			prevDay = day
+			y = y + Row(nr, v.dayRow, y, width) + 4
+			prevDay = v.day
 		end
-		local start = newDay or not prev or ns.FullName(prev.sender) ~= ns.FullName(e.sender)
-			or Own(prev) ~= Own(e) or t - (tonumber(prev.t) or 0) > GROUP_TIME
+		local start = newDay or not prev or prev.full ~= v.full or prev.own ~= v.own or t - prev.at > GROUP_TIME
 		if prev and not newDay then y = y + (start and GAP_OUT or GAP_IN) end
 		nb = nb + 1
 		y = y + Bubble(nb, e, start, y, maxInner, hides)
-		prev = e
+		prev = v
 	end
 	-- The lines of ours that were not sent: a grey note each, a click puts one back in the box.
 	local t = tier
@@ -1192,33 +1335,70 @@ end
 -- A destination as the shared strip draws it (Views.DrawNav): its words and unread count, lit
 -- while it is the one shown, a picker's arrow (Race, Class, Arena: a list of rooms opens from it).
 function ChatWindow.SubtabItem(entry)
+	return ChatWindow.PaintSubtab({
+		entry = entry, picker = entry.dropdown == true, counted = ChatWindow.SubtabCounted(entry),
+		onClick = function(button) ChatWindow.ClickSubtab(entry, button) end,
+		tooltip = entry.dropdown and function(tt)
+			tt:AddLine(entry.label, 1, 0.82, 0)
+			tt:AddLine(entry.tip or L.CHATROOM_DROPDOWN_TIP or "Choose a topic room.", 1, 1, 1, true)
+		end or nil,
+	})
+end
+
+-- The rooms whose new lines a destination counts: Olympus, the switch's channels and rooms; one
+-- room, its own; a picker (Race, Class, Roles, Arena), the rooms in its list that may be opened.
+function ChatWindow.SubtabCounted(entry)
+	local out = {}
+	if entry.kind == "global" then
+		for _, choice in ipairs(Choices()) do out[#out + 1] = choice.key end
+	elseif entry.id then
+		out[1] = entry.id
+	else
+		local R = ns.ChatRooms
+		local options = entry.kind == "arena" and ChatWindow.ArenaOptions(false)
+			or (type(R) == "table" and type(R.Options) == "function" and R.Options(entry.kind) or {})
+		for _, option in ipairs(options) do
+			if not option.disabled and option.id ~= nil then out[#out + 1] = option.id end
+		end
+	end
+	return out
+end
+
+-- Item `item` lit while its destination is the one shown, and its words with its rooms' new lines.
+function ChatWindow.PaintSubtab(item)
+	local entry = item.entry
 	local logical = ChatWindow.Logical(tier)
 	local selected = entry.kind == "global" and ns.Channels.TIERS[tier] ~= nil
 		or entry.kind == "arena" and Dynamic(tier) ~= nil
 		or entry.kind == "role" and logical ~= nil and logical.scope == "restricted"
 		or logical ~= nil and (entry.id == tier or entry.kind == logical.kind)
 	local n = 0
-	if entry.kind == "global" then
-		for _, choice in ipairs(Choices()) do n = n + (unread[choice.key] or 0) end
-	elseif entry.id then
-		n = unread[entry.id] or 0
-	else
+	for _, key in ipairs(item.counted) do n = n + (unread[key] or 0) end
+	item.selected = selected == true
+	item.text = entry.label .. (n > 0 and (" (" .. n .. ")") or "")
+	return item
+end
+
+-- 1.2.3: the destinations' items as DrawSubtabs hands them to Views.DrawNav, made once an era
+-- (ChatWindow.era: ChatRooms.Tabs and .Options describe every room anew at each call, and a picker
+-- counted its list's) and only lit and counted again at each redraw.
+-- (All of them in one listing of the rooms, ChatRooms.Listing: each room's access read once.)
+function ChatWindow.NavItems()
+	local items = ChatWindow.navCache
+	if not items then
 		local R = ns.ChatRooms
-		local options = entry.kind == "arena" and ChatWindow.ArenaOptions(false)
-			or (type(R) == "table" and type(R.Options) == "function" and R.Options(entry.kind) or {})
-		for _, option in ipairs(options) do
-			if not option.disabled then n = n + (unread[option.id] or 0) end
-		end
+		if type(R) == "table" and type(R.Listing) == "function" then items = R.Listing(ChatWindow.BuildNav)
+		else items = ChatWindow.BuildNav() end
+		ChatWindow.navCache = items
+		return items
 	end
-	return {
-		entry = entry, selected = selected == true, picker = entry.dropdown == true,
-		text = entry.label .. (n > 0 and (" (" .. n .. ")") or ""),
-		onClick = function(button) ChatWindow.ClickSubtab(entry, button) end,
-		tooltip = entry.dropdown and function(tt)
-			tt:AddLine(entry.label, 1, 0.82, 0)
-			tt:AddLine(entry.tip or L.CHATROOM_DROPDOWN_TIP or "Choose a topic room.", 1, 1, 1, true)
-		end or nil,
-	}
+	for _, item in ipairs(items) do ChatWindow.PaintSubtab(item) end
+	return items
+end
+function ChatWindow.BuildNav()
+	local items = {}
+	for _, entry in ipairs(ChatWindow.SubtabEntries()) do items[#items + 1] = ChatWindow.SubtabItem(entry) end
+	return items
 end
 
 -- A destination clicked: Olympus (the army chat last shown), a picker's list of rooms (from its
@@ -1300,8 +1480,7 @@ function ChatWindow.DrawSubtabs(show)
 	if not bar then return frame and frame.places.box.top or 0 end
 	local V, box, nav = ns.Views, frame.places.box, frame.places.nav
 	if show and nav and type(V) == "table" and type(V.DrawNav) == "function" then
-		local items = {}
-		for _, entry in ipairs(ChatWindow.SubtabEntries()) do items[#items + 1] = ChatWindow.SubtabItem(entry) end
+		local items = ChatWindow.NavItems()
 		local width = math.max(1, (frame:GetWidth() or 338) - nav.left + nav.right)
 		local h = V.DrawNav(bar, items, width)
 		bar:ClearAllPoints()
@@ -2155,8 +2334,8 @@ SyncKeys = function(due, gamepad)
 	if syncing then return end
 	if gamepad == nil then gamepad = ns.GamepadUI() end
 	if gamepad and not due then return end
-	local keys = KeysWanted(gamepad) and ChatKeys() or {}
-	if SameKeys(keys, boundKeys or {}) then
+	local keys = KeysWanted(gamepad) and ChatKeys() or ChatWindow.NONE -- (1.2.3: each redraw asks: no empty list made)
+	if SameKeys(keys, boundKeys or ChatWindow.NONE) then
 		keysLater = false
 		return
 	end
@@ -2260,9 +2439,11 @@ local function Draw()
 		local A = ns.ArenaChat
 		all = type(A) == "table" and type(A.Lines) == "function" and A.Lines(room.id) or {}
 	elseif logical then
-		all = type(R) == "table" and type(R.History) == "function" and R.History(tier) or {}
+		all = type(R) == "table" and type(R.History) == "function" and R.History(tier, ChatWindow.offMemo) or {}
 	elseif on then
-		all = C.History(tier) -- (read once, for the count and the lines)
+		-- (Read once, for the count and the lines. 1.2.3: with this era's memo of whom a moderator's
+		-- word hides, Channels.History: a line already asked about is not asked again.)
+		all = C.History(tier, ChatWindow.offMemo)
 	end
 	if on then
 		if logical then y = y - ChatWindow.DrawTopicStatus(y) else frame.topicStatus:Hide() end
@@ -2315,9 +2496,12 @@ function ChatWindow.Clock()
 	return ok and type(ms) == "number" and ms or nil
 end
 
-function ChatWindow.Render()
+-- keep (1.2.3, the throttled redraw's, OnUpdate): in the era it is in (ChatWindow.Era); any other
+-- redraw (a click, a channel picked, the opening) starts a new one.
+function ChatWindow.Render(keep)
 	dirty = false
 	ChatWindow.sinceDraw = 0
+	if keep then ChatWindow.Era() else ChatWindow.NewEra() end
 	local started = ChatWindow.Clock()
 	Draw()
 	local finished = started and ChatWindow.Clock()
@@ -2517,14 +2701,17 @@ local function OnUpdate(_, elapsed)
 	end
 	if acc < THROTTLE then return end
 	acc = 0
+	-- (1.2.3: the census's redraw starts a new era: what the lines show follows it, ChatWindow.era.)
 	if dataPending and GetTime() - lastData >= DATA_GAP then
 		dataPending, lastData, dirty = false, GetTime(), true
+		ChatWindow.NewEra()
 	end
+	ChatWindow.Era()
 	-- A rank that no longer reads this channel (a demotion, out of the guild), or a room whose
 	-- retention ended: drawn again at once.
 	if ChatWindow.PruneDynamicRooms and GetTime() - lastRoomPrune >= LOOK_GAP then ChatWindow.PruneDynamicRooms() end
 	local lost = tier ~= nil and not Choice(tier)
-	if lost then dirty = true end
+	if lost then dirty = true; ChatWindow.NewEra() end
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local status = logical and logical.scope == "topic" and type(R) == "table" and type(R.RequestStatus) == "function" and R.RequestStatus(tier) or nil
@@ -2532,7 +2719,7 @@ local function OnUpdate(_, elapsed)
 	if minute ~= ChatWindow.requestMinute then ChatWindow.requestMinute, dirty = minute, true end
 	-- (1.2.1: after a slow redraw the next waits longer, ChatWindow.RedrawGap; a cheap one, as before.)
 	local gap = ChatWindow.RedrawGap()
-	if dirty and (lost or gap <= THROTTLE or ChatWindow.sinceDraw >= gap) then ns.SafeCall("chat tab", Render) end
+	if dirty and (lost or gap <= THROTTLE or ChatWindow.sinceDraw >= gap) then ns.SafeCall("chat tab", ChatWindow.Render, true) end
 end
 
 -- A texture from the game's atlas when this client has it, else a file every client carries.
@@ -3038,13 +3225,15 @@ function ChatWindow.CreateEmbedded(parent, opts)
 		self.content:SetWidth(width)
 		local y, prev = 6
 		local hides = Hides()
+		ChatWindow.Era() -- (1.2.3: the lines' looks of this era, ChatWindow.ViewOf; never older than ERA_MAX)
 		local all = Searched(opts.lines(), self.query, hides)
 		ChatWindow.KeepBubbles(self.bubbles, all) -- (1.2.1: each line in its own bubble again)
 		for i, e in ipairs(all) do
-			local start = not prev or ns.FullName(prev.sender) ~= ns.FullName(e.sender) or Own(prev) ~= Own(e) or (e.t or 0) - (prev.t or 0) > GROUP_TIME
+			local v = ChatWindow.ViewOf(e, hides)
+			local start = not prev or prev.full ~= v.full or prev.own ~= v.own or v.at - prev.at > GROUP_TIME
 			if prev then y = y + (start and GAP_OUT or GAP_IN) end
 			y = y + Bubble(i, e, start, y, math.max(40, math.min(width * SHARE, width - EDGE * 2) - PAD * 2), hides, self, opts.room())
-			prev = e
+			prev = v
 		end
 		for i = #all + 1, #self.bubbles do self.bubbles[i]:Hide(); self.bubbles[i].entry = nil end
 		if self.modMenu and ChatWindow.ModEntry(self.modBubble) ~= self.modTarget then self.modMenu:Hide() end
@@ -3337,7 +3526,7 @@ local function RemoveRoom(key, clearPin)
 		if tier then Remember(tier) end
 		settings, stick, newCount, want = false, true, 0, nil
 	end
-	MarkDirty()
+	ChatWindow.Changed() -- (1.2.3: the Arena destination's rooms changed: a new era)
 	return true
 end
 
@@ -3347,8 +3536,14 @@ end
 function ChatWindow.PruneDynamicRooms(now)
 	lastRoomPrune = GetTime and GetTime() or 0
 	now = now or RoomNow()
-	local gone = {}
-	for key, r in pairs(dynamicRooms) do if not RoomAlive(r.spec, now) then gone[#gone + 1] = key end end
+	local gone -- (1.2.3: a list only when a room ended: every redraw and every second asks)
+	for key, r in pairs(dynamicRooms) do
+		if not RoomAlive(r.spec, now) then
+			gone = gone or {}
+			gone[#gone + 1] = key
+		end
+	end
+	if not gone then return 0 end
 	for _, key in ipairs(gone) do RemoveRoom(key, true) end
 	return #gone
 end
@@ -3465,7 +3660,7 @@ function ChatWindow.UpdateDynamicRoom(spec)
 	end
 	r = UpsertRoom(spec, pinned)
 	if not r then return false end
-	MarkDirty()
+	ChatWindow.Changed() -- (1.2.3: a new era, as RemoveRoom)
 	return true
 end
 
@@ -3524,6 +3719,7 @@ function ChatWindow.Attach(h, places)
 	frame, host = p, h
 	Place(p, places)
 	if not p:IsShown() then
+		ChatWindow.NewEra() -- (1.2.3: opened, nothing kept from before is read: Pick's rooms neither)
 		tier = Pick()
 		if tier and ns.Channels.TIERS[tier] then ChatWindow.globalTier = tier; Remember(tier) end
 		unread = {}
@@ -3616,14 +3812,17 @@ function ChatWindow.Reset()
 	StopWatching()
 	pointer = nil
 	keyButton, boundKeys, keysLater, toldLater, syncing = nil, nil, false, false, false
+	ChatWindow.NewEra() -- (1.2.3: nothing kept from before)
 end
 
 ---------------------------------------------------------------------------
 -- What changes it
 ---------------------------------------------------------------------------
 
+-- (1.2.3: a line kept, CHAT_CHANGED with its channel, or deleted, keeps the era: each line's view
+-- knows its own words and deletion, ChatWindow.ViewOf; the chats on or off, without one, starts one.)
 ns.On("CHAT_CHANGED", function(t)
-	if t == nil or t == tier then MarkDirty() end
+	if t == nil then ChatWindow.Changed() elseif t == tier then MarkDirty() end
 end)
 ns.On("CHAT_LINE", function(t)
 	if not Shown() or not ns.Channels.TIERS[t] then return end
@@ -3646,8 +3845,8 @@ end)
 ns.On("CHAT_ROOM_CHANGED", function(id)
 	if id == tier then MarkDirty() end
 end)
-ns.On("CHAT_ROOM_SELECTED", MarkDirty)
-ns.On("CHAT_ROOMS_CHANGED", MarkDirty)
+ns.On("CHAT_ROOM_SELECTED", ChatWindow.Changed)
+ns.On("CHAT_ROOMS_CHANGED", ChatWindow.Changed)
 -- ArenaChat keeps and admits the line; the host only tracks which local room needs repainting.
 -- Nothing here fires CHAT_LINE or writes Channels history, so an exclusive room cannot leak into
 -- an army/global tab through the presentation adapter.
@@ -3674,7 +3873,7 @@ end)
 -- "shows in your chat" unmuted a channel /oly mute had muted.)
 for _, event in ipairs({ "PIN_CHANGED", "FILTER_CHANGED", "NETOFF_CHANGED", "COUNCIL_MASK_CHANGED", "CONSENT_CHANGED",
 	"CHAT_SETTINGS_CHANGED", "WATCHCHAT_CHANGED" }) do -- (1.1.6: a timeout, a lift, a deletion: WatchChat.lua)
-	ns.On(event, MarkDirty)
+	ns.On(event, function() ChatWindow.Changed() end) -- (1.2.3: each a new era, ChatWindow.era)
 end
 -- The marks follow the census, at most once every DATA_GAP seconds.
 ns.On("DATA_CHANGED", function()

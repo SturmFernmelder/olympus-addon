@@ -125,7 +125,12 @@ local function Leader(name)
 	if not full then return nil end
 	for _, e in ipairs(Squads.Leaders()) do if Fold(e.name) == Fold(full) then return e end end
 end
+-- (1.2.3: every squad's room is "squad:" and its hash, Room. ChatRooms asks each provider about every
+-- room id it is given, the race, class, guild and role rooms' too, and the Chat page gave it a few
+-- hundred a redraw, each reading the leaders again: on the author's game, in the King's guild, most of
+-- the 2.5 MB of garbage each redraw made. An id that is not a squad's is none, the leaders unread.)
 local function LeaderRoom(id)
+	if type(id) ~= "string" or not id:find("^squad:") then return nil end
 	for _, e in ipairs(Squads.Leaders()) do if e.room == id then return e end end
 end
 local function Dense(array, max)
@@ -166,9 +171,8 @@ local function Encode(e) return ("WU~1~S~%s~%d~%s"):format(e.leader, e.rev, tabl
 local function Changed()
 	ns.Fire("SQUADS_CHANGED"); ns.Fire("CHAT_ROOMS_CHANGED")
 end
-function Squads.Get(name)
-	local leader = Leader(name)
-	if not leader then return nil end
+-- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
+local function Squad(leader)
 	local s = Store(false)
 	local row = s and s.rows[Fold(leader.name)]
 	if not ValidRow(row) or Fold(row.leader) ~= Fold(leader.name) then row = nil end
@@ -179,6 +183,11 @@ function Squads.Get(name)
 	end
 	leader.count, leader.rev, leader.by = #leader.soldiers, row and row.rev, row and row.by
 	return leader
+end
+function Squads.Get(name)
+	local leader = Leader(name)
+	if not leader then return nil end
+	return Squad(leader)
 end
 local function Put(e, sender)
 	local s = Store(true)
@@ -282,14 +291,18 @@ function Squads.Request()
 				and Guild() == guild and Member(ns.me) ~= nil
 		end })
 end
+-- Whether member `full` reads leader entry `leader`'s room: the leader himself, or one of his soldiers.
+local function Reads(leader, full)
+	if Fold(full) == Fold(leader.name) then return true end
+	local current = Squad(leader)
+	for _, soldier in ipairs(current.soldiers) do if Fold(soldier) == Fold(full) then return true end end
+	return false
+end
 function Squads.CanAccess(room, name)
 	if Preview() or not Member(ns.me) then return false end
 	local leader, full = LeaderRoom(room), Member(name or ns.me)
 	if not leader or not full then return false end
-	if Fold(full) == Fold(leader.name) then return true end
-	local current = Squads.Get(leader.name)
-	for _, soldier in ipairs(current.soldiers) do if Fold(soldier) == Fold(full) then return true end end
-	return false
+	return Reads(leader, full)
 end
 local function ChatOn() return ns.db and ns.db.chatRooms == true and not (ns.ChatLocked and ns.ChatLocked()) or false end
 local function Chat(room, make)
@@ -384,18 +397,25 @@ function Squads.ReceiveChat(dist, sender, text)
 	chat.seen[Fold(full)] = seq
 	Keep(room, { sender = full, guild = Guild(), text = words, t = Now(), id = seq }); return true
 end
+local function RoomInfo(leader)
+	local format = ns.L and ns.L.SQUAD_CHAT_LABEL or "Squad %d"
+	return { id = leader.room, kind = "role", scope = "restricted", label = format:format(leader.index) }
+end
 function Squads.ChatInfo(room)
 	local leader = LeaderRoom(room)
 	if not leader then return nil end
-	local format = ns.L and ns.L.SQUAD_CHAT_LABEL or "Squad %d"
-	return { id = room, kind = "role", scope = "restricted", label = format:format(leader.index) }
+	return RoomInfo(leader)
 end
 local provider = { Info = Squads.ChatInfo, CanAccess = Squads.CanAccess, History = Squads.ChatHistory,
 	Send = Squads.ChatSend, ChatOn = ChatOn, IsOpen = function(room) return LeaderRoom(room) ~= nil end,
 	Select = function(room) return Squads.CanAccess(room) end,
+	-- (1.2.3: the leaders read once, each room's access and description from its own entry: CanAccess
+	-- and ChatInfo read them all again for each room, three times, and the Chat page asks every era.)
 	Options = function(kind)
 		local out = {}; if kind ~= "role" then return out end
-		for _, e in ipairs(Squads.Leaders()) do if Squads.CanAccess(e.room) then out[#out + 1] = Squads.ChatInfo(e.room) end end
+		local me = not Preview() and Member(ns.me)
+		if not me then return out end
+		for _, e in ipairs(Squads.Leaders()) do if Reads(e, me) then out[#out + 1] = RoomInfo(e) end end
 		return out
 	end,
 }

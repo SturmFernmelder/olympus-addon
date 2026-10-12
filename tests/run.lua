@@ -52069,6 +52069,8 @@ do
 	-- (1.2.1: the views' work while nobody looks: the world map, the crafters' board, the Chat tab.)
 	assert(loadfile(ROOT .. "tests/views-perf.lua"))(ns, test, eq, { ADDON_DIR = ADDON_DIR, WithWindow = WithWindow,
 		WithMapIcons = WithMapIcons, RecordingPins = RecordingPins, WithGamepadUI = WithGamepadUI, Widget = Widget, T0 = T0 })
+	-- (1.2.3: the garbage the Chat tab's and the window's redraws make, the author's measure on his game.)
+	assert(loadfile(ROOT .. "tests/chat-memory.lua"))(ns, test, eq, { ADDON_DIR = ADDON_DIR, WithWindow = WithWindow, Widget = Widget, T0 = T0 })
 
 	local function Line(t, sender, text, extra)
 		local e = { t = t, sender = sender, guild = "Olympus II", text = text }

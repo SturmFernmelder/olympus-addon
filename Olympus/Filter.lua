@@ -75,11 +75,32 @@ end
 
 -- The words of a text as a line shows it, folded. Punctuation of the Latin-1 and general
 -- punctuation blocks ("¡¿«»", "…", "“”") separates words, as ASCII's does.
+-- 1.2.3: the words of the texts asked lately are kept (WORDS_KEPT, the half asked before them too
+-- until as many more came): a text is folded once, not again at each look (the Chat tab looked at
+-- every line of its history twice a redraw, and every redraw folded each again). They rest on the
+-- text alone. The list is the same one each time: read only.
+Filter.WORDS_KEPT = 128
+Filter.wordsNow, Filter.wordsBefore, Filter.wordsCount = {}, {}, 0
 function Filter.WordsOf(text)
+	local key = type(text) == "string" and text or nil
+	if key then
+		local out = Filter.wordsNow[key]
+		if out then return out end
+		out = Filter.wordsBefore[key]
+		if out then return Filter.KeepWords(key, out) end
+	end
 	local s = ns.Searchable(ns.Codec.SanitizeChat(text))
 	s = s:gsub("\226\128[\128-\191]", " "):gsub("\194[\128-\191]", " ")
 	local out = {}
 	for w in s:gmatch("[%w\128-\255]+") do out[#out + 1] = w end
+	if key then Filter.KeepWords(key, out) end
+	return out
+end
+function Filter.KeepWords(key, out)
+	if Filter.wordsCount >= Filter.WORDS_KEPT then
+		Filter.wordsBefore, Filter.wordsNow, Filter.wordsCount = Filter.wordsNow, {}, 0
+	end
+	Filter.wordsNow[key], Filter.wordsCount = out, Filter.wordsCount + 1
 	return out
 end
 
