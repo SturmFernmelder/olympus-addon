@@ -471,3 +471,39 @@ test("chat rooms (1.2.4): without the signed leadership list each room reaches i
 	A.Enforced, A.Manifest = saved.enforced, saved.manifest
 	if not ok then error(err, 0) end
 end)
+
+-- The approved set against the whole cast, as another member's client sees each (the High
+-- Council's, the King's Secretariat, the masters', every guild's masters and centurions, a
+-- department's, and each guild's two rooms), without the signed leadership list and with it.
+test("chat rooms (1.2.4): every room against the cast: the King, councillors titled and not, a Steward, the Treasurer, each guild's master, officer, centurion and correspondent, the author", function()
+	WithRooms(function(w, R, c)
+		local cast, aCorr, aCent, bCorr, bCent = Guilds(w, R, c)
+		c.ApprovedGuilds = function() return {} end
+		w.authorName = "Quill Wright-Realm"
+		local titled, seat, steward = "Wren Titled-Realm", "Una Seat-Realm", "Stew Ard-Realm"
+		w.council[titled:lower()], w.departments[titled:lower()], w.council[seat:lower()] = true, "Department of War", true
+		w.stewards[steward:lower()] = true
+		local treasurer = c.FullName(c.TREASURER)
+		local ROOMS = { "council", "secretariat", "masters", "allcenturions", "dept:war", "dept:treasury", aCorr, aCent, bCorr, bCent }
+		local NAMES = { "council", "secretariat", "masters", "allcenturions", "dept:war", "dept:treasury", "gcorr:A", "gcent:A", "gcorr:B", "gcent:B" }
+		local function Rooms(name)
+			local out = {}
+			for i, id in ipairs(ROOMS) do if R.CanAccess(id, name) then out[#out + 1] = NAMES[i] end end
+			return table.concat(out, ",")
+		end
+		local everyButCouncil = "masters,allcenturions,dept:war,dept:treasury,gcorr:A,gcent:A,gcorr:B,gcent:B"
+		local want = {
+			{ w.king, "council,secretariat,masters,allcenturions" },
+			{ titled, "council,dept:war" }, { seat, "council" }, { steward, "secretariat" }, { treasurer, "council,dept:treasury" },
+			{ cast.aMaster, "masters,allcenturions,gcorr:A,gcent:A" }, { cast.aOfficer, "allcenturions,gcent:A" },
+			{ cast.aCenturion, "allcenturions,gcent:A" }, { cast.aWar, "dept:war,gcorr:A" }, { cast.aMember, "" },
+			{ cast.bMaster, "" }, { cast.bOfficer, "" }, { cast.bCenturion, "" }, { cast.bWar, "" },
+			{ w.authorName, everyButCouncil },
+		}
+		for _, row in ipairs(want) do eq(Rooms(row[1]), row[2], row[1] .. ", without the signed list") end
+		w.enforced = true
+		want[11][2], want[12][2] = "masters,allcenturions,gcorr:B,gcent:B", "allcenturions,gcent:B"
+		want[13][2], want[14][2] = "allcenturions,gcent:B", "dept:war,gcorr:B"
+		for _, row in ipairs(want) do eq(Rooms(row[1]), row[2], row[1] .. ", with it") end
+	end)
+end)
