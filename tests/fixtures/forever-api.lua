@@ -24,6 +24,7 @@ return {
 		["C_Calendar"] = "namespace",
 		["C_ChatInfo"] = "namespace",
 		["C_CreatureInfo"] = "namespace",
+		["C_DamageMeter"] = "namespace",
 		["C_DateAndTime"] = "namespace",
 		["C_DeathInfo"] = "namespace",
 		["C_DeathRecap"] = "namespace",

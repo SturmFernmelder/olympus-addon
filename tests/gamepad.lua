@@ -1156,6 +1156,13 @@ local function World(C, opts)
 	-- the pass's session has none, as HasRecapEvents says then, with an ID or without:
 	-- DeathRecapDocumentation.lua.)
 	E.C_DeathRecap = Namespace("C_DeathRecap", { HasRecapEvents = function() return false end, GetRecapEvents = function() return {} end })
+	-- (1.2.3 repair: and the damage meter's deaths, for the recap IDs of this player's own: none in
+	-- the pass's session, DamageMeterDocumentation.lua's shapes.)
+	E.C_DamageMeter = Namespace("C_DamageMeter", {
+		GetCombatSessionFromType = function() return { combatSources = {}, maxAmount = 0, totalAmount = 0 } end,
+		GetCombatSessionFromID = function() return { combatSources = {}, maxAmount = 0, totalAmount = 0 } end,
+		GetAvailableCombatSessions = function() return {} end,
+	})
 	E.C_GameRules = Namespace("C_GameRules", { IsGameRuleActive = function() return false end })
 	E.C_Texture = Namespace("C_Texture", { GetAtlasInfo = function(a) return { width = 64, height = 64, file = a } end })
 	E.C_Item = Namespace("C_Item", {

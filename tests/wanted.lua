@@ -12,7 +12,8 @@ local function WithWanted(fn)
 	local globals = { "UnitGUID", "UnitIsPlayer", "UnitFactionGroup", "GetGuildInfo", "GetRealZoneText",
 		"UnitCanAttack", "UnitIsPVP", "issecretvalue", "IsInInstance",
 		"UnitIsDeadOrGhost", "C_DateAndTime", "C_DeathInfo", "C_DeathRecap", "CombatLogGetCurrentEventInfo", "GetGameTime", "GetFileIDFromPath",
-		"ERR_CHAT_PLAYER_NOT_FOUND_S", "GetPlayerInfoByGUID", "UnitTokenFromGUID", "UnitLevel", "GetMaxPlayerLevel", "InCombatLockdown" }
+		"ERR_CHAT_PLAYER_NOT_FOUND_S", "GetPlayerInfoByGUID", "UnitTokenFromGUID", "UnitLevel", "GetMaxPlayerLevel", "InCombatLockdown",
+		"C_DamageMeter" }
 	local saved = {}
 	for _, name in ipairs(globals) do saved[name] = _G[name] end
 	local dialogs = {}
@@ -186,6 +187,18 @@ local function WithWanted(fn)
 			if rows and rows[1] == nil then rows = { rows } end
 			C_DeathInfo = nil
 			C_DeathRecap = { HasRecapEvents = function() return rows ~= nil end, GetRecapEvents = function() return rows or {} end }
+		end
+		-- 1.2.3 repair: the game's damage meter (C_DamageMeter, DamageMeterDocumentation.lua): its
+		-- Deaths sources, one a death in the group, each its recap ID and whether it is the local
+		-- player's (deaths: { { id, mine } }), in its overall session.
+		function w.meter(deaths)
+			C_DamageMeter = { GetCombatSessionFromType = function(kind, meterType)
+				local sources = {}
+				if kind == 0 and meterType == 9 then
+					for _, d in ipairs(deaths) do sources[#sources + 1] = { deathRecapID = d[1], isLocalPlayer = d[2] == true, deathTimeSeconds = -1 } end
+				end
+				return { combatSources = sources }
+			end }
 		end
 		function w.die(rows)
 			w.recap(rows)
@@ -1664,13 +1677,17 @@ test("wanted 1.2.3: a full Most Wanted never refuses a Horde killer: the least a
 		local sixth = Death(6)
 		eq(W.Target(nil, sixth).current, 1, "a full list made room")
 		eq(W.Target(nil, nothing), nil, "the one with nothing open and nothing paid went first")
+		-- (1.2.3 repair, changed on purpose: a kill with no bounty open pays the Horde player's level
+		-- now, so "nothing paid" no longer tells a spare entry; one with nothing open and no grudge
+		-- goes before an open bounty, whose deaths would be lost. Before, the oldest of all went
+		-- first, here the open bounty, older than the claim.)
 		local seventh = Death(7)
 		eq(W.Target(nil, seventh).current, 1, "a list of bounties and claims alone: still room")
-		eq(W.Target(nil, open), nil, "the least active went: the oldest open bounty")
-		assert(W.Target(nil, paid), "his claim came later")
+		eq(W.Target(nil, paid), nil, "nothing open and no grudge: the claim that paid went before the older open bounty")
+		assert(W.Target(nil, open), "the open bounty stays")
 		local eighth = Death(8)
 		eq(W.Target(nil, eighth).current, 1)
-		eq(W.Target(nil, paid), nil, "then the oldest claim")
+		eq(W.Target(nil, open), nil, "then the oldest open bounty")
 		-- (1.2.3, changed on purpose, Daniel's revenge: "paid" killed us and we killed him: our death's
 		-- point and 100 more.)
 		eq(W.Rankings().all[1].points, 1 + W.Bounty.SCORE.REVENGE, "what his claim paid still counts")
@@ -2935,6 +2952,9 @@ test("wanted 1.2.3 bounty: Daniel's weights in one table, and the scoring every 
 		eq(S.OFFICE.K, 100); eq(S.OFFICE.H, 50); eq(S.OFFICE.G, 30); eq(S.OFFICE.C, 20); eq(S.OFFICE.O, 10); eq(S.OFFICE.M, 0)
 		eq(S.VICTIM_LEVEL, 1); eq(S.HORDE_LEVEL, 2); eq(S.REVENGE, 100); eq(S.GRUDGE_DAYS, 14); eq(S.REPEAT_GAP, 600)
 		eq(S.BOUNTY_MAX, 2000); eq(S.HIDDEN_GAP, 10)
+		-- (1.2.3 repair, proposed for Daniel's OK: corpse camping and a friend killed in a loop.)
+		eq(S.KILL_GAP, 3600); eq(S.REVENGE_GAP, 86400)
+		assert(S.KILL_GAP >= S.REPEAT_GAP, "a kill's gap at least a death's")
 		eq(S.MAX_POINTS, 100000); eq(S.MAX_POINTS, W.MAX_POINTS, "what WY carries: 1.2.2's receivers refuse a word above it")
 		eq(B.DeathPoints("K", 60) + B.DeathPoints("M", 40) + B.DeathPoints("M", 40), 240, "the King (60) and two members (40, 40)")
 		eq(B.ClaimPoints(B.ClaimLevel(55, true, 60), 240, false), 360, "a '??' (55 at least) and the King's row's exact 60")
@@ -3088,8 +3108,13 @@ test("wanted 1.2.3 bounty: the revenge, 100 once a claim, to a member who kills 
 		w.advance(2 * 3600)
 		local e = Kill(grom, "Grom-Realm", 50)
 		eq(e.revenge, true); eq(e.points, 100 + 40 + 100, "his level, our death's bounty and the revenge")
+		-- (1.2.3 repair, changed on purpose: our kills of one Horde player pay his level once in
+		-- KILL_GAP; before, 100 again a few seconds later.)
 		e = Kill(grom, "Grom-Realm", 50)
-		eq(e.revenge, nil, "once a claim: no new death of ours"); eq(e.points, 100)
+		eq(e.revenge, nil, "once a claim: no new death of ours"); eq(e.points, 0, "his level paid already, within KILL_GAP")
+		w.advance(W.Bounty.SCORE.KILL_GAP)
+		e = Kill(grom, "Grom-Realm", 50)
+		eq(e.revenge, nil); eq(e.points, 100, "past KILL_GAP his level again")
 		-- Another member's kill of him leaves our grudge open; then ours pays it, after a reload too.
 		local thrall = "Player-1-0D00C002"
 		w.hordePlayer("Thrall-Realm", thrall)
@@ -3120,6 +3145,8 @@ test("wanted 1.2.3 bounty: the revenge, 100 once a claim, to a member who kills 
 		w.hordePlayer("Voljin-Realm", voljin)
 		e = Kill(voljin, "Voljin-Realm", 40)
 		eq(e.revenge, nil); eq(e.points, 80)
+		-- (1.2.3 repair: past our kill's KILL_GAP, so that the revenge on him pays.)
+		w.advance(W.Bounty.SCORE.KILL_GAP)
 		DieTo(voljin, "Voljin-Realm")
 		eq(W.Target(nil, voljin).current, 40)
 		e = Kill(voljin, "Voljin-Realm", 40)
@@ -3130,6 +3157,10 @@ end)
 test("wanted 1.2.3 bounty: an office comes only from what the client trusts (the pinned King, the signed council, the game's or the authorized rank for a guild master, his master's list, the signed titles, the author), his highest alone; a row's word never raises the office or the levels", function()
 	WithWanted(function(w, W, c)
 		local B = W.Bounty
+		-- (1.2.3 repair: these are the offices with LOCAL_OFFICES, Daniel's option (b), which this
+		-- client verifies from what it alone holds; the default counts only those every client
+		-- verifies the same way: the test after this one.)
+		B.LOCAL_OFFICES = true
 		local function Office(name, guild) return B.OfficeOf(name, guild or "Olympus II") end
 		local function Named(...)
 			local set = {}
@@ -3185,7 +3216,9 @@ test("wanted 1.2.3 bounty: an office comes only from what the client trusts (the
 		end
 		eq(Row(boaster, "1.cc00d001", "K~40~0").current, 40, "a member who says he is the King: his level alone")
 		c.Roster.Fresh = function() return { members = { { full = boaster, level = 40 } } } end
-		eq(Row(boaster, "1.cc00d001", "M~60~0").current, 40, "60 said, 40 on this client's own guild's fresh roster: 40")
+		-- (1.2.3 repair, changed on purpose: the roster is up to Roster.AUTHORITY_FRESH old, so a
+		-- member who levelled since counts his level, as on every client without the roster: 41.)
+		eq(Row(boaster, "1.cc00d001", "M~60~0").current, 40 + B.ROSTER_SLACK, "60 said, 40 on this client's own guild's fresh roster: 41 at most")
 		local crowned = w.participant("Crowned-Realm", "Player-1-CC00D002")
 		eq(Row(crowned, "1.cc00d002", "M~60~0").current, 60, "the King who says less counts less: never above the row")
 		eq(Row(crowned, "1.cc00d002", "K~60~0").current, 160)
@@ -3288,6 +3321,9 @@ test("wanted 1.2.3 earlier deaths: at login the death recaps the game still hold
 		local live, early, battle, later = "Player-1-0D00A001", "Player-1-0D00A002", "Player-1-0D00A003", "Player-1-0D00A004"
 		w.hordePlayer("Live Ganker-Realm", live); w.hordePlayer("Early Ganker-Realm", early)
 		w.hordePlayer("Battle Ganker-Realm", battle); w.hordePlayer("Later Ganker-Realm", later)
+		-- (1.2.3 repair: this client has noted its instances since this game session began, so it
+		-- knows where its player was at each death: Bounty.Tracked, the test after the next ones.)
+		W.Bounty.Spans()
 		-- A death counted when it happened.
 		local liveRows = w.forever("Live-Realm", live)
 		w.die(liveRows)
@@ -3306,11 +3342,14 @@ test("wanted 1.2.3 earlier deaths: at login the death recaps the game still hold
 		w.advance(600); recaps[7] = w.forever("Later-Realm", later)
 		assert(w.handlers.ZONE_CHANGED_NEW_AREA and w.handlers.PLAYER_ENTERING_WORLD, "the zone's events reach it")
 		-- The game holds IDs 3 to 7 (the oldest went); the latest is also the one without an ID.
+		-- (1.2.3 repair: its damage meter shows them as this player's own deaths; an ID alone proves
+		-- no death is his, the test after the next ones.)
 		C_DeathInfo = nil
 		C_DeathRecap = {
 			HasRecapEvents = function(id) return id == nil or recaps[id] ~= nil end,
 			GetRecapEvents = function(id) return recaps[id or 7] or {} end,
 		}
+		w.meter({ { 3, true }, { 4, true }, { 5, true }, { 6, true }, { 7, true } })
 		w.advance(3600)
 		local before = #w.wire("WK~2~")
 		assert(W.Load())
@@ -3364,6 +3403,8 @@ test("wanted 1.2.3 earlier deaths: their notice waits out combat, an instance, a
 		c.UI.ShowCopy = function(title) if title == ns.L.WANTED_EARLIER_TITLE then shown = shown + 1 end return true end
 		local ganker = "Player-1-0D00A101"
 		w.hordePlayer("Waiting Ganker-Realm", ganker)
+		W.Bounty.Spans() -- (1.2.3 repair: its instances noted since the game session began)
+		w.advance(60)
 		local rows = w.forever("Waiting-Realm", ganker)
 		C_DeathInfo = nil
 		C_DeathRecap = { HasRecapEvents = function(id) return id == nil or id == 1 end, GetRecapEvents = function() return rows end }
@@ -3371,9 +3412,15 @@ test("wanted 1.2.3 earlier deaths: their notice waits out combat, an instance, a
 		w.advance(1200)
 		w.combat = true
 		assert(W.Load())
-		Fire("wanted earlier deaths")
-		eq(W.Target(nil, ganker).current, 40, "counted at once")
-		eq(shown, 0, "in combat: it waits")
+		-- (1.2.3 repair, changed on purpose: in combat the reading waits too, as the damage meter's
+		-- sessions, its own deaths' recap IDs, are secret then; it is tried again NOTICE_TICK later.
+		-- Before, it read at once in combat.)
+		eq(Fire("wanted earlier deaths"), W.Bounty.EARLIER_WAIT)
+		eq(W.Target(nil, ganker), nil, "in combat: the reading waits")
+		w.combat, w.consentWaiting = false, true
+		eq(Fire("wanted earlier deaths"), W.Bounty.NOTICE_TICK)
+		eq(W.Target(nil, ganker).current, 40, "out of combat: counted at once")
+		eq(shown, 0, "the privacy page to ask: it waits")
 		eq(Fire("wanted earlier notice"), W.Bounty.NOTICE_TICK); eq(shown, 0)
 		-- A /reload meanwhile: it is saved, and still waits.
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
@@ -3397,37 +3444,52 @@ test("wanted 1.2.3 earlier deaths: their notice waits out combat, an instance, a
 	end)
 end)
 
-test("wanted 1.2.3 earlier deaths: the newest EARLIER_MAX at a reading, so every member's client takes them within its limit for one member; the rest at the next login, each still once", function()
+test("wanted 1.2.3 earlier deaths: the newest EARLIER_MAX at a reading, so every member's client takes them within its limit for one member; the rest at another reading EARLIER_AGAIN later in the same session (a logout empties the game's recaps), each once, and one notice for them all", function()
 	WithWanted(function(w, W, c)
 		w.manager, w.dead = false, false
 		w.units.player.level = 20
 		local timers = {}
 		c.After = function(seconds, label, fn) timers[#timers + 1] = { seconds = seconds, label = label, fn = fn } end
-		local function Login()
-			assert(W.Load())
-			for i, t in ipairs(timers) do if t.label == "wanted earlier deaths" then table.remove(timers, i) t.fn() return end end
+		local function Fire(label)
+			for i, t in ipairs(timers) do if t.label == label then table.remove(timers, i) t.fn() return t.seconds end end
 		end
-		c.UI.ShowCopy = function() return true end
+		local shown = {}
+		c.UI.ShowCopy = function(title, text) if title == ns.L.WANTED_EARLIER_TITLE then shown[#shown + 1] = text end return true end
+		W.Bounty.Spans() -- (its instances noted since the game session began)
 		local recaps = {}
-		for i = 1, 8 do
+		for i = 1, 9 do
 			local guid = ("Player-1-0D00A3%02d"):format(i)
 			w.hordePlayer("Many" .. i .. "-Realm", guid)
 			w.advance(60)
 			recaps[i] = w.forever("Many" .. i .. "-Realm", guid)
+			-- (Rows of the combat log's shape, where the game's rows carry it: they name their victim,
+			-- this player, so a recap ID the game answers for is his.)
+			for _, row in ipairs(recaps[i]) do row.destGUID = w.units.player.guid end
 		end
 		assert(W.Bounty.EARLIER_MAX < W.SHARE_RATE_MAX, "within a receiver's limit for one member")
 		C_DeathInfo = nil
 		C_DeathRecap = { HasRecapEvents = function(id) return id == nil or recaps[id] ~= nil end,
-			GetRecapEvents = function(id) return recaps[id or 8] or {} end }
+			GetRecapEvents = function(id) return recaps[id or 9] or {} end }
 		w.advance(600)
-		Login()
+		assert(W.Load())
+		eq(Fire("wanted earlier deaths"), W.Bounty.EARLIER_WAIT)
 		eq(#w.wire("WK~2~"), W.Bounty.EARLIER_MAX)
-		eq(W.Target(nil, "Player-1-0D00A308").current, 20); eq(W.Target(nil, "Player-1-0D00A303").current, 20)
-		eq(W.Target(nil, "Player-1-0D00A302"), nil, "the oldest wait"); eq(W.Target(nil, "Player-1-0D00A301"), nil)
-		Login()
-		eq(#w.wire("WK~2~"), 8); eq(W.Target(nil, "Player-1-0D00A301").current, 20)
-		Login()
-		eq(#w.wire("WK~2~"), 8, "none twice")
+		eq(W.Target(nil, "Player-1-0D00A309").current, 20); eq(W.Target(nil, "Player-1-0D00A304").current, 20)
+		eq(W.Target(nil, "Player-1-0D00A303"), nil, "the oldest wait"); eq(W.Target(nil, "Player-1-0D00A301"), nil)
+		eq(#shown, 0, "the notice waits for the session's reading to end: one notice")
+		-- (1.2.3 repair: before, the rest waited for the next login, but a logout empties the game's
+		-- death recaps: without a /reload first they were lost.)
+		eq(Fire("wanted earlier deaths"), W.Bounty.EARLIER_AGAIN, "read again in the same session, past every receiver's window for one member")
+		assert(W.Bounty.EARLIER_AGAIN >= W.SHARE_RATE_WINDOW)
+		eq(#w.wire("WK~2~"), 9); eq(W.Target(nil, "Player-1-0D00A301").current, 20); eq(W.Target(nil, "Player-1-0D00A303").current, 20)
+		eq(#shown, 1, "told once, every death added")
+		local lines = 0
+		for line in shown[1]:gmatch("[^\n]+") do if line:find("+20", 1, true) then lines = lines + 1 end end
+		eq(lines, 9)
+		assert(shown[1]:find("Many1", 1, true) < shown[1]:find("Many9", 1, true), "the oldest death first")
+		eq(Fire("wanted earlier deaths"), nil, "no reading more")
+		assert(W.Load()); Fire("wanted earlier deaths")
+		eq(#w.wire("WK~2~"), 9, "none twice"); eq(#shown, 1)
 	end)
 end)
 
@@ -3438,6 +3500,8 @@ test("wanted 1.2.3 earlier deaths world: a member back with this session's death
 		local horde = "Player-1-0B0000D1"
 		world.horde[horde] = "Recapped-Realm"
 		back.units.player.level = 35
+		-- (1.2.3 repair: a death 900 s ago, after his client began noting its instances: Bounty.Tracked.)
+		world.epoch = world.epoch + 1000
 		back.recap = { { event = "SPELL_DAMAGE", sourceGUID = horde, sourceName = "Recapped-Realm", sourceFlags = 0x548,
 			overkill = 12, timestamp = world.epoch - 900 } }
 		world:Load(back) -- (a /reload: the recaps are the game's, still there)
@@ -3448,6 +3512,354 @@ test("wanted 1.2.3 earlier deaths world: a member back with this session's death
 		end
 		eq(#(back.copies or {}), 1, "told once"); eq(back.copies[1].title, ns.L.WANTED_EARLIER_TITLE); eq(back.copies[1].opts.auto, true)
 		eq(king.copies, nil, "nobody else is told")
+	end)
+end)
+
+-- 1.2.3 repair (the bounty branch's review): each test below fails on the branch before it.
+local function Timers(c)
+	local timers = {}
+	c.After = function(seconds, label, fn) timers[#timers + 1] = { seconds = seconds, label = label, fn = fn } end
+	return function(label)
+		for i, t in ipairs(timers) do if t.label == label then table.remove(timers, i) t.fn() return t.seconds end end
+	end
+end
+
+test("wanted 1.2.3 repair: a death recap that is not this player's own (a party member's: Forever's damage meter keeps a recap ID for every death in the group) is never counted, shared, told or marked read, and opens no grudge; the latest recap, an ID the damage meter shows as his and one whose rows name him count", function()
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		local Fire = Timers(c)
+		local shown = {}
+		c.UI.ShowCopy = function(title, text) if title == ns.L.WANTED_EARLIER_TITLE then shown[#shown + 1] = text end return true end
+		W.Bounty.Spans() -- (its instances noted since the game session began)
+		local mate = "Player-1-CC00B001" -- a party member, killed while this player lived
+		local function Horde(i)
+			local guid = ("Player-1-0D00B1%02d"):format(i)
+			w.hordePlayer("Partykiller" .. i .. "-Realm", guid)
+			return guid
+		end
+		local named, meterOther, bare, meterMine, latest = Horde(1), Horde(2), Horde(3), Horde(4), Horde(5)
+		local recaps = {}
+		w.advance(60); recaps[1] = w.forever("Partykiller1-Realm", named)
+		for _, row in ipairs(recaps[1]) do row.destGUID = mate end -- (rows that name their victim: the mate)
+		w.advance(60); recaps[2] = w.forever("Partykiller2-Realm", meterOther) -- (the mate's death in the damage meter)
+		w.advance(60); recaps[3] = w.forever("Partykiller3-Realm", bare) -- (no row names a victim, the meter has it not)
+		w.advance(60); recaps[4] = w.forever("Partykiller4-Realm", meterMine) -- (our own death in the damage meter)
+		w.advance(60); recaps[5] = w.forever("Partykiller5-Realm", latest) -- (our latest death: the recap without an ID)
+		C_DeathInfo = nil
+		C_DeathRecap = { HasRecapEvents = function(id) return id == nil or recaps[id] ~= nil end,
+			GetRecapEvents = function(id) return recaps[id or 5] or {} end }
+		w.meter({ { 2, false }, { 4, true }, { 5, true } })
+		w.advance(600)
+		assert(W.Load())
+		Fire("wanted earlier deaths")
+		eq(W.Target(nil, named), nil, "a recap whose rows name another victim (before: counted as this player's death)")
+		eq(W.Target(nil, meterOther), nil, "another's death in the damage meter")
+		eq(W.Target(nil, bare), nil, "an ID the game answers for, nothing showing it is ours")
+		eq(W.Target(nil, meterMine).current, 40, "the damage meter's death of the local player")
+		eq(W.Target(nil, latest).current, 40, "the latest recap")
+		eq(#w.wire("WK~"), 2, "only ours shared")
+		for _, n in ipairs({ 1, 2, 3 }) do eq(c.rdb.wanted.recapsRead[W.Bounty.KillingBlow(recaps[n]).key], nil, "recap " .. n .. ": not ours, not marked read") end
+		eq(#shown, 1)
+		for i = 1, 3 do eq(shown[1]:find("Partykiller" .. i, 1, true), nil, "not in the window: " .. i) end
+		local why = W.ShareState().why
+		eq(why.victim, 1); eq(why.unproven, 2)
+		-- Nor a grudge: killing one of them pays his level alone.
+		w.advance(W.DEATH_WINDOW + 1)
+		w.units.target = { name = "Partykiller1-Realm", guid = named, faction = "Horde", level = 50 }
+		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, named)
+		w.units.target = nil
+		assert(ok, tostring(e)); eq(e.revenge, nil); eq(e.points, 100)
+		-- A later reading in the session: still nothing of the mate's, and no second window.
+		assert(W.Load()); Fire("wanted earlier deaths")
+		eq(W.Target(nil, bare), nil); eq(#w.wire("WK~"), 3); eq(#shown, 1)
+		-- The live death reads the latest recap: rows that name another victim are refused there too.
+		w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
+		local rows = w.forever("Partykiller3-Realm", bare)
+		for _, row in ipairs(rows) do row.destGUID = mate end
+		w.die(rows)
+		w.dead = false
+		eq(W.Target(nil, bare), nil, "the live death's recap names the mate: not ours")
+		eq(W.ShareState().log[#W.ShareState().log].why, "victim")
+	end)
+end)
+
+test("wanted 1.2.3 repair: an earlier death from before this client noted its instances (the first /reload after the update, with battleground deaths earlier that session) is refused, never counted as a world death; one in a time it let go is refused too; Daniel's EARLIER_UNTRACKED takes them", function()
+	local function Gulch(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		-- On 1.2.2, two Warsong Gulch matches: five deaths to Horde players. Nothing noted where.
+		local recaps = {}
+		for i = 1, 5 do
+			local guid = ("Player-1-0D00B2%02d"):format(i)
+			w.hordePlayer("Gulch" .. i .. "-Realm", guid)
+			w.advance(120)
+			recaps[i] = w.forever("Gulch" .. i .. "-Realm", guid)
+			for _, row in ipairs(recaps[i]) do row.destGUID = w.units.player.guid end
+		end
+		C_DeathInfo = nil
+		C_DeathRecap = { HasRecapEvents = function(id) return id == nil or recaps[id] ~= nil end,
+			GetRecapEvents = function(id) return recaps[id or 5] or {} end }
+		w.advance(300) -- (he left the match, updated and typed /reload outside)
+		local Fire = Timers(c)
+		local shown = 0
+		c.UI.ShowCopy = function(title) if title == ns.L.WANTED_EARLIER_TITLE then shown = shown + 1 end return true end
+		assert(W.Load())
+		Fire("wanted earlier deaths")
+		local counted = 0
+		for i = 1, 5 do if W.Target(nil, ("Player-1-0D00B2%02d"):format(i)) then counted = counted + 1 end end
+		return counted, shown
+	end
+	WithWanted(function(w, W, c)
+		local counted, shown = Gulch(w, W, c)
+		eq(counted, 0, "no proof they were outside an instance (before: all five counted as world deaths)")
+		eq(#w.wire("WK~"), 0, "none shared"); eq(shown, 0, "nothing added: no window")
+		eq(W.ShareState().why.untracked, 5)
+		assert(c.rdb.wanted.insideSince, "noted from now on")
+	end)
+	WithWanted(function(w, W, c)
+		W.Bounty.EARLIER_UNTRACKED = true
+		local counted, shown = Gulch(w, W, c)
+		eq(counted, 5, "Daniel's other choice: taken"); eq(shown, 1)
+	end)
+	-- More instances than this client keeps: the oldest time let go is not known any more.
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		W.Bounty.Spans()
+		local guid = "Player-1-0D00B2F1"
+		w.hordePlayer("Dungeon-Realm", guid)
+		w.advance(60); w.inside = true; W.Bounty.Zone()
+		w.advance(60)
+		local rows = w.forever("Dungeon-Realm", guid)
+		w.advance(60); w.inside = false; W.Bounty.Zone()
+		for _ = 1, W.Bounty.INSIDE_MAX do
+			w.advance(60); w.inside = true; W.Bounty.Zone()
+			w.advance(60); w.inside = false; W.Bounty.Zone()
+		end
+		eq(#c.rdb.wanted.inside, W.Bounty.INSIDE_MAX)
+		C_DeathInfo = nil
+		C_DeathRecap = { HasRecapEvents = function(id) return id == nil end, GetRecapEvents = function() return rows end }
+		local Fire = Timers(c)
+		c.UI.ShowCopy = function() return true end
+		assert(W.Load()); Fire("wanted earlier deaths")
+		eq(W.Target(nil, guid), nil, "in the first dungeon, a time let go (before: counted)")
+		eq(W.ShareState().why.untracked, 1)
+	end)
+end)
+
+test("wanted 1.2.3 repair world: a death and a kill of one Horde player in the same second count in the same order on every client (the death's bounty in that claim), whichever a client hears first", function()
+	WithWorld(function(world)
+		local a = world:Client("Fallen-Realm", "Player-1-0A0000E1")
+		local b = world:Client("Avenger-Realm", "Player-1-0A0000E2")
+		local third = world:Client("Third-Realm", "Player-1-0A0000E3")
+		a.units.player.level, b.units.player.level, third.units.player.level = 40, 45, 30
+		local everyone = { a, b, third }
+		world.epoch = world.epoch + 100
+		local function Death(horde)
+			a.dead, a.recap = true, { { event = "SPELL_DAMAGE", sourceGUID = horde, sourceName = world.horde[horde], sourceFlags = 0x548,
+				overkill = 30, timestamp = world.epoch + 0.4 } }
+			world:As(a, a.events.PLAYER_DEAD)
+			a.dead, a.recap = false, nil
+		end
+		local function Kill(horde)
+			b.units.target = { name = world.horde[horde], guid = horde, faction = "Horde", level = 50 }
+			assert(world:As(b, b.events.PARTY_KILL, b.guid, horde))
+			b.units.target = nil
+		end
+		local function Same(horde, what)
+			for _, cl in ipairs(everyone) do
+				local t = world:As(cl, cl.W.Target, nil, horde)
+				eq(t.current, 0, cl.name .. ", " .. what .. ": no bounty left open")
+				eq(t.claims[#t.claims].points, 100 + 40, cl.name .. ", " .. what .. ": the death's bounty in the claim")
+			end
+		end
+		-- A (level 40) dies to him, and in the same second B kills him (level 50 on his corpse):
+		-- B's own client holds its claim before A's death reaches it.
+		local first = "Player-1-0B0000E1"
+		world.horde[first] = "Sametime-Realm"
+		Death(first); Kill(first)
+		world:Deliver()
+		Same(first, "the death heard first")
+		-- The kill first, then the death, in one second: every receiver hears the claim first.
+		world.epoch = world.epoch + 60
+		local second = "Player-1-0B0000E2"
+		world.horde[second] = "Othertime-Realm"
+		Kill(second); Death(second)
+		world:Deliver()
+		Same(second, "the claim heard first")
+		for _, cl in ipairs(everyone) do eq(world:As(cl, cl.W.Rankings).all[1].points, 280, cl.name .. ": the same Slayers' points") end
+	end)
+end)
+
+test("wanted 1.2.3 repair: a live death read a moment after it (the recap came late, a retry) is dated by its recap's killing blow, as an earlier death is", function()
+	WithWanted(function(w, W)
+		w.manager = false
+		local guid = "Player-1-0D00B501"
+		w.hordePlayer("Late-Realm", guid)
+		w.advance(60)
+		local rows = w.forever("Late-Realm", guid, { at = w.epoch - 3 }) -- (the recap read three seconds after the death)
+		w.die(rows)
+		eq(W.Target(nil, guid).victims[1].at, w.epoch - 3, "dated by its killing blow (before: when it was read)")
+	end)
+end)
+
+test("wanted 1.2.3 repair world: a death's office counts the same on every client: a guild master only his own client and his guild's roster verify counts as a member everywhere, one the signed leadership manifest names as a guild master everywhere; Daniel's LOCAL_OFFICES (option b) counts what each client verifies, and they differ", function()
+	WithWorld(function(world)
+		local master = world:Client("Master-Realm", "Player-1-0A0000F1", nil, nil, "Olympus II")
+		local mate = world:Client("Mate-Realm", "Player-1-0A0000F2", nil, nil, "Olympus II")
+		local other = world:Client("Faraway-Realm", "Player-1-0A0000F3", nil, nil, "Olympus III")
+		master.units.player.level, master.units.player.rank = 40, 0
+		world.verified[ns.Fold(master.name)] = true -- (the other guild's client verifies him as a member)
+		local everyone = { master, mate, other }
+		local function Manifest(signed)
+			for _, cl in ipairs(everyone) do
+				cl.ns.Authority = { Role = function(name)
+					if signed and ns.Fold(ns.FullName(name)) == ns.Fold(master.name) then return "Olympus II", 0, "signed" end
+				end }
+				-- (His guild's roster, as Data.AuthorizedRank reads it, ranks him on his guildmates' clients
+				-- alone; the census ranks nobody for the other guild's.)
+				cl.ns.Data.AuthorizedRank = function(name, guild)
+					if cl.guild == "Olympus II" and guild == "Olympus II" and ns.Fold(ns.FullName(name)) == ns.Fold(master.name) then return 0, "roster" end
+				end
+			end
+		end
+		local n = 0
+		local function Die()
+			n = n + 1
+			local horde = ("Player-1-0B0000F%d"):format(n)
+			world.horde[horde] = "Office" .. n .. "-Realm"
+			master.dead, master.recap = true, { { event = "SPELL_DAMAGE", sourceGUID = horde, sourceName = world.horde[horde], sourceFlags = 0x548,
+				overkill = 30, timestamp = world.epoch - 0.2 } }
+			world:As(master, master.events.PLAYER_DEAD)
+			master.dead, master.recap = false, nil
+			world:Deliver()
+			local out = {}
+			for i, cl in ipairs(everyone) do
+				local t = world:As(cl, cl.W.Target, nil, horde)
+				out[i] = t and t.current or -1
+			end
+			world.epoch = world.epoch + 60
+			return out
+		end
+		Manifest(false)
+		local got = Die()
+		for i, cl in ipairs(everyone) do eq(got[i], 40, cl.name .. ": a member's 0 and his level (before: 70 on his own client, 40 elsewhere)") end
+		Manifest(true)
+		got = Die()
+		for i, cl in ipairs(everyone) do eq(got[i], 70, cl.name .. ": the signed manifest's guild master, 30 and his level, everywhere") end
+		-- Option (b): each client what it verifies; the other guild's cannot.
+		Manifest(false)
+		for _, cl in ipairs(everyone) do cl.W.Bounty.LOCAL_OFFICES = true end
+		got = Die()
+		eq(got[1], 70, "his own client: the game's rank"); eq(got[2], 70, "his guild's roster")
+		eq(got[3], 40, "a client of another guild that cannot verify him: the clients differ, option b's price")
+	end)
+end)
+
+test("wanted 1.2.3 repair: corpse camping and a Horde friend killed in a loop no longer mint points: one member's kills of one Horde player pay his level once in KILL_GAP (the open bounty always) and the revenge on him once in REVENGE_GAP; another member's kill has its own gap, and a reload keeps them", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		local me = w.units.player.guid
+		w.units.player.level = 60
+		local S = W.Bounty.SCORE
+		local function Kill(guid, name, level)
+			w.units.target = { name = name, guid = guid, faction = "Horde", level = level }
+			local ok, e = w.handlers.PARTY_KILL(me, guid)
+			w.units.target = nil
+			assert(ok, tostring(e))
+			return e
+		end
+		local function Mine()
+			for _, r in ipairs(W.Rankings().all) do if r.guid == me then return r.points end end
+			return 0
+		end
+		-- (a) A real level-60 Horde player's corpse camped in the open world: eight kills in five minutes.
+		local camped = "Player-1-0D00B301"
+		w.hordePlayer("Camped-Realm", camped)
+		local total = 0
+		for i = 1, 8 do
+			w.advance(i > 1 and 37 or 1)
+			total = total + Kill(camped, "Camped-Realm", 60).points
+		end
+		eq(total, 120, "one fair kill's points (before: 8 x 120 = 960)")
+		eq(Mine(), 120)
+		-- (b) A friend's level-60 Horde alt and this member, every 10 minutes: the alt kills him (60
+		-- on the alt's bounty, a grudge), he kills the alt.
+		local alt = "Player-1-0D00B302"
+		w.hordePlayer("Friendly-Realm", alt)
+		local function Loop(wait)
+			w.advance(wait or S.REPEAT_GAP)
+			w.die(w.forever("Friendly-Realm", alt)); w.dead = false
+			w.advance(W.DEATH_WINDOW + 1)
+			return Kill(alt, "Friendly-Realm", 60)
+		end
+		local e = Loop()
+		eq(e.points, 120 + 60 + 100, "the first: his level, the bounty of our death, the revenge"); eq(e.revenge, true)
+		for i = 2, 6 do
+			e = Loop()
+			eq(e.points, 60, "loop " .. i .. ": the bounty our death put on him alone, no level, no revenge (before: 280)"); eq(e.revenge, nil)
+		end
+		e = Loop(S.KILL_GAP)
+		eq(e.points, 120 + 60, "past KILL_GAP his level again; the revenge waits REVENGE_GAP"); eq(e.revenge, nil)
+		e = Loop(S.REVENGE_GAP)
+		eq(e.points, 120 + 60 + 100, "a day on, the revenge again"); eq(e.revenge, true)
+		-- Another member's kill of him has its own gap: his level.
+		local other = w.participant("Other-Realm", "Player-1-CC00B301")
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(w.commHandlers.WK("CHANNEL", other, BountyRow(c, W, { digest = "00000000000b3001", at = w.epoch, kind = "P",
+			horde = "1.0d00b302", own = "1.cc00b301", worth = "M~60~60", name = "Friendly-Realm" })))
+		eq(W.Target(nil, alt).claims[#W.Target(nil, alt).claims].points, 120)
+		-- After a reload, built again from the rows: our gap holds.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted
+		assert(W.Prune())
+		w.advance(W.DEATH_WINDOW + 1)
+		eq(Kill(alt, "Friendly-Realm", 60).points, 0, "within our KILL_GAP after a reload")
+	end)
+end)
+
+test("wanted 1.2.3 repair: a full Most Wanted keeps an open bounty, and a member's open grudge, over a Horde player who was only killed (a kill with no bounty pays his level now, so nothing paid no longer tells the entry that holds least); what his kill paid stays with its Slayer", function()
+	WithWanted(function(w, W, c)
+		W.MAX_TARGETS = 3
+		w.manager, w.dead = false, false
+		w.units.player.level = 40
+		local me = w.units.player.guid
+		local function Horde(i)
+			local guid = ("Player-1-0D00B4%02d"):format(i)
+			w.hordePlayer("Full" .. i .. "-Realm", guid)
+			return guid
+		end
+		local function Die(guid, i) w.advance(W.DEATH_WINDOW + 1) w.die(w.forever("Full" .. i .. "-Realm", guid)) w.dead = false end
+		local function Mine()
+			for _, r in ipairs(W.Rankings().all) do if r.guid == me then return r.points end end
+			return 0
+		end
+		-- The oldest: he killed us, his bounty open.
+		local open = Horde(1); Die(open, 1)
+		-- Then one we killed (level 50 on his corpse: 100 points), nothing open.
+		local killed = Horde(2)
+		w.advance(W.DEATH_WINDOW + 1)
+		w.units.target = { name = "Full2-Realm", guid = killed, faction = "Horde", level = 50 }
+		assert(w.handlers.PARTY_KILL(me, killed))
+		w.units.target = nil
+		eq(Mine(), 100)
+		-- Then one who killed us and whom another member killed: nothing open, our grudge open.
+		local grudged = Horde(3); Die(grudged, 3)
+		local other = w.participant("Other-Realm", "Player-1-CC00B401")
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(w.commHandlers.WK("CHANNEL", other, BountyRow(c, W, { digest = "00000000000b4001", at = w.epoch, kind = "P",
+			horde = "1.0d00b403", own = "1.cc00b401", worth = "M~40~50", name = "Full3-Realm" })))
+		eq(W.Target(nil, grudged).current, 0)
+		-- A fourth Horde player kills us: room is made.
+		local fourth = Horde(4); Die(fourth, 4)
+		assert(W.Target(nil, fourth))
+		eq(W.Target(nil, killed), nil, "the one only killed went (before: the open bounty, the oldest)")
+		eq(W.Target(nil, open).current, 40, "the open bounty stays"); assert(W.Target(nil, grudged), "and the grudge")
+		eq(Mine(), 100, "what our kill paid stays with us")
+		-- A fifth: the grudge goes before any open bounty.
+		local fifth = Horde(5); Die(fifth, 5)
+		eq(W.Target(nil, grudged), nil); eq(W.Target(nil, open).current, 40); assert(W.Target(nil, fourth))
 	end)
 end)
 

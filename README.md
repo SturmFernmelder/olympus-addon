@@ -1654,39 +1654,47 @@ not bring it back. There is no review and no Send evidence any more.
 
 **The bounty (1.2.3).** A death adds to the Horde player's bounty the victim's office and his
 level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any
-other office 10 (a Steward, an arbiter, one of the King's Hands, a correspondent, the Treasurer's
-and the author's characters), a member 0; one office only, the highest. The same member killed
-by the same Horde player counts once in 10 minutes (corpse camping), and one bounty holds 2000
-points at most. A killing blow pays twice the Horde player's level and his whole bounty, which
-then starts again at 0; a kill with no bounty open pays the level part alone. A member who kills
-the very Horde player who killed him within 14 days gets 100 more, once for each such kill. A
-Slayer holds 100000 points at most. Nothing counts in an instance (a battleground, an arena, a
-dungeon, a raid), the death nor the kill. Offices come only from what your client can trust: the
-pinned King, the signed High Council list, the game's own rank (or the roster, the signed
-leadership or the Crown's census rule of two senders) for a guild master, his guild master's own
-list for a centurion or correspondent, the signed titles; never a census rank alone, a guild
-officer's rank or what a row says. Levels are the game's: your own from your client at the death
-or kill, the Horde player's from a unit of his (his corpse, a nameplate, the target, or one seen
-within a minute), a level the game hides (??) as your level plus 10 at least, none 0; a kill
-whose level is hidden or unseen counts the highest exact level a death of the open bounty saw.
-Each row carries what it is worth, frozen where it was observed, and every client scores the
-same rows the same way, never higher than it can verify (an office it cannot check, a level
-above one it sees), so every client shows the same points. A row from a client before these
-fields counts as it did: 1 a death, a kill its open bounty.
+other office 10, a member 0; one office only, the highest. The same member killed by the same
+Horde player counts once in 10 minutes (corpse camping), and one bounty holds 2000 points at most.
+A killing blow pays twice the Horde player's level and his whole bounty, which then starts again
+at 0; a kill with no bounty open pays the level part alone. A member who kills the very Horde
+player who killed him within 14 days gets 100 more, once for each such kill. One member's kills of
+one Horde player pay his level once an hour and the 100 once a day (the open bounty always), so
+camping a corpse or killing a friend's character over and over pays no more. A Slayer holds
+100000 points at most. Nothing counts in an instance (a battleground, an arena, a dungeon, a
+raid), the death nor the kill. An office counts only where every client verifies it the same way,
+so that every client shows the same points: the pinned King, the signed High Council list, the
+signed leadership list for a guild master, the signed titles (a Steward, an arbiter), the
+Treasurer's and the author's characters; a centurion, a correspondent, one of the King's Hands or a
+guild master whom only his own guild's roster or the census knows counts as a member, and never a
+census rank alone, a guild officer's rank or what a row says. Levels are the game's: your own from
+your client at the death or kill, the Horde player's from a unit of his (his corpse, a nameplate,
+the target, or one seen within a minute), a level the game hides (??) as your level plus 10 at
+least, none 0; a kill whose level is hidden or unseen counts the highest exact level a death of
+the open bounty saw. Each row carries what it is worth, frozen where it was observed, and every
+client scores the same rows the same way and in the same order (by the time of each death, a
+death before a kill in the same second), never higher than it can verify (an office it cannot
+check, a level above one it sees). A row from a client before these fields counts as it did: 1 a
+death, a kill its open bounty.
 
 **Earlier deaths (1.2.3).** Olympus kept no death before 1.2.3, and the game keeps no PvP history,
 but its death recaps of the current game session are still there (gone when the game closes).
-Once a login, a moment after it, your client reads every recap the game still holds, applies the
-live death's own checks to each (a Horde player's killing blow, never in an instance, the same
-10 minutes and caps, your office and level as they are now), shares each one it adds as a live
-death, and never reads one twice. It tells you once, in an Olympus copy window (never the chat
-or the game's pop-ups, and it takes no keyboard), each death added as a line: the killer, his
-level, the time and the points it added to his bounty; nothing when none was added. The window
-waits out combat, an instance, a death and the privacy page. A death typed or reported by hand is
-never taken.
+Once a login, a moment after it and out of combat, your client reads the recaps of your own
+deaths the game still holds (the latest, the deaths its damage meter shows as yours, and those
+whose rows name you; a party member's death is never taken), applies the live death's own checks
+to each (a Horde player's killing blow, never in an instance, the same 10 minutes and caps, your
+office and level as they are now), shares each one it adds as a live death, and never reads one
+twice; six at a time, and the rest two minutes later. Only a death from after your client began
+noting its instances counts: at the first /reload after the update it cannot tell a battleground
+death from a world one, so the deaths before it are left out. It tells you once, in an Olympus
+copy window (never the chat or the game's pop-ups, and it takes no keyboard), each death added as
+a line: the killer, his level, the time and the points it added to his bounty; nothing when none
+was added. The window waits out combat, an instance, a death and the privacy page. A death typed
+or reported by hand is never taken.
 
 Wanted holds the 200 most recently active Horde players and never refuses a new one: past 200 the
-least active goes (one with nothing open and nothing paid first), and what his claims paid stays
+least active goes, the one that holds least first (no open bounty and no member's grudge on him,
+then nothing paid), and what his claims paid stays
 with its Slayers (a Take off no longer reaches it). Up to 512 entries taken off are kept off apart
 and take no place. A Horde player is his GUID, never a name: his name is the one the game gives for
 that GUID wherever your client can look it up, a row that gives a GUID the game knows another
