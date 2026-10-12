@@ -272,6 +272,7 @@ Honors.ORACLE_PLACES = 3        -- the Oracle's gold, silver and bronze
 Honors.ORACLE_MIN_MARKETS = 10  -- settled public markets a bettor needs in the month to be ranked
 -- Which honour comes first: in lists, and when several are earned at once (the one switched on).
 Honors.ORDER = { "belt", "podium", "guild", "donor-top", "level", "oracle", "donor-month", "tier" }
+Honors.DEV_TITLE = "the-dev" -- (1.2.3) the author's own title, a title alone (Honors.Holdings)
 -- Where each family's honours come from (Update's known): a family's first word.
 Honors.SOURCES = { "belt", "tier", "donor", "level", "guild", "oracle" }
 
@@ -1082,6 +1083,13 @@ function Honors.Holdings(player, inputs)
 		if Name(g.leader) and Key(g.leader) == key and (mine == nil or mine == top) then
 			held[#held + 1] = Honour("guild", 0, 1, "guild-top-leader", { guild = g.guild })
 		end
+	end
+	-- 1.2.3 (the author's ask): his own title, "The Dev". A title alone (no frame, no mark, no
+	-- King's letter), held by the author's character (player.author: Workshop.IsAuthorName, his
+	-- name in his realm group, so every client works it out the same); last in ORDER.
+	if player.author == true then
+		held[#held + 1] = { kind = "dev", family = "dev", place = 1, key = Honors.DEV_TITLE, title = Honors.DEV_TITLE,
+			noLetter = true, order = (#Honors.ORDER + 1) * 100000 }
 	end
 	table.sort(held, function(a, b)
 		if a.order ~= b.order then return a.order < b.order end
