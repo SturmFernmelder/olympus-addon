@@ -3157,7 +3157,7 @@ end)
 test("wanted 1.2.3 bounty: an office comes only from what the client trusts (the pinned King, the signed council, the game's or the authorized rank for a guild master, his master's list, the signed titles, the author), his highest alone; a row's word never raises the office or the levels", function()
 	WithWanted(function(w, W, c)
 		local B = W.Bounty
-		-- (1.2.3 repair: these are the offices with LOCAL_OFFICES, Daniel's option (b), which this
+		-- (1.2.3: these are the offices with LOCAL_OFFICES, Daniel's option (b), the shipped default, which this
 		-- client verifies from what it alone holds; the default counts only those every client
 		-- verifies the same way: the test after this one.)
 		B.LOCAL_OFFICES = true
@@ -3704,7 +3704,7 @@ test("wanted 1.2.3 repair: a live death read a moment after it (the recap came l
 	end)
 end)
 
-test("wanted 1.2.3 repair world: a death's office counts the same on every client: a guild master only his own client and his guild's roster verify counts as a member everywhere, one the signed leadership manifest names as a guild master everywhere; Daniel's LOCAL_OFFICES (option b) counts what each client verifies, and they differ", function()
+test("wanted 1.2.3 repair world: the strict offices count the same on every client (a guild master only his own client and his guild's roster verify counts as a member everywhere, one the signed leadership manifest names as a guild master everywhere); 1.2.3 ships Daniel's LOCAL_OFFICES (option b), each client counting what it verifies, so they may differ", function()
 	WithWorld(function(world)
 		local master = world:Client("Master-Realm", "Player-1-0A0000F1", nil, nil, "Olympus II")
 		local mate = world:Client("Mate-Realm", "Player-1-0A0000F2", nil, nil, "Olympus II")
@@ -3742,6 +3742,9 @@ test("wanted 1.2.3 repair world: a death's office counts the same on every clien
 			world.epoch = world.epoch + 60
 			return out
 		end
+		-- (1.2.3 ships option b, Daniel's choice "Contar GM e centurião já"; the strict mode first.)
+		eq(master.W.Bounty.LOCAL_OFFICES, true, "1.2.3: option b by default")
+		for _, cl in ipairs(everyone) do cl.W.Bounty.LOCAL_OFFICES = false end
 		Manifest(false)
 		local got = Die()
 		for i, cl in ipairs(everyone) do eq(got[i], 40, cl.name .. ": a member's 0 and his level (before: 70 on his own client, 40 elsewhere)") end

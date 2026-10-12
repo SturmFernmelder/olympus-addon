@@ -3964,8 +3964,9 @@ end
 -- master's game rank on his own client, the roster or the census elsewhere (Data.AuthorizedRank), a
 -- centurion's or a correspondent's master's list (Nominees, heard this session), the King's Hands
 -- (his list, heard lately); then two clients may count one death differently (a client that
--- cannot verify him counts a member's 0).
-Bounty.LOCAL_OFFICES = false
+-- cannot verify him counts a member's 0). 1.2.3: true, Daniel's choice ("Contar GM e centurião
+-- já"), until the signed leadership manifest is switched on.
+Bounty.LOCAL_OFFICES = true
 -- (A member's level on this client's own guild's roster, which is at most Roster.AUTHORITY_FRESH
 -- old, may be this many levels behind the level his own client gave: the clamp leaves them.)
 Bounty.ROSTER_SLACK = 1
