@@ -40,7 +40,10 @@ ns.Letters = Letters
 
 -- Every version with a letter, newest first.
 Letters.LIST = { "1.2.3", "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
-Letters.LOGIN_WAIT = 60 -- after login (the privacy page asks at 45 s: Consent.LOGIN_WAIT)
+-- 1.2.3 (the author's ask: "why a minute later? why not when opening the game?"): a few seconds
+-- after login, once the loading screen is gone; a privacy question still to ask comes first
+-- (PageFirst: the letter waits for the page, then HANDOFF after it closes).
+Letters.LOGIN_WAIT = 8
 -- (1.2.3, the King's stream: the letter came long after the privacy page he closed, on the
 -- minute's next try.) Kept back after LOGIN_WAIT (combat, an instance, the privacy page), it is
 -- tried again every RETRY, and HANDOFF after the privacy page closes.
