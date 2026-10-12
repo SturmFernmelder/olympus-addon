@@ -1,6 +1,7 @@
 -- 1.2.3 (the owner's call, "Cajado entra na 1.2.3"): the missionaries' crook, the first honour's frame
--- worn after the cornucopia. The Church's top 3 missionaries (ChurchCount.Top3: the NR~1~t word of the
--- Head's, the King's or the author's client) hold the shepherd's crook in gold, silver and bronze and
+-- worn after the cornucopia. The Church's top 3 missionaries (ChurchCount.Top3: the NR~1~t word taken
+-- from the Head's, the King's or the author's client; in the game only the author's sends one, and the
+-- tests hand each client the King's) hold the shepherd's crook in gold, silver and bronze and
 -- its title, and see it on their own portraits; the 4th holds nothing. A frame not released yet (the
 -- koi) never takes the place of the cornucopia worn; a released one may switch on by itself, and the
 -- player picks back any released frame he holds, and it stays. The profile's pickers offer only the
@@ -311,5 +312,178 @@ test("1.2.3 the profile's Edit: its frame list and its icon picker offer only th
 	end
 	-- (From the cornucopia, switched on first by ORDER: the crook, then round to it again.)
 	eq(table.concat(seen, ","), "missionary-1,rank,none,donor-top-1")
+	W3.NoErrors(w)
+end)
+
+-- 1.2.3, after review. The crook is the first released frame a 30-day moving ranking gives: its holders
+-- drop out of the top 3 and come back routinely. The owner's rule again: a released frame may switch
+-- on by itself when earned, the player picks any released frame he holds, and his pick sticks.
+-- The world as the tests above: A and a viewer (another client), the King's words of the top 3, each
+-- newer than the last (ChurchCount.TakeTop keeps the newest).
+local function Crook(w, cast, extra)
+	local A, viewer = cast.A, cast.arbiter
+	for _, c in ipairs({ A, viewer }) do Ready(w, c) end
+	for _, c in ipairs(extra or {}) do Ready(w, c) end
+	local x = { A = A, viewer = viewer, rA = Frames(w, A), rv = Frames(w, viewer), at = w.clock, t = w.clock }
+	viewer.target = A.name
+	-- (A profile's word saying something new is taken a minute after the last: ArenaProfile.RATE_CHANGED.)
+	function x.Later() w:Run(A.ns.ArenaProfile.RATE_CHANGED + 1) end
+	-- The King's top 3 (newer each time) to `to` (A and the viewer), then the refresh it causes.
+	function x.Word(names, to)
+		x.at = x.at + 1
+		Top(w, to or { A, viewer }, N.king, names, x.at)
+		w:Run(3)
+	end
+	-- The Treasurer's word: A 1st of all time (and of the month closed when month is given).
+	function x.Donors(month)
+		x.t = x.t + 1
+		for _, c in ipairs({ A, viewer }) do Donors(w, c, x.t, { A }, month) end
+		w:Run(3)
+	end
+	function x.Pick() return A.ns.ArenaProfile.Pick() end
+	function x.Seen() return w:As(viewer, viewer.ns.HonorsNet.Verified, A.name, A.guid) end
+	function x.Own() return w:As(A, A.ns.HonorsNet.Verified, A.name) end
+	return x
+end
+
+-- The cornucopia held, the crook switched on by itself, then a fresh word without him: the pick
+-- stayed on the crook ("a pick no longer held stays the pick"), and his own portrait, the viewer's
+-- target frame and Verified showed his rank's frame with no title, the cornucopia held.
+test("1.2.3 the missionaries' crook: switched on over the cornucopia, then a fresh top 3 without him: the cornucopia and its title show again round his own portrait and as another client sees him, never his rank's frame; named again the same month, the crook again with no second letter", function()
+	local w, cast = W3.New()
+	local x = Crook(w, cast)
+	local A, others = x.A, { cast.B, cast.spectator, cast.king }
+	x.Donors()
+	eq(x.Pick().frame, "donor-top-1")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	-- Named 3rd: the bronze crook switches on by itself, its letter told.
+	x.Later()
+	x.Word({ others[1], others[2], A })
+	eq(x.Pick().frame, "missionary-3") eq(x.Pick().title, "missionary-3")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	eq(x.rA.Shown("player"), MEDIA .. "crook-bronze")
+	eq(x.rv.Shown("target"), MEDIA .. "crook-bronze", "others see it")
+	-- A fresh word without him (three others): the cornucopia and its title.
+	x.Later()
+	x.Word(others)
+	eq(x.Pick().frame, "donor-top-1", "the cornucopia he holds") eq(x.Pick().title, "donor-top-1")
+	eq(x.rA.Shown("player"), MEDIA .. "cornucopia-gold", "round his own portrait")
+	local own = x.Own()
+	eq(own.frame, "donor-top-1") eq(own.title, "donor-top-1")
+	eq(x.rv.Shown("target"), MEDIA .. "cornucopia-gold", "as another client sees him")
+	local seen = x.Seen()
+	eq(seen.frame, "donor-top-1") eq(seen.title, "donor-top-1", "and its title")
+	-- Named 3rd again the same month: the crook back (his look before it dropped), no second letter.
+	x.Later()
+	x.Word({ others[1], others[2], A })
+	eq(x.Pick().frame, "missionary-3", "the crook again") eq(x.Pick().title, "missionary-3")
+	eq(#A.ns.HonorsNet.Letters(), 2, "the cornucopia's and the crook's letters, no other")
+	eq(x.rv.Shown("target"), MEDIA .. "crook-bronze")
+	W3.NoErrors(w)
+end)
+
+-- His pick back to the cornucopia stuck only while the ranking stood still: dropped to 4th and named
+-- 3rd again the same month (its letter told: no letter came), or any place up, switched the crook on
+-- over it, silently.
+test("1.2.3 the missionaries' crook: the cornucopia picked back in the profile stays when he drops to 4th and is named 3rd again the same month (no letter, nothing switched on); a place first reached this month switches on with its letter; picked back again it stays, through moves within the top 3 and a relog", function()
+	local w, cast = W3.New()
+	local x = Crook(w, cast)
+	local A, PE = x.A, W3.M(w, x.A, "ProfileEdit")
+	local B, S, K = cast.B, cast.spectator, cast.king
+	x.Donors()
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	x.Later()
+	x.Word({ B, S, A })
+	eq(x.Pick().frame, "missionary-3")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	-- He picks the cornucopia back (frame and title).
+	x.Later()
+	eq(w:As(A, PE.PickFrame, "donor-top-1"), true) eq(w:As(A, PE.PickTitle, "donor-top-1"), true)
+	w:Run(3)
+	eq(x.rv.Shown("target"), MEDIA .. "cornucopia-gold")
+	-- Out (4th), then 3rd again the same month: his pick stays; no letter.
+	x.Word({ B, S, K })
+	eq(x.Pick().frame, "donor-top-1")
+	x.Word({ B, S, A })
+	eq(x.Pick().frame, "donor-top-1", "his pick stays") eq(x.Pick().title, "donor-top-1")
+	eq(#A.ns.HonorsNet.Letters(), 2, "no letter: 3rd was told this month")
+	eq(x.rA.Shown("player"), MEDIA .. "cornucopia-gold")
+	eq(x.rv.Shown("target"), MEDIA .. "cornucopia-gold", "as others see him")
+	-- 2nd, first reached this month: the silver crook switches on, and its letter tells him.
+	x.Later()
+	x.Word({ B, A, S })
+	eq(x.Pick().frame, "missionary-2") eq(x.Pick().title, "missionary-2")
+	eq(#A.ns.HonorsNet.Letters(), 3, "its letter")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	-- Picked back again: it stays through 3rd, 2nd again, out and in, and a relog.
+	x.Later()
+	eq(w:As(A, PE.PickFrame, "donor-top-1"), true)
+	for _, names in ipairs({ { B, S, A }, { B, A, S }, { B, S, K }, { B, A, S } }) do
+		x.Word(names)
+		eq(x.Pick().frame, "donor-top-1", "his pick sticks")
+	end
+	Ready(w, A)
+	Donors(w, A, x.t + 5, { A })
+	x.Word({ B, A, S }, { A })
+	w:Run(A.ns.HonorsNet.REFRESH_DELAY + 5)
+	eq(x.Pick().frame, "donor-top-1", "after a relog too")
+	eq(#A.ns.HonorsNet.Letters(), 3)
+	W3.NoErrors(w)
+end)
+
+-- The King gets no letter (1.2.1), and nothing was told for him: every return switched his crook on.
+test("1.2.3 the missionaries' crook: the King's honours are told without a letter, so his pick sticks as anyone's: the rank's frame picked back stays when he is named 3rd again the same month", function()
+	local w, cast = W3.New()
+	local K = cast.king
+	Ready(w, K)
+	local at = w.clock
+	local function Word(names) at = at + 1 Top(w, { K }, N.king, names, at) w:Run(3) end
+	Word({ cast.B, cast.spectator, K })
+	eq(K.ns.ArenaProfile.Pick().frame, "missionary-3", "switched on")
+	eq(#K.ns.HonorsNet.Letters(), 0, "no letter from himself")
+	eq((K.ns.ArenaProfile.Mine().lettered or {})["missionary-3@" .. K.ns.Honors.MonthOf(w.clock)], true, "told all the same")
+	eq(w:As(K, W3.M(w, K, "ProfileEdit").PickFrame, "rank"), true)
+	Word({ cast.B, cast.spectator, cast.A })
+	Word({ cast.B, cast.spectator, K })
+	eq(K.ns.ArenaProfile.Pick().frame, "rank", "his pick stays")
+	W3.NoErrors(w)
+end)
+
+-- 1.2.2 switched a frame not released on by itself; the first 1.2.3 mend took only one held now, on an
+-- unlocked pick. And the title's click, or the King's letter's Wear it, on such a pick did nothing
+-- (Choose refused the frame kept).
+test("1.2.3 honours: a pick 1.2.2 left on a frame not released, locked or not held now (the owl after his guild lost first), wears the cornucopia; the koi's Wear it on a locked koi pick wears its title; the title's click with a crook not held now takes", function()
+	local w, cast = W3.New()
+	local x = Crook(w, cast)
+	local A, PE = x.A, W3.M(w, x.A, "ProfileEdit")
+	x.Donors(Short(A.name))
+	local held = {}
+	for _, h in ipairs(A.ns.HonorsNet.Holdings(A.name)) do held[#held + 1] = h.key end
+	eq(table.concat(held, ","), "donor-top-1,donor-month-1", "the cornucopia and the koi")
+	eq(#A.ns.HonorsNet.QueuedLetters(), 2, "their letters")
+	-- The owl, not held (his guild lost first before he ran 1.2.3): the cornucopia.
+	local m = A.ns.ArenaProfile.Mine(true)
+	m.frame = "guild-top-leader"
+	w:As(A, A.ns.Fire, "HONORS_CHANGED", A.name)
+	eq(x.Own().frame, "rank", "(1.2.2's case: his rank's frame)")
+	w:As(A, A.ns.HonorsNet.Refresh)
+	eq(x.Pick().frame, "donor-top-1", "the owl not held: the cornucopia")
+	-- Locked on the koi, his title none, and the koi's letter answered Wear it before any refresh.
+	m.frame, m.title, m.locked = "donor-month-1", nil, true
+	w:As(A, A.ns.HonorsNet.CloseLetter, false) -- (the cornucopia's letter, Later)
+	eq(A.ns.HonorsNet.LetterFrame().key, "donor-month-1")
+	w:As(A, A.ns.HonorsNet.CloseLetter, true)
+	eq(x.Pick().title, "donor-month-1", "Wear it wears its title")
+	w:Run(3)
+	eq(x.Pick().frame, "donor-top-1", "and the cornucopia shows: locked, mended") eq(x.Pick().locked, true)
+	eq(x.rA.Shown("player"), MEDIA .. "cornucopia-gold")
+	-- The crook locked and then lost (a fresh word without him): the title's click takes.
+	x.Word({ A })
+	eq(w:As(A, PE.PickFrame, "missionary-1"), true)
+	eq(x.Pick().frame, "missionary-1", "locked: picked by hand")
+	x.Word({ cast.B })
+	eq(x.Pick().frame, "missionary-1", "locked: stays")
+	eq(w:As(A, PE.PickTitle, "donor-top-1"), true, "the title's click takes")
+	eq(x.Pick().title, "donor-top-1") eq(x.Pick().frame, "missionary-1")
 	W3.NoErrors(w)
 end)

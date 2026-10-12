@@ -45,10 +45,11 @@ local ADDON, ns = ...
 --   guild        the leader (guild master) of the Olympus guild with the highest average level
 --                (the owl, gold only: frame and title). Its members get nothing (the design).
 --   missionary   (1.2.3) the Church's top 3 missionaries over the last 30 days (gold, silver and
---                bronze; 4th and below nothing): the top 3 the Head's, the King's or the author's
---                client publishes (ChurchCount.Top3, its NR~1~t word: no other client's is taken),
---                held while that word names him and is no older than its own 30 days (the
---                shepherd's crook with its sleeping lamb).
+--                bronze; 4th and below nothing): the Church's top 3 (ChurchCount.Top3, its NR~1~t
+--                word: taken from the Head's, the King's or the author's client, no other's; sent
+--                by the author's alone, ChurchCount.SendTop, while it is online with the public
+--                ranking open), held while that word names him and is no older than its own 30
+--                days (the shepherd's crook with its sleeping lamb).
 -- Gone with the design: the week's top donor (Donors still works the week out, for the race
 -- views; no honour comes of it) and the phoenix.
 -- The guild-rank frames (Borders.TIERS, and Borders.MarkOf's marks) stay as they are: "rank" is
@@ -226,26 +227,45 @@ local ADDON, ns = ...
 --       art's mark ("<art>-mark"); the tier has only its badge. metal: "gold", "silver" or
 --       "bronze"; shape: "winged" or "plain" (Honors.ArtOf).
 --   Honors.Choose(pick, held, frame, title) -> pick or nil, "frame"|"title"
---       A player's pick { frame, title, seen, locked }: frame "rank", "none" or a held honour's
---       frame; title nil (or "none") or a held honour's title. A copy; the pick passed is left
---       alone. A pick without seen (a new profile) gets it from what he holds now, so the next
---       Update finds nothing new and keeps his choice. What a viewer shows of a pick that does
---       not hold (the fallback to the rank's frame and no title) is Shown's.
---   Honors.Update(pick, held, known) -> pick, earned, lost
+--       A player's pick { frame, title, seen, locked, back }: frame "rank", "none" or a held
+--       honour's frame this version wears; title nil (or "none") or a held honour's title. (1.2.3)
+--       The pick's own frame, unchanged, is taken whatever it is (a title alone picked: a frame
+--       not held now, or one 1.2.2 switched on that is not released, stays as Update keeps it; the
+--       title's click, or the King's letter's Wear it, did nothing). A copy; the pick passed is
+--       left alone, and back (Update's) is not kept: what the profile shows is his pick now. A pick
+--       without seen (a new profile) gets it from what he holds now, so the next Update finds
+--       nothing new and keeps his choice. What a viewer shows of a pick that does not hold (the
+--       fallback to the rank's frame and no title) is Shown's.
+--   Honors.Update(pick, held, known, told) -> pick, earned, lost
 --       After his honours changed: an honour newly earned (its family not held before, or held at
 --       a lower place) switches on (frame and title), the first by ORDER when several come at
 --       once, unless the player locked his pick (pick.locked = true: set by the caller, kept by
 --       Choose and Update; earned still lists what is new). (1.2.3) Its frame only when this
 --       version wears it (Honors.FrameShipped): a frame not released yet (the koi, the owl, the
---       comet) leaves the frame worn as it is (the cornucopia stays), its title still switches on;
---       and an unlocked pick 1.2.2 left on such a frame (it switched them on by itself) goes back
---       to the first frame by ORDER this version wears that he holds, else his rank's. Any frame
---       he picks himself (Choose) stays picked. A family held at another place than
---       before, lower or higher, moves a pick of its old place along (locked or not: the same
---       honour at its new place, and the old place is no longer his; bronze to silver to the
---       belt).
---       A pick no longer held stays as it is (Shown shows the rank's frame and no title meanwhile),
---       so a gap in the inputs never undoes a player's choice.
+--       comet) leaves the frame worn as it is (the cornucopia stays), its title still switches on.
+--       told (optional, 1.2.3): told(h) -> true when that honour's King's letter was told before
+--       (HonorsNet: its LetterMark in the profile's lettered); such an honour, earned again (back
+--       in the same month to a place already told, after the Church's 30-day ranking dropped him
+--       for a day), lists in earned but switches nothing on: a frame he picked himself since stays.
+--       Without told every honour earned may switch on. Any frame he picks himself (Choose) stays
+--       picked. A family held at another place than before, lower or higher, moves a pick of its
+--       old place along (locked or not: the same honour at its new place, and the old place is no
+--       longer his; bronze to silver to the belt).
+--       (1.2.3) A family lost (its source loaded, and it no longer names him) while an unlocked
+--       pick wears its frame or title: the first frame by ORDER this version wears that he holds
+--       stands in (else as below: as it is, or his rank's), and the first title by ORDER he holds
+--       (else as it is while a family waits for its source, or none); pick.back
+--       = { frame = family, title = family } remembers whose, so when that family is his again its
+--       honour comes back (at its new place), told or not; and a stand-in is worked out again at
+--       each Update while it stands (another lost, or won back). His own pick ends back
+--       (Choose), and so does an honour switching on.
+--       (1.2.3) A pick naming a frame not released (Choose never took one: only 1.2.0-1.2.2's
+--       switch-on could put it there), held or not, locked or not: the first frame by ORDER this
+--       version wears that he holds; with none held, while a family this version wears is still
+--       remembered in seen with its source not loaded (a login), as it is for a later Update;
+--       else his rank's.
+--       Otherwise a pick no longer held stays as it is (Shown shows the rank's frame and no title
+--       meanwhile): a gap in the inputs (a source not loaded) or a locked pick is never undone.
 --       known: the sources loaded, { belt, tier, donor, level, guild, oracle, missionary } = true
 --       (or true: all; belt covers the podium). A family is forgotten (lost) only when its source is
 --       loaded and it is not held; until its source arrives it stays in seen as it was, so its
@@ -1203,8 +1223,75 @@ local function Shipped(h)
 end
 Honors.FrameShipped = Shipped
 
+-- (1.2.3) The family a frame's key names, held or not (as Holdings names it: belt-<cat>, level-<m>,
+-- guild, or the listed families'); nil for the rank's, none, or a key no honour has.
+local CLASS_CODE, RACE_ID = {}, {}
+for code, word in pairs(CLASS_WORD) do CLASS_CODE[word] = code end
+for id, word in pairs(RACE_WORD) do RACE_ID[word] = id end
+local function KeyFamily(key)
+	if type(key) ~= "string" or #key > 64 then return nil end
+	local base = key:match("^(.-)%-[23]$") or key
+	if base == "arena-champion" then return "belt-A" end
+	local class = base:match("^arena%-class%-(%l+)$")
+	if class then
+		local code = CLASS_CODE[class] or (#class == 2 and class:upper())
+		return code and ("belt-C" .. code) or nil
+	end
+	local race = base:match("^arena%-race%-(%w+)$")
+	if race then
+		local id = RACE_ID[race] or tonumber(race)
+		return id and ("belt-R" .. id) or nil
+	end
+	local m = key:match("^level%-race%-(%d+)$")
+	if m then return "level-" .. m end
+	if key == "guild-top-leader" then return "guild" end
+	local family = key:match("^([%l%-]-)%-[123]$")
+	if family and family ~= "level" and Honors.FAMILY_ART[family] then return family end
+	return nil
+end
+-- (1.2.3) A pick's frame of a family this version does not wear (the koi, the owl, the comet...).
+local function Unworn(frame)
+	if Honors.FRAMES_SHIPPED == nil or frame == "rank" or frame == "none" then return false end
+	local family = KeyFamily(frame)
+	return family ~= nil and not Shipped({ family = family })
+end
+-- (1.2.3) The frame worn in place of one the pick can't show: the first by ORDER this version wears
+-- that he holds; with none, while a family this version wears is remembered in seen with its source
+-- not loaded (a login, a gap), the frame as it is (a later Update finds that one); else his rank's.
+local function StandIn(held, seen, best, frame)
+	local first
+	for _, h in ipairs(held) do
+		if type(h) == "table" and h.frame and Shipped(h) and (not first or ByOrder(h, first)) then first = h end
+	end
+	if first then return first.frame end
+	for family, s in pairs(seen) do
+		if not best[family] and s.frame and Shipped({ family = family }) then return frame end
+	end
+	return "rank"
+end
+-- (1.2.3) ...and a title: the first by ORDER he holds; with none, while a family is remembered with its
+-- source not loaded, the title as it is; else none.
+local function StandInTitle(held, seen, best, title)
+	local first
+	for _, h in ipairs(held) do
+		if type(h) == "table" and h.title and (not first or ByOrder(h, first)) then first = h end
+	end
+	if first then return first.title end
+	for family, s in pairs(seen) do
+		if not best[family] and s.title then return title end
+	end
+	return nil
+end
+-- (1.2.3) Update's memory of a frame or title stood in for: { frame = family, title = family }.
+local function Back(pick)
+	local b = type(pick) == "table" and type(pick.back) == "table" and pick.back or {}
+	return { frame = Str(b.frame), title = Str(b.title) }
+end
+
 function Honors.Choose(pick, held, frame, title)
-	if frame ~= "rank" and frame ~= "none" and not Shipped(HeldBy("frame", frame, held)) then return nil, "frame" end
+	-- (1.2.3: the pick's own frame, unchanged, whatever it is: a title alone is picked.)
+	local same = type(pick) == "table" and frame == (type(pick.frame) == "string" and pick.frame or "rank")
+	if frame ~= "rank" and frame ~= "none" and not same and not Shipped(HeldBy("frame", frame, held)) then return nil, "frame" end
 	if title == "none" then title = nil end
 	if title ~= nil and not HeldBy("title", title, held) then return nil, "title" end
 	local new = Copy(pick)
@@ -1217,11 +1304,12 @@ function Honors.Choose(pick, held, frame, title)
 	return new
 end
 
-function Honors.Update(pick, held, known)
+function Honors.Update(pick, held, known, told)
 	held = type(held) == "table" and held or {}
 	local old = Copy(pick)
 	local new = { frame = old.frame, title = old.title, seen = {}, locked = old.locked }
 	local seen = old.seen or {}
+	local back = Back(pick)
 	local best = Best(held)
 	local earned, lost = {}, {}
 	for family, h in pairs(best) do
@@ -1248,24 +1336,42 @@ function Honors.Update(pick, held, known)
 	end
 	table.sort(earned, ByOrder)
 	table.sort(lost, function(a, b) return a.family < b.family end)
-	-- A new honour switches on: the first by ORDER that has a frame this version wears, and the
-	-- first that has a title; a locked pick stays as the player set it. (1.2.3: 1.2.2 switched on
-	-- any frame, so a koi, an owl or a comet earned took the place of the cornucopia worn, and his
-	-- rank's frame showed instead: Shown wears none of them.)
+	local function Told(h) return type(told) == "function" and told(h) == true end
 	if not new.locked then
-		for _, h in ipairs(earned) do if h.frame and Shipped(h) then new.frame = h.frame break end end
-		for _, h in ipairs(earned) do if h.title then new.title = h.title break end end
-		-- (1.2.3) A pick 1.2.2 left on a frame held but not worn (Choose never takes one): the first
-		-- frame by ORDER this version wears that he holds, else his rank's.
-		local stuck = HeldBy("frame", new.frame, held)
-		if stuck and not Shipped(stuck) then
-			local worn = {}
-			for _, h in ipairs(held) do if type(h) == "table" and h.frame and Shipped(h) then worn[#worn + 1] = h end end
-			table.sort(worn, ByOrder)
-			new.frame = worn[1] and worn[1].frame or "rank"
+		-- (1.2.3) His pick back: the honour of a family stood in for (below), his again (at its new
+		-- place, told or not).
+		local f, t = back.frame and best[back.frame], back.title and best[back.title]
+		if f and f.frame and Shipped(f) then new.frame, back.frame = f.frame, nil end
+		if t and t.title then new.title, back.title = t.title, nil end
+		-- A new honour switches on: the first by ORDER that has a frame this version wears, and the
+		-- first that has a title; a locked pick stays as the player set it. (1.2.3: 1.2.2 switched on
+		-- any frame, so a koi, an owl or a comet earned took the place of the cornucopia worn, and his
+		-- rank's frame showed instead: Shown wears none of them. And only an honour told for the
+		-- first time: one told before, earned again, leaves his pick as it is.)
+		for _, h in ipairs(earned) do
+			if h.frame and Shipped(h) and not Told(h) then new.frame, back.frame = h.frame, nil break end
 		end
+		for _, h in ipairs(earned) do
+			if h.title and not Told(h) then new.title, back.title = h.title, nil break end
+		end
+		-- (1.2.3) A family lost while worn (its source loaded: a fresh word without him): a stand-in,
+		-- the first frame (title) by ORDER he holds, and the family remembered to come back to. (It
+		-- stayed the pick, and his rank's frame showed with no title, a cornucopia held: the crook's
+		-- 30-day ranking drops its holders routinely.)
+		for _, x in ipairs(lost) do
+			if x.frame ~= nil and new.frame == x.frame and not back.frame and Shipped(x) then back.frame = x.family end
+			if x.title ~= nil and new.title == x.title and not back.title then back.title = x.family end
+		end
+		if back.frame then new.frame = StandIn(held, new.seen, best, new.frame) end
+		if back.title then new.title = StandInTitle(held, new.seen, best, new.title) end
 	end
-	-- A pick no longer held stays the pick: Shown falls back to the rank meanwhile.
+	-- (1.2.3) A frame not released yet on the pick (only 1.2.0-1.2.2's switch-on put one there: Choose
+	-- never took one), held or not, locked or not: the first frame by ORDER this version wears that he
+	-- holds. (1.2.2's koi after its month, an owl after his guild lost first, a pick locked since: his
+	-- rank's frame showed, the cornucopia held.)
+	if Unworn(new.frame) then new.frame = StandIn(held, new.seen, best, new.frame) end
+	new.back = (back.frame or back.title) and back or nil
+	-- Otherwise a pick no longer held stays the pick: Shown falls back to the rank meanwhile.
 	return new, earned, lost
 end
 

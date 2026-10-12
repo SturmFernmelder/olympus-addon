@@ -45,15 +45,20 @@ ns.HonorsNet = HonorsNet
 --                                 markets:first;...). The newest word for a month wins.
 -- The podium (the belts' silver and bronze) is the clerk's AV 2 and 3 (ArenaLedger); the best guild
 -- is the census's (Honors.GuildTop, its leader vouched by two senders). (1.2.3) The missionaries'
--- top 3 (the crook) is the Church's: ChurchCount.Top3, the newest NR~1~t word of the Head's, the
--- King's or the author's client (the server stamps its sender; ChurchCount.TakeTop refuses anyone
+-- top 3 (the crook) is the Church's: ChurchCount.Top3, the newest NR~1~t word taken from the Head's,
+-- the King's or the author's client (the server stamps its sender; ChurchCount.TakeTop refuses anyone
 -- else's), held while the Church's public ranking is open and the word no older than
--- Honors.CHURCH_MAX_AGE. No word of its own here: the Church's comes on CHANNEL and GUILD, and
--- CHURCH_TOP_CHANGED (or the ranking's switch, CHURCH_PUBLIC_CHANGED) looks at the honours again.
+-- Honors.CHURCH_MAX_AGE. In this version only the author's client sends it (ChurchCount.SendTop: a
+-- keeper whose root is W or H; the King's client is no keeper, and the Head is the King, root K), so
+-- the crooks move only while the author's client is online with the ranking open, and every client
+-- shows none 30 days after his last word. No word of its own here: the Church's comes on CHANNEL and
+-- GUILD, and CHURCH_TOP_CHANGED (or the ranking's switch, CHURCH_PUBLIC_CHANGED) looks at the
+-- honours again.
 --
--- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick),
--- and the King's letter tells him: a parchment in a window of Olympus's own naming the honour and
--- its title, the new frame on his own portrait, "Wear it" and "Later"; queued when several come,
+-- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick; 1.2.3:
+-- only when told for the first time, so an honour earned again, its letter told already, leaves his
+-- pick as it is), and the King's letter tells him: a parchment in a window of Olympus's own naming the
+-- honour and its title, the new frame on his own portrait, "Wear it" and "Later"; queued when several come,
 -- re-readable from the profile's Edit (ProfileEdit); once per honour per character (a month's honour:
 -- once per month), never by itself where the save did not come back, and never to the King himself
 -- (1.2.1). Honours count only in the live arena (Arena.Counts).
@@ -1169,8 +1174,20 @@ function H.Refresh()
 		local held = H.Holdings(ns.me, P.MyGk())
 		local before = P.Pick()
 		local first = before.seen == nil
+		-- (1.2.3) Only an honour told for the first time switches on by itself (its letter comes with
+		-- it): back the same month to a place of the Church's 30-day ranking already told, his own
+		-- pick since stays. What was told before a 1.2.0 profile's first look (FirstLook counts what
+		-- it holds as told for the letters alone, on the safe side: those still switch on, as in 1.2.1).
+		local told = H.Lettered()
+		if P.Mine().letterLook then
+			local copy = {}
+			for mark, v in pairs(told) do copy[mark] = v end
+			told = copy
+		end
 		H.FirstLook(held)
-		local pick, earned, lost = ns.Honors.Update(before, held, H.Known())
+		local pick, earned, lost = ns.Honors.Update(before, held, H.Known(), function(h)
+			return told[H.LetterMark(h.key, h.period)] == true
+		end)
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
 		if not same or (first and next(pick.seen or {}) ~= nil) then P.SavePick(pick) end
@@ -1196,6 +1213,7 @@ end
 -- ask, after the King's stream: a letter from himself about a frame he holds). The King is his
 -- character (ns.IsKingCharacter) or, where none is pinned by name, the guild master of his guild
 -- (King.IsKing). His honours switch on as anyone's; no letter comes, none is kept to read again.
+-- (1.2.3: each is marked told all the same, QueueLetter, so they switch on once, as anyone's.)
 function H.LetterToSender()
 	if ns.IsKingCharacter(ns.me) then return true end
 	local K = ns.King
@@ -1271,7 +1289,7 @@ end
 -- letter is kept in the profile's list, unread, to open from the Edit, and never opens by itself
 -- (1.2.1, the owner's ask: never again at each update; as the update letter, Letters.lua).
 function H.QueueLetter(key, period)
-	if H.LetterToSender() or type(key) ~= "string" then return end
+	if type(key) ~= "string" then return end
 	local told = H.Lettered()
 	local mark = H.LetterMark(key, period)
 	if told[mark] then return end
@@ -1279,6 +1297,8 @@ function H.QueueLetter(key, period)
 	local m = P.Mine(true)
 	m.lettered = told
 	told[mark] = true
+	-- (1.2.3: the King's honours are told too, with no letter, so they switch on as anyone's: once.)
+	if H.LetterToSender() then return end
 	m.letters = type(m.letters) == "table" and m.letters or {}
 	m.letters[#m.letters + 1] = { key = key, t = Now() }
 	while #m.letters > H.LETTERS_MAX do table.remove(m.letters, 1) end

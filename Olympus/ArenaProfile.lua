@@ -108,10 +108,11 @@ function P.Mine(make)
 	return mine
 end
 
--- The pick as Honors takes it: { frame, title, seen, locked }.
+-- The pick as Honors takes it: { frame, title, seen, locked, back } (1.2.3: back, Honors.Update's
+-- memory of an honour lost while worn, its frame or title stood in for until it is his again).
 function P.Pick()
 	local m = P.Mine()
-	return { frame = m.frame or "rank", title = m.title, seen = m.seen, locked = m.locked }
+	return { frame = m.frame or "rank", title = m.title, seen = m.seen, locked = m.locked, back = m.back }
 end
 local function SavePick(pick)
 	local m = P.Mine(true)
@@ -119,6 +120,7 @@ local function SavePick(pick)
 	m.title = pick.title
 	m.seen = pick.seen
 	m.locked = pick.locked or nil
+	m.back = type(pick.back) == "table" and pick.back or nil
 	m.at = Now()
 end
 P.SavePick = SavePick
