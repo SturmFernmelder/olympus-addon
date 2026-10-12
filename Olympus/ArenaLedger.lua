@@ -52,7 +52,7 @@ LG.MIN_RATED_DUR = 15       -- seconds a round must last on average to be rated
 LG.DAY_MAX = 10             -- rated fights of a fighter in a server day
 LG.PAIR_MAX = 3             -- rated fights of a pair in PAIR_DAYS
 LG.PAIR_DAYS = 7
-LG.ENTRIES_MAX = 5000       -- per season
+LG.ENTRIES_MAX = 10000      -- per season (1.2.3: the duels' two halves count too)
 LG.ARB_DAY_MAX = 60         -- entries of one arbiter in a server day at most (a full tournament and two cards)
 LG.TITLES_MAX = 500
 LG.WORDS_MAX = 200
@@ -303,6 +303,36 @@ local function ArbDays(book)
 	end
 	return d
 end
+-- (1.2.3) The duels' entries per fighter and server day of a book, the same way: each fighter by
+-- his name (the server stamps it on his own half) and by his account key's print (e.kA, e.kB: his
+-- half's signature binds it), never by gk. (The review: a gk is the half's own word, so a pair of
+-- characters naming a new made-up gk each time filled the season's book, ENTRIES_MAX, past a cap
+-- counted per gk; and counted per gk, halves naming a member's gk would fill his day.)
+local function DuelKeys(e)
+	local day = math.floor((e.t or 0) / LG.DAY)
+	local out = {}
+	for _, name in ipairs({ e.A or false, e.B or false }) do
+		if type(name) == "string" then out[#out + 1] = "n:" .. ns.FullName(name):lower() .. "|" .. day end
+	end
+	for _, k in ipairs({ e.kA or false, e.kB or false }) do
+		if type(k) == "string" then out[#out + 1] = "k:" .. k .. "|" .. day end
+	end
+	return out
+end
+local duelDays = setmetatable({}, { __mode = "k" })
+local function DuelDays(book)
+	local d = duelDays[book]
+	if not d then
+		d = {}
+		for _, x in pairs(book.list) do
+			if Has(x.fl, "d") then
+				for _, k in ipairs(DuelKeys(x)) do d[k] = (d[k] or 0) + 1 end
+			end
+		end
+		duelDays[book] = d
+	end
+	return d
+end
 
 -- An entry taken (the arbiter's own AE, or the clerk's relay): kept in the heavy ledger (the title
 -- fights in the core too). True when new. A fid already held with other content is a conflict: the
@@ -327,7 +357,18 @@ local function Keep(e, mode, via)
 		end
 		Count("replaced")
 	end
-	if book and not book.list[e.fid] and (ArbDays(book)[ArbDay(e)] or 0) >= LG.ARB_DAY_MAX then return Count("arbiter-day") end
+	if book and not book.list[e.fid] then
+		if Has(e.fl, "d") then
+			-- (1.2.3: a duel's two halves, no arbiter. Its own cap per fighter and day, far above what
+			-- LG.Counted rates: one pair cannot fill the season's book, DuelKeys.)
+			local days = DuelDays(book)
+			for _, k in ipairs(DuelKeys(e)) do
+				if (days[k] or 0) >= LG.DUEL_KEEP_DAY then return Count("duel-day") end
+			end
+		elseif (ArbDays(book)[ArbDay(e)] or 0) >= LG.ARB_DAY_MAX then
+			return Count("arbiter-day")
+		end
+	end
 	-- A title fight: in the core whatever else (enough to verify a belt without the ledger).
 	local fresh = false
 	if Has(e.fl, "t") then
@@ -355,6 +396,12 @@ local function Keep(e, mode, via)
 			book.n = book.n + 1
 			local days, k = ArbDays(book), ArbDay(e)
 			days[k] = (days[k] or 0) + 1
+			if Has(e.fl, "d") then
+				local dd = DuelDays(book)
+				for _, k in ipairs(DuelKeys(e)) do dd[k] = (dd[k] or 0) + 1 end
+				-- (When it was kept here: its place in the day's and the pair's limits, LG.Counted.)
+				e.keptAt = e.keptAt or Now()
+			end
 			fresh = true
 		end
 	end
@@ -366,6 +413,24 @@ local function Keep(e, mode, via)
 	return fresh
 end
 LG.Keep = Keep
+
+-- (1.2.3) A duel's entry taken away again (its GUIDs another character's as the game gives them
+-- here, LG.RecheckGk), its book's counters with it.
+local function Unkeep(e, mode)
+	local book = Book(mode, e.season)
+	if not (book and book.list[e.fid] == e) then return false end
+	book.list[e.fid] = nil
+	book.n = math.max(0, book.n - 1)
+	local days, k = ArbDays(book), ArbDay(e)
+	days[k] = math.max(0, (days[k] or 1) - 1)
+	if Has(e.fl, "d") then
+		local dd = DuelDays(book)
+		for _, x in ipairs(DuelKeys(e)) do dd[x] = math.max(0, (dd[x] or 1) - 1) end
+	end
+	Bump()
+	LG.ClerkChanged()
+	return true
+end
 
 -- The arbiter writes the entry of a rated fight at FINAL (F.Finalize): sent once, must-deliver, and
 -- kept here. (The fight's flags, all but x: whether it was open to betting stays on the fight.)
@@ -398,6 +463,8 @@ end
 local function OnEntry(dist, sender, mode, body)
 	local e, why = Decode(body, sender)
 	if not e then return Count(why) end
+	-- (1.2.3: a duel's entry comes from its two signed halves alone, AX, never an arbiter's word.)
+	if Has(e.fl, "d") then return Count("direct") end
 	if dist == "WHISPER" and not asked[e.fid] then return Count("unasked") end
 	local R = ns.ArenaRoles
 	if not R.IsArbiter(sender, mode) then return Count("arbiter") end
@@ -474,14 +541,559 @@ function LG.Entries(season, mode)
 end
 
 ---------------------------------------------------------------------------
+-- Two signed halves (AX, 1.2.3: the owner's decision for the duels)
+---------------------------------------------------------------------------
+
+-- A direct duel reaches every client's rankings with no judge. Each fighter's client publishes its
+-- signed half of a duel it confirmed (ArenaFights.Half, LG.Publish); any client counts the duel
+-- only when both halves match: the same fight, pair, winner, method and rounds, the two fighters'
+-- clocks and last lines within HALF_DUR_SLACK and HALF_SLACK, each half signed with its fighter's
+-- account key (Debts.lua's, the one his IOUs and results sign with) and the two keys not one
+-- account's (an alt's duel against himself). One half alone, or two that differ, never count.
+-- The two make a ledger entry like an arbiter's (fl "d", no arbiter): the ledger's limits
+-- (LG.Counted: under 15 s a round, a fighter's 11th of the day, a pair's 4th in 7 days), the level
+-- factor (ArenaRating) and every ranking, profile and history read it as any other. It is rated
+-- ("r") only when each fighter's client saw the other's unit (his half names that level, and the
+-- GUID it signs for him is then the game's, not his own word); otherwise it is history only.
+--
+-- A half: AX~L1~fid~side~gkA~A~gkB~B~bo~cat~w~m~rounds~t~facts~lvl~opp~pk~sig, on the channel and
+-- to the other fighter, again from the fighter's client every ArenaFights.HALF_REPEAT for HALF_FOR,
+-- and in the clerk's carousel (the last two weeks) for the members who were not online.
+--   side: the signer's (A or B); A, B: Name-Realm; w: the winner's side; m: K or R; rounds:
+--   "<w><m><seconds|->" per round, "." apart, on the signer's own clock (- unknown); t: his last
+--   duel line's server time; facts: his own "<class2><raceID>.<level>" (FactsText, - unread); lvl:
+--   his own level; opp: the other fighter's level as he saw it (- never seen); pk: his account
+--   key, sig: its signature over "OLYH1|" and every field before pk, both base64url.
+-- Taken from its signer (the server-stamped sender is the fighter it names), or relayed by a clerk
+-- (a public arbiter or a High Councillor, never the King: the carousel's own rule), and then only
+-- when its key is the one its signer gave first-hand here, if he did.
+--
+-- (1.2.3, the review of the two halves) What a half may not do on its own word:
+--   - name another character's GUID. A half's gks are its fighters' word, and the ratings, records,
+--     tiers and rankings are kept by gk: two modified clients could write losses on any member's.
+--     A first-hand half whose gk the game gives another character is refused ("gk"), and an
+--     entry is rated only once the game here pairs each name with its gk (Bound: ArenaProfile's
+--     VerifyGk, a unit token or GetPlayerInfoByGUID, or a profile it verified). Not known yet: kept
+--     for the history alone (fl "d"; e.wait "r" when both fighters saw each other, else "d"),
+--     looked at again every GK_RECHECK for GK_WAIT and whenever its halves are heard again; rated
+--     (e.wait "r") once both are bound, gone once one is another character's.
+--   - be dated in the past. Its time is its fighter's word: a first-hand half older than
+--     HalfFresh() (his line, the other's report within DIRECT_WAIT, his repeats for HALF_FOR) is
+--     refused ("late"), and a clerk takes one up to HALF_LATE (a fighter's own half again, to a
+--     clerk who was not online then, LG.HalvesToClerk). A duel's entry takes its place in the day's
+--     and the pair's limits by when it was kept here (keptAt, LG.Counted), so one kept later and
+--     dated earlier never pushes out one already counted.
+--   - fill the book. A day's duel entries are counted per fighter's name and account key (the
+--     server stamps the first, the signature binds the second), never per gk (a half names any).
+--   - hold a fight's place. Each side keeps up to HALF_CANDIDATES halves, one per signer (a
+--     clerk's relay taking the oldest first-hand one's place when full), and every pair of them is
+--     tried (Agree), so a made-up half for a fight's id never blocks the real two; a key is pinned
+--     to a gk only from a first-hand half whose signature checked, with the game's word that the gk
+--     is its signer's.
+LG.HALF_SLACK = 120        -- seconds between the two fighters' last lines at most
+LG.HALF_DUR_SLACK = 30     -- seconds between their two clocks for one round at most
+LG.HALVES_MAX = 300        -- halves waiting here for their other half at most (the oldest fights' go)
+LG.HALF_CANDIDATES = 4     -- halves of one side of a fight waiting here at most, one per signer
+LG.DUEL_KEEP_DAY = 30      -- duel entries kept per fighter (his name, his key) and server day at most (LG.Counted rates 10)
+LG.PINS_MAX = 2000         -- fighters' keys heard first-hand, kept for this session
+LG.HALVES_LATER = 30       -- the signature queue full: the halves are checked again this much later
+LG.HALF_LATE = 86400       -- a clerk takes a fighter's own half up to this old (LG.HalvesToClerk)
+LG.GK_RECHECK = 30         -- an entry waiting for the game's word on its GUIDs: looked at again this often...
+LG.GK_WAIT = 900           -- ...for this long after it was kept (later, whenever its halves are heard again)
+
+-- [fid] = { t (first heard), A = { half, ... }, B = { half, ... }, tried = { [pair] = true }, checking }
+local pend, pendN = {}, 0  -- pendN: the halves held
+local pins, pinsN = {}, 0  -- [gk] = the account key (base64url) its fighter gave first-hand
+local function Raw(v, len)
+	local Ed = ns.Ed25519
+	local r = type(v) == "string" and Ed and Ed.FromB64 and Ed.FromB64(v) or nil
+	return type(r) == "string" and #r == len and r or nil
+end
+local function Pin(gk, pk64)
+	if not pins[gk] then
+		if pinsN >= LG.PINS_MAX then pins, pinsN = {}, 0 end
+		pinsN = pinsN + 1
+	end
+	pins[gk] = pk64
+end
+local function Drop(fid)
+	local p = pend[fid]
+	if not p then return end
+	pend[fid] = nil
+	pendN = pendN - #p.A - #p.B
+end
+local function Evict()
+	while pendN >= LG.HALVES_MAX do
+		local old, at
+		for fid, p in pairs(pend) do if not p.checking and (not at or p.t < at) then old, at = fid, p.t end end
+		if not old then return end
+		Drop(old)
+	end
+end
+local function Unhold(p, h)
+	local list = p[h.side]
+	for i, x in ipairs(list) do
+		if x == h then
+			table.remove(list, i)
+			pendN = pendN - 1
+			return
+		end
+	end
+end
+function LG.Pending() return pendN end
+
+-- How long a first-hand half is taken after its time: the fighter's last line, the other's report
+-- (up to ArenaFights.DIRECT_WAIT), his repeats (HALF_FOR), and the slack.
+function LG.HalfFresh()
+	local Fi = F()
+	return (tonumber(Fi and Fi.HALF_FOR) or 1800) + (tonumber(Fi and Fi.DIRECT_WAIT) or 600) + LG.HALF_SLACK
+end
+
+-- Whether the game here pairs `name` with gk: true, false (another character's), or nil (not known
+-- yet). ArenaProfile.VerifyGk (a unit token, GetPlayerInfoByGUID), else a profile it verified here
+-- that names another gk for him, or another character for that gk.
+local function Bound(name, gk)
+	local P = ns.ArenaProfile
+	if type(P) ~= "table" or type(name) ~= "string" or not gk then return nil end
+	local v
+	if type(P.VerifyGk) == "function" then v = P.VerifyGk(name, gk) end
+	if v ~= nil then return v end
+	local Of = type(P.Of) == "function" and P.Of or nil
+	local byGk = Of and Of(gk)
+	if type(byGk) == "table" and byGk.verified and type(byGk.name) == "string" and not Same(byGk.name, name) then return false end
+	local byName = Of and Of(name)
+	if type(byName) == "table" and byName.verified and byName.gk and byName.gk ~= gk then return false end
+	return nil
+end
+LG.Bound = Bound
+-- Both fighters of an entry: true, false (either is another character's), nil (not both known).
+local function BothBound(e)
+	local a, b = Bound(e.A, e.gkA), Bound(e.B, e.gkB)
+	if a == false or b == false then return false end
+	if a == true and b == true then return true end
+	return nil
+end
+
+-- A clerk may relay halves (the carousel's rule, OnBook).
+function LG.MayRelay(sender, mode)
+	local R = ns.ArenaRoles
+	if type(sender) ~= "string" or R.IsKing(sender) then return false end
+	return R.IsPublicArbiter(sender, mode) == true or ns.IsHighCouncillor(ns.FullName(sender)) == true
+end
+
+local function ReadRounds(s)
+	if type(s) ~= "string" or s == "" or #s > 60 then return nil end
+	local list = {}
+	for part in (s .. "."):gmatch("([^.]*)%.") do
+		local w, m, d = part:match("^([AB])([KR])([0-9a-z%-]+)$")
+		if not w or #list >= 5 then return nil end
+		local dur
+		if d ~= "-" then
+			dur = N(d, 0, 86400)
+			if not dur then return nil end
+		end
+		list[#list + 1] = { w = w, m = m, dur = dur }
+	end
+	return list
+end
+
+-- A level a half may name: a whole number from 1 to 1000 (the game's "??", -1, is none).
+local function Level(v) return type(v) == "number" and v >= 1 and v <= 1000 and v % 1 == 0 end
+
+-- A half's body read and checked (the shape, the rounds making its result): the half, or nil and
+-- why. The signature is checked once both halves are here (LG.MatchHalves).
+function LG.ReadHalf(body)
+	if type(body) ~= "string" or #body > 480 then return nil, "shape" end
+	local fid, side, gkA, A, gkB, B, bo, cat, w, m, rounds, t, facts, lvl, opp, pk64, sig64 = Arena.Fields(body, 17)
+	if not sig64 then return nil, "shape" end
+	if not fid:find("^F[0-9a-z]+$") or #fid > 20 then return nil, "fid" end
+	if side ~= "A" and side ~= "B" then return nil, "side" end
+	local h = { fid = fid, side = side, gkA = Gk(gkA), gkB = Gk(gkB), bo = tonumber(bo), cat = cat, w = w, m = m,
+		t = N(t, 0, 4294967295), facts = Facts(facts), lvl = lvl ~= "-" and tonumber(lvl) or nil, opp = opp ~= "-" and tonumber(opp) or nil,
+		pk64 = pk64, sig64 = sig64, body = body }
+	if (opp ~= "-" and not Level(h.opp)) or (lvl ~= "-" and not Level(h.lvl)) then return nil, "level" end
+	h.A = A:find("-", 1, true) and Arena.Name(A) or nil
+	h.B = B:find("-", 1, true) and Arena.Name(B) or nil
+	if not (h.gkA and h.gkB and h.A and h.B and h.t) then return nil, "shape" end
+	if h.gkA == h.gkB or Same(h.A, h.B) then return nil, "pair" end
+	if h.bo ~= 1 and h.bo ~= 3 and h.bo ~= 5 then return nil, "bo" end
+	if not tostring(cat):find("^[ACRB][%w]*$") or #cat > 4 then return nil, "cat" end
+	if (w ~= "A" and w ~= "B") or (m ~= "K" and m ~= "R") then return nil, "result" end
+	if h.t > Now() + LG.AHEAD then return nil, "time" end
+	h.rounds = ReadRounds(rounds)
+	if not h.rounds then return nil, "rounds" end
+	-- (The rounds make the result: the winner's Need wins, the last round his, none after it.)
+	local need, a, b = math.floor(h.bo / 2) + 1, 0, 0
+	for _, x in ipairs(h.rounds) do
+		if a >= need or b >= need then return nil, "rounds" end
+		if x.w == "A" then a = a + 1 else b = b + 1 end
+	end
+	local last = h.rounds[#h.rounds]
+	if (w == "A" and a ~= need) or (w == "B" and b ~= need) or last.w ~= w or last.m ~= m then return nil, "rounds" end
+	h.sc = a .. ":" .. b
+	h.pk, h.sig = Raw(pk64, 32), Raw(sig64, 64)
+	if not (h.pk and h.sig) then return nil, "key" end
+	h.signer = side == "A" and h.A or h.B
+	h.gk = side == "A" and h.gkA or h.gkB
+	h.text = "OLYH1|" .. body:sub(1, #body - #pk64 - #sig64 - 2)
+	return h
+end
+
+-- Whether two halves (one each side) are the same duel: its entry, or nil and why.
+local function Agree(a, b)
+	if a.side ~= "A" then a, b = b, a end
+	if a.side ~= "A" or b.side ~= "B" or a.fid ~= b.fid then return nil, "halves" end
+	if a.gkA ~= b.gkA or a.gkB ~= b.gkB or not Same(a.A, b.A) or not Same(a.B, b.B) then return nil, "pair" end
+	if a.bo ~= b.bo or a.cat ~= b.cat or a.w ~= b.w or a.m ~= b.m or #a.rounds ~= #b.rounds then return nil, "result" end
+	local dur = 0
+	for i, x in ipairs(a.rounds) do
+		local y = b.rounds[i]
+		if x.w ~= y.w or x.m ~= y.m then return nil, "result" end
+		-- (Each fighter's own clock; the shorter counts, an unknown one is none: too short to rate.)
+		if x.dur and y.dur then
+			if math.abs(x.dur - y.dur) > LG.HALF_DUR_SLACK then return nil, "times" end
+			dur = dur + math.min(x.dur, y.dur)
+		end
+	end
+	if math.abs(a.t - b.t) > LG.HALF_SLACK then return nil, "times" end
+	-- One account's key on both sides: an alt's duel against himself (Debts: one key per account).
+	if a.pk64 == b.pk64 or F().SamePerson(a.A, a.B) then return nil, "alts" end
+	-- The level each saw of the other is the one the other gave of himself.
+	if (a.opp and a.opp ~= b.lvl) or (b.opp and b.opp ~= a.lvl) then return nil, "level" end
+	local M = ns.Moderation
+	if type(M) == "table" and not M.missing and M.Hides and (M.Hides(a.A) or M.Hides(a.B)) then return nil, "off" end
+	local seen = a.opp ~= nil and b.opp ~= nil and a.lvl ~= nil and b.lvl ~= nil
+	local t = math.max(a.t, b.t)
+	return { season = LG.SeasonOf(t, "L"), fid = a.fid, t = t, cat = a.cat, bo = a.bo, gkA = a.gkA, A = a.A, fA = a.facts,
+		gkB = a.gkB, B = b.B, fB = b.facts, sc = a.sc, w = a.w, m = a.m, dur = dur, fl = seen and "dr" or "d" }
+end
+LG.AgreeHalves = Agree
+
+-- An account key's print for the day's limit (LG.DUEL_KEEP_DAY): Debts.Fp, the first six bytes of
+-- its SHA-256 in base 36.
+local function KeyPrint(pk)
+	local D = ns.Debts
+	if type(pk) ~= "string" or type(D) ~= "table" or type(D.Fp) ~= "function" then return nil end
+	local ok, fp = pcall(D.Fp, pk)
+	return ok and type(fp) == "string" and fp or nil
+end
+
+-- The entries waiting for the game's word on their GUIDs (e.wait): [fid] = { mode, season }.
+local waiting = {}
+
+-- An entry waiting for the game's word, looked at again: rated once both fighters are bound here
+-- (e.wait "r"; "d" stays history), gone once one is another character's ("gk"). True, false, or
+-- nil (still not known).
+function LG.RecheckGk(e, mode)
+	if type(e) ~= "table" or not e.wait then return nil end
+	local v = BothBound(e)
+	if v == true then
+		if e.wait == "r" and not Has(e.fl, "r") then e.fl = e.fl .. "r" end
+		e.wait = nil
+		waiting[e.fid] = nil
+		Bump()
+		LG.ClerkChanged()
+		return true
+	end
+	if v == false then
+		waiting[e.fid] = nil
+		Unkeep(e, mode or "L")
+		Count("gk")
+		return false
+	end
+	return nil
+end
+local function GkLater()
+	if next(waiting) then Arena.After(LG.GK_RECHECK, "halves gk", LG.RecheckAll) end
+end
+function LG.RecheckAll()
+	local now = Now()
+	for fid, w in pairs(waiting) do
+		local book = Book(w.mode, w.season)
+		local e = book and book.list[fid]
+		if not (e and e.wait) or now - (tonumber(e.keptAt) or 0) > LG.GK_WAIT then waiting[fid] = nil
+		else LG.RecheckGk(e, w.mode) end
+	end
+	GkLater()
+end
+-- The ledger loaded (the companion): its entries still waiting, looked at again.
+local function Waiting(mode)
+	local s = LG.Season(mode)
+	for _, season in ipairs({ s.n, s.n - 1 }) do
+		local book = Book(mode, season)
+		for fid, e in pairs(book and book.list or {}) do
+			if e.wait and Now() - (tonumber(e.keptAt) or 0) <= LG.GK_WAIT then waiting[fid] = { mode = mode, season = season } end
+		end
+	end
+	GkLater()
+end
+
+local Later -- (below)
+-- One pair of halves agreed (Agree): each signature checked (Arena.Check), then the entry kept.
+-- A signature that fails takes its half away, and the other pairs are tried.
+local function CheckPair(fid, p, a, b, e, mode)
+	local pair = a.body .. "\n" .. b.body
+	p.checking = pair
+	a.checking, b.checking = true, true
+	local left, bad, later = 2, {}, false
+	local function Done(h)
+		return function(ok)
+			if ok == nil then later = true elseif not ok then bad[#bad + 1] = h end
+			left = left - 1
+			if left > 0 then return end
+			a.checking, b.checking = nil, nil
+			if pend[fid] ~= p then return end
+			p.checking = nil
+			if bad[1] then
+				for _, x in ipairs(bad) do Unhold(p, x) end
+				Count("signature")
+				return LG.MatchHalves(fid, mode)
+			end
+			if later then return Later() end
+			-- (The game's word on the two GUIDs, now: another character's, never; not known yet,
+			-- the history alone until it is, Bound.)
+			local v = BothBound(e)
+			if v == false then
+				p.tried[pair] = true
+				Count("gk")
+				return LG.MatchHalves(fid, mode)
+			end
+			Drop(fid)
+			-- (A key is its fighter's only from his own half that checked, his gk the game's word.)
+			for _, x in ipairs({ a, b }) do
+				if x.first and Bound(x.signer, x.gk) == true then Pin(x.gk, x.pk64) end
+			end
+			if v == nil then e.fl, e.wait = (e.fl:gsub("r", "")), Has(e.fl, "r") and "r" or "d" end
+			e.kA, e.kB = KeyPrint(a.pk), KeyPrint(b.pk)
+			-- (The halves themselves only where they may be relayed: a clerk's, a fighter's own.)
+			if LG.MayClerk() or Me(e.A) or Me(e.B) then e.halves = { A = a.body, B = b.body } end
+			if Keep(e, mode, "halves") and e.wait then
+				waiting[e.fid] = { mode = mode, season = e.season }
+				GkLater()
+			end
+		end
+	end
+	for _, h in ipairs({ a, b }) do
+		Arena.Check("ax " .. h.fid .. h.side .. h.sig64:sub(1, 16), { pk = h.pk, msg = h.text, sig = h.sig }, Done(h))
+	end
+	return true
+end
+
+-- The halves of a duel here: every pair of one side's and the other's not tried yet (Agree, the
+-- game's word on the GUIDs, then each signature), until one is kept (Keep). A client without the
+-- companion keeps them waiting: no ledger here (Book).
+function LG.MatchHalves(fid, mode)
+	mode = mode or "L"
+	local p = pend[fid]
+	if not (p and p.A[1] and p.B[1]) then return false, "half" end
+	if p.checking then return false, "checking" end
+	for _, a in ipairs(p.A) do
+		for _, b in ipairs(p.B) do
+			local pair = a.body .. "\n" .. b.body
+			if not p.tried[pair] then
+				local e, why = Agree(a, b)
+				if not e then
+					p.tried[pair] = true
+					Count(why)
+				elseif BothBound(e) == false then
+					p.tried[pair] = true
+					Count("gk")
+				elseif not Arena.Heavy(mode) then
+					return false, "light"
+				else
+					return CheckPair(fid, p, a, b, e, mode)
+				end
+			end
+		end
+	end
+	return false, "halves"
+end
+function LG.RetryHalves()
+	local list = {}
+	for fid, p in pairs(pend) do if p.A[1] and p.B[1] and not p.checking then list[#list + 1] = fid end end
+	table.sort(list)
+	for _, fid in ipairs(list) do LG.MatchHalves(fid, "L") end
+end
+Later = function() Arena.After(LG.HALVES_LATER, "halves later", LG.RetryHalves) end
+
+-- A half heard from `sender` (or our own, LG.Publish): kept until its other half, then matched.
+function LG.TakeHalf(dist, sender, mode, body)
+	if mode ~= "L" or not Arena.Counts(mode) then return Count("rehearsal") end
+	local h, why = LG.ReadHalf(body)
+	if not h then return Count(why) end
+	local first = Same(sender, h.signer)
+	if first then
+		-- (Its time and its gk are its fighter's word: fresh only, a clerk's late one excepted, and
+		-- never a GUID the game gives another character.)
+		local age = Now() - h.t
+		if age > LG.HalfFresh() and not (age <= LG.HALF_LATE and LG.MayClerk()) then return Count("late") end
+		if Bound(h.signer, h.gk) == false then return Count("gk") end
+	else
+		if not LG.MayRelay(sender, mode) then return Count("relay") end
+		if pins[h.gk] and pins[h.gk] ~= h.pk64 then return Count("pin") end
+	end
+	local book = Book(mode, LG.SeasonOf(h.t, mode))
+	local held = book and book.list[h.fid]
+	if held then
+		-- (Heard again: one still waiting for the game's word is looked at again.)
+		if held.wait then LG.RecheckGk(held, mode) end
+		return false, "held"
+	end
+	local p = pend[h.fid]
+	if p then
+		local list = p[h.side]
+		for _, x in ipairs(list) do
+			if x.body == h.body then
+				if first then x.first = true end
+				return false, "again"
+			end
+		end
+		for i, x in ipairs(list) do
+			if Same(x.signer, h.signer) then
+				-- (Another half of that signer's: a first-hand one replaces a relayed one, else the first stays.)
+				if not (first and not x.first) or x.checking then return Count("conflict") end
+				h.first = first
+				list[i] = h
+				return LG.MatchHalves(h.fid, mode)
+			end
+		end
+		if #list >= LG.HALF_CANDIDATES then
+			-- (Full: a clerk's relay, the half his own two matched, takes the place of the oldest
+			-- first-hand one of another signer's, so made-up halves never keep it out; else refused.)
+			local out
+			if not first then
+				for _, x in ipairs(list) do if x.first and not x.checking then out = x break end end
+			end
+			if not out then return Count("candidates") end
+			Unhold(p, out)
+			Count("candidate-out")
+		end
+	else
+		Evict()
+		p = { t = Now(), A = {}, B = {}, tried = {} }
+		pend[h.fid] = p
+	end
+	h.first = first
+	table.insert(p[h.side], h)
+	pendN = pendN + 1
+	return LG.MatchHalves(h.fid, mode)
+end
+
+-- (1.2.3, the review: a duel no clerk heard while its fighters repeated it reached nobody who
+-- logged in later.) This fighter's own halves again, by whisper to a clerk heard (OnBook): each
+-- confirmed duel of his past HALF_FOR and younger than HALF_LATE, once per clerk and session. The
+-- clerk takes it first-hand (LG.TakeHalf's late window) and his carousel brings it to the rest.
+-- The number sent.
+local toClerk, clerkPass = {}, {}
+LG.CLERK_PASS = 60          -- a clerk's own words looked at this often at most for it
+function LG.HalvesToClerk(clerk)
+	if type(clerk) ~= "string" or Me(clerk) then return 0 end
+	local key = ns.FullName(clerk):lower()
+	local now = Now()
+	if now - (clerkPass[key] or -math.huge) < LG.CLERK_PASS then return 0 end
+	clerkPass[key] = now
+	local Fi = F()
+	local n = 0
+	for _, f in ipairs(Fi.All("fights")) do
+		if type(f.half) == "string" and f.mode == "L" and f.halfAt and now - f.halfAt > (tonumber(Fi.HALF_FOR) or 1800)
+			and not toClerk[key .. "|" .. f.fid] and Fi.SideOf(f, ns.me) then
+			local t = N(select(12, Arena.Fields(f.half, 17)), 0, 4294967295)
+			if t and now - t < LG.HALF_LATE then
+				toClerk[key .. "|" .. f.fid] = true
+				Arena.Send("AX", "L", f.half, { to = clerk })
+				n = n + 1
+			end
+		end
+	end
+	return n
+end
+
+-- This fighter's half of a direct duel he confirmed (ArenaFights.Half): made, signed with his
+-- account's key, sent (the channel, and the other fighter), taken here as heard. Its body, or nil
+-- and why.
+function LG.Publish(f)
+	local Fi = F()
+	local mine = type(f) == "table" and Fi.SideOf(f, ns.me)
+	local D = ns.Debts
+	if not mine or type(D) ~= "table" or type(D.Sign) ~= "function" or type(D.MyKey) ~= "function" then return nil, "key" end
+	local myGk, pk = D.MyKey()
+	if not myGk or not pk then return nil, "key" end
+	local other = mine == "A" and "B" or "A"
+	-- What this client saw of each unit at its lines (the latest round that saw it, F.Seen).
+	local seen = {}
+	for r = 1, f.round or 0 do
+		local x = type(f.reports) == "table" and f.reports[r]
+		local p = x and x.proof
+		if type(p) == "table" then
+			for _, s in ipairs({ "A", "B" }) do if type(p[s]) == "table" and p[s].gk then seen[s] = p[s] end end
+		end
+	end
+	local gk = { [mine] = myGk, [other] = (seen[other] and seen[other].gk) or (f[other] and f[other].gk) }
+	if not gk[other] then return nil, "gk" end
+	local rounds = {}
+	for r = 1, f.round or 0 do
+		local x = f.rounds and f.rounds[r]
+		local rep = type(f.reports) == "table" and f.reports[r] and f.reports[r][mine]
+		if not (x and x.w and x.m and rep) then return nil, "rounds" end
+		rounds[#rounds + 1] = x.w .. x.m .. (rep.dur and B36(rep.dur) or "-")
+	end
+	local last = f.reports[f.round][mine]
+	local own, opp = seen[mine], seen[other]
+	local lvl = own and own.level or (UnitLevel and tonumber((UnitLevel("player")))) or nil
+	if not Level(lvl) then lvl = nil end
+	-- (1.2.3, the review) The other's level as this client saw it, only a real one: the game shows a
+	-- hostile character 10 or more levels above as "??" (UnitLevel -1), and every receiver refuses a
+	-- half naming that ("level"), so the duel was in nobody's history. Unseen ("-"), the two halves
+	-- make a history-only entry instead (Agree: not rated).
+	local oppLevel = opp and Level(opp.level) and opp.level or nil
+	local core = table.concat({ f.fid, mine, gk.A, ns.FullName(f.A.name), gk.B, ns.FullName(f.B.name), tostring(f.bo or 1), f.cat or "A",
+		f.w, f.m, table.concat(rounds, "."), B36(last.t or Now()), FactsText(own), lvl and tostring(lvl) or "-",
+		oppLevel and tostring(oppLevel) or "-" }, "~")
+	local sig = D.Sign("OLYH1|" .. core)
+	if type(sig) ~= "string" then return nil, "key" end
+	local body = core .. "~" .. D.B64(pk) .. "~" .. D.B64(sig)
+	Arena.Send("AX", "L", body, { key = "ax " .. f.fid })
+	Arena.Send("AX", "L", body, { to = f[other].name })
+	LG.TakeHalf("CHANNEL", ns.me, "L", body)
+	return body
+end
+
+local function OnHalf(dist, sender, mode, body)
+	if dist ~= "CHANNEL" and dist ~= "WHISPER" then return Count("lane") end
+	LG.TakeHalf(dist, sender, mode, body)
+end
+ns.Comm.Handle("AX", ns.Arena.Handle("AX", OnHalf))
+-- (The companion loaded: the ledger is here now, for the halves that waited, and its entries still
+-- waiting for the game's word on their GUIDs.)
+ns.On("ARENA_UI_LOADED", function()
+	ns.SafeCall("arena halves", LG.RetryHalves)
+	ns.SafeCall("arena halves gk", Waiting, "L")
+end)
+
+---------------------------------------------------------------------------
 -- What counts, and the ratings (ArenaRating)
 ---------------------------------------------------------------------------
 
--- Each entry's `counts`, from the ledger alone (sorted by time, then fid).
+-- Each entry's `counts`, from the ledger alone (sorted by time, then fid). (1.2.3, the review) The
+-- day's and the pair's limits are filled in the order the entries were kept: an arbiter's by its
+-- time, a duel's (fl d) by when it was kept here (keptAt). A duel's time is its fighters' own word,
+-- so halves dated earlier and sent later pushed a fighter's real duels of that day out of his
+-- limit after they had counted: one kept later never takes the place of one kept before. The
+-- pair's 7 days run both ways from each entry's time. The clerk's carousel sends the duels in the
+-- order he kept them, so a member who catches up keeps them in that order too.
 function LG.Counted(list)
 	local day, pairs_ = {}, {}
 	local out = {}
-	for _, e in ipairs(list) do
+	local function At(e) return (Has(e.fl, "d") and tonumber(e.keptAt)) or e.t end
+	local order = {}
+	for i, e in ipairs(list) do order[i] = e end
+	table.sort(order, function(a, b)
+		local x, y = At(a), At(b)
+		if x ~= y then return x < y end
+		if a.t ~= b.t then return a.t < b.t end
+		return a.fid < b.fid
+	end)
+	for _, e in ipairs(order) do
 		local ok = Has(e.fl, "r")
 		local a, b = e.sc:match("^(%d):(%d)$")
 		local rounds = math.max(1, (tonumber(a) or 0) + (tonumber(b) or 0))
@@ -496,7 +1108,7 @@ function LG.Counted(list)
 		local pk = e.gkA < e.gkB and (e.gkA .. "|" .. e.gkB) or (e.gkB .. "|" .. e.gkA)
 		if ok then
 			local recent = 0
-			for _, t in ipairs(pairs_[pk] or {}) do if e.t - t < LG.PAIR_DAYS * LG.DAY then recent = recent + 1 end end
+			for _, t in ipairs(pairs_[pk] or {}) do if math.abs(e.t - t) < LG.PAIR_DAYS * LG.DAY then recent = recent + 1 end end
 			if recent >= LG.PAIR_MAX then ok = false end
 		end
 		if ok then
@@ -809,7 +1421,9 @@ function LG.Synced(mode)
 end
 
 -- The carousel (the design): the current and the previous week's entries, a piece at a time on the
--- low lane, so each piece serves every listener with the companion loaded.
+-- low lane, so each piece serves every listener with the companion loaded. (1.2.3) A duel's entry
+-- goes as its two signed halves (AX, relayed: each listener checks them as its fighters' own),
+-- never in a piece: { type, body } each.
 local turn -- { pieces, i }
 local function Pieces(mode)
 	local d = LG.Digest(mode)
@@ -819,20 +1433,38 @@ local function Pieces(mode)
 	local out = {}
 	for i = math.max(1, #ws - 1), #ws do
 		local w = ws[i]
-		local cur, chunks = {}, {}
+		local cur, chunks, halves, duels = {}, {}, {}, {}
 		for _, e in ipairs(d.byWeek[w]) do
-			local text = Encode(e):gsub("^[^~]*~", "", 1) -- (the season is the piece's)
-			local size = #table.concat(cur, ";") + #text + 1
-			if #cur > 0 and size > LG.PIECE - 20 then chunks[#chunks + 1] = cur cur = {} end
-			cur[#cur + 1] = text
+			if Has(e.fl, "d") then
+				local h = type(e.halves) == "table" and e.halves or nil
+				if h and type(h.A) == "string" and type(h.B) == "string" then duels[#duels + 1] = e end
+			else
+				local text = Encode(e):gsub("^[^~]*~", "", 1) -- (the season is the piece's)
+				local size = #table.concat(cur, ";") + #text + 1
+				if #cur > 0 and size > LG.PIECE - 20 then chunks[#chunks + 1] = cur cur = {} end
+				cur[#cur + 1] = text
+			end
 		end
 		if #cur > 0 then chunks[#chunks + 1] = cur end
 		for j, chunk in ipairs(chunks) do
-			out[#out + 1] = table.concat({ "P", B36(d.season), B36(w), B36(j), B36(#chunks), table.concat(chunk, ";") }, "~")
+			out[#out + 1] = { "AB", table.concat({ "P", B36(d.season), B36(w), B36(j), B36(#chunks), table.concat(chunk, ";") }, "~") }
 		end
+		-- (1.2.3, the review) The duels in the order the clerk kept them (keptAt): a member who
+		-- catches up fills the day's and the pair's limits in that order, as the clerk did (LG.Counted).
+		table.sort(duels, function(a, b)
+			local x, y = tonumber(a.keptAt) or a.t, tonumber(b.keptAt) or b.t
+			if x ~= y then return x < y end
+			return a.fid < b.fid
+		end)
+		for _, e in ipairs(duels) do
+			halves[#halves + 1] = { "AX", e.halves.A }
+			halves[#halves + 1] = { "AX", e.halves.B }
+		end
+		for _, x in ipairs(halves) do out[#out + 1] = x end
 	end
 	return out
 end
+LG.Pieces = Pieces
 local nextTurn = 0
 local function Producer()
 	if not LG.IsClerk() then turn = nil return nil end
@@ -841,13 +1473,13 @@ local function Producer()
 		turn = { pieces = Pieces("L"), i = 0 }
 	end
 	turn.i = turn.i + 1
-	local body = turn.pieces[turn.i]
-	if not body then
+	local item = turn.pieces[turn.i]
+	if not item then
 		turn, nextTurn = nil, Now() + LG.CAROUSEL_GAP
 		return nil
 	end
 	stats.pieces = stats.pieces + 1
-	return "AB", "L", body, { low = true }
+	return item[1], "L", item[2], { low = true }
 end
 LG.Producer = Producer
 
@@ -923,12 +1555,20 @@ local function OnBook(dist, sender, mode, body)
 	if not R.IsPublicArbiter(sender, mode) and not ns.IsHighCouncillor(ns.FullName(sender)) then return Count("sender") end
 	if R.IsKing(sender) then return Count("king") end
 	clerks[ns.FullName(sender):lower()] = Now()
+	-- (1.2.3, the review) A clerk heard: this fighter's own halves he may not have (LG.HalvesToClerk).
+	if mode == "L" then LG.HalvesToClerk(sender) end
 	if kind == "D" then
 		local season, n, hash, weeks = Arena.Fields(rest, 4)
 		if not weeks then return Count("shape") end
 		OnDigest(sender, mode, N(season, 1, 999), N(n, 0, 99999), hash, weeks ~= "-" and weeks or "")
 	elseif kind == "P" then
 		if not Arena.Heavy(mode) then return Count("light") end
+		-- (1.2.3, the review) A piece carries arbiters' entries alone (a duel's goes as its halves,
+		-- AX): none while there are no arbiters (Compliance.Arbiters), nor in L while the live switch
+		-- is off. AB is a free game's type now (Arena.FREE_TYPES: the clerk's digest and the duels'
+		-- halves in his carousel), so its pieces are no longer dropped as "live-off" on the way in,
+		-- and an entry in one, made up by a modified clerk, was kept and rated.
+		if not F().Arbiters() or (mode == "L" and not (R.Live and R.Live())) then return Count("live-off") end
 		local season, week, i, of, entries = Arena.Fields(rest, 5)
 		if not entries then return Count("shape") end
 		season = N(season, 1, 999)
@@ -937,7 +1577,10 @@ local function OnBook(dist, sender, mode, body)
 		for text in (entries .. ";"):gmatch("([^;]*);") do
 			if text ~= "" then
 				local e, why = Decode(B36(season or 0) .. "~" .. text, sender)
-				if e then
+				-- (1.2.3: a duel's entry is never relayed on a clerk's word: its two halves are, AX.)
+				if e and Has(e.fl, "d") then
+					Count("duel")
+				elseif e then
 					local f = F().Find("fights", e.fid)
 					local name = ArbiterName(e, named)
 					-- A trusted clerk may relay a late, unknown arbiter; known contradictions
@@ -1266,7 +1909,8 @@ function LG.History(opts)
 		else show = Has(e.fl, "p") end
 		if show then
 			Add({ fid = e.fid, t = e.t, A = e.A, B = e.B, gkA = e.gkA, gkB = e.gkB, w = e.w, winner = e.w == "A" and e.A or e.B,
-				method = e.m, dur = e.dur, cat = e.cat, title = Has(e.fl, "t"), rated = Has(e.fl, "r"), public = Has(e.fl, "p"), sc = e.sc },
+				method = e.m, dur = e.dur, cat = e.cat, title = Has(e.fl, "t"), rated = Has(e.fl, "r"), public = Has(e.fl, "p"), sc = e.sc,
+				direct = Has(e.fl, "d") or nil },
 				side, Has(e.fl, "p") or Has(e.fl, "c") or Has(e.fl, "k"))
 		end
 	end

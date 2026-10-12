@@ -106,7 +106,9 @@ test("1.1.6 games ledger: a duel without a stake: each fighter sees his own game
 	w:Run(5) -- (the records go on the low lane)
 	local okA, f = Final(w, a, fid)
 	assert(okA, "final on the challenger's client"); assert((Final(w, b, fid)), "and on the other's")
-	eq(f.mode, "T", "the King's live switch is off: a rehearsal's mode, as in 1.1.6")
+	-- (1.2.3, the owner's decision: a free duel counts with the King's live switch off, so it is L;
+	-- it was a rehearsal's T from 1.1.6 to 1.2.2.)
+	eq(f.mode, "L", "the King's live switch is off: a free duel counts all the same")
 	eq(f.stake, nil, "no stake")
 	local aSide = f.A.name:lower() == a.name:lower() and "1" or "2"
 	for _, aud in ipairs(Auditors(c)) do
@@ -114,7 +116,7 @@ test("1.1.6 games ledger: a duel without a stake: each fighter sees his own game
 		eq(#list, 1, aud.name)
 		local e = list[1]
 		eq(e.id, fid); eq(e.g, "d"); eq(e.game, "arena"); eq(e.w, aSide); eq(e.winner:lower(), a.name:lower())
-		eq(e.how, "K", "a knockout"); eq(e.reports, 2); eq(e.state, "agreed", aud.name); eq(e.mode, "T")
+		eq(e.how, "K", "a knockout"); eq(e.reports, 2); eq(e.state, "agreed", aud.name); eq(e.mode, "L")
 	end
 	eq(#w:Sent({ type = "AY", dist = "CHANNEL" }), 0, "never on the channel")
 	eq(#w:Sent({ type = "AY", to = c.member.name }), 0, "nothing to a member")
@@ -375,7 +377,10 @@ test("1.1.6 games ledger: a rehearsal never empties it: a group rehearsal's word
 	Duel(w, a, b, a, b)
 	w:Run(5)
 	eq(#M(w, a, "ArenaLedger").MyGames(), 1); eq(#Rows(w, king), 1)
-	eq(type(king.rdb.arenaGames) == "table" and type(king.rdb.arenaGames.gamesLedger), "table", "the games' own store")
+	-- (1.2.3: a free duel is L whatever the live switch says, so its game is in this realm's live
+	-- store; a T game's own store, ns.rdb.arenaGames, is the one a rehearsal's T games keep.)
+	local live = w:As(king, king.ns.Arena.Store, "L")
+	eq(type(live.gamesLedger), "table", "the games' own store: the live one")
 	eq(king.rdb.arenaTest and king.rdb.arenaTest.gamesLedger, nil, "not the rehearsal store")
 	-- The signed arbiter starts a rehearsal in the fighters' group: only clients whose players
 	-- explicitly opted in may join it; preserving the actual ledger assertions below.

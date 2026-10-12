@@ -2634,9 +2634,19 @@ even fight gives +12), beating a much lower one little or nothing (10 levels dow
 0), and losing to a much higher one costs little (-1 to 10 levels up, 0 from 16). The levels are
 the weigh-in's, in each ledger entry; a fight where either level is unknown rates as before. Whole
 numbers in and one formula, every fight taken in (time, id) order, so every client holding the
-same fights gets the same ratings (`tests/arena/ArenaRating.lua`). A fight is rated only when an
-arbiter judges it, and 1.1.6 has no arbiters: rating the game's own duels between their two
-fighters is the next step for the rankings to move.
+same fights gets the same ratings (`tests/arena/ArenaRating.lua`). A fight is rated when an
+arbiter judges it, or (1.2.3) when a direct duel's two fighters both sign it: each fighter's client
+publishes its signed half of the duel it confirmed (AX, signed with the account key), and any
+other client counts the duel only when both halves match (the fight, the pair, the winner, the
+method, the rounds, their lengths and times within a tolerance); one half alone, two that differ,
+or one account on both sides never count. The ledger's limits apply as to any entry (15 s a
+round, a fighter's 10 a day, a pair's 3 in 7 days, filled in the order the entries arrived), and a
+member who was offline gets the halves from the clerk's carousel; a clerk who was offline too gets
+each fighter's own half from him later (up to a day). A client rates the duel only once the game
+there pairs each fighter's name with his GUID (a unit in view, or `GetPlayerInfoByGUID`); until
+then it is in the history alone, and it goes if the game names another character
+(`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel counts whatever the King's
+live switch says: that switch is the bets' alone.
 **Find a player** (`Olympus/ArenaMatch.lua`, the Find in the Arena and in the Bones window): each
 game has its own Find, a duel's or a Bones game's, so the game is the one it was opened from; a
 duel filters by level (Any, within 5 or within 10 of the player's own); both filter by distance (Nearby: the
