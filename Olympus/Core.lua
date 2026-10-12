@@ -1752,7 +1752,7 @@ StandIn("Watch", { "Slash" }) -- 1.2: the guild-local moderation desk
 StandIn("Judgment", {}) -- 1.2: a case to the King, the High Council's votes, his final word
 StandIn("Church", { "Slash" }) -- 1.1.6: the Missionary Church of Olympus (Church.lua)
 StandIn("WatchChat", {}) -- 1.1.6: chat moderation (deleted lines, timeouts, sanctions' bars)
-StandIn("Wanted", { "SightingsSlash" }) -- 1.2: the Horde Most Wanted ledger and its sightings
+StandIn("Wanted", { "SightingsSlash", "Slash" }) -- 1.2: the Horde Most Wanted ledger and its sightings (1.2.3: /oly wanted)
 StandIn("Board", { "Slash" }) -- (1.1: the Board)
 StandIn("Week", {}) -- (1.1: the King's week)
 -- 1.1: net-off (Moderation.lua), alt links (Alts.lua), the King's key rotation (Keys.lua).
@@ -2062,6 +2062,7 @@ local function Help()
 	print(L.HELP_LAYERAUTO)
 	print(L.HELP_LOCATION)
 	print(L.HELP_SIGHTINGS) -- (1.2)
+	print(L.HELP_WANTED) -- (1.2.3)
 	print(L.HELP_ROLLCALL)
 	print(L.HELP_PRIVACY_PAGE)
 	print(L.HELP_PROFILE)
@@ -2292,6 +2293,10 @@ local function Slash(input)
 		elseif cmd == "sightings" or cmd == "avistamentos" then
 			-- 1.2 (Wanted.lua): this client's Most Wanted sightings, on until a No; alone, says which.
 			ns.Wanted.SightingsSlash(rest)
+		elseif cmd == "wanted" or cmd == "procurados" then
+			-- 1.2.3 (Wanted.lua): what Most Wanted captured, shared and heard this session, and why
+			-- each kill or death was refused, in the copy window (a chat line cannot be copied).
+			ns.Wanted.Slash(rest)
 		elseif cmd == "kingarrow" or cmd == "setarei" then
 			if ns.KingArrow then ns.KingArrow.Slash(rest) else ns.Print(L.KING_ARROW_STATUS:format(L.KING_ARROW_OFF)) end
 		elseif cmd == "filter" or cmd == "filtro" then

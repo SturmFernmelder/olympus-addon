@@ -358,8 +358,10 @@ end
 --   OfficerMuster OM (bounded, zone-only officer gathering, logged)
 --   Other 1.1 work: Recruit J1 J3 | Alts AL | Filter BW | Dues FA FB FC FD FQ FS FU
 --   Board G0 G1 GQ | Keys K3 K4 K5 | Channels N1 | Moderation O1 | The Watch MW | Treasury TA TD TW
---   Bank TL TN TO TS | Week Y2 | Wanted WS WX WY W4 W5. Reserved: J2 (#20's route answer),
---   FK (a 1.1 build's copy of the dues' amount from the Treasurer's client, read by nobody now).
+--   Bank TL TN TO TS | Week Y2 | Wanted WS WY W4 W5, and 1.2.3's WK (a member's own kill or death,
+--   and a reviewer's relay of one) WV (a reviewer's removal or void). Reserved: J2 (#20's route
+--   answer), FK (a 1.1 build's copy of the dues' amount from the Treasurer's client, read by nobody
+--   now), WX (1.2.0 to 1.2.2's evidence whispered to a reviewer, read by nobody now).
 --   Bank UP UQ UG (the guild keeper's grant, reader's ask and own-guild snapshot).
 --   1.2 guild operations: War WZ (GUILD only; its bounded recovery snapshot may be chunked).
 --   1.2, the King's minimap arrow: KingArrow K6 (the switch's lease, logged).

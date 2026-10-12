@@ -1629,20 +1629,43 @@ master (or the Head, the King or the author), who keeps that guild full and answ
 
 ### Wanted and Slayers
 
-**Wanted is this client's Horde target list**, not a live list of every Horde player encountered
-by Olympus. A moderator can add a target by name or from a targeted Horde player. Your own recent
-fatal death recap can also discover an unlisted killer, but only with a locally observed Horde
-player identity and a verified own victim. A name-only listing learns its GUID through that same
-local proof; an already pinned identity is never replaced by a same-name different GUID. Ordinary
-damage, animals, pets, stale or restricted recap data do not create a bounty. The native kill
-event counts your own killing blow only against an already listed active player GUID.
+**Wanted fills itself (1.2.3).** Nobody lists a Horde player first and no name is typed: a Horde
+player who kills an Olympus member, or is killed by one, enters Wanted by himself, and the kill or
+death counts at once. Your own death is read from the game's death recap (its killing blow: a
+recent hostile player's damage), your own killing blow from the game's kill event (PARTY_KILL:
+yours only, never a party member's or a pet's). The Horde faction is proven by your client, never
+guessed: a Horde unit it sees (or saw within a minute), else the game's lookup of the GUID (a race
+only the Horde plays). No target, nameplate or listing is needed. Nothing counts in an instance (a
+battleground, an arena), from a pet, a creature or the environment, for an Alliance player (a
+free-for-all zone) or a race of both factions with no Horde unit seen, nor while the game hides
+the identities (an unfinished PvP match).
 
-These observations stay on your client. **Send evidence** sends your retained kill/death rows
-privately to the King, a High Councillor or the author for manual review. Their signed publication
-shares the **Slayers top three**, not the Horde target list. A trusted peer can relay that unchanged
-ranking only to a recipient who already independently pinned its original publisher's key.
-Waiting online or simply seeing Horde therefore does not populate your Wanted targets from other
-clients. See [Privacy](#privacy) for sightings' separate explicit consent and recipient limits.
+Each own row goes at once to the Olympus channel, and every member's client adds it to its own
+Wanted and Slayers boards: a death opens a bounty on the Horde player, a killing blow claims his
+open bounty and its points (a kill of a Horde player with no open bounty records the claim and
+scores nothing). A client takes a row only from a member it can verify (its own guild's roster, or
+a guild rank it can verify), about that member's own death or killing blow (the Olympian is the
+sender as the server names him; his GUID only where the receiving client can prove it is his), of
+its own realm group and faction, at most 7 days old, once, eight a minute from one member and
+twenty in five minutes about one Horde player. The King, a High Councillor or the author relays
+what his client took, so members of other guilds count it too, and answers a late login's
+catch-up with the newest rows. They alone can **Take off** an abusive entry or **Void** one row
+afterwards: their word reaches every client, what it counted stops counting, and a later event does
+not bring it back. There is no review and no Send evidence any more.
+
+Wanted holds the 200 most recently active Horde players and never refuses a new one: past 200 the
+least active goes (one with nothing open and nothing paid first), and what his claims paid stays
+with its Slayers (a Take off no longer reaches it). Up to 512 entries taken off are kept off apart
+and take no place. A Horde player is his GUID, never a name: his name is the one the game gives for
+that GUID wherever your client can look it up, a row that gives a GUID the game knows another
+character's name is refused, and an entry under someone's name never keeps that player off.
+
+The signed **Slayers top three** is the publisher's own board, by verified GUID (a slayer his
+client knows by name only is left out and named on his Frames page). A trusted peer can relay that
+unchanged ranking only to a recipient who already independently pinned its original publisher's
+key. `/oly wanted status` shows, in a copy window, what your client captured, shared and heard this
+session and why each kill or death was refused. See [Privacy](#privacy) for sightings' separate
+explicit consent and recipient limits.
 
 ### World map
 - Soldiers per zone on zone and continent maps, and per continent on the world map (none with
@@ -2018,10 +2041,12 @@ message (the game adds it). What goes where:
 | The Church: what your addon read in your guild's log (an invite by a Church person and the join after it: both names, your guild, the hours), a registration (the name), your public-row choice | the Church's keepers online (the Head, the Apostles, the author), alone (whispers); kept on your client up to 7 days while none is online | a Church person's own addon every 5 minutes; any other member's only where a Church person was heard in the guild lately, drawn so that about two of each guild read; your own invite count and your guild's joins and leaves are never sent |
 | The Church's seen-check (a name) and its answer (the guild your roster saw him in, the first and last day, whether he is in it now) | the check: everyone on the Olympus channel, from the desk (a keeper). The answer: that keeper alone (a whisper) | the desk asks about each new recruit, a registered one on its days and 7 days after a join; about two clients of each guild that knew the name answer |
 | The Church's numbers (rankings, a person's detail) and the keepers' ledger | the Church's audience who asked (the Church, the High Council, the King, the author), alone; the ledger between keepers alone | when a member of that audience opens the tab or refreshes; never on the channel, except, while the author's switch is open, the rows of the people who chose to show theirs and the top 3 of each ranking (names only) |
-| Most Wanted evidence (WX): a kill of a listed Horde player by you, or your own death to one: both GUIDs, the time and month, bounty or claim | the one reviewer you choose (the King, a High Councillor or the author), alone (a whisper) | only when you send it (**Send evidence**); a reviewer keeps it only from a verified member whose own kill/death identity he can resolve, and nothing counts until he accepts it by hand |
-| The reviewed Slayers top three (WY): GUIDs, scores, claims and tie times, with the issuer, signature and expiry | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client, after a review; an unchanged verified word may also be relayed by one of these roles (W5) |
-| Slayers catch-up (W4): a request for the current signed ranking | everyone on the Olympus channel | up to three login attempts, starting after 45 seconds and then 5 minutes apart; a role holder answers at most once every 5 minutes |
-| A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you send your evidence to, alone (whispers), three a minute at most | only after your own Yes on its privacy line (**Accept all** does not turn it on), only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
+| Most Wanted, your own death to a Horde player or your own killing blow on one (WK, 1.2.3): the Horde player's GUID and name, your GUID, the time and month, bounty or claim, your guild, the realm group's digest | everyone on the Olympus channel | at once, by itself (no Send, no review), and again after a login if the channel did not take it; never where it happened, never in an instance |
+| A reviewer's relay of a member's row (WK, 1.2.3): the same row, the member's name, and whether the reviewer's client proved the GUID his | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client: once for each row it took from a member, and in its answer to a late login's catch-up (W4), the newest rows only |
+| A reviewer's removal or void (WV, 1.2.3): a Horde player's GUID, or a member's name and his row's digest, and when | everyone on the Olympus channel | when the King, a High Councillor or the author takes an abusive entry off or voids a row, and in his catch-up answer |
+| The signed Slayers top three (WY): GUIDs, scores, claims and tie times, with the issuer, signature and expiry | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client, from his own Slayers board (1.2.3: no review); an unchanged verified word may also be relayed by one of these roles (W5) |
+| Slayers catch-up (W4): a request for the current signed ranking | everyone on the Olympus channel | up to three login attempts, starting after 45 seconds and then 5 minutes apart; a role holder answers at most once every 5 minutes, with the signed ranking and (1.2.3) the newest shared rows |
+| A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you chose (**Sightings to** on the Most Wanted page; 1.2.2: the one you sent evidence to), alone (whispers), three a minute at most | only after your own Yes on its privacy line (**Accept all** does not turn it on), only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
@@ -2038,18 +2063,15 @@ anchor still needs a direct publisher word; this is not guaranteed offline boots
 WY, W4 and W5 use the Olympus channel's public or sealed audience described below, not a
 private staff lane. Older clients ignore W4/W5 and still accept original direct WY words.
 
-WX membership needs a fresh roster of the reviewer's own guild or independently verified
-federation membership; a claimed guild or a census row alone is insufficient. A death must be
-the sender's own (S/B), a claim the sender's own party kill (P/C), with a positive server
-GUID/name lookup or matching real player unit. Unknown or mismatched identities do not enter
-the review inbox, and this identity check still does not authenticate the claimed event:
-the reviewer must accept it by hand. Local observations are not removed by intake refusal.
-Cross-guild sources whose GUID the reviewer cannot resolve may therefore be refused. Sending
-is not a remote acceptance acknowledgement, and there is no separate unknown-evidence inbox
-or automatic proof-recovery retry. After the sender reloads, **Send evidence** can retry the
-same saved eligible record (up to 31 days old, with a clock margin), subject to its send wait;
-the sender may also choose another reviewer. This does not guarantee every death is recorded
-or every report reaches an offline reviewer.
+WK membership (1.2.3) needs the receiving client's own fresh guild roster or a guild rank it can
+verify for the guild the row names; a claimed guild alone is not enough, and an ordinary member
+of another guild counts there through a reviewer's relay. A death must be the sender's own (S, a
+bounty), a claim the sender's own killing blow (P); a row naming another character's GUID as the
+sender is refused, and a GUID the receiving client cannot name is left off the row (the sender by
+his name alone, never a frame by a name). A client before 1.2.3 ignores WK and WV, and nobody
+reads 1.2.2's WX whispers any more. This does not guarantee that every death is recorded: the
+game must give the recap and the kill event, and a late login sees only the newest rows of a
+reviewer online.
 
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll
