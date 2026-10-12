@@ -561,6 +561,9 @@ local function IconsLines(lines, vm)
 	else
 		lines[#lines + 1] = { text = L.MYPROFILE_EMBLEM_SAMPLE:format(art and Texture(art) or L.MYPROFILE_NONE_WORD), right = label or "",
 			tooltip = Tip(L.MYPROFILE_EMBLEM_HEAD, L.MYPROFILE_EMBLEM_HINT) }
+		-- (1.2.4, the author: "podemos manter os ícones pro lugar do portrait quando não disponível, mas
+		-- tem que explicar que é pra isso": what the emblem is for, on the page itself, not in a tooltip.)
+		Words(lines, L.MYPROFILE_EMBLEM_HINT, 1)
 	end
 	if c.names then
 		lines[#lines + 1] = { text = L.COUNCIL_ICON_FILTER, input = { text = c.filter, onChange = function(text) PE.FilterIcons(text) end } }

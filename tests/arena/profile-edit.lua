@@ -376,6 +376,10 @@ test("1.2.4 My profile, Icons: the picker inline, the list built once per open (
 	eq(calls.n, 1, "a redraw builds nothing")
 	eq(lines[2].nav, nil, "no councillor: the emblem alone (no strip)")
 	eq(lines[2].text, A.ns.L.MYPROFILE_EMBLEM_SAMPLE:format("|T200040:16|t"), "the sample: his emblem"); eq(lines[2].right, "#200040")
+	-- (1.2.4, the author's ask) What the emblem is for, written on the page under the sample.
+	local why = {}
+	for i = 3, #lines do if type(lines[i].text) == "string" and not lines[i].items and not lines[i].nav and not lines[i].input then why[#why + 1] = (lines[i].text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) else break end end
+	assert(table.concat(why, " "):find("in place of your portrait", 1, true), "the emblem's purpose shown: " .. table.concat(why, " | "))
 	local grid
 	for _, l in ipairs(lines) do if l.items then grid = l end end
 	assert(grid, "the slots")
