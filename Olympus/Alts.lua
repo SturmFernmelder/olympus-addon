@@ -30,7 +30,10 @@ ns.Alts = Alts
 Alts.MAX_ALTS = 8            -- alts one main links (the claim must fit one message)
 Alts.EVERY = 1800            -- a linked character's client repeats its claim this often
 Alts.LOGIN_AFTER = 60        -- ...the first time this long after login (the channel is joined)
-Alts.KEEP = 30 * 86400       -- a claim not heard this long is forgotten (never while frozen)
+-- A claim not heard this long is forgotten (never while frozen). (1.2.4, the author's ask: lists of
+-- people are not erased early: it was 30 days, so a player away a month split in two again in the
+-- census, the dues and the rankings.)
+Alts.KEEP = 180 * 86400
 Alts.MAX_CLAIMS = 5000       -- claims kept (the oldest unfrozen goes first)
 Alts.DATE_AHEAD = 60         -- a claim dated further ahead of the server's clock is not taken
 Alts.ASK_AFTER = 15          -- the alt's confirmation is asked this long after login (not in combat)

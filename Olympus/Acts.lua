@@ -9,6 +9,7 @@ local L = ns.L
 --   Royal Pardon (The Watch's Tabards, Wall of Shame): a name off the wall, for everyone, for a week.
 --   T1~W~<id>~<guild>~<L|C>~<text>               a writ (the King's)
 --   T6~<id>~<guild>                               acknowledged (whisper to the King)
+--   T7~1                                          (1.2.4) a member's login: the week's writs again, please
 --   T1~G~<id>~<guild>~<seconds left>~<guild to join>   gates open (empty guild: closed)
 --   T1~F~<id>~<guild>~<name>                      pardon (the King's)
 
@@ -25,6 +26,16 @@ Acts.PARDON_DAYS = 7
 Acts.PARDON_RESEND = 600    -- the King's client repeats the week's pardons for late logins
 Acts.NEWS_GAP = 60          -- gates news in chat once a minute at most
 Acts.MAX_ACKS = 300
+-- (1.2.4, the author's ask: announcements are not lost) A writ went out once: a member offline then
+-- never got it. The King's client now says each writ of the last WRIT_DAYS again, one each
+-- WRIT_REPEAT (the least lately said first), and a member's client asks for them once a login
+-- (T7, WRIT_ASK_AFTER after it); the King's answers an ask at most each WRIT_ANSWER_GAP, the week's
+-- writs WRIT_SPACING apart (every client shows one writ each WRIT_SHOW_GAP at most).
+Acts.WRIT_DAYS = 7
+Acts.WRIT_REPEAT = 900
+Acts.WRIT_ASK_AFTER = 90
+Acts.WRIT_ANSWER_GAP = 300
+Acts.WRIT_SPACING = 50
 
 local function Clean(s, n) return ns.Cut((tostring(s or ""):gsub("[~|%c]", " "):gsub("^%s+", ""):gsub("%s+$", "")), n) end
 
@@ -40,6 +51,7 @@ local function Read(key) return ns.rdb[key] or {} end
 ---------------------------------------------------------------------------
 
 local lastWritSent, lastWritShown = -math.huge, -math.huge
+local lastWritAnswer, writAnswering = -math.huge, false
 local writFrame
 
 -- Who reads a writ: "L" the Lords (guild masters, and the officers of <Olympus>), "C" every
@@ -154,9 +166,10 @@ local function OnWrit(sender, id, rest)
 	text = Clean(text, Acts.WRIT_MAX)
 	if #text < 3 then return end
 	local now = ns.Now()
+	-- (1.2.4: a writ held already first, the King's repeats: it never takes the next one's turn)
+	for _, old in ipairs(Read("writs")) do if old.id == id and old.king == ns.FullName(sender) then return end end
 	if now - lastWritShown < Acts.WRIT_SHOW_GAP then return end
 	lastWritShown = now
-	for _, old in ipairs(Read("writs")) do if old.id == id and old.king == ns.FullName(sender) then return end end
 	local list = Store("writs")
 	local w = { id = id, king = ns.FullName(sender), by = ns.KingName(sender), to = to, text = text, t = now }
 	-- 1.1 (#31): a writ the player's block terms hit stays folded: no parchment, no alert, and
@@ -207,6 +220,59 @@ function Acts.HandleAck(dist, sender, text)
 	end
 end
 ns.Comm.Handle("T6", function(...) Acts.HandleAck(...) end)
+
+-- (1.2.4) The King's writs of the last WRIT_DAYS, as his client sent them, oldest first.
+local function RecentWrits()
+	local out, now = {}, ns.Now()
+	for _, w in ipairs(Read("writsSent")) do
+		if type(w) == "table" and tonumber(w.id) and type(w.text) == "string" and Acts.AUDIENCES[w.to]
+			and now - (tonumber(w.t) or 0) <= Acts.WRIT_DAYS * 86400 then out[#out + 1] = w end
+	end
+	return out
+end
+local function SayWrit(w)
+	w.saidAt = ns.Now()
+	ns.Comm.Send("CHANNEL", ("T1~W~%d~%s~%s~%s"):format(w.id, GetGuildInfo("player") or "", w.to, w.text), "writ " .. w.id)
+end
+-- The King's client, each WRIT_REPEAT: the writ of the week said least lately (its first telling
+-- counts), one a time. The writ said, or nil.
+function Acts.RepeatWrits()
+	if not ns.King.IsKing() or ns.King.Preview() then return nil end
+	local best
+	for _, w in ipairs(RecentWrits()) do
+		local said = tonumber(w.saidAt) or tonumber(w.t) or 0
+		if ns.Now() - said >= Acts.WRIT_REPEAT and (not best or said < (tonumber(best.saidAt) or tonumber(best.t) or 0)) then best = w end
+	end
+	if best then SayWrit(best) end
+	return best
+end
+-- A member's login asks for the week's writs (the King's client alone answers).
+function Acts.AskWrits()
+	if not ns.IsMember() or ns.King.IsKing() then return false end
+	ns.Comm.Send("CHANNEL", "T7~1", "writs ask")
+	return true
+end
+-- The King's client hears an ask: the week's writs said again, WRIT_SPACING apart, once per
+-- WRIT_ANSWER_GAP whoever asks. The number to be said.
+function Acts.HandleAsk(dist, sender, text)
+	if dist ~= "CHANNEL" or text ~= "T7~1" or not ns.King.IsKing() or ns.King.Preview() then return 0 end
+	local now = ns.Now()
+	if writAnswering or now - lastWritAnswer < Acts.WRIT_ANSWER_GAP then return 0 end
+	local list = RecentWrits()
+	if #list == 0 then return 0 end
+	lastWritAnswer, writAnswering = now, true
+	local i = 0
+	local function Next()
+		i = i + 1
+		local w = list[i]
+		if not w or not ns.King.IsKing() then writAnswering = false return end
+		SayWrit(w)
+		if list[i + 1] then ns.After(Acts.WRIT_SPACING, "writs answer", Next) else writAnswering = false end
+	end
+	Next()
+	return #list
+end
+ns.Comm.Handle("T7", function(...) Acts.HandleAsk(...) end)
 
 -- Writs the player's block terms hid and a click showed, this session (1.1, #31).
 local revealed = setmetatable({}, { __mode = "k" })
@@ -538,6 +604,9 @@ ns.On("LOGIN", function()
 		ns.rdb.gates = nil
 	end
 	local lastPardons = ns.Now()
+	-- (1.2.4) The week's writs: asked for once a login, the King's client saying them again.
+	ns.After(Acts.WRIT_ASK_AFTER, "writs ask", function() Acts.AskWrits() end)
+	ns.Every(Acts.WRIT_REPEAT, "writs repeat", function() Acts.RepeatWrits() end)
 	ns.Every(60, "gates", function()
 		local g = gates
 		if g and ns.Now() > g.at then
@@ -558,6 +627,7 @@ end)
 function Acts.Reset()
 	gates, lastNews = nil, -math.huge
 	lastWritSent, lastWritShown = -math.huge, -math.huge
+	lastWritAnswer, writAnswering = -math.huge, false
 	-- (The tests rebuild the interface between runs: a frame whose global is gone is made again.)
 	if writFrame and rawget(_G, "OlympusWritFrame") ~= writFrame then writFrame = nil elseif writFrame then writFrame:Hide() end
 end

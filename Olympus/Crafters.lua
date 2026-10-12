@@ -32,7 +32,9 @@ local Crafters = {}
 ns.Crafters = Crafters
 
 Crafters.LIST_EVERY = 45 * 60      -- a listing is repeated this often while the player plays...
-Crafters.LIST_KEEP = 100 * 60      -- ...and shows this long after it was last heard
+-- ...and shows this long after it was last heard (1.2.4, the author's ask: lists are not erased: a
+-- week, kept in the saved data across a /reload; it was 100 minutes, this session's memory alone)
+Crafters.LIST_KEEP = 7 * 86400
 Crafters.LIST_GAP = 10 * 60        -- a listing whose skill or recipes changed this often at most (Crafters.SendListing)
 Crafters.BOARD_MAX = 400           -- crafters on the board
 Crafters.PROFS_MAX = 4             -- professions a listing carries
@@ -60,6 +62,21 @@ Crafters.after = function(seconds, where, fn) ns.After(seconds, where, fn) end
 
 local board = {}        -- [sender] = { guild, profs = { { key, name, rank, max, n } }, t }
 local boardCount = 0
+-- (1.2.4) The board is the saved data's (rdb.craftersBoard), taken up again whenever it is another
+-- table (a new session, another realm group's): its count worked out again then.
+local boardFor
+local function Held()
+	local rdb = ns.rdb
+	if type(rdb) == "table" and boardFor ~= rdb then
+		if type(rdb.craftersBoard) ~= "table" then rdb.craftersBoard = {} end
+		board, boardFor, boardCount = rdb.craftersBoard, rdb, 0
+		for name, e in pairs(board) do
+			if type(name) == "string" and type(e) == "table" and type(e.t) == "number" and type(e.profs) == "table" then boardCount = boardCount + 1
+			else board[name] = nil end
+		end
+	end
+	return board
+end
 local myAsk             -- our last ask: { id, t, label, item, answers = { [sender] = { guild, prof, rank, recipes } }, count }
 local askTimes = {}     -- our asks' times (the last 10 minutes)
 local askCounter = 0
@@ -363,6 +380,7 @@ end
 function Crafters.HandleListing(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" or #text > 255 then return end
 	sender = ns.FullName(sender)
+	Held()
 	if text == "W0~" then
 		if board[sender] then
 			board[sender], boardCount = nil, boardCount - 1
@@ -408,7 +426,7 @@ ns.Comm.Handle("W0", function(...) Crafters.HandleListing(...) end)
 -- The board forgets the listings not heard in the last LIST_KEEP. Returns how many it forgot.
 function Crafters.Prune()
 	local now, gone = ns.Now(), 0
-	for name, e in pairs(board) do
+	for name, e in pairs(Held()) do
 		if now - e.t > Crafters.LIST_KEEP then
 			board[name], boardCount, gone = nil, boardCount - 1, gone + 1
 		end
@@ -941,7 +959,7 @@ ns.On("LOGIN", function() Crafters.OnLogin() end)
 
 -- Tests start from a clean state.
 function Crafters.Reset()
-	wipe(board); boardCount = 0
+	wipe(Held()); boardCount = 0
 	myAsk, askCounter, pendingRead = nil, 0, nil
 	wipe(askTimes); wipe(answered); wipe(answerTimes); wipe(listSent); wipe(listTimes); wipe(lists); wipe(asked); wipe(open); wipe(questioned)
 	lastListing, lastListingText, lastListingKeys, changedWaiting, loginWait = -math.huge, nil, nil, false, false

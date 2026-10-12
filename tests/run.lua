@@ -8171,7 +8171,7 @@ local function WithThrone(fn)
 		K.Reset(); ns.Vox.Reset(); ns.Court.Reset(); ns.Acts.Reset(); ns.Treasury.Reset(); ns.Bank.Reset()
 		ns.rdb.writs, ns.rdb.writsSent, ns.rdb.pardons, ns.rdb.treasury, ns.rdb.treasurySeen = nil, nil, nil, nil, nil
 		ns.rdb.kingHands, ns.rdb.gates, ns.rdb.pardonsGiven = nil, nil, nil
-		ns.rdb.stewardHands = nil
+		ns.rdb.stewardHands, ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil, nil
 		ns.rdb.treasurySums, ns.rdb.treasuryReport, ns.rdb.treasuryFlags, ns.rdb.treasuryOpening = nil, nil, nil, nil
 		ns.rdb.treasuryToldWho, ns.db.previewTreasuryFlags, ns.db.myCharacters = nil, nil, nil
 	end
@@ -8285,9 +8285,11 @@ test("Hands of the King: he names them, they use the tools he lends them, nothin
 		K.HandleCommand("CHANNEL", "Helper-Realm", "T1~H~5~Olympus II~Other-Realm")
 		eq(K.IsHand(), false, "a Hand names nobody")
 		for _, kind in ipairs({ "W", "F", "C", "P" }) do eq(K.Authorized(kind, "Helper-Realm", "Olympus II"), false, kind) end
-		-- The King stopped repeating his list (offline): it ends.
+		-- (1.2.4, the author's ask: lists are not erased) The King stopped repeating his list
+		-- (offline): it stands until his newer list (it ended after 20 minutes; a /reload keeps it:
+		-- "1.2.4 the Hands" below).
 		w.clock = w.clock + K.HANDS_FRESH + 1
-		eq(K.Authorized("A", "Helper-Realm", "Olympus II"), false, "an old list ends")
+		eq(K.Authorized("A", "Helper-Realm", "Olympus II"), true, "his list stands until his newer one")
 		-- He takes the title back: the list goes out without the name.
 		AsKing()
 		K.RemoveHand("Helper-Realm")
@@ -9864,6 +9866,56 @@ test("Royal Writs to the whole army: every member gets the parchment, nobody ack
 			eq(StaticPopupDialogs.OLYMPUS_WRIT_TO.noCancelOnEscape, true, "Escape sends nothing")
 			StaticPopupDialogs.OLYMPUS_WRIT.OnAccept({ editBox = { GetText = function() return "x" end } })
 			eq(w.popups[#w.popups].name, "OLYMPUS_WRIT_TO", "too short: no second step"); eq(w.popups[#w.popups].data, "Hold the bridge")
+		end)
+	end)
+end)
+
+-- 1.2.4, the author's ask (announcements are not lost): a writ went out once, so a member offline
+-- then never got it. The King's client says each writ of the last seven days again, one each
+-- WRIT_REPEAT, the least lately said first; a member's login asks for them (T7) and the King's
+-- client answers, once per WRIT_ANSWER_GAP; a writ held already never takes the next one's turn.
+test("1.2.4 Royal Writs: each writ of the week said again, one at a time; a member away gets each once; a login asks and the King's client answers; nothing past seven days", function()
+	WithUI(function()
+		LoadUI()
+		WithThrone(function(w, K)
+			local A = ns.Acts
+			local KING = ns.KingCharacter() .. "-Realm"
+			AsKing()
+			A.SendWrit("E", "Hold the northern pass")
+			local first = LastSent(w)
+			w.clock = w.clock + 120
+			A.SendWrit("E", "Muster at dawn")
+			local second = LastSent(w)
+			eq(A.RepeatWrits(), nil, "both said less than WRIT_REPEAT ago")
+			w.clock = w.clock + A.WRIT_REPEAT
+			assert(A.RepeatWrits()); eq(LastSent(w), first, "the least lately said first")
+			assert(A.RepeatWrits()); eq(LastSent(w), second)
+			eq(A.RepeatWrits(), nil, "each once per WRIT_REPEAT")
+			-- A soldier who was away: the repeats bring both, each kept once; one held already never
+			-- takes the next one's turn (WRIT_SHOW_GAP).
+			AsSoldier("Away")
+			K.HandleCommand("CHANNEL", KING, first)
+			w.clock = w.clock + A.WRIT_SHOW_GAP + 1
+			K.HandleCommand("CHANNEL", KING, first) -- (its repeat: held already)
+			w.clock = w.clock + 10
+			K.HandleCommand("CHANNEL", KING, second)
+			local held = {}
+			for _, x in ipairs(ns.rdb.writs or {}) do held[#held + 1] = x.text end
+			eq(table.concat(held, " | "), "Hold the northern pass | Muster at dawn", "both, once each")
+			-- His login asks; the King's client answers with the week's writs, once per WRIT_ANSWER_GAP.
+			local n = #w.sent
+			eq(A.AskWrits(), true)
+			eq(w.sent[n + 1].dist, "CHANNEL"); eq(w.sent[n + 1].msg, "T7~1")
+			AsKing()
+			eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 2, "the week's two")
+			eq(LastSent(w), first, "said again at once, the next after WRIT_SPACING")
+			eq(A.HandleAsk("CHANNEL", "Later-Realm", "T7~1"), 0, "once per WRIT_ANSWER_GAP")
+			eq(A.HandleAsk("WHISPER", "Later-Realm", "T7~1"), 0, "on the channel alone")
+			-- Past seven days: no more.
+			w.clock = w.clock + A.WRIT_DAYS * 86400 + 1
+			eq(A.RepeatWrits(), nil)
+			w.clock = w.clock + A.WRIT_ANSWER_GAP
+			eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 0)
 		end)
 	end)
 end)
@@ -30523,12 +30575,15 @@ do
 				Logged("Baron-Realm", "MUSTER", "Olympus")
 				eq(#cns.Decree.Active(), 3, "nor his Muster")
 				eq(Line("Baron-Realm", "L", "Olympus"), "rank")
-				-- And a list the King stopped repeating ends (King.HANDS_FRESH).
+				-- (1.2.4) A list the King stopped repeating stands until his newer one (it ended after
+				-- King.HANDS_FRESH): his newer list without the name ends it.
 				K.HandleCommand("CHANNEL", KING, "T1~H~11~Olympus~Baron-Realm")
 				eq(Line("Baron-Realm", "L", "Olympus"), "shown")
 				s.clock = s.clock + K.HANDS_FRESH + 1
+				eq(K.IsHandName("Baron-Realm"), true, "his list stands")
+				K.HandleCommand("CHANNEL", KING, "T1~H~12~Olympus~")
 				eq(K.IsHandName("Baron-Realm"), false)
-				assert(Line("Baron-Realm", "L", "Olympus") ~= "shown", "not once the list ended")
+				assert(Line("Baron-Realm", "L", "Olympus") ~= "shown", "not once his newer list leaves him out")
 			end)
 			StaticPopup_Show = savedShow
 			K.Reset()
@@ -30868,7 +30923,7 @@ do
 	-- Another client, from nothing (every list it kept or heard gone): `as` plays who it is.
 	local function Fresh(as, ...)
 		ns.King.Reset()
-		ns.rdb.kingHands, ns.rdb.stewardHands = nil, nil
+		ns.rdb.kingHands, ns.rdb.stewardHands, ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil, nil, nil
 		as(...)
 	end
 
@@ -31016,7 +31071,11 @@ do
 		end)
 	end)
 
-	test("1.0.0 the Hands: each list lapses 20 minutes after its own owner's client stopped repeating it, and never on its owner's client; each owner's client repeats its own every 5 minutes, across a /reload", function()
+	-- (1.2.4, the author's ask: lists of people are not erased; provisional, his to confirm) Each
+	-- list stood 20 minutes after its owner's client stopped repeating it, then lapsed on every
+	-- other client: his Hands lost the Throne's tools as soon as he logged out. It now stands until
+	-- its owner's newer list, kept in the saved data across a /reload.
+	test("1.2.4 the Hands: each list stands until its own owner's newer one, also once his client stopped repeating it and across a /reload; each owner's client repeats its own every 5 minutes, across a /reload", function()
 		WithThrone(function(w, K)
 			WithStewardList(STEWARD_E, function()
 				local KING = ns.KingCharacter() .. "-Realm"
@@ -31026,17 +31085,17 @@ do
 				w.clock = t0 + 600
 				K.HandleCommand("CHANNEL", STEWARD, "T1~N~12~Olympus II~Helper-Realm")
 				K.HandleCommand("CHANNEL", SECOND, "T1~N~13~Olympus II~Aide-Realm")
-				w.clock = t0 + K.HANDS_FRESH
-				eq(K.IsHandName("Kingsman-Realm"), true, "20 minutes: still")
-				w.clock = t0 + K.HANDS_FRESH + 1
-				eq(K.IsHandName("Kingsman-Realm"), false, "the King's: ended 20 minutes after he was last heard")
+				w.clock = t0 + 10 * K.HANDS_FRESH
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's: stands while he is away")
 				eq(K.IsHandName("Helper-Realm"), true); eq(K.IsHandName("Aide-Realm"), true)
-				-- The second Steward's client keeps repeating his; the first's stopped.
-				K.HandleCommand("CHANNEL", SECOND, "T1~N~14~Olympus II~Aide-Realm")
-				w.clock = t0 + 600 + K.HANDS_FRESH + 1
-				eq(K.IsHandName("Helper-Realm"), false, "that Steward's: ended 20 minutes after his last repeat")
-				eq(K.IsHandName("Aide-Realm"), true, "the other's, repeated, stands")
-				-- The King back: his list again, whatever the Stewards' did.
+				-- A /reload: the lists heard come back from the saved data.
+				K.Reset(); K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's, kept")
+				eq(K.IsHandName("Helper-Realm"), true, "each Steward's, kept"); eq(K.IsHandName("Aide-Realm"), true)
+				-- A newer list ends a name: each owner's for his own list alone.
+				K.HandleCommand("CHANNEL", STEWARD, "T1~N~14~Olympus II~")
+				eq(K.IsHandName("Helper-Realm"), false, "that Steward's newer list")
+				eq(K.IsHandName("Aide-Realm"), true, "the other's stands")
 				K.HandleCommand("CHANNEL", KING, "T1~H~15~Olympus~Kingsman-Realm")
 				eq(K.IsHandName("Kingsman-Realm"), true)
 				-- On its owner's own client a list never lapses: the King's, a Steward's.
@@ -31044,12 +31103,12 @@ do
 				K.HandleCommand("CHANNEL", STEWARD, "T1~N~16~Olympus II~Helper-Realm")
 				w.clock = w.clock + 10 * K.HANDS_FRESH
 				eq(K.IsHandName("Kingsman-Realm"), true, "his own list, on his client")
-				eq(K.IsHandName("Helper-Realm"), false, "a Steward's lapses on the King's client too")
+				eq(K.IsHandName("Helper-Realm"), true, "a Steward's stands on the King's client too")
 				Fresh(AsSteward); K.AddHand("Helper")
 				K.HandleCommand("CHANNEL", KING, "T1~H~17~Olympus~Kingsman-Realm")
 				w.clock = w.clock + 10 * K.HANDS_FRESH
 				eq(K.IsHandName("Helper-Realm"), true, "his own list, on his client")
-				eq(K.IsHandName("Kingsman-Realm"), false, "the King's lapses on a Steward's client")
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's stands on a Steward's client")
 				-- A /reload: his own list back from what his client kept; repeated every 5 minutes
 				-- (HANDS_EVERY), never the King's.
 				K.Reset(); K.LoadHands()
@@ -31318,9 +31377,10 @@ do
 				assert(page:find(L.HANDS_HINT_STEWARD, 1, true), "his hint"); assert(page:find(L.HANDS_NOTE_STEWARD, 1, true), "his note")
 				assert(L.HANDS_HINT_STEWARD:find("The King can't take your Hands back: you do, or the author, by removing you as Steward.", 1, true), L.HANDS_HINT_STEWARD)
 				assert(L.HANDS_HINT_STEWARD:find("The King's Hands and the other Stewards' (below) are theirs to remove, not yours.", 1, true), L.HANDS_HINT_STEWARD)
-				-- A list nobody repeats any more leaves the page with its Hands (20 minutes).
+				-- (1.2.4) A list nobody repeats any more stays on the page with its Hands until its
+				-- owner's newer list (it left after 20 minutes).
 				w.clock = w.clock + K.HANDS_FRESH + 1
-				eq(Section(K.Build(), L.HANDS_NAMED_BY_KING), nil, "the King's lapsed")
+				eq(Section(K.Build(), L.HANDS_NAMED_BY_KING), D("Kingsman-Realm"), "the King's stands")
 				-- pt-BR: the same rule on both pages.
 				local pt = { L = setmetatable({}, { __index = ns.L }) }
 				local savedLocale = GetLocale
@@ -39073,6 +39133,24 @@ end)
 		end)
 	end)
 
+	-- 1.2.4, the author's ask (lists of people are not erased): a link heard was forgotten 30 days
+	-- after its characters were last heard, so a player away a month split in two again in the census,
+	-- the dues and the rankings. It stays 180 days now.
+	test("1.2.4 alt links: a link heard stays 180 days after its characters were last heard (it was 30)", function()
+		WithAlts(function(w, K)
+			AsSoldier("Watcher")
+			local t = w.clock
+			Pair("Main Four", "Alt Four", t)
+			eq(Names(A.Linked("Main Four-Realm")), "Alt Four")
+			w.clock = t + 31 * 86400
+			A.Prune()
+			eq(Names(A.Linked("Main Four-Realm")), "Alt Four", "a month away: still one player")
+			w.clock = t + 181 * 86400
+			A.Prune()
+			eq(A.Group("Alt Four-Realm"), nil, "half a year away: forgotten")
+		end)
+	end)
+
 	test("1.1 alt links (#21): the census counts people: a player's characters in the guilds counted count once, each guild's size stays its roster's", function()
 		WithAlts(function(w, K)
 			AsSoldier("Watcher")
@@ -43973,6 +44051,36 @@ test("1.1 crafters (#24): Classic Era's windows: the trade skill's items and rec
 		p = Cr.Mine()["Enchanting"]
 		assert(p, "Enchanting read")
 		eq(p.recipes[1].r, 7418); eq(p.recipes[1].i, nil, "an enchantment makes no item"); eq(p.recipes[2].i, 6218); eq(p.recipes[2].r, 7421)
+	end)
+end)
+
+-- 1.2.4, the author's ask (lists are not erased): the board was this session's memory alone and
+-- forgot a crafter 100 minutes after his last listing (a /reload emptied it). It is the saved
+-- data's now, and keeps a crafter a week after he was last heard.
+test("1.2.4 crafters: the board is the saved data's: a crafter heard stays a week after his last listing, also across a /reload", function()
+	WithCraft(function(w, Cr)
+		Cr.HandleListing("CHANNEL", "Smith-Realm", "W1~Olympus Zeus~164:Blacksmithing:150:300:12")
+		eq(#Cr.Board(), 1)
+		eq(type(ns.rdb.craftersBoard and ns.rdb.craftersBoard["Smith-Realm"]), "table", "in the saved data")
+		w.clock = w.clock + 6 * 86400
+		eq(#Cr.Board(), 1, "six days on: still listed")
+		-- A /reload: the saved data as the game gives it back (another table), the board taken up again.
+		local rdb = ns.rdb
+		local copy = {}
+		for k, v in pairs(rdb) do copy[k] = v end
+		local board = {}
+		for name, e in pairs(rdb.craftersBoard) do board[name] = { guild = e.guild, profs = e.profs, t = e.t } end
+		copy.craftersBoard = board
+		ns.rdb = copy
+		local ok, err = pcall(function()
+			local b = Cr.Board()
+			eq(#b, 1, "kept across the /reload"); eq(b[1] and b[1].name, "Smith-Realm")
+			w.clock = w.clock + 86400 + 1
+			eq(#Cr.Board(), 0, "a week and a day after his last listing: gone")
+		end)
+		ns.rdb = rdb
+		Cr.Reset()
+		if not ok then error(err, 0) end
 	end)
 end)
 

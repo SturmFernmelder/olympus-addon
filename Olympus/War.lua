@@ -334,13 +334,24 @@ function War.Prune(now)
 	for key, e in pairs(s.roles) do
 		if type(e) ~= "table" or not tonumber(e.rev) or now - e.rev > War.REPLAY_KEEP then s.roles[key], changed = nil, true end
 	end
+	-- (1.2.4, the author's ask: records are not erased with what they name) An operation's
+	-- after-action records keep its title when it goes (opTitle): they stand AAR_KEEP on their own.
+	local function Orphan(id, e)
+		for _, a in pairs(s.after) do
+			if type(a) == "table" and a.operation == id and not a.opTitle then a.opTitle = type(e) == "table" and e.title or "?" end
+		end
+	end
 	for id, e in pairs(s.operations) do
 		if type(e) ~= "table" or not ValidID(id) or ((e.state == "complete" or e.state == "cancelled") and now - (e.rev or 0) > War.OP_KEEP) then
+			Orphan(id, e)
 			s.operations[id], s.rsvp[id] = nil, nil
 			changed = true
 		end
 	end
+	local before = {}
+	for id, e in pairs(s.operations) do before[id] = e end
 	changed = TrimNewest(s.operations, War.OP_MAX, "rev") or changed
+	for id, e in pairs(before) do if not s.operations[id] then Orphan(id, e) end end
 	for id, map in pairs(s.rsvp) do
 		if not s.operations[id] or type(map) ~= "table" then s.rsvp[id], changed = nil, true
 		else changed = TrimNewest(map, War.RSVP_MAX, "rev") or changed end
@@ -359,8 +370,10 @@ function War.Prune(now)
 		end
 	end
 	changed = TrimPosts(s.posts, War.POST_TOTAL_MAX) or changed
+	-- (1.2.4) AAR_KEEP each, whether its operation is still kept or not (War.lua deleted them with it,
+	-- 30 days after it closed, against their 90).
 	for id, e in pairs(s.after) do
-		if type(e) ~= "table" or now - (e.rev or 0) > War.AAR_KEEP or not s.operations[e.operation]
+		if type(e) ~= "table" or now - (e.rev or 0) > War.AAR_KEEP
 			or (e.century and not s.centuries[e.century]) then s.after[id], changed = nil, true end
 	end
 	changed = TrimNewest(s.roles, War.ROLE_MAX, "rev") or changed
@@ -766,7 +779,11 @@ local function SnapshotRecords()
 	for cid, map in pairs(s.posts) do for key, e in pairs(map) do posts[#posts + 1] = { key = cid .. "\1" .. key, text = EncodePost(cid, e) } end end
 	table.sort(posts, function(a, b) return a.key < b.key end)
 	for _, e in ipairs(posts) do Add(e.text) end
-	Section(s.after, function(e) return EncodeAfter(e) end)
+	-- (1.2.4: a record whose operation went is kept here, never sent: nobody could check it against
+	-- its operation.)
+	local kept = {}
+	for id, e in pairs(s.after) do if type(e) == "table" and s.operations[e.operation] then kept[id] = e end end
+	Section(kept, function(e) return EncodeAfter(e) end)
 	return out
 end
 War.SnapshotRecords = SnapshotRecords
@@ -1113,6 +1130,23 @@ function War.Lines(q)
 		end
 	end
 	if #ops == 0 then lines[#lines + 1] = { indent = 1, text = Grey(q and L.SEARCH_NO_MATCH or L.WAR_OPERATIONS_EMPTY) } end
+	-- (1.2.4) The reports of operations no longer kept, newest first, with the title they kept.
+	local past = {}
+	for _, a in pairs(s.after) do
+		if type(a) == "table" and not s.operations[a.operation] and (not q or ns.Holds(q, a.opTitle, a.result, a.by, unpack(a.participants or {}))) then past[#past + 1] = a end
+	end
+	table.sort(past, function(a, b) if a.rev ~= b.rev then return a.rev > b.rev end return a.id > b.id end)
+	if #past > 0 then
+		lines[#lines + 1] = { header = true, text = L.WAR_AFTER_PAST, right = tostring(#past) }
+		for _, a in ipairs(past) do
+			local present = {}
+			for _, player in ipairs(a.participants or {}) do present[#present + 1] = ns.DisplayName(player) end
+			lines[#lines + 1] = { indent = 1, text = Gold(tostring(a.opTitle or "?")) .. "  " .. L.WAR_AFTER_LINE:format(a.training and L.WAR_AFTER_TRAINING or L.WAR_AFTER_ACTION, a.result, #present),
+				right = Grey(ns.Ago(a.rev)), tooltip = function(tt)
+					tt:AddLine(L.WAR_AFTER_TIP:format(Provenance(a), table.concat(present, ", ")), 1, 1, 1, true)
+				end }
+		end
+	end
 
 	local centuries = {}
 	for _, e in pairs(s.centuries) do
