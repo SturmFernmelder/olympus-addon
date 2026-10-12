@@ -215,10 +215,24 @@ local function Guilds()
 	return out
 end
 
+-- Rooms.Enforced, once a listing.
+local function Enforced()
+	if listing then
+		if listing.enforced == nil then listing.enforced = Rooms.Enforced() end
+		return listing.enforced
+	end
+	return Rooms.Enforced()
+end
+
 local function Rank(name, guild)
 	if guild == OwnGuild() then
 		local R = ns.Roster
 		if not R or not R.Fresh or not R.Fresh() then return nil end
+	elseif not Enforced() then
+		-- (1.2.4: another guild's rank is the census's alone until the author's signed list counts,
+		-- Data.AuthorizedRank, and the census is never taken here: not asked at all. Every room's
+		-- check asked it of every guild for each candidate, the census's votes counted each time.)
+		return nil
 	end
 	local D = ns.Data
 	if not (D and D.AuthorizedRank) then return nil end
@@ -924,8 +938,11 @@ end
 function Candidates.Leaders(add)
 	if ns.KingCharacter then add(ns.KingCharacter(), 2) end
 	RosterLeaders(add)
+	-- (The census's word for another guild's master and officers is only a candidate, and only one
+	-- that can pass while the signed list counts.)
+	local census = Enforced()
 	for _, guild in ipairs(Guilds()) do
-		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
+		local g = census and ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
 		if g then
 			if g.leader then add(ns.FullName(g.leader, g.realm), 4) end
 			for _, officer in ipairs(g.officers or {}) do add(ns.FullName(officer.name, g.realm)) end
@@ -944,7 +961,7 @@ end
 function Candidates.Guild(add, guild, officers)
 	if ns.IsKingGuild(guild) and ns.KingCharacter then add(ns.KingCharacter(), 2) end
 	if Same(guild, OwnGuild()) then RosterLeaders(add) end
-	local g = ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
+	local g = Enforced() and ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
 	if g then
 		if g.leader then add(ns.FullName(g.leader, g.realm), 4) end
 		if officers then for _, officer in ipairs(g.officers or {}) do add(ns.FullName(officer.name, g.realm)) end end

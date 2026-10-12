@@ -45,6 +45,10 @@ local function WithRoles(fn)
 			end
 		end,
 	}
+	-- (1.2.4: another guild's signed ranks exist only once the author's signed leadership list counts,
+	-- Data.AuthorizedRank; before, its ranks are the census's, which the rooms no longer even ask. This
+	-- world's other guild is signed unless a test marks it census-only: the world before the list.)
+	c.Authority = { Enforced = function() return next(w.census) == nil end }
 	c.ViewAs = { Previewing = function() return w.role ~= nil end, Role = function() return w.role end }
 	c.Comm = { Handle = function() end, Whisper = function(target, msg, _, _, _, _, options)
 		w.jobs[#w.jobs + 1] = { target = target, msg = msg, options = options }; return true

@@ -507,3 +507,40 @@ test("chat rooms (1.2.4): every room against the cast: the King, councillors tit
 		for _, row in ipairs(want) do eq(Rooms(row[1]), row[2], row[1] .. ", with it") end
 	end)
 end)
+
+-- Until the signed list counts, another guild's rank is the census's (Data.AuthorizedRank), which the
+-- rooms never take: they no longer ask it at all. A line to the masters' room asked every guild's
+-- rank of every candidate before, the census's votes counted at each (a long pause in a large army).
+test("chat rooms (1.2.4): without the signed leadership list no room asks another guild's rank; with it, once a name and guild", function()
+	WithRooms(function(w, R, c)
+		local cast = Guilds(w, R, c)
+		for i = 1, 30 do c.rdb.guilds["Olympus " .. (i + 40)] = { leader = "Lead" .. i, officers = { { name = "Aide" .. i } } } end
+		local isFederation = c.IsFederation
+		c.IsFederation = function(g) return c.rdb.guilds[g] ~= nil or isFederation(g) end
+		local asked, abroad = 0, 0
+		local rank = c.Data.AuthorizedRank
+		c.Data.AuthorizedRank = function(name, guild)
+			asked = asked + 1
+			if guild ~= w.guild then abroad = abroad + 1 end
+			return rank(name, guild)
+		end
+		c.me = cast.aMaster
+		eq(R.Send("masters", "to the masters"), true)
+		eq(R.Send("allcenturions", "and the centurions"), false, "(too fast)")
+		w.advance(2)
+		eq(R.Send("allcenturions", "and the centurions"), true)
+		eq(abroad, 0, "another guild's rank never asked")
+		assert(asked > 0, "our own roster asked")
+		w.enforced = true
+		w.advance(2)
+		local counted = {}
+		c.Data.AuthorizedRank = function(name, guild)
+			local key = name .. " in " .. guild
+			counted[key] = (counted[key] or 0) + 1
+			return rank(name, guild)
+		end
+		eq(R.Send("masters", "once more"), true)
+		for key, n in pairs(counted) do eq(n, 1, key .. ": once a send") end
+		eq(table.concat(R.Recipients("masters"), ","), table.concat({ w.king, cast.bMaster }, ","))
+	end)
+end)
