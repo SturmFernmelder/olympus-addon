@@ -52263,7 +52263,7 @@ do
 		end)
 	end)
 
-	test("1.2 Arena Chat subtab: always after the four defaults, empty opens Arena, admitted rooms are private choices with pinned first", function()
+	test("1.2 Arena Chat subtab: always after the defaults (Olympus, Guild), empty opens Arena, admitted rooms are private choices with pinned first", function()
 		WithWindow(function(w)
 			local savedHome, savedChat = ns.ArenaHome, ns.ArenaChat
 			local R, oldSelect = ns.ChatRooms, ns.ChatRooms.Select
@@ -52282,7 +52282,8 @@ do
 				end
 				local kinds = {}
 				for _, button in ipairs(f.subtabs.nav) do if button:IsShown() then kinds[#kinds + 1] = button.item.entry.kind end end
-				eq(table.concat(kinds, ","), "global,guild,race,class,arena")
+				-- (1.2.3: the Race and Class tabs are gone; Arena still follows the defaults.)
+				eq(table.concat(kinds, ","), "global,guild,arena")
 				local arena = assert(Subtab("arena"), "the stable Arena subtab")
 				arena:Click()
 				assert(f.subMenu:IsShown(), "an empty Arena still explains where rooms come from")
@@ -53297,83 +53298,91 @@ do
 	test("1.2 Chat subtabs: explicit logical rooms keep drafts and unread apart, use their send owner, and leave one header help control", function()
 		WithWindow(function(w)
 			local R, sent = ns.ChatRooms, {}
-			ns.db.chatRooms, ns.db.chatRoomChoices = true, {}
-			R.Reset()
-			R.Send = function(id, text) sent[#sent + 1] = id .. " " .. text return true, "ok" end
-			R.History = function() return {} end
-			local f = w.CW.Open("A")
-			local function Subtab(kind)
-				for _, button in ipairs(f.subtabs.nav) do
-					if button:IsShown() and button.item and button.item.entry.kind == kind then return button end
+			local council = ns.IsHighCouncillor
+			local ok, err = pcall(function()
+				ns.db.chatRooms = true
+				R.Reset()
+				R.Send = function(id, text) sent[#sent + 1] = id .. " " .. text return true, "ok" end
+				R.History = function() return {} end
+				local f = w.CW.Open("A")
+				local function Subtab(kind)
+					for _, button in ipairs(f.subtabs.nav) do
+						if button:IsShown() and button.item and button.item.entry.kind == kind then return button end
+					end
 				end
-			end
-			-- (Changed on purpose, test33: the destinations are the Realm's in-page tabs, Views.DrawNav;
-			-- their words are the strip's label, its underline the selected mark, and a picker's mark is
-			-- the strip's texture arrow, not the "\226\150\190" the game's fonts drew as a box. The
-			-- strip's place: "the Realm's in-page tabs, the same component in the same place".)
-			local global, guild, race, class, arena = Subtab("global"), Subtab("guild"), Subtab("race"), Subtab("class"), Subtab("arena")
-			assert(global and guild and race and class and arena, "the four default destinations and Arena")
-			local mark = " " .. ns.Views.PickerMark()
-			eq(global.label:GetText(), "Olympus"); eq(guild.label:GetText(), L.CHATROOM_GUILD)
-			eq(race.label:GetText(), L.CHATROOM_RACE .. mark)
-			eq(class.label:GetText(), L.CHATROOM_CLASS .. mark)
-			local shown = {}
-			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() then shown[#shown + 1] = b.item.entry.kind end end
-			eq(table.concat(shown, ","), "global,guild,race,class,arena", "Arena follows the four defaults; authorized tabs follow it")
-			eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Arena") .. mark, "the pickers' mark")
-			eq(global.underline:IsShown(), true); eq(guild.underline:IsShown(), false)
-			eq(global:GetHeight(), ns.Views.SUBTAB_STYLE.height, "Chat and Realm tabs use the same height")
-			eq(global.label:Anchor("CENTER")[5], ns.Views.SUBTAB_STYLE.labelY)
-			eq(global.label.textColor[1], 1); eq(global.label.textColor[2], 0.82); eq(global.label.textColor[3], 0, "selected text is gold")
-			eq(guild.label.textColor[1], 1); eq(guild.label.textColor[2], 1); eq(guild.label.textColor[3], 1, "inactive text is white")
-			eq(global.underline.colorTexture[1], 1); eq(global.underline.colorTexture[2], 1); eq(global.underline.colorTexture[3], 1, "underline is white")
-			eq(global.underline:Anchor("BOTTOMLEFT")[5], 0)
-			-- (1.1.5, the owner's ask: the window's help "i" left of its X is the one over the tab; the
-			-- tab's own "?" beside Search is gone.)
-			eq(f.help, nil, "no help control of the tab's own"); eq(f.info, nil, "no duplicate in-content info control")
-			eq(f.gear:IsShown(), true, "Settings remains")
+				-- (Changed on purpose, test33: the destinations are the Realm's in-page tabs, Views.DrawNav;
+				-- their words are the strip's label, its underline the selected mark, and a picker's mark is
+				-- the strip's texture arrow, not the "\226\150\190" the game's fonts drew as a box. The
+				-- strip's place: "the Realm's in-page tabs, the same component in the same place".)
+				-- (Changed in 1.2.3: the Race and Class destinations are gone: Olympus, Guild and Arena; the
+				-- logical room's draft below is the Council's, from a High Councillor's Roles, no longer a race
+				-- and a class room's.)
+				local global, guild, arena = Subtab("global"), Subtab("guild"), Subtab("arena")
+				assert(global and guild and arena, "the default destinations and Arena")
+				eq(Subtab("race"), nil); eq(Subtab("class"), nil)
+				local mark = " " .. ns.Views.PickerMark()
+				eq(global.label:GetText(), "Olympus"); eq(guild.label:GetText(), L.CHATROOM_GUILD)
+				local shown = {}
+				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() then shown[#shown + 1] = b.item.entry.kind end end
+				eq(table.concat(shown, ","), "global,guild,arena", "Arena follows the defaults; authorized tabs follow it")
+				eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Arena") .. mark, "the pickers' mark")
+				eq(global.underline:IsShown(), true); eq(guild.underline:IsShown(), false)
+				eq(global:GetHeight(), ns.Views.SUBTAB_STYLE.height, "Chat and Realm tabs use the same height")
+				eq(global.label:Anchor("CENTER")[5], ns.Views.SUBTAB_STYLE.labelY)
+				eq(global.label.textColor[1], 1); eq(global.label.textColor[2], 0.82); eq(global.label.textColor[3], 0, "selected text is gold")
+				eq(guild.label.textColor[1], 1); eq(guild.label.textColor[2], 1); eq(guild.label.textColor[3], 1, "inactive text is white")
+				eq(global.underline.colorTexture[1], 1); eq(global.underline.colorTexture[2], 1); eq(global.underline.colorTexture[3], 1, "underline is white")
+				eq(global.underline:Anchor("BOTTOMLEFT")[5], 0)
+				-- (1.1.5, the owner's ask: the window's help "i" left of its X is the one over the tab; the
+				-- tab's own "?" beside Search is gone.)
+				eq(f.help, nil, "no help control of the tab's own"); eq(f.info, nil, "no duplicate in-content info control")
+				eq(f.gear:IsShown(), true, "Settings remains")
 
-			f.input:SetText("global draft")
-			guild:Click()
-			eq(w.CW.Tier(), "guild"); eq(f.input:GetText(), ""); eq(guild.underline:IsShown(), true)
-			f.input:SetText("guild draft")
-			global:Click()
-			eq(w.CW.Tier(), "A"); eq(f.input:GetText(), "global draft")
-			guild:Click()
-			eq(f.input:GetText(), "guild draft", "the Guild draft is independent")
+				f.input:SetText("global draft")
+				guild:Click()
+				eq(w.CW.Tier(), "guild"); eq(f.input:GetText(), ""); eq(guild.underline:IsShown(), true)
+				f.input:SetText("guild draft")
+				global:Click()
+				eq(w.CW.Tier(), "A"); eq(f.input:GetText(), "global draft")
+				guild:Click()
+				eq(f.input:GetText(), "guild draft", "the Guild draft is independent")
 
-			f.input.focused = true
-			f.input:SetText("guild message")
-			f.input:Fire("OnEnterPressed")
-			eq(sent[1], "guild guild message"); eq(f.input:GetText(), ""); eq(f.input.focused, true)
-			f.input:SetText("/cast Fireball")
-			f.input:Fire("OnEnterPressed")
-			eq(#sent, 1, "stock slash commands never leave Olympus's EditBox")
-			eq(f.input:GetText(), "/cast Fireball")
-			f.input:Fire("OnEscapePressed"); eq(f.input.focused, false)
+				f.input.focused = true
+				f.input:SetText("guild message")
+				f.input:Fire("OnEnterPressed")
+				eq(sent[1], "guild guild message"); eq(f.input:GetText(), ""); eq(f.input.focused, true)
+				f.input:SetText("/cast Fireball")
+				f.input:Fire("OnEnterPressed")
+				eq(#sent, 1, "stock slash commands never leave Olympus's EditBox")
+				eq(f.input:GetText(), "/cast Fireball")
+				f.input:Fire("OnEscapePressed"); eq(f.input.focused, false)
 
-			race:Click(); assert(f.subMenu:IsShown(), "Race opens its explicit choices")
-			f.subMenu.rows[1]:Click()
-			eq(w.CW.Tier(), "race:1"); eq(R.Selected("race"), "race:1")
-			f.input:SetText("race draft")
-			class:Click(); assert(f.subMenu:IsShown(), "Class opens its explicit choices")
-			f.subMenu.rows[1]:Click()
-			eq(w.CW.Tier(), "class:WA"); eq(R.Selected("class"), "class:WA")
-			w.fire("CHAT_ROOM_LINE", "guild", "Peer-Realm", "new")
-			w.CW.Render()
-			guild = Subtab("guild")
-			assert(guild.label:GetText():find("(1)", 1, true), guild.label:GetText())
-			guild:Click()
-			eq(f.input:GetText(), "/cast Fireball", "the unsent command remains that room's draft")
-			assert(not guild.label:GetText():find("(1)", 1, true), "opening clears only that room's unread")
-			race = Subtab("race"); race:Click(); f.subMenu.rows[1]:Click()
-			eq(f.input:GetText(), "race draft", "the topic draft survives fast switching")
+				ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+				w.CW.Render()
+				local roles = assert(Subtab("role"), "a High Councillor's Roles")
+				roles:Click(); assert(f.subMenu:IsShown(), "Roles opens its explicit choices")
+				eq(f.subMenu.rows[1].roomId, "council"); f.subMenu.rows[1]:Click()
+				eq(w.CW.Tier(), "council")
+				f.input:SetText("council draft")
+				w.fire("CHAT_ROOM_LINE", "guild", "Peer-Realm", "new")
+				w.CW.Render()
+				guild = Subtab("guild")
+				assert(guild.label:GetText():find("(1)", 1, true), guild.label:GetText())
+				guild:Click()
+				eq(f.input:GetText(), "/cast Fireball", "the unsent command remains that room's draft")
+				assert(not guild.label:GetText():find("(1)", 1, true), "opening clears only that room's unread")
+				roles = Subtab("role"); roles:Click(); f.subMenu.rows[1]:Click()
+				eq(w.CW.Tier(), "council"); eq(f.input:GetText(), "council draft", "the logical room's draft survives fast switching")
+			end)
+			ns.IsHighCouncillor = council
+			if not ok then error(err, 0) end
 		end)
 	end)
 
 	-- 1.1.6 (the Church's review): the strip had eight buttons made with the window; a High Councillor of a
 	-- department in the Church's audience fills them (global, guild, race, class, arena, authority,
 	-- department, church), and one claimed crafting request made a ninth entry with no button.
+	-- (Changed in 1.2.3: Race and Class are gone, so two more crafting rooms keep the strip past eight.)
 	test("1.1.6 Chat subtabs: more destinations than the strip's first eight buttons (a councillor's Church room, crafting rooms) all draw, a button each (the shared strip, Views.DrawNav)", function()
 		WithWindow(function(w)
 			local R = ns.ChatRooms
@@ -53383,7 +53392,8 @@ do
 					local out = savedTabs()
 					for _, e in ipairs({ { kind = "authority", id = "council", label = "Council", dropdown = true },
 						{ kind = "department", id = "dept:war", label = "Department", dropdown = true }, { kind = "church", id = "church", label = "Church" },
-						{ kind = "craft:1", id = "craft:1", label = "Linen" }, { kind = "craft:2", id = "craft:2", label = "Silk" } }) do out[#out + 1] = e end
+						{ kind = "craft:1", id = "craft:1", label = "Linen" }, { kind = "craft:2", id = "craft:2", label = "Silk" },
+						{ kind = "craft:3", id = "craft:3", label = "Wool" }, { kind = "craft:4", id = "craft:4", label = "Mageweave" } }) do out[#out + 1] = e end
 					return out
 				end
 				local f = w.CW.Open("A")
@@ -53394,40 +53404,41 @@ do
 					for _, b in ipairs(f.subtabs.nav or {}) do if b:IsShown() then out[#out + 1] = b.item.entry.kind end end
 					return table.concat(out, ",")
 				end
-				eq(Shown(), "global,guild,race,class,arena,authority,department,church,craft:1,craft:2")
+				eq(Shown(), "global,guild,arena,authority,department,church,craft:1,craft:2,craft:3,craft:4")
 				eq(#f.subtabs.nav, 10, "a button each, made when needed")
 				-- Fewer again: the extra buttons hide.
 				R.Tabs = savedTabs
 				w.CW.Render()
-				eq(Shown(), "global,guild,race,class,arena")
+				eq(Shown(), "global,guild,arena")
 			end)
 			R.Tabs = savedTabs
 			if not ok then error(err, 0) end
 		end)
 	end)
 
-	test("1.2 Chat topic status clearly identifies an outsider and names both request gates", function()
+	-- (Changed in 1.2.3: the outsider's status over a race or class room, and its two request gates,
+	-- went with those rooms. What stays: no such strip over the rooms that remain, the lines right
+	-- under the destinations.)
+	test("1.2.3 Chat: no outsider-request status over the rooms that remain (Guild, the Council)", function()
 		WithWindow(function(w)
-			ns.db.chatRooms, ns.db.chatRoomChoices, ns.db.chatRoomRequests = true, {}, {}
-			local f = w.CW.Open("A")
-			-- The review of test33: the topic's status, shown on Race and Class alone, took the box and
-			-- the destinations' tabs down with it. The tabs stay; the status under them, the lines under it.
-			local bar = f.subtabs
-			local function TabsTop() return f.box:Anchor("TOPLEFT")[5] + bar:Anchor("TOPLEFT")[5] end
-			local tabsTop = TabsTop()
-			assert(w.CW.SelectLogical("class:MA"))
-			w.CW.Render()
-			eq(f.topicStatus:IsShown(), true)
-			assert(f.topicStatus.text:GetText():find("not a member", 1, true), f.topicStatus.text:GetText())
-			eq(TabsTop(), tabsTop, "the tabs unmoved on Class")
-			local at = f.topicStatus:Anchor("TOPLEFT")
-			eq(at[2], f); eq(at[5], TabsTop() - f.subtabs:GetHeight() - 7, "the status under destinations")
-			assert(f.topicStatus:GetFrameLevel() > f.box:GetFrameLevel(), "drawn over the box")
-			assert(f.box:Anchor("TOPLEFT")[5] + f.scroll:Anchor("TOPLEFT")[5] <= at[5] - f.topicStatus:GetHeight(), "the lines under the status")
-			ns.db.chatRoomRequests[(ns.FullName(ns.me)):lower() .. "|class:MA"] = { sentAt = ns.Now() }
-			w.CW.Render()
-			local status = f.topicStatus.text:GetText()
-			assert(status:find("member to reply", 1, true) and status:find("30 min", 1, true), status)
+			local council = ns.IsHighCouncillor
+			local ok, err = pcall(function()
+				ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+				ns.db.chatRooms = true
+				local f = w.CW.Open("A")
+				local bar = f.subtabs
+				local function TabsTop() return f.box:Anchor("TOPLEFT")[5] + bar:Anchor("TOPLEFT")[5] end
+				local tabsTop = TabsTop()
+				for _, id in ipairs({ "guild", "council" }) do
+					assert(w.CW.SelectLogical(id), id)
+					w.CW.Render()
+					eq(f.topicStatus:IsShown(), false, id)
+					eq(TabsTop(), tabsTop, id .. ": the tabs unmoved")
+					eq(f.box:Anchor("TOPLEFT")[5] + f.scroll:Anchor("TOPLEFT")[5], TabsTop() - bar:GetHeight() - 4, id .. ": the lines under the tabs")
+				end
+			end)
+			ns.IsHighCouncillor = council
+			if not ok then error(err, 0) end
 		end)
 	end)
 
@@ -53618,11 +53629,12 @@ do
 				assert(f.scroll:Anchor("TOPLEFT")[5] <= a[5] - bar:GetHeight(), look .. ": the lines under the tabs")
 				local shown = {}
 				for _, b in ipairs(bar.nav) do if b:IsShown() then shown[#shown + 1] = b end end
-				eq(#shown, 5, look .. ": Olympus, Guild, Race, Class, Arena")
+				-- (Changed in 1.2.3: three destinations, Race and Class gone with their rooms.)
+				eq(#shown, 3, look .. ": Olympus, Guild, Arena")
 				for k, b in ipairs(shown) do
 					local where = look .. ": cell " .. k
-					eq(b:Anchor("TOPLEFT")[4], math.floor((k - 1) * realm.w / 5), where)
-					eq(b:GetWidth(), math.floor(k * realm.w / 5) - math.floor((k - 1) * realm.w / 5), where .. ", shared alike")
+					eq(b:Anchor("TOPLEFT")[4], math.floor((k - 1) * realm.w / 3), where)
+					eq(b:GetWidth(), math.floor(k * realm.w / 3) - math.floor((k - 1) * realm.w / 3), where .. ", shared alike")
 					eq(b:GetHeight(), cell:GetHeight(), where)
 					eq(b.label.font, cell.label.font, where); eq(b.label:Anchor("CENTER")[5], cell.label:Anchor("CENTER")[5], where)
 					eq(b.highlightTexture, cell.highlightTexture, where .. ": the Realm's highlight")
@@ -53677,7 +53689,7 @@ do
 			local function Cell(kind)
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == kind then return b end end
 			end
-			local PICKERS = { race = L.CHATROOM_RACE, class = L.CHATROOM_CLASS, arena = w.CW.Localized("ARENA_CHAT_TAB", "Arena") }
+			local PICKERS = { arena = w.CW.Localized("ARENA_CHAT_TAB", "Arena") } -- (1.2.3: Race and Class gone)
 			local savedTexture = rawget(_G, "C_Texture")
 			C_Texture = nil
 			w.CW.Render()

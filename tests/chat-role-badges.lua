@@ -56,7 +56,7 @@ test("Chat role badge: formatted addon lines use identity rather than guild labe
 	end)
 end)
 
-test("Chat role badge: actual Olympus, Guild, Race, Class and role bubbles share the coin even without a guild field", function()
+test("Chat role badge: actual Olympus, Guild and role bubbles share the coin even without a guild field", function()
 	WithWindow(function(w)
 		Pins(function(primary, _, coin)
 			local R, C = ns.ChatRooms, ns.Channels
@@ -75,7 +75,8 @@ test("Chat role badge: actual Olympus, Guild, Race, Class and role bubbles share
 					error("missing rendered sender bubble")
 				end
 				eq(Count(Header(), coin), 1, "Olympus")
-				for _, id in ipairs({ "guild", "race:1", "class:WA", "council" }) do
+				-- (1.2.3: no race:1 or class:WA any more; Guild and the Council remain.)
+				for _, id in ipairs({ "guild", "council" }) do
 					assert(w.CW.SelectLogical(id), id .. " is selectable")
 					eq(Count(Header(), coin), 1, id)
 				end

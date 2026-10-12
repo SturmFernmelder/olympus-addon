@@ -152,11 +152,10 @@ function World:Client(name, opts)
 	w.byKey[cl.key] = cl
 	w:RefreshRosters()
 	if not opts.old then
-		-- (ChatRooms.lua defines its request dialog in the game's global table: the harness's own is put back.)
-		local harnessRequest = StaticPopupDialogs and StaticPopupDialogs.OLYMPUS_CHATROOM_REQUEST
+		-- (1.2.3: ChatRooms.lua no longer defines a dialog in the game's global table, the race and class
+		-- rooms' request warning gone with them: nothing of the harness's to put back after it.)
 		w:As(cl, function()
 			assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", c)
-			if StaticPopupDialogs then StaticPopupDialogs.OLYMPUS_CHATROOM_REQUEST = harnessRequest end
 			assert(loadfile(ROOT .. "Olympus/Church.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChurchCount.lua"))("Olympus", c)
 			if opts.view then assert(loadfile(ROOT .. "Olympus/ChurchView.lua"))("Olympus", c) end

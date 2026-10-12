@@ -12,12 +12,13 @@ test("role chat navigation: one dropdown follows actual restricted audiences", f
 		assert(R.RegisterAudience("church", { label = "Church", CanAccess = function() return w.church == true end, Recipients = function() return {} end }))
 		w.church = true
 		local tabs = R.Tabs()
-		eq(#tabs, 4); eq(tabs[4].kind, "role"); eq(tabs[4].dropdown, true)
+		-- (1.2.3: Guild, then Roles; the Race and Class tabs are gone.)
+		eq(#tabs, 2); eq(tabs[2].kind, "role"); eq(tabs[2].dropdown, true)
 		eq(Ids(R.Options("role")), "council,secretariat,dept:war,departments,church")
 		w.church, w.stewards[me] = false, nil
 		eq(Ids(R.Options("role")), "council,dept:war,departments", "audience removals reflected immediately")
 		w.council[me] = nil
-		eq(#R.Options("role"), 0); eq(#R.Tabs(), 3)
+		eq(#R.Options("role"), 0); eq(#R.Tabs(), 1)
 	end)
 end)
 
