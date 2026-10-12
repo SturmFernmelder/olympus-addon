@@ -1145,6 +1145,35 @@ local function OnHalf(dist, sender, mode, body)
 	LG.TakeHalf(dist, sender, mode, body)
 end
 ns.Comm.Handle("AX", ns.Arena.Handle("AX", OnHalf))
+-- (1.2.4) This fighter's own halves of the duels he confirmed (his fights' f.half), for /oly backup
+-- (Backup.lua): [fid] = body, HALF_KEEP at most; nil when none.
+function LG.OwnBackup()
+	local Fi = F()
+	if type(Fi) ~= "table" or type(Fi.All) ~= "function" then return nil end
+	local out, now = {}, Now()
+	for _, f in ipairs(Fi.All("fights")) do
+		if type(f) == "table" and type(f.half) == "string" and f.mode == "L" and Fi.SideOf(f, ns.me) then
+			local h = LG.ReadHalf(f.half)
+			if h and Me(h.signer) and now - h.t <= LG.HALF_KEEP then out[h.fid] = f.half end
+		end
+	end
+	return next(out) and out or nil
+end
+-- (1.2.4) Those taken back after a wiped saved data (Backup.ApplyArena): each this fighter's own,
+-- as his own word (LG.TakeHalf's own), to wait for the other's half. The number taken.
+function LG.RestoreOwn(list)
+	if type(list) ~= "table" then return 0 end
+	local n = 0
+	for fid, body in pairs(list) do
+		local h = type(body) == "string" and LG.ReadHalf(body)
+		if h and h.fid == fid and Me(h.signer) and Now() - h.t <= LG.HALF_KEEP then
+			LG.TakeHalf("CHANNEL", ns.me, "L", body, true)
+			n = n + 1
+		end
+	end
+	return n
+end
+
 -- (1.2.4) The companion's book of the builds before (heavy ledger), taken into the core's once it
 -- loads: each entry kept as any (Keep: a fid already held stays), then the companion's copy goes.
 function LG.TakeHeavy()

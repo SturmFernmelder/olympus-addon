@@ -4656,6 +4656,51 @@ function FT.Load()
 end
 ns.On("LOGIN", function() ns.SafeCall("farkle load", FT.Load) end)
 
+-- (1.2.4) This character's own halves of the games that count, for /oly backup (Backup.lua): [key]
+-- = { t, mode, mine }, his own signed half alone (the other's comes back from its player: HV.AskHalves),
+-- HALVES_DAYS at most; nil when none.
+function FT.OwnBackup()
+	local b = RankStore(false)
+	if not b then return nil end
+	local out, cut, me = {}, Now() - FT.HALVES_DAYS * 86400, Low(Me())
+	for key, o in pairs(b.own) do
+		local f = type(o) == "table" and type(o.mine) == "string" and Split(o.mine) or nil
+		local seat = f and tonumber(f[16] or "")
+		local mine = f and (seat == 1 and f[2] or (seat == 2 and f[3])) or nil
+		if mine and Low(mine) == me and (tonumber(o.t) or 0) >= cut then
+			out[key] = { t = tonumber(o.t) or 0, mode = o.mode == "L" and "L" or "T", mine = o.mine }
+		end
+	end
+	return next(out) and out or nil
+end
+-- (1.2.4) Those taken back after a wiped saved data (Backup.ApplyArena): each this player's own
+-- half (his seat's, his name), taken as his own word, its game kept for his repeats and his ask for
+-- the other's half; a game held here already is left as it is. The number taken.
+function FT.RestoreOwn(list)
+	if type(list) ~= "table" then return 0 end
+	local n = 0
+	for key, x in pairs(list) do
+		local f = type(x) == "table" and type(x.mine) == "string" and #x.mine <= 600 and Split(x.mine) or nil
+		local p1, p2 = f and A().Name(f[2] or ""), f and A().Name(f[3] or "")
+		local mode = type(x) == "table" and x.mode == "L" and "L" or "T"
+		local h = f and p1 and p2 and type(f[1]) == "string" and f[1]:find("^K[0-9a-z]+$") and #f[1] <= 16 and NoticeHalf(f, f[1], p1, p2, mode) or nil
+		if h and Same(h.seat == 1 and h.p1 or h.p2, Me()) and HalfKey(h.id, h.p1, h.p2) == key then
+			local b = RankStore(true)
+			if b and b.own[key] == nil then
+				b.own[key] = { t = h.t, mode = mode, n = 0 }
+				if TakeHalf(Me(), h, true) then
+					local o = b.own[key]
+					o.mine, o.t, o.last = h.body, h.t, h.t
+					n = n + 1
+				else
+					b.own[key] = nil
+				end
+			end
+		end
+	end
+	return n
+end
+
 -- Tests only: forget every table (a new world's client starts clean anyway).
 function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
