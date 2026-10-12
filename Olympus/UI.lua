@@ -34,6 +34,18 @@ local personFrames = {}             -- style -> person details panel (created on
 local playerProfile, playerReturn   -- the full-window person page, and the list page it returns to
 local playerTrail = {}              -- the person pages Back goes through first, oldest first: { person, scroll }
 
+-- 1.2.4: a person page left (for the list, another tab, another person's page, or the window
+-- closed): PLAYER_PROFILE_LEFT with whose it was (folded, as ProfileKey), so the player's own page
+-- ("My profile", ProfileEdit.lua) lets go of what it held (its icon list, the Games window's return).
+local function ProfileLeft(p)
+	if type(p) == "table" then ns.Fire("PLAYER_PROFILE_LEFT", ns.Fold(tostring(ns.FullName(p.name, p.realm)))) end
+end
+local function LeaveProfile()
+	local was = playerProfile
+	playerProfile, playerReturn, playerTrail = nil, nil, {}
+	ProfileLeft(was)
+end
+
 -- icon: the side tab's (HD window), a texture or a function giving one. A new tab is one
 -- entry here, its L.TAB_ label and, if it has any, its BUTTONS.
 local TABS = {
@@ -325,11 +337,18 @@ table.insert(DETAIL_BUTTONS.realm, { "COUNCIL_ASK_BTN", function() ns.ShowDialog
 	shown = function() local c = ns.rdb and ns.rdb.council return type(c) == "table" and next(c.names or {}) ~= nil end })
 -- A councillor's own icon with their name (0.9.8, Workshop.lua; since 1.1.5 in the game's own
 -- chat, Borders.lua): the button shown to councillors alone.
--- 1.2: it opens the profile's Edit in this window once ProfileEdit.lua gives one (the icon picker
--- moved there, Workshop.IconPickerHost), the picker's own window until then.
+-- 1.2: it opens the profile's Edit in this window once ProfileEdit.lua gives one, the picker's own
+-- window until then. 1.2.4: the Icons section of his own page, "My profile", on the council icon
+-- (/oly council icon too); a councillor's alone, as the picker's window was.
 function UI.OpenIconPicker()
 	local PE = ns.ProfileEdit
-	if type(PE) == "table" and not PE.missing and type(PE.Open) == "function" then return PE.Open("icon") end
+	if type(PE) == "table" and not PE.missing and type(PE.Open) == "function" then
+		if not ns.IsHighCouncillor(ns.me) then
+			ns.Print(L.COUNCIL_ICON_ONLY)
+			return false
+		end
+		return PE.Open("icon")
+	end
 	return ns.Workshop.ShowIconPicker()
 end
 table.insert(DETAIL_BUTTONS.realm, { "COUNCIL_ICON_BTN", function() UI.OpenIconPicker() end,
@@ -1227,6 +1246,8 @@ local function CreateMain(style)
 		if person then person:Hide() end
 		-- (The Chat tab goes with it: its boxes let go of the keyboard.)
 		if ChatPaneReady() then ns.ChatWindow.Detach(self) end
+		-- (1.2.4: and the person page shown, for what it held: ProfileLeft.)
+		if self == main then ProfileLeft(playerProfile) end
 	end)
 	f:SetScript("OnSizeChanged", function(self) if self == main then UI.Layout() end end)
 	return f
@@ -1376,7 +1397,8 @@ end
 -- membership (the Join screen has no column titles).
 local function DrawPageNavigation()
 	local g = GEOMETRY[main.style]
-	local page = main.pageNavTab == main.tab and not playerProfile and not UI.Locked()
+	-- (1.2.4: a person page has no strip, but the player's own, "My profile": its sections.)
+	local page = main.pageNavTab == main.tab and (not playerProfile or UI.OwnProfileShown()) and not UI.Locked()
 	local lines = page and main.pageNavLines or {}
 	local width = main:GetWidth() - g.scroll.left + (main.scrollRight or g.scroll.right) - 2
 	local searchHeight = 0
@@ -1642,7 +1664,7 @@ end
 function UI.SelectTab(key, focus)
 	-- A tab is an explicit destination. If a person page was open, do not leave a hidden
 	-- profile in front of the newly selected tab; its Back history belongs only to that page.
-	playerProfile, playerReturn, playerTrail = nil, nil, {}
+	LeaveProfile()
 	if not (main and main:IsShown()) then UseStyle(UI.Style()) end
 	ShowTab(key, focus)
 	UI.Clicked()
@@ -1671,7 +1693,15 @@ UI.PLACE_HOLD = 1  -- seconds a redraw's place is given again when the client me
 -- Which page of its tab the list shows: another one starts at the top.
 local function PageOf(tab, locked)
 	if locked then return "join" end
-	if playerProfile then return "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm)) end
+	if playerProfile then
+		local id = "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm))
+		-- (1.2.4: his own page's sections, "My profile", each a page of its own, each from the top.)
+		local PE = ns.ProfileEdit
+		if UI.OwnProfileShown() and type(PE) == "table" and not PE.missing and type(PE.Section) == "function" then
+			id = id .. "#" .. tostring((PE.Section()))
+		end
+		return id
+	end
 	local sub
 	if tab == "realm" then
 		-- (1.1: our guild's members page, Members.lua, a page of its own.)
@@ -1701,6 +1731,12 @@ UI.PROFILE_BACK_MAX = 8
 -- "Ann-Other", a player of another realm of the group).
 local function ProfileKey(p) return ns.Fold(tostring(ns.FullName(p.name, p.realm))) end
 
+-- 1.2.4: the person page shown is the player's own, "My profile" (ProfileEdit.lua): its section
+-- strip under the header, its sections as pages, its portrait in the detail box.
+function UI.OwnProfileShown()
+	return playerProfile ~= nil and ProfileKey(playerProfile) == ns.Fold(tostring(ns.me))
+end
+
 -- A person selected from the normal Census/Realm/inspection lists occupies this same window.
 -- The Arena companion has its own profile and never calls this path. Keep the normal tab's
 -- exact subpage, search state and scroll offset so Back returns to what the player was reading.
@@ -1726,6 +1762,7 @@ function UI.OpenPlayerProfile(p)
 	else
 		playerTrail[#playerTrail + 1] = { person = playerProfile, scroll = scroll }
 		if #playerTrail > UI.PROFILE_BACK_MAX then table.remove(playerTrail, 1) end
+		ProfileLeft(playerProfile)
 	end
 	playerProfile = p
 	main.scroll:SetVerticalScroll(0)
@@ -1741,6 +1778,7 @@ function UI.CurrentPlayerProfile() return playerProfile end
 function UI.BackFromPlayerProfile()
 	if not playerProfile then return false end
 	local prior = table.remove(playerTrail)
+	ProfileLeft(playerProfile)
 	if prior then
 		-- The person page before this one, where it was scrolled to.
 		playerProfile = prior.person
@@ -1852,6 +1890,48 @@ local function Clock()
 	return ok and type(ms) == "number" and ms or nil
 end
 
+-- 1.2.4: the player's own page, "My profile" (ProfileEdit.Page): his portrait in the detail box,
+-- in the frame others see (art = { frame, emblem }: ProfileEdit.DressPortrait dresses it), its art
+-- inside the box (its size so that the art's reach above and below fits DETAIL_H - 8,
+-- Borders.PortraitReach) and the box's words to its right. Made the first time on each look's
+-- window (HonorsNet.NewPortrait); hidden on every other page, the words back in their place.
+UI.OWN_PORTRAIT_MAX = 44
+local function OwnPortraitSize()
+	local Bd = ns.Borders
+	local reach = type(Bd) == "table" and not Bd.missing and type(Bd.PortraitReach) == "function" and Bd.PortraitReach or nil
+	for size = UI.OWN_PORTRAIT_MAX, 16, -1 do
+		local r = reach and reach(size) or { top = 0, bottom = 0 }
+		if size + r.top + r.bottom <= DETAIL_H - 8 then return size end
+	end
+	return 16
+end
+local function ShowOwnPortrait(art)
+	local HN, PE = ns.HonorsNet, ns.ProfileEdit
+	local rig = main.ownPortrait
+	if art and not rig and type(HN) == "table" and type(HN.NewPortrait) == "function" and type(PE) == "table" and type(PE.DressPortrait) == "function" then
+		local size = OwnPortraitSize()
+		rig = HN.NewPortrait(main.detail, size)
+		rig.size = rig.size or size
+		local reach = rig.reach or { left = 0, right = 0, top = 0, bottom = 0 }
+		rig.slot:SetPoint("TOPLEFT", main.detail, "TOPLEFT", 6 + reach.left, -(4 + reach.top))
+		main.ownPortrait = rig
+	end
+	local shown = art ~= nil and rig ~= nil
+	if rig then rig.slot:SetShown(shown) end
+	if (main.ownPortraitShown == true) ~= shown then
+		main.ownPortraitShown = shown
+		main.detailTitle:ClearAllPoints()
+		if shown then
+			local reach = rig.reach or { left = 0, right = 0 }
+			main.detailTitle:SetPoint("TOPLEFT", 6 + reach.left + rig.size + reach.right + 8, -6)
+		else
+			main.detailTitle:SetPoint("TOPLEFT", 8, -6)
+		end
+		main.detailTitle:SetPoint("TOPRIGHT", -26, -6) -- (the page's "?" at its end)
+	end
+	if shown then ns.SafeCall("my profile portrait", PE.DressPortrait, rig, art) end
+end
+
 function UI.Refresh()
 	if not main or not main:IsShown() then return end
 	UI.lastRedraw = GetTime()
@@ -1870,10 +1950,10 @@ function UI.Refresh()
 		local views = AuthorView()
 		local previewing = views ~= nil and views.Previewing() == true
 		local inert = locked and ns.IsMember() -- (locked by the preview alone)
-		if locked and playerProfile then playerProfile, playerReturn, playerTrail = nil, nil, {} end
+		if locked and playerProfile then LeaveProfile() end
 		-- Joined or left a guild while the window is open: lay it out again.
 		if locked ~= main.layoutLocked then UI.Layout() end
-		local lines, title, text, profileButtons, profileHeader, profileSubheader
+		local lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt
 		if locked then
 			-- Not an Olympus member yet: the only thing on offer is joining one.
 			lines = ns.Views.RecruitLines()
@@ -1883,7 +1963,8 @@ function UI.Refresh()
 			main.total:SetText(header)
 			main.sub:SetText(sub)
 		elseif playerProfile and ns.PlayerProfile and ns.PlayerProfile.Build then
-			lines, title, text, profileButtons, profileHeader, profileSubheader = ns.PlayerProfile.Build(playerProfile)
+			-- (1.2.4: his own page, "My profile", gives its portrait's art too: ShowOwnPortrait.)
+			lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt = ns.PlayerProfile.Build(playerProfile)
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
 		else
@@ -1922,6 +2003,7 @@ function UI.Refresh()
 		UI.KeepPlace(content, offset, click, PageOf(main.tab, locked), focus)
 		main.detailTitle:SetText(title or "")
 		main.detailText:SetText(text or "")
+		ShowOwnPortrait(not locked and playerProfile and profileArt or nil)
 		local recruit = inert and InertButtons(RECRUIT_BUTTONS) or RECRUIT_BUTTONS
 		SetButtons(main.buttons, locked and recruit or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
 		local tabsWere = main.tabs[1] and main.tabs[1]:IsShown()
@@ -1986,7 +2068,7 @@ function UI.OpenDocked(host, tab, heightOnly, style)
 	main:SetSize(UI.DockSize(host:GetWidth(), host:GetHeight(), heightOnly, SocialSize()))
 	DockTo(host)
 	main.docked = true
-	playerProfile, playerReturn, playerTrail = nil, nil, {}
+	LeaveProfile()
 	ShowTab(tab or main.tab or "census")
 	UI.Clicked()
 end

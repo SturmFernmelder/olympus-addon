@@ -262,7 +262,8 @@ local function ItemButton(r, k)
 		local ok = false
 		if it.link and GameTooltip.SetHyperlink then ok = pcall(GameTooltip.SetHyperlink, GameTooltip, it.link) end
 		if not ok and it.id and GameTooltip.SetItemByID then ok = pcall(GameTooltip.SetItemByID, GameTooltip, it.id) end
-		if not ok then GameTooltip:AddLine("#" .. tostring(it.id), 1, 1, 1) end
+		-- (1.2.4: a slot that is no item, an icon of "My profile"'s picker: its name, never "#nil".)
+		if not ok then GameTooltip:AddLine(it.label or ("#" .. tostring(it.id)), 1, 1, 1) end
 		if (it.n or 0) > 1 then GameTooltip:AddLine("x" .. it.n, 0.8, 0.8, 0.8) end
 		if it.gone then GameTooltip:AddLine(L.BANK_GONE_SLOT, 1, 0.4, 0.4, true) end
 		local row = self.GetParent and self:GetParent()

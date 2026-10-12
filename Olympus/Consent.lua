@@ -484,6 +484,18 @@ local function Status(item)
 	return state
 end
 
+-- 1.2.4: a line as this page words it, for the player's own page ("My profile", ProfileEdit.lua:
+-- its Who sees what), so no other file repeats these rules: { key, label, text, state (its state's
+-- words, as a Profile line's), on (true, false or nil: never answered), readonly }; nil for a key
+-- no file registered.
+function Consent.Describe(key)
+	local item = byKey[key]
+	if not item then return nil end
+	local v = Status(item)
+	return { key = key, label = Text(item.label), text = Text(item.text), state = StateText(v, item.section == "profile"),
+		on = item.readonly ~= true and v or nil, readonly = item.readonly == true }
+end
+
 local function Viewport()
 	local width = UIParent and UIParent.GetWidth and UIParent:GetWidth() or 1366
 	local height = UIParent and UIParent.GetHeight and UIParent:GetHeight() or 768

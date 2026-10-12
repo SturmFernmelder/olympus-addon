@@ -2245,7 +2245,8 @@ local function Slash(input)
 				local a = arg:lower()
 				if a == "on" or a == "off" then ns.Workshop.SetCouncilHelp(a == "on")
 				else ns.Print(ns.db.councilHelp and L.COUNCIL_HELP_ON or L.COUNCIL_HELP_OFF) end
-			elseif verb == "icon" then ns.Workshop.ShowIconPicker() -- a councillor's own icon (0.9.8)
+			-- A councillor's own icon (0.9.8); 1.2.4: on his own page's Icons ("My profile"), as the Realm's button.
+			elseif verb == "icon" then ns.UI.OpenIconPicker()
 			else ns.Workshop.EditCouncil(verb) end
 		elseif cmd == "helpme" then
 			if rest ~= "" then ns.Workshop.AskCouncil(rest) else ns.ShowDialog("OLYMPUS_COUNCIL_ASK") end

@@ -133,6 +133,16 @@ test("1.2.1 an Apostle's own look: a signed Apostle picks the red cross in the f
 	vm = PE(w, apostle).ViewModel()
 	for _, x in ipairs(vm.frames) do eq(x.selected, x.key == "apostle-red", x.key) end
 	eq(vm.preview.frame, pickBefore, "as others see him: his pick")
+	-- 1.2.4, My profile: the red cross's row labelled (only he sees it) and marked as worn; the page's
+	-- portrait keeps the frame others see, and the detail box names the look on his screen alone.
+	local lines, _, text, _, art = w:As(apostle, apostle.ns.ProfileEdit.Page, { full = apostle.name }, {})
+	local crossRow
+	for _, l in ipairs(lines) do if type(l.text) == "string" and l.text:find("Red cross (only you see it)", 1, true) then crossRow = l end end
+	assert(crossRow and crossRow.onClick, "the red cross's row")
+	assert(crossRow.text:find("> ", 1, true), "worn: marked")
+	eq(art.frame, pickBefore, "the portrait: the frame others see, never the own look")
+	assert(text:find(apostle.ns.L.MYPROFILE_OWN_LOOK:format(apostle.ns.L.MYPROFILE_RED_CROSS), 1, true), text)
+	eq(apostle.ns.L.MYPROFILE_OWN_LOOK:format(apostle.ns.L.MYPROFILE_RED_CROSS), "On your screen only: Red cross")
 	-- Every other client: his normal frame.
 	viewer.target = apostle.name
 	theirs.B.Refresh("target", true)

@@ -165,6 +165,47 @@ function W3.Money(w, c, opts)
 	return calls
 end
 
+-- 1.2.4: the Olympus window as "My profile" (ProfileEdit.lua) uses it, stood in on client c (the
+-- world's clients load no UI.lua; UI.lua's own wiring has its tests in tests/run.lua): the person
+-- page it opens (OpenPlayerProfile, members only, his own or another's), whether his own shows,
+-- Back (here to the list), its redraws counted, its close (Toggle); PLAYER_PROFILE_LEFT, with
+-- whose page it was, wherever UI.lua fires it. Returns the stand-in: { person, shown, opened = {
+-- the people opened }, refreshed, toggled }.
+function W3.PageUI(w, c)
+	local ns = c.ns
+	local ui = { shown = false, opened = {}, refreshed = 0, toggled = 0 }
+	local function Key(p) return ns.Fold(tostring(ns.FullName(p.name, p.realm))) end
+	local function Left()
+		local was = ui.person
+		ui.person = nil
+		if was then ns.Fire("PLAYER_PROFILE_LEFT", Key(was)) end
+	end
+	function ui.OpenPlayerProfile(p)
+		if type(p) ~= "table" or type(p.name) ~= "string" or p.name == "" or not ns.IsMember() then return false end
+		if ui.person and Key(ui.person) ~= Key(p) then Left() end
+		ui.shown, ui.person = true, p
+		ui.opened[#ui.opened + 1] = p
+		ui.refreshed = ui.refreshed + 1
+		return true
+	end
+	function ui.OwnProfileShown() return ui.person ~= nil and Key(ui.person) == ns.Fold(tostring(ns.me)) end
+	function ui.IsShown() return ui.shown end
+	function ui.BackFromPlayerProfile()
+		if not ui.person then return false end
+		Left()
+		return true
+	end
+	function ui.Refresh() ui.refreshed = ui.refreshed + 1 end
+	ui.RefreshSoon = ui.Refresh
+	function ui.Toggle()
+		ui.toggled = ui.toggled + 1
+		if ui.shown then Left() end
+		ui.shown = not ui.shown
+	end
+	rawset(ns, "UI", ui)
+	return ui
+end
+
 -- The messages of a type sent by a client (World:Sent), their bodies.
 function W3.Bodies(w, from, kind, dist)
 	local out = {}

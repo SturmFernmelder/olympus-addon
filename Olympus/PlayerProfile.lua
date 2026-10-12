@@ -2,7 +2,7 @@ local ADDON, ns = ...
 local L = ns.L
 
 -- The normal Olympus window's player page. The Blood Arena companion owns a separate profile
--- surface. This module renders a bounded snapshot of
+-- surface; the player's own page is "My profile" (1.2.4, ProfileEdit.Page). This module renders a bounded snapshot of
 -- facts already held by the core addon, with source/freshness/visibility metadata kept beside
 -- every field instead of guessing at facts the client does not have.
 local Profile = {}
@@ -215,7 +215,30 @@ function Profile.OpenName(text)
 	local p = Profile.Find(text)
 	if not p then return false, "name" end
 	if not ns.IsMember() then return false, "member" end
+	-- (1.2.4: his own, "My profile", through ProfileEdit.Open: on Look, and a King's letter waiting
+	-- opens on this command, as its notice says. In a fight before the page was ever drawn it is
+	-- refused there: the page as it comes.)
+	local PE = ns.ProfileEdit
+	if type(PE) == "table" and not PE.missing and type(PE.Open) == "function"
+		and ns.Fold(tostring(ns.FullName(p.name, p.realm))) == ns.Fold(tostring(ns.me)) and PE.Open() == true then
+		return true, nil
+	end
 	return ns.UI.OpenPlayerProfile(p) == true, nil
+end
+
+-- The header's second line: "<guild>", and the realm given apart, or the one a whole name carries
+-- ("Ann-Other": War's and other lists hand it so): another realm's player always says which, ours
+-- never ("Capt-Realm" reads as "Capt" does, whichever list opened him).
+local function SubLine(p, details)
+	local sub = details.guild and ("<" .. details.guild .. ">") or ""
+	local realm = (p.realm and p.realm ~= "" and p.realm) or ns.RealmOf(p.name)
+	local ours = ns.realm or ns.CurrentRealm()
+	if realm and realm ~= "" and ns.Fold(realm) ~= ns.Fold(ours) then
+		realm = ns.Codec.Plain(realm)
+		sub = sub ~= "" and (sub .. "  ·  " .. L.PLAYER_PROFILE_REALM:format(realm))
+			or L.PLAYER_PROFILE_REALM:format(realm)
+	end
+	return sub
 end
 
 function Profile.Build(p)
@@ -226,16 +249,33 @@ function Profile.Build(p)
 			L.PLAYER_PROFILE_TITLE, ""
 	end
 
-	local lines = { { text = L.PLAYER_PROFILE_DETAILS, header = true } }
+	local facts = {}
 	if #details.rows == 0 then
-		lines[#lines + 1] = { text = L.PLAYER_PROFILE_NO_DATA }
+		facts[1] = { text = L.PLAYER_PROFILE_NO_DATA }
 	else
 		for i, text in ipairs(details.rows) do
 			local field = details.rowMeta[i]
-			lines[#lines + 1] = { text = text, right = MetaText(field), tooltip = MetaTip(field) }
+			facts[#facts + 1] = { text = text, right = MetaText(field), tooltip = MetaTip(field) }
+		end
+	end
+	-- 1.2.4: the player's own page is "My profile" (ProfileEdit.Page: its sections, the preview in
+	-- the detail box, the pickers), his facts above in its Who sees what as others open them. A
+	-- 7th value: the portrait's art for the detail box (UI.Refresh). A page that fails to build is
+	-- caught, and the plain page below shows instead.
+	if details.full == ns.me then
+		local PE = ns.ProfileEdit
+		if type(PE) == "table" and not PE.missing and type(PE.Page) == "function" then
+			local ok, lines, title, text, buttons, art = pcall(PE.Page, details, facts)
+			if ok and type(lines) == "table" then return lines, title, text, buttons, details.nameText, SubLine(p, details), art end
+			if not ok and ns.CaptureError then ns.CaptureError("my profile", lines) end
 		end
 	end
 
+	local lines = { { text = L.PLAYER_PROFILE_DETAILS, header = true } }
+	for _, line in ipairs(facts) do lines[#lines + 1] = line end
+
+	-- (Without ProfileEdit.lua, a client updated without a restart: the privacy page's Profile
+	-- section and the person card's "Edit my profile", as before.)
 	if details.full == ns.me then
 		local C = ns.Consent
 		if type(C) == "table" and type(C.Show) == "function" then
@@ -265,18 +305,7 @@ function Profile.Build(p)
 		{ "INVITE", function() ns.UI.InvitePerson(p) end, enabled = online },
 		{ "WHO", function() ns.UI.WhoPerson(p) end },
 	}
-	local sub = details.guild and ("<" .. details.guild .. ">") or ""
-	-- The realm given apart, or the one a whole name carries ("Ann-Other": War's and other
-	-- lists hand it so): another realm's player always says which, ours never ("Capt-Realm"
-	-- reads as "Capt" does, whichever list opened him).
-	local realm = (p.realm and p.realm ~= "" and p.realm) or ns.RealmOf(p.name)
-	local ours = ns.realm or ns.CurrentRealm()
-	if realm and realm ~= "" and ns.Fold(realm) ~= ns.Fold(ours) then
-		realm = ns.Codec.Plain(realm)
-		sub = sub ~= "" and (sub .. "  ·  " .. L.PLAYER_PROFILE_REALM:format(realm))
-			or L.PLAYER_PROFILE_REALM:format(realm)
-	end
-	return lines, L.PLAYER_PROFILE_TITLE, L.PLAYER_PROFILE_ABOUT, buttons, details.nameText, sub
+	return lines, L.PLAYER_PROFILE_TITLE, L.PLAYER_PROFILE_ABOUT, buttons, details.nameText, SubLine(p, details)
 end
 
 -- Profile privacy is status-only unless a real protocol-backed setter exists. The identity row

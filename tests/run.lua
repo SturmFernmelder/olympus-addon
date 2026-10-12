@@ -4274,6 +4274,148 @@ test("1.2 normal player profile: /oly profile opens a named player's page, your 
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- 1.2.4: "My profile" (ProfileEdit.lua) is the player's own person page in this window. The harness
+-- loads no Arena file, so a stand-in of ProfileEdit gives the wiring its page (ProfileEdit.Page's
+-- shape: lines with the section strip first, the detail box's title and text, the buttons, the
+-- portrait's art), its section (ProfileEdit.Section) and its portrait's dressing; the real page's
+-- own tests are tests/arena/profile-edit.lua's. HonorsNet.NewPortrait's portrait is Borders.lua's.
+local function MyProfileStandIn(uns)
+	local pe = { section = "look", dressed = {} }
+	function pe.Section() return pe.section end
+	local function Go(key) return function() pe.section = key uns.UI.Refresh() end end
+	function pe.Page(details, facts)
+		pe.details, pe.facts = details, facts
+		local lines = { { pageNav = true, nav = {
+			{ text = "Look", selected = pe.section == "look", onClick = Go("look") },
+			{ text = "Icons", selected = pe.section == "icons", onClick = Go("icons") } } },
+			{ text = "a row of " .. pe.section } }
+		local buttons = { { "PLAYER_PROFILE_BACK", function() uns.UI.BackFromPlayerProfile() end } }
+		if pe.section == "icons" then buttons[2] = { "COUNCIL_ICON_DEFAULT", function() end } end
+		return lines, "As others see you", "Title: none", buttons, { frame = "rank", emblem = pe.emblem }
+	end
+	function pe.DressPortrait(rig, art) pe.dressed[#pe.dressed + 1] = { rig = rig, art = art } end
+	uns.ProfileEdit = pe
+	local bns = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+	assert(loadfile(ADDON_DIR .. "Borders.lua"))("Olympus", bns)
+	uns.Borders = bns.Borders
+	uns.HonorsNet = { NewPortrait = function(parent, size) pe.made = (pe.made or 0) + 1 return bns.Borders.NewPortrait(parent, size) end }
+	-- PLAYER_PROFILE_LEFT as UI.lua fires it (whose page, folded), every other event as before.
+	pe.left = {}
+	uns.Fire = function(name, ...)
+		if name == "PLAYER_PROFILE_LEFT" then pe.left[#pe.left + 1] = (...) end
+		return ns.Fire(name, ...)
+	end
+	return pe
+end
+
+test("1.2.4 My profile in the Olympus window: his own person page draws ProfileEdit's page: its section strip as page chrome (none on another player's page), the detail box's words, its buttons by section; each section a page of its own; Back goes back; no side card, no panel", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		UI.SelectTab("realm")
+		local main = OlympusFrame
+		local tabPage = UI.PageId()
+		UI.ShowPerson({ name = ns.me })
+		eq(UI.OwnProfileShown(), true)
+		eq(pe.details.full, ns.me, "PlayerProfile.Build hands his page to ProfileEdit.Page")
+		eq(type(pe.facts), "table", "with his facts as the person page makes them")
+		eq(main.pageNavRows[1]:IsShown(), true, "the section strip, page chrome")
+		eq(main.pageNavRows[1].line.nav[1].text, "Look")
+		assert(ShownRowWith(main, "a row of look"), "the section's rows in the list")
+		eq(main.detailTitle:GetText(), "As others see you"); eq(main.detailText:GetText(), "Title: none")
+		eq(main.buttons[1]:GetText(), ns.L.PLAYER_PROFILE_BACK); eq(main.buttons[2]:IsShown(), false)
+		eq(UI.PageId(), "player-profile:" .. ns.me .. "#look")
+		-- A section of its own: its page id (each starts at the top), its buttons.
+		main.pageNavRows[1].nav[2]:Click()
+		eq(UI.PageId(), "player-profile:" .. ns.me .. "#icons")
+		assert(ShownRowWith(main, "a row of icons"))
+		eq(main.buttons[2]:IsShown(), true); eq(main.buttons[2]:GetText(), ns.L.COUNCIL_ICON_DEFAULT)
+		-- Another player's page (from his own: a step): no strip.
+		UI.ShowPerson({ name = "Racer" })
+		eq(UI.OwnProfileShown(), false)
+		eq(main.pageNavRows[1]:IsShown(), false, "no strip on another player's page")
+		eq(main.detailTitle:GetText(), ns.L.PLAYER_PROFILE_TITLE)
+		-- Back: his own page, then the tab.
+		main.buttons[1]:Click()
+		eq(UI.OwnProfileShown(), true); eq(main.pageNavRows[1]:IsShown(), true)
+		main.buttons[1]:Click()
+		eq(UI.PlayerProfileShown(), false); eq(UI.PageId(), tabPage, "the tab's page")
+		eq(rawget(_G, "OlympusPersonFrame"), nil, "no side card"); eq(rawget(_G, "OlympusProfileEdit"), nil, "no panel")
+		-- Without ProfileEdit (a client updated without a restart): his page as before, its privacy route.
+		uns.ProfileEdit = nil
+		UI.ShowPerson({ name = ns.me })
+		assert(ShownRowWith(main, ns.L.PROFILE_VISIBILITY_BTN), "the plain page")
+		eq(UI.PageId(), "player-profile:" .. ns.me)
+	end)
+end)
+
+test("1.2.4 My profile's portrait: in the detail box, made once, inside it (its art's reach above and below too), the box's words to its right, dressed with the page's art at each redraw; hidden on another page, the words back; PLAYER_PROFILE_LEFT on Back, another person, a tab and the window closed", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		UI.SelectTab("census")
+		local main = OlympusFrame
+		eq(main.ownPortrait, nil, "nothing made before his page")
+		UI.ShowPerson({ name = ns.me })
+		local rig = main.ownPortrait
+		assert(rig and rig.container and not rig.plain, "HonorsNet.NewPortrait's (Borders') portrait")
+		eq(pe.made, 1)
+		eq(rig.slot:IsShown(), true)
+		eq(rig.size + rig.reach.top + rig.reach.bottom <= 78 - 8, true, "inside the detail box, its art too: " .. rig.size)
+		eq(rig.size >= 30, true, "not a speck")
+		local at = rig.slot.points[1]
+		eq(at[2], main.detail); eq(at[4] - rig.reach.left >= 4, true, "clear of the box's left edge")
+		eq(-at[5] - rig.reach.top >= 2, true, "below the box's top")
+		local title = main.detailTitle.points[1]
+		eq(title[1], "TOPLEFT"); eq(title[2], main.detail); eq(title[4] >= at[4] + rig.size + rig.reach.right, true, "the words right of the art")
+		local dressed = #pe.dressed
+		eq(pe.dressed[dressed].rig, rig); eq(pe.dressed[dressed].art.frame, "rank")
+		pe.emblem = 134400
+		UI.Refresh()
+		eq(main.ownPortrait, rig, "made once"); eq(pe.made, 1)
+		eq(#pe.dressed, dressed + 1, "dressed again"); eq(pe.dressed[#pe.dressed].art.emblem, 134400)
+		-- Another player's page: hidden, the title back in its place.
+		local me = ns.Fold(ns.me)
+		UI.ShowPerson({ name = "Racer" })
+		eq(rig.slot:IsShown(), false)
+		eq(main.detailTitle.points[1][4], 8, "the title back in its place")
+		eq(pe.left[#pe.left], me, "left: another person")
+		main.buttons[1]:Click()
+		eq(rig.slot:IsShown(), true, "his page again")
+		local n = #pe.left
+		main.buttons[1]:Click()
+		eq(#pe.left, n + 1, "left: Back"); eq(pe.left[#pe.left], me); eq(rig.slot:IsShown(), false)
+		UI.ShowPerson({ name = ns.me })
+		n = #pe.left
+		UI.SelectTab("realm")
+		eq(#pe.left, n + 1, "left: a tab"); eq(rig.slot:IsShown(), false)
+		UI.ShowPerson({ name = ns.me })
+		n = #pe.left
+		main:Hide()
+		eq(#pe.left, n + 1, "left: the window closed")
+	end)
+end)
+
+-- 1.2.4: an item slot that is no item ("My profile"'s icon picker in the list: a texture and its name).
+-- Fails on 1.2.3: the tooltip said "#nil".
+test("1.2.4 Views: a slot of an items row with a label and no item id: its tooltip's first line is its label", function()
+	WithUI(function()
+		LoadUI()
+		local content = CreateFrame("Frame")
+		content.w = 300
+		local picked
+		ns.Views.Render(content, { { items = { { icon = "Interface\\Icons\\Spell_Holy_SealOfMight", label = "Spell_Holy_SealOfMight" } }, columns = 7,
+			onItem = function(it) picked = it end } })
+		local slot = content.rows[1].items[1]
+		slot:Fire("OnEnter")
+		eq(GameTooltip.lines[1], "Spell_Holy_SealOfMight")
+		slot:Click()
+		eq(picked and picked.label, "Spell_Holy_SealOfMight", "the line's own click")
+	end)
+end)
 end
 
 ---------------------------------------------------------------------------
@@ -13611,7 +13753,7 @@ test("0.9.8 the Realm tab: a councillor's own button for their icon, next to Ask
 	end)
 end)
 
-test("1.2 the Realm tab's council icon button opens the profile's Edit once ProfileEdit.lua gives one (the icon picker moved there)", function()
+test("1.2 the Realm tab's council icon button opens the profile's Edit once ProfileEdit.lua gives one (the icon picker moved there); 1.2.4: /oly council icon too", function()
 	WithUI(function()
 		WithCouncil(function()
 			local w, UI = ForeverWorld(true)
@@ -13627,6 +13769,18 @@ test("1.2 the Realm tab's council icon button opens the profile's Edit once Prof
 				btn:Click()
 				eq(opened, "icon")
 				eq(rawget(_G, "OlympusCouncilIconFrame"), nil, "not the picker's own window")
+				-- 1.2.4: /oly council icon takes the same way (My profile's Icons, on the council icon),
+				-- a councillor's alone as the picker's window was. (It opened that window directly.)
+				opened = nil
+				SlashCmdList.OLYMPUS("council icon")
+				eq(opened, "icon", "/oly council icon")
+				eq(rawget(_G, "OlympusCouncilIconFrame"), nil)
+				local savedPrint, printed = ns.Print, nil
+				ns.Print = function(msg) printed = msg end
+				ns.me, opened = "Random Guy-Realm", nil
+				SlashCmdList.OLYMPUS("council icon")
+				ns.Print, ns.me = savedPrint, "Test Councillor-Realm"
+				eq(opened, nil, "anyone else: nothing opened"); eq(printed, ns.L.COUNCIL_ICON_ONLY)
 				-- Without it (a client updated without a restart): the picker's own window, as before.
 				ns.ProfileEdit = nil
 				btn:Click()
@@ -13638,106 +13792,22 @@ test("1.2 the Realm tab's council icon button opens the profile's Edit once Prof
 	end)
 end)
 
-test("1.2 Workshop.IconPickerHost: the council icon picker inside a host (the profile's Edit): the list given first, OK hands the choice back and never sets a councillor's icon; its own window again after", function()
-	WithUI(function()
-		WithCouncil(function()
-			local W = ns.Workshop
-			local saved = { GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons }
-			local ok, err = pcall(function()
-				local sent = {}
-				ns.Comm.Send = function(_, msg) sent[#sent + 1] = msg end
-				GamepadStyle(false) -- (1.1.5: the input style, never ns.GamepadUI replaced)
-				GetLooseMacroIcons, GetLooseMacroItemIcons = nil, nil
-				GetMacroIcons = function(t) for i = 1, 50 do t[#t + 1] = 200000 + i end end
-				GetMacroItemIcons = function() end
-				-- Anyone's Edit may host it (the Edit decides what it lists): here not a councillor.
-				ns.me = "Random Guy-Realm"
-				local host = CreateFrame("Frame", "OlympusProfileEditHost", UIParent)
-				local picked
-				local f = W.IconPickerHost(host, { "Spell_Holy_SealOfMight", 134400, "bad|name", 134400 }, function(icon) picked = icon or false end, 134400)
-				eq(f.parent, host); eq(f:IsShown(), true); eq(f.close:IsShown(), false)
-				eq(W.IconPickerHosted(), true)
-				eq(f.cells[1].icon, "Spell_Holy_SealOfMight"); eq(f.cells[2].art.texture, 134400); eq(f.cells[3]:IsShown(), false, "junk and repeats left out")
-				eq(f.preview.texture, 134400, "the icon it had")
-				assert(not f.sample:GetText():find(ns.HIGH_COUNCIL_MARK, 1, true), "no council mark for a player who is none")
-				-- 1.2.3: hosted it picks the emblem: its title and words say so, never the council's
-				-- (which promised a silver dragon in the chat to anyone who opened it).
-				eq(f.titleText, ns.L.EMBLEM_ICON_TITLE); eq(f.hint:GetText(), ns.L.EMBLEM_ICON_HINT)
-				f.cells[1]:Click(); f.ok:Click()
-				eq(picked, "Spell_Holy_SealOfMight"); eq(f:IsShown(), false)
-				eq(ns.db.councilIcons, nil, "never a councillor's icon"); eq(#sent, 0, "nothing said")
-				-- No list: the game's icons.
-				W.IconPickerHost(host, nil, function() end)
-				eq(f.cells[1].art.texture, 200001)
-				eq(W.IconPickerHost(nil, {}, function() end), nil); eq(W.IconPickerHost(host, {}, nil), nil)
-				-- A councillor's own picker takes it back to its window.
-				ns.me = "Test Councillor-Realm"
-				eq(W.ShowIconPicker(), true)
-				eq(f.parent, UIParent); eq(f.close:IsShown(), true); eq(W.IconPickerHosted(), false)
-				eq(f.titleText, ns.L.COUNCIL_ICON_TITLE, "the council's own title again"); eq(f.hint:GetText(), ns.L.COUNCIL_ICON_HINT)
-			end)
-			GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons = saved[1], saved[2], saved[3], saved[4]
-			if not ok then error(err, 0) end
-		end)
-	end)
-end)
-
-test("1.2 review: the hosted icon picker lists honour marks (Olympus's own textures, keys with hyphens) first and hands the key back; hosted it is part of the Edit (not movable, the host's strata, off the Escape list), its own window again after", function()
-	WithUI(function()
-		WithCouncil(function()
-			local W = ns.Workshop
-			local saved = { GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons }
-			local ok, err = pcall(function()
-				GamepadStyle(false) -- (1.1.5: the input style, never ns.GamepadUI replaced)
-				GetLooseMacroIcons, GetLooseMacroItemIcons = nil, nil
-				GetMacroIcons = function(t) for i = 1, 50 do t[#t + 1] = 200000 + i end end
-				GetMacroItemIcons = function() end
-				-- The standalone picker once opened (a councillor's): on the Escape list.
-				ns.me = "Test Councillor-Realm"
-				eq(W.ShowIconPicker(), true)
-				local f = W.IconPicker()
-				local function Listed() for _, n in ipairs(UISpecialFrames) do if n == "OlympusCouncilIconFrame" then return true end end return false end
-				eq(Listed(), true); eq(f:IsMovable(), true); eq(f:GetFrameStrata(), "DIALOG")
-				f:Hide()
-				local host = CreateFrame("Frame", "OlympusProfileEditHost", UIParent)
-				host:SetFrameStrata("MEDIUM")
-				local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
-				local picked
-				local list = {
-					{ key = "gryphon-gold-mark", texture = MEDIA .. "gryphon-gold-mark", label = "Arena Champion" },
-					{ key = "koi-silver-mark", texture = MEDIA .. "koi-silver-mark", label = "Silver Hand" },
-					{ key = "bad-mark", texture = "Interface\\Icons\\X" }, { key = "bad mark", texture = MEDIA .. "x" }, { key = "gryphon-gold-mark", texture = MEDIA .. "again" },
-					"Spell_Holy_SealOfMight", 134400,
-				}
-				eq(W.IconPickerHost(host, list, function(v) picked = v end, "koi-silver-mark"), f)
-				eq(f.cells[1].art.texture, MEDIA .. "gryphon-gold-mark"); eq(f.cells[2].art.texture, MEDIA .. "koi-silver-mark")
-				eq(f.cells[3].icon, "Spell_Holy_SealOfMight"); eq(f.cells[4].icon, 134400); eq(f.cells[5]:IsShown(), false, "a texture elsewhere, a bad key, a repeat: left out")
-				eq(f.cells[2].chosen:IsShown(), true, "its current mark shown chosen"); eq(f.preview.texture, MEDIA .. "koi-silver-mark")
-				eq(f.chosenName:GetText(), "Silver Hand")
-				-- Hosted: part of the Edit.
-				eq(f:IsMovable(), false); eq(f:GetScript("OnDragStart"), nil); eq(f:IsToplevel(), false)
-				eq(f:GetFrameStrata(), "MEDIUM"); eq(Listed(), false, "Escape closes the Olympus window, the Edit with it")
-				-- The filter finds a mark by its label.
-				W.FilterIcons("champion")
-				eq(f.cells[1].icon.key, "gryphon-gold-mark"); eq(f.cells[2]:IsShown(), false)
-				W.FilterIcons("")
-				f.cells[1]:Click(); f.ok:Click()
-				eq(picked, "gryphon-gold-mark", "the key handed back"); eq(ns.db.councilIcons, nil)
-				-- A game icon still hands its value back.
-				W.IconPickerHost(host, list, function(v) picked = v end)
-				f.cells[4]:Click(); f.ok:Click()
-				eq(picked, 134400)
-				-- Out of a host, a mark is no choice.
-				eq(W.IconEntry({ key = "a-b", texture = MEDIA .. "a-b" }).key, "a-b"); eq(W.IconEntry({ key = "a-b", texture = "Interface\\AddOns\\Other\\x" }), nil)
-				-- Its own window again: movable, above the others, on the Escape list.
-				eq(W.ShowIconPicker(), true)
-				eq(f.parent, UIParent); eq(f:IsMovable(), true); eq(f:IsToplevel(), true); eq(f:GetFrameStrata(), "DIALOG"); eq(Listed(), true)
-				assert(f:GetScript("OnDragStart"), "dragged again")
-			end)
-			GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons = saved[1], saved[2], saved[3], saved[4]
-			if not ok then error(err, 0) end
-		end)
-	end)
+-- 1.2.4: the hosted picker (Workshop.IconPickerHost) went with the profile's Edit panel: "My profile"
+-- draws its own Icons section in the Olympus window (tests/arena/profile-edit.lua). Its two tests
+-- went with it; what the page still takes from Workshop.lua is the entry check of its list, here.
+test("1.2.4 Workshop.IconEntry: a council icon value, or an honour mark of Olympus's own textures (a key of letters, digits, _ and -; a file number or a path under Interface\\AddOns\\Olympus\\media\\; a plain label), nothing else", function()
+	local W = ns.Workshop
+	local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
+	eq(W.IconEntry(134400), 134400); eq(W.IconEntry("Spell_Holy_SealOfMight"), "Spell_Holy_SealOfMight"); eq(W.IconEntry("bad|name"), nil)
+	local mark = W.IconEntry({ key = "gryphon-gold", texture = MEDIA .. "gryphon-gold-mark", label = "Arena Champion" })
+	eq(mark.key, "gryphon-gold"); eq(mark.texture, MEDIA .. "gryphon-gold-mark"); eq(mark.label, "Arena Champion")
+	eq(W.IconEntry({ key = "a-b", texture = MEDIA .. "a-b" }).key, "a-b")
+	eq(W.IconEntry({ key = "a-b", texture = "Interface\\AddOns\\Other\\x" }), nil, "a texture elsewhere")
+	eq(W.IconEntry({ key = "bad mark", texture = MEDIA .. "x" }), nil, "a bad key")
+	eq(W.IconEntry({ key = "a-b", texture = "Interface\\Icons\\X" }), nil)
+	eq(W.IconEntry({ key = "a-b", texture = 2147483648 }), nil); eq(W.IconEntry({ key = "a-b", texture = 1.5 }), nil)
+	eq(W.IconEntry({ key = "a-b", texture = 134400, label = "|cffff0000x" }).label, nil, "a label with a code dropped")
+	eq(W.IconPickerHost, nil, "no hosted mode any more"); eq(W.IconPickerHosted, nil)
 end)
 
 -- 0.9.8: review of the merge

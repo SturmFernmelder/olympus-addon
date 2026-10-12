@@ -72,8 +72,9 @@ end
 -- - each section's explanation (OlympusArenaHelp): the first time the section opens, and again
 --   from the window's help button. Bones's is the Bones tables' own guide where the build has it, the
 --   Lottery's its board's own.
--- - the King's letters kept (OlympusArenaLetters), to read again; "preview as others see me"
---   (OlympusArenaPreview).
+-- (1.2.4: the King's letters kept, to read again, and "as others see me" are sections of "My
+-- profile" in the Olympus window, ProfileEdit.lua: their windows here, OlympusArenaLetters and
+-- OlympusArenaPreview, are gone.)
 -- The alert window, the challenge window and the toasts are the core's (ArenaHome.lua): a
 -- player who never opened the arena gets them too.
 
@@ -283,61 +284,3 @@ function ArenaUI.Explain(section, force)
 	return help
 end
 function ArenaUI.HelpFrame() return help end
-
----------------------------------------------------------------------------
--- The King's letters, to read again (the design)
----------------------------------------------------------------------------
-
-local letters
-function ArenaUI.LettersPopup()
-	if not letters then
-		letters = Kit.Frame("OlympusArenaLetters", 380, 360, { title = L.ARENA_LETTERS_TITLE })
-		letters.list = Kit.List(letters, 330, 250)
-		letters.list:SetPoint("TOPLEFT", 26, -56)
-	end
-	local lines = {}
-	local list = Home.Letters()
-	if #list == 0 then lines[1] = { text = L.ARENA_LETTERS_NONE } end
-	for _, e in ipairs(list) do
-		local entry = e
-		lines[#lines + 1] = { text = Home.TitleOf(e.key) or e.key, right = e.at and date and date("%Y-%m-%d", e.at) or "",
-			onClick = function() Home.ReadLetter(entry) end }
-	end
-	letters:Show()
-	letters.list:SetLines(lines)
-	ArenaUI.lastLetters = lines
-	return letters
-end
-
----------------------------------------------------------------------------
--- "Preview as others see me": the portrait with the frame viewers verify, the title, the name
----------------------------------------------------------------------------
-
-local preview
-function ArenaUI.PreviewMe()
-	if not preview then
-		preview = Kit.Frame("OlympusArenaPreview", 320, 300, { title = L.ARENA_PROFILE_PREVIEW })
-		-- (the portrait drawn as the player's own, Kit.NewPortrait, as his profile's)
-		preview.rig = Kit.NewPortrait(preview, 96)
-		preview.portrait = preview.rig.slot
-		preview.portrait:SetPoint("TOP", 0, -70)
-		preview.name = Kit.Text(preview, "title", "CENTER")
-		preview.name:SetPoint("TOP", preview.portrait, "BOTTOM", 0, -34)
-		preview.sub = Kit.Text(preview, nil, "CENTER")
-		preview.sub:SetPoint("TOP", preview.name, "BOTTOM", 0, -4)
-	end
-	local PE = ns.ProfileEdit
-	local pv = type(PE) == "table" and type(PE.Preview) == "function" and select(2, pcall(PE.Preview)) or nil
-	if type(pv) ~= "table" then pv = {} end
-	local m = ArenaUI.ProfileModel and ArenaUI.ProfileModel(nil) or {}
-	-- (asSeen: his picture as a viewer without him as a unit sees it, his emblem, race or class, never
-	-- his own live portrait; his own frame, never his border preview)
-	Kit.DrawPortrait(preview.rig, ns.me, { class = m.class, race = m.race, gender = m.gender, emblem = pv.emblem or m.emblem,
-		guild = pv.guild or m.guild, honour = pv.honour or m.honour, asSeen = true })
-	local nick = pv.nick or m.nick
-	preview.name:SetText(Kit.Name(ns.me) .. (nick and nick ~= "" and ("\n\"" .. ns.Codec.Plain(nick) .. "\"") or ""))
-	local title = pv.titleText or m.title
-	preview.sub:SetText(title and ns.Codec.Plain(title) or "")
-	preview:Show()
-	return preview
-end

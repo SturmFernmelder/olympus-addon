@@ -397,7 +397,6 @@ Sim.SCENES = {
 	end },
 	{ "PROFILE", function()
 		Pane("arena.profile", false)
-		ArenaUI.PreviewMe()
 	end },
 	{ "BANK", function()
 		W.bank = { mode = "L", name = Full("Coffrey Vault"), currency = "g", paused = false,
@@ -435,9 +434,9 @@ Sim.SCENES = {
 		Home.ShowCall({ title = L.ARENA_ALERT_OPEN:format(Home.EventTitle(Home.Data.Normal(W.main))), who = Home.EventTitle(Home.Data.Normal(W.main)), lockAt = W.main.lockAt })
 	end },
 	{ "EDIT", function()
+		-- (1.2.4: the Edit is "My profile" in the Olympus window: this window steps aside.)
 		Pane("arena.profile", false)
-		ArenaUI.PreviewMe()
-		ArenaUI.LettersPopup()
+		ArenaUI.EditMyProfile()
 	end },
 	{ "BONE_LIFE", function()
 		ArenaUI.Show()

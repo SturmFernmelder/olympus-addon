@@ -1040,7 +1040,9 @@ test("1.2 the fights part review: under the gamepad UI the King's letter never o
 	eq(letter == nil or not letter:IsShown(), true, "not by itself")
 	eq(Printed(A, A.ns.L.HONOR_LETTER_WAITING), true)
 	eq(#A.ns.HonorsNet.QueuedLetters(), 1)
-	w:As(A, A.ns.ProfileEdit.Open)
+	-- (1.2.4: his profile is "My profile" in the Olympus window, stood in here: W3.PageUI.)
+	W3.PageUI(w, A)
+	eq(w:As(A, A.ns.ProfileEdit.Open), true)
 	letter = A.ns.HonorsNet.LetterFrame()
 	eq(letter ~= nil and letter:IsShown(), true, "the player's click opened it")
 	W3.NoErrors(w)
@@ -1062,11 +1064,12 @@ test("1.2 the fights part review: in the chat icon picker an honour's mark picks
 	local list = PE.IconList("icon")
 	eq(type(list[1]), "table"); eq(list[1].key, "gryphon-gold")
 	eq(#list > 1, true, "a councillor: the game's icons after his marks")
-	-- The picker's OK with his honour's mark (Workshop.IconPickerHost's onPick, as the game calls it).
-	local onPick
-	hc.ns.Workshop.IconPickerHost = function(parent, l, fn) onPick = fn return {} end
-	PE.IconPicker("icon", {})
-	w:As(hc, onPick, "gryphon-gold")
+	-- His honour's mark chosen and used in "My profile"'s Icons section (1.2.4: the picker the Edit
+	-- hosted, Workshop.IconPickerHost, is the page's own section now; its Use, as the game calls it).
+	W3.PageUI(w, hc)
+	eq(PE.Open("icon"), true)
+	eq(PE.ChooseIcon("gryphon-gold"), true)
+	eq(PE.UseIcon(), true)
 	eq(hc.ns.ArenaProfile.Pick().frame, "arena-champion", "the honour picked")
 	eq(hc.ns.CouncilIcon(hc.name), "", "his own icon taken away: the mark shows")
 	-- A non-councillor: his marks only.
