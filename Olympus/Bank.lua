@@ -1075,7 +1075,7 @@ end
 -- of a session spent outside it (taken off the High Council while offline: a Hand's role waits for
 -- the King's list, which a login does not have yet).
 ---------------------------------------------------------------------------
-Bank.SISTERS_SAVED_BYTES = 512 * 1024 -- some 80 full banks (a TS is 6.5 KB at most), 128 of 4 KB
+Bank.SISTERS_SAVED_BYTES = 512 * 1024 -- some 70 full banks (a TS is 7.4 KB at most: Room), 128 of 4 KB
 Bank.ROLE_SETTLE = 20 * 60            -- (King.HANDS_FRESH: a Hand knows he is one within it)
 local restored = false   -- this session's memory took what the save kept
 local outsideSince       -- this session's first look at the role outside the audience
