@@ -364,6 +364,11 @@ test("1.2.1 the King's letter: its window is Olympus's own metal with the parchm
 					local sign = f.sign
 					local sgr, sgt = sign:GetRight(), sign:GetTop()
 					assert(sgr <= pr and sgr - sign:GetUnboundedStringWidth() >= bl - 1 and sgt <= bb, where .. ": the signature under the words, inside the paper")
+					-- (1.2.4, the author's ask) The seal just before the signature, on the right half.
+					local sealLeft, _, sealW = f.seal:GetRect()
+					local signLeft = sign:GetLeft()
+					assert(sealLeft + sealW <= signLeft + 0.5 and signLeft - (sealLeft + sealW) <= 12, where .. ": the seal just before the signature")
+					assert(sealLeft >= (pl + pr) / 2, where .. ": on the right half of the paper")
 					local wl, wb, wr, wt = Inside(f.wear, "Wear it")
 					local ll, lb, lr, lt = Inside(f.later, "Later")
 					assert(wr <= ll, where .. ": the buttons apart")

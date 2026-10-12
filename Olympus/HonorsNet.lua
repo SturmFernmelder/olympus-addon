@@ -1473,8 +1473,11 @@ local function Place(f)
 	local h = math.ceil(TextHeight(f.body, f.bodyWidth)) + 2
 	f.body:SetHeight(h)
 	local y = math.max(top + h, top + reach.top + H.LETTER_PORTRAIT + reach.bottom) + 10
-	f.seal:SetPoint("TOPLEFT", inner[1] + H.LETTER_PAD + 8, -y)
 	f.sign:SetPoint("TOPRIGHT", inner[3] - H.LETTER_PAD - 8, -(y + 12))
+	-- (1.2.4, the author's ask: the wax seal just before the signature, on the right, not at the
+	-- paper's left edge.)
+	f.seal:ClearAllPoints()
+	f.seal:SetPoint("RIGHT", f.sign, "LEFT", -6, 0)
 	f:SetHeight(y + 40 + 12 + 24 + inner[4] + 12)
 end
 
