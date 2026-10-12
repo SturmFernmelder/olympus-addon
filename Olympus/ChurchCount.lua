@@ -42,8 +42,8 @@ local L = ns.L
 -- Who sees what: the numbers go only to the audience (Church.InAudience), by whisper from a
 -- keeper; a person's detail only to himself, the Head, the Apostles, the High Council, the King
 -- and the author. The public view: while the author's switch is open, the desk broadcasts the
--- rows of the people who chose to show theirs (off by default), and the Head's or the author's
--- client the top 3 of each ranking for the borders still to come (Count.Top3).
+-- rows of the people who chose to show theirs (off by default), and the author's client the top 3
+-- of each ranking (Count.Top3; 1.2.3: the missionaries' is their crook, HonorsNet).
 --
 -- The wire (whole messages, version 1, dropped unread by clients before 1.1.6):
 --   NV~1~w~<inviter>~<invitee>~<guild>~<invite hour36>~<join hour36>   a log pair  -> keepers
@@ -71,8 +71,8 @@ local L = ns.L
 --   NR~1~e~<what>~<window>~<person|->~<lines>~<asOf36>   the end of an answer
 --   NR~1~p~<switch at36>~<a|m>~<rank>~<name>~<30 days*10>~<all*10>   public rows, CHANNEL
 --   NR~1~n~<switch at36>~<a|m>~<rows>   the end of one list's public rows (0: none shows now), CHANNEL
---   NR~1~t~<at36>~<a1,a2,a3|->~<m1,m2,m3|->   the top 3 (last 30 days), CHANNEL and GUILD, from the
---       Head's, the King's or the author's client only
+--   NR~1~t~<at36>~<a1,a2,a3|->~<m1,m2,m3|->   the top 3 (last 30 days), CHANNEL and GUILD, taken from
+--       the Head's, the King's or the author's client only; sent by the author's alone (SendTop)
 
 local Count = {}
 ns.ChurchCount = Count
@@ -2170,8 +2170,12 @@ function Count.PublicView()
 	return v
 end
 
--- The Head's or the author's client (a keeper): the top 3, while the switch is open, at once when it
--- changes and TOP_EVERY apart otherwise (D8). A closed switch ends it on every client (Count.Top3).
+-- The author's client (a keeper): the top 3, while the switch is open, at once when it changes and
+-- TOP_EVERY apart otherwise (D8). A closed switch ends it on every client (Count.Top3). (1.2.3: the
+-- author's alone in fact. SendTop takes a root of H or W, but the Head is the King (Church.IsHead),
+-- whose root is K, and the King's client is no keeper (Count.Tick leaves him out): TakeTop still takes
+-- the King's word. So the top 3, and the missionaries' crooks, move only while the author's client
+-- is online with the ranking open; 30 days after its last word no client shows a crook.)
 -- (1.2.3: worked out again only when what it is made of may have changed: the ledger, the book, the
 -- hour (the last 30 days move on), the top 3 held; and when TOP_EVERY sends it anyway. It was every tick,
 -- every person's numbers, only to find it the same.)
@@ -2227,7 +2231,8 @@ function Count.TakeTop(sender, text)
 end
 
 -- The newest top 3 a trusted client published: { at, by, apostles = { names }, missionaries =
--- { names } }, or nil. For the borders still to come (Borders.lua reads nothing of it yet).
+-- { names } }, or nil. (1.2.3: HonorsNet reads the missionaries', their crook; the Apostles' cross
+-- still waits.)
 function Count.Top3()
 	local c = Church.Store()
 	local t = c and c.top
