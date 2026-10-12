@@ -18,8 +18,8 @@ contains everything in 1.2.2. Games stay free: no bets, no gold at stake.
 - The privacy page no longer opens again after updating for a player who had already closed it
   (1.2.0 and 1.2.1 only remembered that for the session).
 - The Olympus window no longer opens by itself when another member claims your crafting request.
-- The update letter shows a moment after you close the privacy page, and retries every 10 seconds
-  while it waits, instead of once a minute.
+- The update letter shows a few seconds after login instead of a minute later; a privacy question
+  still to ask comes first, and the letter follows a moment after the page closes.
 - The King's crown on the map sends his layer right after login, without turning it off and on.
 
 ## Who reaches the whole army

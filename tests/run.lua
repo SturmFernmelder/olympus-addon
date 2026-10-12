@@ -61058,7 +61058,9 @@ end)()
 			eq(rawget(_G, "OlympusLetterFrame"), nil, "nothing at login itself")
 			local a = w.after[1]
 			assert(a and a.sec == Lt.LOGIN_WAIT, "after login")
-			assert(Lt.LOGIN_WAIT > ns.Consent.LOGIN_WAIT, "after the privacy page's own wait")
+			-- (1.2.3, the author's ask: a few seconds after login, not a minute; a privacy question
+			-- still to ask comes first, the letter waiting for its page: the test below.)
+			assert(Lt.LOGIN_WAIT <= 10, "soon after login")
 			-- (The privacy page asked first, 45 s after login, and was closed: here a line of it, the
 			-- zone and layer's, was never answered.)
 			ns.Consent.Show():Hide()
@@ -61289,6 +61291,32 @@ end)()
 			eq(#w.after, 1, "only the letter's own wait"); eq(w.after[1].sec, Lt.LOGIN_WAIT)
 			w.run()
 			assert(Lt.Frame() and Lt.Frame():IsShown())
+		end)
+	end)
+
+	test("1.2.3 version letters: a few seconds after login, but a privacy question still to ask comes first: at LOGIN_WAIT the letter waits, the page asks at its own wait, and the letter comes HANDOFF after the page closes", function()
+		WithLetters(function(w)
+			local Lt, C = w.Letters, ns.Consent
+			local savedWaiting = C.Waiting
+			local ok, err = pcall(function()
+				local waiting = true
+				C.Waiting = function() return waiting end
+				w.login()
+				eq(w.after[1].sec, Lt.LOGIN_WAIT); assert(Lt.LOGIN_WAIT < C.LOGIN_WAIT, "before the page's own wait")
+				w.run()
+				eq(Lt.Frame() ~= nil and Lt.Frame():IsShown() or false, false, "a question still to ask: the page first")
+				eq(Lt.IsRead(ns.VERSION), false)
+				-- The page asks and is closed: the letter a moment after.
+				waiting = false
+				local page = C.Show()
+				page:Hide()
+				local a = w.after[#w.after]
+				assert(a and a.sec == Lt.HANDOFF, "the letter HANDOFF after the page")
+				w.run()
+				assert(Lt.Frame() and Lt.Frame():IsShown(), "then the letter")
+			end)
+			C.Waiting = savedWaiting
+			if not ok then error(err, 0) end
 		end)
 	end)
 
