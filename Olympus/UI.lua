@@ -1887,7 +1887,7 @@ function UI.Refresh()
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
 		else
-			lines, title, text = ns.Views.Build(main.tab)
+			lines, title, text = ns.Views.Build(main.tab, s) -- (1.2.3: the header's summary, not a second one)
 			-- The treasury next to the soldiers, on the Treasury tab (Treasury.HeaderText; 1.1.5, the
 			-- author's call: no longer on the Throne, the treasury has its own tab).
 			if main.tab == "treasury" then
@@ -2545,14 +2545,16 @@ end
 -- 1.2.1: always through its timer (at the next frame when the gap is over), never inside the
 -- listener that asked: a census change, a search typed, an event of the game's.
 local redrawQueued = false
+-- (1.2.3: one function for every queued redraw, not a new one each time.)
+function UI.QueuedRefresh()
+	redrawQueued = false
+	UI.Refresh()
+end
 function UI.RefreshSoon()
 	if not main or not main:IsShown() or redrawQueued then return end
 	local wait = math.max(0, UI.RedrawGap() - (GetTime() - (UI.lastRedraw or 0)))
 	redrawQueued = true
-	ns.After(wait, "ui redraw", function()
-		redrawQueued = false
-		UI.Refresh()
-	end)
+	ns.After(wait, "ui redraw", UI.QueuedRefresh)
 end
 
 -- Typed into a tab's search box (Views.SetFilter): that list again, soon. A search that starts

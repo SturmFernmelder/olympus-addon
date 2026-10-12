@@ -3004,10 +3004,13 @@ local BUILD = {
 	end,
 }
 
-function Views.Build(tab)
+-- s (1.2.3): the census's summary the caller read a moment ago (UI.Refresh's, for the window's
+-- header), else read here. The window's redraw summed the census twice, once for its header and
+-- once for its tab, a few hundred KB each time on a big census.
+function Views.Build(tab, s)
 	local build = BUILD[tab]
 	if not build then return {}, nil, nil end
-	return build(ns.Data.Summary())
+	return build(s or ns.Data.Summary())
 end
 
 -- 1.2: another file's tab (UI.AddTab: the Blood Arena's, ArenaHome.lua): builder(s) returns its

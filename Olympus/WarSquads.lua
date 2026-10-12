@@ -84,12 +84,23 @@ local function Store(make)
 	end
 	return type(s) == "table" and s.guild == guild and type(s.rows) == "table" and type(s.chats) == "table" and s or nil
 end
+-- (1.2.3: found first by the names as given, roomOf, without folding them: each census notice
+-- reads the leaders, Signature, and so does the Chat tab's ticker on a squad's room.)
+local roomOf, roomOfCount = {}, 0 -- guild -> leader -> room
 local function Room(guild, leader)
+	local known = roomOf[guild]
+	if known and known[leader] then return known[leader] end
 	local key = Fold(guild) .. "|" .. Fold(leader)
-	if roomCache[key] then return roomCache[key] end
-	local digest = ns.Sign.SHA256(key)
-	local room = "squad:" .. (digest:sub(1, 12):gsub(".", function(byte) return ("%02x"):format(byte:byte()) end))
-	if roomCacheCount < 256 then roomCache[key], roomCacheCount = room, roomCacheCount + 1 end
+	local room = roomCache[key]
+	if not room then
+		local digest = ns.Sign.SHA256(key)
+		room = "squad:" .. (digest:sub(1, 12):gsub(".", function(byte) return ("%02x"):format(byte:byte()) end))
+		if roomCacheCount < 256 then roomCache[key], roomCacheCount = room, roomCacheCount + 1 end
+	end
+	if roomOfCount < 256 then
+		if not known then known = {}; roomOf[guild] = known end
+		known[leader], roomOfCount = room, roomOfCount + 1
+	end
 	return room
 end
 function Squads.Leaders()
@@ -98,9 +109,10 @@ function Squads.Leaders()
 	local main = ns.IsKingGuild and ns.IsKingGuild(guild)
 	local function Add(name)
 		local full = Member(name)
-		if not full or seen[Fold(full)] or #list >= Squads.MAX_LEADERS then return end
+		local key = full and Fold(full) -- (1.2.3: folded once; each census notice reads the leaders, Signature)
+		if not full or seen[key] or #list >= Squads.MAX_LEADERS then return end
 		if main and ns.IsHighCouncillor(full) ~= true then return end
-		seen[Fold(full)] = true
+		seen[key] = true
 		list[#list + 1] = { name = full, index = #list + 1, kind = main and "councillor" or "centurion", room = Room(guild, full) }
 	end
 	if main then
@@ -125,7 +137,12 @@ local function Leader(name)
 	if not full then return nil end
 	for _, e in ipairs(Squads.Leaders()) do if Fold(e.name) == Fold(full) then return e end end
 end
+-- (1.2.3: every squad's room is "squad:" and its hash, Room. ChatRooms asks each provider about every
+-- room id it is given, the race, class, guild and role rooms' too, and the Chat page gave it a few
+-- hundred a redraw, each reading the leaders again: on the author's game, in the King's guild, most of
+-- the 2.5 MB of garbage each redraw made. An id that is not a squad's is none, the leaders unread.)
 local function LeaderRoom(id)
+	if type(id) ~= "string" or not id:find("^squad:") then return nil end
 	for _, e in ipairs(Squads.Leaders()) do if e.room == id then return e end end
 end
 local function Dense(array, max)
@@ -163,12 +180,15 @@ local function List(leader, members)
 	return out
 end
 local function Encode(e) return ("WU~1~S~%s~%d~%s"):format(e.leader, e.rev, table.concat(e.members, ",")) end
-local function Changed()
+local told      -- (1.2.3) what the squads' rooms rested on when they were last told changed (Signature's)
+local Signature -- (below)
+-- now: Signature's, when the caller has it already.
+local function Changed(now)
+	told = now or Signature()
 	ns.Fire("SQUADS_CHANGED"); ns.Fire("CHAT_ROOMS_CHANGED")
 end
-function Squads.Get(name)
-	local leader = Leader(name)
-	if not leader then return nil end
+-- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
+local function Squad(leader)
 	local s = Store(false)
 	local row = s and s.rows[Fold(leader.name)]
 	if not ValidRow(row) or Fold(row.leader) ~= Fold(leader.name) then row = nil end
@@ -179,6 +199,11 @@ function Squads.Get(name)
 	end
 	leader.count, leader.rev, leader.by = #leader.soldiers, row and row.rev, row and row.by
 	return leader
+end
+function Squads.Get(name)
+	local leader = Leader(name)
+	if not leader then return nil end
+	return Squad(leader)
 end
 local function Put(e, sender)
 	local s = Store(true)
@@ -282,14 +307,18 @@ function Squads.Request()
 				and Guild() == guild and Member(ns.me) ~= nil
 		end })
 end
+-- Whether member `full` reads leader entry `leader`'s room: the leader himself, or one of his soldiers.
+local function Reads(leader, full)
+	if Fold(full) == Fold(leader.name) then return true end
+	local current = Squad(leader)
+	for _, soldier in ipairs(current.soldiers) do if Fold(soldier) == Fold(full) then return true end end
+	return false
+end
 function Squads.CanAccess(room, name)
 	if Preview() or not Member(ns.me) then return false end
 	local leader, full = LeaderRoom(room), Member(name or ns.me)
 	if not leader or not full then return false end
-	if Fold(full) == Fold(leader.name) then return true end
-	local current = Squads.Get(leader.name)
-	for _, soldier in ipairs(current.soldiers) do if Fold(soldier) == Fold(full) then return true end end
-	return false
+	return Reads(leader, full)
 end
 local function ChatOn() return ns.db and ns.db.chatRooms == true and not (ns.ChatLocked and ns.ChatLocked()) or false end
 local function Chat(room, make)
@@ -384,18 +413,25 @@ function Squads.ReceiveChat(dist, sender, text)
 	chat.seen[Fold(full)] = seq
 	Keep(room, { sender = full, guild = Guild(), text = words, t = Now(), id = seq }); return true
 end
+local function RoomInfo(leader)
+	local format = ns.L and ns.L.SQUAD_CHAT_LABEL or "Squad %d"
+	return { id = leader.room, kind = "role", scope = "restricted", label = format:format(leader.index) }
+end
 function Squads.ChatInfo(room)
 	local leader = LeaderRoom(room)
 	if not leader then return nil end
-	local format = ns.L and ns.L.SQUAD_CHAT_LABEL or "Squad %d"
-	return { id = room, kind = "role", scope = "restricted", label = format:format(leader.index) }
+	return RoomInfo(leader)
 end
 local provider = { Info = Squads.ChatInfo, CanAccess = Squads.CanAccess, History = Squads.ChatHistory,
 	Send = Squads.ChatSend, ChatOn = ChatOn, IsOpen = function(room) return LeaderRoom(room) ~= nil end,
 	Select = function(room) return Squads.CanAccess(room) end,
+	-- (1.2.3: the leaders read once, each room's access and description from its own entry: CanAccess
+	-- and ChatInfo read them all again for each room, three times, and the Chat page asks every era.)
 	Options = function(kind)
 		local out = {}; if kind ~= "role" then return out end
-		for _, e in ipairs(Squads.Leaders()) do if Squads.CanAccess(e.room) then out[#out + 1] = Squads.ChatInfo(e.room) end end
+		local me = not Preview() and Member(ns.me)
+		if not me then return out end
+		for _, e in ipairs(Squads.Leaders()) do if Reads(e, me) then out[#out + 1] = RoomInfo(e) end end
 		return out
 	end,
 }
@@ -447,10 +483,38 @@ function Squads.Lines(query, baseIndent, manage)
 	if #lines > 0 then table.insert(lines, 1, { indent = indent, header = true, text = Label("SQUAD_TITLE", "Military squads - your guild") }) end
 	return lines
 end
+-- 1.2.3: what the squads' rooms rest on, as one text: our guild, our own place (in the roster, a
+-- preview, the chats on) and each leader's room, kind and place in the list (his room's label).
+-- The rows change only through Put, which tells at once; whether we read a room follows from
+-- these and the rows (Reads). A soldier gone from the guild changes nothing the Chat tab keeps for
+-- its era (a room's lines and anyone's access are asked at each redraw), and the War page is the
+-- window's, redrawn at every DATA_CHANGED (UI.lua). The census tells DATA_CHANGED every second or
+-- so on a busy realm (Data.NOTIFY_GAP), and each was told as the squads changed: the Chat tab
+-- starts a new era at CHAT_ROOMS_CHANGED, and on the author's game (the King's guild) it worked
+-- every line and room out again 0.2 s after every notice, never waiting for its DATA_GAP.
+-- (A name holds no ",", Full; a room is "squad:" and hex.)
+local parts = {}
+Signature = function()
+	parts[1], parts[2] = Guild() or "", Member(ns.me) or ""
+	parts[3], parts[4] = Preview() and "preview" or "", ChatOn() and "on" or ""
+	local n = 4
+	for _, e in ipairs(Squads.Leaders()) do
+		parts[n + 1], parts[n + 2], parts[n + 3] = e.room, e.kind, e.name
+		n = n + 3
+	end
+	for i = #parts, n + 1, -1 do parts[i] = nil end
+	return table.concat(parts, ",", 1, n)
+end
 if ns.ChatRooms then ns.ChatRooms.RegisterProvider(provider) end
 ns.Comm.Handle("WU", Squads.Handle)
 ns.Comm.Handle("SC", Squads.ReceiveChat)
 -- Event driven only: no per-frame task or periodic enumeration while idle; a roster scan asks
--- for rows only until an officer's came (Squads.Request's own limits).
-ns.On("DATA_CHANGED", function() indexedRoster = nil; Changed(); Squads.Request() end)
+-- for rows only until an officer's came (Squads.Request's own limits). (1.2.3: told only when
+-- what the squads' rooms rest on changed, Signature.)
+ns.On("DATA_CHANGED", function()
+	indexedRoster = nil
+	local now = Signature()
+	if now ~= told then Changed(now) end
+	Squads.Request()
+end)
 ns.On("LOGIN", Squads.Request)

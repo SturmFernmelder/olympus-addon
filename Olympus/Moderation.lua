@@ -72,6 +72,7 @@ local L = ns.L
 
 local Moderation = {}
 ns.Moderation = Moderation
+Moderation.NONE = {} -- (1.2.3: an empty list, read only)
 
 Moderation.KINDS = { c = true, g = true } -- what a word may aim at: a character, a guild (no third)
 Moderation.MAX = { c = 500, g = 200 }     -- words kept per kind (full: the oldest "on" word goes; for the
@@ -297,7 +298,7 @@ function Moderation.Character(name)
 	if e or not ns.splitNames then return e end
 	local group = ns.GroupOf(ns.RealmOf(full) or ns.realm or "")
 	local own = OwnWord(full)
-	for _, y in ipairs(x.short[ns.ShortName(full):lower()] or {}) do
+	for _, y in ipairs(x.short[ns.ShortName(full):lower()] or Moderation.NONE) do -- (1.2.3: no new table each time)
 		if ns.GroupOf(ns.RealmOf(y.name) or ns.realm or "") == group and not Overrides(own, y) then return y end
 	end
 	return nil
@@ -319,21 +320,26 @@ end
 function Moderation.Hidden(name)
 	if type(name) ~= "string" or name == "" or IsKing(name) then return nil end
 	if Index().n.c == 0 then return nil end
+	-- (1.2.3: his rank read once, at the first word found, without a closure made at each call: the
+	-- Chat tab asked for every line of its history at every redraw.)
 	local rank
-	local function Counts(e)
-		if not e then return false end
-		rank = rank or Rank(name)
-		return Reaches(e, rank)
-	end
 	local e = Moderation.Character(name)
-	if Counts(e) then return e, e.name end
-	local linked = ns.Alts and ns.Alts.Linked and ns.Alts.Linked(name)
+	if e then
+		rank = Rank(name)
+		if Reaches(e, rank) then return e, e.name end
+	end
+	-- (1.2.3: his alts asked for only when he has any, Alts.Group: Alts.Linked makes a list each time.)
+	local A = ns.Alts
+	local linked = A and A.Linked and (type(A.Group) ~= "function" or A.Group(name) ~= nil) and A.Linked(name)
 	local own
-	for _, other in ipairs(type(linked) == "table" and linked or {}) do
+	for _, other in ipairs(type(linked) == "table" and linked or Moderation.NONE) do
 		e = Moderation.Character(other)
-		if Counts(e) then
-			if own == nil then own = OwnWord(ns.FullName(ns.Normal(name))) or false end
-			if not Overrides(own, e) then return e, other end
+		if e then
+			rank = rank or Rank(name)
+			if Reaches(e, rank) then
+				if own == nil then own = OwnWord(ns.FullName(ns.Normal(name))) or false end
+				if not Overrides(own, e) then return e, other end
+			end
 		end
 	end
 	return nil
@@ -369,17 +375,18 @@ function Moderation.Hides(sender, guild, look)
 	if e then return e, on end
 	if guild and not look then Moderation.NoteGuild(sender, guild) end
 	if Index().n.g == 0 then return nil end
-	local rank
-	local function Counts(w)
-		if not w then return false end
-		rank = rank or Rank(sender)
-		return Reaches(w, rank)
-	end
+	local rank -- (1.2.3: read once, at the first word found, as Moderation.Hidden)
 	e = Moderation.Guild(guild)
-	if Counts(e) then return e, guild end
+	if e then
+		rank = Rank(sender)
+		if Reaches(e, rank) then return e, guild end
+	end
 	local known = Moderation.GuildOf(sender)
 	e = known and Moderation.Guild(known)
-	if Counts(e) then return e, known end
+	if e then
+		rank = rank or Rank(sender)
+		if Reaches(e, rank) then return e, known end
+	end
 	return nil
 end
 

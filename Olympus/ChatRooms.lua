@@ -144,7 +144,26 @@ local function FederalTreasurer(name)
 	return T and T.TreasurerPin and T.TreasurerPin(name) == 1 or false
 end
 
+-- 1.2.3: while one listing of the rooms runs (Rooms.Listing: Rooms.Options, Rooms.Tabs, the Chat
+-- page's destinations), what every room's access check read again is read once for all of them: the
+-- federation's guilds (Guilds), a name's nominations across them (Correspondent), a name's rank in a
+-- guild (Rank) and each kind's rooms (Rooms.Options). Each department's, the treasurers', the masters'
+-- and the centurions' rooms read every guild of the census again, a dozen times a listing, and the
+-- Chat page listed them at every redraw.
+-- listing: { guilds, correspondent = { [name] = { any, [department] = true } }, rank = { [name] =
+-- { [guild] = rank or false } }, options = { [kind] = list } } while one runs, else nil.
+local listing
+function Rooms.Listing(fn, ...)
+	if listing then return fn(...) end
+	listing = { correspondent = {}, rank = {}, options = {} }
+	local ok, a, b = pcall(fn, ...)
+	listing = nil
+	if not ok then error(a, 0) end
+	return a, b
+end
+
 local function Guilds()
+	if listing and listing.guilds then return listing.guilds end
 	local out, seen = {}, {}
 	local function Add(guild)
 		if type(guild) == "string" and ns.IsFederation(guild) and not seen[Lower(guild)] then
@@ -155,6 +174,7 @@ local function Guilds()
 	if ns.KingGuildName then Add(ns.KingGuildName()) end
 	for guild in pairs(ns.rdb and ns.rdb.guilds or {}) do Add(guild) end
 	table.sort(out)
+	if listing then listing.guilds = out end
 	return out
 end
 
@@ -165,10 +185,20 @@ local function Rank(name, guild)
 	end
 	local D = ns.Data
 	if not (D and D.AuthorizedRank) then return nil end
+	-- (1.2.3: once a listing for each name and guild, Rooms.Listing: the masters' and the centurions'
+	-- rooms asked every guild of the census each, Data.AuthorizedRank counting its reports' votes.)
+	local known
+	if listing and guild ~= nil then
+		local who = tostring(name)
+		known = listing.rank[who]
+		if not known then known = {}; listing.rank[who] = known end
+		if known[guild] ~= nil then return known[guild] or nil end
+	end
 	-- Our own roster, the pinned King or the signed list; never the census (two characters could
 	-- otherwise invent a guild and vouch for each other into these rooms).
 	local rank, source = D.AuthorizedRank(ns.FullName(name), guild)
-	if source == "census" then return nil end
+	if source == "census" then rank = nil end
+	if known then known[guild] = rank or false end
 	return rank
 end
 
@@ -191,6 +221,25 @@ local function Nomination(name, guild)
 end
 
 local function Correspondent(name, department)
+	if listing then
+		-- (Every guild's nomination of this name read once a listing: the departments it names.)
+		local key = tostring(name)
+		local found = listing.correspondent[key]
+		if not found then
+			found = {}
+			for _, guild in ipairs(Guilds()) do
+				local role, dept = Nomination(name, guild)
+				if role == "correspondent" then
+					found.any = true
+					local d = DEPT_BY_NAME[Lower(dept)]
+					if d then found[d] = true end
+				end
+			end
+			listing.correspondent[key] = found
+		end
+		if department then return found[department] == true end
+		return found.any == true
+	end
 	for _, guild in ipairs(Guilds()) do
 		local role, dept = Nomination(name, guild)
 		if role == "correspondent" and (not department or DEPT_BY_NAME[Lower(dept)] == department) then return true end
@@ -347,6 +396,8 @@ local function RoleOptions()
 end
 
 function Rooms.Options(kind)
+	if not listing then return Rooms.Listing(Rooms.Options, kind) end
+	if kind ~= nil and listing.options[kind] then return listing.options[kind] end
 	local out = {}
 	-- 1.2.1: only our faction's races are offered (while the faction is unknown, all of them); every
 	-- class is, Forever's Alliance having Shamans too.
@@ -375,12 +426,14 @@ function Rooms.Options(kind)
 			end
 		end
 	end
+	if kind ~= nil then listing.options[kind] = out end -- (the same list for the rest of this listing: read only)
 	return out
 end
 
 -- The compact row's logical destinations after Olympus. Race/class remain unchosen until
 -- the player opens their dropdown: neither character API is consulted to pick one.
 function Rooms.Tabs()
+	if not listing then return Rooms.Listing(Rooms.Tabs) end
 	local out = { { kind = "guild", id = "guild", label = L.CHATROOM_GUILD or "Guild" } }
 	for _, kind in ipairs({ "race", "class" }) do
 		local id = Rooms.Selected(kind)
@@ -578,7 +631,9 @@ function Rooms.ReceiveGuild(text, sender)
 	return true
 end
 
-function Rooms.History(id)
+-- 1.2.3: memo (optional, the Chat tab's: ChatWindow.offMemo), line -> left out, as Channels.History
+-- keeps it: emptied by its caller whenever what it rests on may have changed (our guild, a word).
+function Rooms.History(id, memo)
 	if Rooms.PreviewOnly(id) then return {} end
 	local provider = ProviderFor(id)
 	if provider then
@@ -594,8 +649,13 @@ function Rooms.History(id)
 	if id ~= "guild" and not (M and M.Any and M.Any()) then return r.lines end
 	local out = {}
 	for _, e in ipairs(r.lines) do
-		if (id ~= "guild" or Same(e.guild, GetGuildInfo("player")))
-			and not (M and M.Hides and M.Hides(e.sender, e.guild)) then out[#out + 1] = e end
+		local off = memo and memo[e]
+		if off == nil then
+			off = not ((id ~= "guild" or Same(e.guild, GetGuildInfo("player")))
+				and not (M and M.Hides and M.Hides(e.sender, e.guild)))
+			if memo then memo[e] = off end
+		end
+		if not off then out[#out + 1] = e end
 	end
 	return out
 end

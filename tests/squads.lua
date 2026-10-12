@@ -2,7 +2,7 @@ local ns, test, eq = ...
 local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]squads%.lua$") or "./"
 local function World(fn)
 	local saved = { GetGuildInfo, IsInGuild, GetServerTime, GetTime, C_ChatInfo, StaticPopupDialogs }
-	local w = { guild = "Olympus II", now = 1800000000, fresh = true, jobs = {}, council = {}, ranks = {}, events = {} }
+	local w = { guild = "Olympus II", now = 1800000000, fresh = true, jobs = {}, council = {}, ranks = {}, events = {}, on = {} }
 	local ok, err = pcall(function()
 		GetGuildInfo = function() return w.guild end
 		IsInGuild = function() return w.guild ~= nil end
@@ -42,7 +42,7 @@ local function World(fn)
 		c.Nominees.IsCorrespondent = function() return false end
 		c.War.IsWarCouncillor = function() return false end
 		c.Fire = function(...) w.events[#w.events + 1] = { ... } end
-		c.On = function() end
+		c.On = function(event, f) w.on[event] = w.on[event] or {}; table.insert(w.on[event], f) end -- (heard by w.on)
 		c.Consent = {}; c.L = ns.L or setmetatable({}, { __index = function(_, key) return key end })
 		c.RealmPages = {}
 		c.ChatRooms.RegisterProvider = function(p) w.provider = p end
@@ -394,5 +394,139 @@ test("Squads: malformed saved chat lines and seen maps fail closed without overw
 			eq(s.ChatSend(room, "new"), false); eq(#s.ChatHistory(room), 0)
 			eq(s.ReceiveChat("WHISPER", "Soldier1-Realm", msg), false); eq(store.chats[room], bad)
 		end
+	end)
+end)
+-- 1.2.3 (the author's measure on his game: each redraw of the Chat tab made 2.5 MB of garbage, most of
+-- it here): ChatRooms asks every provider about every room id it is given, the Olympus channels',
+-- the race, class, guild and role rooms' too, a few hundred times a redraw of the tab's destinations,
+-- and each ask read the squads' leaders again (in the King's guild, the signed council list parsed
+-- and each councillor's name checked). An id that is not a squad's reads none; the Roles menu reads
+-- them once, and offers what each room's own checks (CanAccess, ChatInfo) say.
+test("Squads (1.2.3): a room id that is not a squad's reads no leaders; the Roles menu reads them once and offers what each room's own checks say", function()
+	World(function(w, s)
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		eq(s.Replace("OtherLeader", { "Soldier2", "Soldier3" }), true)
+		local room = s.Get("Leader").room
+		local reads, leaders = 0, s.Leaders
+		s.Leaders = function(...) reads = reads + 1; return leaders(...) end
+		local ok, err = pcall(function()
+			local p = w.provider
+			for _, id in ipairs({ "guild", "race:human", "class:WA", "council", "secretariat", "dept:war", "masters", "craft:d00r",
+				"arena:x", "squad", "A" }) do
+				eq(p.Info(id), nil, id); eq(p.CanAccess(id, "Leader"), false, id); eq(p.IsOpen(id), false, id); eq(p.Select(id), false, id)
+			end
+			eq(reads, 0, "no leaders read for another room's id")
+			eq(p.Info(room).id, room, "its own room still found")
+			assert(reads > 0, "(its own room reads them)")
+			for _, me in ipairs({ "Officer-Realm", "Leader-Realm", "OtherLeader-Realm", "Soldier1-Realm", "Soldier3-Realm", "Outsider-Realm" }) do
+				w.c.me = me
+				-- Each room's own checks, as the menu asked them before.
+				local want = {}
+				for _, e in ipairs(leaders()) do
+					if s.CanAccess(e.room) then
+						local info = s.ChatInfo(e.room)
+						want[#want + 1] = table.concat({ info.id, info.kind, info.scope, info.label }, " ")
+					end
+				end
+				reads = 0
+				local got = {}
+				for _, info in ipairs(p.Options("role")) do got[#got + 1] = table.concat({ info.id, info.kind, info.scope, info.label }, " ") end
+				eq(reads, 1, me .. ": the leaders read once")
+				eq(table.concat(got, ", "), table.concat(want, ", "), me .. ": the rooms offered")
+			end
+			w.c.me = "Leader-Realm"; w.preview = true
+			eq(#p.Options("role"), 0, "a preview offers none, as before")
+		end)
+		s.Leaders = leaders
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.3, the review of the Chat tab's eras: the census tells DATA_CHANGED every second or so on a
+-- busy realm (Data.NOTIFY_GAP; 891 census redraws in the author's 50 minutes), and WarSquads told
+-- SQUADS_CHANGED and CHAT_ROOMS_CHANGED at each of them whatever they changed. The Chat tab starts a
+-- new era at CHAT_ROOMS_CHANGED: on his game (the King's guild) it worked every line and room out
+-- again 0.2 s after each notice, never waiting for its DATA_GAP. They are told when what the squads'
+-- rooms rest on changed: our guild, our own place (in the roster, a preview, the chats on), a
+-- leader, his place in the list (his room's label); whenever nothing is told, what the Chat tab
+-- keeps for its era (the Roles menu, each room's description, ChatWindow.NavItems and .Logical) is
+-- still what it would read. The asks and the roster read anew as before.
+test("Squads (1.2.3): a census notice (DATA_CHANGED) tells SQUADS_CHANGED and CHAT_ROOMS_CHANGED only when what the squads' rooms rest on changed (a leader added, moved or gone, our own place: the roster, a preview, the chats locked, the guild), and what the Chat tab keeps for its era is right whenever it tells nothing; it still asks for rows and reads the roster anew", function()
+	World(function(w, s)
+		local p = w.provider
+		eq(#(w.on.DATA_CHANGED or {}), 1, "its listener")
+		eq(s.Replace("Leader", { "Soldier1", "Soldier2" }), true)
+		eq(s.Replace("OtherLeader", { "Soldier3" }), true)
+		-- What the Chat tab keeps for an era, and what its ticker asks: the Roles menu, and each
+		-- room's (every leader's seen so far) description, access and whether it is open.
+		local rooms, seenRoom = {}, {}
+		local function Kept()
+			for _, e in ipairs(s.Leaders()) do if not seenRoom[e.room] then seenRoom[e.room] = true; rooms[#rooms + 1] = e.room end end
+			local out = {}
+			for _, info in ipairs(p.Options("role")) do out[#out + 1] = "menu " .. info.id .. " " .. info.label end
+			for _, room in ipairs(rooms) do
+				local info = p.Info(room)
+				out[#out + 1] = table.concat({ room, info and info.label or "none", tostring(p.CanAccess(room)), tostring(p.IsOpen(room)) }, " ")
+			end
+			return table.concat(out, "; ")
+		end
+		local last = Kept()
+		local function Notice(what)
+			w.events = {}
+			for _, f in ipairs(w.on.DATA_CHANGED) do f() end
+			local told = {}
+			for _, e in ipairs(w.events) do told[#told + 1] = e[1] end
+			local now = Kept()
+			if #told == 0 then eq(now, last, what .. ": what the Chat tab keeps") end
+			last = now
+			return table.concat(told, " ")
+		end
+		local BOTH = "SQUADS_CHANGED CHAT_ROOMS_CHANGED"
+		local jobs = #w.jobs
+		eq(Notice("its own rows"), "", "nothing changed since its own rows (told as they were made)")
+		eq(#w.jobs, jobs + 1, "the ask still made"); eq(w.jobs[#w.jobs].msg, "WU~1~Q")
+		eq(Notice("again"), "", "nor at the next")
+		-- The roster read anew at each notice (a name changed in place, found through its index).
+		eq(s.Get("leader").name, "Leader-Realm", "(the index made)")
+		w.c.Roster.byName["Newcomer-Realm"] = {}; w.ranks["Newcomer-Realm"] = 9
+		eq(Notice("a member more"), "", "a member more, no room changed")
+		eq(s.Assign("Leader", "newcomer"), true, "the roster read anew")
+		eq(Notice("an assignment"), "", "his assignment told as it was made")
+		-- A soldier of the Leader's squad looks.
+		w.c.me = "Soldier1-Realm"
+		eq(Notice("another of us"), BOTH, "our own place"); eq(Notice("again"), "")
+		assert(last:find("menu " .. s.Get("Leader").room, 1, true), "his squad's room in his Roles menu")
+		-- Another soldier gone from the guild: nothing the tab keeps changed; his access goes at once.
+		w.c.Roster.byName["Soldier2-Realm"] = nil
+		eq(Notice("a soldier gone"), "", "a soldier gone"); eq(s.Get("Leader").count, 2)
+		eq(p.CanAccess(s.Get("Leader").room, "Soldier2-Realm"), false, "his access, asked at each look")
+		-- Our own name gone from the roster, and back.
+		w.c.Roster.byName["Soldier1-Realm"] = nil; eq(Notice("we left"), BOTH, "we left the roster")
+		w.c.Roster.byName["Soldier1-Realm"] = {}; eq(Notice("back"), BOTH, "back in it"); eq(Notice("again"), "")
+		-- A leader added, the leaders' order (each room's label, Squad %d), a leader gone.
+		table.insert(w.list.entries, { name = "Soldier50-Realm", role = "centurion" })
+		eq(Notice("a leader added"), BOTH, "a leader added"); eq(#s.Leaders(), 3); eq(Notice("again"), "")
+		w.list.entries[1], w.list.entries[2] = w.list.entries[2], w.list.entries[1]
+		eq(Notice("the order"), BOTH, "the leaders' order"); eq(Notice("again"), "")
+		table.remove(w.list.entries)
+		eq(Notice("a leader gone"), BOTH, "a leader gone"); eq(#s.Leaders(), 2); eq(Notice("again"), "")
+		-- Our own place: a preview, the chats locked, out of the guild and back.
+		w.preview = true; eq(Notice("a preview"), BOTH, "a preview"); w.preview = false; eq(Notice("over"), BOTH, "the preview over")
+		w.locked = true; eq(Notice("locked"), BOTH, "the chats locked"); w.locked = false; eq(Notice("unlocked"), BOTH, "unlocked")
+		w.guild = nil; eq(Notice("out"), BOTH, "out of the guild"); eq(Notice("still out"), "", "nothing more while out")
+		w.guild = "Olympus II"; eq(Notice("in"), BOTH, "back in it"); eq(Notice("again"), "")
+		-- What a notice reads, every second or so: the leaders once, each one's name folded once
+		-- (his room found by the names as they were given).
+		local reads, folds, leaders, fold = 0, 0, s.Leaders, w.c.Fold
+		local count = #leaders(); eq(count, 2)
+		s.Leaders = function(...) reads = reads + 1; return leaders(...) end
+		w.c.Fold = function(x) folds = folds + 1; return fold(x) end
+		local ok, err = pcall(function()
+			for _, f in ipairs(w.on.DATA_CHANGED) do f() end
+			eq(reads, 1, "the leaders read once")
+			eq(folds, count, "a fold for each leader")
+		end)
+		s.Leaders, w.c.Fold = leaders, fold
+		if not ok then error(err, 0) end
 	end)
 end)

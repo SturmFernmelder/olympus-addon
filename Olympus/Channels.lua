@@ -905,7 +905,10 @@ end
 
 -- The lines of a channel we may read (for a future Channels view, with CHAT_CHANGED). None
 -- while the chats are off on this client (1.1): lines kept before that don't show either.
-function Channels.History(tier)
+-- 1.2.3: memo (optional, the Chat tab's: ChatWindow.offMemo), line -> left out, as this caller asked
+-- last; the caller empties it whenever what a moderator's word rests on may have changed (its era).
+-- A line already asked about is not asked again: each redraw of a busy channel asked about them all.
+function Channels.History(tier, memo)
 	if not Channels.CanUse(tier) or not Channels.ChatOn() then return {} end
 	local list = Store(tier)
 	-- 1.1: lines kept before the moderators took their writer off leave the view too (net-off).
@@ -913,7 +916,12 @@ function Channels.History(tier)
 	if not (M.Any and M.Any()) then return list end
 	local out = {}
 	for _, e in ipairs(list) do
-		if not M.Hides(e.sender, e.guild) then out[#out + 1] = e end
+		local off = memo and memo[e]
+		if off == nil then
+			off = M.Hides(e.sender, e.guild) and true or false
+			if memo then memo[e] = off end
+		end
+		if not off then out[#out + 1] = e end
 	end
 	return out
 end
