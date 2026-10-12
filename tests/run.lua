@@ -11443,6 +11443,70 @@ test("1.0.0 the King's layer goes with his crown: at once when he shows it, agai
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.3 (the King's stream: logged in after the update with his crown on from the last session,
+-- "location already allowed", the army could not ask for his layer until he hid his crown and
+-- showed it again). The creature read that announces a new layer came before the game named his
+-- guild: not the King yet for the addon, nothing went out, and the next announcement was the
+-- minute's ticker, a minute or two after login. King.lua's login tickers loaded as the game runs
+-- them (its "king location" one called here as its timer would).
+test("1.2.3 the King's crown on at login: his layer goes out at his first location tick as the King, once; not with his crown hidden, nor in an instance", function()
+	local savedPos, savedInstance, savedPopups = C_Map.GetPlayerMapPosition, IsInInstance, {}
+	for k, v in pairs(StaticPopupDialogs) do savedPopups[k] = v end
+	local ok, err = pcall(function()
+		WithLayerWatch(function(w)
+			C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end
+			-- King.lua as the game loads it, its LOGIN handler's timers kept by name.
+			local timers, loginFns = {}, {}
+			local kns = setmetatable({
+				On = function(n, f) if n == "LOGIN" then loginFns[#loginFns + 1] = f end end,
+				Every = function(_, what, f) timers[what] = f return { Cancel = function() end } end,
+				After = function() end,
+				Comm = setmetatable({ Handle = function() end }, { __index = ns.Comm }),
+			}, { __index = ns })
+			assert(loadfile(ADDON_DIR .. "King.lua"))("Olympus", kns)
+			ns.King.Reset()
+			ns.me = ns.KingCharacter() .. "-Realm"
+			ns.db.throneLocation = true -- (his crown on from the last session)
+			GetGuildInfo = function() return nil end -- (the login: the game has not named his guild yet)
+			for _, f in ipairs(loginFns) do f() end
+			local tick = assert(timers["king location"], "the King's location ticker")
+			w.observe() -- (a creature's nameplate as he enters the world)
+			eq(w.layers(), 0, "not the King yet for the addon: nothing goes out")
+			tick()
+			eq(w.layers(), 0)
+			-- His guild known: his first tick as the King sends his layer, as Show me on the map does.
+			GetGuildInfo = function() return "Olympus", "King", 0 end
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "his layer, at his first tick as the King")
+			eq(w.sent[#w.sent], ("CHANNEL L1~1453~%d~0~Olympus"):format(w.npc))
+			local crowns = 0
+			for _, m in ipairs(w.sent) do if m:find("^CHANNEL T1~P~") then crowns = crowns + 1 end end
+			eq(crowns, 1, "and his crown")
+			for _ = 1, 3 do w.clock = w.clock + ns.King.LOCATION_EVERY; tick() end
+			eq(w.layers(), 1, "once: then the minute's announcement, as before")
+			-- His crown hidden: nothing from the tick (a new layer read, none sent yet this session).
+			ns.db.throneLocation = nil
+			w.observe()
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "his crown hidden: his layer stays home")
+			-- Shown again in an instance: nothing either.
+			ns.db.throneLocation = true
+			IsInInstance = function() return true end
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "in an instance: nothing")
+		end)
+	end)
+	C_Map.GetPlayerMapPosition, IsInInstance = savedPos, savedInstance
+	wipe(StaticPopupDialogs)
+	for k, v in pairs(savedPopups) do StaticPopupDialogs[k] = v end
+	ns.db.throneLocation = nil
+	ns.King.Reset()
+	if not ok then error(err, 0) end
+end)
+
 -- 1.0.0: with the King's layer unknown the line said "his addon announces it when he targets an
 -- NPC, try again in a minute", whatever the reason. While his crown is hidden (the default: his
 -- position is on stream) his layer is never announced, and a player on another realm never
