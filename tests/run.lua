@@ -31168,7 +31168,10 @@ do
 				s.clock = s.clock + 61
 				Logged(STEWARD, "ROYAL", "Olympus Zeus")
 				eq(#cns.Decree.Active(), 7)
-				-- Nobody else: a namesake on another realm group, a councillor.
+				-- Nobody else: a namesake on another realm group, a councillor the titles list names
+				-- (1.2.3: the High Council's own Royal decrees go by the signed name list, which
+				-- names nobody here; tested with the guild masters' decrees).
+				eq(ns.IsHighCouncillor("Test Councillor-Realm"), false, "no signed name list here")
 				Logged("Test Steward-OtherRealm", "ROYAL", "Olympus")
 				Logged("Test Councillor-Realm", "ROYAL", "Olympus")
 				eq(#cns.Decree.Active(), 7)
@@ -31396,6 +31399,334 @@ do
 		for _, key in ipairs({ "TREASURER_SHARE_ASK", "TREASURER_SHARE_ON", "TREASURY_YOU_AND_KING", "TREASURY_YOU_AND_KING_BUT", "TREASURY_DETAIL_TREASURER", "TREASURY_HOW", "HANDS_NOTE" }) do
 			Says(rawget(pt.L, key), "Senescal")
 		end
+	end)
+
+	---------------------------------------------------------------------------
+	-- 1.2.3: the guild master of another Olympus guild sent the whole realm "Olympus: ROYAL DECREE
+	-- Ironforge - Summon me". ns.IsCrownRank counts every guild master (rank 0 of any Olympus
+	-- guild), and the Royal decree and the Tabard inspection took it for the Crown, on his client
+	-- (ns.IsCrown) and on everyone's. Now the whole army's come from the King, his Steward and his
+	-- Hands, the High Council and the King's guild's own Crown alone; another guild's master sends
+	-- his over GUILD, his own guild's members' clients show it as a guild decree, and every client
+	-- refuses one of his on the channel, a 1.2.2 client's among them. Names are made up; the
+	-- King's is read from ns.KingCharacter(). (Scene: a receiver in <Olympus II>, Member1 its
+	-- master and Member2 to Member6 its officers in its roster.)
+	---------------------------------------------------------------------------
+
+	-- <Olympus Zeus> as two of its members report it: Zed its master, Zeta its officer.
+	local function ZeusCensus()
+		for _, rep in ipairs({ "Zedrep1-Realm", "Zedrep2-Realm" }) do eq(D.Receive(R("Olympus Zeus", "Zed", "Zeta:1:0"), rep), true) end
+		eq(D.KnownRank("Zed-Realm", "Olympus Zeus"), 0, "the census names Zed the master of <Olympus Zeus>")
+	end
+	-- What Decree.lua logs on that client, as text.
+	local function DecreeLogs(cns)
+		local logs = {}
+		cns.Log = function(fmt, ...) logs[#logs + 1] = fmt:format(...) end
+		return function(text)
+			for _, l in ipairs(logs) do if l:find(text, 1, true) then return true end end
+			return false, table.concat(logs, "\n")
+		end
+	end
+
+	test("1.2.3 decrees: another Olympus guild's master's Royal decree and Tabard inspection on the channel (a 1.2.2 client's) are refused and logged on every client, his own guild's too; his Calls to Arms still reach the army", function()
+		Scene(3, function(s)
+			ZeusCensus()
+			local cns, _, Logged = DecreeClient(s)
+			local Logs = DecreeLogs(cns)
+			-- As 1.2.2 sends it: the channel, rank 0 written in it.
+			Logged("Zed-Realm", "ROYAL", "Olympus Zeus", "Ironforge - Summon me")
+			eq(#cns.Decree.Active(), 0, "no Royal decree for the whole army from another guild's master")
+			eq(#s.warnings, 0, "no raid warning")
+			assert(Logs("ROYAL from Zed-Realm <Olympus Zeus> refused"))
+			s.clock = s.clock + 61
+			Logged("Zed-Realm", "HERALDRY", "Olympus Zeus", "")
+			eq(#cns.Decree.Active(), 0, "nor a Tabard inspection")
+			assert(Logs("HERALDRY from Zed-Realm <Olympus Zeus> refused"))
+			-- Our own guild's master, whom our roster names (the server's word): not on the channel either.
+			Logged("Member1-Realm", "ROYAL", "Olympus II", "to everyone")
+			eq(#cns.Decree.Active(), 0, "nor our own guild master's")
+			assert(Logs("ROYAL from Member1-Realm <Olympus II> refused"))
+			-- His Call to Arms and his Muster are the army's, as before.
+			s.clock = s.clock + 61
+			Logged("Zed-Realm", "ARMS", "Olympus Zeus", "Horde at the farm")
+			eq(#cns.Decree.Active(), 1, "his Call to Arms"); eq(cns.Decree.Active()[1].kind, "ARMS")
+			Logged("Member1-Realm", "MUSTER", "Olympus II", "at the bridge")
+			eq(#cns.Decree.Active(), 2, "our master's Muster"); eq(cns.Decree.Active()[1].kind, "MUSTER")
+			for _, w in ipairs(s.warnings) do assert(not w:find(ns.L.ROYAL, 1, true), w) end
+		end)
+		-- On his own guild's clients (Zed's guildmates: their roster names him its master): refused too.
+		Scene(3, function(s)
+			GetGuildInfo = function() return "Olympus Zeus", "rank", 3 end
+			local savedNum, savedInfo = GetNumGuildMembers, GetGuildRosterInfo
+			GetNumGuildMembers = function() return 2, 2 end
+			GetGuildRosterInfo = function(i)
+				local r = ({ { "Zed-Realm", 0 }, { "Tester-Realm", 3 } })[i]
+				return r[1], "rank", r[2], 60, "class", "Stormwind City", "", "", true, 0, "WARRIOR"
+			end
+			local ok, err = pcall(function()
+				ns.Roster.Scan()
+				eq(ns.Roster.RankOf("Zed-Realm"), 0)
+				local cns, _, Logged = DecreeClient(s)
+				local Logs = DecreeLogs(cns)
+				Logged("Zed-Realm", "ROYAL", "Olympus Zeus", "Ironforge - Summon me")
+				eq(#cns.Decree.Active(), 0, "not on the channel, even for his own guildmates")
+				assert(Logs("ROYAL from Zed-Realm <Olympus Zeus> refused"))
+			end)
+			GetNumGuildMembers, GetGuildRosterInfo = savedNum, savedInfo
+			GetGuildInfo = function() return "Olympus II", "rank", 3 end
+			ns.Roster.Scan() -- (the roster as Scene read it)
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.3 decrees: a guild master's Royal decree and Tabard inspection over GUILD show on his own guild's clients alone, as guild decrees, never royal ones", function()
+		Scene(3, function(s)
+			ZeusCensus()
+			local cns, _, _, _, DeliverLogged = DecreeClient(s)
+			local Logs = DecreeLogs(cns)
+			local function Guild(sender, kind, guild, text)
+				DeliverLogged("GUILD", sender, Codec.EncodeDecree(kind, 1453, 0.5, 0.5, guild, 0, text or "x"))
+			end
+			local printed = {}
+			ns.Print = function(msg) printed[#printed + 1] = msg end
+			Guild("Member1-Realm", "ROYAL", "Olympus II", "Ironforge - Summon me")
+			local d = cns.Decree.Active()[1]
+			assert(d, "our guild master's guild decree is shown")
+			eq(d.kind, "ROYAL"); eq(d.scope, "guild"); eq(d.text, "Ironforge - Summon me"); eq(d.sender, "Member1")
+			eq(cns.Decree.Label(d), ns.L.GUILD_DECREE)
+			eq(#s.warnings, 1, "its raid warning")
+			assert(s.warnings[1]:find(ns.L.GUILD_DECREE, 1, true) and s.warnings[1]:find("Ironforge - Summon me", 1, true), s.warnings[1])
+			assert(not s.warnings[1]:find(ns.L.ROYAL, 1, true), "never a royal decree")
+			assert(printed[#printed]:find(ns.L.GUILD_DECREE, 1, true) and not printed[#printed]:find(ns.L.ROYAL, 1, true), printed[#printed])
+			s.clock = s.clock + 61
+			Guild("Member1-Realm", "HERALDRY", "Olympus II", "")
+			eq(cns.Decree.Active()[1].kind, "HERALDRY"); eq(cns.Decree.Active()[1].scope, "guild")
+			eq(cns.Decree.Label(cns.Decree.Active()[1]), ns.L.GUILD_HERALDRY_CALL)
+			-- Nothing else over GUILD: an officer's (not our master), one naming another guild, a Call
+			-- to Arms (the army's go on the channel), a stranger to our roster.
+			s.clock = s.clock + 61
+			Guild("Member2-Realm", "ROYAL", "Olympus II", "an officer's")
+			assert(Logs("guild decree ROYAL from Member2-Realm ignored: not our guild master in our roster"))
+			Guild("Member1-Realm", "ROYAL", "Olympus Zeus", "for another guild")
+			assert(Logs("it names <Olympus Zeus>, not our guild"))
+			Guild("Member1-Realm", "ARMS", "Olympus II", "over GUILD")
+			assert(Logs("guild decree ARMS from Member1-Realm ignored: over GUILD only a Royal decree or a Tabard inspection"))
+			Guild("Zed-Realm", "ROYAL", "Olympus II", "not one of us")
+			assert(Logs("guild decree ROYAL from Zed-Realm ignored: not our guild master in our roster"))
+			eq(#cns.Decree.Active(), 2, "none of them")
+		end)
+	end)
+
+	test("1.2.3 decrees: another Olympus guild's master sends his Royal decree and Tabard inspection to his own guild alone (GUILD), as guild decrees; his Calls to Arms, the High Council's and the King's guild's Crown's decrees still go to the whole army", function()
+		local saved = { guild = GetGuildInfo, me = ns.me, map = C_Map.GetBestMapForUnit, pos = C_Map.GetPlayerMapPosition,
+			print = ns.Print, alert = ns.PlayAlert, notice = RaidNotice_AddMessage, council = ns.rdb.council }
+		local ok, err = pcall(function()
+			C_Map.GetBestMapForUnit = function() return 1453 end
+			C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end
+			local printed = {}
+			ns.Print, ns.PlayAlert, RaidNotice_AddMessage = function(msg) printed[#printed + 1] = msg end, function() end, nil
+			ns.rdb.council = nil
+			-- A client of its own (its own cooldown), what it sends kept.
+			local function Client(guild, rank, me)
+				GetGuildInfo = function() return guild, "rank", rank end
+				ns.me = me
+				local cns = FreshComm()
+				cns.Comm.loginAt = cns.clock - 1000
+				assert(loadfile(ADDON_DIR .. "Decree.lua"))("Olympus", cns)
+				local sent = {}
+				cns.Comm.Send = function(dist, msg, key, urgent, logged) sent[#sent + 1] = { dist = dist, msg = msg, logged = logged } end
+				return cns, sent
+			end
+			-- Zed, the master of <Olympus Zeus>.
+			local cns, sent = Client("Olympus Zeus", 0, "Zed-Realm")
+			local Dc = cns.Decree
+			eq(Dc.CanSend("ROYAL"), true, "he still decrees, for his guild")
+			Dc.Send("ROYAL", "Ironforge - Summon me")
+			eq(#sent, 1)
+			eq(sent[1].dist, "GUILD", "to his guild alone, never the channel"); eq(sent[1].logged, true, "logged, as every decree")
+			local d = Codec.DecodeDecree(sent[1].msg)
+			eq(d.kind, "ROYAL"); eq(d.guild, "Olympus Zeus"); eq(d.text, "Ironforge - Summon me")
+			eq(Dc.Active()[1].scope, "guild"); eq(Dc.Label(Dc.Active()[1]), ns.L.GUILD_DECREE, "a guild decree on his own screen too")
+			assert(printed[#printed]:find(ns.L.GUILD_DECREE, 1, true) and not printed[#printed]:find(ns.L.ROYAL, 1, true), printed[#printed])
+			eq(Dc.Scope("ROYAL"), "guild"); eq(Dc.Scope("HERALDRY"), "guild"); eq(Dc.Scope("ARMS"), "army"); eq(Dc.Scope("MUSTER"), "army")
+			cns.clock = cns.clock + 61
+			Dc.Send("HERALDRY", "")
+			eq(#sent, 2); eq(sent[2].dist, "GUILD"); eq(Dc.Label(Dc.Active()[1]), ns.L.GUILD_HERALDRY_CALL)
+			cns.clock = cns.clock + 61
+			Dc.Send("ARMS", "Horde at the farm")
+			eq(#sent, 3); eq(sent[3].dist, "CHANNEL", "his Call to Arms: the army's, as before")
+			-- His officer: a preview only, and the reason.
+			cns, sent = Client("Olympus Zeus", 1, "Zeta-Realm")
+			eq(cns.Decree.Scope("ROYAL"), nil); eq(cns.Decree.CanSend("ROYAL"), false); eq(cns.Decree.Scope("ARMS"), "army")
+			cns.Decree.Send("ROYAL", "x")
+			eq(#sent, 0); eq(printed[#printed], ns.L.CROWN_ONLY)
+			-- The King's guild's own Crown, on its own client: the whole army, as before.
+			for _, rank in ipairs({ 0, 1 }) do
+				cns, sent = Client("Olympus", rank, "Baron-Realm")
+				eq(cns.Decree.Scope("ROYAL"), "army", "the King's guild's rank " .. rank)
+				cns.Decree.Send("ROYAL", "the Crown's")
+				eq(sent[1] and sent[1].dist, "CHANNEL")
+			end
+			-- Its members below its officers: none.
+			cns = Client("Olympus", 3, "Page-Realm")
+			eq(cns.Decree.Scope("ROYAL"), nil)
+			-- A High Councillor (the signed list), whatever his guild and rank: the whole army.
+			ns.rdb.council = { names = { ["test councillor"] = true } }
+			cns, sent = Client("Olympus Zeus", 3, "Test Councillor-Realm")
+			eq(cns.Decree.Scope("ROYAL"), "army"); eq(cns.Decree.Scope("HERALDRY"), "army")
+			eq(cns.Decree.Scope("ARMS"), nil, "Calls to Arms stay the Captains'")
+			cns.Decree.Send("HERALDRY", "")
+			eq(sent[1] and sent[1].dist, "CHANNEL"); eq(cns.Decree.Active()[1].scope, nil)
+			eq(cns.Decree.Label(cns.Decree.Active()[1]), ns.L.HERALDRY_CALL)
+			-- A councillor who is also a guild master: the council's, the whole army.
+			cns, sent = Client("Olympus Zeus", 0, "Test Councillor-Realm")
+			eq(cns.Decree.Scope("ROYAL"), "army")
+		end)
+		GetGuildInfo, ns.me, C_Map.GetBestMapForUnit, C_Map.GetPlayerMapPosition = saved.guild, saved.me, saved.map, saved.pos
+		ns.Print, ns.PlayAlert, RaidNotice_AddMessage, ns.rdb.council, C_ChatInfo = saved.print, saved.alert, saved.notice, saved.council, nil
+		if not ok then error(err, 0) end
+	end)
+
+	test("1.2.3 decrees: the King's, his Steward's and a High Councillor's Royal decrees and Tabard inspections still reach every client, <Olympus>'s own too, past the flood guard", function()
+		local savedCouncil = ns.rdb.council
+		local ok, err = pcall(function()
+			WithStewardList(STEWARD_A, function()
+				ns.rdb.council = { names = { ["test councillor"] = true } }
+				for _, home in ipairs({ { "Olympus II", 3 }, { "Olympus", 1 } }) do
+					Scene(home[2], function(s)
+						GetGuildInfo = function() return home[1], "rank", home[2] end
+						ns.Roster.Scan()
+						local cns, Decree, Logged = DecreeClient(s)
+						Flood(s, Decree, home[1] == "Olympus" and "Floodk" or "Floodm")
+						local before = #cns.Decree.Active()
+						s.clock = s.clock + 1
+						Logged(ns.KingCharacter() .. "-Realm", "ROYAL", "Olympus", "the King's")
+						Logged(STEWARD, "HERALDRY", "Olympus", "")
+						-- The councillor: no census of him or of his guild (his signed name alone).
+						eq(D.KnownRank("Test Councillor-Realm", "Olympus Zeus"), nil)
+						Logged("Test Councillor-Realm", "ROYAL", "Olympus Zeus", "the council's")
+						local got = {}
+						for i = 1, #cns.Decree.Active() - before do
+							local d = cns.Decree.Active()[i]
+							got[#got + 1] = d.kind .. " " .. d.sender .. " " .. tostring(d.scope) .. " " .. cns.Decree.Label(d)
+						end
+						eq(table.concat(got, ", "), table.concat({ "ROYAL Test Councillor nil " .. ns.L.ROYAL, "HERALDRY Test Steward nil " .. ns.L.HERALDRY_CALL,
+							"ROYAL " .. ns.KingCharacter() .. " nil " .. ns.L.ROYAL }, ", "), "on " .. home[1] .. "'s client")
+						s.clock = s.clock + 61
+						Logged("Test Councillor-Realm", "HERALDRY", "Olympus Zeus", "")
+						eq(cns.Decree.Active()[1].kind, "HERALDRY"); eq(cns.Decree.Active()[1].sender, "Test Councillor")
+						-- His Call to Arms still needs a rank this client verifies, as anyone's.
+						s.clock = s.clock + 61
+						local count = #cns.Decree.Active()
+						Logged("Test Councillor-Realm", "ARMS", "Olympus Zeus", "x")
+						eq(#cns.Decree.Active(), count, "no Call to Arms on the council's word")
+						-- A name the signed list lacks: refused, as another guild's master's is.
+						Logged("Test Counsellor-Realm", "ROYAL", "Olympus Zeus", "x")
+						eq(#cns.Decree.Active(), count)
+					end)
+				end
+			end)
+		end)
+		ns.rdb.council = savedCouncil
+		if not ok then error(err, 0) end
+	end)
+
+	test("1.2.3 decrees: the Decrees tab, its buttons, the Tabards' button and /oly decrees say what each player's decrees reach (English and pt-BR)", function()
+		local L = ns.L
+		local saved = { council = ns.rdb.council, me = ns.me, dialog = ns.ShowDialog, preview = ns.Decree.Preview, print = ns.Print }
+		local letGo
+		local ok, err = pcall(function()
+			WithStewardList(nil, function()
+				WithUI(function()
+					ns.me = "Tester-Realm"
+					ns.rdb.council = nil
+					local dialogs, previews, printed = {}, {}, {}
+					ns.ShowDialog = function(which, a, b, data) dialogs[#dialogs + 1] = { which = which, a = a, data = data } end
+					ns.Decree.Preview = function(kind) previews[#previews + 1] = kind end
+					ns.Print = function(msg) printed[#printed + 1] = msg end
+					local UI, uns = LoadUI()
+					local W, done = Harness.LoadWatch(uns)
+					letGo = done
+					UI.Toggle()
+					local main = OlympusFrame
+					local function As(guild, rank)
+						GetGuildInfo = function() return guild, "rank", rank end
+						UI.SelectTab("decrees")
+						UI.Refresh()
+						local b
+						for _, x in ipairs(main.buttons) do if x:IsShown() then b = x end end
+						return b
+					end
+					local function Detail() return select(3, ns.Views.Build("decrees")) end
+					-- The master of <Olympus II>: a guild decree, for his guild alone.
+					local b = As("Olympus II", 0)
+					eq(b:GetText(), L.GUILD_DECREE_BTN, "the third button: his guild decree")
+					b:Fire("OnEnter")
+					eq(GameTooltip.lines[1], L.GUILD_DECREE_BTN); eq(GameTooltip.lines[2], L.GUILD_DECREE_BTN_TIP:format("Olympus II"))
+					b:Click()
+					eq(#dialogs, 1); eq(dialogs[1].which, "OLYMPUS_DECREE"); eq(dialogs[1].data, "ROYAL")
+					eq(dialogs[1].a, L.GUILD_DECREE_ASK:format(L.GUILD_DECREE, "Olympus II"), "the send box says it reaches his guild alone")
+					eq(Detail(), L.YOU_ARE_GUILD_LORD:format("Olympus II"))
+					-- The Watch's Tabards: his Tabard inspection, his guild's alone too.
+					W.Show("tabards")
+					for _, tab in ipairs(main.tabs) do if tab.key == "watch" then tab:Click() end end
+					eq(UI.PageId(), "watch/tabards")
+					local call
+					for _, x in ipairs(main.detailButtons) do if x:IsShown() and x:GetText() == L.GUILD_HERALDRY_BTN then call = x end end
+					assert(call, "the Tabards' call: his guild inspection")
+					call:Fire("OnEnter")
+					eq(GameTooltip.lines[1], L.GUILD_HERALDRY_BTN); eq(GameTooltip.lines[2], L.GUILD_HERALDRY_BTN_TIP:format("Olympus II"))
+					call:Click()
+					eq(#dialogs, 2); eq(dialogs[2].data, "HERALDRY")
+					eq(dialogs[2].a, L.GUILD_DECREE_ASK:format(L.GUILD_HERALDRY_CALL, "Olympus II"))
+					SlashCmdList.OLYMPUS("decrees")
+					eq(main.tab, "decrees"); eq(printed[#printed], L.YOU_ARE_GUILD_LORD:format("Olympus II"), "/oly decrees says it")
+					-- His officer: the Royal decree's button, its tip says who sends it and that this is a preview.
+					b = As("Olympus II", 1)
+					eq(b:GetText(), L.ROYAL_BTN)
+					b:Fire("OnEnter")
+					eq(GameTooltip.lines[2], L.ROYAL_BTN_TIP .. "\n" .. L.CROWN_PREVIEW_NOTE)
+					b:Click()
+					eq(#dialogs, 2, "no send box"); eq(previews[#previews], "ROYAL"); eq(printed[#printed], L.CROWN_PREVIEW_NOTE)
+					eq(Detail(), L.YOU_ARE_OFFICER)
+					eq(As("Olympus II", 3):GetText(), L.ROYAL_BTN); eq(Detail(), L.YOU_ARE_SOLDIER)
+					-- The King's guild's officer: the whole army's.
+					b = As("Olympus", 1)
+					eq(b:GetText(), L.ROYAL_BTN)
+					b:Fire("OnEnter")
+					eq(GameTooltip.lines[2], L.ROYAL_BTN_TIP)
+					b:Click()
+					eq(#dialogs, 3); eq(dialogs[3].a, L.ROYAL)
+					eq(Detail(), L.YOU_ARE_CROWN)
+					-- A High Councillor: the whole army's Royal decrees and Tabard inspections.
+					ns.rdb.council = { names = { ["tester"] = true } }
+					eq(As("Olympus II", 3):GetText(), L.ROYAL_BTN); eq(Detail(), L.YOU_ARE_COUNCIL_DECREES)
+					eq(ns.Decree.ButtonTip("HERALDRY"), L.HERALDRY_BTN_TIP)
+					-- How decrees work: the Crown's two say a guild master's reach his guild.
+					local help = {}
+					for _, l in ipairs(ns.Views.Build("decrees")) do help[#help + 1] = tostring(l.text) end
+					assert(table.concat(help, "\n"):find(L.WHO_CROWN, 1, true), "the help names who")
+				end)
+			end)
+			-- The same in pt-BR; and no line of the old rule's (guild masters as the Crown) is left.
+			local pt = { L = setmetatable({}, { __index = ns.L }) }
+			local savedLocale = GetLocale
+			GetLocale = function() return "ptBR" end
+			local okPt, errPt = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
+			GetLocale = savedLocale
+			if not okPt then error(errPt, 0) end
+			for _, key in ipairs({ "GUILD_DECREE", "GUILD_DECREE_BTN", "GUILD_HERALDRY_CALL", "GUILD_HERALDRY_BTN", "GUILD_DECREE_ASK",
+				"GUILD_DECREE_BTN_TIP", "GUILD_HERALDRY_BTN_TIP", "YOU_ARE_GUILD_LORD", "YOU_ARE_COUNCIL_DECREES", "HELP_GUILD_DECREE_NAME",
+				"HELP_GUILD_HERALDRY_NAME", "CROWN_ONLY", "CROWN_PREVIEW_NOTE", "WHO_CROWN" }) do
+				local v = rawget(pt.L, key)
+				assert(type(v) == "string" and v ~= L[key], key .. " in pt-BR")
+			end
+			eq(rawget(pt.L, "GUILD_DECREE"), "DECRETO DA GUILDA")
+			assert(not L.CROWN_ONLY:find("guild masters and", 1, true) and not rawget(pt.L, "CROWN_ONLY"):find("líderes das guildas", 1, true), "the Crown is no longer every guild master")
+		end)
+		ns.rdb.council, ns.me, ns.ShowDialog, ns.Decree.Preview, ns.Print = saved.council, saved.me, saved.dialog, saved.preview, saved.print
+		if letGo then letGo() end
+		if not ok then error(err, 0) end
 	end)
 end
 

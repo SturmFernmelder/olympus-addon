@@ -131,15 +131,27 @@ UI.personRows = {}
 -- the card then shows "Edit my profile", which calls it (ProfileEdit.lua's Edit in this window).
 UI.profileEditors = {}
 
+-- (1.2.3) The send box names where it goes: a guild master's Royal decree or Tabard inspection,
+-- his own guild alone (Decree.Ask).
 local function DecreeAction(kind)
 	return function()
 		if ns.Decree.CanSend(kind) then
-			ns.ShowDialog("OLYMPUS_DECREE", ns.Decree.Label({ kind = kind }), nil, kind)
+			ns.ShowDialog("OLYMPUS_DECREE", ns.Decree.Ask(kind), nil, kind)
 		else
 			ns.Print(ns.Decree.CROWN_ONLY[kind] and L.CROWN_PREVIEW_NOTE or L.DECREE_PREVIEW_NOTE)
 			ns.Decree.Preview(kind)
 		end
 	end
+end
+-- (1.2.3) A Royal decree's or a Tabard inspection's button says what this player's does: its
+-- name (a guild master's: the guild decree's) and whom it reaches, or that a click is a preview.
+local function CrownButton(key, kind)
+	return { key, DecreeAction(kind),
+		label = function() return ns.Decree.ButtonLabel(kind) end,
+		tooltip = function(tt)
+			tt:AddLine(ns.Decree.ButtonLabel(kind), 1, 0.82, 0)
+			tt:AddLine(ns.Decree.ButtonTip(kind), 1, 1, 1, true)
+		end }
 end
 
 -- Three buttons per tab, like "Guild Information / Add Member / Guild Control".
@@ -166,7 +178,7 @@ local BUTTONS = {
 	decrees = {
 		{ "ARMS_BTN", DecreeAction("ARMS") },
 		{ "MUSTER_BTN", DecreeAction("MUSTER") },
-		{ "ROYAL_BTN", DecreeAction("ROYAL") },
+		CrownButton("ROYAL_BTN", "ROYAL"),
 	},
 	heraldry = {
 		{ "PATROL_BTN", function() ns.Inspect.SetPatrol(not ns.Inspect.IsPatrolling()) end },
@@ -295,7 +307,7 @@ local DETAIL_BUTTONS = {
 			label = function() return ns.ViewAs.Previewing() and L.VIEW_AS_PREVIEW_BTN:format(ns.ViewAs.Label()) or L.VIEW_AS_TITLE end },
 	},
 	heraldry = {
-		{ "HERALDRY_BTN", DecreeAction("HERALDRY") },
+		CrownButton("HERALDRY_BTN", "HERALDRY"),
 		{ "CLEAR", function() ns.ShowDialog("OLYMPUS_CLEAR_INSPECT") end },
 	},
 	-- The King's switches: what the army sees of the treasury (each its own).

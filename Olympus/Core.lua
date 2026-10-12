@@ -1411,6 +1411,9 @@ end
 -- the Hands his list or a Steward's own names (King.IsHandName: their word, never a vote), who
 -- speak for his guild with his Crown there (Decree.lua, Channels.VerifiedLevel) besides his
 -- tools (King.Authorized).
+-- (1.2.3) The Royal decree and the Tabard inspection for the whole army take this for the King's
+-- guild alone: another guild's master sends his to his own guild (Decree.Scope). [Lords] and the
+-- King's writs to his Lords still count every guild master here.
 function ns.IsCrownRank(guild, rankIndex)
 	if not guild or not rankIndex then return false end
 	if rankIndex == 0 then return true end
@@ -2211,6 +2214,7 @@ local function Slash(input)
 			ns.UI.SelectTab("realm")
 		elseif cmd == "decrees" then
 			ns.UI.SelectTab("decrees")
+			ns.Print(ns.Decree.YouCan()) -- (1.2.3: what this player's decrees reach)
 		elseif cmd == "arms" or cmd == "muster" then
 			local kind = cmd == "arms" and "ARMS" or "MUSTER"
 			if rest == "test" or not ns.Decree.CanSend(kind) then ns.Decree.Preview(kind) else ns.Decree.Send(kind, rest) end

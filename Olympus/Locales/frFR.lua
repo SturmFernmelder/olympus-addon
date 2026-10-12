@@ -87,7 +87,7 @@ ns.Locale("frFR", {
 	ROYAL = "DÉCRET ROYAL",
 	ROYAL_BTN = "Décret royal",
 	HERALDRY_CALL = "INSPECTION DES TABARDS : portez vos couleurs !",
-	CROWN_ONLY = "Seule la Couronne (les maîtres de guilde et les officiers d'<Olympus>) peut faire cela.",
+	CROWN_ONLY = "Seuls la Couronne (le Roi, son Sénéchal et ses Mains, les officiers d'<Olympus>) et le Haut Conseil envoient cela à toute l'armée, et un maître de guilde à sa propre guilde.",
 	YOU_ARE_CROWN = "Vous êtes la Couronne : tous les décrets, l'inspection et le Mur de la honte sont à vous.",
 	YOU_ARE_OFFICER = "En tant que Capitaine, vous pouvez appeler aux armes et au rassemblement. Les décrets royaux appartiennent à la Couronne.",
 	YOU_ARE_SOLDIER = "Les Capitaines appellent aux armes, la Couronne émet les décrets royaux. Les boutons vous montrent un aperçu.",

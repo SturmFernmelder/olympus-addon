@@ -276,7 +276,7 @@ ns.ANSWER_BANK = {
 		{ id = "feat-decrees", topic = "features",
 			q = { "What's a Call to arms?", "How do I send a muster?" },
 			text = "Captains+: Call to arms (/oly arms) or Muster (/oly muster). Add test for a preview only you see.",
-			long = "Captains and up send a Call to arms (an alarm and map marker for every guild) or a Muster (a rally point for 30 minutes). Royal decrees and Tabard inspections are for the Crown. Others get a local preview; /oly arms test tries it." },
+			long = "Captains and up send a Call to arms (an alarm and map marker for every guild) or a Muster (a rally point for 30 minutes). Royal decrees and Tabard inspections: the Crown and the High Council, a guild master for his guild. Others get a local preview; /oly arms test tries it." },
 		{ id = "feat-alert-sounds", topic = "features",
 			q = { "How do I turn off the alert sounds?", "Why didn't I get the raid warning in my dungeon?" },
 			text = "Type /oly sound off for all, or /oly sound <kind> off. In instances alerts wait; /oly alerts always shows them at once.",
