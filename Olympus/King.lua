@@ -1204,8 +1204,16 @@ ns.On("WATCHCHAT_CHANGED", function() ns.SafeCall("king crown", King.RefreshCrow
 
 ns.On("LOGIN", function()
 	-- The King's position, while he shares it; everyone's crown expires on its own.
+	-- (1.2.3, the King's stream: his crown already on from the last session, the army could not ask
+	-- for his layer until he hid and showed it again.) His layer goes out at his first tick as the
+	-- King, as Show me on the map sends it: at login the creature read that announces it
+	-- (Layers.Observe) can come before the game names his guild, when he is not the King yet here,
+	-- and the minute's announcement (Layers.Tick) starts a minute or two after login.
 	ns.Every(King.LOCATION_EVERY, "king location", function()
 		SendLocation()
+		local Ly = ns.Layers
+		if King.SharingLocation() and King.IsKing() and not (IsInInstance and IsInInstance())
+			and Ly and Ly.SentAt and Ly.AnnounceNow and Ly.SentAt() == nil then Ly.AnnounceNow() end
 		King.RefreshCrown()
 	end)
 	-- His Hands from the last session; he repeats them for late logins (HANDS_EVERY). A

@@ -8,11 +8,11 @@ local L = ns.L
 -- UI.PARCHMENTS). The Olympus window's help button (its "i", UI.ShowHelp) keeps them all: the help
 -- page's Version letters button lists every letter, newest first, and a click opens that
 -- version's letter; `/oly letters` opens the list too, `/oly letters <version>` that letter.
--- When it shows by itself: after login (LOGIN_WAIT, then on the minute until it could), for a
+-- When it shows by itself: after login (LOGIN_WAIT, then every RETRY until it could), for a
 -- member of an Olympus guild (outside one the addon offers nothing but the Join Olympus screen),
 -- never in combat or an instance, and only while no first-open page shows or waits: the privacy
--- page (Consent.lua) is asked first, and the letter waits until it is closed. Once a version,
--- saved per account (ns.db.lettersRead[version]). A first/unknown session stays quiet: its
+-- page (Consent.lua) is asked first, and the letter waits until it is closed (then HANDOFF).
+-- Once a version, saved per account (ns.db.lettersRead[version]). A first/unknown session stays quiet: its
 -- installed version is an automatic baseline, not a claim that the letter was read. WoW:
 -- Forever's beta can write saved data without loading it, making every login look new. Without
 -- retained state an upgrade cannot be distinguished from that login, so the history remains
@@ -41,9 +41,14 @@ ns.Letters = Letters
 -- Every version with a letter, newest first.
 Letters.LIST = { "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
 Letters.LOGIN_WAIT = 60 -- after login (the privacy page asks at 45 s: Consent.LOGIN_WAIT)
+-- (1.2.3, the King's stream: the letter came long after the privacy page he closed, on the
+-- minute's next try.) Kept back after LOGIN_WAIT (combat, an instance, the privacy page), it is
+-- tried again every RETRY, and HANDOFF after the privacy page closes.
+Letters.RETRY = 10
+Letters.HANDOFF = 2
 Letters.WIDTH, Letters.HEIGHT = 440, 470
 
-local frame, ticker
+local frame, ticker, waited
 
 local function Key(version) return "LETTER_" .. tostring(version):gsub("%.", "_") end
 
@@ -389,21 +394,30 @@ function Letters.Ask(reason)
 	return Letters.Show(v, true)
 end
 
--- A retained upgrade's unread letter, from LOGIN_WAIT after login, then on the minute until
--- it could. A first/unknown login creates no deferred callbacks or polling timer.
+-- A retained upgrade's unread letter, from LOGIN_WAIT after login, then every RETRY until it
+-- could (never before LOGIN_WAIT). A first/unknown login creates no deferred callbacks or polling
+-- timer.
 function Letters.OnLogin()
 	if not Letters.Has(ns.VERSION) or Letters.IsRead(ns.VERSION) or not AutoEligible() then return end
-	ns.After(Letters.LOGIN_WAIT, "version letter", function() Letters.Ask("login") end)
-	ticker = ns.Every(60, "version letter", function()
+	ns.After(Letters.LOGIN_WAIT, "version letter", function()
+		waited = true
+		Letters.Ask("login")
+	end)
+	ticker = ns.Every(Letters.RETRY, "version letter", function()
 		if Letters.IsRead(ns.VERSION) then
 			if ticker and ticker.Cancel then ticker:Cancel() end
 			ticker = nil
 			return
 		end
-		Letters.Ask("login")
+		if waited then Letters.Ask("login") end
 	end)
 end
 ns.On("LOGIN", function() Letters.OnLogin() end)
+-- The privacy page closed once LOGIN_WAIT passed: the letter a moment after, not at the next try.
+ns.On("CONSENT_CLOSED", function()
+	if not waited or not ticker or Letters.IsRead(ns.VERSION) then return end
+	ns.After(Letters.HANDOFF, "version letter", function() Letters.Ask("privacy") end)
+end)
 
 -- `/oly letters` (the list), `/oly letters <version>` (that letter; one without a letter: the list).
 function Letters.Slash(rest)
@@ -422,7 +436,7 @@ end
 -- Tests start from a clean state.
 function Letters.Reset()
 	if ticker and ticker.Cancel then ticker:Cancel() end
-	ticker = nil
+	ticker, waited = nil, nil
 	if frame and rawget(_G, frame:GetName()) == frame then frame:Hide() end
 	frame = nil
 end

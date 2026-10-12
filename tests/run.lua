@@ -11443,6 +11443,70 @@ test("1.0.0 the King's layer goes with his crown: at once when he shows it, agai
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.3 (the King's stream: logged in after the update with his crown on from the last session,
+-- "location already allowed", the army could not ask for his layer until he hid his crown and
+-- showed it again). The creature read that announces a new layer came before the game named his
+-- guild: not the King yet for the addon, nothing went out, and the next announcement was the
+-- minute's ticker, a minute or two after login. King.lua's login tickers loaded as the game runs
+-- them (its "king location" one called here as its timer would).
+test("1.2.3 the King's crown on at login: his layer goes out at his first location tick as the King, once; not with his crown hidden, nor in an instance", function()
+	local savedPos, savedInstance, savedPopups = C_Map.GetPlayerMapPosition, IsInInstance, {}
+	for k, v in pairs(StaticPopupDialogs) do savedPopups[k] = v end
+	local ok, err = pcall(function()
+		WithLayerWatch(function(w)
+			C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end
+			-- King.lua as the game loads it, its LOGIN handler's timers kept by name.
+			local timers, loginFns = {}, {}
+			local kns = setmetatable({
+				On = function(n, f) if n == "LOGIN" then loginFns[#loginFns + 1] = f end end,
+				Every = function(_, what, f) timers[what] = f return { Cancel = function() end } end,
+				After = function() end,
+				Comm = setmetatable({ Handle = function() end }, { __index = ns.Comm }),
+			}, { __index = ns })
+			assert(loadfile(ADDON_DIR .. "King.lua"))("Olympus", kns)
+			ns.King.Reset()
+			ns.me = ns.KingCharacter() .. "-Realm"
+			ns.db.throneLocation = true -- (his crown on from the last session)
+			GetGuildInfo = function() return nil end -- (the login: the game has not named his guild yet)
+			for _, f in ipairs(loginFns) do f() end
+			local tick = assert(timers["king location"], "the King's location ticker")
+			w.observe() -- (a creature's nameplate as he enters the world)
+			eq(w.layers(), 0, "not the King yet for the addon: nothing goes out")
+			tick()
+			eq(w.layers(), 0)
+			-- His guild known: his first tick as the King sends his layer, as Show me on the map does.
+			GetGuildInfo = function() return "Olympus", "King", 0 end
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "his layer, at his first tick as the King")
+			eq(w.sent[#w.sent], ("CHANNEL L1~1453~%d~0~Olympus"):format(w.npc))
+			local crowns = 0
+			for _, m in ipairs(w.sent) do if m:find("^CHANNEL T1~P~") then crowns = crowns + 1 end end
+			eq(crowns, 1, "and his crown")
+			for _ = 1, 3 do w.clock = w.clock + ns.King.LOCATION_EVERY; tick() end
+			eq(w.layers(), 1, "once: then the minute's announcement, as before")
+			-- His crown hidden: nothing from the tick (a new layer read, none sent yet this session).
+			ns.db.throneLocation = nil
+			w.observe()
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "his crown hidden: his layer stays home")
+			-- Shown again in an instance: nothing either.
+			ns.db.throneLocation = true
+			IsInInstance = function() return true end
+			w.clock = w.clock + ns.King.LOCATION_EVERY
+			tick()
+			eq(w.layers(), 1, "in an instance: nothing")
+		end)
+	end)
+	C_Map.GetPlayerMapPosition, IsInInstance = savedPos, savedInstance
+	wipe(StaticPopupDialogs)
+	for k, v in pairs(savedPopups) do StaticPopupDialogs[k] = v end
+	ns.db.throneLocation = nil
+	ns.King.Reset()
+	if not ok then error(err, 0) end
+end)
+
 -- 1.0.0: with the King's layer unknown the line said "his addon announces it when he targets an
 -- NPC, try again in a minute", whatever the reason. While his crown is hidden (the default: his
 -- position is on stream) his layer is never announced, and a player on another realm never
@@ -52963,6 +53027,54 @@ do
 		end)
 	end)
 
+	-- (1.2.3, the King's stream: "the Olympus window opened by itself", a minute or two after his
+	-- login. The door above was the one way it could with no click or key of his: another member's
+	-- claim on a request of his, published again after the login, showed the closed window on the
+	-- deal's room. The requester's side, Requests.OpenChat's ifOpen, comes only into the window he
+	-- has open; a match found for a search of his own, or the claim a crafter just made, as before.)
+	test("1.2.3 pending conversations: another member's claim never opens the requester's closed Olympus window, after an instance too; his click on the request's page still opens the room, and with the window open the room still comes to the front", function()
+		WithWindow(function(w)
+			local wasArenaChat, wasRaise, wasCraft, wasInstance = ns.ArenaChat, rawget(Widget, "Raise"), ns.rdb.craftRequests, IsInInstance
+			local wasSound = ns.PlayAlert
+			local raised, sounds = {}, {}
+			Widget.Raise = function(self) raised[#raised + 1] = self end
+			ns.PlayAlert = function(_, kind) sounds[#sounds + 1] = tostring(kind) end
+			ns.ArenaChat = { Open = function(id) return { id = id } end, Close = function() end,
+				Lines = function() return {} end, Send = function() return true end }
+			local ok, err = pcall(function()
+				local now = ns.Now()
+				ns.rdb.craftRequests = { records = { c1os = { id = "c1os", requester = ns.me, crafter = "Wren Thistle-Realm", state = "accepted",
+					itemName = "Mooncloth", itemID = 14342, quantity = 1, details = "", created = now, updated = now, guild = "Olympus II" } }, invites = {} }
+				w.UI.SelectTab("census")
+				local main = OlympusFrame
+				main:Hide()
+				-- The claim won while the window is closed (WinClaim's Requests.OpenChat(id, true, true)).
+				local pane, why = ns.CraftRequests.OpenChat("c1os", true, true)
+				eq(pane, false, "nothing opened by itself"); eq(why, "closed")
+				eq(main:IsShown(), false, "the window stays closed")
+				eq(#raised, 0)
+				eq(sounds[#sounds], "craft", "its sound still tells it")
+				-- Held in an instance, then out of it with the window still closed: still closed.
+				IsInInstance = function() return true end
+				eq(select(2, ns.CraftRequests.OpenChat("c1os", true, true)), "held")
+				IsInInstance = wasInstance
+				ns.ReleaseHeld()
+				eq(main:IsShown(), false, "the held alert shown: the window still closed")
+				-- His own click (the request's page): the window, on the deal's room.
+				assert(ns.CraftRequests.OpenChat("c1os"), "his click opens it")
+				eq(main:IsShown(), true); eq(main.tab, "chat"); eq(w.CW.Tier(), "craft:c1os")
+				-- The window open on another page: the deal's room comes to the front by itself, as before.
+				w.UI.SelectTab("realm")
+				local before = #raised
+				assert(ns.CraftRequests.OpenChat("c1os", true, true), "into his open window")
+				eq(main.tab, "chat"); eq(w.CW.Tier(), "craft:c1os"); eq(raised[#raised], main); eq(#raised, before + 1)
+			end)
+			ns.ArenaChat, Widget.Raise, ns.rdb.craftRequests, IsInInstance, ns.PlayAlert = wasArenaChat, wasRaise, wasCraft, wasInstance, wasSound
+			ns.ResetHeld()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
 	-- (Review of the door: the pins it made lived for the session alone and never heard the
 	-- player's own pin button, so after a reload its pin passed for his and was never taken back, and
 	-- his own pin of a room it had pinned was taken at the end; and a room it opened by itself was
@@ -60453,7 +60565,14 @@ end)()
 				instance = IsInInstance, gamepad = ns.GamepadUI, member = ns.IsMember, log = ns.Log, print = ns.Print, chat = ns.db.addonChat,
 				template = TEMPLATES.PortraitFrameTemplate }
 			local w = { on = {}, after = {}, every = {}, printed = {} }
+			saved.fire = ns.Fire
 			local ok, err = pcall(function()
+				-- (1.2.3: the privacy page's CONSENT_CLOSED, Consent.lua's ns.Fire, reaches this fresh
+				-- module's listeners too; every event goes where it went before.)
+				ns.Fire = function(n, ...)
+					saved.fire(n, ...)
+					for _, f in ipairs(w.on[n] or {}) do f(...) end
+				end
 				TEMPLATES.PortraitFrameTemplate = function(f)
 					saved.template(f)
 					f.portrait = NewWidget("Texture", nil, f)
@@ -60485,6 +60604,7 @@ end)()
 			ns.db.lettersAutoVersion = saved.baseline
 			InCombatLockdown, IsInInstance, ns.IsMember = saved.combat, saved.instance, saved.member; GamepadStyle(nil)
 			ns.Log, ns.Print, ns.db.addonChat = saved.log, saved.print, saved.chat
+			ns.Fire = saved.fire
 			if not ok then error(err, 0) end
 		end)
 	end
@@ -60806,6 +60926,64 @@ end)()
 			w.tick()
 			assert(Lt.Frame() and Lt.Frame():IsShown(), "then the letter")
 			eq(Lt.IsRead(ns.VERSION), true)
+		end)
+	end)
+
+	-- (1.2.3, the King's stream: the privacy page asked first and he closed it with its X; the
+	-- letter came long after, on the minute's next try, 60 to 120 seconds after login at first.)
+	test("1.2.3 version letters: the privacy page closed after the letter's wait, the letter comes HANDOFF (2 s) after its X, not at the next try; the page hidden with the whole interface (Alt+Z) is no close", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			ns.db.addonChat = nil
+			ns.Consent.Reset()
+			w.login()
+			local page = ns.Consent.Show() -- (its own wait, 45 s after login: shown, not yet closed)
+			eq(w.after[1].sec, Lt.LOGIN_WAIT)
+			w.run() -- (the letter's own wait, the page still up)
+			w.tick()
+			eq(Lt.Frame(), nil, "never over the privacy page")
+			-- Hidden with the whole interface (OnHide while it still says shown): nothing yet.
+			for _, h in ipairs(page.hooks.OnHide or {}) do h(page) end
+			eq(#w.after, 0, "not a close")
+			page:Hide() -- (its X)
+			local a = w.after[1]
+			assert(a, "the letter is asked again after the page's close")
+			eq(a.sec, Lt.HANDOFF); assert(Lt.HANDOFF <= 2, tostring(Lt.HANDOFF))
+			w.run()
+			assert(Lt.Frame() and Lt.Frame():IsShown(), "the letter, a moment after the page")
+			eq(Lt.IsRead(ns.VERSION), true)
+			-- Read: a later close of the page asks nothing.
+			ns.Consent.Show():Hide()
+			eq(#w.after, 0)
+		end)
+		-- Closed before the letter's own wait: the letter at LOGIN_WAIT, as before.
+		WithLetters(function(w)
+			local Lt = w.Letters
+			w.login()
+			ns.Consent.Show():Hide()
+			eq(#w.after, 1, "only the letter's own wait"); eq(w.after[1].sec, Lt.LOGIN_WAIT)
+			w.run()
+			assert(Lt.Frame() and Lt.Frame():IsShown())
+		end)
+	end)
+
+	test("1.2.3 version letters: kept back by combat or an instance after its wait, tried again every RETRY (10 s), not on the minute; never before LOGIN_WAIT", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			ns.Consent.Show():Hide()
+			w.login()
+			eq(w.every[1].sec, Lt.RETRY); assert(Lt.RETRY <= 10, tostring(Lt.RETRY))
+			w.tick()
+			eq(Lt.Frame(), nil, "never before the letter's wait")
+			InCombatLockdown = function() return true end
+			w.run()
+			eq(Lt.Frame(), nil, "never in combat")
+			InCombatLockdown = function() return false end
+			IsInInstance = function() return true end
+			w.tick(); eq(Lt.Frame(), nil, "nor in an instance")
+			IsInInstance = function() return false end
+			w.tick()
+			assert(Lt.Frame() and Lt.Frame():IsShown(), "the next try, RETRY later")
 		end)
 	end)
 

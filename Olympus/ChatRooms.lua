@@ -957,9 +957,10 @@ end
 
 -- Olympus's own opening (m.auto), each matter waiting on its own (its key): with the held alerts
 -- (shown when the player is back, while the matter is still open), then out of combat, then while
--- the player writes, a look at his box every WRITING_WAIT seconds. Its sound is the matter's own
--- switch (m.kind: "craft" a crafting deal's, else "arena"), at most one with the caller's own just
--- before (ns.PlayAlert's 15 seconds).
+-- the player writes, a look at his box every WRITING_WAIT seconds; m.ifOpen, only into the Olympus
+-- window the player has open (1.2.3). Its sound is the matter's own switch (m.kind: "craft" a
+-- crafting deal's, else "arena"), at most one with the caller's own just before (ns.PlayAlert's
+-- 15 seconds).
 local function Arrive(m, key, title)
 	local wait = "room:" .. key
 	local pane, why = nil, "combat"
@@ -972,6 +973,11 @@ local function Arrive(m, key, title)
 	Try = function()
 		local spec, live = MatterNow(m)
 		if not live then why = "over" return end
+		-- (1.2.3, the King's stream: "the window opened by itself".) A matter the player did not
+		-- just start (m.ifOpen: another member's claim on his request) comes only into the Olympus
+		-- window he has open: closed, it stays closed (its line and sound tell it; its page opens it).
+		local UI = rawget(ns, "UI")
+		if m.ifOpen and not (type(UI) == "table" and type(UI.IsShown) == "function" and UI.IsShown()) then why = "closed" return end
 		local C = rawget(ns, "ChatWindow")
 		if type(C) == "table" and not C.missing and Writing(C) then
 			why = "writing"
@@ -993,7 +999,8 @@ local function Arrive(m, key, title)
 end
 
 -- The Chat tab shown on the matter's room: that pane, else false and why ("held", "combat" and
--- "writing": Olympus's own opening waits; "over": it is no longer open).
+-- "writing": Olympus's own opening waits; "closed": an m.ifOpen matter with the window closed;
+-- "over": it is no longer open).
 function Rooms.OpenMatter(m)
 	if type(m) ~= "table" then return false, "matter" end
 	local spec = m.spec ~= nil and MatterSpec(m) or nil
