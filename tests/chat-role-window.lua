@@ -1,4 +1,4 @@
-local ns, test, eq, WithWindow = ...
+local ns, test, eq, WithWindow, WithGamepadUI = ...
 
 test("watch chat context menu: actions are opt-in and recheck permission and target", function()
 	WithWindow(function(w)
@@ -271,6 +271,147 @@ test("Chat tab (1.2.4): a line in a room not shown is only counted, no redraw; t
 			eq(w.CW.navBuilds, builds + 1, "listed at the opening")
 		end)
 		w.CW.Render, GetTime, ns.IsHighCouncillor = real, savedTime, council
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4: the Roles list had ten rows, made with the tab, and every option wrote to one: an eleventh
+-- room stopped it from opening (the King's preview already filled the ten; the author's own view,
+-- in every room but the High Council's, has dozens). Any number of rooms now: a long list folds
+-- each group into one row whose click opens its own list beside it, a list still longer pages, and
+-- every room is a click or a few away, with the mouse and with the gamepad UI (the cursor clicks
+-- Olympus's own buttons; no game menu, no key).
+local function AuthorsRoles(w, gamepad)
+	local saved = { isAuthor = ns.Workshop.IsAuthorName, approved = ns.ApprovedGuilds, guilds = ns.rdb.guilds }
+	local ok, err = pcall(function()
+		local R = ns.ChatRooms
+		ns.db.chatRooms = true
+		ns.Workshop.IsAuthorName = function(name) return ns.FullName(name) == ns.me end
+		ns.ApprovedGuilds = function() return {} end
+		ns.rdb.guilds = {}
+		local base = #R.Options("role")
+		local k = 0
+		while base + 2 * k < 34 do
+			k = k + 1
+			ns.rdb.guilds[("Olympus Guild %02d"):format(k)] = { t = 1 }
+		end
+		local options = R.Options("role")
+		assert(#options >= 34, "the author's rooms: " .. #options)
+		local f = w.CW.Open("A")
+		local function Roles()
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then return b end end
+		end
+		local function Rows(menu)
+			local out = {}
+			for _, r in ipairs(menu.rows) do if r:IsShown() then out[#out + 1] = r end end
+			return out
+		end
+		local function Labels(menu)
+			local out = {}
+			for _, r in ipairs(Rows(menu)) do out[#out + 1] = r.text:GetText() end
+			return table.concat(out, " | ")
+		end
+		assert(Roles(), "Roles"):Click()
+		eq(f.subMenu:IsShown(), true, "the list opens")
+		local top = Rows(f.subMenu)
+		assert(#top <= 10, "ten rows at most: " .. Labels(f.subMenu))
+		eq(top[1].roomId, "masters"); eq(top[2].roomId, "allcenturions")
+		assert(top[3].text:GetText():find("^Departments %(6%) >"), top[3].text:GetText())
+		local groups = 0
+		for _, r in ipairs(top) do if r.groupItem then groups = groups + 1 end end
+		assert(groups >= 3, "the departments' and each kind of guild room folded: " .. Labels(f.subMenu))
+		-- A group's own list: beside the first, paged past ten; a census redraw leaves both open.
+		local cent
+		for _, r in ipairs(top) do if r.groupItem and r.groupItem.group == "gcent" then cent = r end end
+		assert(cent, "the guilds' masters and centurions: " .. Labels(f.subMenu))
+		cent:Click()
+		eq(f.subMenu:IsShown(), true); eq(f.subMenu2:IsShown(), true, "its own list")
+		local rows = Rows(f.subMenu2)
+		eq(#rows, 9, "eight rooms and More"); assert(rows[9].text:GetText():find("^More %(%d+%)"), rows[9].text:GetText())
+		-- Beside the first list, on its left where the tab has the room, and inside the tab always.
+		local child, menu = f.subMenu2, f.subMenu
+		assert(child:GetLeft() >= f:GetLeft() and child:GetRight() <= f:GetRight(), "inside the tab")
+		assert(child:GetRight() <= menu:GetLeft() - 2 or child:GetLeft() == f:GetLeft() + 12,
+			("on the first list's left, or at the tab's left edge: %s-%s, %s-%s"):format(child:GetLeft(), child:GetRight(), menu:GetLeft(), menu:GetRight()))
+		w.fire("DATA_CHANGED"); w.CW.Render()
+		eq(f.subMenu2:IsShown(), true, "a census redraw keeps it"); eq(f.subMenu:IsShown(), true)
+		rows[9]:Click()
+		rows = Rows(f.subMenu2)
+		eq(rows[1].text:GetText(), "Previous"); eq(f.subMenu:IsShown(), true)
+		rows[1]:Click(); eq(#Rows(f.subMenu2), 9, "back to the first page")
+		f.subCatcher:Click()
+		eq(f.subMenu:IsShown(), false); eq(f.subMenu2:IsShown(), false, "a click outside closes both")
+		-- Every room reached by clicks alone: the list, a group's list, its pages.
+		local function Reach(id)
+			Roles():Click()
+			local function Pick(menu)
+				for _ = 1, 20 do
+					local more
+					for _, r in ipairs(Rows(menu)) do
+						if r.roomId == id then r:Click() return true end
+						if r.pageTo and r.text:GetText():find("^More") then more = r end
+					end
+					if not more then return false end
+					more:Click()
+				end
+				return false
+			end
+			if Pick(f.subMenu) then return true end
+			for i = 1, 20 do
+				local parents = {}
+				for _, r in ipairs(Rows(f.subMenu)) do if r.groupItem then parents[#parents + 1] = r end end
+				for _, r in ipairs(parents) do
+					r:Click()
+					if Pick(f.subMenu2) then return true end
+				end
+				local more
+				for _, r in ipairs(Rows(f.subMenu)) do if r.pageTo and r.text:GetText():find("^More") then more = r end end
+				if not more then return false end
+				more:Click()
+			end
+			return false
+		end
+		for _, option in ipairs(options) do
+			assert(Reach(option.id), (gamepad and "gamepad: " or "") .. "reached: " .. option.id)
+			eq(f.subMenu:IsShown(), false, option.id); eq(f.subMenu2:IsShown(), false, option.id .. ": both lists close")
+			eq(w.CW.Tier(), option.id, option.id)
+		end
+	end)
+	ns.Workshop.IsAuthorName, ns.ApprovedGuilds, ns.rdb.guilds = saved.isAuthor, saved.approved, saved.guilds
+	if not ok then error(err, 0) end
+end
+
+test("Chat tab (1.2.4): thirty-four rooms in the Roles list (the author's): grouped and paged, each room a click or a few away, both lists closing", function()
+	WithWindow(function(w) AuthorsRoles(w, false) end)
+end)
+
+test("Chat tab (1.2.4): thirty-four rooms in the Roles list with the gamepad UI: the same lists, Olympus's own buttons, every room reached", function()
+	WithGamepadUI(true, function()
+		WithWindow(function(w) AuthorsRoles(w, true) end)
+	end)
+end)
+
+-- A list of ten or fewer stays as it was: one row an option, in order.
+test("Chat tab (1.2.4): ten rooms or fewer show as they come, without groups or pages", function()
+	WithWindow(function(w)
+		local R = ns.ChatRooms
+		local saved = R.Options
+		local ok, err = pcall(function()
+			local list = {}
+			for i = 1, 10 do list[i] = { id = "dept:war", label = "Room " .. i, group = "dept", groupLabel = "Departments" } end
+			R.Options = function(kind) if kind == "role" then return list end return saved(kind) end
+			ns.db.chatRooms = true
+			local f = w.CW.Open("A")
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then b:Click() end end
+			eq(f.subMenu:IsShown(), true)
+			for i = 1, 10 do eq(f.subMenu.rows[i].text:GetText(), "Room " .. i); eq(f.subMenu.rows[i].groupItem, nil) end
+			f.subCatcher:Click()
+			list[11] = { id = "council", label = "Room 11" }
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then b:Click() end end
+			eq(f.subMenu.rows[1].text:GetText(), "Departments (10) >"); eq(f.subMenu.rows[2].text:GetText(), "Room 11")
+			eq(f.subMenu.rows[3]:IsShown(), false)
+		end)
+		R.Options = saved
 		if not ok then error(err, 0) end
 	end)
 end)

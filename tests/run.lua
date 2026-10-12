@@ -52841,7 +52841,7 @@ do
 		end)
 	end
 
-	assert(loadfile(ROOT .. "tests/chat-role-window.lua"))(ns, test, eq, WithWindow)
+	assert(loadfile(ROOT .. "tests/chat-role-window.lua"))(ns, test, eq, WithWindow, WithGamepadUI)
 	assert(loadfile(ROOT .. "tests/chat-picker-anchor.lua"))(ns, test, eq, WithWindow, ForeverWorld)
 	assert(loadfile(ROOT .. "tests/chat-role-badges.lua"))(ns, test, eq, WithWindow)
 	assert(loadfile(ROOT .. "tests/chat-guild-labels.lua"))(ns, test, eq, WithWindow)

@@ -5166,6 +5166,11 @@ L.CHATWIN_YOU = "You"
 L.CHATWIN_TAG_STEWARD = "Steward"
 L.CHATWIN_TAG_HAND = "Hand"
 L.CHATWIN_TAG_DEV = "The Royal Dev" -- (1.2.4: after the author's name on the Chat tab; his title, in English in both languages)
+-- 1.2.4: a long list of rooms (ChatWindow.MenuItems): a group folded into one row (its name and how
+-- many rooms), and a page's ways to the others.
+L.CHATWIN_MENU_GROUP = "%s (%d) >"
+L.CHATWIN_MENU_PREV = "Previous"
+L.CHATWIN_MENU_MORE = "More (%d)"
 L.CHATWIN_KEPT = "The last %d lines of each channel are kept, from every session."
 L.CHATWIN_EMPTY = "Nothing said in [%s] yet."
 -- (CHATWIN_NEW is taken: the game's "Create New Window" menu, /oly chatwindow.)
@@ -5263,6 +5268,9 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CHATWIN_TAG_STEWARD = "Senescal"
 	L.CHATWIN_TAG_HAND = "Mão"
 	L.CHATWIN_TAG_DEV = "The Royal Dev"
+	L.CHATWIN_MENU_GROUP = "%s (%d) >"
+	L.CHATWIN_MENU_PREV = "Anteriores"
+	L.CHATWIN_MENU_MORE = "Mais (%d)"
 	L.CHATWIN_KEPT = "As últimas %d linhas de cada canal ficam guardadas, de todas as sessões."
 	L.CHATWIN_EMPTY = "Nada dito em [%s] ainda."
 	L.CHATWIN_NEW_LINES = "%d novas"
