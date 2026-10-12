@@ -44975,7 +44975,8 @@ test("1.1 sister guilds' banks (Fern): their treasurer's yes, whispered to the K
 			-- page, with the line on its Book, is where the search leads, ShowGuild.)
 			lines = T.Build()
 			page = Texts(lines)
-			assert(page:find("[-] <Olympus Zeus>", 1, true) and page:find("Tab 1", 1, true), page)
+			-- (1.2.4: the ranking's row, its place and its correspondent before the guild; changed on purpose.)
+			assert(page:find("[-] " .. ns.L.TREASURY_RANK_ROW:format(1, ns.L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true) and page:find("Tab 1", 1, true), page)
 			eq(Grid(lines)[3].id, 2589, "its grid in the list, where the stack sits")
 			eq(T.ShowGuild("Olympus Zeus"), true)
 			lines = T.Build()
@@ -45079,6 +45080,7 @@ do
 		for i = from or 1, #lines do if tostring(lines[i].text):find(text, 1, true) then return i, lines[i] end end
 	end
 	local function Key(lines, key) for _, l in ipairs(lines) do if l.key == key then return l end end end
+	local function KeyAt(lines, key) for i, l in ipairs(lines) do if l.key == key then return i end end end
 	local function Grids(lines)
 		local out = {}
 		for i, l in ipairs(lines) do if l.items then out[#out + 1] = i end end
@@ -45122,7 +45124,8 @@ do
 		local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
-		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true } -- (punctuation alone)
+		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true, -- (punctuation alone)
+			TREASURY_RANK_ROW = true, TREASURY_RANK_TOTAL = true } -- (1.2.4: and "Total", one word in both)
 		for _, key in ipairs({ "TREASURY_DIR_TOTAL", "TREASURY_DIR_TOTAL_TIP", "TREASURY_DIR_LEDGER", "TREASURY_DIR_LEDGER_NONE",
 			"TREASURY_DIR_LEDGER_HIDDEN", "TREASURY_DIR_LEDGER_TIP", "TREASURY_DIR_WHO", "TREASURY_DIR_GM", "TREASURY_DIR_OFFICER",
 			"TREASURY_DIR_KEEPER", "TREASURY_DIR_WHEN", "TREASURY_DIR_STATE_SHARED", "TREASURY_DIR_STATE_OLD", "TREASURY_DIR_EXPAND_TIP",
@@ -45130,7 +45133,11 @@ do
 			"TREASURY_DIR_FOUND_TIP", "TREASURY_DIR_FOUND_IN", "TREASURY_DIR_PLACE", "TREASURY_DIR_PLACES_MORE", "TREASURY_DIR_LIT",
 			"SEARCH_TIP_TREASURY_GUILDS", "BANK_SISTER_WIDER", "BANK_SISTER_WIDER_YES", "BANK_SISTER_WIDER_NO", "BANK_SISTER_KING_KEPT",
 			"TREASURY_GUILDS_TIP", "TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_BOOK_UNAVAILABLE", "BANK_SISTER_ASK", "BANK_SISTER_ON",
-			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK" }) do
+			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK",
+			-- 1.2.4: the ranking of the treasuries.
+			"TREASURY_RANK_HEAD", "TREASURY_RANK_TOTAL", "TREASURY_RANK_TIP", "TREASURY_RANK_FEDERAL", "TREASURY_RANK_ROW",
+			"TREASURY_RANK_NO_CORR", "TREASURY_RANK_DETAIL", "TREASURY_RANK_ATLEAST", "TREASURY_RANK_VALUE", "TREASURY_RANK_PENDING",
+			"TREASURY_RANK_UNPRICED", "TREASURY_RANK_CORR", "TREASURY_RANK_CORR_KEPT", "TREASURY_RANK_CORR_NONE", "TREASURY_GUILD_VALUE_TIP" }) do
 			assert(type(rawget(ns.L, key)) == "string", "English " .. key)
 			assert(type(rawget(pt.L, key)) == "string" and (same[key] or pt.L[key] ~= ns.L[key]), "Portuguese " .. key)
 			eq(select(2, pt.L[key]:gsub("%%[ds]", "")), select(2, ns.L[key]:gsub("%%[ds]", "")), key)
@@ -45456,13 +45463,21 @@ do
 			eq(lines[total].right, T.Coins(424242 + 424242 + 900000))
 			assert(lines[total + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[total + 1].text)
 			assert(lines[total + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85 + 85 + 200, 7), 1, true), lines[total + 1].text)
-			-- <Olympus> first, then the most gold first.
-			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), Find(lines, "[+] <Olympus Hera>", total), Find(lines, "[+] <Olympus Zeus>", total)
+			-- <Olympus> first, then the most first. (1.2.4, changed on purpose: the ranking's rows, found
+			-- by their keys; the most gold plus the items' value first. This client holds no item data:
+			-- each total is its gold, "at least".)
+			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), KeyAt(lines, "sister:Olympus Hera"), KeyAt(lines, "sister:Olympus Zeus")
 			assert(home and hera and zeus and home < hera and hera < zeus, page)
-			-- Each row: its gold; the ledger apart (<Olympus>'s books alone), its items, who shared it, when.
-			eq(lines[zeus].right, T.Coins(424242))
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), lines[zeus + 1].text)
+			-- Each row: its total; the ledger apart (<Olympus>'s books alone: no "none kept" on another
+			-- guild's row any more), its gold, items and their value, who shared it, when; its stacks in
+			-- the tooltip.
+			eq(lines[zeus].right, ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
+			assert(not lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
+			eq(lines[zeus + 1].text, "|cff9d9d9d" .. ns.L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 85, ns.L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+			local stacks = { lines = {} }
+			function stacks:AddLine(s) self.lines[#self.lines + 1] = s end
+			lines[zeus].tooltip(stacks)
+			assert(table.concat(stacks.lines, "\n"):find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), table.concat(stacks.lines, "\n"))
 			assert(lines[zeus + 1].right:find(ns.L.TREASURY_DIR_WHO:format("Zed", ns.L.TREASURY_DIR_GM), 1, true), lines[zeus + 1].right)
 			assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 3600), 1, true), lines[zeus + 1].right)
 			assert(lines[home + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[home + 1].text)
@@ -45489,8 +45504,8 @@ do
 			-- A click opens Olympus Zeus in place: what the guild bank above shows of its own, line for line.
 			Key(T.Build(), "sister:Olympus Zeus").onClick()
 			lines = T.Build()
-			local open = Find(lines, "[-] <Olympus Zeus>")
-			assert(open, Texts(lines))
+			local open = KeyAt(lines, "sister:Olympus Zeus")
+			assert(open and lines[open].text:find("[-] ", 1, true), Texts(lines))
 			local grids = Grids(lines)
 			eq(#grids, 2, "the bank above, and Olympus Zeus's")
 			local function Portrait(at)
@@ -45848,8 +45863,9 @@ do
 			eq(T.Private(SAGE, "TS", B.Message(ns.rdb.bank, "TS")), false, "never whispered to himself")
 			T.Show("summary")
 			local lines = T.Build()
-			local zeus = Find(lines, "[+] <Olympus Zeus>")
-			assert(zeus and lines[zeus].right == T.Coins(31337), Texts(lines))
+			-- (1.2.4: its row in the ranking, its gold the total while this client holds no item data.)
+			local zeus = Key(lines, "sister:Olympus Zeus")
+			assert(zeus and zeus.right == ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(31337)), Texts(lines))
 			-- The others the census knows: no snapshot received (Hera, Ares, Olympus II), never Zeus.
 			local others = Key(lines, "dir:others")
 			assert(others and others.text:find(ns.L.TREASURY_DIR_UNHELD:format(3), 1, true), Texts(lines))
@@ -45876,9 +45892,11 @@ do
 			AsKing()
 			Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 41414, { { i = 1, items = { { id = 2770, n = 13, s = 2 } } } }, 60), "Zora-Realm")
 			As(SAGE, "Olympus Zeus", 0)
-			eq(Row(), T.Coins(41414), "the officer's, newer")
+			-- (1.2.4: the row's total, gold plus the items' value; no item data here: "at least".)
+			local AtLeast = function(c) return ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(c)) end
+			eq(Row(), AtLeast(41414), "the officer's, newer")
 			ns.rdb.bank = Snap(w, "Olympus Zeus", SAGE, 51515, { { i = 1, name = "Our Tab", items = { { id = 2770, n = 14, s = 2 } } } })
-			eq(Row(), T.Coins(51515), "his own read, newer")
+			eq(Row(), AtLeast(51515), "his own read, newer")
 			-- Another guild's master outside the audience: his own bank is no directory of his.
 			B.Reset()
 			As(HERA, "Olympus Hera", 0)
@@ -46272,6 +46290,143 @@ do
 				eq(#B.Sisters(), 2)
 			end)
 			ns.Comm.loginAt, B.SISTERS_SAVED_BYTES = savedLogin, savedCap
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4 (the author's ask: "eu quero um ranking dos tesouros com mais gold, com mais itens... Esse
+	-- ranking vai ser no lugar desses bancos aqui. Teria que ter: o nome do correspondente, o nome da
+	-- guilda, a quantidade de gold, a quantidade de itens, o valor dos itens... Em ordem, em ranking
+	-- mesmo"; a guild's average level breaks a tie, his rule everywhere).
+	test("1.2.4 Guild treasuries: the ranking in the banks' place (position, correspondent, guild, gold, items, the items' value, total, when); <Olympus> apart as the Federal Treasury; by total, then average level, then name; items still loading say 'at least'; a click opens the bank; nothing sent", function()
+		WithDirectory(function(w, K, Run)
+			local T, B, L, N = ns.Treasury, ns.Bank, ns.L, ns.Nominees
+			local savedValues, savedLogin = B.ITEM_VALUES, ns.Comm.loginAt
+			local ok, err = pcall(function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- The game's item data as C_Item gives it, its 11th return what a vendor pays, in copper
+				-- (made-up prices: this is no price list). Linen Cloth's data not loaded yet.
+				local SELL = { [2589] = 10, [2770] = 25, [929] = 0, [2996] = 100 }
+				local cached = { [2589] = false, [2770] = true, [929] = true, [2996] = true }
+				local requested = {}
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function(id) return cached[id] == true end,
+					RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+					GetItemInfo = function(id)
+						if not cached[id] then return nil end
+						return NAMES[id], "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, SELL[id]
+					end,
+				}
+				-- The census's average levels: Olympus Hermes 55, Olympus Hera and Olympus Zeus 40.
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm", avgLevel = 55 }, "W11-Realm", "W12-Realm")
+				ns.rdb.guilds["Olympus Apollo"] = Vouched({ total = 70, online = 3, zones = {}, t = w.clock, leader = "Apo", realm = "Realm", avgLevel = 10 }, "W13-Realm", "W14-Realm")
+				-- Zed names Olympus Zeus's Federal Treasury correspondent (his list, the census proving him).
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				N.Handle("CHANNEL", "Hermy-Realm", ("NM~1~Olympus Hermes~%d~1~1~d=Department of War=Warry"):format(w.clock))
+				-- <Olympus>'s bank (the King's own read), and four guilds'. After the data comes, Hermes,
+				-- Hera and Zeus are alike in total (10g 6s), Apollo ahead.
+				ns.rdb.bank = Snap(w, "Olympus", KING, 5000000, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } })
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, { { i = 1, items = { { id = 2589, n = 60, s = 3 }, { id = 929, n = 5, s = 4 } } } }, 7200), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 100500, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } }, 60), HERA)
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 100400, { { i = 1, items = { { id = 2996, n = 2, s = 1 } } } }), "Hermy-Realm")
+				Hear(Snap(w, "Olympus Apollo", "Apo-Realm", 200000, { { i = 1, items = {} } }), "Apo-Realm")
+				w.sent, w.whispered = {}, {}
+				T.Show("summary")
+				local lines = T.Build()
+				local page = Texts(lines)
+				-- <Olympus> apart, the Federal Treasury: no position, outside the race.
+				local fed = Key(lines, "sister:Olympus")
+				assert(fed and fed.text:find(L.TREASURY_RANK_FEDERAL:format("<Olympus>"), 1, true), page)
+				eq(fed.right, T.Coins(5000000 + 100), "its gold and its items' value")
+				local head = Key(lines, "dir:ranking")
+				assert(head and head.text:find(L.TREASURY_RANK_HEAD, 1, true) and head.right:find(L.TREASURY_RANK_TOTAL, 1, true), page)
+				local tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				head.tooltip(tip)
+				eq(tip.lines[2], L.TREASURY_RANK_TIP)
+				-- In order: the most first; alike, the higher average level; then the name.
+				local function At(key) for i, l in ipairs(lines) do if l.key == key then return i, l end end end
+				local apollo, hermes, hera, zeus = At("sister:Olympus Apollo"), At("sister:Olympus Hermes"), At("sister:Olympus Hera"), At("sister:Olympus Zeus")
+				assert(At("sister:Olympus") < At("dir:ranking") and At("dir:ranking") < apollo, page)
+				assert(apollo < hermes and hermes < hera and hera < zeus, "Zeus's items still loading: " .. page)
+				eq(lines[apollo].text, "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Apollo>"))
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				eq(lines[hermes].text, "[+] " .. L.TREASURY_RANK_ROW:format(2, L.TREASURY_RANK_NO_CORR, "<Olympus Hermes>"), "another department's correspondent is none of the treasury's")
+				-- Zeus: its gold, its items (stacks in the tooltip), their value "at least" while Linen Cloth's
+				-- data loads (asked of the game once), the potions no vendor buys counted in the items alone.
+				eq(lines[zeus].right, L.TREASURY_RANK_ATLEAST:format(T.Coins(100000)))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+				assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 7200), 1, true), lines[zeus + 1].right)
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				local said = table.concat(tip.lines, "\n")
+				for _, want in ipairs({ L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), L.TREASURY_GUILD_ITEMS:format(65, 2),
+					L.TREASURY_RANK_PENDING:format(60), L.TREASURY_RANK_UNPRICED:format(5), L.TREASURY_GUILD_VALUE_TIP }) do
+					assert(said:find(want, 1, true), want .. " in " .. said)
+				end
+				eq(#requested, 1); eq(requested[1], 2589)
+				T.Build(); eq(#requested, 1, "asked once")
+				-- Its data arrives: the value fills in by itself (one redraw), no "at least" left.
+				cached[2589] = true
+				eq(B.ItemInfoReceived(2589), true)
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].right, T.Coins(100600))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, T.GoldText(600)) .. "|r")
+				hermes, hera = At("sister:Olympus Hermes"), At("sister:Olympus Hera")
+				assert(hermes < hera and hera < zeus, "alike: the higher average level, then the name: " .. Texts(lines))
+				eq(lines[hera].right, T.Coins(100600)); eq(lines[hermes].right, T.Coins(100600))
+				-- The guilds with no snapshot here, below.
+				local others = At("dir:others")
+				assert(others and others > zeus and lines[others].text:find(L.TREASURY_DIR_UNHELD:format(2), 1, true), Texts(lines))
+				-- A click opens that guild's bank, as before.
+				lines[zeus].onClick()
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				assert(lines[zeus].text:find("[-] ", 1, true), lines[zeus].text)
+				eq(#Grids(lines), 2, "the bank above, and Olympus Zeus's")
+				lines[zeus].onClick()
+				-- The ranking as numbers alone (the seam for sharing it later): no item, no tab.
+				local r = T.Ranking()
+				eq(r.federal.guild, "Olympus"); eq(r.federal.total, 5000100); eq(r.federal.pos, nil)
+				eq(#r.rows, 4)
+				local z = r.rows[4]
+				eq(z.pos, 4); eq(z.guild, "Olympus Zeus"); eq(z.correspondent, "Zcorr-Realm"); eq(z.money, 100000); eq(z.units, 65); eq(z.stacks, 2)
+				eq(z.value, 600); eq(z.pending, 0); eq(z.unpriced, 5); eq(z.total, 100600); eq(z.level, 40); eq(z.t, w.clock - 7200)
+				for _, row in ipairs(r.rows) do
+					for k, v in pairs(row) do assert(type(v) ~= "table", "a table in the ranking's row: " .. k) end
+				end
+				-- Nothing of it was sent anywhere (sharing it is for later).
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+				-- His guild master offline longer than his list counts: the correspondent last named still shows,
+				-- with the save, after a reload too.
+				w.clock = w.clock + N.FRESH + 60
+				Census(w)
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				assert(table.concat(tip.lines, "\n"):find(L.TREASURY_RANK_CORR_KEPT:format(ns.DisplayName("Zcorr-Realm")), 1, true), table.concat(tip.lines, "\n"))
+				B.Reload()
+				eq(T.Ranking().rows[4].correspondent, "Zcorr-Realm", "kept with the snapshot")
+				-- Olympus's own table, where it names an item, over its vendor price (empty as shipped).
+				eq(next(savedValues), nil, "shipped empty: no price is guessed")
+				B.ITEM_VALUES = { [929] = 50 }
+				B.Reload()
+				r = T.Ranking()
+				eq(r.rows[2].guild, "Olympus Zeus", "now ahead of the guilds alike")
+				eq(r.rows[2].value, 600 + 250); eq(r.rows[2].unpriced, 0); eq(r.rows[2].pos, 2)
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+			end)
+			B.ITEM_VALUES, ns.Comm.loginAt = savedValues, savedLogin
+			N.Reset()
 			if not ok then error(err, 0) end
 		end)
 	end)
@@ -47050,12 +47205,16 @@ do
 			local row = Find(lines, "sister:Olympus Zeus")
 			assert(row and row.onClick, Texts(lines))
 			-- (1.2's directory: a click opens the bank in place; its page is a search's way to an item.)
-			eq(Plain(row.text), "[+] <Olympus Zeus>"); eq(row.right, T.Coins(424242))
+			-- (1.2.4, changed on purpose: the ranking's row, its place and correspondent, its total; its
+			-- gold, items and their value under it, the stacks in its tooltip. No item data here: "at least".)
+			eq(Plain(row.text), "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"))
+			eq(row.right, L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
 			local tip = Tip(row)
-			assert(tip:find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true) and tip:find("Zed", 1, true), tip)
+			assert(tip:find(L.TREASURY_GUILD_VALUE_TIP, 1, true) and tip:find("Zed", 1, true) and tip:find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), tip)
 			local under
 			for i, l in ipairs(lines) do if l == row then under = lines[i + 1] end end
-			eq(under.indent, 1); assert(Plain(under.text):find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), under.text)
+			eq(under.indent, 1)
+			assert(Plain(under.text):find(L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 60, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))), 1, true), under.text)
 			assert(Plain(under.right):find("Zed", 1, true), under.right)
 			-- Its page: the way back, its title, the same portrait (no stacks gone, nothing to ask for), its Book not shared.
 			eq(T.ShowGuild("Olympus Zeus"), true)
@@ -47076,7 +47235,8 @@ do
 			for _, l in ipairs(page) do
 				if Plain(l.text) == L.TREASURY_BANK_GOLD then eq(l.right, T.Coins(424242)) end
 				if Plain(l.text) == L.TREASURY_GUILD_ITEMS:format(60, 1) then
-					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true), "no gold estimate, said so")
+					-- (1.2.4: the items' value is the vendor's price, said so; before, no estimate at all.)
+					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_TIP, 1, true), "what the value is, said so")
 				end
 				if l.items then eq(l.onItem, nil, "nothing to ask for from another guild's bank") end
 			end
@@ -47256,7 +47416,7 @@ do
 			-- (1.2: a click opens its bank in place; its page is ShowGuild's, a search's way to an item.)
 			row.onClick()
 			local open = Texts(Summary())
-			assert(open:find("[-] <Olympus Zeus>", 1, true), open)
+			assert(open:find("[-] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true), open) -- (1.2.4: the ranking's row)
 			eq(T.ShowGuild("Olympus Zeus"), true); eq(T.mode, "guild")
 			assert(Texts((T.Build())):find(L.TREASURY_GUILD_TITLE:format("Olympus Zeus"), 1, true), "its page")
 			T.Show("summary")
@@ -47307,7 +47467,7 @@ test("1.1 the treasury's new lines (bank, sister guilds, requests, donations, ba
 		"BANK_SISTERS_TIP", "BANK_SISTER_OF", "BANK_SISTER_TAB", "BANK_SISTER_ASK", "BANK_SISTER_YES", "BANK_SISTER_NO", "BANK_SISTER_ON",
 		"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK", "TREASURY_GUILDS", "TREASURY_GUILDS_TIP", "TREASURY_GUILDS_NONE",
 		"TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_TITLE", "TREASURY_GUILD_ITEMS", "TREASURY_GUILD_SHARED_BY",
-		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_UNAVAILABLE", "TREASURY_GUILD_BOOK_UNAVAILABLE",
+		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_TIP", "TREASURY_GUILD_BOOK_UNAVAILABLE",
 		"TREASURY_GUILD_SNAPSHOT_GONE", "TREASURY_EARLY_COLLAPSE_TIP",
 		"BANK_REQUESTS", "BANK_REQUESTS_TIP", "BANK_MY_REQUESTS", "BANK_REQUEST_HOLDS", "BANK_REQUEST_CLICK", "BANK_REQUEST_CLICK_ANSWER",
 		"BANK_REQUEST_NEW_LINE", "BANK_REQUEST_PROMPT", "BANK_REQUEST_ANY_PROMPT", "BANK_REQUEST_ASK", "BANK_REQUEST_ANSWER", "BANK_REQUEST_MARK_DONE",
@@ -51304,7 +51464,8 @@ do
 				Pages(function(path, doc)
 					assert(doc:find("from each one whose addon asked in the last 18 minutes", 1, true), path)
 					assert(doc:find("from the others at their next ask", 1, true), path)
-					assert(doc:find("keeps it on his screen until that player logs out", 1, true), path)
+					-- (1.2.4, changed on purpose: a viewer's addon keeps it across logouts now.)
+					assert(doc:find("keeps it, saved (1.2.4), until his no reaches that viewer's addon at a later ask", 1, true), path)
 					assert(doc:find("your no takes it back from their screens: at once from those whose addon asked in the last 18 minutes", 1, true), path)
 				end)
 			end)

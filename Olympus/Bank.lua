@@ -611,10 +611,16 @@ end
 -- next draw, and the Treasury is drawn again by itself (once for those arriving together), so the
 -- results the search could not name yet show without another keystroke. Every other item the
 -- client loads costs a look-up here and nothing else.
+local priceAsked, prices = {}, {} -- (1.2.4: the items' value, below)
+local priceRev = 0
 function Bank.ItemInfoReceived(id)
 	id = tonumber(id)
-	if not id or not nameAsked[id] or foldedNames[id] then return false end
-	nameMiss[id] = nil
+	if not id then return false end
+	local forName = nameAsked[id] and not foldedNames[id]
+	local forPrice = priceAsked[id] and prices[id] == nil
+	if not forName and not forPrice then return false end
+	if forName then nameMiss[id] = nil end
+	if forPrice then priceRev = priceRev + 1 end -- (1.2.4: a value waiting for it is worked out again)
 	if not namesSoon then
 		namesSoon = true
 		ns.After(Bank.NAMES_REDRAW, "bank names", function()
@@ -623,6 +629,79 @@ function Bank.ItemInfoReceived(id)
 		end)
 	end
 	return true
+end
+
+---------------------------------------------------------------------------
+-- 1.2.4: what a bank's items are worth, for the Guild treasuries' ranking (the author's ask: "os
+-- itens têm valores diferentes. Tem que dar um jeito de calcular o valor dos itens"). An item is
+-- worth Bank.ITEM_VALUES[its number] where Olympus's own table names it (copper), else what a
+-- vendor pays for it: the 11th return of C_Item.GetItemInfo (the global GetItemInfo on a client
+-- without C_Item's, as CraftRequests reads it), in copper, the item's own data, the same on every
+-- client of a build; times how many the bank holds. Not its market value: no auction is read. The
+-- table ships empty: a later version fills it, never with a guess. An item the client holds no data
+-- of yet counts in the items, not in the value (the row says "at least"), and is asked of the game,
+-- VALUE_ASKS a draw at most (as the search's names are, FoldedName); its price comes in by itself
+-- (GET_ITEM_INFO_RECEIVED: Bank.ItemInfoReceived, one redraw for many). One no vendor buys (0) and
+-- not in the table counts in the items alone (unpriced). A snapshot's value is worked out once (with
+-- its index), again only while some of its items wait and one of them came.
+---------------------------------------------------------------------------
+Bank.ITEM_VALUES = {} -- [item number] = copper: Olympus's own value for that item, over its vendor price
+Bank.VALUE_ASKS = 100 -- items with no data asked of the game at most, a draw
+local priceAsksLeft, priceMore = Bank.VALUE_ASKS, false
+local valued = setmetatable({}, { __mode = "k" }) -- [index] = { value, pending, unpriced, rev, more }
+local function Secret(v) return type(issecretvalue) == "function" and issecretvalue(v) == true end
+local function AskPrice(id)
+	if priceAsked[id] then return end
+	if priceAsksLeft <= 0 then priceMore = true return end
+	priceAsksLeft = priceAsksLeft - 1
+	priceAsked[id] = true
+	if type(C_Item) == "table" and type(C_Item.RequestLoadItemDataByID) == "function" then pcall(C_Item.RequestLoadItemDataByID, id) end
+end
+-- An item's worth in copper (0: no vendor buys it), or nil while the client has no data of it.
+function Bank.ItemPrice(id)
+	id = tonumber(id)
+	if not id then return nil end
+	local fixed = tonumber(Bank.ITEM_VALUES[id])
+	if fixed and fixed >= 0 then return math.floor(fixed) end
+	if prices[id] then return prices[id] end
+	local C = type(C_Item) == "table" and C_Item or nil
+	if C and type(C.IsItemDataCachedByID) == "function" then
+		local ok, cached = pcall(C.IsItemDataCachedByID, id)
+		if ok and cached == false then AskPrice(id) return nil end
+	elseif not priceAsked[id] then
+		-- (No way to tell what it holds: the look-up itself may ask the server, paced as the asks.)
+		if priceAsksLeft <= 0 then priceMore = true return nil end
+		priceAsksLeft = priceAsksLeft - 1
+		priceAsked[id] = true
+	end
+	local fn = C and type(C.GetItemInfo) == "function" and C.GetItemInfo or (type(GetItemInfo) == "function" and GetItemInfo or nil)
+	if not fn then return nil end
+	local ok, name, _, _, _, _, _, _, _, _, _, sell = pcall(fn, id)
+	if not ok or name == nil or Secret(name) or Secret(sell) then AskPrice(id) return nil end
+	local p = math.max(0, math.floor(tonumber(sell) or 0))
+	prices[id] = p
+	return p
+end
+-- A draw starts: its asks of the game (VALUE_ASKS).
+function Bank.PriceAsks() priceAsksLeft = Bank.VALUE_ASKS end
+-- What a snapshot's items are worth: { value (copper), pending (items still loading), unpriced
+-- (items no vendor buys, not in the table) }, or nil for no snapshot.
+function Bank.Value(snap)
+	local x = Bank.Index(snap)
+	if not x then return nil end
+	local v = valued[x]
+	if v and (v.pending == 0 or (v.rev == priceRev and not v.more)) then return v end
+	priceMore = false
+	v = { value = 0, pending = 0, unpriced = 0, rev = priceRev }
+	for _, id in ipairs(x.order) do
+		local n, p = x.ids[id].n, Bank.ItemPrice(id)
+		if p == nil then v.pending = v.pending + n
+		elseif p == 0 then v.unpriced = v.unpriced + n
+		else v.value = v.value + p * n end
+	end
+	v.more = priceMore
+	valued[x] = v
+	return v
 end
 
 -- The search as the box holds it (folded: Views.Query): an item's link pasted in finds that item
@@ -1520,6 +1599,32 @@ function Bank.Sisters()
 	return out
 end
 
+-- 1.2.4: the Federal Treasury correspondent `guild`'s master named (Nominees: his list while it
+-- counts here, the census proving him), kept with that guild's snapshot, in the save too, so it
+-- still shows once his list is no longer heard (he logged off: Nominees.FRESH). Returns his name, or
+-- nil for none; and whether it is the one kept.
+Bank.CORRESPONDENT = "Federal Treasury"
+function Bank.Correspondent(guild)
+	if type(guild) ~= "string" or guild == "" or ns.IsKingGuild(guild) then return nil end
+	local key, N = guild:lower(), ns.Nominees
+	local list = N and N.ListOf and N.ListOf(guild)
+	local x = sisters[key]
+	if list then
+		local name
+		for _, e in ipairs(type(list.entries) == "table" and list.entries or {}) do
+			if e.role == "correspondent" and type(e.dept) == "string" and e.dept:lower() == Bank.CORRESPONDENT:lower() then name = e.name break end
+		end
+		if x then
+			x.corr = name or false
+			local mine = SavedMine(false)
+			if mine and type(mine[key]) == "table" then mine[key].corr = name or false end
+		end
+		return name, false
+	end
+	if x and type(x.corr) == "string" then return x.corr, true end
+	return nil
+end
+
 ---------------------------------------------------------------------------
 -- 1.1: bank requests (Fern's): a Lord or a Captain asks the treasury for an item and a count
 -- ("need 10 Ironwood"), shown next to the bank snapshot. The bank view shows what the treasury
@@ -2051,6 +2156,8 @@ function Bank.Reload()
 	heldCount, heldTimer, rechecking, restored, outsideSince = 0, nil, false, false, nil
 	sisterCount, sisterAsked, sisterSeen, sisterLapsed = 0, false, false, false
 	wipe(indexed); wipe(foldedNames); wipe(nameMiss); wipe(nameAsked)
+	wipe(prices); wipe(priceAsked); wipe(valued)
+	priceRev, priceAsksLeft, priceMore = 0, Bank.VALUE_ASKS, false
 	namesSoon = false
 	union = { idx = {}, ids = {}, list = {}, total = {} }
 	Bank.indexBuilds, Bank.unionBuilds = 0, 0
