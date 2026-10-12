@@ -2654,7 +2654,10 @@ end)
 
 -- The owner's profile page (2026-09-30): the stat blocks and the in-profile fight History in the
 -- grey block, the portrait and who he is on the parchment; Visibility opens the privacy page.
-test("1.2 the profile: its stat blocks and History, the Visibility button, the privacy page's Profile lines", function()
+-- 1.2.4 (an intended change): Visibility, "As others see me" and the King's letters moved into "My
+-- profile" in the Olympus window, its sections; the second button is "Edit my profile", which opens
+-- that page (the next test). The privacy page's Profile lines stay.
+test("1.2 the profile: its stat blocks and History, the Edit my profile button (1.2.4), the privacy page's Profile lines", function()
 	local w = World.New()
 	local a = w:Client("Wenna Crale", { testBuild = TestBuild(w) })
 	w:As(a, function() a.slashes.OLYMPUS("arena") end)
@@ -2668,10 +2671,51 @@ test("1.2 the profile: its stat blocks and History, the Visibility button, the p
 		L.ARENA_PROF_PLACES, L.ARENA_PROF_TABARD, L.ARENA_PROF_ONLINE }, ","))
 	local buttons = spec.buttons({ key = "arena.profile" })
 	eq(buttons[1][1], L.ARENA_HISTORY_SHOW_RECENT, "History's Mine/Everyone control stays in Profile")
-	eq(buttons[2][1], L.ARENA_PROF_VISIBILITY)
+	eq(buttons[2][1], L.ARENA_PROFILE_EDIT)
+	eq(#buttons, 2, "two buttons: no More menu")
 	local keys = {}
 	for _, item in ipairs(a.ns.Consent.Items and a.ns.Consent.Items() or {}) do keys[item.key] = true end
 	if a.ns.Consent.Items then assert(keys.arenaProfileStats and keys.arenaProfileHours, "the Profile lines on the privacy page") end
+	NoErrors(w)
+end)
+
+-- 1.2.4, the owner's screenshot (the Games window, the Edit panel and its picker stacked): one place
+-- to edit. "Edit my profile" closes the Games window and opens "My profile" in the Olympus window
+-- (stood in: the world's clients load no UI.lua); Back there brings the Games window back on Profile
+-- and closes the Olympus window, closed before. The Games tab's row opens the same page.
+test("1.2.4 the Games window's Profile: Edit my profile hides the Games window and opens My profile in the Olympus window; Back brings the Games window back on Profile, the Olympus window closed again; the Games tab's row opens it too", function()
+	local w = World.New()
+	local a = w:Client("Wenna Crale", { testBuild = TestBuild(w) })
+	w:As(a, function() a.slashes.OLYMPUS("arena") end)
+	local UI, L = a.companion.own.ArenaUI, a.ns.L
+	local ui = assert(loadfile(H.ROOT .. "tests/arena/lib/fights-world.lua"))(H).PageUI(w, a)
+	w:As(a, function() UI.ShowPane("arena.profile") end)
+	eq(UI.IsShown(), true)
+	local buttons = w:As(a, function() return UI.Pane("arena.profile").buttons({ key = "arena.profile" }) end)
+	eq(buttons[2][1], L.ARENA_PROFILE_EDIT)
+	w:As(a, buttons[2][2])
+	eq(UI.IsShown(), false, "the Games window steps aside")
+	eq(ui.shown, true); eq(ui.OwnProfileShown(), true, "My profile, in the Olympus window")
+	eq(a.ns.ProfileEdit.Section(), "look")
+	eq(w:As(a, a.ns.ProfileEdit.Back), true)
+	eq(ui.person, nil); eq(ui.shown, false, "the Olympus window closed, as before")
+	eq(UI.IsShown(), true, "the Games window back"); eq(UI.state.pane.arena, "arena.profile", "on Profile")
+	-- Opened with the Olympus window already open: Back leaves it open.
+	ui.shown = true
+	w:As(a, buttons[2][2])
+	eq(w:As(a, a.ns.ProfileEdit.Back), true)
+	eq(ui.shown, true, "left open"); eq(UI.IsShown(), true)
+	-- Opened another way (the Games tab's row): Back is the window's own, the Games window stays put.
+	w:As(a, function() UI.Hide() end)
+	local row
+	for _, l in ipairs(w:As(a, a.ns.ArenaHome.TabLines)) do
+		if tostring(l.text):find(L.MYPROFILE_TITLE, 1, true) then row = l end
+	end
+	assert(row and row.onClick, "the Games tab's row")
+	w:As(a, row.onClick)
+	eq(ui.OwnProfileShown(), true)
+	eq(w:As(a, a.ns.ProfileEdit.Back), true)
+	eq(UI.IsShown(), false, "no Games window brought back")
 	NoErrors(w)
 end)
 

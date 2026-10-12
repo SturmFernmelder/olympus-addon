@@ -126,12 +126,6 @@ local function Frames(w, c)
 	return rec
 end
 
-local function FrameKeys(vm)
-	local out = {}
-	for _, x in ipairs(vm.frames) do if not x.own then out[#out + 1] = x.key end end
-	return table.concat(out, ",")
-end
-
 print("HonorsNet: the missionaries' crook (1.2.3)")
 
 test("1.2.3 the missionaries' crook: the Church's top 3 (the King's word) hold the crook in gold, silver and bronze and its title, switched on and seen round their own portraits and by others; the 4th, and a word from anyone but a root, nothing", function()
@@ -281,7 +275,11 @@ test("1.2.3 honours: wearing the cornucopia, a frame not released yet (the koi) 
 	W3.NoErrors(w)
 end)
 
-test("1.2.3 the profile's Edit: its frame list and its icon picker offer only the released frames held (the cornucopia, the crook), never one not released yet (the koi); its title still is; each click moves to a frame that shows", function()
+-- 1.2.4 ("My profile", the frame rows of its Look): the koi is listed now, grey and unpickable,
+-- "comes in a later version" (the view model's shipped = false), where 1.2.3 left it out; the
+-- frames picked are the released ones as before. The panel's "next frame" (ProfileEdit.Cycle)
+-- went with the panel: a click on each released frame's row, the same check that it shows.
+test("1.2.3 the profile's Edit: its frame rows pick only the released frames held (the cornucopia, the crook), never one not released yet (the koi, 1.2.4: listed grey); its title still is; each click moves to a frame that shows", function()
 	local w, cast = W3.New()
 	local A = cast.A
 	Ready(w, A)
@@ -293,7 +291,15 @@ test("1.2.3 the profile's Edit: its frame list and its icon picker offer only th
 	eq(table.concat(held, ","), "donor-top-1,missionary-1,donor-month-1", "the cornucopia, the crook and the koi held")
 	local PE = W3.M(w, A, "ProfileEdit")
 	local vm = PE.ViewModel()
-	eq(FrameKeys(vm), "rank,none,donor-top-1,missionary-1", "the released frames alone")
+	local pickable, later = {}, {}
+	for _, x in ipairs(vm.frames) do
+		if not x.own then
+			local list = x.shipped == false and later or pickable
+			list[#list + 1] = x.key
+		end
+	end
+	eq(table.concat(pickable, ","), "rank,none,donor-top-1,missionary-1", "the released frames alone pick")
+	eq(table.concat(later, ","), "donor-month-1", "the koi listed, not pickable (1.2.4)")
 	local titles = {}
 	for _, x in ipairs(vm.titles) do titles[#titles + 1] = x.key end
 	eq(table.concat(titles, ","), "none,donor-top-1,missionary-1,donor-month-1", "every title held")
@@ -301,16 +307,25 @@ test("1.2.3 the profile's Edit: its frame list and its icon picker offer only th
 		assert(x.key ~= "koi-gold", "no mark of a frame not released")
 	end
 	eq(PE.HonourOfMark("koi-gold"), nil)
-	-- Each click on the frame picker: the next frame, and it is the one shown.
+	-- Each click on a frame's row of the page's Look: that frame, and it is the one shown; the
+	-- koi's row takes no click.
+	local function Row(label)
+		local lines = PE.Page({ full = A.name }, {})
+		for _, l in ipairs(lines) do
+			if type(l.text) == "string" and (l.text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^> ", "")) == label then return l end
+		end
+	end
+	eq(Row(A.ns.HonorsNet.TitleText("donor-month-1")).onClick, nil, "the koi: no click")
 	local seen = {}
-	for _ = 1, 4 do
-		eq(PE.Cycle("frame", 1), true, "each click takes")
+	for _, key in ipairs({ "missionary-1", "rank", "none", "donor-top-1" }) do
+		local label
+		for _, x in ipairs(vm.frames) do if x.key == key then label = x.label end end
+		w:As(A, assert(Row(label), key).onClick)
 		local pick = A.ns.ArenaProfile.Pick().frame
 		seen[#seen + 1] = pick
 		local shown = w:As(A, A.ns.HonorsNet.Verified, A.name).frame
 		eq(shown, pick, pick .. ": shown as picked")
 	end
-	-- (From the cornucopia, switched on first by ORDER: the crook, then round to it again.)
 	eq(table.concat(seen, ","), "missionary-1,rank,none,donor-top-1")
 	W3.NoErrors(w)
 end)

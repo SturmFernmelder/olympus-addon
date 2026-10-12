@@ -753,6 +753,10 @@ function ArenaHome.TabLines()
 	lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.ARENA_GAMES_MINE), right = Grey(L.ARENA_GAMES_MINE_DESC),
 		onClick = function() ArenaHome.Open("games.mine") end,
 		tooltip = function(tt) tt:AddLine(L.ARENA_GAMES_MINE, 1, 0.82, 0) tt:AddLine(L.ARENA_GAMES_MINE_TIP, 1, 1, 1, true) end }
+	-- (1.2.4: his frame, title, nickname and emblem: "My profile", his own page in this window.)
+	if type(ns.ProfileEdit) == "table" and type(ns.ProfileEdit.Open) == "function" then
+		lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.MYPROFILE_TITLE), onClick = function() ns.ProfileEdit.Open() end }
+	end
 	lines[#lines].gapAfter = true
 	-- The games' rankings (the staff always; everyone once the King switches them on), then the
 	-- staff's own section.

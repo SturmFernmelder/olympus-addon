@@ -85,7 +85,7 @@ ns.GAMEPAD = {
 	{ id = "error-handler", kind = "global-handler", files = { "Bootstrap.lua", "Diagnostics.lua" },
 		guard = "gate", toPad = "park", toMouse = "nothing", safe = "off",
 		why = "Every error would pass through Olympus's handler, which opens the game's error window in Olympus's taint; at a switch to the gamepad UI the game's own handler is put back, and never replaced again that session." },
-	{ id = "escape-list", kind = "table-write", files = { "Core.lua", "Workshop.lua", "Olympus_Arena/Games/Games.lua" },
+	{ id = "escape-list", kind = "table-write", files = { "Core.lua", "Olympus_Arena/Games/Games.lua" },
 		guard = "gate", toPad = "park", toMouse = "on", safe = "off",
 		why = "The gamepad menus close every window on UISpecialFrames and read it unprotected: Olympus writes no name there, and at a switch takes off its names at the end of the list (a name before another addon's stays until a /reload, so nothing moves)." },
 	{ id = "worldmap-icons", kind = "map-pins", files = { "Core.lua", "Map.lua", "Decree.lua", "King.lua", "Positions.lua", "Board.lua" },

@@ -1072,16 +1072,32 @@ local function ProfileButtons(st)
 		local name = ProfileName(st)
 		return { { L.ARENA_MENU_CHALLENGE, function() ArenaUI.Challenge(name) end }, { L.ARENA_BACK, ArenaUI.BackFromProfile } }
 	end
+	-- 1.2.4: one place to edit, "My profile" in the Olympus window (the core's ProfileEdit): this
+	-- window steps aside (as for a table, Window.lua) and Back there brings it back on Profile. Its
+	-- visibility, "as others see me" and the King's letters are that page's sections now: two
+	-- buttons, no More menu.
 	local PE = ns.ProfileEdit
 	local edit = type(PE) == "table" and type(PE.Open) == "function"
-	local C2 = ns.Consent
 	return {
 		{ HistoryMine() and L.ARENA_HISTORY_SHOW_RECENT or L.ARENA_HISTORY_SHOW_MINE, ToggleProfileHistory },
-		{ L.ARENA_PROF_VISIBILITY, function() if C2 and C2.Show then C2.Show("profile") end end, enabled = C2 ~= nil and C2.Show ~= nil },
-		{ L.ARENA_PROFILE_EDIT, function() if edit then PE.Open() else ArenaUI.Say(Kit.Why("missing")) end end, enabled = edit, why = Kit.Why("missing") },
-		{ L.ARENA_PROFILE_PREVIEW, function() if ArenaUI.PreviewMe then ArenaUI.PreviewMe() end end },
-		{ L.ARENA_PROFILE_LETTERS, function() if ArenaUI.LettersPopup then ArenaUI.LettersPopup() end end },
+		{ L.ARENA_PROFILE_EDIT, function() ArenaUI.EditMyProfile() end, enabled = edit, why = Kit.Why("missing") },
 	}
+end
+-- "Edit my profile": the Olympus window's page of his own; this window back when it can't open.
+function ArenaUI.EditMyProfile()
+	local PE = ns.ProfileEdit
+	if type(PE) ~= "table" or type(PE.Open) ~= "function" then
+		ArenaUI.Say(Kit.Why("missing"))
+		return false
+	end
+	ArenaUI.Hide()
+	local ok, why = PE.Open(nil, { from = "games" })
+	if not ok then
+		ArenaUI.Open("profile")
+		if why == "combat" then ArenaUI.Say(Kit.Why("combat")) end
+		return false
+	end
+	return true
 end
 ArenaUI.RegisterPane("arena.profile", { section = "arena", label = L.ARENA_PANE_PROFILE, order = 3,
 	lines = ProfileLines, detail = ProfileDetail, buttons = ProfileButtons,

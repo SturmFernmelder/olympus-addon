@@ -108,9 +108,12 @@ test("1.2 profile polish: an arena portrait is the player's own portrait again (
 		B.MarkOfName = function(name, guild) return nil, { who = name, guild = guild } end
 		framed = Kit.SetPortraitFrame(rig, "Lida Fenn", "Olympus Ember", nil, true)
 		eq(framed.key, nil, "as others see him: no preview"); eq(rig.shown, nil)
-		local seen = UI.PreviewMe()
-		assert(seen.rig and seen.rig.container and not seen.rig.plain, "the preview's portrait is Borders'")
-		eq(seen.rig.shown, nil, "the Arena's 'Preview as others see me': no preview either")
+		-- (1.2.4: "as others see me" is My profile's detail box, in the Olympus window: HonorsNet's
+		-- portrait dressed by ProfileEdit.DressPortrait with the frame others verify. The same rule.)
+		local seen = a.ns.HonorsNet.NewPortrait(CreateFrame("Frame"), 42)
+		assert(seen.container and not seen.plain, "My profile's portrait is Borders'")
+		a.ns.ProfileEdit.DressPortrait(seen, { frame = "rank" })
+		eq(seen.shown, nil, "My profile's 'As others see you': no preview either")
 		B.MarkOfName = lord
 		B.SetPreview("off")
 		W.Visible = visible
@@ -152,7 +155,7 @@ end)
 -- "player" unit, first in Card.Tokens), never the emblem a viewer who has him as no unit sees; and
 -- an Arena already open kept the author's old border preview (or none) until something redrew it,
 -- while his unit frame changed at once.
-test("1.2 profile polish: 'Preview as others see me' shows his emblem as viewers do, never his live portrait; his Arena portraits follow his border preview at once, as his unit frame", function()
+test("1.2 profile polish: 'Preview as others see me' (1.2.4: My profile's detail box) shows his emblem as viewers do, never his live portrait; his Arena portraits follow his border preview at once, as his unit frame", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
 	w:As(a, function()
@@ -171,12 +174,18 @@ test("1.2 profile polish: 'Preview as others see me' shows his emblem as viewers
 			if name == "Parric Stowe" then return "silver", { who = name, guild = guild, olympus = true, leader = true } end
 			return nil, { who = name, guild = guild }
 		end
-		-- His emblem picked in the profile's Edit: the preview shows it, as a viewer without him as a
-		-- unit of his own sees it, and asks no live portrait for it (his own would be "player").
-		a.ns.ProfileEdit = { Preview = function() return { emblem = "INV_Misc_Head_Dragon_01" } end }
-		local seen = UI.PreviewMe()
+		-- His emblem picked in his profile: the preview shows it, as a viewer without him as a unit of
+		-- his own sees it, and asks no live portrait for it (his own would be "player"). (1.2.4: the
+		-- preview is My profile's detail box, ProfileEdit.DressPortrait with the page's art, where
+		-- this was the Arena's own "Preview as others see me" window; the rule carries over unchanged.)
+		local seen = { rig = a.ns.HonorsNet.NewPortrait(CreateFrame("Frame"), 42) }
+		a.ns.ProfileEdit.DressPortrait(seen.rig, { frame = "rank", emblem = "INV_Misc_Head_Dragon_01" })
 		eq(seen.rig.portrait.texture, "Interface\\Icons\\INV_Misc_Head_Dragon_01", "his emblem, as others see him")
 		for _, p in ipairs(pictures) do assert(p.tex ~= seen.rig.portrait, "no live portrait (" .. tostring(p.unit) .. ") as others see him") end
+		-- Without an emblem: his live portrait, as his unit frame's.
+		local live = a.ns.HonorsNet.NewPortrait(CreateFrame("Frame"), 42)
+		a.ns.ProfileEdit.DressPortrait(live, { frame = "rank" })
+		eq(pictures[#pictures].tex, live.portrait); eq(pictures[#pictures].unit, "player")
 		-- His own portraits elsewhere stay live, as on his unit frame.
 		local rig, other = Kit.NewPortrait(CreateFrame("Frame"), 64), Kit.NewPortrait(CreateFrame("Frame"), 64)
 		eq(Kit.DrawPortrait(rig, "Lida Fenn", { class = "MAGE", guild = "Olympus Ember" }), "live")
