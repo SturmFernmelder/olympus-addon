@@ -372,6 +372,8 @@ test("1.2.1 the King's letter: its window is Olympus's own metal with the parchm
 					local signLeft = sign:GetLeft()
 					assert(sealLeft + sealW <= signLeft + 0.5 and signLeft - (sealLeft + sealW) <= 12, where .. ": the seal just before the signature")
 					assert(sealLeft >= (pl + pr) / 2, where .. ": on the right half of the paper")
+					-- (1.2.4, the author's ask: "use vermelho no selo de cera do rei") Red wax: the
+					-- window's seal goes through H.TintSeal (below, on a texture that records it).
 					local wl, wb, wr, wt = Inside(f.wear, "Wear it")
 					local ll, lb, lr, lt = Inside(f.later, "Later")
 					assert(wr <= ll, where .. ": the buttons apart")
@@ -388,5 +390,28 @@ test("1.2.1 the King's letter: its window is Olympus's own metal with the parchm
 		for _, k in ipairs(WORDS) do rawset(L, k, saved[k]) end
 		if not ok then error(err, 0) end
 	end)
+	W3.NoErrors(w)
+end)
+
+-- 1.2.4, the author's ask: "use vermelho no selo de cera do rei". The letter's wax seal is the
+-- faction's own (the Alliance's is blue), greyed and tinted red, through H.TintSeal; the window
+-- made by H.ShowLetter tints its seal with it.
+test("1.2.4 the King's letter: its wax seal is red, the faction's seal greyed and tinted", function()
+	local w, cast = W3.New()
+	local A = cast.A
+	local HN = A.ns.HonorsNet
+	local tex = {}
+	function tex:SetDesaturated(on) self.desaturated = on end
+	function tex:SetVertexColor(r, g, b) self.color = { r, g, b } end
+	HN.TintSeal(tex)
+	eq(tex.desaturated, true, "greyed first")
+	assert(tex.color and tex.color[1] > 0.6 and tex.color[2] < 0.25 and tex.color[3] < 0.25, "red")
+	-- The window's own seal: H.TintSeal is what its creation calls.
+	local tinted = 0
+	local real = HN.TintSeal
+	HN.TintSeal = function(t) tinted = tinted + 1; return real(t) end
+	w:As(A, HN.ShowLetter, "arena-champion")
+	HN.TintSeal = real
+	eq(tinted, 1, "the window's seal tinted, once, as it is made")
 	W3.NoErrors(w)
 end)

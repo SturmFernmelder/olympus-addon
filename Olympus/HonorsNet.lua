@@ -102,6 +102,14 @@ H.LETTERS_MAX = 20
 H.LETTER_PORTRAIT = 60          -- the letter's portrait: the size of his own on his unit frame
 H.LETTER_W = 440                -- the letter's window across (its height follows its words)
 H.LETTER_PAD = 16               -- the parchment's margin
+H.SEAL_RED = { 0.78, 0.13, 0.11 } -- the King's wax seal, red (1.2.4, the author's ask)
+-- (1.2.4, the author's ask: "use vermelho no selo de cera do rei": red wax, whatever the faction's
+-- seal's own colour; its drawing kept, greyed, then tinted.)
+function H.TintSeal(tex)
+	if type(tex) ~= "table" then return end
+	if tex.SetDesaturated then tex:SetDesaturated(true) end
+	if tex.SetVertexColor then tex:SetVertexColor(H.SEAL_RED[1], H.SEAL_RED[2], H.SEAL_RED[3]) end
+end
 H.LETTER_FONT = 15              -- its words' size at least
 H.LETTER_BUTTON = 120
 H.REFRESH_DELAY = 60            -- after login, the own honours looked at once the words came in
@@ -1620,6 +1628,7 @@ local function Build()
 	local okA, has = false, nil
 	if type(info) == "function" then okA, has = pcall(info, atlas) end
 	if okA and has then f.seal:SetAtlas(atlas) else f.seal:SetTexture("Interface\\Icons\\Spell_Holy_SealOfSacrifice") end
+	H.TintSeal(f.seal)
 	local function Btn(label, dx, fn)
 		local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
 		b:SetSize(H.LETTER_BUTTON, 24)
