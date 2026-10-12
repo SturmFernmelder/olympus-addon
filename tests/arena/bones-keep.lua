@@ -209,6 +209,42 @@ test("1.2.4 Bones kept: a closed month's list is kept for good, its totals and c
 	NoErrors(w)
 end)
 
+-- (The review) A list's rows each ask for their player's card (Kit.Portrait, the ranking's class),
+-- and each card for his Bones: every player's read every month again (each kept month's list
+-- copied, each name looked up), at every game heard, and the months kept add up for good.
+test("1.2.4 Bones kept: the profile's Bones of every player shown cost one reading of each month, not one per player", function()
+	local w, a, b, c = Setup()
+	local d = w:Player(P3)
+	Game(w, { id = "Kp1", p1 = a, p2 = b, w = "2", t = w.clock - 3600 })
+	Game(w, { id = "Kp2", p1 = d, p2 = b, w = "1", t = w.clock - 1800 })
+	local FT = c.ns.FarkleTable
+	local month, n = FT.Month, 0
+	FT.Month = function(...) n = n + 1 return month(...) end
+	local got = {}
+	local ok, err = pcall(function()
+		for _, p in ipairs({ a, b, d, a, b }) do got[p.short] = w:As(c, FT.PlayerStats, p.name) end
+	end)
+	FT.Month = month
+	if not ok then error(err, 0) end
+	eq(got[b.short].games, 2); eq(got[b.short].won, 1)
+	eq(got[a.short].games, 1); eq(got[a.short].won, 0)
+	eq(got[d.short].games, 1); eq(got[d.short].won, 1)
+	eq(w:As(c, FT.PlayerStats, "Nobody Here-" .. c.realm), nil, "none for a player with no game")
+	eq(n, #w:As(c, FT.Months), "each month read once, for them all")
+	-- A game heard: worked out again, once.
+	Game(w, { id = "Kp3", p1 = a, p2 = d, w = "1", t = w.clock - 60 })
+	n = 0
+	FT.Month = function(...) n = n + 1 return month(...) end
+	ok, err = pcall(function()
+		for _, p in ipairs({ a, b, d }) do got[p.short] = w:As(c, FT.PlayerStats, p.name) end
+	end)
+	FT.Month = month
+	if not ok then error(err, 0) end
+	eq(got[a.short].games, 2); eq(got[a.short].won, 1)
+	eq(n, #w:As(c, FT.Months))
+	NoErrors(w)
+end)
+
 test("1.2.4 Bones kept: a free table's live record is the live realm's, not the rehearsals': `test clear` mid-game, then a /reload, and the game goes on and counts", function()
 	local w, a, b, c = Setup()
 	local id = assert(Do(w, a, "Create", { guest = b.name, target = 2000 }))

@@ -334,7 +334,7 @@ test("free duel qualification: native local completion and both reports retain g
 	-- (1.2.4, the author's ask: the ledger is the core's, so the duel's own two halves make its entry
 	-- here without the companion too; it is a direct duel's, never an arbiter's.)
 	local entries = Ledger(w, cast.A).Entries()
-	eq(#entries <= 1, true, "the duel once at most")
+	eq(#entries, 1, "the duel once, its own two halves' entry")
 	for _, e in ipairs(entries) do
 		eq(e.gkArb, nil, "qualification does not create an arbiter's ranking")
 		eq(cast.A.ns.ArenaFights.Has(e.fl, "d"), true, "the duel's own two halves")

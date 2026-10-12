@@ -1379,25 +1379,30 @@ function FT.Months()
 end
 -- (1.2.4) A player's Bones for his profile (PagesPlayer's stats.bones): the games and wins every
 -- month's list here counts for him (FT.Month: the ranking's own count, caps and all), or nil.
-HV.stats = {} -- { ctx, [name, lower case] = his stats or false }: worked out again when Best's would be
+-- (Every player's at once, each month read once, kept until Best's would be worked out again: a
+-- portrait on each row of a list asks for its player's card, and the months kept add up for good.)
+HV.stats = {} -- { ctx, totals = { [name, lower case] = { games, won } } }
 function FT.PlayerStats(name)
 	local k = Low(name)
 	if not k then return nil end
 	local ctx = HV.Context()
-	if HV.stats.ctx ~= ctx then HV.stats = { ctx = ctx } end
-	if HV.stats[k] ~= nil then return HV.stats[k] or nil end
-	local games, won = 0, 0
-	for _, m in ipairs(FT.Months()) do
-		local x = FT.Month(m)
-		for _, r in ipairs(x and x.rows or {}) do
-			if (r.key or Low(r.name)) == k then
-				games, won = games + (tonumber(r.games) or 0), won + (tonumber(r.won) or 0)
-				break
+	if HV.stats.ctx ~= ctx or type(HV.stats.totals) ~= "table" then
+		local totals = {}
+		for _, m in ipairs(FT.Months()) do
+			local x = FT.Month(m)
+			for _, r in ipairs(x and x.rows or {}) do
+				local rk = r.key or Low(r.name)
+				if rk then
+					local t = totals[rk]
+					if not t then t = { games = 0, won = 0 } totals[rk] = t end
+					t.games, t.won = t.games + (tonumber(r.games) or 0), t.won + (tonumber(r.won) or 0)
+				end
 			end
 		end
+		HV.stats = { ctx = ctx, totals = totals }
 	end
-	HV.stats[k] = games > 0 and { games = games, won = won } or false
-	return HV.stats[k] or nil
+	local t = HV.stats.totals[k]
+	return t and t.games > 0 and { games = t.games, won = t.won } or nil
 end
 
 -- After a login: this player's own games of this month and the last said again on the channel (the
