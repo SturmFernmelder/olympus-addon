@@ -2224,12 +2224,13 @@ few characters working together can still reach is said plainly further down
     runner-up of each guild's election also reports every 10 minutes (and answers census
     requests), so a Lord or officer who is the elected reporter is still verified. (An officer
     who is the only one of their guild with the addon is not.)
-  - **The Crown** (any guild master) needs two senders naming them, and one of the two may be
-    that Lord himself (see below). The officers of `<Olympus>` are of the Crown only on
-    `<Olympus>` members' clients, from their roster (1.0.0), and the Hands the King's list or a
-    Steward's own list names (their word, never a vote; the King can't take back a Steward's
-    Hand: that Steward does, or the author by removing him): everywhere else they count as
-    Captains, so outsiders' reports can't add one to the Crown.
+  - **A Lord** (any guild master; since 1.2.3 only `<Olympus>`'s are of the Crown) needs two
+    senders naming them, and one of the two may be that Lord himself (see below). The officers
+    of `<Olympus>` are of the Crown only on `<Olympus>` members' clients, from their roster
+    (1.0.0), and the Hands the King's list or a Steward's own list names (their word, never a
+    vote; the King can't take back a Steward's Hand: that Steward does, or the author by
+    removing him): everywhere else they count as Captains, so outsiders' reports can't add one
+    to the Crown.
   - **The centurions of the King's guild** (1.1.5) count only from the King's character or a
     councillor on the signed list (the sender the server stamps), the newest list heard, and end
     when its sender is neither any more; their border shows only on a player the server puts in
@@ -2332,10 +2333,10 @@ code.
   clients, and six of them filled its flood guard (6 decrees a minute) with raid warnings.
 - **A real guild: two contest it, three take it.** A real guild is pictured by its reporter and
   runner-up, two votes at most. Two outsiders who send another picture leave it contested: its
-  Lord and officers lose their rank on every other client ([Lords], [Captains], their decrees)
-  while the two keep voting. Three make theirs its picture: their Lord is of the Crown, the
-  real one nobody. Two alts who join a real guild with names that sort first in its election
-  become its reporter and runner-up, and name whom they like.
+  Lord and officers lose their rank on every other client ([Lords], [Captains]) while the two
+  keep voting. Three make theirs its picture: their man is its Lord, the real one nobody. Two
+  alts who join a real guild with names that sort first in its election become its reporter
+  and runner-up, and name whom they like.
 - **`<Olympus>`.** Its King counts by his character's name: no count of votes makes anyone else
   King or silences him. Three outsiders can still add one of their own to its officers in the
   census. Before 1.0.0 that made him of the Crown on every client outside `<Olympus>`; since
