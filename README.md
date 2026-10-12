@@ -2682,6 +2682,14 @@ there pairs each fighter's name with his GUID (a unit in view, or `GetPlayerInfo
 then it is in the history alone, and it goes if the game names another character
 (`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel counts whatever the King's
 live switch says: that switch is the bets' alone.
+**What the duels' rankings keep** (1.2.4, `Olympus/ArenaLedger.lua`): the ledger is in the core's
+saved data, no longer the companion's alone, so a member who never opens the Arena window keeps
+every duel whose two halves he heard, ranks it (the Games tab's Arena ranking too) and keeps it
+across a `/reload`. A half waiting for its other half is kept as well (62 days at most) and
+matched when the other comes later; at login a fighter's own half of each duel he confirmed waits
+again for the other's when his ledger lost the duel; and the clerk's carousel carries the season's
+eight weeks of duels (it was the last two weeks with duels). The ledger the companion kept before
+is taken in when it loads (`tests/arena/duels-keep.lua`).
 **The games' rankings stay shown** (1.2.4, `Olympus/ArenaRoles.lua`): the King's word that shows
 a game's ranking to everyone on the Games tab (or a councillor's he named for that game) is kept
 for the whole realm group, not under its giver's realm, so a member on another realm of the group

@@ -5,8 +5,9 @@ local ADDON, ns = ...
 
 -- The results ledger (AE), clerk sync (AB, AQ), ratings and tiers through ArenaRating, belts and
 -- their words (AV), seasons (AH), the Hall, and the games' ledger (AY, 1.1.6: every game played,
--- for the auditors and each player's own). Registers AE AB AQ AV AH AY. The ledger lives in
--- Arena.Heavy (the companion's saved variables); the clerk is never the King's character.
+-- for the auditors and each player's own). Registers AE AB AQ AV AH AY. The ledger lives in the
+-- core's saved data (1.2.4; the companion's, Arena.Heavy, before); the clerk is never the King's
+-- character.
 -- API (the design): Table(cat), Rating(gk), Record(gk), Tier(gk), Belts(), BeltOf(gk), Lineage(cat),
 --   Season(), Hall(n), Clerk()
 --   The games' ledger (1.1.6): Played(mode, record), MyGames(), AllGames(), GamesView(opts),
@@ -27,10 +28,12 @@ ns.ArenaLedger = ArenaLedger
 -- public arbiter. Refused: a time ahead of the clock, an arbiter who is one of its fighters, a fid
 -- already held with other content (the first kept, the conflict counted).
 --
--- Where it lives (the design): the entries in the companion's heavy tables only (dropped while it is
--- not loaded: the clerk's carousel refills them); the title fights (titles), the belt and podium
--- words (beltWords) and the season word in the core, enough to verify a belt frame without the
--- ledger.
+-- Where it lives (the design): the title fights (titles), the belt and podium words (beltWords)
+-- and the season word in the core, enough to verify a belt frame without the ledger. (1.2.4, the
+-- author's ask: rankings are kept and never lost.) The entries are in the core's saved data too
+-- (OlympusDB, ledger), no longer the companion's alone: a member who never opens the Arena window
+-- keeps every duel he heard, his own included, and ranks it; the companion's book of the builds
+-- before is taken in when it loads (LG.TakeHeavy).
 --
 -- What counts (the design), worked out from the ledger alone so every client agrees:
 -- the arbiter's r; never a rehearsal; the rounds at least MIN_RATED_DUR on average; a fighter's
@@ -65,6 +68,7 @@ LG.CLERK_SILENT = 1200      -- ...until silent this long, when the next takes ov
 LG.CLERK_WAIT = 120         -- a candidate waits this long after it could clerk before its first word
 LG.PIECE = 240              -- bytes of an AB~P piece at most
 LG.CAROUSEL_GAP = 300       -- a full turn of the carousel, then this pause
+LG.CAROUSEL_WEEKS = 8       -- (1.2.4) its weeks with entries, the newest: the season's (two before)
 LG.WORD_REPEAT = 1800       -- belt words again every 30 minutes...
 LG.WORD_DAYS = 7            -- ...for 7 days
 LG.PODIUM_REPEAT = 3600     -- the podium words every 60 minutes
@@ -111,24 +115,21 @@ local function CoreT(mode, key, make)
 end
 LG.CoreT = CoreT
 
--- This realm's (or the rehearsal's) ledger of a season: { list = { [fid] = entry }, n }, heavy only.
+-- This realm's (or the rehearsal's) ledger of a season: { list = { [fid] = entry }, n }, in the
+-- core's saved data (1.2.4; the companion's before).
 local function Book(mode, season, make)
-	local h = Arena.Heavy(mode)
-	if not h then return nil end
-	if type(h.ledger) ~= "table" then
-		if not make then return nil end
-		h.ledger = {}
-	end
-	local b = h.ledger[season]
+	local ledger = CoreT(mode, "ledger", make)
+	if not ledger then return nil end
+	local b = ledger[season]
 	if type(b) ~= "table" then
 		if not make then return nil end
 		b = { list = {}, n = 0 }
-		h.ledger[season] = b
+		ledger[season] = b
 		-- Two seasons kept: the current and the last.
 		local seasons = {}
-		for k in pairs(h.ledger) do if type(k) == "number" then seasons[#seasons + 1] = k end end
+		for k in pairs(ledger) do if type(k) == "number" then seasons[#seasons + 1] = k end end
 		table.sort(seasons)
-		for i = 1, #seasons - 2 do h.ledger[seasons[i]] = nil end
+		for i = 1, #seasons - 2 do ledger[seasons[i]] = nil end
 	end
 	return b
 end
@@ -558,7 +559,7 @@ end
 --
 -- A half: AX~L1~fid~side~gkA~A~gkB~B~bo~cat~w~m~rounds~t~facts~lvl~opp~pk~sig, on the channel and
 -- to the other fighter, again from the fighter's client every ArenaFights.HALF_REPEAT for HALF_FOR,
--- and in the clerk's carousel (the last two weeks) for the members who were not online.
+-- and in the clerk's carousel (1.2.4: the season's eight weeks) for the members who were not online.
 --   side: the signer's (A or B); A, B: Name-Realm; w: the winner's side; m: K or R; rounds:
 --   "<w><m><seconds|->" per round, "." apart, on the signer's own clock (- unknown); t: his last
 --   duel line's server time; facts: his own "<class2><raceID>.<level>" (FactsText, - unread); lvl:
@@ -601,8 +602,24 @@ LG.HALF_LATE = 86400       -- a clerk takes a fighter's own half up to this old 
 LG.GK_RECHECK = 30         -- an entry waiting for the game's word on its GUIDs: looked at again this often...
 LG.GK_WAIT = 900           -- ...for this long after it was kept (later, whenever its halves are heard again)
 
+LG.HALF_KEEP = 62 * 86400 -- (1.2.4) halves waiting for their other half kept this long in the saved data
+
 -- [fid] = { t (first heard), A = { half, ... }, B = { half, ... }, tried = { [pair] = true }, checking }
+-- (1.2.4) Kept in the core's saved data too (duelHalves[fid] = { t, A = { { b = body, f = 1 if
+-- first-hand }, ... }, B = ... }), so a logout or a /reload no longer loses a duel whose other half
+-- comes later: taken back at login (LG.RestoreHalves), HALF_KEEP at most.
 local pend, pendN = {}, 0  -- pendN: the halves held
+local function Persist(fid)
+	local saved = CoreT("L", "duelHalves", pend[fid] ~= nil)
+	if not saved then return end
+	local p = pend[fid]
+	if not p then saved[fid] = nil return end
+	local s = { t = p.t, A = {}, B = {} }
+	for _, side in ipairs({ "A", "B" }) do
+		for _, h in ipairs(p[side]) do s[side][#s[side] + 1] = { b = h.body, f = h.first and 1 or nil } end
+	end
+	saved[fid] = s
+end
 local pins, pinsN = {}, 0  -- [gk] = the account key (base64url) its fighter gave first-hand
 local function Raw(v, len)
 	local Ed = ns.Ed25519
@@ -621,6 +638,7 @@ local function Drop(fid)
 	if not p then return end
 	pend[fid] = nil
 	pendN = pendN - #p.A - #p.B
+	Persist(fid)
 end
 local function Evict()
 	while pendN >= LG.HALVES_MAX do
@@ -636,6 +654,7 @@ local function Unhold(p, h)
 		if x == h then
 			table.remove(list, i)
 			pendN = pendN - 1
+			if pend[h.fid] == p then Persist(h.fid) end
 			return
 		end
 	end
@@ -880,8 +899,8 @@ local function CheckPair(fid, p, a, b, e, mode)
 end
 
 -- The halves of a duel here: every pair of one side's and the other's not tried yet (Agree, the
--- game's word on the GUIDs, then each signature), until one is kept (Keep). A client without the
--- companion keeps them waiting: no ledger here (Book).
+-- game's word on the GUIDs, then each signature), until one is kept (Keep). (1.2.4: with or
+-- without the companion: the ledger is the core's.)
 function LG.MatchHalves(fid, mode)
 	mode = mode or "L"
 	local p = pend[fid]
@@ -898,8 +917,6 @@ function LG.MatchHalves(fid, mode)
 				elseif BothBound(e) == false then
 					p.tried[pair] = true
 					Count("gk")
-				elseif not Arena.Heavy(mode) then
-					return false, "light"
 				else
 					return CheckPair(fid, p, a, b, e, mode)
 				end
@@ -917,7 +934,9 @@ end
 Later = function() Arena.After(LG.HALVES_LATER, "halves later", LG.RetryHalves) end
 
 -- A half heard from `sender` (or our own, LG.Publish): kept until its other half, then matched.
-function LG.TakeHalf(dist, sender, mode, body)
+-- own (1.2.4): this fighter's own half again, from his own saved fight (LG.OwnHalves), whatever its
+-- age: its time is his own word, to himself.
+function LG.TakeHalf(dist, sender, mode, body, own)
 	if mode ~= "L" or not Arena.Counts(mode) then return Count("rehearsal") end
 	local h, why = LG.ReadHalf(body)
 	if not h then return Count(why) end
@@ -926,7 +945,7 @@ function LG.TakeHalf(dist, sender, mode, body)
 		-- (Its time and its gk are its fighter's word: fresh only, a clerk's late one excepted, and
 		-- never a GUID the game gives another character.)
 		local age = Now() - h.t
-		if age > LG.HalfFresh() and not (age <= LG.HALF_LATE and LG.MayClerk()) then return Count("late") end
+		if age > LG.HalfFresh() and not (own and Me(sender)) and not (age <= LG.HALF_LATE and LG.MayClerk()) then return Count("late") end
 		if Bound(h.signer, h.gk) == false then return Count("gk") end
 	else
 		if not LG.MayRelay(sender, mode) then return Count("relay") end
@@ -954,6 +973,7 @@ function LG.TakeHalf(dist, sender, mode, body)
 				if not (first and not x.first) or x.checking then return Count("conflict") end
 				h.first = first
 				list[i] = h
+				Persist(h.fid)
 				return LG.MatchHalves(h.fid, mode)
 			end
 		end
@@ -976,7 +996,69 @@ function LG.TakeHalf(dist, sender, mode, body)
 	h.first = first
 	table.insert(p[h.side], h)
 	pendN = pendN + 1
+	Persist(h.fid)
 	return LG.MatchHalves(h.fid, mode)
+end
+
+-- (1.2.4) At login: the halves that waited here (duelHalves) taken back as they were held, then
+-- matched; HALF_KEEP at most, and none of a duel the ledger holds. The number of duels taken back.
+function LG.RestoreHalves()
+	local saved = CoreT("L", "duelHalves")
+	if not saved then return 0 end
+	local now, list = Now(), {}
+	for fid, s in pairs(saved) do
+		if type(s) ~= "table" or type(fid) ~= "string" or now - (tonumber(s.t) or 0) > LG.HALF_KEEP then
+			saved[fid] = nil
+		elseif not pend[fid] then
+			list[#list + 1] = fid
+		end
+	end
+	table.sort(list)
+	local n = 0
+	for _, fid in ipairs(list) do
+		local s = saved[fid]
+		local p = { t = tonumber(s.t) or now, A = {}, B = {}, tried = {} }
+		for _, side in ipairs({ "A", "B" }) do
+			for _, x in ipairs(type(s[side]) == "table" and s[side] or {}) do
+				local h = type(x) == "table" and LG.ReadHalf(x.b) or nil
+				if h and h.side == side and h.fid == fid and #p[side] < LG.HALF_CANDIDATES then
+					h.first = x.f == 1 or nil
+					p[side][#p[side] + 1] = h
+				end
+			end
+		end
+		local h = p.A[1] or p.B[1]
+		local book = h and Book("L", LG.SeasonOf(h.t, "L"))
+		if not h or (book and book.list[fid]) then
+			saved[fid] = nil
+		else
+			Evict()
+			pend[fid] = p
+			pendN = pendN + #p.A + #p.B
+			n = n + 1
+		end
+	end
+	for _, fid in ipairs(list) do if pend[fid] then LG.MatchHalves(fid, "L") end end
+	return n
+end
+-- (1.2.4) At login: this fighter's own halves of the duels he confirmed (his saved fights' f.half)
+-- that the ledger here does not hold, taken as heard, so his own duel is matched once the other's
+-- half comes (again, or from a clerk's carousel). The number taken.
+function LG.OwnHalves()
+	local Fi = F()
+	if type(Fi) ~= "table" or type(Fi.All) ~= "function" then return 0 end
+	local n, now = 0, Now()
+	for _, f in ipairs(Fi.All("fights")) do
+		if type(f) == "table" and type(f.half) == "string" and f.mode == "L" and Fi.SideOf(f, ns.me) then
+			local h = LG.ReadHalf(f.half)
+			local book = h and Book("L", LG.SeasonOf(h.t, "L"))
+			if h and Me(h.signer) and now - h.t <= LG.HALF_KEEP and not (book and book.list[h.fid]) then
+				LG.TakeHalf("CHANNEL", ns.me, "L", f.half, true)
+				n = n + 1
+			end
+		end
+	end
+	return n
 end
 
 -- (1.2.3, the review: a duel no clerk heard while its fighters repeated it reached nobody who
@@ -1063,10 +1145,41 @@ local function OnHalf(dist, sender, mode, body)
 	LG.TakeHalf(dist, sender, mode, body)
 end
 ns.Comm.Handle("AX", ns.Arena.Handle("AX", OnHalf))
--- (The companion loaded: the ledger is here now, for the halves that waited, and its entries still
--- waiting for the game's word on their GUIDs.)
+-- (1.2.4) The companion's book of the builds before (heavy ledger), taken into the core's once it
+-- loads: each entry kept as any (Keep: a fid already held stays), then the companion's copy goes.
+function LG.TakeHeavy()
+	local n = 0
+	for _, mode in ipairs({ "L", "T" }) do
+		local h = Arena.Heavy(mode)
+		if type(h) == "table" and type(h.ledger) == "table" then
+			local seasons = {}
+			for season, b in pairs(h.ledger) do
+				if type(season) == "number" and type(b) == "table" and type(b.list) == "table" then seasons[#seasons + 1] = season end
+			end
+			table.sort(seasons)
+			for _, season in ipairs(seasons) do
+				local list = {}
+				for _, e in pairs(h.ledger[season].list) do if type(e) == "table" and e.fid then list[#list + 1] = e end end
+				table.sort(list, function(a, b) return (tonumber(a.keptAt) or a.t or 0) < (tonumber(b.keptAt) or b.t or 0) end)
+				for _, e in ipairs(list) do if Keep(e, mode, e.via) then n = n + 1 end end
+			end
+			h.ledger = nil
+		end
+	end
+	return n
+end
+-- (The companion loaded: its book of the builds before taken in, and the entries still waiting for
+-- the game's word on their GUIDs looked at again.)
 ns.On("ARENA_UI_LOADED", function()
+	ns.SafeCall("arena ledger heavy", LG.TakeHeavy)
 	ns.SafeCall("arena halves", LG.RetryHalves)
+	ns.SafeCall("arena halves gk", Waiting, "L")
+end)
+-- (1.2.4) At login: the halves that waited, this fighter's own, and the entries waiting for the
+-- game's word on their GUIDs (the ledger is the core's: no companion needed).
+ns.On("LOGIN", function()
+	ns.SafeCall("arena halves restore", LG.RestoreHalves)
+	ns.SafeCall("arena halves own", LG.OwnHalves)
 	ns.SafeCall("arena halves gk", Waiting, "L")
 end)
 
@@ -1133,7 +1246,7 @@ end
 LG.Fight = Fight
 
 -- The season's ratings (ArenaRating.Build), from the last season's carry-over; kept until anything
--- changes (a generation), or nil while the companion is not loaded (no ledger here).
+-- changes (a generation). (1.2.4: the ledger is the core's, so with or without the companion.)
 function LG.Built(mode, season)
 	mode = mode or "L"
 	local s = LG.Season(mode)
@@ -1141,7 +1254,7 @@ function LG.Built(mode, season)
 	local key = mode .. ":" .. season
 	if built[key] and builtGen[key] == gen then return built[key] end
 	local R = ns.ArenaRating
-	if not R or not Arena.Heavy(mode) then return nil end
+	if not R then return nil end
 	local start
 	if season > 1 then
 		local prev = LG.Built(mode, season - 1)
@@ -1369,7 +1482,7 @@ local digests = {} -- [mode] = { gen, d }
 function LG.Digest(mode)
 	mode = mode or "L"
 	local cached = digests[mode]
-	if cached and cached.gen == gen and Arena.Heavy(mode) then return cached.d end
+	if cached and cached.gen == gen then return cached.d end
 	local d = LG.MakeDigest(mode)
 	digests[mode] = { gen = gen, d = d }
 	return d
@@ -1415,15 +1528,16 @@ function LG.Behind() return behind end
 -- matches this client's own entries now. Before any digest, never (a part of the ledger held here
 -- must not refuse the clerk's podium words).
 function LG.Synced(mode)
-	if not digestHeard or not Arena.Heavy(mode or "L") then return false end
+	if not digestHeard then return false end
 	local d = LG.Digest(mode or "L")
 	return digestHeard.season == d.season and digestHeard.hash == d.hash and next(behind) == nil
 end
 
--- The carousel (the design): the current and the previous week's entries, a piece at a time on the
--- low lane, so each piece serves every listener with the companion loaded. (1.2.3) A duel's entry
--- goes as its two signed halves (AX, relayed: each listener checks them as its fighters' own),
--- never in a piece: { type, body } each.
+-- The carousel (the design): the last CAROUSEL_WEEKS weeks with entries (1.2.4: the season's eight;
+-- the current and the previous week's alone before, so a member away for two weeks never got the
+-- older duels of the season), a piece at a time on the low lane, so each piece serves every
+-- listener. (1.2.3) A duel's entry goes as its two signed halves (AX, relayed: each listener checks
+-- them as its fighters' own), never in a piece: { type, body } each.
 local turn -- { pieces, i }
 local function Pieces(mode)
 	local d = LG.Digest(mode)
@@ -1431,7 +1545,7 @@ local function Pieces(mode)
 	for w in pairs(d.byWeek) do ws[#ws + 1] = w end
 	table.sort(ws)
 	local out = {}
-	for i = math.max(1, #ws - 1), #ws do
+	for i = math.max(1, #ws - (LG.CAROUSEL_WEEKS - 1)), #ws do
 		local w = ws[i]
 		local cur, chunks, halves, duels = {}, {}, {}, {}
 		for _, e in ipairs(d.byWeek[w]) do
@@ -1562,7 +1676,6 @@ local function OnBook(dist, sender, mode, body)
 		if not weeks then return Count("shape") end
 		OnDigest(sender, mode, N(season, 1, 999), N(n, 0, 99999), hash, weeks ~= "-" and weeks or "")
 	elseif kind == "P" then
-		if not Arena.Heavy(mode) then return Count("light") end
 		-- (1.2.3, the review) A piece carries arbiters' entries alone (a duel's goes as its halves,
 		-- AX): none while there are no arbiters (Compliance.Arbiters), nor in L while the live switch
 		-- is off. AB is a free game's type now (Arena.FREE_TYPES: the clerk's digest and the duels'
@@ -1836,12 +1949,12 @@ end
 -- marked, and one page of rows. period: "today"|"week"|"month"|"all" (default "all"); cat: a
 -- category (default "A"); page: 1-based (LG.PAGE rows). Returns { period, cat, label, periods =
 -- { { key, label, selected } }, categories = { { cat, kind, label, selected } }, rows, page, pages,
--- total, mine (this character's row, wherever it is), loaded (false while the companion is not) }.
+-- total, mine (this character's row, wherever it is), loaded (1.2.4: always, the ledger is the core's) }.
 function LG.RankingView(period, cat, page, opts)
 	opts = opts or {}
 	period = (period == "today" or period == "week" or period == "month") and period or "all"
 	cat = cat or "A"
-	local view = { period = period, cat = cat, label = LG.CatLabel(cat), periods = {}, categories = {}, rows = {}, loaded = Arena.Heavy(opts.mode or "L") ~= nil }
+	local view = { period = period, cat = cat, label = LG.CatLabel(cat), periods = {}, categories = {}, rows = {}, loaded = true }
 	for _, p in ipairs(LG.PERIODS) do
 		view.periods[#view.periods + 1] = { key = p, label = L["ARENA_PERIOD_" .. p:upper()], selected = p == period }
 	end

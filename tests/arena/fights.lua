@@ -88,12 +88,13 @@ test("1.2 the fights part: a public fight from AF to FINAL: announced on the cha
 	eq(State(w, cast.arbiter, fid), "F")
 	eq(State(w, cast.spectator, fid), "F")
 	eq(results[1].w, "A")
-	-- Rated (no alts, no catchweight): its ledger entry, kept where the companion is loaded.
+	-- Rated (no alts, no catchweight): its ledger entry. (1.2.4, the author's ask: the ledger is the
+	-- core's saved data, so a client without the companion keeps it too; it kept none before.)
 	eq(cast.arbiter.ns.ArenaFights.Has(f.fl, "r"), true)
 	eq(#w:Sent{ from = cast.arbiter, type = "AE", dist = "CHANNEL" }, 1)
 	local e = w:As(cast.spectator, function() return cast.spectator.ns.ArenaLedger.Entries() end)
 	eq(#e, 1); eq(e[1].fid, fid); eq(e[1].w, "A"); eq(e[1].m, "K")
-	eq(#w:As(cast.A, function() return cast.A.ns.ArenaLedger.Entries() end), 0, "no companion: no ledger here")
+	eq(#w:As(cast.A, function() return cast.A.ns.ArenaLedger.Entries() end), 1, "no companion: kept all the same")
 	-- The fighter's own history.
 	local mine = cast.A.ns.Arena.Store("L").myFights[cast.A.name]
 	eq(#mine, 1); eq(mine[1].w, "W"); eq(mine[1].rated, true)
