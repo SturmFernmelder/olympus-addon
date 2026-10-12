@@ -203,7 +203,9 @@ end
 -- when known for sure: a unit's, or a verified profile's).
 function H.Holdings(name, guid)
 	if type(name) ~= "string" then return {} end
-	return ns.Honors.Holdings({ name = name, guid = GameGuid(guid), guild = GuildOf(name) }, H.Inputs())
+	local W = ns.Workshop
+	local author = type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(ns.FullName(name)) == true
+	return ns.Honors.Holdings({ name = name, guid = GameGuid(guid), guild = GuildOf(name), author = author }, H.Inputs())
 end
 
 -- A player's pick as heard (or ours), and a GUID for him we are sure of.
@@ -1151,7 +1153,7 @@ function H.Refresh()
 			sent = true
 		end
 		for _, h in ipairs(earned) do
-			if h.frame or h.title then H.QueueLetter(h.key, h.period) end
+			if (h.frame or h.title) and not h.noLetter then H.QueueLetter(h.key, h.period) end
 		end
 		if sent or #earned > 0 then
 			gen = gen + 1
