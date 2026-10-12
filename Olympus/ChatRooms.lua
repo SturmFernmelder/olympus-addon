@@ -7,11 +7,12 @@ local L = ns.L
 --
 --   M2~1~<room>~<id>~<class>~<guild>~<text>
 --
--- Guild uses the game's native guild chat. Race and class are open topic rooms on the logged Olympus lane; choosing
--- one never publishes the character's race/class. The local client reads its own race/class only
--- to distinguish a member from an outsider request. Restricted rooms go as one logged
+-- Guild uses the game's native guild chat. Restricted rooms go as one logged
 -- whisper to each recipient from the signed authority lists. There is no broadcast fallback for
 -- a private audience, and every queued whisper rechecks both ends immediately before it leaves.
+-- (<class> is a legacy field: this client leaves it empty, and an older client's class code only
+-- colours its name.) 1.2.3: the race and class rooms, open topic rooms on the Olympus channel, are
+-- gone (the author: nobody used them); an older client's line to one is dropped (Rooms.Receive).
 
 local Rooms = {}
 ns.ChatRooms = Rooms
@@ -22,32 +23,7 @@ Rooms.TEXT_MAX = 150
 Rooms.SEND_GAP = 1.5
 Rooms.PER_MINUTE = 6
 Rooms.FLOOD = 60
-Rooms.REQUEST_WAIT = 30 * 60
 Rooms.GONE_FOR = 10 * 60    -- a recipient the server said is not playing: no whisper this long
-
-local RACES = {
-	{ id = "race:1", label = "Human", race = 1 },
-	{ id = "race:2", label = "Orc", race = 2 },
-	{ id = "race:3", label = "Dwarf", race = 3 },
-	{ id = "race:4", label = "Night Elf", race = 4 },
-	{ id = "race:5", label = "Undead", race = 5 },
-	{ id = "race:6", label = "Tauren", race = 6 },
-	{ id = "race:7", label = "Gnome", race = 7 },
-	{ id = "race:8", label = "Troll", race = 8 },
-	{ id = "race:95", label = "Skyborn", race = 95 }, -- (1.2.1: Forever's Skyborn, of both factions)
-}
-local HORDE_RACE = { [1] = false, [2] = true, [3] = false, [4] = false, [5] = true, [6] = true, [7] = false, [8] = true } -- (a race not listed, the Skyborn, is of both)
-local CLASSES = {
-	{ id = "class:WA", file = "WARRIOR", label = "Warrior" },
-	{ id = "class:PA", file = "PALADIN", label = "Paladin" },
-	{ id = "class:HU", file = "HUNTER", label = "Hunter" },
-	{ id = "class:RO", file = "ROGUE", label = "Rogue" },
-	{ id = "class:PR", file = "PRIEST", label = "Priest" },
-	{ id = "class:SH", file = "SHAMAN", label = "Shaman" },
-	{ id = "class:MA", file = "MAGE", label = "Mage" },
-	{ id = "class:WL", file = "WARLOCK", label = "Warlock" },
-	{ id = "class:DR", file = "DRUID", label = "Druid" },
-}
 
 -- The signed titles list remains the authority. Aliases only normalize labels that have existed
 -- in that list; they never grant somebody absent from it a room.
@@ -66,7 +42,6 @@ for _, d in ipairs(DEPARTMENTS) do
 end
 
 local states = {}          -- room -> bounded session history and receive budgets
-local subscriptions = {}   -- explicitly selected race/class topic rooms
 local nextId = math.random and math.random(0, 9999) or 0
 local lastSend = -math.huge
 local sentTimes = {}
@@ -88,35 +63,6 @@ local function Drop(why)
 end
 local function IsMe(name)
 	return ns.Channels and ns.Channels.IsMe and ns.Channels.IsMe(name) == true
-end
-
-local function RaceLabel(e)
-	local fn = C_CreatureInfo and C_CreatureInfo.GetRaceInfo
-	if type(fn) == "function" then
-		local ok, info = pcall(fn, e.race)
-		if ok and type(info) == "table" and type(info.raceName) == "string" and info.raceName ~= "" then return info.raceName end
-	end
-	local names = rawget(L, "ARENA_RACE_NAMES")
-	return type(names) == "table" and names[e.race] or e.label
-end
-
-local function ClassLabel(e)
-	local names = LOCALIZED_CLASS_NAMES_MALE
-	local name = type(names) == "table" and names[e.file]
-	return type(name) == "string" and name ~= "" and name or e.label
-end
-
-local function Topic(id)
-	for _, e in ipairs(RACES) do
-		if e.id == id then
-			local clientName = RaceLabel(e)
-			return { id = id, kind = "race", label = e.race == 95 and e.label or clientName,
-				scope = "topic", race = e.race, raceName = e.label, clientRaceName = clientName }
-		end
-	end
-	for _, e in ipairs(CLASSES) do
-		if e.id == id then return { id = id, kind = "class", label = ClassLabel(e), scope = "topic", class = id:sub(7), classFile = e.file } end
-	end
 end
 
 local function DepartmentFor(name)
@@ -308,7 +254,7 @@ end
 function Rooms.RegisterAudience(id, spec)
 	if type(id) ~= "string" or not id:match("^%l+$") or #id > 16 or type(spec) ~= "table"
 		or type(spec.CanAccess) ~= "function" or type(spec.Recipients) ~= "function" then return false end
-	if id == "guild" or id == "council" or id == "secretariat" or ROLE_BY_ID[id] or DEPT_BY_ID[id] or Topic(id) or ProviderFor(id) or audiences[id] then return false end
+	if id == "guild" or id == "council" or id == "secretariat" or ROLE_BY_ID[id] or DEPT_BY_ID[id] or ProviderFor(id) or audiences[id] then return false end
 	audiences[id] = spec
 	audienceOrder[#audienceOrder + 1] = id
 	return true
@@ -318,7 +264,7 @@ function Rooms.Info(id)
 	local _, external = ProviderFor(id)
 	if external then return external end
 	if id == "guild" then return { id = id, kind = "guild", label = L.CHATROOM_GUILD or "Guild", scope = "guild" } end
-	return Topic(id) or Restricted(id)
+	return Restricted(id)
 end
 
 function Rooms.CanAccess(id, name)
@@ -327,7 +273,7 @@ function Rooms.CanAccess(id, name)
 	local info = Rooms.Info(id)
 	if not info then return false end
 	name = name or ns.me
-	if info.scope == "guild" or info.scope == "topic" then return ns.IsMember() == true end
+	if info.scope == "guild" then return ns.IsMember() == true end
 	if id == "council" then return ns.IsHighCouncillor(name) == true or (ns.IsKingCharacter and ns.IsKingCharacter(name) == true) or FederalTreasurer(name) end
 	if id == "secretariat" then return IsSecretariat(name) end
 	if ROLE_BY_ID[id] then return RoleAccess(id, name) end
@@ -336,19 +282,6 @@ function Rooms.CanAccess(id, name)
 		return ok and yes == true
 	end
 	return info.department ~= nil and (DepartmentFor(name) == info.department or Correspondent(name, info.department))
-end
-
-local function Choices()
-	if not ns.db then return nil end
-	if type(ns.db.chatRoomChoices) ~= "table" then ns.db.chatRoomChoices = {} end
-	return ns.db.chatRoomChoices
-end
-
-function Rooms.Selected(kind)
-	local c = Choices()
-	local id = c and c[kind]
-	if (kind == "race" or kind == "class") and Rooms.Info(id) and Rooms.CanAccess(id) then return id end
-	return nil
 end
 
 local function AuthorityOptions()
@@ -399,17 +332,7 @@ function Rooms.Options(kind)
 	if not listing then return Rooms.Listing(Rooms.Options, kind) end
 	if kind ~= nil and listing.options[kind] then return listing.options[kind] end
 	local out = {}
-	-- 1.2.1: only our faction's races are offered (while the faction is unknown, all of them); every
-	-- class is, Forever's Alliance having Shamans too.
-	local horde = ns.faction == "Horde"
-	local known = ns.faction == "Horde" or ns.faction == "Alliance"
-	if kind == "race" then
-		for _, e in ipairs(RACES) do
-			if not known or HORDE_RACE[e.race] == nil or HORDE_RACE[e.race] == horde then out[#out + 1] = Rooms.Info(e.id) end
-		end
-	elseif kind == "class" then
-		for _, e in ipairs(CLASSES) do out[#out + 1] = Rooms.Info(e.id) end
-	elseif kind == "authority" then
+	if kind == "authority" then
 		out = AuthorityOptions()
 	elseif kind == "department" then
 		out = DepartmentOptions()
@@ -430,16 +353,11 @@ function Rooms.Options(kind)
 	return out
 end
 
--- The compact row's logical destinations after Olympus. Race/class remain unchosen until
--- the player opens their dropdown: neither character API is consulted to pick one.
+-- The compact row's logical destinations after Olympus: Guild, Roles while this character (or the
+-- role previewed) has one, then the providers' own tabs. (1.2.3: no Race or Class any more.)
 function Rooms.Tabs()
 	if not listing then return Rooms.Listing(Rooms.Tabs) end
 	local out = { { kind = "guild", id = "guild", label = L.CHATROOM_GUILD or "Guild" } }
-	for _, kind in ipairs({ "race", "class" }) do
-		local id = Rooms.Selected(kind)
-		local info = id and Rooms.Info(id)
-		out[#out + 1] = { kind = kind, id = id, label = info and info.label or (kind == "race" and (L.CHATROOM_RACE or "Race") or (L.CHATROOM_CLASS or "Class")), dropdown = true }
-	end
 	if #Rooms.Options("role") > 0 then
 		out[#out + 1] = { kind = "role", label = rawget(L, "CHATROOM_ROLES") or "Roles", dropdown = true }
 	end
@@ -460,15 +378,7 @@ function Rooms.Select(id)
 		ns.Fire("CHAT_ROOM_SELECTED", id)
 		return true
 	end
-	local info = Rooms.Info(id)
-	if not info or not Rooms.CanAccess(id) then return false, "access" end
-	if info.kind == "race" or info.kind == "class" then
-		local c = Choices()
-		local old = c and c[info.kind]
-		if old and old ~= id then subscriptions[old] = nil end
-		if c then c[info.kind] = id end
-		subscriptions[id] = true
-	end
+	if not Rooms.Info(id) or not Rooms.CanAccess(id) then return false, "access" end
 	ns.Fire("CHAT_ROOM_SELECTED", id)
 	return true
 end
@@ -476,10 +386,7 @@ end
 local function Accepts(id)
 	local provider = ProviderFor(id)
 	if provider then return Rooms.CanAccess(id) and (type(provider.IsOpen) ~= "function" or provider.IsOpen(id) == true) end
-	local info = Rooms.Info(id)
-	if not info or not Rooms.CanAccess(id) then return false end
-	if info.kind == "race" or info.kind == "class" then return subscriptions[id] == true end
-	return true
+	return Rooms.Info(id) ~= nil and Rooms.CanAccess(id)
 end
 Rooms.IsOpen = Accepts
 
@@ -513,87 +420,6 @@ local function State(id, make)
 	r = { id = id, lines = {}, recent = {}, used = Now() }
 	states[id] = r
 	return r
-end
-
--- A topic's membership is a local presentation and sending decision. It is never added to M2:
--- only the neutral RQ marker says that a line is an outsider request. This keeps the existing
--- privacy boundary (no new race/class fact on the wire) while letting updated receivers enforce
--- the request cadence as a defence in depth.
-local function LocalTopicMember(info)
-	if not info or info.scope ~= "topic" then return true end
-	if info.kind == "class" then
-		if type(UnitClass) ~= "function" then return nil end
-		local ok, _, file = pcall(UnitClass, "player")
-		if not ok or type(file) ~= "string" or file == "" then return nil end
-		local code = ns.Roster and ns.Roster.ClassCode and ns.Roster.ClassCode(file) or file
-		return code == info.class
-	end
-	if type(UnitRace) ~= "function" then return nil end
-	local ok, _, _, race = pcall(UnitRace, "player")
-	if not ok or tonumber(race) == nil then return nil end
-	return tonumber(race) == info.race
-end
-
-local function RequestExempt(name)
-	name = name or ns.me
-	if ns.IsKingCharacter and ns.IsKingCharacter(name) == true then return true end
-	if ns.IsHighCouncillor and ns.IsHighCouncillor(name) == true then return true end
-	local W = ns.Workshop
-	if type(W) ~= "table" then return false end
-	if type(W.IsAuthorName) == "function" then return W.IsAuthorName(name) == true end
-	return IsMe(name) and type(W.IsAuthor) == "function" and W.IsAuthor() == true or false
-end
-
-local function RequestRecords()
-	if not ns.db then return nil end
-	if type(ns.db.chatRoomRequests) ~= "table" then ns.db.chatRoomRequests = {} end
-	return ns.db.chatRoomRequests
-end
-
-local function RequestKey(id)
-	return Lower(ns.FullName(ns.me or "")) .. "|" .. tostring(id or "")
-end
-
-local pendingRequests = {} -- room -> queued request; prevents a second warning/send racing it
-local remoteRequests = {}  -- sender|room -> session-only receiver cadence
-
-function Rooms.RequestStatus(id, at)
-	local info = Rooms.Info(id)
-	if not info or info.scope ~= "topic" then return { member = true, canSend = true } end
-	local member = LocalTopicMember(info)
-	local exempt = RequestExempt()
-	if member == true or exempt then
-		return { topic = true, member = member == true, exempt = exempt, canSend = true, info = info }
-	end
-	local records = RequestRecords()
-	local record = records and records[RequestKey(id)]
-	if type(record) ~= "table" then record = nil end
-	at = tonumber(at) or ns.Now()
-	local sentAt = record and tonumber(record.sentAt) or nil
-	local replied = sentAt ~= nil and tonumber(record.replyAt) ~= nil and tonumber(record.replyAt) >= sentAt
-	local wait = sentAt and math.max(0, Rooms.REQUEST_WAIT - math.max(0, at - sentAt)) or 0
-	local pending = pendingRequests[id] ~= nil
-	return {
-		topic = true, member = false, unknown = member == nil or nil, outsider = member == false or nil,
-		exempt = false, pending = pending, sentAt = sentAt, replied = replied,
-		wait = wait, canSend = not pending and (sentAt == nil or (wait == 0 and replied)), info = info,
-	}
-end
-
-function Rooms.StatusText(id, at)
-	local s = Rooms.RequestStatus(id, at)
-	if not s.topic or s.member or s.exempt then return nil end
-	local label = s.info and s.info.label or "?"
-	if s.unknown then return (L.CHATROOM_MEMBER_UNKNOWN or "Olympus could not verify whether you belong to %s; messages use the outsider-request rules."):format(label) end
-	if s.pending then return (L.CHATROOM_REQUEST_PENDING or "You are not a member of %s. Your request is waiting to be sent."):format(label) end
-	if s.canSend then return (L.CHATROOM_OUTSIDER_READY or "You are not a member of %s. You may send one request; a warning appears first."):format(label) end
-	local minutes = math.max(1, math.ceil((s.wait or 0) / 60))
-	if s.wait > 0 and not s.replied then
-		return (L.CHATROOM_REQUEST_WAIT_BOTH or "You are not a member of %s. Wait %d min and for a member to reply before another request."):format(label, minutes)
-	elseif s.wait > 0 then
-		return (L.CHATROOM_REQUEST_WAIT_TIME or "You are not a member of %s. A member replied; wait %d min before another request."):format(label, minutes)
-	end
-	return (L.CHATROOM_REQUEST_WAIT_REPLY or "You are not a member of %s. Thirty minutes passed; wait for a member to reply before another request."):format(label)
 end
 
 local function Keep(id, e)
@@ -782,27 +608,23 @@ local function Recent(now)
 	return #sentTimes
 end
 
-local function Permit(id, audience, recipient, channel, guild)
+-- (1.2.3: every M2 line this client sends is a restricted room's whisper; Guild goes natively.)
+local function Permit(id, recipient)
 	return function(_, key, dist, target)
 		if not Rooms.ChatOn() or not Rooms.CanAccess(id) then return false, "revoked" end
 		-- (1.1.6: a moderator's timeout that came while the line waited.)
 		local WC = ns.WatchChat
 		if WC and WC.SelfTimeout and WC.SelfTimeout() then return false, "timeout" end
-		if audience == "topic" then
-			if dist ~= "CHANNEL" or ns.Comm.ChannelName() ~= channel then return false, "moved" end
-		elseif audience == "guild" then
-			if dist ~= "GUILD" or not Same(GetGuildInfo("player"), guild) then return false, "guild" end
-		elseif dist ~= "WHISPER" or not Same(target, recipient) or not Rooms.CanAccess(id, recipient) then
+		if dist ~= "WHISPER" or not Same(target, recipient) or not Rooms.CanAccess(id, recipient) then
 			return false, "revoked"
 		end
 		return true
 	end
 end
 
-local function Echo(id, lineId, guild, class, text, request)
+local function Echo(id, lineId, guild, text)
 	receiveMine[id .. ":" .. lineId .. "#" .. text] = Now()
-	Keep(id, { t = ns.Now(), sender = ns.me, guild = guild, class = class ~= "" and class ~= "RQ" and class or nil,
-		text = text, id = lineId, mine = true, request = request or nil })
+	Keep(id, { t = ns.Now(), sender = ns.me, guild = guild, text = text, id = lineId, mine = true })
 	stats.sent = stats.sent + 1
 end
 
@@ -822,7 +644,7 @@ end
 -- Returns true once the complete, fixed audience was admitted to the queue. Completion callbacks
 -- add the local echo only after a game send succeeded and expose a failed/partly failed send to
 -- the Chat page without rerouting it.
-local function Send(id, text, confirmed)
+local function Send(id, text)
 	if Rooms.PreviewOnly(id) then return false, "preview" end
 	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too.
 	local WC = ns.WatchChat
@@ -847,19 +669,6 @@ local function Send(id, text, confirmed)
 	text = Cut(ns.Codec.SanitizeChat(text), Rooms.TEXT_MAX)
 	if text == "" then return false, "empty" end
 	if WC and WC.RefuseSevere and WC.RefuseSevere(text) then return false, "severe" end -- (1.1.6, WatchChat.SEVERE)
-	local requestStatus = Rooms.RequestStatus(id)
-	local request = info.scope == "topic" and not requestStatus.member and not requestStatus.exempt
-	if request then
-		if not requestStatus.canSend then
-			ns.Print(Rooms.StatusText(id))
-			return false, requestStatus.pending and "pending" or "request"
-		end
-		if confirmed ~= true then
-			local data = { id = id, text = text, label = info.label }
-			ns.ShowDialog("OLYMPUS_CHATROOM_REQUEST", info.label, Rooms.REQUEST_WAIT / 60, data)
-			return false, "confirm"
-		end
-	end
 	if Locked() then ns.Print(L.CHAN_LOCKDOWN) return false, "lockdown" end
 	local now = Now()
 	if now - lastSend < Rooms.SEND_GAP or Recent(now) >= Rooms.PER_MINUTE then
@@ -873,64 +682,44 @@ local function Send(id, text, confirmed)
 		if ok then lastSend = now; sentTimes[#sentTimes + 1] = now; stats.sent = stats.sent + 1 end
 		return ok, ok and "ok" or why
 	end
-	-- Topic selection is deliberately not identity disclosure. Updated members keep the
-	-- compatibility field empty; an outsider request uses only the neutral RQ marker. Old readers
-	-- may still send a class code, which Parse accepts for their existing name-colour presentation.
-	local class = request and "RQ" or ""
+	-- The legacy class field stays empty (an old reader takes it for its name colour alone).
 	nextId = (nextId + 1) % 10000
 	local lineId = nextId
-	local msg = ("M2~1~%s~%d~%s~%s~%s"):format(id, lineId, class, CleanGuild(guild), text)
+	local msg = ("M2~1~%s~%d~~%s~%s"):format(id, lineId, CleanGuild(guild), text)
 	if #msg > 255 then return false, "size" end
-	local recipients = info.scope == "restricted" and Members(id) or nil
-	if recipients then WatchGone() end
-	local count = recipients and #recipients or 1
+	-- (1.2.3: past Guild every room of this file is restricted: one logged whisper to each recipient.)
+	local recipients = Members(id)
+	WatchGone()
+	local count = #recipients
 	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < count then ns.Print(L.CHAN_BUSY) return false, "busy" end
-	if info.scope == "topic" and not ns.Comm.ChannelReady() then ns.Print(L.CHAN_NOT_READY) return false, "ready" end
 
-	local channel = info.scope == "topic" and ns.Comm.ChannelName() or nil
 	local guardKey = id .. "#" .. lineId
 	local pending, successes, failures = count, 0, 0
 	local finished = false
-	if request then pendingRequests[id] = { key = guardKey, at = ns.Now() } end
 	local function Done(ok, why)
 		if finished then return end
 		pending = pending - 1
 		if ok then successes = successes + 1 else failures = failures + 1 end
 		if pending > 0 then return end
 		finished = true
-		if request then
-			pendingRequests[id] = nil
-			if successes > 0 then
-				local records = RequestRecords()
-				if records then records[RequestKey(id)] = { sentAt = ns.Now() } end
-				ns.Fire("CHAT_ROOM_CHANGED", id)
-			end
-		end
-		if successes > 0 then Echo(id, lineId, guild, class, text, request) end
+		if successes > 0 then Echo(id, lineId, guild, text) end
 		if failures > 0 then ns.Fire("CHAT_ROOM_SEND_FAILED", id, why or "failed", text, successes) end
 	end
 	local accepted = true
-	if info.scope == "restricted" then
-		-- A room containing only this character is still a useful local history, and sends no bytes.
-		if #recipients == 0 then pending = 0; Echo(id, lineId, guild, class, text, request)
-		else
-			for _, recipient in ipairs(recipients) do
-				local ok = ns.Comm.Whisper(recipient, msg, nil, false, true, Done,
-					{ owner = Rooms, key = guardKey, permit = Permit(id, info.scope, recipient, nil, guild) })
-				if not ok then accepted = false end
-			end
-			-- Admission is all-or-none: preflight normally makes every whisper fit, but a
-			-- synchronous refusal must not leave an admitted prefix aimed at only part of the
-			-- audience. All jobs share this exact capability key; unrelated sends stay queued.
-			if not accepted and ns.Comm.CancelQueued then ns.Comm.CancelQueued(Rooms, guardKey, "cancelled") end
-		end
+	-- A room containing only this character is still a useful local history, and sends no bytes.
+	if #recipients == 0 then pending = 0; Echo(id, lineId, guild, text)
 	else
-		local dist = info.scope == "guild" and "GUILD" or "CHANNEL"
-		accepted = ns.Comm.Send(dist, msg, nil, false, true, Done,
-			{ owner = Rooms, key = guardKey, permit = Permit(id, info.scope, nil, channel, guild) })
+		for _, recipient in ipairs(recipients) do
+			local ok = ns.Comm.Whisper(recipient, msg, nil, false, true, Done,
+				{ owner = Rooms, key = guardKey, permit = Permit(id, recipient) })
+			if not ok then accepted = false end
+		end
+		-- Admission is all-or-none: preflight normally makes every whisper fit, but a
+		-- synchronous refusal must not leave an admitted prefix aimed at only part of the
+		-- audience. All jobs share this exact capability key; unrelated sends stay queued.
+		if not accepted and ns.Comm.CancelQueued then ns.Comm.CancelQueued(Rooms, guardKey, "cancelled") end
 	end
 	if not accepted then
-		if request then pendingRequests[id] = nil; ns.Fire("CHAT_ROOM_CHANGED", id) end
 		if pending == count then finished = true end
 		return false, "busy"
 	end
@@ -939,32 +728,7 @@ local function Send(id, text, confirmed)
 	return true, "ok"
 end
 
-function Rooms.Send(id, text) return Send(id, text, false) end
-
--- The held outsider line is sent only after the explicit answer, and every gate is checked again.
-function Rooms.ConfirmRequest(data, send)
-	if type(data) ~= "table" or data.answered then return false, "answered" end
-	data.answered = true
-	if not send then
-		ns.Print(L.CHATROOM_REQUEST_NOT_SENT or "Request not sent.")
-		return false, "cancelled"
-	end
-	return Send(data.id, data.text, true)
-end
-
-if StaticPopupDialogs then
-	StaticPopupDialogs["OLYMPUS_CHATROOM_REQUEST"] = {
-		text = L.CHATROOM_REQUEST_WARNING or "You are not a member of %s. This is a request to its members. After sending it, you cannot send another until %d minutes have passed and a member replies. Send it?",
-		button1 = SEND_LABEL or "Send",
-		button2 = CANCEL or "Cancel",
-		OnAccept = function(self, data) ns.SafeCall("chat room request", Rooms.ConfirmRequest, data or (self and self.data), true) end,
-		OnCancel = function(self, data) ns.SafeCall("chat room request", Rooms.ConfirmRequest, data or (self and self.data), false) end,
-		timeout = 0,
-		whileDead = true,
-		hideOnEscape = true,
-		preferredIndex = 3,
-	}
-end
+function Rooms.Send(id, text) return Send(id, text) end
 
 -- A room's minute: FLOOD lines in all, and (1.2.0) each sender's fair share of it, PER_MINUTE
 -- (what an unmodified client sends at most): one sender cannot crowd the others out.
@@ -979,72 +743,6 @@ local function Flooded(r, sender, now)
 	return false
 end
 
-local function SameName(a, b)
-	return type(a) == "string" and type(b) == "string" and Lower(ns.FullName(a)) == Lower(ns.FullName(b))
-end
-
-local function RaceMatches(info, value)
-	if tonumber(value) ~= nil then return tonumber(value) == info.race end
-	local key = Lower(value)
-	return key ~= "" and (key == Lower(info.raceName) or key == Lower(info.clientRaceName) or key == Lower(info.label))
-end
-
--- Server-provided roster and /who rows can corroborate a sender's membership without adding any
--- personal fact to M2. A legacy class field is retained only as a compatibility fallback; an
--- unknown sender stays unknown and a normal old-client line remains usable.
-local function KnownTopicMember(info, sender, guild, class)
-	local function From(row)
-		if type(row) ~= "table" then return nil end
-		if info.kind == "class" and type(row.class) == "string" and row.class ~= "" then return row.class == info.class end
-		if info.kind == "race" and row.race ~= nil then return RaceMatches(info, row.race) end
-		return nil
-	end
-	local R = ns.Roster
-	for _, row in ipairs(type(R) == "table" and type(R.members) == "table" and R.members or {}) do
-		if SameName(row.full or row.name, sender) then
-			local known = From(row)
-			if known ~= nil then return known end
-		end
-	end
-	local W = ns.Who
-	if type(W) == "table" and type(W.GuildSeen) == "function" then
-		local ok, list = pcall(W.GuildSeen, guild)
-		if ok then
-			for _, row in ipairs(type(list) == "table" and list or {}) do
-				if SameName(row.name, sender) then
-					local known = From(row)
-					if known ~= nil then return known end
-				end
-			end
-		end
-	end
-	if info.kind == "class" and class ~= "" and class ~= "RQ" then return class == info.class end
-	return nil
-end
-
-local function RemoteKey(id, sender) return Lower(ns.FullName(sender)) .. "|" .. id end
-
-local function RemoteRequestAllowed(id, sender, now)
-	local old = remoteRequests[RemoteKey(id, sender)]
-	if not old then return true end
-	return now - old.sentAt >= Rooms.REQUEST_WAIT and old.replyAt ~= nil and old.replyAt >= old.sentAt
-end
-
-local function MarkMemberReply(id, sender, member, request, now)
-	if request or member ~= true or IsMe(sender) then return end
-	local changed = false
-	local records = RequestRecords()
-	local own = records and records[RequestKey(id)]
-	if type(own) == "table" and tonumber(own.sentAt) and not own.replyAt then
-		own.replyAt = ns.Now()
-		changed = true
-	end
-	for _, state in pairs(remoteRequests) do
-		if state.id == id and state.sentAt <= now and not state.replyAt then state.replyAt = now end
-	end
-	if changed then ns.Fire("CHAT_ROOM_CHANGED", id) end
-end
-
 local function Parse(text)
 	local version, id, lineId, class, guild, words = tostring(text or ""):match("^M2~([^~]+)~([^~]+)~([^~]+)~([^~]*)~([^~]*)~(.*)$")
 	lineId = tonumber(lineId)
@@ -1054,18 +752,33 @@ local function Parse(text)
 	if guild == "" or guild:find("[|%c]") or not ns.IsFederation(guild) then return nil end
 	words = ns.Codec.SanitizeChat(words)
 	if words == "" or #words > Rooms.TEXT_MAX then return nil end
-	local request = class == "RQ"
-	return id, lineId, request and "" or class, guild, words, request
+	-- ("RQ", the old race/class rooms' outsider-request marker, is no class: no name colour.)
+	return id, lineId, class == "RQ" and "" or class, guild, words
+end
+
+-- 1.2.3: the race and class rooms are gone. A line an older client still sends to one ("race:<n>",
+-- "class:<code>") is dropped without a word to the player, and said in the debug log once a
+-- session (Rooms.Reset), its kind alone: nothing of the wire's words goes there.
+local retiredSaid = false
+local function Retired(text)
+	local kind = tostring(text or ""):match("^M2~[^~]*~(%l+):")
+	if kind ~= "race" and kind ~= "class" then return false end
+	if not retiredSaid and ns.Log then
+		retiredSaid = true
+		ns.Log("chat rooms: a line to a %s room dropped (the race and class rooms are gone since 1.2.3)", kind)
+	end
+	return true
 end
 
 function Rooms.Receive(dist, sender, text, now)
 	if not Rooms.ChatOn() then return Drop("off") end
-	local id, lineId, class, guild, words, markedRequest = Parse(text)
+	if Retired(text) then return Drop("retired") end
+	local id, lineId, class, guild, words = Parse(text)
 	if not id then return Drop("shape") end
 	if ProviderFor(id) then return Drop("provider") end
 	if not Accepts(id) then return Drop("unselected") end
 	local info = Rooms.Info(id)
-	local expected = info.scope == "guild" and "GUILD" or (info.scope == "topic" and "CHANNEL" or "WHISPER")
+	local expected = info.scope == "guild" and "GUILD" or "WHISPER"
 	if dist ~= expected then return Drop("lane") end
 	sender = ns.FullName(sender)
 	if info.scope == "restricted" and not Rooms.CanAccess(id, sender) then return Drop("audience") end
@@ -1076,10 +789,6 @@ function Rooms.Receive(dist, sender, text, now)
 	end
 	if C_ChatInfo and C_ChatInfo.SendAddonMessageLogged and ns.Comm.DeliveredLogged and not ns.Comm.DeliveredLogged() then return Drop("unlogged") end
 	now = now or Now()
-	local member = true
-	if info.scope == "topic" then member = KnownTopicMember(info, sender, guild, class) end
-	local request = info.scope == "topic" and not RequestExempt(sender) and (markedRequest or member == false) or false
-	if request and not RemoteRequestAllowed(id, sender, now) then return Drop("request") end
 	local admitted, why = ns.Channels.Admit(sender, guild, words, now, {
 		id = id .. ":" .. lineId, chat = id, line = lineId, level = info.scope == "guild" and 0 or 1,
 		buckets = receiveBuckets, seen = receiveSeen, mine = receiveMine, stats = stats, where = id,
@@ -1087,10 +796,8 @@ function Rooms.Receive(dist, sender, text, now)
 	if not admitted and why ~= "filtered" then return Drop(why) end
 	local r = State(id, true)
 	if Flooded(r, sender, now) then return Drop("flood") end
-	if request then remoteRequests[RemoteKey(id, sender)] = { id = id, sentAt = now } end
-	MarkMemberReply(id, sender, member, request, now)
 	Keep(id, { t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil,
-		text = words, id = lineId, hidden = why == "filtered" or nil, request = request or nil })
+		text = words, id = lineId, hidden = why == "filtered" or nil })
 	stats.shown = stats.shown + 1
 	return true, "ok"
 end
@@ -1110,19 +817,17 @@ function Rooms.RefreshAuthority()
 end
 
 function Rooms.Reset()
-	states, subscriptions = {}, {}
-	pendingRequests, remoteRequests = {}, {}
+	states = {}
 	nextId = 0
 	lastSend, sentTimes = -math.huge, {}
 	receiveBuckets, receiveSeen, receiveMine = {}, {}, {}
 	gone = {}
 	stats = { sent = 0, shown = 0, dropped = {} }
 	held, writing = nil, {}
-	local c = Choices()
-	for _, kind in ipairs({ "race", "class" }) do
-		local id = c and c[kind]
-		if Rooms.Info(id) and Rooms.CanAccess(id) then subscriptions[id] = true elseif c then c[kind] = nil end
-	end
+	retiredSaid = false
+	-- (1.2.3: the race and class rooms' saved choices and outsider-request records go with them; a
+	-- Chat page last left on one of them opens on its channel, ChatWindow's Pick.)
+	if ns.db then ns.db.chatRoomChoices, ns.db.chatRoomRequests = nil, nil end
 end
 
 ---------------------------------------------------------------------------

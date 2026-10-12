@@ -1265,7 +1265,7 @@ function ChatWindow.SubtabEntries()
 	if type(R) == "table" and type(R.Tabs) == "function" then
 		for _, e in ipairs(R.Tabs()) do
 			out[#out + 1] = e
-			if e.kind == "class" then out[#out + 1], inserted = arena, true end
+			if e.kind == "guild" then out[#out + 1], inserted = arena, true end
 		end
 	end
 	if not inserted then out[#out + 1] = arena end

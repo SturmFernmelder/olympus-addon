@@ -37,18 +37,51 @@ test("watch chat context menu: actions are opt-in and recheck permission and tar
 	end)
 end)
 
+-- (Changed in 1.2.3: shown before with the Race dropdown, gone with the race rooms; the Roles
+-- dropdown of a High Councillor behaves the same.)
 test("chat destination dropdown: unchanged census redraw keeps menu open; selection and outside click close it", function()
 	WithWindow(function(w)
+		local council = ns.IsHighCouncillor
+		ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+		local ok, err = pcall(function()
+			ns.db.chatRooms = true
+			local f = w.CW.Open("A")
+			local roles
+			for _, button in ipairs(f.subtabs.nav) do if button:IsShown() and button.item.entry.kind == "role" then roles = button end end
+			assert(roles); roles:Click(); eq(f.subMenu:IsShown(), true)
+			w.fire("DATA_CHANGED"); w.CW.Render()
+			eq(f.subMenu:IsShown(), true, "ordinary census refresh must not eat the user's dropdown")
+			f.subCatcher:Click(); eq(f.subMenu:IsShown(), false)
+			roles:Click(); eq(f.subMenu.rows[1].roomId, "council"); f.subMenu.rows[1]:Click()
+			eq(f.subMenu:IsShown(), false); eq(w.CW.Tier(), "council")
+		end)
+		ns.IsHighCouncillor = council
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.3 (the author: "remove class and race chats from chat tab... no one uses them"): a Chat page
+-- last left on a race or class room (its saved room, the old saved choices, a draft) opens on its
+-- channel without an error, shows no Race or Class tab, and refuses one asked for by name.
+test("Chat tab (1.2.3): a page last left on a race or class room opens on its channel, and no Race or Class tab shows", function()
+	WithWindow(function(w)
+		local R = ns.ChatRooms
 		ns.db.chatRooms = true
-		local f = w.CW.Open("A")
-		local race
-		for _, button in ipairs(f.subtabs.nav) do if button.item.entry.kind == "race" then race = button end end
-		assert(race); race:Click(); eq(f.subMenu:IsShown(), true)
-		w.fire("DATA_CHANGED"); w.CW.Render()
-		eq(f.subMenu:IsShown(), true, "ordinary census refresh must not eat the user's dropdown")
-		f.subCatcher:Click(); eq(f.subMenu:IsShown(), false)
-		race:Click(); f.subMenu.rows[1]:Click()
-		eq(f.subMenu:IsShown(), false); eq(w.CW.Tier(), "race:1")
+		ns.db.chatRoomChoices = { race = "race:1", class = "class:WA" }
+		R.Reset()
+		ns.db.chatWin = { tier = "A", room = "race:1" }
+		w.CW.drafts["race:1"] = "an old race draft"
+		local f = assert(w.CW.Open(), "the Chat tab opens")
+		eq(w.CW.Tier(), "A", "the channel last shown, not the race room")
+		eq(f.input:GetText(), "", "the race room's draft is not the box's")
+		local kinds = {}
+		for _, b in ipairs(f.subtabs.nav) do if b:IsShown() then kinds[#kinds + 1] = b.item.entry.kind end end
+		eq(table.concat(kinds, ","), "global,guild,arena", "no Race or Class tab")
+		eq(w.CW.SelectLogical("class:WA"), false, "one asked for by name is refused")
+		eq(w.CW.Tier(), "A"); eq(w.printed[#w.printed], ns.L.CHATROOM_NO_ACCESS)
+		eq(w.CW.SelectLogical("race:95"), false); eq(w.CW.Tier(), "A")
+		w.CW.Render()
+		eq(w.CW.Tier(), "A", "a redraw keeps the channel")
 	end)
 end)
 
@@ -67,8 +100,9 @@ test("role chat navigation: real dropdown redraws with the preview without openi
 			local function Tab(kind)
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == kind then return b end end
 			end
-			for _, kind in ipairs({ "global", "guild", "race", "class", "arena" }) do assert(Tab(kind), kind) end
-			eq(Tab("role"), nil)
+			-- (1.2.3: no Race or Class tab any more.)
+			for _, kind in ipairs({ "global", "guild", "arena" }) do assert(Tab(kind), kind) end
+			eq(Tab("race"), nil); eq(Tab("class"), nil); eq(Tab("role"), nil)
 			role = "king"; w.fire("DATA_CHANGED"); w.CW.Render()
 			assert(Tab("role")); eq(Tab("authority"), nil); eq(Tab("department"), nil); eq(Tab("church"), nil)
 			w.fire("CHAT_ROOM_LINE", "council"); w.CW.Render()
