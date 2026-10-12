@@ -60216,9 +60216,9 @@ end)()
 	end)
 
 	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.2") -- (1.2.2: the same files, a new version, since 1.2.1 was already published)
+		eq(ns.VERSION, "1.2.3") -- (1.2.2: the same files, a new version, since 1.2.1 was already published; 1.2.3 next)
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.2", 1, true))
+		assert(toc:find("## Version: 1.2.3", 1, true))
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -60614,8 +60614,8 @@ end)()
 		return n
 	end
 
-	test("1.2.2 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.2")
+	test("1.2.3 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.3")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -60635,62 +60635,79 @@ end)()
 				assert(lns.Letters.Has("1.1.5"), code .. ": published letter retained")
 				assert(lns.Letters.Has("1.2.0"), code .. ": previous release letter retained")
 				assert(lns.Letters.Has("1.2.1"), code .. ": the published 1.2.1 letter retained")
+				assert(lns.Letters.Has("1.2.2"), code .. ": the published 1.2.2 letter retained")
 				assert(body:lower():find(code == "ptBR" and "sem apostas" or "no bets", 1, true), code .. ": free-game policy")
 			end)
 			GetLocale = savedLocale
 			if not ok then error(err, 0) end
 		end
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.1.6"] = true, ["1.2.0"] = true }
+			ns.db.lettersRead = { ["1.1.6"] = true, ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true)
-			eq(w.Letters.Frame().version, "1.2.2")
-			eq(ns.db.lettersRead["1.2.2"], true)
+			eq(w.Letters.Frame().version, "1.2.3")
+			eq(ns.db.lettersRead["1.2.3"], true)
 			eq(w.Letters.Ask("update"), false, "shown once per release")
 		end)
-		-- 1.2.1 was already published (its letter read by everyone who took it): this release's
-		-- letter is still new to them.
+		-- A reader of the published 1.2.2 letter gets 1.2.3's alone.
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
-			eq(w.Letters.Ask("update"), true, "a reader of the published 1.2.1 letter gets 1.2.2's")
-			eq(w.Letters.Frame().version, "1.2.2")
-			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text("1.2.2")), "and only 1.2.2's")
+			eq(w.Letters.Ask("update"), true, "a reader of the published 1.2.2 letter gets 1.2.3's")
+			eq(w.Letters.Frame().version, "1.2.3")
+			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text("1.2.3")), "and only 1.2.3's")
 		end)
 	end)
 
-	test("1.2.2 version letters: unread 1.2.0 comes before 1.2.2 on the update parchment, both are marked shown, but history remains individual", function()
+	test("1.2.3 version letters: unread 1.2.2 comes before 1.2.3 on the update parchment, both are marked shown, but history remains individual", function()
 		WithLetters(function(w)
 			local Lt = w.Letters
-			local _, oldBody = Lt.Text("1.2.0")
-			local _, newBody = Lt.Text("1.2.2")
-			local _, catchup = Lt.Text("1.2.2", true)
+			local _, oldBody = Lt.Text("1.2.2")
+			local _, newBody = Lt.Text("1.2.3")
+			local _, catchup = Lt.Text("1.2.3", true)
+			local _, body120 = Lt.Text("1.2.0")
+			local _, catchup122 = Lt.Text("1.2.2", true)
 			local _, catchup121 = Lt.Text("1.2.1", true)
-			assert(catchup121:find(oldBody, 1, true), "1.2.1's own catch-up still carries 1.2.0")
+			assert(catchup122:find(body120, 1, true), "1.2.2's own catch-up still carries 1.2.0")
+			assert(catchup121:find(body120, 1, true), "1.2.1's own catch-up still carries 1.2.0")
 			local oldAt, newAt = catchup:find(oldBody, 1, true), catchup:find(newBody, 1, true)
 			assert(oldAt and newAt and oldAt < newAt, "previous release before the current release")
-			eq(Lt.IsRead("1.2.0"), false, "reading text alone does not mark it shown")
+			eq(Lt.IsRead("1.2.2"), false, "reading text alone does not mark it shown")
 			InCombatLockdown = function() return true end
 			eq(Lt.Ask("update"), false)
-			eq(Lt.IsRead("1.2.0"), false, "a blocked popup does not consume the old letter")
+			eq(Lt.IsRead("1.2.2"), false, "a blocked popup does not consume the old letter")
 			InCombatLockdown = function() return false end
 			ns.Consent.Show():Hide()
 			eq(Lt.Ask("update"), true)
 			eq(Lt.Frame().body:GetText(), catchup)
-			eq(Lt.IsRead("1.2.0"), true); eq(Lt.IsRead("1.2.2"), true)
+			eq(Lt.IsRead("1.2.2"), true); eq(Lt.IsRead("1.2.3"), true)
 			Lt.Hide()
 			eq(Lt.Ask("update"), false, "no repeated catch-up popup")
-			eq(Lt.Show("1.2.2"), true)
+			eq(Lt.Show("1.2.3"), true)
 			eq(Lt.Frame().body:GetText(), newBody, "history opens only the requested release")
-			eq(Lt.Show("1.2.0"), true)
+			eq(Lt.Show("1.2.2"), true)
 			eq(Lt.Frame().body:GetText(), oldBody)
 		end)
 		WithLetters(function(w)
 			local Lt = w.Letters
-			ns.db.lettersRead = { ["1.2.0"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
 			eq(Lt.Ask("update"), true)
-			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.2")), "read old release is not repeated")
+			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.3")), "read old release is not repeated")
+		end)
+		-- An account whose 1.2.0 letter was never shown, nor 1.2.2's: both, the oldest first.
+		WithLetters(function(w)
+			local Lt = w.Letters
+			local _, b120 = Lt.Text("1.2.0")
+			local _, b122 = Lt.Text("1.2.2")
+			local _, b123 = Lt.Text("1.2.3")
+			ns.db.lettersRead = {}
+			ns.Consent.Show():Hide()
+			eq(Lt.Ask("update"), true)
+			local shown = Lt.Frame().body:GetText()
+			local a0, a2, a3 = shown:find(b120, 1, true), shown:find(b122, 1, true), shown:find(b123, 1, true)
+			assert(a0 and a2 and a3 and a0 < a2 and a2 < a3, "1.2.0, then 1.2.2, then 1.2.3")
+			eq(Lt.IsRead("1.2.0"), true); eq(Lt.IsRead("1.2.2"), true); eq(Lt.IsRead("1.2.3"), true)
 		end)
 	end)
 
@@ -60883,7 +60900,7 @@ end)()
 
 	test("1.2.1 version letters: a downgrade is not an update; malformed legacy baseline cannot break unread notification", function()
 		WithLetters(function(w)
-			ns.db.lettersAutoVersion = "1.2.2"
+			ns.db.lettersAutoVersion = "9.9.9" -- (a version newer than the running one)
 			w.login(); eq(#w.after, 0); eq(#w.every, 0)
 			eq(w.Letters.IsRead(ns.VERSION), false)
 			eq(w.Letters.Show(ns.VERSION), true, "manual current letter stays available")
@@ -60996,7 +61013,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)

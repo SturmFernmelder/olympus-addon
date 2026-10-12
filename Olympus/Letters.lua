@@ -39,7 +39,7 @@ local Letters = {}
 ns.Letters = Letters
 
 -- Every version with a letter, newest first.
-Letters.LIST = { "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
+Letters.LIST = { "1.2.3", "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
 Letters.LOGIN_WAIT = 60 -- after login (the privacy page asks at 45 s: Consent.LOGIN_WAIT)
 -- (1.2.3, the King's stream: the letter came long after the privacy page he closed, on the
 -- minute's next try.) Kept back after LOGIN_WAIT (combat, an instance, the privacy page), it is
@@ -118,25 +118,39 @@ local function Strings(version)
 	return title, body
 end
 
--- The letter a release's letter carries before it for a player who never read it (1.2.2 already
--- tells 1.2.1's changes itself, so it carries 1.2.0's, like 1.2.1).
-Letters.CATCH_UP = { ["1.2.1"] = "1.2.0", ["1.2.2"] = "1.2.0" }
+-- The letters a release's letter carries before it for a player who never read them, oldest
+-- first (1.2.2 already tells 1.2.1's changes itself, so it carries 1.2.0's, like 1.2.1; 1.2.3
+-- carries 1.2.2's, the fixes before the King's stream, and 1.2.0's): a version or a list.
+Letters.CATCH_UP = { ["1.2.1"] = "1.2.0", ["1.2.2"] = "1.2.0", ["1.2.3"] = { "1.2.2", "1.2.0" } }
 
 -- A version's letter: its title and its text as the page shows them (its marks drawn), or nil when
 -- it has none.
 function Letters.Text(version, includePrevious)
 	local title, body = Strings(version)
 	if not title then return nil end
-	local previous
+	local previous, carried
 	local older = includePrevious and Letters.CATCH_UP[version] or nil
-	if older and not Letters.IsRead(older) then
-		local oldTitle, oldBody = Strings(older)
-		if oldTitle then
-			previous = older
-			body = table.concat({ oldTitle, oldBody, title, body }, "\n\n")
+	if type(older) == "string" then older = { older } end
+	if type(older) == "table" then
+		local parts = {}
+		for i = #older, 1, -1 do -- (the oldest first, as the list names them newest first)
+			local v = older[i]
+			local oldTitle, oldBody
+			if not Letters.IsRead(v) then oldTitle, oldBody = Strings(v) end
+			if oldTitle then
+				parts[#parts + 1], parts[#parts + 2] = oldTitle, oldBody
+				carried = carried or {}
+				carried[#carried + 1] = v
+				previous = v
+			end
+		end
+		if #parts > 0 then
+			parts[#parts + 1], parts[#parts + 2] = title, body
+			body = table.concat(parts, "\n\n")
 		end
 	end
-	return Letters.DrawMarks(title), Letters.DrawMarks(body), previous
+	-- previous: the newest letter carried (or nil); carried: every one, each marked shown with it.
+	return Letters.DrawMarks(title), Letters.DrawMarks(body), previous, carried
 end
 function Letters.Has(version) return Strings(version) ~= nil end
 
@@ -298,7 +312,7 @@ end
 
 -- A version's letter on the page; true when it has one.
 function Letters.Show(version, includePrevious)
-	local title, body, previous = Letters.Text(version, includePrevious)
+	local title, body, previous, carried = Letters.Text(version, includePrevious)
 	if not title then return false end
 	local f = Frame()
 	HideRows(f)
@@ -326,7 +340,7 @@ function Letters.Show(version, includePrevious)
 	if f.scroll.SetVerticalScroll then f.scroll:SetVerticalScroll(0) end
 	f.all:Show()
 	Letters.MarkRead(version)
-	if previous then Letters.MarkRead(previous) end
+	for _, v in ipairs(carried or {}) do Letters.MarkRead(v) end
 	f:Show()
 	return true
 end

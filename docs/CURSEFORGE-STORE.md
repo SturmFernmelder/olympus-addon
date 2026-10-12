@@ -29,10 +29,10 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
-- **1.2.2**: The stutter fixed (the level race's checks off the message handler, data changes taken once
-  a second, the map left alone while closed, the minute jobs spread out) and `/oly perf`; the
-  privacy page and Bones invitations; guild removal and rank changes; Church counts; chat reports to
-  the King and the High Council; [Olympus] links; Shift + the guild key; the security reviews' fixes
+- **1.2.3**: The King's stream fixes (the privacy page after the update, the window opening by itself, the letter's
+  wait, the crown's layer at login); the Chat tab's and the window's memory; guild masters' decrees and other
+  army-wide actions to their own guild; Most Wanted filled by members' own kills and deaths, with bounties by office
+  and level and revenge; the missionaries' crook; the race and class rooms gone
 - **1.2.1**: Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
 - **1.2.0**: The Watch (each guild's moderation desk, the Tabards in it); crafting requests on the Crafters
   tab; the King's arrow on the minimap; Vox Populi's history and a guild master's own questions; the
