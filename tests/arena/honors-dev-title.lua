@@ -26,8 +26,13 @@ test("1.2.3 the author's title: his character holds The Royal Dev, a title alone
 	local author, viewer = cast.A, cast.spectator
 	-- (after the login: a login builds the client's namespace again)
 	Kept(w, author); Kept(w, viewer)
+	-- (The core's borders say who the dev is, Borders.IsDevName: the arena's files never name the
+	-- author. This world's borders may be the core's stand-in: it is told here, on both clients.)
 	for _, c in ipairs({ author, viewer }) do
-		rawset(c.ns.Workshop, "IsAuthorName", function(name) return type(name) == "string" and Short(name) == Short(author.name) end)
+		local function IsDev(name) return type(name) == "string" and Short(name) == Short(author.name) end
+		rawset(c.ns.Workshop, "IsAuthorName", IsDev)
+		if type(c.ns.Borders) ~= "table" then rawset(c.ns, "Borders", {}) end
+		rawset(c.ns.Borders, "IsDevName", IsDev)
 	end
 	w:As(author, author.ns.HonorsNet.Refresh or function() end)
 	w:Run(3)

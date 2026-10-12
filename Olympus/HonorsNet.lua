@@ -231,8 +231,9 @@ end
 -- when known for sure: a unit's, or a verified profile's).
 function H.Holdings(name, guid)
 	if type(name) ~= "string" then return {} end
-	local W = ns.Workshop
-	local author = type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(ns.FullName(name)) == true
+	-- (The dev's own character, as the core's borders know him: no arena file names the author.)
+	local B = ns.Borders
+	local author = type(B) == "table" and type(B.IsDevName) == "function" and B.IsDevName(ns.FullName(name)) == true
 	return ns.Honors.Holdings({ name = name, guid = GameGuid(guid), guild = GuildOf(name), author = author }, H.Inputs())
 end
 

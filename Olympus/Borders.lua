@@ -227,6 +227,7 @@ local function IsDev(who)
 	local W = ns.Workshop
 	return type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(who) == true
 end
+Borders.IsDevName = IsDev -- (1.2.3: HonorsNet's The Royal Dev title asks the core, never naming the author)
 
 -- Named by that guild's master (1.1.5, Nominees.lua): a centurion or a correspondent.
 local function Nominee(who, guild)
