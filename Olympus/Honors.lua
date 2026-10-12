@@ -251,7 +251,7 @@ local ADDON, ns = ...
 --       without seen (a new profile) gets it from what he holds now, so the next Update finds
 --       nothing new and keeps his choice. What a viewer shows of a pick that does not hold (the
 --       fallback to the rank's frame and no title) is Shown's.
---   Honors.Update(pick, held, known, told) -> pick, earned, lost
+--   Honors.Update(pick, held, known, told, opts) -> pick, earned, lost
 --       After his honours changed: an honour newly earned (its family not held before, or held at
 --       a lower place) switches on (frame and title), the first by ORDER when several come at
 --       once, unless the player locked his pick (pick.locked = true: set by the caller, kept by
@@ -286,8 +286,17 @@ local ADDON, ns = ...
 --       wanted, the Apostles', the Bones' and the slayers' families). A family is forgotten (lost) only when its source is
 --       loaded and it is not held; until its source arrives it stays in seen as it was, so its
 --       return is not "new".
---       pick.seen remembers each family held ({ [family] = { place, frame, title } }) for the
---       next call; a pick without it (a new profile) takes every honour held as newly earned.
+--       pick.seen remembers each family held ({ [family] = { place, frame, title, c } }, c: its
+--       honour's period) for the next call; a pick without it (a new profile) takes every honour
+--       held as newly earned.
+--       (1.2.4) opts: { now, offset } (as Moves takes them). A closed month's list (Honors.CYCLE:
+--       the koi, the charm, the raven) not held at now because its month is over (its remembered
+--       period not CycleOf's at now; none remembered, over too), no word leaving him out, is lost
+--       as above (worn: stood in for, back when his again) and stays in seen at the place it
+--       ended (ended = true): the next month's list naming him at that place, or a lower one, is
+--       not newly earned and switches nothing on (his pick sticks: the cornucopia or "none" he
+--       picked stays); a better place is. A word of the same month without him (a correction) is
+--       a loss as before. Without opts.now no month is over.
 --   Honors.Shown(pick, held) -> frame, mark, title, honour
 --       What a pick shows, checked against the honours held: its frame and mark when held, "none"
 --       (and the rank's mark) when so picked, else "rank" and "rank"; its title when held, else
@@ -1254,7 +1263,8 @@ local function Best(held)
 	end
 	return best
 end
-local function Seen(h) return { place = h.place, frame = h.frame, title = h.title } end
+-- (1.2.4: c, its honour's period: a closed month's list over is told from one left, Update's Over.)
+local function Seen(h) return { place = h.place, frame = h.frame, title = h.title, c = tonumber(h.period) } end
 
 -- A family's source is loaded (Update's known): true for all, or { [source] = true }.
 local function Known(known, family)
@@ -1274,7 +1284,8 @@ local function Copy(pick)
 		seen = {}
 		for family, s in pairs(pick.seen) do
 			if type(family) == "string" and type(s) == "table" and tonumber(s.place) then
-				seen[family] = { place = tonumber(s.place), frame = Str(s.frame), title = Str(s.title) }
+				seen[family] = { place = tonumber(s.place), frame = Str(s.frame), title = Str(s.title), c = tonumber(s.c),
+					ended = s.ended == true or nil }
 			end
 		end
 	end
@@ -1332,6 +1343,7 @@ end
 -- (1.2.3) The frame worn in place of one the pick can't show: the first by ORDER this version wears
 -- that he holds; with none, while a family this version wears is remembered in seen with its source
 -- not loaded (a login, a gap), the frame as it is (a later Update finds that one); else his rank's.
+-- (1.2.4: a closed month's list remembered over, ended, waits for no source: never one of those.)
 local function StandIn(held, seen, best, frame)
 	local first
 	for _, h in ipairs(held) do
@@ -1339,7 +1351,7 @@ local function StandIn(held, seen, best, frame)
 	end
 	if first then return first.frame end
 	for family, s in pairs(seen) do
-		if not best[family] and s.frame and Shipped({ family = family }) then return frame end
+		if not best[family] and not s.ended and s.frame and Shipped({ family = family }) then return frame end
 	end
 	return "rank"
 end
@@ -1352,9 +1364,18 @@ local function StandInTitle(held, seen, best, title)
 	end
 	if first then return first.title end
 	for family, s in pairs(seen) do
-		if not best[family] and s.title then return title end
+		if not best[family] and not s.ended and s.title then return title end
 	end
 	return nil
+end
+-- (1.2.4) A closed month's list (Honors.CYCLE) remembered in seen whose month is no longer the one
+-- held at opts.now (CycleOf): its month's turn is over, no word left him out (Moves' "end"). A place
+-- remembered without its month (1.2.3 kept none) is over too, on the side of his pick. Without
+-- opts.now, never.
+local function Over(family, was, opts)
+	local now = type(opts) == "table" and Time(opts.now) or nil
+	if not now or Honors.CYCLE[family] ~= "closed" then return false end
+	return was.c ~= Honors.CycleOf(family, now, opts.offset)
 end
 -- (1.2.3) Update's memory of a frame or title stood in for: { frame = family, title = family }.
 local function Back(pick)
@@ -1378,7 +1399,7 @@ function Honors.Choose(pick, held, frame, title)
 	return new
 end
 
-function Honors.Update(pick, held, known, told)
+function Honors.Update(pick, held, known, told, opts)
 	held = type(held) == "table" and held or {}
 	local old = Copy(pick)
 	local new = { frame = old.frame, title = old.title, seen = {}, locked = old.locked }
@@ -1400,8 +1421,21 @@ function Honors.Update(pick, held, known, told)
 	end
 	for family, was in pairs(seen) do
 		if not best[family] then
-			if Known(known, family) then
+			if was.ended then
+				-- (1.2.4) A closed month's list over, lost already (below): remembered at the place it
+				-- ended, so the next month's list naming him there is no new honour, nor one a place down.
+				new.seen[family] = was
+			elseif Known(known, family) then
 				lost[#lost + 1] = { family = family, place = was.place, frame = was.frame, title = was.title }
+				-- (1.2.4) Its month's turn over (the koi, the charm: Over), no word leaving him out: lost
+				-- now as any family is (worn, it is stood in for and comes back), and remembered, ended.
+				-- (Forgotten, the next month's list naming him at his place again was a new honour: it
+				-- switched on by itself over the cornucopia or "none" he picked, every month, wherever a
+				-- look fell between the month's turn and the list's first word of it, as HonorsNet's own
+				-- look at the month's turn makes sure of.)
+				if Over(family, was, opts) then
+					new.seen[family] = { place = was.place, frame = was.frame, title = was.title, c = was.c, ended = true }
+				end
 			else
 				-- Its source not loaded yet (a login, a relay's gap): remembered as it was.
 				new.seen[family] = was

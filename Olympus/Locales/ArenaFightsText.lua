@@ -149,6 +149,9 @@ L.PROFILE_NO_HONOURS = "None yet: belts, podiums, donations, the level race, the
 L.PROFILE_PREVIEW = "As others see you: %s\nNickname: %s"
 L.PROFILE_ICON_REFUSED = "That icon can't be used here: pick one of your honours' marks (or, for your emblem, one of the game's icons)."
 L.HONOR_LETTER_WAITING = "A letter from the King awaits you: open the Olympus window or your arena profile to read it."
+-- (1.2.4) A letter held in an instance or Busy: its chat line, and its words on the Decrees tab.
+L.HONOR_LETTER_HELD = "A letter from the King awaits you: it opens once you are out of the instance and not Busy (or open the Olympus window to read it now)."
+L.HELD_HONOR_LETTER = "a letter from the King"
 
 if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_EPI_A = { "Inquebrável", "Carmesim", "Silencioso", "de Ferro", "de Ouro", "Veloz", "Sombrio", "Selvagem", "de Pedra", "da Tempestade",
@@ -250,6 +253,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.PROFILE_EDIT_TITLE = "Meu perfil da arena"
 	L.PROFILE_ICON_REFUSED = "Esse ícone não serve aqui: escolha a marca de uma das suas honras (ou, para o emblema, um ícone do jogo)."
 	L.HONOR_LETTER_WAITING = "Uma carta do Rei espera por você: abra a janela do Olympus ou o seu perfil da arena para lê-la."
+	L.HONOR_LETTER_HELD = "Uma carta do Rei espera por você: ela abre quando você sair da instância e não estiver Ocupado (ou abra a janela do Olympus para lê-la agora)."
+	L.HELD_HONOR_LETTER = "uma carta do Rei"
 	L.PROFILE_FRAME_RANK = "A moldura do meu posto"
 	L.PROFILE_FRAME_NONE = "Sem moldura"
 	L.PROFILE_FRAME_RED_CROSS = "Cruz vermelha (só você a vê)"

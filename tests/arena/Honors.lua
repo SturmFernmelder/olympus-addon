@@ -1917,3 +1917,87 @@ test("1.2.4 honours: Moves and the cycles: a closed month's list (the koi, the c
 		church = { apostles = Places({ "Aldric" }), at = NOW }, now = NOW })
 	eq(Keys(Honors.Moves(nil, all, true, { now = NOW }), "family"), "guild,apostle,bones")
 end)
+
+-- 1.2.4's first cut: a closed month's list over at its month's turn was lost (forgotten in seen), so
+-- the next month's list naming him at his place again was a new honour: it switched on by itself over
+-- the cornucopia or "none" he picked, every month (HonorsNet's own look at the month's turn makes sure
+-- a look falls in between).
+test("1.2.4 honours: Update with now: a closed month's list over at its turn (the koi, the charm) is remembered where it ended: the next month's list naming him there, or a place down, switches nothing on (the cornucopia or none he picked stays, and his title), a place up does; worn, it is stood in for (his rank's with nothing else) and comes back; a correction of its own month without him is lost as before; a place 1.2.3 remembered without its month is over too; without now, as before", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local NOV = OCT_1 + 31 * DAY + 12 * HOUR
+		local all = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW).all
+		-- The month closed's donors (September's held in October, October's in November), all time's too.
+		local function Koi(names, monthNo, now)
+			return Honors.Holdings(ME, { donors = { all = all, month = Places(names), monthNo = monthNo }, now = now })
+		end
+		local p0 = Honors.Update(nil, Honors.Holdings(ME, { donors = { all = all } }), true)
+		local sep = Koi({ "Aldric" }, OCT - 1, NOW)
+		eq(Keys(sep), "donor-top-1,donor-month-1")
+		local p = Honors.Update(p0, sep, true, nil, { now = NOW })
+		eq(p.frame, "donor-month-1", "the koi switches on")
+		-- November: September's koi over, October's list not in yet.
+		local gap = Koi({ "Aldric" }, OCT - 1, NOV)
+		eq(Keys(gap), "donor-top-1")
+		local oct = Koi({ "Aldric" }, OCT, NOV)
+		for _, frame in ipairs({ "donor-top-1", "none" }) do
+			local mine = Honors.Choose(p, sep, frame, "donor-top-1")
+			local q, earned, lost = Honors.Update(mine, gap, true, nil, { now = NOV })
+			eq(Keys(lost, "family"), "donor-month", frame) eq(#earned, 0)
+			eq(q.frame, frame) eq(q.back, nil, "not worn: nothing stood in for")
+			-- The next look, still over: lost once.
+			local q2, e2, l2 = Honors.Update(q, gap, true, nil, { now = NOV + 60 })
+			eq(#e2, 0) eq(#l2, 0, frame .. ": lost once")
+			-- October's list naming him 1st: no new honour; his pick stays, his title too.
+			local r, again = Honors.Update(q2, oct, true, nil, { now = NOV })
+			eq(r.frame, frame, frame .. ": his pick stays") eq(r.title, "donor-top-1") eq(#again, 0, frame .. ": the same place, no new honour")
+			-- (seen: the place it ended, then October's.)
+			eq(q2.seen["donor-month"].ended, true, frame .. ": remembered where it ended") eq(q2.seen["donor-month"].place, 1)
+			eq(r.seen["donor-month"].ended, nil, "held again") eq(r.seen["donor-month"].c, OCT)
+			-- ...nor 2nd.
+			eq(Honors.Update(q2, Koi({ "Brenna", "Aldric" }, OCT, NOV), true, nil, { now = NOV }).frame, frame, frame .. ": a place down")
+		end
+		-- 2nd in September, 1st in October: a place up, new, switches on.
+		local sep2 = Koi({ "Brenna", "Aldric" }, OCT - 1, NOW)
+		local second = Honors.Choose(Honors.Update(p0, sep2, true, nil, { now = NOW }), sep2, "donor-top-1")
+		local ended = Honors.Update(second, gap, true, nil, { now = NOV })
+		local up, upEarned = Honors.Update(ended, oct, true, nil, { now = NOV })
+		eq(Keys(upEarned), "donor-month-1") eq(up.frame, "donor-month-1", "a place up switches on")
+		-- Worn at the turn: the cornucopia stands in; October's list naming him, his koi again.
+		local worn = Honors.Update(p, gap, true, nil, { now = NOV })
+		eq(worn.frame, "donor-top-1", "the cornucopia stands in") eq(worn.back.frame, "donor-month")
+		eq(Honors.Update(worn, oct, true, nil, { now = NOV }).frame, "donor-month-1", "his koi back")
+		-- The koi alone held: his rank's meanwhile (an ended list waits for no source).
+		local koiOnly = Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT - 1 }, now = NOW })
+		local k = Honors.Update(nil, koiOnly, true, nil, { now = NOW })
+		eq(k.frame, "donor-month-1")
+		local kGap = Honors.Update(k, {}, true, nil, { now = NOV })
+		eq(kGap.frame, "rank", "nothing else held: his rank's") eq(kGap.back.frame, "donor-month")
+		eq(Honors.Update(kGap, Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT }, now = NOV }), true, nil,
+			{ now = NOV }).frame, "donor-month-1")
+		-- A correction of September's list without him, in October: lost as before (forgotten).
+		local mine = Honors.Choose(p, sep, "donor-top-1")
+		eq(Honors.Update(mine, Koi({ "Brenna" }, OCT - 1, NOW), true, nil, { now = NOW }).seen["donor-month"], nil, "its own month without him: lost")
+		-- A place 1.2.3 remembered (no month): over, on the side of his pick.
+		local old = { frame = "donor-top-1", seen = { ["donor-top"] = { place = 1, frame = "donor-top-1", title = "donor-top-1" },
+			["donor-month"] = { place = 1, frame = "donor-month-1", title = "donor-month-1" } } }
+		local o = Honors.Update(old, gap, true, nil, { now = NOV })
+		eq(o.seen["donor-month"].ended, true, "1.2.3's place: over")
+		eq(Honors.Update(o, oct, true, nil, { now = NOV }).frame, "donor-top-1")
+		-- Without now: lost, as before.
+		eq(Honors.Update(mine, gap, true).seen["donor-month"], nil, "without now: as 1.2.3")
+		-- The Bones' charm the same (its "none" picked); a list for life (the cornucopia) is never over.
+		local function Charm(names, monthNo, now)
+			return Honors.Holdings(ME, { donors = { all = all }, bones = { month = Places(names), monthNo = monthNo }, now = now })
+		end
+		local charm = Charm({ "Aldric" }, OCT - 1, NOW)
+		local c = Honors.Choose(Honors.Update(p0, charm, true, nil, { now = NOW }), charm, "none")
+		local cGap = Honors.Update(c, Charm({ "Aldric" }, OCT - 1, NOV), true, nil, { now = NOV })
+		eq(cGap.seen.bones.ended, true)
+		eq(Honors.Update(cGap, Charm({ "Aldric" }, OCT, NOV), true, nil, { now = NOV }).frame, "none", "the charm: none stays")
+		eq(Honors.Update(p0, {}, true, nil, { now = NOV }).seen["donor-top"], nil, "for life: lost")
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)

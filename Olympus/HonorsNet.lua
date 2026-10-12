@@ -14,7 +14,9 @@ local ADDON, ns = ...
 --   NewPortrait(parent, size) and DressPortrait(rig, key): the player's own portrait with a frame;
 --   (1.2.4) PickKnown(name), Standing(), Tell(held, known, told), Notices(), NoticeFrames().
 -- The King's letter (the design) when an honour is earned: a popup of Olympus's own, queued.
--- (1.2.4) Once per place of each list per cycle; any other move a small notice (below).
+-- (1.2.4) Once per place of each list per cycle; any other move a small notice (below). In an
+-- instance or Busy one that would open by itself waits as Olympus's other popups do (ns.Alert's held
+-- list), opened once he is out or by his own click.
 local HonorsNet = {}
 ns.HonorsNet = HonorsNet
 
@@ -57,7 +59,8 @@ ns.HonorsNet = HonorsNet
 -- GUILD, and CHURCH_TOP_CHANGED (or the ranking's switch, CHURCH_PUBLIC_CHANGED) looks at the
 -- honours again. (1.2.4) The same word's Apostles hold the cross. The Bones' charm is the last
 -- month's top 3 of FarkleTable.Best (the games both players' halves agree on, as this client holds
--- them: no word of its own); the slayers' skeletal horse the signed Slayers top 3
+-- them: no word of its own; kept in the honours store as it stood, never recounted from what its
+-- store's cap left of that month); the slayers' skeletal horse the signed Slayers top 3
 -- (Wanted.GlobalSnapshot, by GUID), looked at again when that word changes (WANTED_CHANGED); the
 -- owl's guild master's own honours again when the census changes its first (DATA_CHANGED).
 --
@@ -194,21 +197,56 @@ local function ChurchTop()
 end
 H.ChurchTop = ChurchTop
 
+-- (1.2.4) A closed month's Bone Throw list (the charm's, held through the month after it) as this
+-- client last worked it out, kept in the honours store: bones = { side, monthNo, n, names }, n the
+-- games that list read then (FarkleTable.Best's second value: the month's, and the days before it
+-- the pair cap counts). FarkleTable keeps HALVES_MAX games, the oldest going first past it, and the
+-- oldest are those: holding fewer of them now (pruned here), the list kept stands, the same all
+-- month; as many or more (a game heard late; a player hidden here, the same games), worked out
+-- again and kept. (Recounted from what was left, the charm went to another top 3 partway through
+-- the month it is held in, each client at its own prune: "out" for its holder, a letter for a place
+-- nobody held when the month closed.)
+local function KeptBones(month, names, n)
+	local side = tostring(ns.faction or "Alliance")
+	local s = H.Store(n > 0)
+	local kept = s and type(s.bones) == "table" and s.bones or nil
+	local same = kept ~= nil and kept.side == side and tonumber(kept.monthNo) == month and type(kept.names) == "table"
+	if same and n < (tonumber(kept.n) or 0) then
+		local out = {}
+		for _, name in ipairs(kept.names) do
+			if #out >= ns.Honors.BONES_PLACES then break end
+			if type(name) == "string" then out[#out + 1] = name end
+		end
+		return out
+	end
+	if s and n > 0 and not (same and kept.n == n and table.concat(kept.names, "\n") == table.concat(names, "\n")) then
+		s.bones = { side = side, monthNo = month, n = n, names = names }
+	end
+	return names
+end
+
 -- (1.2.4) Bone Throw's top 3 of a month as this client counts it (FarkleTable.Best: the games both
--- players' halves agree on), with at least one win; nil where the build has no Bones table.
+-- players' halves agree on), with at least one win; nil where the build has no Bones table. A month
+-- closed: as it stood before this client pruned its games (KeptBones).
 local function BonesTop(month)
 	local FT = ns.FarkleTable
 	if type(FT) ~= "table" or FT.missing or type(FT.Best) ~= "function" then return nil end
-	local ok, rows = pcall(FT.Best, "L", { month = month })
+	local ok, rows, held = pcall(FT.Best, "L", { month = month })
 	if not ok or type(rows) ~= "table" then return nil end
-	local out = {}
+	local names = {}
 	for _, r in ipairs(rows) do
-		if #out >= ns.Honors.BONES_PLACES then break end
-		if type(r) == "table" and type(r.name) == "string" and (tonumber(r.won) or 0) >= 1 then out[#out + 1] = { name = r.name, place = #out + 1 } end
+		if #names >= ns.Honors.BONES_PLACES then break end
+		if type(r) == "table" and type(r.name) == "string" and (tonumber(r.won) or 0) >= 1 then names[#names + 1] = r.name end
 	end
+	if month < ns.Honors.MonthOf(Now()) then names = KeptBones(month, names, tonumber(held) or 0) end
+	local out = {}
+	for i, name in ipairs(names) do out[i] = { name = name, place = i } end
 	return { month = out, monthNo = month }
 end
 H.BonesTop = BonesTop
+-- (1.2.4) FarkleTable about to prune agreed games past its cap (the oldest first, the last month's):
+-- that month's list kept first, as it stands now, on every client (no look may have asked yet).
+ns.On("BONES_PRUNING", function() BonesTop(ns.Honors.MonthOf(Now()) - 1) end)
 
 -- (1.2.4) The Slayers' signed top 3 this client shows now (Wanted.GlobalSnapshot: an authenticated,
 -- unexpired word of a role holder), or nil.
@@ -1285,9 +1323,11 @@ function H.Refresh()
 		end
 		H.FirstLook(held)
 		local known = H.Known()
+		-- (1.2.4: now, so a closed month's list over is remembered where it ended, not lost: the next
+		-- month's list naming him there switches nothing on, Honors.Update's opts.)
 		local pick, earned, lost = ns.Honors.Update(before, held, known, function(h)
 			return told[H.LetterMark(h.key, h.period)] == true
-		end)
+		end, { now = H.Inputs().now })
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
 		if not same or (first and next(pick.seen or {}) ~= nil) then P.SavePick(pick) end
@@ -1585,6 +1625,22 @@ local function Place(f)
 	f:SetHeight(y + 40 + 12 + 24 + inner[4] + 12)
 end
 
+-- (1.2.4) In an instance or Busy (ns.Quiet) a letter that would open by itself waits as every popup
+-- of Olympus's does (the held alerts, ns.Alert): a chat line now, its line on the Decrees tab, and
+-- opened once he is out (ns.ReleaseHeld: a new zone, a change of his flags, or within 10 seconds).
+-- His own click opens it at once (the Olympus window, H.WindowShown; his profile's Edit; the
+-- Decrees tab's line). One held line for every letter waiting. (1.2.4's first cut opened it over a
+-- dungeon or a raid between pulls: the month's turn, 00:01 UTC, is 21:01 in Brazil.)
+H.LETTER_HELD = "honors letter"
+local function HoldLetter()
+	for _, x in ipairs(ns.Held()) do if x.key == H.LETTER_HELD then return end end
+	ns.Alert("arena", "soft", { what = L.HELD_HONOR_LETTER, key = H.LETTER_HELD,
+		open = function() return letters[1] ~= nil end,
+		-- (still held: the Decrees tab's line, his own click; out: ReleaseHeld's, by itself)
+		show = function() H.ShowLetter(nil, ns.Quiet() ~= nil) end })
+	ns.Print("|cffffd200" .. L.HONOR_LETTER_HELD .. "|r")
+end
+
 -- key: a letter asked for (a click: shown at once); prompted: the player's click opened it.
 function H.ShowLetter(key, prompted)
 	if H.LetterToSender() then return false end
@@ -1594,6 +1650,10 @@ function H.ShowLetter(key, prompted)
 	if frame and frame:IsShown() then return true end
 	if not key and not prompted and ns.GamepadUI() then
 		H.WaitForWindow()
+		return false
+	end
+	if not key and not prompted and ns.Quiet() then
+		HoldLetter()
 		return false
 	end
 	H.toldWaiting = nil

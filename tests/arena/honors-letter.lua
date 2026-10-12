@@ -258,7 +258,10 @@ test("1.2.1 the King's letter: a month's honour is told for its month: a reorder
 	-- The next month someone else's; the month after his again: a new award.
 	NextMonth()
 	Word(Short(B.name))
-	eq(A.ns.ArenaProfile.Pick().seen["donor-month"], nil, "not his this month")
+	for _, h in ipairs(HN.Holdings(A.name)) do assert(h.family ~= "donor-month", "not his this month") end
+	-- (1.2.4: his pick remembers the koi where its month ended, no longer forgets it, so the koi of a
+	-- later month at that place is no new honour switching on over his pick: Honors.Update's opts.)
+	eq(A.ns.ArenaProfile.Pick().seen["donor-month"].ended, true, "remembered where it ended")
 	eq(Shown(A), false)
 	NextMonth()
 	Word(Short(A.name))

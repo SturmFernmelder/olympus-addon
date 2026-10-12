@@ -194,6 +194,138 @@ test("1.2.4 the koi: the month's top 3 donors hold it through the next month, wo
 	W3.NoErrors(w)
 end)
 
+-- The month's turn as the field has it: the clock runs through it, so the look HonorsNet asks at the
+-- next month's first minute (Tell's LookAt) comes before the Treasurer's first word of the new month.
+-- (The test above moves every timer with the clock, so that look never fell in between: before this
+-- fix it ended the koi as lost there, and the new month's word made it new again, switched on by
+-- itself over the cornucopia or "none" picked: "expected donor-top-1, got donor-month-1".)
+test("1.2.4 the koi over the month's turn: the look at the next month's first minute ends it in silence; the new month's list naming him at the same place is its King's letter, and his pick stays (the cornucopia picked, or none; 1.2.4's first cut switched the koi back on every month); the koi he wore stands in for the cornucopia meanwhile and comes back", function()
+	local w, cast = W3.New()
+	-- (An hour before this month's end, the clock and every timer moved together.)
+	local Hs = cast.A.ns.Honors
+	local m = Hs.MonthOf(w.clock)
+	local turn = w.clock - w.clock % 86400
+	while Hs.MonthOf(turn) == m do turn = turn + 86400 end
+	local from = w.clock
+	w.clock = turn - 3600
+	for _, x in ipairs(w.timers) do x.at = x.at + (w.clock - from) end
+	local A, B, C = Ready(w, cast.A), Ready(w, cast.B), Ready(w, cast.spectator)
+	local all = { A, B, C }
+	local t = w.clock
+	-- The Treasurer's word to each: all time's top 3 (A, B, C) and the month closed's (names).
+	local function Word(month)
+		t = math.max(t + 1, w.clock)
+		for _, c in ipairs(all) do Donors(w, c, t, { A, B, C }, month) end
+		w:Run(3)
+	end
+	local function Read() for _, c in ipairs(all) do w:As(c, c.ns.HonorsNet.CloseLetter, false) end end
+	Word()
+	Read()
+	Later(w, A)
+	-- The month closed: A 1st, B 2nd, C 3rd; each koi switches on with its letter.
+	Word({ A, B, C })
+	for i, c in ipairs(all) do eq(Pick(c).frame, "donor-month-" .. i, c.short .. ": the koi switched on") end
+	Read()
+	Later(w, A)
+	-- A picks his cornucopia back, B none; C keeps the koi on.
+	eq(w:As(A, A.ns.ProfileEdit.PickFrame, "donor-top-1"), true)
+	eq(w:As(B, B.ns.ProfileEdit.PickFrame, "none"), true)
+	-- Through the month's turn, the Treasurer's word not in yet: each client's own look ends the koi.
+	w:Run(turn - w.clock + 120)
+	for _, c in ipairs(all) do
+		for _, h in ipairs(c.ns.HonorsNet.Holdings(c.name)) do assert(h.family ~= "donor-month", c.short .. ": the month held is over") end
+	end
+	eq(Pick(A).frame, "donor-top-1") eq(Pick(B).frame, "none")
+	eq(Pick(C).frame, "donor-top-3", "the koi he wore over: his cornucopia stands in")
+	-- The Treasurer's first word of the new month: the same places.
+	Word({ A, B, C })
+	eq(Pick(A).frame, "donor-top-1", "the cornucopia he picked stays")
+	eq(Pick(B).frame, "none", "none stays")
+	eq(Pick(C).frame, "donor-month-3", "the koi he wore, back")
+	local month = Hs.MonthOf(w.clock) - 1
+	for i, c in ipairs(all) do
+		eq(#Letters(c), 3, c.short .. ": the new month's letter") eq(Letters(c)[3].key, "donor-month-" .. i)
+		eq(c.ns.ArenaProfile.Mine().lettered["donor-month-" .. i .. "@" .. month], true, c.short .. ": told for the new month")
+	end
+	-- Again that month (a later word, and the looks after it): nothing more.
+	Read()
+	Later(w, A)
+	Word({ A, B, C })
+	w:Run(A.ns.HonorsNet.NOTICE_GAP + 5)
+	eq(Pick(A).frame, "donor-top-1") eq(Pick(B).frame, "none") eq(Pick(C).frame, "donor-month-3")
+	for _, c in ipairs(all) do eq(#Letters(c), 3, c.short .. ": once that month") end
+	W3.NoErrors(w)
+end)
+
+-- 1.2.4's first cut opened the King's letter by itself wherever the player stood: at the month's
+-- turn (the look at 00:01 UTC, 21:01 in Brazil: raid time) for the crook, the cross and the charm,
+-- or at a new Slayers word, over a dungeon or a raid between pulls (only combat lockdown and the
+-- gamepad UI made it wait). Olympus's popups wait in an instance or Busy (ns.Alert): so does it now.
+test("1.2.4 the King's letter in an instance or Busy: one that would open by itself waits (his honour switched on all the same; a chat line; one line on the Decrees tab's held list for every letter waiting), opens by itself once he is out and not Busy, and at once on his own click (the Olympus window, the held line); the month's turn in a raid the same", function()
+	local w, cast = W3.New()
+	-- (An hour before this month's end, the clock and every timer moved together.)
+	local Hs = cast.A.ns.Honors
+	local m = Hs.MonthOf(w.clock)
+	local turn = w.clock - w.clock % 86400
+	while Hs.MonthOf(turn) == m do turn = turn + 86400 end
+	local from = w.clock
+	w.clock = turn - 3600
+	for _, x in ipairs(w.timers) do x.at = x.at + (w.clock - from) end
+	local A, B, C, D = Ready(w, cast.A), Ready(w, cast.B), Ready(w, cast.spectator), Ready(w, cast.arbiter)
+	local all = { A, B, C, D }
+	local function Shown(c) local f = c.ns.HonorsNet.LetterFrame() return f ~= nil and f:IsShown() == true end
+	local function Held(c)
+		local out = {}
+		for _, h in ipairs(w:As(c, c.ns.Held)) do out[#out + 1] = h.what end
+		return table.concat(out, " | ")
+	end
+	C.globals.UnitIsDND = function() return C.dnd == true end
+	A.instance, B.instance, D.instance, C.dnd = true, true, true, true
+	local printed = #A.printed
+	for _, c in ipairs(all) do Donors(w, c, w.clock, { A, B, C }) end
+	w:Run(3)
+	for _, c in ipairs({ A, B, C }) do
+		eq(Pick(c).frame:find("^donor%-top%-") ~= nil, true, c.short .. ": his honour switched on all the same")
+		eq(#Letters(c), 1, c.short .. ": kept to read")
+		eq(Shown(c), false, c.short .. ": no letter over his game")
+		eq(Held(c), "a letter from the King", c.short .. ": on the Decrees tab's held list")
+	end
+	assert(table.concat(A.printed, "\n", printed + 1):find("A letter from the King awaits you", 1, true), "its chat line")
+	-- A second letter meanwhile (the koi): still one held line.
+	Later(w, A)
+	for _, c in ipairs(all) do Donors(w, c, w.clock, { A, B, C }, { A }) end
+	w:Run(3)
+	eq(#Letters(A), 2) eq(Shown(A), false) eq(Held(A), "a letter from the King", "one line for both")
+	-- B opens the Olympus window himself, in the instance: his letter at once. D, Busy nowhere, none.
+	eq(w:As(B, B.ns.HonorsNet.WindowShown), true) eq(Shown(B), true, "his own click")
+	eq(Held(D), "", "no letter: nothing held")
+	-- Out of the instance, and C no longer Busy: each opens by itself within seconds, A's second after his first.
+	A.instance, C.dnd = false, false
+	w:Run(12)
+	eq(Shown(A), true, "out: it opens") eq(A.ns.HonorsNet.LetterFrame().key, "donor-top-1")
+	eq(Shown(C), true, "not Busy: it opens")
+	eq(w:As(A, A.ns.HonorsNet.CloseLetter, false), true)
+	eq(Shown(A), true) eq(A.ns.HonorsNet.LetterFrame().key, "donor-month-1", "the next one after his click")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	-- The month's turn in a raid: the Apostles' cross, told per calendar month, comes again at the
+	-- next month's first minute (his own look). It waits until he is out.
+	Top(w, { A }, { A })
+	w:Run(3)
+	eq(Shown(A), true) eq(A.ns.HonorsNet.LetterFrame().key, "apostle-1")
+	w:As(A, A.ns.HonorsNet.CloseLetter, false)
+	A.instance = true
+	w:Run(turn - w.clock + 120)
+	eq(#Letters(A), 4, "the new month's cross") eq(Letters(A)[4].key, "apostle-1")
+	eq(Shown(A), false, "not over his raid") eq(Held(A), "a letter from the King")
+	-- The held line clicked in the raid (his own click): it opens.
+	local line
+	for _, l in ipairs(w:As(A, A.ns.HeldLines)) do if l.onClick then line = l end end
+	assert(line, "a line to click")
+	w:As(A, line.onClick)
+	eq(Shown(A), true, "his click on the held line")
+	W3.NoErrors(w)
+end)
+
 -- The owner (1.2.4): "... uns avisos menores ... menos intrusiva, tipo um aviso na tela, não um
 -- pop-up, falando que ele caiu de posição para segundo, que ele perdeu porque ele saiu da lista, que
 -- ele voltou para a lista, que ele recuperou".
@@ -500,5 +632,71 @@ test("1.2.4 the Bones' charm: the last month's top 3 of Bone Throw (the games bo
 	eq(#Said(a), 0, "a closed month's end: no notice")
 	eq(#Letters(a), 1)
 	eq(tostring(r.Shown("player")):find("charm", 1, true), nil, "the charm no longer shows")
+	W3.NoErrors(w)
+end)
+
+-- FarkleTable keeps HALVES_MAX games (2000), the oldest going first past it, and the oldest are the
+-- closed month's: 1.2.4's first cut recounted the charm from what was left, so on a busy realm its
+-- top 3 changed partway through the month it is held in (its holder "out", the 4th lettered for a
+-- place he never held), each client at its own prune. (The cap lowered here: the same code, fewer
+-- games.)
+test("1.2.4 the Bones' charm through the month after: this client's games past FarkleTable's cap (HALVES_MAX) prune the closed month's oldest, and its top 3 stays as it stood when that month closed: the holders keep their charms, round their portraits and as others see them, no notice, no letter", function()
+	local w = FW.New({ compliance = "shipped" })
+	local a, b, c, d = w:Player(N.fighterA), w:Player(N.fighterB), w:Player(N.bettor3), w:Player(N.bettor1)
+	local everyone = { a, b, c, d }
+	w:Group({ a, b })
+	local Hs, HN = a.ns.Honors, a.ns.HonorsNet
+	-- (An hour before this month's end, the clock and every timer moved together.)
+	local m = Hs.MonthOf(w.clock)
+	local turn = w.clock - w.clock % 86400
+	while Hs.MonthOf(turn) == m do turn = turn + 86400 end
+	local from = w.clock
+	w.clock = turn - 3600
+	for _, x in ipairs(w.timers) do x.at = x.at + (w.clock - from) end
+	-- This month: a beats b, then c beats b.
+	PlayConceded(w, b, a)
+	w:Group({ b, c })
+	PlayConceded(w, b, c)
+	for _, x in ipairs(everyone) do w:As(x, x.ns.HonorsNet.Refresh) end
+	-- The month's turn: a holds the gold charm, c the silver.
+	w:Run(turn - w.clock + 120)
+	eq(Pick(a).frame, "bones-1") eq(Pick(c).frame, "bones-2")
+	eq(#Letters(a), 1) eq(#Letters(c), 1)
+	eq(w:As(d, d.ns.HonorsNet.Verified, a.name, a.guid).art, "charm-gold", "as others see him")
+	Strips(a)
+	Strips(c)
+	-- This month's games (d beats c, then d beats b) take every client's store over its cap (3 here:
+	-- down to 2 when pruned, FarkleTable.Prune as at a login and while involved): the oldest go, last
+	-- month's.
+	w:Run(3600)
+	w:Group({ c, d })
+	PlayConceded(w, c, d)
+	-- (Two hosts' invitations within FarkleTable.INVITES_WINDOW ask d whether to stop them: later.)
+	w:Run(d.ns.FarkleTable.INVITES_WINDOW + 1)
+	w:Group({ b, d })
+	PlayConceded(w, b, d)
+	local closed = Hs.MonthOf(w.clock) - 1
+	for _, x in ipairs(everyone) do
+		eq(#Bones(w, x, "Best", "L", { month = closed }), 3, x.short .. ": last month's list as it closed")
+		x.ns.FarkleTable.HALVES_MAX = 3
+		Bones(w, x, "Prune")
+		eq(#Bones(w, x, "Best", "L", { month = closed }), 0, x.short .. ": last month's games pruned here")
+		eq(#Bones(w, x, "Best", "L"), 3, x.short .. ": this month's kept")
+	end
+	for _, x in ipairs(everyone) do w:As(x, x.ns.HonorsNet.Refresh) end
+	w:Run(HN.NOTICE_SETTLE + HN.NOTICE_GAP + 10)
+	eq(Pick(a).frame, "bones-1", "his charm stays") eq(Pick(c).frame, "bones-2")
+	for _, x in ipairs(everyone) do
+		local holders = {}
+		for _, p in ipairs({ a, c }) do
+			for _, h in ipairs(w:As(x, x.ns.HonorsNet.Holdings, p.name)) do if h.family == "bones" then holders[#holders + 1] = h.key end end
+		end
+		eq(table.concat(holders, ","), "bones-1,bones-2", x.short .. ": the closed month's top 3 as it stood")
+	end
+	eq(w:As(d, d.ns.HonorsNet.Verified, a.name, a.guid).art, "charm-gold", "others still see it")
+	for _, x in ipairs({ a, c }) do
+		eq(#Said(x), 0, x.short .. ": no notice") eq(#Letters(x), 1, x.short .. ": no letter")
+	end
+	for _, h in ipairs(w:As(d, d.ns.HonorsNet.Holdings, d.name)) do assert(h.family ~= "bones", "this month's winner holds nothing of last month") end
 	W3.NoErrors(w)
 end)
