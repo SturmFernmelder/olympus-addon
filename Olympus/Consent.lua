@@ -169,27 +169,93 @@ end
 -- though he had always closed it with its X.) Up to 1.2.1 the page kept the lines it showed for
 -- the session alone (each login asked again), but its games notice for good (Consent.Show:
 -- ns.db.consentNotices.games). An account with that notice and no record of the lines yet was
--- shown the page and left its unanswered lines as they are: in the first session with the record,
--- every line still waiting counts as asked, as if the page had just shown it. Nothing is answered
--- for him (unanswered stays off; /oly privacy shows them). The record starts that session, so a
--- later build's new question is still asked once.
-local adopting = false
+-- shown the page at every login and left its unanswered lines as they are: they count as asked,
+-- as if the page had just shown them. Nothing is answered for him (unanswered stays off; /oly
+-- privacy shows them).
+-- Only the lines showing by the login check (LOGIN_WAIT, when 1.2.1's page opened): the first
+-- check in an Olympus guild once that wait passed takes them, then the record is the only rule,
+-- so a line that first shows later (a character named a keeper or a bank) is a new question,
+-- asked once (review of 1.2.3).
+-- And on each character the account had then (Treasury's ns.db.myCharacters), at its own first
+-- session's check: its own lines (a keeper's, a bank's: perCharacter) and those it alone gets (an
+-- officer's patrol line) were on its page at every login too (review of 1.2.3: a Treasurer's mail
+-- character was asked its keeper line once more). The plan stays in ns.db.consentAdopt until each
+-- character had its check: `lines`, the build's lines then (key = version), so a later build's
+-- question is asked; `chars`, the characters still to come. A character made after the update
+-- is asked as anyone.
+local adoptAll = false -- this session: every line still waiting (the account's first with the record)
+local adoptDone = false -- this session's check took them
+local settled = false -- the login check's wait passed (Consent.OnLogin)
+
+local function Character()
+	if type(ns.me) ~= "string" or ns.me == "" then return nil end
+	-- (As Treasury.lua keeps ns.db.myCharacters.)
+	return tostring(ns.FullName(ns.Normal(ns.me)) or ns.me):lower()
+end
+local function Lines()
+	local out = {}
+	for _, item in ipairs(items) do if item.readonly ~= true then out[item.key] = Version(item) end end
+	return out
+end
+local function Plan()
+	local plan = type(ns.db) == "table" and ns.db.consentAdopt or nil
+	if type(plan) ~= "table" or type(plan.lines) ~= "table" or type(plan.chars) ~= "table" then return nil end
+	return plan
+end
+
 ns.On("INIT", function()
+	adoptAll, adoptDone, settled = false, false, false
 	if type(ns.db) ~= "table" or type(ns.db.consentAsked) == "table" then return end
 	local seen = ns.db.consentNotices
-	adopting = type(seen) == "table" and seen.games == true
+	if type(seen) == "table" and seen.games == true then
+		local chars = {}
+		for name, on in pairs(type(ns.db.myCharacters) == "table" and ns.db.myCharacters or {}) do
+			if on == true and type(name) == "string" then chars[name] = true end
+		end
+		ns.db.consentAdopt = { lines = Lines(), chars = chars }
+		adoptAll = true
+	end
 	ns.db.consentAsked = {}
 end)
 
+-- Whether this session still takes a waiting line as asked, and that line.
+local function Adopting()
+	if adoptDone then return false end
+	if adoptAll then return true end
+	local plan, me = Plan(), Character()
+	return plan ~= nil and me ~= nil and plan.chars[me] == true
+end
+local function Adopts(item)
+	if adoptAll then return true end
+	local plan = Plan()
+	return plan ~= nil and plan.lines[item.key] ~= nil and plan.lines[item.key] == Version(item)
+end
+local function AdoptDone()
+	adoptDone = true
+	local plan, me = Plan(), Character()
+	if not plan then return end
+	-- (The account's first session: every line it had, a test's or a late file's included.)
+	if adoptAll then plan.lines = Lines() end
+	if me then plan.chars[me] = nil end
+	if next(plan.chars) == nil then ns.db.consentAdopt = nil end
+end
+
 -- A line waiting for its answer that the page never showed (a new question).
 local function Fresh()
+	local adopting = Adopting()
+	local fresh = false
 	for _, item in ipairs(Consent.Pending()) do
 		if not WasAsked(item) then
-			if not adopting then return true end
-			MarkAsked(item)
+			if not (adopting and Adopts(item)) then
+				if not adopting then return true end
+				fresh = true
+			else
+				MarkAsked(item)
+			end
 		end
 	end
-	return false
+	if adopting and settled and ns.IsMember() then AdoptDone() end
+	return fresh
 end
 
 -- The games' ledger's line (1.1.6, ArenaLedger.lua: Consent.Intro), where the build has the arena,
@@ -567,8 +633,8 @@ function Consent.Hide() if frame then frame:Hide() end end
 -- rebuilt). (A new session keeps ns.db.consentAsked: only this file's state starts again.)
 function Consent.Reset()
 	wipe(asked)
-	if type(ns.db) == "table" then ns.db.consentAsked = nil end
-	activeSection, adopting = nil, false
+	if type(ns.db) == "table" then ns.db.consentAsked, ns.db.consentAdopt = nil, nil end
+	activeSection, adoptAll, adoptDone = nil, false, false
 	if frame and rawget(_G, "OlympusConsentFrame") ~= frame then frame = nil elseif frame then frame:Hide() end
 end
 
@@ -645,7 +711,10 @@ Consent.Register({
 -- The first question after login: the page, once the login settled, then on the minute until it
 -- could be asked (combat, an instance), once for each question (Consent.Ask).
 function Consent.OnLogin()
-	ns.After(Consent.LOGIN_WAIT, "privacy page", function() Consent.Ask("login") end)
+	ns.After(Consent.LOGIN_WAIT, "privacy page", function()
+		settled = true -- (the lines left from 1.2.1 are taken at this check: Fresh)
+		Consent.Ask("login")
+	end)
 	ns.Every(60, "privacy page", function() Consent.Ask("login") end)
 end
 ns.On("LOGIN", function() Consent.OnLogin() end)
