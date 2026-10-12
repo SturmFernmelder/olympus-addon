@@ -248,14 +248,14 @@ of `/oly status` (and of `/oly bug`) says what your addon knows of him: online a
 his realm, his layer and his crown, and how long ago each was heard.
 
 ### Person details
-Click any Lord, Captain, racer or inspected player. Their profile opens in the normal Olympus
-window, at that window's size, with the census facts Olympus already knows: level, class, zone,
-rank and status. **Back** returns to the same list or Realm subpage; **Whisper**, **Invite** and
-**Who** stay on the profile. Offline players cannot be whispered or invited from it. This is
-separate from the Blood Arena companion's player profile and opening it sends no new query.
-`/oly profile Name` (or `Name-Realm`) opens a player's profile by name, yours with no name. A
-profile opened from another one is one more step: **Back** goes to the profile before it, then
-to the list.
+Click any Lord, Captain, racer or inspected player. Their profile opens in the Olympus window, at
+its size, with the census facts Olympus knows: level, class, zone, rank and status. **Back**
+returns to the same list or Realm subpage, one opened from another first; **Whisper**,
+**Invite** and **Who** stay on it (offline: **Who** alone). It is not the Blood Arena
+companion's profile, and opening it sends no query. `/oly profile Name` (or `Name-Realm`) opens
+one by name. Yours is **My profile** (1.2.4: `/oly profile`, the Realm, the Games tab, the Games
+window's **Edit my profile**): **Look** (frame, title, nickname, emblem; one not released yet in
+grey), **Icons**, **Who sees what**, **Letters** (the King's), and you as others see you.
 Any soldier can reach the Lord of another Olympus guild in two clicks.
 
 A High Councillor's tooltip (1.1.5) says so too: their mark and own icon after their name, then

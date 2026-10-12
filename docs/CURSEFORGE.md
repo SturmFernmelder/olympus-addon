@@ -235,14 +235,14 @@ of `/oly status` (and of `/oly bug`) says what your addon knows of him: online a
 his realm, his layer and his crown, and how long ago each was heard.
 
 ### Person details
-Click any Lord, Captain, racer or inspected player. Their profile opens in the normal Olympus
-window, at that window's size, with the census facts Olympus already knows: level, class, zone,
-rank and status. **Back** returns to the same list or Realm subpage; **Whisper**, **Invite** and
-**Who** stay on the profile. Offline players cannot be whispered or invited from it. This is
-separate from the Blood Arena companion's player profile and opening it sends no new query.
-`/oly profile Name` (or `Name-Realm`) opens a player's profile by name, yours with no name. A
-profile opened from another one is one more step: **Back** goes to the profile before it, then
-to the list.
+Click any Lord, Captain, racer or inspected player. Their profile opens in the Olympus window, at
+its size, with the census facts Olympus knows: level, class, zone, rank and status. **Back**
+returns to the same list or Realm subpage, one opened from another first; **Whisper**,
+**Invite** and **Who** stay on it (offline: **Who** alone). It is not the Blood Arena
+companion's profile, and opening it sends no query. `/oly profile Name` (or `Name-Realm`) opens
+one by name. Yours is **My profile** (1.2.4: `/oly profile`, the Realm, the Games tab, the Games
+window's **Edit my profile**): **Look** (frame, title, nickname, emblem; one not released yet in
+grey), **Icons**, **Who sees what**, **Letters** (the King's), and you as others see you.
 Any soldier can reach the Lord of another Olympus guild in two clicks.
 
 A High Councillor's tooltip (1.1.5) says so too: their mark and own icon after their name, then
@@ -1947,7 +1947,7 @@ Other limits:
 | `/oly bank share on\|off` | the guild master or an officer of an Olympus guild other than the King's shows his guild bank's snapshot to the King, his Steward and his Hands (by whisper, never on the channel), or not (1.1) |
 | `/oly rollcall on\|off` | answer the author's roll calls (version, client, channel state) or not (1.1: not until you say yes) |
 | `/oly privacy` | the first-open page again: what the addon shares, and your Yes or No to each (1.1) |
-| `/oly profile [Name]` | a player's profile in the Olympus window, yours with no name |
+| `/oly profile [Name]` | a player's profile in the Olympus window, yours (**My profile**) with no name |
 | `/oly letters [version]` | the version letters (1.1.5): every one, newest first, a click opens one; with a version, that letter |
 | `/oly chat on\|off` | the Olympus chats on this client; off, nothing is sent or shown (1.1: off until you say yes) |
 | `/oly talk [olympus\|captains\|lords]` | open or close the Olympus window on its Chat tab, on that channel; also `/ol`, `/olc` or `/oll` with nothing after it, or Shift-click the minimap button (1.1.1) |
@@ -1955,7 +1955,7 @@ Other limits:
 | `/oly issuereporter hide\|show` | hide Blizzard's Issue Reporter box (beta clients) at every login, or show it again (also a "Hide" button on it) |
 | `/oly helpme [text]` (or **Ask a High Councillor** on the Realm tab) | ask the High Council (the moderators) for help: it goes by whisper to up to three of them online who take requests |
 | `/oly council list` · `/oly council help on\|off` | the High Council as your addon knows it; moderators: take help requests or not. The list is signed by the author on his own computer and checked by every client: no name is written in the addon's code, and nobody can forge or change it. An addon without the list (`High Council: -`) asks the channel for it a minute or so after login, and again until it has it (two and a half minutes later when nobody answered, up to 3 times). Since 1.0.0 the list also crosses realms through guild chat: guildmates on another realm answer the ask and pass the list on, and it goes on to your realm's channel |
-| `/oly council icon` (or **My council icon** on the Realm tab, councillors only) | moderators: a councillor's name always carries the High Council's mark, which nobody can change: in the game's own chat (1.1.5, `/oly chatmarks`) the game's silver elite dragon, on their tooltip and in the census the game's target-frame skull. An icon of your own after it is optional: pick it from the game's icons, like a macro's. Your addon announces it on the channel (at once, then every 20 minutes), and other clients take it only from a councillor and only as a game icon |
+| `/oly council icon` (or **My council icon** on the Realm tab, councillors only; 1.2.4: **My profile**'s **Icons**) | moderators: a councillor's name always carries the High Council's mark, which nobody can change: in the game's own chat (1.1.5, `/oly chatmarks`) the game's silver elite dragon, on their tooltip and in the census the game's target-frame skull. An icon of your own after it is optional: pick it from the game's icons, like a macro's. Your addon announces it on the channel (at once, then every 20 minutes), and other clients take it only from a councillor and only as a game icon |
 | `/oly discord <code>` · `/oly discord` | Olympus Link: link this character to your Discord account with the bot's code (or paste it in a box) |
 | `/oly discord show` · `status` · `forget` | the Olympus Link window (QR code and link) again; every character's request or proof; drop this character's |
 | `/oly hop` | ask for an invite to the King's layer (while he is online) |
