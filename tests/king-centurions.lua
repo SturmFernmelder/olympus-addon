@@ -261,3 +261,69 @@ test("1.2.4 King's centurions: a King's or a councillor's client that still hold
 		N.Minute(); eq(ns.rdb.mainNominees, nil); eq(#w.parts(), 2); eq(w.parts()[2], Msg("Olympus", w.clock, ""))
 	end)
 end)
+
+test("1.2.4 King's centurions: an older client's list heard after the end went out, even one older than that end (a councillor's 1.2.3 client offline then, repeating its copy at its login), is answered again, once a minute at most: a 1.2.3 client that logged in since took it, and the new answer ends it there", function()
+	With(function(w)
+		w.asKing()
+		-- His client ends its own old copy at its first minute.
+		local rev = w.clock - 600
+		ns.rdb.mainNominees = { rev = rev, by = KING, list = { { r = "c", n = "Ada-Realm" } } }
+		N.Minute()
+		eq(#w.parts(), 1); local first = w.parts()[1]
+		eq(first, Msg("Olympus", w.clock, ""))
+		-- Ten minutes on, a councillor's 1.2.3 client, offline then, logs in and repeats that same list.
+		w.clock = w.clock + 600
+		N.Handle("CHANNEL", VERA, Msg("Olympus", rev, "c=Ada"))
+		w.flush()
+		eq(#w.parts(), 2, "answered, though older than the end he sent")
+		local answer = w.parts()[2]
+		eq(answer, Msg("Olympus", w.clock, ""), "empty, newer than anything heard")
+		-- Within the minute, its next repeat waits; an end another sends after it, newer, answers it.
+		N.Handle("CHANNEL", VERA, Msg("Olympus", rev, "c=Ada"))
+		w.flush(); eq(#w.parts(), 2, "not again within the minute")
+		N.Handle("CHANNEL", OLAF, Msg("Olympus", w.clock + 1, ""))
+		w.clock = w.clock + 60
+		w.flush(); eq(#w.parts(), 2, "another's newer end came after it: nothing more")
+		-- A 1.2.3 member's client that logged in after the first end: it took the repeat (the bronze),
+		-- held the first end not; the new answer ends it.
+		local saved = { StaticPopupDialogs.OLYMPUS_NOMINEE, StaticPopupDialogs.OLYMPUS_NOMINEE_REMOVE }
+		local ok, err = pcall(function()
+			local old = setmetatable({ On = function() end, Comm = setmetatable({ Handle = function() end,
+				Send = function() end }, { __index = ns.Comm }) }, { __index = ns })
+			assert(loadfile(ROOT .. "tests/fixtures/nominees-1.2.3.lua"))("Olympus", old)
+			local O = old.Nominees
+			w.as("Ada-Realm", "Olympus", 3)
+			O.Handle("CHANNEL", VERA, Msg("Olympus", rev, "c=Ada"))
+			eq(O.RoleOf("Ada-Realm", "Olympus"), "centurion", "a 1.2.3 client that logged in later takes the repeat")
+			O.Handle("CHANNEL", KING, answer)
+			eq(O.RoleOf("Ada-Realm", "Olympus"), nil, "the new answer ends it")
+		end)
+		StaticPopupDialogs.OLYMPUS_NOMINEE, StaticPopupDialogs.OLYMPUS_NOMINEE_REMOVE = saved[1], saved[2]
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("1.2.4 King's centurions: in another Olympus guild the War Room's squads are still led by its guild master's centurions (his own list, heard as it comes), a High Councillor in it by none of his seat; the King's guild's leaders stay the councillors", function()
+	With(function(w)
+		local S = w.squads()
+		local R = ns.Roster
+		local BOSS = "Boss Master-Realm"
+		R.byName, R.guild = { [BOSS] = 0, [OLAF] = 3, ["Cid-Realm"] = 3, ["Dax-Realm"] = 3 }, "Olympus II"
+		w.as("Cid-Realm", "Olympus II", 3)
+		eq(#S.Leaders(), 0, "nobody named yet: no squad, the councillor in it neither")
+		N.Handle("CHANNEL", BOSS, Msg("Olympus II", w.clock, "c=Cid;c=Dax"))
+		eq(N.RoleOf("Dax-Realm", "Olympus II"), "centurion")
+		local leaders = S.Leaders()
+		eq(#leaders, 2, "his two centurions lead its squads")
+		eq(leaders[1].name, "Cid-Realm"); eq(leaders[2].name, "Dax-Realm"); eq(leaders[1].kind, "centurion")
+		for _, e in ipairs(leaders) do assert(e.name ~= OLAF, "a councillor leads no squad here by his seat") end
+		-- A list for the King's guild from the King's older client changes nothing there either.
+		N.Handle("CHANNEL", KING, Msg("Olympus", w.clock, "c=Cid"))
+		eq(#S.Leaders(), 2)
+		-- Back in the King's guild: its squads' leaders are its councillors alone.
+		R.byName, R.guild = { [KING] = 0, [VERA] = 3, ["Ada-Realm"] = 3 }, "Olympus"
+		w.asKing()
+		leaders = S.Leaders()
+		eq(#leaders, 1); eq(leaders[1].name, VERA); eq(leaders[1].kind, "councillor")
+	end)
+end)

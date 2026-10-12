@@ -72,9 +72,11 @@ local version = 0  -- one more at each change of what any list counts for (Borde
 local lastSent, sendPending = -math.huge, false
 local sentOnce = false -- his list went out this session (then an empty one goes out too)
 -- 1.2.4: ending 1.1.5's list of the King's guild's centurions where older clients hold it (Retire):
--- the newest one heard that names anyone, the newest empty one heard or sent, when this client last
--- sent one, and whether one is on its way.
-local retireNamed, retireEmpty, retiredAt, retirePending = 0, 0, -math.huge, false
+-- the newest rev heard of one that names anyone, whether one heard waits for an answer (no empty one
+-- newer than every named one came after it), when this client last sent one, and whether one is on
+-- its way. (An end heard or sent earlier answers nothing heard after it: a 1.2.3 client that logged
+-- in since never heard it, and takes the named one, older than that end, as the newest.)
+local retireNamed, retireWanted, retiredAt, retirePending = 0, false, -math.huge, false
 Nominees.RETIRE_GAP = 60 -- an answer to an older client's list, once a minute at most
 
 function Nominees.Version() return version end
@@ -576,19 +578,20 @@ function Nominees.Retire(rev)
 	for i, part in ipairs(Nominees.Parts(Nominees.MainGuild(), rev, {})) do
 		ns.Comm.Send("CHANNEL", part, "mainnominees" .. i)
 	end
-	retiredAt, retireEmpty = ns.Now(), math.max(retireEmpty, rev)
+	retiredAt = ns.Now()
+	if rev > retireNamed then retireWanted = false end
 	ns.Log("nominees: <%s>'s old list of centurions ended for older clients (rev %d)", Nominees.MainGuild(), rev)
 	return true
 end
 
 -- An answer a few seconds after an older client's list (one for several heard together), RETIRE_GAP
--- after the last one at the soonest, unless an empty list as new came meanwhile.
+-- after the last one at the soonest, unless an empty list newer than it came after it meanwhile.
 local function RetireSoon()
 	if retirePending or not Retirer() then return end
 	retirePending = true
 	ns.After(math.max(Nominees.SEND_AFTER, Nominees.RETIRE_GAP - (ns.Now() - retiredAt)), "main nominees end", function()
 		retirePending = false
-		if retireNamed <= retireEmpty then return end
+		if not retireWanted then return end
 		if ns.Now() - retiredAt < Nominees.RETIRE_GAP then return RetireSoon() end
 		Nominees.Retire(retireNamed)
 	end)
@@ -666,16 +669,17 @@ local function Take(sender, guild, rev, entries, set)
 end
 
 -- 1.1.5's list of the King's guild's centurions, from an older client of the King's or a councillor's
--- (1.2.4): nothing of it is kept or counts here. An empty one is the newest end heard; one that names
--- anyone, newer than that, is answered from the King's or a councillor's client (Retire).
+-- (1.2.4): nothing of it is kept or counts here. One that names anyone is answered from the King's or
+-- a councillor's client (Retire), whatever its rev: an end sent before it never reached a client that
+-- logged in since. An empty one newer than every named one heard, after them, is that answer already.
 local function Retired(sender, rev, entries)
 	if #entries == 0 then
-		retireEmpty = math.max(retireEmpty, rev)
+		if rev > retireNamed then retireWanted = false end
 		return
 	end
 	ns.Log("nominees: <%s>'s list from %s ignored: the High Council are the King's centurions", Nominees.MainGuild(), sender)
-	retireNamed = math.max(retireNamed, rev)
-	if retireNamed > retireEmpty then RetireSoon() end
+	retireNamed, retireWanted = math.max(retireNamed, rev), true
+	RetireSoon()
 end
 
 -- A part of a list, from the channel: only from that guild's master (Proven), put together with
@@ -1079,6 +1083,6 @@ ns.On("LOGIN", function() ns.Every(60, "nominees", Nominees.Minute) end)
 function Nominees.Reset()
 	wipe(lists); wipe(pending)
 	lastSent, sendPending, sentOnce = -math.huge, false, false
-	retireNamed, retireEmpty, retiredAt, retirePending = 0, 0, -math.huge, false
+	retireNamed, retireWanted, retiredAt, retirePending = 0, false, -math.huge, false
 	Bump()
 end
