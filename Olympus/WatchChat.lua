@@ -23,7 +23,8 @@ local L = ns.L
 --     Watch.IsAuthorized) on a member of his own guild below him (Watch.TargetAllowed), over GUILD;
 --   the author (7), the King (6), a High Councillor (4) or an Olympus moderator one of them named
 --     (3) on anyone in Olympus whose level is lower (WatchChat.ProtectLevel: a Steward 5, a Hand 4,
---     a guild master 3), on the Olympus channel.
+--     the King's guild's master 3; since 1.2.3 any other guild master 0, as his members: his own
+--     guild's Watchers still never act on him, by its rank order), on the Olympus channel.
 -- Nobody acts on himself, on the pinned King, or through a linked alt on someone he may not reach.
 --
 --   MD~1~<D|P|T|U>~<G|O>~<seq>~<at>~<guild>~<Name-Realm>~<arg>~<refs>~<by>~<reason>   an action
@@ -426,13 +427,20 @@ function WC.ActorLevel(name)
 	return WC.IsMod(name) and LEVEL.mod or 0
 end
 
-local function GuildMaster(name)
+-- The King's guild's own master: our roster's rank 0 when ours is the King's guild, or rank 0 of
+-- the King's guild as this client can verify it (its census master is the pinned King himself).
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) Every guild master
+-- stood with the Olympus moderators here, so no moderator could delete his lines or time him out
+-- anywhere, and two cooperating characters made one of theirs a census guild master of an invented
+-- guild for it. Another guild's master is protected as his members are now; his own guild's
+-- Watchers still never act on him (Watch.TargetAllowed: its rank order).
+local function KingsGuildMaster(name)
 	local W = TheWatch()
-	if W and W.RosterRank and W.RosterRank(name) == 0 then return true end
-	-- A census-known guild master: protection only (a false report can only cause a refusal).
+	if ns.IsKingGuild(OwnGuild()) and W and W.RosterRank and W.RosterRank(name) == 0 then return true end
 	local M = Mod()
 	local guild = M and M.GuildOf and M.GuildOf(name)
-	return guild ~= nil and ns.Data ~= nil and type(ns.Data.AuthorizedRank) == "function" and ns.Data.AuthorizedRank(name, guild) == 0
+	return guild ~= nil and ns.IsKingGuild(guild) and ns.Data ~= nil and type(ns.Data.AuthorizedRank) == "function"
+		and ns.Data.AuthorizedRank(name, guild) == 0
 end
 
 local function OwnProtect(name)
@@ -440,7 +448,7 @@ local function OwnProtect(name)
 	if IsKing(name) then return LEVEL.king end
 	if IsSteward(name) then return LEVEL.steward end
 	if IsCouncillor(name) or IsHand(name) then return LEVEL.council end
-	if WC.IsMod(name) or GuildMaster(name) then return LEVEL.mod end
+	if WC.IsMod(name) or KingsGuildMaster(name) then return LEVEL.mod end
 	return 0
 end
 

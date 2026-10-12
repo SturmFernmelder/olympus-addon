@@ -940,7 +940,9 @@ right-clicks it; on a case's page in The Watch the same choices are lines of the
   guild below him, never on its guild master; it goes over guild, and every client of the guild
   checks him in its own roster. A **High Councillor**, the **King** and the **author** act on
   anyone in Olympus whose rank is lower, on the Olympus channel; each of them names up to 10
-  **Olympus moderators**, who act anywhere but never on a guild master or anyone above, and whose
+  **Olympus moderators**, who act anywhere but never on the guild master of `<Olympus>` or anyone
+  above (since 1.2.3 another guild's master is no higher than his members for them: no guild
+  master stands above anyone at the level of the whole army), and whose
   list lapses 20 minutes after its namer stops repeating it, or at once when he loses his title.
   Stewards and Hands are protected but act only if named. Every client checks every action by the
   name the server stamps on it, never by anything the message says. Other guilds learn of a
