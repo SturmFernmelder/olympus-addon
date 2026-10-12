@@ -52,6 +52,10 @@ for _, role in ipairs({ "author", "test" }) do
 			eq(#c.ns.ArenaHome.Data.BoneHistory(), 0)
 		end
 		w:As(c, RealHistory)
+		-- (1.2.3: the author's own title, The Royal Dev, switches on at his first look at his
+		-- honours, a save and a profile word of the login's, not of the simulation: let it settle
+		-- before the save is taken, so the check below still sees anything the simulation saves.)
+		w:Run(5)
 		local db, rdb, sent = Copy(c.db), Copy(c.rdb), #w:Sent()
 		Command(w, c, "boneschat")
 		local ui = c.ns.Arena.ui
