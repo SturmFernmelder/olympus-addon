@@ -622,10 +622,26 @@ local function Permit(id, recipient)
 	end
 end
 
-local function Echo(id, lineId, guild, text)
+-- 1.2.4: the sender's own line, in his history at Enter (pending: its whispers still waiting in
+-- Comm's queue, one leaves every 1.2 s), and taken out again if none of them left (Unkeep).
+local function Echo(id, lineId, guild, text, pending)
 	receiveMine[id .. ":" .. lineId .. "#" .. text] = Now()
-	Keep(id, { t = ns.Now(), sender = ns.me, guild = guild, text = text, id = lineId, mine = true })
+	local e = { t = ns.Now(), sender = ns.me, guild = guild, text = text, id = lineId, mine = true, pending = pending or nil }
+	Keep(id, e)
 	stats.sent = stats.sent + 1
+	return e
+end
+local function Unkeep(id, e)
+	local r = State(id, false)
+	if not r then return end
+	for i = #r.lines, 1, -1 do
+		if r.lines[i] == e then
+			table.remove(r.lines, i)
+			stats.sent = math.max(0, stats.sent - 1)
+			ns.Fire("CHAT_ROOM_CHANGED", id)
+			return
+		end
+	end
 end
 
 local function SendGuild(text) -- gp:roster-actions
@@ -641,9 +657,13 @@ local function SendGuild(text) -- gp:roster-actions
 	return true
 end
 
--- Returns true once the complete, fixed audience was admitted to the queue. Completion callbacks
--- add the local echo only after a game send succeeded and expose a failed/partly failed send to
--- the Chat page without rerouting it.
+-- Returns true once the complete, fixed audience was admitted to the queue. 1.2.4 (the author: in
+-- the Church's room his line showed nowhere at Enter, nothing in the history and no reason): the
+-- line shows in its sender's history at once, marked pending, until its whispers left; it settles
+-- when one at least left, and goes when none did (the Chat page's note says why, and puts it back).
+-- A line refused here returns its reason, which the Chat page shows in the room (Rooms.Own: this
+-- file's rooms); nobody else of the room reachable is "alone": nothing sent, nothing kept.
+-- Completion never reroutes a line: its audience is the one fixed at Enter.
 local function Send(id, text)
 	if Rooms.PreviewOnly(id) then return false, "preview" end
 	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too.
@@ -691,44 +711,60 @@ local function Send(id, text)
 	local recipients = Members(id)
 	WatchGone()
 	local count = #recipients
+	-- 1.2.4: nobody else of the room online (the roster's, the server's "not playing", the Church's
+	-- members heard online): nothing goes, and nothing is kept as if it had been said.
+	if count == 0 then return false, "alone" end
 	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < count then ns.Print(L.CHAN_BUSY) return false, "busy" end
 
 	local guardKey = id .. "#" .. lineId
 	local pending, successes, failures = count, 0, 0
-	local finished = false
+	local admitting, finished, echo, failedWhy = true, false, nil, nil
+	local function Settle()
+		finished = true
+		if successes > 0 then
+			echo.pending = nil
+			ns.Fire("CHAT_ROOM_CHANGED", id)
+		else
+			Unkeep(id, echo)
+		end
+		if failures > 0 then ns.Fire("CHAT_ROOM_SEND_FAILED", id, failedWhy or "failed", text, successes) end
+	end
 	local function Done(ok, why)
 		if finished then return end
 		pending = pending - 1
-		if ok then successes = successes + 1 else failures = failures + 1 end
-		if pending > 0 then return end
-		finished = true
-		if successes > 0 then Echo(id, lineId, guild, text) end
-		if failures > 0 then ns.Fire("CHAT_ROOM_SEND_FAILED", id, why or "failed", text, successes) end
+		if ok then successes = successes + 1 else failures, failedWhy = failures + 1, why end
+		if pending > 0 or admitting then return end
+		Settle()
 	end
 	local accepted = true
-	-- A room containing only this character is still a useful local history, and sends no bytes.
-	if #recipients == 0 then pending = 0; Echo(id, lineId, guild, text)
-	else
-		for _, recipient in ipairs(recipients) do
-			local ok = ns.Comm.Whisper(recipient, msg, nil, false, true, Done,
-				{ owner = Rooms, key = guardKey, permit = Permit(id, recipient) })
-			if not ok then accepted = false end
-		end
+	for _, recipient in ipairs(recipients) do
+		local ok = ns.Comm.Whisper(recipient, msg, nil, false, true, Done,
+			{ owner = Rooms, key = guardKey, permit = Permit(id, recipient) })
+		if not ok then accepted = false end
+	end
+	admitting = false
+	if not accepted then
 		-- Admission is all-or-none: preflight normally makes every whisper fit, but a
 		-- synchronous refusal must not leave an admitted prefix aimed at only part of the
 		-- audience. All jobs share this exact capability key; unrelated sends stay queued.
-		if not accepted and ns.Comm.CancelQueued then ns.Comm.CancelQueued(Rooms, guardKey, "cancelled") end
-	end
-	if not accepted then
-		if pending == count then finished = true end
+		-- (Refused at Enter: the words stay in the box and the page says why, once: no late note.)
+		finished = true
+		if ns.Comm.CancelQueued then ns.Comm.CancelQueued(Rooms, guardKey, "cancelled") end
 		return false, "busy"
 	end
+	echo = Echo(id, lineId, guild, text, true)
+	if pending == 0 then Settle() end
 	lastSend = now
 	sentTimes[#sentTimes + 1] = now
 	return true, "ok"
 end
 
 function Rooms.Send(id, text) return Send(id, text) end
+-- 1.2.4: a room this file carries (Guild and the M2 rooms), whose refusals the Chat page shows in
+-- the room; a provider's room (a crafting deal's, a squad's) answers for itself.
+function Rooms.Own(id)
+	return type(id) == "string" and not ProviderFor(id) and Rooms.Info(id) ~= nil
+end
 
 -- A room's minute: FLOOD lines in all, and (1.2.0) each sender's fair share of it, PER_MINUTE
 -- (what an unmodified client sends at most): one sender cannot crowd the others out.

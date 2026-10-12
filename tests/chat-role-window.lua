@@ -1,4 +1,5 @@
 local ns, test, eq, WithWindow = ...
+local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]chat%-role%-window%.lua$") or "./"
 
 test("watch chat context menu: actions are opt-in and recheck permission and target", function()
 	WithWindow(function(w)
@@ -191,5 +192,156 @@ test("chat: an ordinary member right-clicks another player's Olympus line, its w
 		C.History = saved.history
 		rawset(ns, "Watch", saved.watch); rawset(ns, "WatchChat", saved.wc)
 		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4 (the author, in the Church's room: "Eu dou Enter para enviar a mensagem na igreja e não
+-- aparece a mensagem. No histórico, não aparece nada e não me avisa por que não foi"): the real
+-- Chat page over the real rooms (ChatRooms.lua loaded fresh for the page, its events the page's),
+-- with the Church's room registered as Church.lua registers it, its audience and its members
+-- online stood in for, and a send queue whose whispers leave when the test says.
+local function WithChurchRoom(w, fn)
+	local saved = { rooms = ns.ChatRooms, getTime = GetTime, guildInfo = GetGuildInfo }
+	local room = { clock = 5000, audience = {}, online = {}, jobs = {} }
+	local ok, err = pcall(function()
+		GetTime = function() return room.clock end
+		ns.db.chatRooms = true
+		room.audience[ns.me:lower()] = true
+		for i = 1, 3 do
+			local name = "Brother " .. string.char(96 + i) .. "-Realm"
+			room.audience[name:lower()], room.online[#room.online + 1] = true, name
+		end
+		local rns = setmetatable({}, { __index = ns })
+		rns.On, rns.RegisterEvent = function() end, function() end
+		rns.Fire = function(name, ...) w.fire(name, ...) end
+		rns.Consent = { Register = function() end, Ask = function() end }
+		rns.Comm = setmetatable({
+			Handle = function() end,
+			QueueRoom = function() return 60 end,
+			Whisper = function(target, msg, _, _, logged, done, options)
+				room.jobs[#room.jobs + 1] = { target = target, msg = msg, logged = logged, done = done, options = options }
+				return true
+			end,
+		}, { __index = ns.Comm })
+		assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", rns)
+		local R = rns.ChatRooms
+		R.Reset()
+		assert(R.RegisterAudience("church", { label = function() return ns.L.CHURCH_ROOM end,
+			CanAccess = function(name) return room.audience[ns.FullName(name or ns.me):lower()] == true end,
+			Recipients = function() return room.online end }))
+		ns.ChatRooms = R
+		room.R = R
+		-- A queued whisper's last check, then its send: as Comm does when its turn comes.
+		function room.Finish(job)
+			local o = job.options
+			local permitted, why = o.permit(o.owner, o.key, "WHISPER", job.target, job.msg)
+			job.done(permitted, why)
+			return permitted, why
+		end
+		function room.Shown(list)
+			local out = {}
+			for _, x in ipairs(list) do if x:IsShown() then out[#out + 1] = x end end
+			return out
+		end
+		function room.RowWith(f, text)
+			for _, r in ipairs(room.Shown(f.rows)) do if (r.text:GetText() or ""):find(text, 1, true) then return r end end
+		end
+		function room.BubbleWith(f, text)
+			for _, b in ipairs(room.Shown(f.bubbles)) do if (b.body:GetText() or ""):find(text, 1, true) then return b end end
+		end
+		fn(room, R)
+	end)
+	ns.ChatRooms, GetTime, GetGuildInfo = saved.rooms, saved.getTime, saved.guildInfo
+	if not ok then error(err, 0) end
+end
+
+test("Chat tab (1.2.4): a line written in the Church's room shows at once, marked sending, and a line that cannot go says why in the room", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L, jobs = ns.L, room.jobs
+			local RowWith, BubbleWith = room.RowWith, room.BubbleWith
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true, "the Church's room, his own")
+			f.input:SetText("hello brothers")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "", "the box empties")
+			eq(#jobs, 3, "one logged whisper to each of the room's members online")
+			for _, job in ipairs(jobs) do eq(job.logged, true); eq(room.audience[job.target:lower()], true, job.target) end
+			local b = BubbleWith(f, "hello brothers")
+			assert(b, "his line shows at Enter")
+			assert(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), "marked as sending: " .. b.body:GetText())
+			room.Finish(jobs[1]); room.Finish(jobs[2])
+			w.CW.Render()
+			assert(BubbleWith(f, L.CHATWIN_SENDING), "still sending while a whisper waits")
+			room.Finish(jobs[3])
+			w.CW.Render()
+			b = BubbleWith(f, "hello brothers")
+			assert(b, "still shown once sent")
+			eq(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), nil, "no longer marked once every whisper left")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format("")), nil, "no note")
+
+			-- Enter again at once: too fast, told in the room, the words kept in the box.
+			f.input:SetText("again")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "again", "kept in the box")
+			eq(#jobs, 3, "nothing sent")
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_FAST)), "the reason, in the room")
+			eq(RowWith(f, L.CHATWIN_PUT_BACK), nil, "no put-back: the words never left the box")
+
+			-- Nobody else of the room online: told so; one note, the latest refusal's.
+			room.clock = room.clock + 2
+			for i = #room.online, 1, -1 do room.online[i] = nil end
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "again"); eq(#jobs, 3)
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_ALONE)), "nobody else online, said in the room")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_FAST)), nil, "the older refusal's note gone")
+			eq(BubbleWith(f, "again"), nil, "not shown as said")
+
+			-- The game has not said his guild yet (a loading screen): told so.
+			room.online[1] = "Brother a-Realm"
+			local guildInfo = GetGuildInfo
+			GetGuildInfo = function() return nil end
+			f.input:Fire("OnEnterPressed")
+			GetGuildInfo = guildInfo
+			w.CW.Render()
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_GUILD)), "no guild yet, said in the room")
+
+			-- Sent again: the line shows, the refusal's note goes.
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), ""); eq(#jobs, 4)
+			assert(BubbleWith(f, "again"), "shown at Enter")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_GUILD)), nil, "the note gone with a line sent")
+		end)
+	end)
+end)
+
+-- 1.2.4: a role room's line every whisper of which failed after it showed: it leaves the room, and
+-- the room's note names the reason (here the audience changed while it waited), its words to put
+-- back in the box.
+test("Chat tab (1.2.4): a role room's line none of whose whispers left goes from the room, and its note says why and puts it back", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L, jobs = ns.L, room.jobs
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			f.input:SetText("lost on the way")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			assert(room.BubbleWith(f, "lost on the way"), "shown at Enter")
+			eq(#jobs, 3)
+			for k in pairs(room.audience) do if k ~= ns.me:lower() then room.audience[k] = nil end end
+			for _, job in ipairs(jobs) do eq((room.Finish(job)), false, "the permit refuses " .. job.target) end
+			w.CW.Render()
+			eq(room.BubbleWith(f, "lost on the way"), nil, "gone: it reached nobody")
+			local note = room.RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_REVOKED))
+			assert(note, "the reason, in the room")
+			assert(room.RowWith(f, L.CHATWIN_PUT_BACK), "its words can go back in the box")
+			note:Click()
+			eq(f.input:GetText(), "lost on the way")
+		end)
 	end)
 end)

@@ -83,7 +83,15 @@ local MAX_NOTES = 5
 local LOOK_GAP = 1                                    -- the Olympus tab awaited: the game's chat windows read this often
 local GREY = "|cff9d9d9d"
 local LINK_TIPS = { item = true, spell = true, enchant = true, quest = true } -- (the links Codec lets through)
-local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "CHATWIN_WHY_FAILED", left = "CHATWIN_WHY_LEFT" }
+local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "CHATWIN_WHY_FAILED", left = "CHATWIN_WHY_LEFT",
+	-- 1.2.4: a room's line refused at Enter (ChatRooms.Send's reasons), or every whisper of it lost
+	-- on its way (Comm's and the room's permit's reasons): each its own words, not "the game refused it".
+	alone = "CHATWIN_WHY_ALONE", fast = "CHATWIN_WHY_FAST", busy = "CHATWIN_WHY_BUSY", full = "CHATWIN_WHY_QUEUE",
+	dropped = "CHATWIN_WHY_QUEUE", cancelled = "CHATWIN_WHY_CANCELLED", revoked = "CHATWIN_WHY_REVOKED",
+	access = "CHATWIN_WHY_ACCESS", off = "CHATWIN_WHY_OFF", netoff = "CHATWIN_WHY_NETOFF", held = "CHATWIN_WHY_NETOFF",
+	timeout = "CHATWIN_WHY_TIMEOUT", severe = "CHATWIN_WHY_SEVERE", lockdown = "CHATWIN_WHY_LOCKDOWN",
+	guild = "CHATWIN_WHY_GUILD", empty = "CHATWIN_WHY_EMPTY", size = "CHATWIN_WHY_SIZE", preview = "CHATWIN_WHY_PREVIEW",
+	gamepad = "CHATWIN_WHY_GAMEPAD" }
 -- The pointer's arrow: the game's tutorial arrow (Blizzard_TutorialTemplates), else the chat
 -- frame's own scroll-down arrow (Blizzard_SharedXML's dropdown and store templates use it).
 local ARROW_ATLAS, ARROW_FILE = "NPE_ArrowDown", "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up"
@@ -705,10 +713,11 @@ function ChatWindow.ViewOf(e, hides)
 	local views = ChatWindow.views
 	local v = views[e]
 	if not v or v.text ~= e.text or v.sender ~= e.sender or v.guild ~= e.guild or v.class ~= e.class or v.t ~= e.t
-		or v.mine ~= e.mine then
+		or v.mine ~= e.mine or v.pending ~= e.pending then
 		v = v or {}
 		views[e] = v
 		v.text, v.sender, v.guild, v.class, v.t, v.mine = e.text, e.sender, e.guild, e.class, e.t, e.mine
+		v.pending = e.pending -- (1.2.4: a room's line of ours whose whispers have not all left: ChatRooms' echo)
 		local t = tonumber(e.t) or 0
 		v.at, v.when, v.day = t, Grey(date("%H:%M", t)), date("%Y-%m-%d", t)
 		v.dayRow, v.full = Grey(v.day), ns.FullName(e.sender)
@@ -719,7 +728,7 @@ function ChatWindow.ViewOf(e, hides)
 		v.era, v.hides, v.del = ChatWindow.era, hides, e.del
 		v.own = Own(e)
 		v.veiled = not v.own and hides ~= nil and hides(e.text or "") or false
-		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. v.body
+		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. (v.pending and (Grey(L.CHATWIN_SENDING) .. " ") or "") .. v.body
 		v.headed = false
 	end
 	return v
@@ -1117,11 +1126,16 @@ local function DrawLines(all)
 	end
 	-- The lines of ours that were not sent: a grey note each, a click puts one back in the box.
 	local t = tier
+	-- (1.2.4: one refused at Enter has its words still in the box: its reason alone, nothing to put back.)
 	for _, note in ipairs(notes[t] or {}) do
 		local key = WHY[note.why] or WHY.failed
 		nr = nr + 1
 		y = y + GAP_OUT
-		y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
+		if note.kept then
+			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key])), y, width)
+		else
+			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
+		end
 	end
 	y = y + 8
 	for i = nb + 1, #frame.bubbles do frame.bubbles[i]:Hide(); frame.bubbles[i].entry, frame.bubbles[i].y = nil, nil end
@@ -2623,6 +2637,20 @@ local function NextTier()
 	SelectChoice(choices[at % #choices + 1].key)
 end
 
+-- 1.2.4 (the author, in the Church's room: "não me avisa por que não foi"): a line one of ChatRooms'
+-- own rooms refused at Enter (ChatRooms.Own: Guild and the role rooms; a provider's room answers for
+-- itself) gets its reason in that room, one note, the latest refusal's (an older one goes); its
+-- words stay in the box, and a line sent takes the note away (Submit). Before, the reason went to
+-- the game's chat frame at best, under the Olympus window.
+function ChatWindow.Refused(t, why)
+	local list = notes[t] or {}
+	notes[t] = list
+	for i = #list, 1, -1 do if list[i].kept then table.remove(list, i) end end
+	list[#list + 1] = { why = WHY[why] and why or "failed", kept = true }
+	while #list > MAX_NOTES do table.remove(list, 1) end
+	MarkDirty()
+end
+
 local function Submit()
 	if not frame or not tier then return end
 	local eb = frame.input
@@ -2655,6 +2683,7 @@ local function Submit()
 		elseif logical then
 			local R = ns.ChatRooms
 			if type(R) == "table" and type(R.Send) == "function" then ok, why = R.Send(tier, text) else ok, why = false, "room" end
+			if not ok and type(R) == "table" and type(R.Own) == "function" and R.Own(tier) then ChatWindow.Refused(tier, why) end
 		else
 			ok, why = ns.Channels.Send(tier, text, nil, true)
 		end
