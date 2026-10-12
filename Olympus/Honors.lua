@@ -44,6 +44,12 @@ local ADDON, ns = ...
 --                scored, as donor-month is.
 --   guild        the leader (guild master) of the Olympus guild with the highest average level
 --                (the owl, gold only: frame and title). Its members get nothing (the design).
+--   missionary   (1.2.3) the Church's top 3 missionaries over the last 30 days (gold, silver and
+--                bronze; 4th and below nothing): the Church's top 3 (ChurchCount.Top3, its NR~1~t
+--                word: taken from the Head's, the King's or the author's client, no other's; sent
+--                by the author's alone, ChurchCount.SendTop, while it is online with the public
+--                ranking open), held while that word names him and is no older than its own 30
+--                days (the shepherd's crook with its sleeping lamb).
 -- Gone with the design: the week's top donor (Donors still works the week out, for the race
 -- views; no honour comes of it) and the phoenix.
 -- The guild-rank frames (Borders.TIERS, and Borders.MarkOf's marks) stay as they are: "rank" is
@@ -62,11 +68,17 @@ local ADDON, ns = ...
 --     arena-class-mage-3 (mage-bronze);
 --   donor-top-<1-3> (cornucopia-gold/-silver/-bronze), donor-month-<1-3> (koi-...),
 --   oracle-<1-3> (raven-...), guild-top-leader (owl-gold, winged);
+--   (1.2.3) missionary-<1-3> (crook-gold/-silver/-bronze, plain);
 --   level-race-<milestone> (level-race-20: comet-bronze, -40 comet-silver, -60 comet-gold; the
 --     milestone written on it);
 --   the tier's badge: arena-tier-<bronze|silver|gold> (the crossed swords of the arena's
 --     division, a badge in the arena's screens: no frame, no mark, no title).
 --   A pick's frame may also be "rank" (the Olympus rank's frame) or "none".
+--   1.2.1, a preview only (Honors.PREVIEWS: the author's /oly borders test <key>; no honour has
+--   these keys, so nobody holds, wears or is awarded them): apostle-<1-3> (cross-gold/-silver/
+--   -bronze), bones-<1-3> (charm-...), arena-race-skyborn (owlcat-gold; -2, -3 silver and bronze),
+--   all plain; and apostle-red (cross-red, plain, on the black underlay: its metal "black"), also
+--   a signed Apostle's own look on his own screen (Borders.OwnLook), never anyone's honour.
 --
 -- API
 --   Honors.Key(name) -> key or nil
@@ -119,7 +131,8 @@ local ADDON, ns = ...
 --       Run by the level race's authority (above); everyone else keeps the book it broadcasts,
 --       passed through LevelRace(book, nil, now) to tidy it.
 --       book: the places recorded, { [milestone] = { { guid, name, t, place }, ... } } (kept
---       forever; a place in it never changes). GUIDs are compared as Holdings compares them (the
+--       forever; a place in it never changes here: 1.2.1, the caller takes out one the server's
+--       word shows false, HonorsNet.CheckPlaces). GUIDs are compared as Holdings compares them (the
 --       game's form and the short one are one) and kept as given.
 --       claims: level-ups seen happening, { name, guid, level, from, since, t, vouched }:
 --         t: when the voucher's census saw him at `level` (its clock, never the player's word);
@@ -127,7 +140,8 @@ local ADDON, ns = ...
 --         milestones it was seen crossing: from < m <= level; without from (the level-up itself
 --         seen, at t), m == level only. A player seen for the first time (who joined an Olympus
 --         guild at 25, or a veteran when 1.2 ships) makes no claim.
---         vouched: a guildmate's census saw it (not only the player's own word).
+--         vouched: the caller's proof that he is there (HonorsNet.Vouched: the server's roster, or
+--         two census senders of his guild; 1.2.1: never one census row), not only his own word.
 --       opts: { start }: the race's start (server time). A claim whose crossing may be earlier
 --       (since, or t without it, before start) counts for nothing.
 --       Returns the new book (a copy), fresh (the places recorded by this call: { milestone,
@@ -193,11 +207,14 @@ local ADDON, ns = ...
 --       unknown). inputs: { belts = { { cat, guid, name } }, podium = Podium()'s rows (the
 --       clerk's words), tiers = { [guid] = "bronze"|"silver"|"gold" }, donors = Donors(), levels
 --       = LevelRace()'s book, guild = GuildTop(), oracle = { month = Oracle()'s top (or the
---       bank's word: { name, place }), monthNo }, now, offset, anchor }.
+--       bank's word: { name, place }), monthNo }, church = { missionaries = { { name, place } },
+--       at } (1.2.3: ChurchCount.Top3's, its time on the server's clock), now, offset, anchor }.
 --       now (optional; offset and anchor as MonthOf and WeekOf take them): a closed period's list
 --       holds only while it is the last one: donors.month and oracle.month when their monthNo is
---       the month before now's. Without now the lists are taken as they are. (donors.week gives
---       no honour since the design.)
+--       the month before now's; the Church's top 3 while it is no older than CHURCH_MAX_AGE
+--       (Honors.ChurchFresh). Without now the lists are taken as they are. (donors.week gives
+--       no honour since the design.) A missionary's honour's period is now's month: its letter is
+--       told once per place per calendar month he holds it in (the koi's clock, MonthOf).
 --       Belts, podium and level places go by GUID when both sides have one, else by name; the
 --       rest by name. A GUID may come in the game's form ("Player-<serverID>-<8 hex>", as
 --       UnitGUID gives it) or the arena's short one (gk, "<serverID>-<8 hex>", as the AV words
@@ -210,23 +227,47 @@ local ADDON, ns = ...
 --       art's mark ("<art>-mark"); the tier has only its badge. metal: "gold", "silver" or
 --       "bronze"; shape: "winged" or "plain" (Honors.ArtOf).
 --   Honors.Choose(pick, held, frame, title) -> pick or nil, "frame"|"title"
---       A player's pick { frame, title, seen, locked }: frame "rank", "none" or a held honour's
---       frame; title nil (or "none") or a held honour's title. A copy; the pick passed is left
---       alone. A pick without seen (a new profile) gets it from what he holds now, so the next
---       Update finds nothing new and keeps his choice. What a viewer shows of a pick that does
---       not hold (the fallback to the rank's frame and no title) is Shown's.
---   Honors.Update(pick, held, known) -> pick, earned, lost
+--       A player's pick { frame, title, seen, locked, back }: frame "rank", "none" or a held
+--       honour's frame this version wears; title nil (or "none") or a held honour's title. (1.2.3)
+--       The pick's own frame, unchanged, is taken whatever it is (a title alone picked: a frame
+--       not held now, or one 1.2.2 switched on that is not released, stays as Update keeps it; the
+--       title's click, or the King's letter's Wear it, did nothing). A copy; the pick passed is
+--       left alone, and back (Update's) is not kept: what the profile shows is his pick now. A pick
+--       without seen (a new profile) gets it from what he holds now, so the next Update finds
+--       nothing new and keeps his choice. What a viewer shows of a pick that does not hold (the
+--       fallback to the rank's frame and no title) is Shown's.
+--   Honors.Update(pick, held, known, told) -> pick, earned, lost
 --       After his honours changed: an honour newly earned (its family not held before, or held at
 --       a lower place) switches on (frame and title), the first by ORDER when several come at
 --       once, unless the player locked his pick (pick.locked = true: set by the caller, kept by
---       Choose and Update; earned still lists what is new). A family held at another place than
---       before, lower or higher, moves a pick of its old place along (locked or not: the same
---       honour at its new place, and the old place is no longer his; bronze to silver to the
---       belt).
---       A pick no longer held stays as it is (Shown shows the rank's frame and no title meanwhile),
---       so a gap in the inputs never undoes a player's choice.
---       known: the sources loaded, { belt, tier, donor, level, guild, oracle } = true (or true:
---       all; belt covers the podium). A family is forgotten (lost) only when its source is
+--       Choose and Update; earned still lists what is new). (1.2.3) Its frame only when this
+--       version wears it (Honors.FrameShipped): a frame not released yet (the koi, the owl, the
+--       comet) leaves the frame worn as it is (the cornucopia stays), its title still switches on.
+--       told (optional, 1.2.3): told(h) -> true when that honour's King's letter was told before
+--       (HonorsNet: its LetterMark in the profile's lettered); such an honour, earned again (back
+--       in the same month to a place already told, after the Church's 30-day ranking dropped him
+--       for a day), lists in earned but switches nothing on: a frame he picked himself since stays.
+--       Without told every honour earned may switch on. Any frame he picks himself (Choose) stays
+--       picked. A family held at another place than before, lower or higher, moves a pick of its
+--       old place along (locked or not: the same honour at its new place, and the old place is no
+--       longer his; bronze to silver to the belt).
+--       (1.2.3) A family lost (its source loaded, and it no longer names him) while an unlocked
+--       pick wears its frame or title: the first frame by ORDER this version wears that he holds
+--       stands in (else as below: as it is, or his rank's), and the first title by ORDER he holds
+--       (else as it is while a family waits for its source, or none); pick.back
+--       = { frame = family, title = family } remembers whose, so when that family is his again its
+--       honour comes back (at its new place), told or not; and a stand-in is worked out again at
+--       each Update while it stands (another lost, or won back). His own pick ends back
+--       (Choose), and so does an honour switching on.
+--       (1.2.3) A pick naming a frame not released (Choose never took one: only 1.2.0-1.2.2's
+--       switch-on could put it there), held or not, locked or not: the first frame by ORDER this
+--       version wears that he holds; with none held, while a family this version wears is still
+--       remembered in seen with its source not loaded (a login), as it is for a later Update;
+--       else his rank's.
+--       Otherwise a pick no longer held stays as it is (Shown shows the rank's frame and no title
+--       meanwhile): a gap in the inputs (a source not loaded) or a locked pick is never undone.
+--       known: the sources loaded, { belt, tier, donor, level, guild, oracle, missionary } = true
+--       (or true: all; belt covers the podium). A family is forgotten (lost) only when its source is
 --       loaded and it is not held; until its source arrives it stays in seen as it was, so its
 --       return is not "new".
 --       pick.seen remembers each family held ({ [family] = { place, frame, title } }) for the
@@ -239,8 +280,13 @@ local ADDON, ns = ...
 --       An honour key's art stem (its frame "<art>.tga", its mark "<art>-mark.tga"), the frame's
 --       shape ("winged" or "plain") and its metal; nil for a key with no art (rank, none, a tier's
 --       badge, an unknown key, a class or race the catalogue has no beast for).
---   Honors.ArtFiles() -> { art, ... }  every art stem a held honour can name (the files the
---       addon ships; sorted), for scripts/make-honors.py's list and the tests.
+--   Honors.ChurchFresh(word, now) -> true | false
+--       (1.2.3) The Church's top 3 (Holdings' inputs.church) still names its missionaries at now:
+--       its time no older than CHURCH_MAX_AGE (the last 30 days it ranks are over after that); a
+--       word without a time, false. Without now, true. HonorsNet.Known asks it too.
+--   Honors.ArtFiles() -> { art, ... }  every art stem a held honour can name, and the previews'
+--       (Honors.PREVIEWS): the files the addon ships; sorted, for scripts/make-honors.py's list
+--       and the tests.
 
 local Honors = {}
 ns.Honors = Honors
@@ -262,10 +308,13 @@ Honors.GUILD_MIN_MEMBERS = 25   -- members a guild needs for the best-guild plaq
 Honors.GUILD_MAX_AGE = 2 * 86400 -- a guild's report older than this can't win (opts.now given)
 Honors.ORACLE_PLACES = 3        -- the Oracle's gold, silver and bronze
 Honors.ORACLE_MIN_MARKETS = 10  -- settled public markets a bettor needs in the month to be ranked
+Honors.MISSIONARY_PLACES = 3    -- (1.2.3) the Church's top 3 missionaries: gold, silver and bronze crook
+Honors.CHURCH_MAX_AGE = 30 * 86400 -- (1.2.3) a top 3 older than this names nobody (the last 30 days it ranks are over)
 -- Which honour comes first: in lists, and when several are earned at once (the one switched on).
-Honors.ORDER = { "belt", "podium", "guild", "donor-top", "level", "oracle", "donor-month", "tier" }
+Honors.ORDER = { "belt", "podium", "guild", "donor-top", "missionary", "level", "oracle", "donor-month", "tier" }
+Honors.DEV_TITLE = "the-dev" -- (1.2.3) the author's own title, a title alone (Honors.Holdings)
 -- Where each family's honours come from (Update's known): a family's first word.
-Honors.SOURCES = { "belt", "tier", "donor", "level", "guild", "oracle" }
+Honors.SOURCES = { "belt", "tier", "donor", "level", "guild", "oracle", "missionary" }
 
 local MAX_COPPER = 2147483647
 local MAX_TIME = 4294967295
@@ -290,13 +339,22 @@ Honors.METALS = METAL
 -- Shaman's spirit wolf, the Mage's sheep, the Warlock's felhunter, the Druid's stag.
 Honors.CLASS_ART = { warrior = "boar", paladin = "paladin", hunter = "hunter", rogue = "rogue", priest = "priest",
 	shaman = "shaman", mage = "mage", warlock = "warlock", druid = "druid" }
--- The race champions' mounts, by the race's word.
+-- The race champions' mounts, by the race's word. (1.2.1: the skyborn's owlcat, a preview only: no
+-- race ID gives "skyborn", so no belt or podium is ever his.)
 Honors.RACE_ART = { human = "lion", dwarf = "ram", nightelf = "nightsaber", gnome = "mechanostrider", orc = "orc-wolf",
-	undead = "skeletal-horse", tauren = "kodo", troll = "raptor" }
+	undead = "skeletal-horse", tauren = "kodo", troll = "raptor", skyborn = "owlcat" }
 Honors.WINGED = { gryphon = true, owl = true }
--- The families' beasts: donors of all time, the month's, the Oracle, the level race.
+-- The families' beasts: donors of all time, the month's, the Oracle, the level race. (1.2.1, a
+-- preview only: the Apostles' cross and the Bones' charm; Holdings never names those families.)
+-- (1.2.3: the missionaries' shepherd's crook with its sleeping lamb.)
 Honors.FAMILY_ART = { ["donor-top"] = "cornucopia", ["donor-month"] = "koi", oracle = "raven", level = "comet",
-	["wanted-slayer"] = "orc-wolf" }
+	["wanted-slayer"] = "orc-wolf", apostle = "cross", bones = "charm", missionary = "crook" }
+-- 1.2.1: the new frames' keys, a preview only (see the top of the file): out of FRAMES_SHIPPED and
+-- of every honour, so nobody can wear them or be awarded them.
+Honors.PREVIEWS = { "apostle-1", "apostle-2", "apostle-3", "apostle-red", "bones-1", "bones-2", "bones-3",
+	"arena-race-skyborn", "arena-race-skyborn-2", "arena-race-skyborn-3" }
+-- The red cross: its own art, plain, on the plain underlay tinted black (Borders.lua's UNDERLAY).
+Honors.RED_CROSS = "apostle-red"
 -- The level race's metal by milestone: bronze the first to 20, silver to 40, gold to 60.
 Honors.LEVEL_METAL = { [20] = "bronze", [40] = "silver", [60] = "gold" }
 -- The kinds of line the Treasury's ranking never counts (Treasury.lua's Add; the arena's, as
@@ -899,6 +957,7 @@ function Honors.ArtOf(key)
 		return "comet-" .. Honors.LEVEL_METAL[m], "plain", Honors.LEVEL_METAL[m]
 	end
 	if key == "guild-top-leader" then return "owl-gold", "winged", "gold" end
+	if key == Honors.RED_CROSS then return "cross-red", "plain", "black" end
 	return nil
 end
 local ArtOf = Honors.ArtOf
@@ -913,10 +972,11 @@ function Honors.ArtFiles()
 		Add((ArtOf(k)))
 		if k ~= "guild-top-leader" then Add((ArtOf(k .. "-2"))); Add((ArtOf(k .. "-3"))) end
 	end
-	for _, family in ipairs({ "donor-top", "donor-month", "oracle" }) do
+	for _, family in ipairs({ "donor-top", "donor-month", "oracle", "missionary" }) do
 		for n = 1, 3 do Add((ArtOf(family .. "-" .. n))) end
 	end
 	for _, m in ipairs(Honors.MILESTONES) do Add((ArtOf("level-race-" .. m))) end
+	for _, k in ipairs(Honors.PREVIEWS) do Add((ArtOf(k))) end
 	table.sort(out)
 	return out
 end
@@ -989,6 +1049,15 @@ local function Listed(list, kind, places, key, period, held)
 	end
 end
 
+-- (1.2.3) The Church's top 3 still says something at now: no older than the 30 days it ranks.
+function Honors.ChurchFresh(word, now)
+	now = Time(now)
+	if not now then return true end
+	local at = type(word) == "table" and Time(word.at) or nil
+	return at ~= nil and now - at <= Honors.CHURCH_MAX_AGE
+end
+local ChurchFresh = Honors.ChurchFresh
+
 -- A guild's name as two clients compare it: trimmed, any case.
 local function GuildKey(v)
 	v = Name(v)
@@ -1045,6 +1114,12 @@ function Honors.Holdings(player, inputs)
 		if Current(oracle.monthNo, lastMonth) then
 			Listed(oracle.month, "oracle", Honors.ORACLE_PLACES, key, oracle.monthNo, held)
 		end
+		-- (1.2.3) The Church's top 3 missionaries: the crook, while the word is fresh; told for the
+		-- month he holds it in (period: now's month).
+		local church = type(inputs.church) == "table" and inputs.church or nil
+		if church and ChurchFresh(church, now) then
+			Listed(church.missionaries, "missionary", Honors.MISSIONARY_PLACES, key, now and Honors.MonthOf(now, inputs.offset), held)
+		end
 	end
 	local levels = type(inputs.levels) == "table" and inputs.levels or {}
 	for _, m in ipairs(Honors.MILESTONES) do
@@ -1064,6 +1139,13 @@ function Honors.Holdings(player, inputs)
 		if Name(g.leader) and Key(g.leader) == key and (mine == nil or mine == top) then
 			held[#held + 1] = Honour("guild", 0, 1, "guild-top-leader", { guild = g.guild })
 		end
+	end
+	-- 1.2.3 (the author's ask): his own title, "The Royal Dev". A title alone (no frame, no mark, no
+	-- King's letter), held by the author's character (player.author: Workshop.IsAuthorName, his
+	-- name in his realm group, so every client works it out the same); last in ORDER.
+	if player.author == true then
+		held[#held + 1] = { kind = "dev", family = "dev", place = 1, key = Honors.DEV_TITLE, title = Honors.DEV_TITLE,
+			noLetter = true, order = (#Honors.ORDER + 1) * 100000 }
 	end
 	table.sort(held, function(a, b)
 		if a.order ~= b.order then return a.order < b.order end
@@ -1131,7 +1213,9 @@ end
 -- 1.2.0 (the owner's call): the only honours' frames worn are the all-time donors'. The level race's
 -- comet waits for the game's launch; the month's donors, the Arena's, the Oracle's raven, the games',
 -- the Church's and the slayers' come later. Their frames stay in the code, worn by nobody here.
-Honors.FRAMES_SHIPPED = { ["donor-top"] = true }
+-- 1.2.3 (the owner's call, "Cajado entra na 1.2.3"): the missionaries' crook is worn too. The koi,
+-- the owl, the comet, the raven, the Arena's, the Apostles' cross and the Bones' charm still wait.
+Honors.FRAMES_SHIPPED = { ["donor-top"] = true, missionary = true }
 -- (nil: every family's frame, as the honours' own tests and 2.0 have them.)
 local function Shipped(h)
 	local s = Honors.FRAMES_SHIPPED
@@ -1139,8 +1223,75 @@ local function Shipped(h)
 end
 Honors.FrameShipped = Shipped
 
+-- (1.2.3) The family a frame's key names, held or not (as Holdings names it: belt-<cat>, level-<m>,
+-- guild, or the listed families'); nil for the rank's, none, or a key no honour has.
+local CLASS_CODE, RACE_ID = {}, {}
+for code, word in pairs(CLASS_WORD) do CLASS_CODE[word] = code end
+for id, word in pairs(RACE_WORD) do RACE_ID[word] = id end
+local function KeyFamily(key)
+	if type(key) ~= "string" or #key > 64 then return nil end
+	local base = key:match("^(.-)%-[23]$") or key
+	if base == "arena-champion" then return "belt-A" end
+	local class = base:match("^arena%-class%-(%l+)$")
+	if class then
+		local code = CLASS_CODE[class] or (#class == 2 and class:upper())
+		return code and ("belt-C" .. code) or nil
+	end
+	local race = base:match("^arena%-race%-(%w+)$")
+	if race then
+		local id = RACE_ID[race] or tonumber(race)
+		return id and ("belt-R" .. id) or nil
+	end
+	local m = key:match("^level%-race%-(%d+)$")
+	if m then return "level-" .. m end
+	if key == "guild-top-leader" then return "guild" end
+	local family = key:match("^([%l%-]-)%-[123]$")
+	if family and family ~= "level" and Honors.FAMILY_ART[family] then return family end
+	return nil
+end
+-- (1.2.3) A pick's frame of a family this version does not wear (the koi, the owl, the comet...).
+local function Unworn(frame)
+	if Honors.FRAMES_SHIPPED == nil or frame == "rank" or frame == "none" then return false end
+	local family = KeyFamily(frame)
+	return family ~= nil and not Shipped({ family = family })
+end
+-- (1.2.3) The frame worn in place of one the pick can't show: the first by ORDER this version wears
+-- that he holds; with none, while a family this version wears is remembered in seen with its source
+-- not loaded (a login, a gap), the frame as it is (a later Update finds that one); else his rank's.
+local function StandIn(held, seen, best, frame)
+	local first
+	for _, h in ipairs(held) do
+		if type(h) == "table" and h.frame and Shipped(h) and (not first or ByOrder(h, first)) then first = h end
+	end
+	if first then return first.frame end
+	for family, s in pairs(seen) do
+		if not best[family] and s.frame and Shipped({ family = family }) then return frame end
+	end
+	return "rank"
+end
+-- (1.2.3) ...and a title: the first by ORDER he holds; with none, while a family is remembered with its
+-- source not loaded, the title as it is; else none.
+local function StandInTitle(held, seen, best, title)
+	local first
+	for _, h in ipairs(held) do
+		if type(h) == "table" and h.title and (not first or ByOrder(h, first)) then first = h end
+	end
+	if first then return first.title end
+	for family, s in pairs(seen) do
+		if not best[family] and s.title then return title end
+	end
+	return nil
+end
+-- (1.2.3) Update's memory of a frame or title stood in for: { frame = family, title = family }.
+local function Back(pick)
+	local b = type(pick) == "table" and type(pick.back) == "table" and pick.back or {}
+	return { frame = Str(b.frame), title = Str(b.title) }
+end
+
 function Honors.Choose(pick, held, frame, title)
-	if frame ~= "rank" and frame ~= "none" and not Shipped(HeldBy("frame", frame, held)) then return nil, "frame" end
+	-- (1.2.3: the pick's own frame, unchanged, whatever it is: a title alone is picked.)
+	local same = type(pick) == "table" and frame == (type(pick.frame) == "string" and pick.frame or "rank")
+	if frame ~= "rank" and frame ~= "none" and not same and not Shipped(HeldBy("frame", frame, held)) then return nil, "frame" end
 	if title == "none" then title = nil end
 	if title ~= nil and not HeldBy("title", title, held) then return nil, "title" end
 	local new = Copy(pick)
@@ -1153,11 +1304,12 @@ function Honors.Choose(pick, held, frame, title)
 	return new
 end
 
-function Honors.Update(pick, held, known)
+function Honors.Update(pick, held, known, told)
 	held = type(held) == "table" and held or {}
 	local old = Copy(pick)
 	local new = { frame = old.frame, title = old.title, seen = {}, locked = old.locked }
 	local seen = old.seen or {}
+	local back = Back(pick)
 	local best = Best(held)
 	local earned, lost = {}, {}
 	for family, h in pairs(best) do
@@ -1184,13 +1336,42 @@ function Honors.Update(pick, held, known)
 	end
 	table.sort(earned, ByOrder)
 	table.sort(lost, function(a, b) return a.family < b.family end)
-	-- A new honour switches on: the first by ORDER that has a frame, and the first that has a
-	-- title; a locked pick stays as the player set it.
+	local function Told(h) return type(told) == "function" and told(h) == true end
 	if not new.locked then
-		for _, h in ipairs(earned) do if h.frame then new.frame = h.frame break end end
-		for _, h in ipairs(earned) do if h.title then new.title = h.title break end end
+		-- (1.2.3) His pick back: the honour of a family stood in for (below), his again (at its new
+		-- place, told or not).
+		local f, t = back.frame and best[back.frame], back.title and best[back.title]
+		if f and f.frame and Shipped(f) then new.frame, back.frame = f.frame, nil end
+		if t and t.title then new.title, back.title = t.title, nil end
+		-- A new honour switches on: the first by ORDER that has a frame this version wears, and the
+		-- first that has a title; a locked pick stays as the player set it. (1.2.3: 1.2.2 switched on
+		-- any frame, so a koi, an owl or a comet earned took the place of the cornucopia worn, and his
+		-- rank's frame showed instead: Shown wears none of them. And only an honour told for the
+		-- first time: one told before, earned again, leaves his pick as it is.)
+		for _, h in ipairs(earned) do
+			if h.frame and Shipped(h) and not Told(h) then new.frame, back.frame = h.frame, nil break end
+		end
+		for _, h in ipairs(earned) do
+			if h.title and not Told(h) then new.title, back.title = h.title, nil break end
+		end
+		-- (1.2.3) A family lost while worn (its source loaded: a fresh word without him): a stand-in,
+		-- the first frame (title) by ORDER he holds, and the family remembered to come back to. (It
+		-- stayed the pick, and his rank's frame showed with no title, a cornucopia held: the crook's
+		-- 30-day ranking drops its holders routinely.)
+		for _, x in ipairs(lost) do
+			if x.frame ~= nil and new.frame == x.frame and not back.frame and Shipped(x) then back.frame = x.family end
+			if x.title ~= nil and new.title == x.title and not back.title then back.title = x.family end
+		end
+		if back.frame then new.frame = StandIn(held, new.seen, best, new.frame) end
+		if back.title then new.title = StandInTitle(held, new.seen, best, new.title) end
 	end
-	-- A pick no longer held stays the pick: Shown falls back to the rank meanwhile.
+	-- (1.2.3) A frame not released yet on the pick (only 1.2.0-1.2.2's switch-on put one there: Choose
+	-- never took one), held or not, locked or not: the first frame by ORDER this version wears that he
+	-- holds. (1.2.2's koi after its month, an owl after his guild lost first, a pick locked since: his
+	-- rank's frame showed, the cornucopia held.)
+	if Unworn(new.frame) then new.frame = StandIn(held, new.seen, best, new.frame) end
+	new.back = (back.frame or back.title) and back or nil
+	-- Otherwise a pick no longer held stays the pick: Shown falls back to the rank meanwhile.
 	return new, earned, lost
 end
 

@@ -1012,6 +1012,9 @@ end)
 test("1.2 the fights part review: under the gamepad UI the King's letter never opens by itself: it waits (said once in chat) until the player opens his profile's Edit", function()
 	local w, cast = W3.New()
 	local A = cast.A
+	-- (The release client: its save came back, Arena.Persists. Where it did not, the letter only
+	-- waits in the Edit's list: honors-letter.lua.)
+	w:Logout(A) w:Login(A) W3.Rules(w, A)
 	A.globals.C_InputInterfaceStyle = { GetCurrentStyle = function() return 1 end }
 	A.globals.Enum = { InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 } }
 	w:As(A, A.ns.HonorsNet.QueueLetter, "arena-champion")
@@ -1340,6 +1343,7 @@ test("1.2 the fights part review: under the gamepad UI a waiting letter opens wi
 	-- HonorsNet: the window's open shows the letter waiting for the player's click.
 	local w, cast = W3.New()
 	local A = cast.A
+	w:Logout(A) w:Login(A) W3.Rules(w, A) -- (the release client: its save came back)
 	A.globals.C_InputInterfaceStyle = { GetCurrentStyle = function() return 1 end }
 	A.globals.Enum = { InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 } }
 	w:As(A, A.ns.HonorsNet.QueueLetter, "arena-champion")

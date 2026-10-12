@@ -1,11 +1,18 @@
 # The honours' art (Olympus/media/honors): each file's SHA-256, the frame lab's file it was
 # copied from, and its name in the addon. Written by scripts/make-honors.py --from; checked by --check.
+# 1.2.1's new frames and 1.2.3's crook name their source as ~/Downloads/olympus-new-frames/<name>.
 224091778dfeefc15fbc4abcd51b0bbb3728b59149f707fa3e86126500ec6069  boar-bronze-mark.tga  boar-bronze-mark.tga
 c12f632b0c764480faf486ed1168a6562815b704add2b94771534a62a472c825  boar-bronze.tga  boar-bronze.tga
 7a7536fd7519c29f816a7a6dba82f6544a8cee689c74c697603b50f1c15581c6  boar-gold-mark.tga  boar-gold-mark.tga
 503d68a9c06c0ab3a24ce6437ea3f4de3517000b119d82ab9c33e2cec97e1971  boar.tga  boar-gold.tga
 9de2523306b408b7257799964e154e67cadad6bc9fe594d1f24e85aa31bb689b  boar-silver-mark.tga  boar-silver-mark.tga
 1b9ff95d4d958974cfd6a6f8c0ab1bd3cd61ca58206146393ac8ba0facb79d11  boar-silver.tga  boar-silver.tga
+80657ba428f9a008ece78edfc8913c60fa719ce347f3ac55da821a6447e64c76  ~/Downloads/olympus-new-frames/charm-bronze-mark.tga  charm-bronze-mark.tga
+fc2f8377d2c20099c73030c07378cd0bb8cc93d727b7bb59f651cc661248811c  ~/Downloads/olympus-new-frames/charm-bronze.tga  charm-bronze.tga
+fa0ab797ca7ef15af8f80542d7cee15f714d1dc24c7d6d035b93480a219c6d23  ~/Downloads/olympus-new-frames/charm-gold-mark.tga  charm-gold-mark.tga
+3fe020dc1a8fd4efced7300100227059bab6447a54f208b253cfacdd5341a584  ~/Downloads/olympus-new-frames/charm-gold.tga  charm-gold.tga
+a338dbf3bfa779bb90b7513c2e9a5600ea16372ad55aa98a20ac16b929d31163  ~/Downloads/olympus-new-frames/charm-silver-mark.tga  charm-silver-mark.tga
+78b8f7b124d2bfafd0adc5521e3cb4806a15931a75e0b5237f8638d66f77cedb  ~/Downloads/olympus-new-frames/charm-silver.tga  charm-silver.tga
 60ab399cf94773f64a22d7fcba1837b90773c2ad275deb51d74c136883af600b  comet-bronze-mark.tga  comet-bronze-mark.tga
 510d9cd4f4d1f17f6b7b949483c6907698231d4c002a82b22221260dc547f3b0  comet-bronze.tga  comet-bronze.tga
 31faf83940e5a317375c0e359e32688c38a7e16e470b9d0a95b6545354e879de  comet-gold-mark.tga  comet-gold-mark.tga
@@ -18,6 +25,20 @@ d45481aeccf409b4c4c3d8158369bbb8c6303d1ef7c7ada22210f812350a8e04  comet.tga  com
 9048565edbf5d7b196ebc5498dd306c3b321881fef10c2babadc1922b0e3c085  cornucopia.tga  cornucopia-gold.tga
 c3b44974591cb9176185ed757f71b1755c19389c07f31b18a1b749b9d2a80c1b  cornucopia-silver-mark.tga  cornucopia-silver-mark.tga
 5cc5fde03fe50b3e9eb5832f6b603b0a622b0309a00ae81253ce01a3c0436986  cornucopia-silver.tga  cornucopia-silver.tga
+e3d21245ea902c15105f6b705d377f5abce9d3b27627c1feda990e687cfa8e83  ~/Downloads/olympus-new-frames/crook-bronze-mark.tga  crook-bronze-mark.tga
+787ac073c1feaabe6006b03c5c1d7cb753dd2cd208de705c5a69ec1d75b03064  ~/Downloads/olympus-new-frames/crook-bronze.tga  crook-bronze.tga
+398d66325ff9928bdde3e43698db802154372cd484e025bdf5a0668a8abbf7db  ~/Downloads/olympus-new-frames/crook-gold-mark.tga  crook-gold-mark.tga
+b4f720df07139e63561a79067dd9a0bb0f433577bb1f174e73392e850737b3ca  ~/Downloads/olympus-new-frames/crook-gold.tga  crook-gold.tga
+641cc56346bc483e443ce1ae02e7c249b34f57f9432b2b8312b88b1e72b60282  ~/Downloads/olympus-new-frames/crook-silver-mark.tga  crook-silver-mark.tga
+31ead8ce847259ff27e184c4152960149a34f6c31aa4b06d26c64fa7a137be64  ~/Downloads/olympus-new-frames/crook-silver.tga  crook-silver.tga
+98281111afab2cefff60cd08db211c44191cbdf981117e0d2e745dbfec3d9ebf  ~/Downloads/olympus-new-frames/cross-bronze-mark.tga  cross-bronze-mark.tga
+a6585d72bdbd413be58a600fd84b9fc216fa0bbdb303cbbe5502cec5f418aaa4  ~/Downloads/olympus-new-frames/cross-bronze.tga  cross-bronze.tga
+ab26b3d92bc0488aecd5588ae860fb2289d1f8032fc5fb92b35e92f20fefaa10  ~/Downloads/olympus-new-frames/cross-gold-mark.tga  cross-gold-mark.tga
+44b0c54cba45271485995aacec47b54a9a7e7ca920d229b48d46248dd7ea1cd1  ~/Downloads/olympus-new-frames/cross-gold.tga  cross-gold.tga
+ee312dab7904c9e32eaf71a7fc480733017d9fc80f8ee67d4543ad61400cd206  ~/Downloads/olympus-new-frames/cross-red-mark.tga  cross-red-mark.tga
+5fac025fee57e31d0d19df9512d9a9f6e0c615e66b9414674b2b7850d30dd307  ~/Downloads/olympus-new-frames/cross-red.tga  cross-red.tga
+48d85798ec56215392f76200e2a80eaf3c1d7359510f274640985f5d8250bc35  ~/Downloads/olympus-new-frames/cross-silver-mark.tga  cross-silver-mark.tga
+482421c63c8c962c115702c533b56b86c8dcf0ceed81f37ff41320fad0f6413e  ~/Downloads/olympus-new-frames/cross-silver.tga  cross-silver.tga
 56aaa52595bac2841605aa0000e69923a1edefb4e425571a60017f4520f06e05  druid-bronze-mark.tga  druid-bronze-mark.tga
 ba9901f73202582cc2c331ac2d1380274d294c1b6da3d3beced35362d0b5459e  druid-bronze.tga  druid-bronze.tga
 3351e3501840ba3e57dc4f101541ce1521082f639540f4433294ec349b65dae9  druid-gold-mark.tga  druid-gold-mark.tga
@@ -80,6 +101,12 @@ d16d6a498347a87e308637c5338d92b0cc769e953e20c8801270769a67466aa7  orc-wolf-gold-
 d04214bb8c77e1aa2ddc080aa37eba4e3ae1429e20ff0e0005f3c25f104531cd  orc-wolf-silver.tga  orc-wolf-silver.tga
 f6cf7c74ef11fb612355a00667dea64439188b844fa8a44756c0b902fbfc3b33  owl-gold-mark.tga  owl-gold-mark.tga
 70dd250e073397399c70c6bd87ebf51a2d0d5601074b127e11f5a87989b3d9fb  owl.tga  owl-gold.tga
+870a339e7f0b0b721e0c2982a42d3187d5add8f4789acccc22bdb0f5b594097d  ~/Downloads/olympus-new-frames/owlcat-bronze-mark.tga  owlcat-bronze-mark.tga
+3d37fab6ef9b9a78fbe23635f6d866a4cd8921a66064e8ede555ed86b3c0a63d  ~/Downloads/olympus-new-frames/owlcat-bronze.tga  owlcat-bronze.tga
+adb0917882be370caef31f0c55c0e10283629e0e255c3c31df75c000f2d15caf  ~/Downloads/olympus-new-frames/owlcat-gold-mark.tga  owlcat-gold-mark.tga
+e022f498ba47c1388f25671431c206eb8ed5ada62ed797c18d9c04be87335f94  ~/Downloads/olympus-new-frames/owlcat-gold.tga  owlcat-gold.tga
+46c98298777ed30f0db976362c158874c3395178d41f5d9a1efa4be63981eb1c  ~/Downloads/olympus-new-frames/owlcat-silver-mark.tga  owlcat-silver-mark.tga
+8b3554024efa975ef024d56d793e39fb5d780572341ea483c1034a609fe5ddf2  ~/Downloads/olympus-new-frames/owlcat-silver.tga  owlcat-silver.tga
 571e0ca7d3fe62d6b53d9a468bc484890d2504e19a38a3d6cc7b65d73476bf43  paladin-bronze-mark.tga  paladin-bronze-mark.tga
 d5251183b34302740b6755d14880a5682466fc15f26aa303f4f1554cddc3a03d  paladin-bronze.tga  paladin-bronze.tga
 99a461f01a49714d98501d15bb7c53f2cc7e950cbd7282d7884243f50b51b7ce  paladin-gold-mark.tga  paladin-gold-mark.tga

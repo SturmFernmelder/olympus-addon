@@ -85,6 +85,8 @@ F.CODES = { dc = true, off = true, help = true, char = true, flee = true, late =
 local STATES = { A = true, O = true, S = true, C = true, Y = true, Z = true, L = true, B = true, R = true, F = true,
 	V = true, N = true, W = true }
 local ENDED = { F = true, V = true, N = true, W = true }
+local CARD_STATES = { P = true, L = true, D = true, X = true }
+local CARD_ENDED = { D = true, X = true }
 local LIVE = { C = true, Y = true, Z = true, L = true, B = true }
 local METHODS = { K = true, R = true, D = true, W = true, N = true, V = true }
 
@@ -267,15 +269,17 @@ end
 F.Involved = Involved
 
 -- Kept where it belongs (core while involved, else heavy or memory), in one place only.
-local function Prune(t, keep)
+local function Prune(t, keep, ended, protected)
 	local n, list = 0, {}
 	for id, r in pairs(t) do
 		n = n + 1
-		if type(r) == "table" and ENDED[r.st] then list[#list + 1] = { id = id, t = r.heardAt or 0 } end
+		if id ~= protected and type(r) == "table" and ended[r.st] then list[#list + 1] = { id = id, t = r.heardAt or 0 } end
 	end
-	if n <= keep then return end
-	table.sort(list, function(a, b) return a.t < b.t end)
-	for i = 1, math.min(#list, n - keep) do t[list[i].id] = nil end
+	if n <= keep then return n end
+	table.sort(list, function(a, b) return a.t < b.t or (a.t == b.t and a.id < b.id) end)
+	local remove = math.min(#list, n - keep)
+	for i = 1, remove do t[list[i].id] = nil end
+	return n - remove
 end
 local function Put(kind, r)
 	local mode = r.mode == "T" and "T" or "L"
@@ -290,11 +294,21 @@ local function Put(kind, r)
 	else home = memory; keep = kind == "cards" and F.CARDS_KEEP or F.MEM_KEEP end
 	home = home or memory
 	local places = { core, heavy, memory }
+	local fresh = home[id] == nil
+	local n = Prune(home, keep - (fresh and 1 or 0), kind == "cards" and CARD_ENDED or ENDED, id)
+	if fresh and n >= keep then
+		-- A known record may have changed involvement or loaded its companion. If its new home
+		-- is full, update its existing copy in place; never lose an active fight during migration.
+		local previous
+		for i = 1, 3 do if places[i] and places[i][id] then previous = places[i]; break end end
+		if not previous then return false, "capacity" end
+		home = previous
+	end
 	for i = 1, 3 do
 		if places[i] and places[i] ~= home then places[i][id] = nil end
 	end
 	home[id] = r
-	Prune(home, keep)
+	return true
 end
 F.Put = Put
 
@@ -432,6 +446,39 @@ local MatchFromChallenge -- assigned once the challenge table exists (below)
 local MarketSpecs, OpenMarkets -- a public fight's own sheet (below)
 local function Refuse(why) Count(stats.refused, why) return false, why end
 
+-- (1.2.1) This client's own part in a fight: its fighter accepted it, signed for its slot, said he
+-- was at the ring or read a duel line of it (f.took: only this client's own acts set it), wrote
+-- it, or agreed the challenge an arbiter made it from. An arbiter naming two players is not their
+-- part: his word alone writes nothing in their own records.
+local function TookPart(f)
+	if f.took == true or Me(f.writer) then return true end
+	local side = SideOf(f, ns.me)
+	local other = side and f[Other(side)]
+	if not other then return false end
+	for _, c in pairs(chal) do
+		if not c.judge and c.how == "a" and c.mode == f.mode and (c.state == "yes" or c.state == "set") then
+			if c.fid == f.fid then return true end
+			if c.incoming and not c.fid and Same(c.A, other.name) then return true end
+		end
+	end
+	return false
+end
+F.TookPart = TookPart
+-- (1.2.1) A private fight's result (a round's, the fight's) is held only by a client with a part of
+-- its own in it: one that took part in it, judges it or promotes it. The history a profile shows
+-- lists the fights its client holds, by name or by gk: a result its arbiter whispered alone about
+-- two players who never accepted it, came to or fought it is in neither one's. (A public fight is
+-- every member's record, as its lane carries it.)
+local function OwnPart(f) return TookPart(f) or Me(f.arb) or Me(Promoter(f)) end
+local RESULT = { R = true, F = true, W = true }
+local function Forget(f)
+	local mode = f.mode == "T" and "T" or "L"
+	for _, t in ipairs({ Core(mode, "fights") or {}, HeavyOf(mode, "fights") or {}, Mem(mode).fights }) do t[f.fid] = nil end
+	Arena.Involve("fight:" .. f.fid, nil)
+	Arena.Changed()
+	return Refuse("not-ours")
+end
+
 -- An AF heard from `sender`: taken, or false and why (the design).
 function F.Take(dist, sender, mode, body)
 	local fid, st, fl, bo, cat, arb, card, a, gkA, b, gkB, tAnn, tCall, lockAt, round, sc, w, m, dur = Arena.Fields(body, 19)
@@ -514,8 +561,11 @@ function F.Take(dist, sender, mode, body)
 	-- when its promoter kept it out of betting (x).
 	local takeover = arb and Me(arb) and not direct and not Me(f.writer)
 	if arb and Me(arb) and not direct then f.writer = ns.me end
+	-- (A challenge this client agreed stays its part after a reload; the session's list does not.)
+	if not f.took and SideOf(f, ns.me) and TookPart(f) then f.took = true end
+	if not Has(fl, "p") and RESULT[st] and not OwnPart(f) then return Forget(f) end
 	if takeover and f.marketSpecs == nil then f.marketSpecs = MarketSpecs(Has(fl, "p") and not Has(fl, "x"), nil) end
-	Put("fights", f)
+	if not Put("fights", f) then return Refuse("capacity") end
 	if takeover and f.st ~= "D" then
 		SendAF(f, true)
 		if f.B and f.marketSpecs and not Has(f.fl, "m") and OpenMarkets(f) then SendAF(f, true) end
@@ -550,7 +600,7 @@ function F.TakeDirect(f, sender, mode, fid, st, fl, bo, cat, A, B, w)
 		else
 			return Refuse("direct-state")
 		end
-		Put("fights", f)
+		if not Put("fights", f) then return Refuse("capacity") end
 		Changed(f, was)
 		return true
 	end
@@ -561,7 +611,7 @@ function F.TakeDirect(f, sender, mode, fid, st, fl, bo, cat, A, B, w)
 	if st ~= "S" and st ~= "A" then return Refuse("direct-state") end
 	f = { fid = fid, mode = mode, writer = ns.FullName(sender), st = st, fl = fl, bo = bo, cat = cat, A = { name = A.name, gk = A.gk },
 		B = { name = B.name, gk = MyGk() or B.gk }, round = 0, sc = { 0, 0 }, rounds = {}, facts = {}, accepted = { A = true, B = true },
-		tAnn = Now(), heardAt = Now(), from = c.from }
+		tAnn = Now(), heardAt = Now(), from = c.from, took = true }
 	if (c.stake or 0) > 0 then
 		f.stake, f.salt = c.stake, c.salt
 		f.ious = { A = c.iou, B = c.myIou }
@@ -571,8 +621,8 @@ function F.TakeDirect(f, sender, mode, fid, st, fl, bo, cat, A, B, w)
 			if ok and type(gk) == "string" then f.A.gk = gk end
 		end
 	end
+	if not Put("fights", f) then return Refuse("capacity") end
 	c.state, c.fid = "set", fid
-	Put("fights", f)
 	Changed(f, nil)
 	return true
 end
@@ -652,7 +702,9 @@ function F.Ended(f)
 	if f.endedDone then return end
 	f.endedDone = true
 	local side = SideOf(f, ns.me)
-	if side and Arena.Counts(f.mode) then
+	-- (Named as a fighter is not enough: only a fight this client took part in is his own.)
+	local mine = side and TookPart(f) and side or nil
+	if mine and Arena.Counts(f.mode) then
 		local store = Arena.Store(f.mode)
 		store.myFights = type(store.myFights) == "table" and store.myFights or {}
 		local mine = store.myFights[ns.me] or {}
@@ -673,8 +725,8 @@ function F.Ended(f)
 		end
 	end
 	-- The games' ledger (1.1.6, ArenaLedger.Played): every fight that ended, rated or not, either
-	-- mode, from each fighter's client and its arbiter's.
-	if side or Me(f.arb) then F.ToLedger(f) end
+	-- mode, from each fighter's client (one it took part in) and its arbiter's.
+	if mine or Me(f.arb) then F.ToLedger(f) end
 	-- Matchmaking's end of the match this fight came from (the design), once: its id is
 	-- the challenge's, on either fighter's client (MatchFromChallenge, AttachMatch).
 	local ended = Hook("ArenaMatch", "Ended")
@@ -904,7 +956,7 @@ function F.New(opts)
 		marketSpecs = marketSpecs, marketList = type(opts.markets) == "table" or nil }
 	if Me(A) then f.A.gk = f.A.gk or MyGk() end
 	if B and Me(B) then f.B.gk = f.B.gk or MyGk() end
-	Put("fights", f)
+	if not Put("fights", f) then return nil, "capacity" end
 	return fid
 end
 
@@ -955,6 +1007,7 @@ function F.Accept(fid)
 	local side = SideOf(f, ns.me)
 	if not side then return false, "fighter" end
 	if not Arena.RulesAccepted() then return false, "rules" end
+	f.took = true
 	if Me(f.writer) then Accepted(f, side) return true end
 	SendAC(f, f.writer, "A~" .. B36(f.round) .. "~0~0~0~" .. (MyGk() or "-"))
 	f.accepted[side] = true
@@ -1019,6 +1072,7 @@ function F.Here(fid)
 		.. "~" .. (MyGk() or "-")
 	f.hereSent = (f.hereSent or 0) + 1
 	f.hereAt = Now()
+	f.took = true
 	if Me(f.writer) then return true end
 	SendAC(f, f.writer, body)
 	return true
@@ -1646,6 +1700,8 @@ OnSystem = function(text)
 		local st = State(f)
 		local direct = Has(f.fl, "d")
 		if side and off and not (direct and f.stake) then side = nil end
+		-- (This fighter's own duel in a fight not over: he took part in it.)
+		if side and not ENDED[st] and SideOf(f, ns.me) then f.took = true end
 		-- A direct fight has no bell: agreed, it is live (the game's own duel starts it); between
 		-- rounds of a best-of, the next duel is the next round.
 		if side and direct and (st == "S" or st == "B") and SideOf(f, ns.me) then
@@ -2037,6 +2093,9 @@ local function OnResult(dist, sender, mode, body)
 	local king = isKing and (f.st == "R" or kingVoid)
 	if not (Same(sender, f.writer) or Same(sender, Promoter(f)) or king) then return Refuse("sender") end
 	if Has(f.fl, "p") and dist ~= "CHANNEL" and dist ~= "RAID" and dist ~= "PARTY" then return Refuse("lane") end
+	-- (1.2.1) A round's or the fight's result (never a void) of a private fight this client has no
+	-- part in: the record goes (OwnPart).
+	if not Has(f.fl, "p") and not (final == "1" and (m == "V" or m == "N")) and not OwnPart(f) then return Forget(f) end
 	round = N(round, 1, 9)
 	local sa, sb = tostring(sc):match("^(%d):(%d)$")
 	if not round or not sa then return Refuse("shape") end
@@ -2567,6 +2626,7 @@ function F.Sign(fid)
 	local body = table.concat({ fid, "J", MyGk() or "-", tostring(UnitLevel and UnitLevel("player") or 0),
 		classFile and R and R.ClassCode and R.ClassCode(classFile) or "-", tostring(raceID or "-") }, "~")
 	Arena.Send("AS", f.mode, body, { to = f.writer })
+	f.took = true
 	return true
 end
 
@@ -2595,8 +2655,6 @@ end
 
 local Card = {}
 F.Card = Card
-local CARD_STATES = { P = true, L = true, D = true, X = true }
-local CARD_ENDED = { D = true, X = true }
 
 local function CleanTitle(s)
 	s = tostring(s or ""):gsub("[%c|~,]", ""):gsub("^%s+", ""):gsub("%s+$", "")
@@ -2625,10 +2683,11 @@ function Card.New(title, t0, opts)
 	local cid = Arena.NewId("N", function(id) return Find("cards", id) ~= nil end)
 	if not cid then return nil, "id" end
 	local store = Arena.Store(mode)
-	store.cardNo = (tonumber(store.cardNo) or 0) + 1
-	local c = { cid = cid, mode = mode, st = "P", fl = "", no = store.cardNo, t0 = tonumber(t0) or Now(), mapID = tonumber(opts.mapID) or 0,
+	local no = (tonumber(store.cardNo) or 0) + 1
+	local c = { cid = cid, mode = mode, st = "P", fl = "", no = no, t0 = tonumber(t0) or Now(), mapID = tonumber(opts.mapID) or 0,
 		zone = opts.zone, fids = {}, awards = {}, title = CleanTitle(title), promoter = ns.me, heardAt = Now() }
-	Put("cards", c)
+	if not Put("cards", c) then return nil, "capacity" end
+	store.cardNo = no
 	SendAN(c, true)
 	Watch()
 	return cid
@@ -2789,7 +2848,7 @@ local function OnCard(dist, sender, mode, body)
 	c.title = title ~= "-" and CleanTitle(title) or ""
 	c.heardAt = Now()
 	if CARD_ENDED[st] then c.endedAt = c.endedAt or c.heardAt else c.endedAt = nil end
-	Put("cards", c)
+	if not Put("cards", c) then return Refuse("capacity") end
 	if was ~= st then ns.Fire("ARENA_CARD", cid, st) end
 	Arena.Changed()
 end

@@ -160,6 +160,7 @@ Dialog.FONT = "GameFontHighlight" -- and its text
 local frames = {}     -- built once, reused
 local order = 0       -- to know the oldest
 local hinted          -- the player told once a session: these are answered with the mouse
+local Catch           -- (below: Escape, for the questions the game's popups would have asked)
 
 local function Def(which) return type(which) == "string" and StaticPopupDialogs and StaticPopupDialogs[which] or nil end
 local function Call(f, where, fn, ...)
@@ -276,6 +277,7 @@ local function Build(i)
 			self.look = 0
 			local popups = GamePopups()
 			if popups ~= self.popups then self.popups = popups; Layout() end
+			Catch()
 		end
 		if not self.left then return end
 		self.left = self.left - elapsed
@@ -293,6 +295,7 @@ local function Build(i)
 		if self.editBox then self.editBox:ClearFocus() end
 		if def then Call(self, "hide", def.OnHide, self, data) end
 		Layout()
+		Catch()
 	end)
 	return f
 end
@@ -336,7 +339,7 @@ function Dialog.Show(which, a, b, data)
 	end
 	local f = Free()
 	order = order + 1
-	f.order, f.which, f.def, f.data, f.closing, f.popups = order, which, def, data, nil, GamePopups()
+	f.order, f.which, f.def, f.data, f.closing, f.popups, f.escapes = order, which, def, data, nil, GamePopups(), nil
 	f.left = (tonumber(def.timeout) or 0) > 0 and tonumber(def.timeout) or nil
 	local text = tostring(def.text or "")
 	if a ~= nil or b ~= nil then
@@ -430,10 +433,99 @@ function Dialog.Hide(which, data)
 	end
 end
 
+---------------------------------------------------------------------------
+-- Escape, for the questions the game's popups would have asked (1.2.1)
+---------------------------------------------------------------------------
+
+-- With mouse and keyboard, a question is asked here instead of the game's popup while one of the
+-- game's guild windows is open (Core.lua's ns.ShowDialog, ns.MoveDialogsOffGame). That popup closes
+-- on Escape (hideOnEscape), as StaticPopup_EscapePressed does: its OnEscape, else its
+-- OnCancel(self, data, "clicked") unless noCancelOnEscape, then hidden. These windows stay off the
+-- escape list (a definition's own Hide after its Enter can't be told from the game's), so a frame
+-- of ours that shows nothing is on it while such a question is up: Escape hides it with the game's
+-- windows, the guild window among them (CloseAllWindows, its CloseSpecialWindows), and on the next
+-- frame, out of the game's walk of that list, each such question closes as its popup would have.
+-- The game's other sweeps of the list, which its popups live through, leave them up: a death, a
+-- loading screen, the interface shown again after Alt+Z. A loss of control (a stun) sweeps it too
+-- and can't be told apart: those questions close with the guild window then. Never with the gamepad
+-- UI (nothing goes on the list).
+local catcher
+local sweptAt -- GetTime() of the game's last sweep at a death or a loading screen
+
+-- The game's sweeps that are not Escape (Blizzard_Game's PLAYER_DEAD and PLAYER_ENTERING_WORLD
+-- handlers, CloseAllWindows): the same frame's time, so the same GetTime().
+function Dialog.Swept() sweptAt = GetTime() end
+ns.RegisterEvent("PLAYER_DEAD", Dialog.Swept)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", Dialog.Swept)
+
+local function Escaped(f, shown)
+	if not f:IsShown() or f.order ~= shown then return end
+	local def, data = f.def, f.data
+	f.closing = "escape"
+	if def and def.OnEscape then Call(f, "escape", def.OnEscape, f, data, "clicked")
+	elseif def and def.OnCancel and not def.noCancelOnEscape then Call(f, "cancel", def.OnCancel, f, data, "clicked") end
+	if f:IsShown() and f.order == shown then f:Hide() end
+end
+
+-- The frame on the escape list, shown while such a question is up (else hidden, by us).
+function Catch()
+	if not catcher then return end
+	local up = false
+	for _, f in ipairs(frames) do if f:IsShown() and f.escapes then up = true end end
+	if up and ns.Gate.Allowed("escape-list") then
+		if not catcher:IsShown() then
+			catcher:Show()
+			ns.EscapeCloses(catcher:GetName())
+		end
+	elseif catcher:IsShown() then
+		-- (Its OnHide runs only when it was on screen: hidden with the interface, it doesn't.)
+		catcher.ours = catcher:IsVisible() or nil
+		catcher:Hide()
+	end
+end
+
+local function Catcher()
+	if catcher then return catcher end
+	catcher = CreateFrame("Frame", "OlympusQuestionEscape", UIParent)
+	catcher:SetSize(1, 1)
+	catcher:Hide()
+	catcher:SetScript("OnShow", function(self)
+		if self.uiHidden then self.uiHidden, self.backAt = nil, GetTime() end
+	end)
+	catcher:SetScript("OnHide", function(self)
+		if self.ours then self.ours = nil return end
+		if self:IsShown() then self.uiHidden = true return end -- the whole interface hidden (Alt+Z)
+		local at = GetTime()
+		local back = self.uiHidden or self.backAt == at
+		self.uiHidden = nil
+		local up = {}
+		for _, f in ipairs(frames) do if f:IsShown() and f.escapes then up[f] = f.order end end
+		ns.After(0, "dialog escape", function()
+			if not back and sweptAt ~= at and ns.Gate.Allowed("escape-list") then
+				for f, shown in pairs(up) do Escaped(f, shown) end
+			end
+			Catch()
+		end)
+	end)
+	return catcher
+end
+
+-- f (Dialog.Show's) closes on Escape as the game's popup would have, when its definition asks for
+-- that (hideOnEscape): Core.lua's guild window case, with mouse and keyboard alone.
+function Dialog.CloseOnEscape(f)
+	if type(f) ~= "table" or not f.def or not f.def.hideOnEscape or not ns.Gate.Allowed("escape-list") then return end
+	f.escapes = true
+	Catcher()
+	Catch()
+end
+
 -- Tests start from a clean state.
 function Dialog.Reset()
 	for _, f in ipairs(frames) do
 		f.closing = "hide"
 		f:Hide()
 	end
+	-- (Each test's frames are its own: the escape frame is made again in the next one.)
+	if catcher then catcher.ours = catcher:IsVisible() or nil; catcher:Hide() end
+	catcher, sweptAt = nil, nil
 end

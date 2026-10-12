@@ -97,6 +97,7 @@ Map.ContainerOf = ContainerOf -- for tests
 
 local function RefreshNow()
 	refreshQueued = false
+	Map.dirty = false
 	if not Pins then return end
 	-- With the gamepad UI no zone circles (they are the pin library's, ns.WorldMapIcons); the
 	-- continent totals below are drawn by us, never through the library, and stay.
@@ -484,10 +485,42 @@ function Map.Refresh()
 	if finished then Map.lastCost = math.max(0, (finished - started) / 1000) end
 end
 
+-- 1.2.1 (players' stutter that stopped with Olympus off; the owner's game measured every census
+-- report taking the world map's pins off and putting them back, ~8.5 ms each and up to 372 ms, with
+-- the map closed): the refreshes the census asks for wait for the map. Closed, it is only marked
+-- dirty (Map.dirty); opened, it is drawn then, once (Map.WorldMapShown, its OnShow). A refresh asked
+-- for by name (the map's menu, Map.SetEnabled, /oly map, a backup restored) is still drawn at once.
+Map.dirty = false
+function Map.WorldMapOpen()
+	local f = WorldMapFrame
+	return type(f) == "table" and type(f.IsShown) == "function" and f:IsShown() == true
+end
+
+-- The census's refresh, when its turn comes: drawn while the map is open, else left for its opening.
+function Map.CensusRefresh()
+	if not Map.WorldMapOpen() then
+		refreshQueued, Map.dirty = false, true
+		return
+	end
+	Map.Refresh()
+end
+
 local function QueueRefresh()
 	if refreshQueued then return end
+	if not Map.WorldMapOpen() then
+		Map.dirty = true
+		return
+	end
 	refreshQueued = true
-	ns.After(Map.RefreshGap(), "map refresh", Map.Refresh)
+	ns.After(Map.RefreshGap(), "map refresh", Map.CensusRefresh)
+end
+
+-- The world map opened (its OnShow, HookWorldMap): what the census changed while it was closed is
+-- drawn now (mouse and keyboard: with the gamepad UI nothing of Olympus's is on that map, and the
+-- census redraws it while it is open, as before); then the continent totals laid out, as before.
+function Map.WorldMapShown()
+	if Map.dirty and ns.Gate.Allowed("map-overlay") then Map.Refresh() end
+	ns.SafeCall("map overlay", Map.LayoutOverlay)
 end
 
 -- "Olympus" menu on the world map: everything map related lives here, like Questie's toggle.
@@ -574,7 +607,8 @@ local function HookWorldMap() -- gp:map-overlay
 	-- (Each does nothing with the gamepad UI on: LayoutOverlay's first line.)
 	local function relayout() ns.SafeCall("map overlay", Map.LayoutOverlay) end
 	if WorldMapFrame.OnMapChanged then pcall(hooksecurefunc, WorldMapFrame, "OnMapChanged", relayout) end
-	WorldMapFrame:HookScript("OnShow", relayout)
+	-- (1.2.1: opening it also draws what the census changed while it was closed, Map.WorldMapShown.)
+	WorldMapFrame:HookScript("OnShow", function() ns.SafeCall("map shown", Map.WorldMapShown) end)
 	WorldMapFrame:HookScript("OnHide", relayout)
 	local sc = WorldMapFrame.ScrollContainer
 	if sc then
@@ -653,6 +687,8 @@ ns.Gate.Hooks("map-overlay", {
 		ns.SafeCall("map hooks", HookWorldMap)
 		CreateMapToggle()
 		if toggle then toggle:Show() end
+		-- (1.2.1: switched to mouse and keyboard with the map open, what the census changed meanwhile.)
+		if Map.dirty and Map.WorldMapOpen() then Map.Refresh() end
 		Map.LayoutOverlay()
 	end,
 	park = function()

@@ -335,6 +335,22 @@ function Codec.DecodeReport(s)
 	}
 end
 
+-- (1.2.3) Where field 25 lies in a report's text, the server time it was made, which every report
+-- has its own (Data.SetLocal stamps it at each roster read): the "~" before it, the "~" after it
+-- (#s + 1 when it is the last field), and that time as Codec.DecodeReport reads it. Nothing is cut
+-- out of the text but the time itself. nil for a text without field 25, or one DecodeReport refuses
+-- by its length. (Data.DecodeReport: a sender's report alike his last one but for its time.)
+function Codec.ReportTime(s)
+	if type(s) ~= "string" or #s > Codec.CHUNK * Codec.MAX_CHUNKS then return nil end
+	local at = 0
+	for _ = 1, 24 do
+		at = s:find("~", at + 1, true)
+		if not at then return nil end
+	end
+	local stop = s:find("~", at + 1, true) or #s + 1
+	return at, stop, unBase36(s:sub(at + 1, stop - 1))
+end
+
 ---------------------------------------------------------------------------
 -- Small single-message types (always < 255 bytes, never chunked)
 --   P1~mapID~x~y~class          guild only: my position (x, y in 0..1000)
@@ -512,6 +528,28 @@ function Codec.NoMentions(s)
 	return (s:gsub("@", "@" .. ZWSP):gsub("<#", "<" .. ZWSP .. "#"))
 end
 
+-- A value from another player (a name, a guild's, a note, a chat line) in a copy for Discord
+-- (1.2.1: every copy's builder, Data, Inspect, Loot, Chronicle, The Watch's cases, Judgment): shown
+-- there as written, never as Discord's markup, on one line. In a code block (code == true, nothing
+-- else: a gsub's count passed along is none; the copies' tables), where no backslash escapes
+-- anything, a backtick becomes an apostrophe: three would end the block and let the rest out as
+-- markup. Elsewhere a backslash, which Discord drops as it shows the text, goes before each
+-- character that makes markup anywhere in a line (bold, italics, strikes, code, masked links,
+-- <@id>, <t:...>), and before a "#", ">" or "-" the value starts with (a heading, a quote, a list
+-- at a line's start): "Name-Realm" and "(note)" stay as they are. A "|" goes in both (a spoiler's,
+-- the game's escape codes), and a line break becomes a space. Nobody is pinged either way
+-- (NoMentions; the copy box runs it over everything too). The copies' own words (Locales) are not
+-- passed through it.
+function Codec.Discord(s, code)
+	s = tostring(s == nil and "" or s):gsub("%c", " "):gsub("|", "")
+	if code == true then
+		s = s:gsub("`", "'")
+	else
+		s = s:gsub("[\\`*_~%[%]<]", "\\%0"):gsub("^(%s*)([#>%-])", "%1\\%2")
+	end
+	return Codec.NoMentions(s)
+end
+
 -- Room for the text in one message: CHAT_MAX minus "M1~", the tier, 4 separators, a 4 digit id,
 -- the guild and the class.
 function Codec.ChatBudget(guild, class)
@@ -584,7 +622,56 @@ end
 Codec.OPEN_PER_SENDER = 4
 Codec.OPEN_MAX = 400
 function Codec.NewAssembler()
-	return { buf = {}, open = 0, bySender = {}, refused = 0 }
+	return { buf = {}, open = 0, bySender = {}, refused = 0, evicted = 0, changes = 0, none = -1, noneFor = 0 }
+end
+
+-- 1.2.1 (a security review): a full buffer refused every new message, so about a hundred characters
+-- holding OPEN_PER_SENDER messages open each kept multi-piece messages from everyone, the census's
+-- reports among them. A full buffer now makes room (Room): for those a stranger can't be (Trusted:
+-- our guildmates, as the server's roster has them, the pinned King, the signed High Council) the
+-- oldest open message of the stranger holding the most goes; for a stranger, the same, while that
+-- one holds more than he would then hold himself. A flood then needs OPEN_MAX characters with one
+-- message open each, and never keeps out those trusted. A stranger's look that found nothing to
+-- close holds until a message opens or closes (asm.changes): his next tries, and those of any
+-- stranger holding as many, cost no more than the refusals before.
+function Codec.Trusted(sender)
+	local ok, yes = pcall(function()
+		local R = ns.Roster
+		if type(R) == "table" and type(R.RankOf) == "function" and R.RankOf(sender) ~= nil then return true end
+		if type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(sender) then return true end
+		return type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(sender) == true
+	end)
+	return ok and yes == true
+end
+
+-- One open message of a stranger's closed for `sender`'s (who holds `mine`): true when one went.
+local function Room(asm, sender, trusted, mine)
+	if not trusted and asm.none == (asm.changes or 0) and mine >= (asm.noneFor or 0) then return false end
+	local oldest = {} -- each stranger's oldest open message (its key), but the sender's own
+	for key, e in pairs(asm.buf) do
+		if e.trusted == nil then e.trusted = Codec.Trusted(e.sender) end
+		if not e.trusted and e.sender ~= sender then
+			local o = oldest[e.sender]
+			if not o or e.t < asm.buf[o].t or (e.t == asm.buf[o].t and key < o) then oldest[e.sender] = key end
+		end
+	end
+	local victim, most
+	for who, key in pairs(oldest) do
+		local held = asm.bySender[who] or 0
+		if trusted or held > mine + 1 then
+			local e, v = asm.buf[key], victim and asm.buf[victim]
+			if not victim or held > most or (held == most and (e.t < v.t or (e.t == v.t and key < victim))) then victim, most = key, held end
+		end
+	end
+	if not victim then
+		-- (Nobody else holds more than mine + 1: nor will anyone, for a stranger holding as many
+		-- or more, until the buffer changes.)
+		if not trusted then asm.none, asm.noneFor = asm.changes or 0, mine end
+		return false
+	end
+	Codec.Close(asm, victim)
+	asm.evicted = (asm.evicted or 0) + 1
+	return true
 end
 
 -- Returns the full payload once every chunk from this sender/id arrived.
@@ -596,15 +683,21 @@ function Codec.Feed(asm, sender, msg, now)
 	local key = sender .. "#" .. id
 	local e = asm.buf[key]
 	if not e or e.n ~= n then
+		local trusted = e and e.trusted
 		if not e then
 			local mine = asm.bySender[sender] or 0
+			if mine < Codec.OPEN_PER_SENDER and asm.open >= Codec.OPEN_MAX then
+				trusted = Codec.Trusted(sender)
+				Room(asm, sender, trusted, mine)
+			end
 			if mine >= Codec.OPEN_PER_SENDER or asm.open >= Codec.OPEN_MAX then
 				asm.refused = asm.refused + 1
 				return nil
 			end
 			asm.bySender[sender], asm.open = mine + 1, asm.open + 1
+			asm.changes = (asm.changes or 0) + 1
 		end
-		e = { n = n, parts = {}, got = 0, t = now, sender = sender }
+		e = { n = n, parts = {}, got = 0, t = now, sender = sender, trusted = trusted }
 		asm.buf[key] = e
 	end
 	if not e.parts[i] then
@@ -625,6 +718,7 @@ function Codec.Close(asm, key)
 	asm.open = math.max(0, asm.open - 1)
 	local left = (asm.bySender[e.sender] or 1) - 1
 	asm.bySender[e.sender] = left > 0 and left or nil
+	asm.changes = (asm.changes or 0) + 1
 end
 
 -- Drops assemblies older than 60 s (70 s above 30 parts), with an incomplete sample

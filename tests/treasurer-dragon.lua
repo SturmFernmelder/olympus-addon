@@ -31,3 +31,125 @@ test("Treasurer dragon: verified primary pin owns one supplied portrait overlay,
 	ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM = unpack(saved, 1, 3)
 	if not ok then error(err, 0) end
 end)
+
+-- 1.2.1 (the owner's report: the Treasurer's dragon sat slightly off round a party member's
+-- portrait). Each border Olympus draws from a file of its own (the dragon, Max's bronze wings and
+-- plain bronze) is measured on the party member frame as placed: the inner edge of its ring is
+-- read from the file's alpha (rays from the portrait's centre, a circle fitted to the edge, the
+-- parts that are no circle, the dragon's claws and the plain frame's open side, left out), and its
+-- centre must fall on the portrait's (the template's 37 x 37 at 7, -6) within a pixel. The game's
+-- own atlases are drawn at the game's offsets, so they are right by construction and not read here.
+local ROOT = debug.getinfo(1, "S").source:match("^@(.*)tests[/\\]treasurer%-dragon%.lua$") or "./"
+local function Alpha(file)
+	local f = assert(io.open(ROOT .. "Olympus/media/borders/" .. file:match("([^\\]+)$") .. ".tga", "rb"))
+	local s = f:read("*a")
+	f:close()
+	local w, h = s:byte(13) + 256 * s:byte(14), s:byte(15) + 256 * s:byte(16)
+	local top = math.floor(s:byte(18) / 32) % 2 == 1
+	return function(x, y) -- (x, y from the art's top left; nil outside it)
+		if x < 0 or y < 0 or x >= w or y >= h then return nil end
+		local row = top and y or (h - 1 - y)
+		return s:byte(18 + (row * w + x) * 4 + 4)
+	end
+end
+-- The circle through points (least squares), as centre x, y and radius.
+local function Circle(pts)
+	local n, sx, sy, sxx, syy, sxy, b1, b2, b3 = #pts, 0, 0, 0, 0, 0, 0, 0, 0
+	for _, p in ipairs(pts) do
+		local x, y = p[1], p[2]
+		local q = x * x + y * y
+		sx, sy, sxx, syy, sxy = sx + x, sy + y, sxx + x * x, syy + y * y, sxy + x * y
+		b1, b2, b3 = b1 - x * q, b2 - y * q, b3 - q
+	end
+	local m = { { sxx, sxy, sx, b1 }, { sxy, syy, sy, b2 }, { sx, sy, n, b3 } }
+	for i = 1, 3 do
+		local piv = i
+		for r = i + 1, 3 do if math.abs(m[r][i]) > math.abs(m[piv][i]) then piv = r end end
+		m[i], m[piv] = m[piv], m[i]
+		for r = 1, 3 do
+			if r ~= i then
+				local f = m[r][i] / m[i][i]
+				for c = 1, 4 do m[r][c] = m[r][c] - f * m[i][c] end
+			end
+		end
+	end
+	local d, e, f = m[1][4] / m[1][1], m[2][4] / m[2][2], m[3][4] / m[3][3]
+	local cx, cy = -d / 2, -e / 2
+	return cx, cy, math.sqrt(cx * cx + cy * cy - f)
+end
+-- The centre of the inner edge of the art's ring, in the art's pixels, from a point inside it.
+local function RingCentre(alpha, x0, y0)
+	local pts = {}
+	for deg = 0, 358, 2 do
+		local t, r = math.rad(deg), 5
+		while r < 75 do
+			local a = alpha(math.floor(x0 + r * math.cos(t) + 0.5), math.floor(y0 + r * math.sin(t) + 0.5))
+			if a == nil or a >= 128 then break end
+			r = r + 0.25
+		end
+		if r < 75 then pts[#pts + 1] = { x0 + r * math.cos(t), y0 + r * math.sin(t) } end
+	end
+	local cx, cy, cr
+	for _ = 1, 8 do
+		cx, cy, cr = Circle(pts)
+		local keep = {}
+		for _, p in ipairs(pts) do
+			if math.abs(math.sqrt((p[1] - cx) ^ 2 + (p[2] - cy) ^ 2) - cr) < 2.5 then keep[#keep + 1] = p end
+		end
+		if #keep == #pts then break end
+		pts = keep
+	end
+	assert(#pts >= 40, "enough of the ring's edge: " .. #pts)
+	return cx, cy
+end
+-- The same, from where it finds the centre again until it stops moving: a ray's edge depends on
+-- where the rays start (8 file pixels left or right of the centre move one reading 4 px), so the
+-- start is the portrait's centre only for the first reading.
+local function SettledRingCentre(alpha, x0, y0)
+	local cx, cy = RingCentre(alpha, x0, y0)
+	for _ = 1, 20 do
+		local nx, ny = RingCentre(alpha, cx, cy)
+		local moved = math.abs(nx - cx) + math.abs(ny - cy)
+		cx, cy = nx, ny
+		if moved < 0.01 then return cx, cy end
+	end
+	return cx, cy
+end
+
+test("1.2.1 party borders: every border drawn from Olympus's own file (the Treasurer's dragon, the bronze wings, the plain bronze) has its ring round the party member's portrait, within a pixel of its centre", function()
+	local saved = { ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM }
+	ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM = "Test Treasurer", { "Test Treasurer", "Test Mail" }, "Realm"
+	local ok, err = pcall(function()
+		WithBorders(function(w)
+			w.party()
+			w.units.party1 = BorderUnit("Test Treasurer", "Olympus II", "Member", 3)
+			w.internal("LOGIN")
+			eq(w.shown("party1"), "treasurer-dragon", "the Treasurer's dragon round his party portrait")
+			local portrait = w.partyRegions.Portrait
+			local px, py = portrait.x + portrait.width / 2, -portrait.y + portrait.height / 2 -- (its centre, down from the frame's top)
+			local measured = {}
+			for _, tex in ipairs(w.textures) do
+				if tex.owner == "PartyMember#1" and tex.file then
+					local name = w.tierOf(tex)
+					local l, r, t, b = tex.coord:match("^(%S+) (%S+) (%S+) (%S+)$")
+					l, r, t, b = tonumber(l), tonumber(r), tonumber(t), tonumber(b)
+					assert(l > r, name .. ": turned round (the portrait on the left)")
+					-- The art's pixels across and down (its area on the 256 file), and the frame's pixels a file pixel.
+					local cw, ch = l * 256, b * 256
+					local sx, sy = tex.dims[1] / cw, tex.dims[2] / ch
+					local x0, y0 = tex.at.x, -tex.at.y -- (its top left, down from the frame's top)
+					-- The portrait's centre in the art's pixels (turned round), then the ring's.
+					local fx, fy = cw - (px - x0) / sx, (py - y0) / sy
+					local cx, cy = SettledRingCentre(Alpha(tex.file), fx, fy)
+					local gx, gy = x0 + (cw - cx) * sx, y0 + cy * sy
+					measured[name] = ("%.2f %.2f"):format(gx - px, gy - py)
+					assert(math.abs(gx - px) < 1 and math.abs(gy - py) < 1,
+						("%s: its ring's centre %.2f px across and %.2f px down from the portrait's"):format(name, gx - px, gy - py))
+				end
+			end
+			for _, name in ipairs({ "treasurer-dragon", "bronze-elite", "bronze" }) do assert(measured[name], name .. " measured") end
+		end)
+	end)
+	ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM = unpack(saved, 1, 3)
+	if not ok then error(err, 0) end
+end)

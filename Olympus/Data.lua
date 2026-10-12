@@ -13,6 +13,55 @@ Data.TOTAL_KEEP = 24 * 60 * 60 -- a guild's size counts in the army's total this
 Data.VOUCH_TTL = 30 * 60       -- a report counts as its sender's vote on the guild this long
 Data.CLAIM_TTL = 15 * 60       -- a sender quiet this long for its guild may speak for another one
 local MAX_VOUCH = 8            -- votes kept per guild (the newest)
+-- 1.2.1: the reports kept, at most, ours among them. Any guild whose name holds "Olympus" is an
+-- Olympus guild, so characters to spare (one guild each every CLAIM_TTL) could fill the saved
+-- variables with guilds that do not exist, each kept for KEEP. Past it the report heard longest ago
+-- goes (Data.Trim): a real guild reports every few minutes while anyone of it is on, so a forger's
+-- old names go first. Never our own guild's, nor the King's guild or one the author's signed list
+-- approves while another can go. Several times the guilds any realm group has.
+Data.MAX_GUILDS = 300
+
+-- 1.2.1 (the stutter players reported, measured on the owner's PC): every census report heard,
+-- about one a second and up to nine in a burst, ran every DATA_CHANGED listener at once, inside
+-- the game's addon-message event. A report heard from someone else now marks the census changed,
+-- and DATA_CHANGED follows within NOTIFY_GAP, once for every report heard meanwhile (one timer
+-- waits at a time); so does our own roster's report, read once a minute, on a frame of its own
+-- rather than the scan's. What the player does himself (a /who, /oly reset, a realm linked) still
+-- fires it at once. Data.Revision(): a number that grows with every change to the census's
+-- reports, for what is worked out from them and kept (HonorsNet's level race).
+-- Every report taken is seen by the listeners before it is replaced: a guild's row is its newest
+-- report, and a listener reads the rows as they stand (the level race keeps each sender it sees on
+-- a claim), so a second report of one guild within NOTIFY_GAP tells the first one's DATA_CHANGED
+-- at once, before it takes its place, as every report did before 1.2.1.
+Data.NOTIFY_GAP = 1
+local revision, notifyQueued, notifyDirty = 0, false, false
+local unseen = {} -- the rows taken since DATA_CHANGED last went out (emptied each time it does)
+function Data.Revision() return revision end
+local function Tell()
+	notifyDirty = false
+	for row in pairs(unseen) do unseen[row] = nil end
+	ns.Fire("DATA_CHANGED")
+end
+local function Notify()
+	notifyQueued = false
+	if not notifyDirty then return end -- (fired at once meanwhile: Data.ChangedNow, or a row replaced)
+	Tell()
+end
+-- A change heard from someone else, or our roster's: DATA_CHANGED within NOTIFY_GAP. row: the
+-- report just taken, which the listeners see before another takes its place.
+function Data.ChangedSoon(row)
+	revision = revision + 1
+	notifyDirty = true
+	if row ~= nil then unseen[row] = true end
+	if notifyQueued then return end
+	notifyQueued = true
+	ns.After(Data.NOTIFY_GAP, "census changed", Notify)
+end
+-- A change the player made: DATA_CHANGED now, which answers for what was waiting too.
+function Data.ChangedNow()
+	revision = revision + 1
+	Tell()
+end
 
 -- The key a guild is stored under, whatever the case a report spells it in: a realm has one
 -- guild of a name, so "OLYMPUS X" and "Olympus X" are the same one (or one is forged).
@@ -32,11 +81,82 @@ function Data.Guild(name)
 	return key and ns.rdb.guilds[key] or nil
 end
 
+-- (1.2.3) About 40 census reports a minute reach a client, and each one was decoded and voted from
+-- scratch: some 11 KB of garbage each for the collector, what the owner's PC felt as memory peaks.
+-- Many come out as their sender's last one did, but for field 25 (the server time it was made,
+-- stamped at every roster read: Codec.ReportTime). So each sender's last report taken is kept as
+-- it came, its text but for that time, with the row it made, while that row is still its guild's:
+-- the same report again is that row again (Data.DecodeReport), not decoded. Data.Receive takes it
+-- as any report, from the same checks to the votes counted again: the row gets the new time and
+-- its sender's vote a new time, what a new report alike but for its time made of it. One per
+-- sender, gone with its row (the guild's report from anyone else, Data.Trim, a reset or another
+-- realm's store) or once that row is FRESH old (Data.Housekeeping), so MAX_GUILDS at most. Only a
+-- report whose guild is spelled as its row's key is kept (the checks read the spelling it gives).
+local repeats = {} -- "Name-Realm" -> { head, tail, row, vote }: his report's text around field 25
+local heard = {} -- what Data.DecodeReport gave last (r, who, text, at, stop, st, again, entry), for Data.Receive
+-- A row that goes, or another report replaces: its sender's report is not the guild's any more.
+local function Forget(row)
+	local who = type(row) == "table" and row.reporterFull
+	local e = type(who) == "string" and repeats[who]
+	if e and e.row == row then repeats[who] = nil end
+end
+
+-- (1.2.1) The store at MAX_GUILDS reports less `room` (0, or 1 before a new guild goes in): the
+-- reports heard longest ago go, the King's guild and the approved ones only once no other is
+-- left, our own never. Returns how many went.
+local trimmed = 0
+function Data.Trim(room)
+	local guilds = ns.rdb and ns.rdb.guilds
+	if type(guilds) ~= "table" then return 0 end
+	local count = 0
+	for _ in pairs(guilds) do count = count + 1 end
+	local over = count + (room or 0) - Data.MAX_GUILDS
+	if over <= 0 then return 0 end
+	local list = {}
+	for name, g in pairs(guilds) do
+		if not (type(g) == "table" and g.mine) then
+			local kept = type(name) == "string" and (ns.IsKingGuild(name) or (ns.IsApprovedGuild ~= nil and ns.IsApprovedGuild(name)))
+			list[#list + 1] = { name = name, t = type(g) == "table" and tonumber(g.t) or -math.huge, kept = kept and 1 or 0 }
+		end
+	end
+	table.sort(list, function(a, b)
+		if a.kept ~= b.kept then return a.kept < b.kept end
+		if a.t ~= b.t then return a.t < b.t end
+		return tostring(a.name) < tostring(b.name)
+	end)
+	local n = math.min(over, #list)
+	for i = 1, n do
+		Forget(guilds[list[i].name])
+		guilds[list[i].name] = nil
+	end
+	trimmed = trimmed + n
+	if n > 0 then revision = revision + 1 end
+	return n
+end
+function Data.Trimmed() return trimmed end -- (this session: /oly status)
+
 -- Where the King is pinned by name (ns.KING_CHARACTER), a report of his guild that names
 -- anyone else as its leader (or nobody) is not his guild's: forged, or out of date.
 function Data.OtherKing(guild, leader)
 	return ns.IsKingGuild(guild) and ns.KingCharacter() ~= nil and not ns.IsKingCharacter(leader)
 end
+
+-- (1.2.3) Every report's vote stays in its row until the guild's next report counts the votes again
+-- (Votes, Data.Receive), so the rows of guilds not heard since kept theirs, past VOUCH_TTL, in
+-- memory and in the saved variables (71 of the owner's 300). Those no count takes any more go at
+-- INIT and at logout: older than VOUCH_TTL (Votes, Majority; DuesHistory reads 90 s of them).
+local function DropDeadVotes(now)
+	for _, g in pairs(ns.rdb and ns.rdb.guilds or {}) do
+		local vouch = type(g) == "table" and g.vouch
+		if type(vouch) == "table" then
+			for sender, v in pairs(vouch) do
+				if type(v) ~= "table" or now - (tonumber(v.t) or 0) > Data.VOUCH_TTL then vouch[sender] = nil end
+			end
+			if next(vouch) == nil then g.vouch = nil end
+		end
+	end
+end
+ns.On("LOGIN", function() ns.RegisterEvent("PLAYER_LOGOUT", function() DropDeadVotes(ns.Now()) end) end)
 
 ns.On("INIT", function()
 	local now = ns.Now()
@@ -76,6 +196,10 @@ ns.On("INIT", function()
 		ns.Log("dropped guild %s: forged size or a second spelling", name)
 		ns.rdb.guilds[name] = nil
 	end
+	-- (1.2.1) Kept by older versions, without a cap: MAX_GUILDS at most from now on.
+	local over = Data.Trim(0)
+	if over > 0 then ns.Log("census: %d guild reports heard longest ago let go (%d kept at most)", over, Data.MAX_GUILDS) end
+	DropDeadVotes(now) -- (1.2.3)
 	local seen = Data.Seen()
 	for name, e in pairs(seen) do
 		if type(e) ~= "table" or now - (e.t or 0) > Data.KEEP then seen[name] = nil end
@@ -117,7 +241,7 @@ function Data.RecordSightings(players, capped)
 	end
 	local seen, now = Data.Seen(), ns.Now()
 	for guild, n in pairs(count) do seen[guild] = { online = n, capped = capped or nil, t = now } end
-	if next(count) then ns.Fire("DATA_CHANGED") end
+	if next(count) then Data.ChangedNow() end -- (a /who: the player's own click)
 end
 ns.Who.Listen(Data.RecordSightings)
 
@@ -129,6 +253,28 @@ function Data.ServerTime()
 	return ok and type(t) == "number" and t > 0 and t or nil
 end
 
+-- Two reports alike but for when they were made (t, st), their tables compared value by value.
+local WHEN = { t = true, st = true }
+local function SameReport(a, b, depth)
+	if a == b then return true end
+	if type(a) ~= "table" or type(b) ~= "table" or depth > 4 then return false end
+	for k, v in pairs(a) do
+		if not (depth == 0 and WHEN[k]) and not SameReport(v, b[k], depth + 1) then return false end
+	end
+	for k in pairs(b) do
+		if not (depth == 0 and WHEN[k]) and a[k] == nil then return false end
+	end
+	return true
+end
+
+-- (1.2.1) The roster is read once a minute, and some minutes our guild's report comes out as the
+-- last one did: stored (its time is new) with no DATA_CHANGED, so nothing is worked out again for
+-- it. Only against the report stored by this session: the first one after login, a /oly reset or
+-- another realm's store (Core.lua's ns.LinkRealms) is always news. A report that changed (most
+-- minutes in a big guild: who is online, where, at what level) tells DATA_CHANGED within
+-- NOTIFY_GAP (Data.ChangedSoon), never inside the scan (Roster.TryScan), so the scan and the
+-- listeners land on different frames.
+local lastLocal
 function Data.SetLocal(r)
 	r.t = ns.Now()
 	r.st = Data.ServerTime() -- field 25 of our report: when it was made, by the server's clock
@@ -138,23 +284,36 @@ function Data.SetLocal(r)
 	r.from = ns.realm -- travels in the report: whoever hears it on another realm sees the channel shared (/oly status)
 	r.heardOn = ns.realm -- see Data.Receive
 	r.mine = true
+	local old = ns.rdb.guilds[r.guild]
+	if old == nil then Data.Trim(1) end -- (1.2.1: MAX_GUILDS)
 	ns.rdb.guilds[r.guild] = r
-	ns.Fire("DATA_CHANGED")
+	local same = old ~= nil and old == lastLocal and SameReport(old, r, 0)
+	lastLocal = r
+	if not same then Data.ChangedSoon() end
 end
 
 -- Sender names are set by the server and cannot be forged, so we tie every sender to the
 -- one guild it reports. A (modified) client that reports several guilds is ignored, and a
 -- guild whose reports disagree about its leader or its officers is flagged as a conflict (the
 -- census marks it, and sizes that disagree too: Data.Dispute, 1.1).
-local senderGuild = {} -- "Name-Realm" -> { guild, t }
+-- (1.2.3) Every sender heard stayed, a table each, for the whole session. A claim CLAIM_TTL old
+-- binds nobody: once a minute (Data.Housekeeping) it keeps only the guild it spoke for, which
+-- Data.ClaimedGuild still answers for the rest of the session, as before (the council copy of a
+-- report from a sender quiet since, Watch.lua; a guild master's mark on his Trade lines, Borders.lua).
+-- None is dropped: an old claim is a slot here holding its guild's one name string.
+local senderGuild = {} -- "Name-Realm" -> { guild, t }, or the guild alone once CLAIM_TTL old
 
 -- One guild per sender, shared by reports and chat: a name that speaks for one guild can't
 -- speak for another. A player who really moved guilds speaks again after CLAIM_TTL quiet.
 function Data.ClaimGuild(sender, guild)
 	local who, now = ns.FullName(sender), ns.Now()
 	local c = senderGuild[who]
-	if c and c.guild:lower() ~= guild:lower() and now - c.t < Data.CLAIM_TTL then return false end
-	senderGuild[who] = { guild = guild, t = now }
+	if type(c) ~= "table" then
+		senderGuild[who] = { guild = guild, t = now }
+		return true
+	end
+	if c.guild:lower() ~= guild:lower() and now - c.t < Data.CLAIM_TTL then return false end
+	c.guild, c.t = guild, now -- (1.2.3: his claim's own table, not a new one each report or line)
 	return true
 end
 
@@ -164,7 +323,8 @@ end
 function Data.ClaimedGuild(sender)
 	if type(sender) ~= "string" or sender == "" then return nil end
 	local c = senderGuild[ns.FullName(sender)]
-	return c and c.guild or nil
+	if type(c) == "table" then return c.guild end
+	return c
 end
 
 -- Every rank a report names, as "Name-Realm" -> 0 (leader) or 1 (officer). Names without a
@@ -228,6 +388,7 @@ function Data.ForgetVotes()
 	for _, g in pairs(ns.rdb and ns.rdb.guilds or {}) do
 		if type(g) == "table" then g.vouch, g.conflict, g.outvoted = nil, nil, nil end
 	end
+	revision = revision + 1
 end
 
 -- What the census's mark on a row says (1.1, Fern's #30): its senders split on the guild's leader
@@ -314,7 +475,38 @@ local function NetOff(guild)
 end
 Data.NetOff = NetOff
 
-function Data.Receive(r, sender)
+-- (1.2.3) A census report heard on the channel (Comm.lua), as Codec.DecodeReport reads it; or, when
+-- it is its sender's last report taken but for its time, the row that report made, as it stands
+-- (Data.Receive takes it as that report again). nil for a text that is no report.
+function Data.DecodeReport(text, sender)
+	local who = ns.FullName(sender)
+	local at, stop, st = ns.Codec.ReportTime(text)
+	heard.r, heard.who, heard.text, heard.at, heard.stop, heard.st = nil, who, text, at, stop, st
+	heard.again, heard.entry = false, nil
+	local e = at and repeats[who]
+	if e then
+		local guilds = ns.rdb and ns.rdb.guilds
+		local row = e.row
+		if type(guilds) ~= "table" or guilds[row.guild] ~= row or row.heardOn ~= ns.realm then
+			repeats[who] = nil -- (its row went)
+		-- The same text but for field 25, compared where it lies: nothing is cut out of it for that.
+		elseif at == #e.head and #text - stop + 1 == #e.tail and text:find(e.head, 1, true) == 1
+			and (e.tail == "" or text:find(e.tail, stop, true) == stop) then
+			heard.r, heard.again, heard.entry = row, true, e
+			return row
+		end
+	end
+	heard.r = ns.Codec.DecodeReport(text)
+	if heard.r == nil then heard.text = nil end
+	return heard.r
+end
+
+-- A report from a sender (r: from Codec.DecodeReport, or Data.DecodeReport), taken or not.
+-- h: what Data.DecodeReport kept of it, when r came from there.
+local function Take(r, sender, h)
+	-- (1.2.3) r is the row of his last report, which that same report again finds as it stands: it
+	-- keeps its time and votes until it is taken (the listeners, an outvoted report, see it so).
+	local again = h ~= nil and h.again
 	if not ns.IsFederation(r.guild) then return false end
 	-- 1.1: a guild the moderators took off (net-off): its report counts for nothing, not even as a vote.
 	if ns.Moderation.Report and ns.Moderation.Report(r, sender) then return false end
@@ -336,12 +528,12 @@ function Data.Receive(r, sender)
 		return false
 	end
 	if not Data.ClaimGuild(who, r.guild) then
-		local claimed = senderGuild[who]
-		ns.Log("ignored %s: already reported %s, now claims %s", who, claimed and claimed.guild or "?", r.guild)
+		ns.Log("ignored %s: already reported %s, now claims %s", who, Data.ClaimedGuild(who) or "?", r.guild)
 		return false
 	end
 	-- One guild whatever the case it is spelled in: the spelling already stored is its key, and
 	-- a report under another spelling is one more vote on that guild.
+	local spelled = r.guild
 	r.guild = Data.GuildKey(r.guild) or r.guild
 	local previous = ns.rdb.guilds[r.guild]
 	-- Realms of one census group share this store, but a name without a realm takes the realm
@@ -349,46 +541,106 @@ function Data.Receive(r, sender)
 	-- in that realm's form: compared with ours, the same reporter and officers would look new
 	-- (a false conflict), so here it counts as no report at all.
 	if previous and previous.heardOn and previous.heardOn ~= ns.realm then previous = nil end
-	local previousWho = previous and (previous.reporterFull or ns.FullName(previous.reporter))
-	r.t = ns.Now()
-	r.reporter = ns.DisplayName(who)
-	r.reporterFull = who
-	r.heardOn = ns.realm
-	-- The realm of the sender's name as we got it, not the report's `from`: a report's short
-	-- names are compared with senders in that same form (a sender that reaches us without a
-	-- realm carries ours, whatever realm it plays on).
-	r.realm = ns.RealmOf(who) or ns.realm
-	local now = r.t
+	local now = ns.Now()
+	if not again then -- (his same report again: its row says all this already)
+		r.t = now
+		r.reporter = ns.DisplayName(who)
+		r.reporterFull = who
+		r.heardOn = ns.realm
+		-- The realm of the sender's name as we got it, not the report's `from`: a report's short
+		-- names are compared with senders in that same form (a sender that reaches us without a
+		-- realm carries ours, whatever realm it plays on).
+		r.realm = ns.RealmOf(who) or ns.realm
+	end
 	-- Every report is its sender's vote on who leads the guild and who its officers are. Ranks
 	-- count only from the picture most senders agree on (Data.KnownRank): one sender changing
 	-- or repeating a report can't move it, and two pictures with as many senders each are a
 	-- contest where no rank counts. Nothing here needs saved history (the Forever beta client
 	-- never loads it back).
 	local votes = Votes(previous and previous.vouch, now)
-	local ranks = Ranks(r)
-	-- n (1.1): the size this sender gives, for the census's dispute mark (Data.Dispute).
-	votes[who] = { t = now, sig = Signature(r, ranks), ranks = ranks, n = tonumber(r.total) }
-	r.vouch = votes
+	local vote
+	if again then
+		-- (1.2.3) His last vote's picture: the same leader, officers and size give the same one.
+		local last = h.entry.vote
+		vote = { t = now, sig = last.sig, ranks = last.ranks, n = last.n }
+	else
+		local ranks = Ranks(r)
+		-- n (1.1): the size this sender gives, for the census's dispute mark (Data.Dispute).
+		vote = { t = now, sig = Signature(r, ranks), ranks = ranks, n = tonumber(r.total) }
+		r.vouch = votes
+	end
+	votes[who] = vote
 	local top, _, tops = Majority(votes, now)
 	-- Against the picture most senders give while that picture is fresh: the vote counts, the
 	-- row everyone sees (and the King's guild's leader with it) stays the majority's.
-	if previous and top and votes[who].sig ~= top and now - (previous.t or 0) <= Data.FRESH then
+	if previous and top and vote.sig ~= top and now - (previous.t or 0) <= Data.FRESH then
 		previous.vouch = votes
 		if not previous.outvoted then ns.Log("conflict on %s: %s's report is not what the other senders say", r.guild, who) end
 		previous.outvoted = true
-		ns.Fire("DATA_CHANGED")
+		if again then h.entry.vote = vote end
+		Data.ChangedSoon() -- (1.2.1: within NOTIFY_GAP, once for a burst)
 		return false
 	end
 	-- Shown in the census: the senders are split on this guild (no picture leads).
 	local pictures = 0
 	for _ in pairs(tops) do pictures = pictures + 1 end
-	r.conflict = (top == nil and pictures > 1) and true or nil
-	if r.conflict and not (previous and previous.conflict) then
+	local conflict = (top == nil and pictures > 1) and true or nil
+	if conflict and not (previous and previous.conflict) then
 		ns.Log("conflict on %s: the senders are split on it", r.guild)
 	end
+	-- (1.2.1) A guild not kept yet: room for it first (MAX_GUILDS, Data.Trim).
+	local stored = ns.rdb.guilds[r.guild]
+	if stored == nil then Data.Trim(1) end
+	-- (1.2.1) Its row taken since DATA_CHANGED last went out: the listeners see it now, before
+	-- this one replaces it (one guild heard twice within NOTIFY_GAP).
+	if stored ~= nil and unseen[stored] then Tell() end
+	-- (1.2.3) His same report again: its row as a new report alike but for its time makes it (a
+	-- new time, field 25, the votes counted now, no other sender's report outvoted against it).
+	if again then r.t, r.st, r.vouch, r.outvoted = now, h.st, votes, nil end
+	r.conflict = conflict
 	ns.rdb.guilds[r.guild] = r
-	ns.Fire("DATA_CHANGED")
+	-- (1.2.3) The row it replaced is no sender's report any more; this one's text is kept for his
+	-- next (Data.DecodeReport), when it came from there spelling its guild as the row's key.
+	if stored ~= nil and stored ~= r and stored.reporterFull ~= who then Forget(stored) end
+	if again then
+		h.entry.vote = vote
+	elseif h ~= nil and h.at and spelled == r.guild then
+		local e = repeats[who] or {}
+		e.head, e.tail, e.row, e.vote = h.text:sub(1, h.at), h.text:sub(h.stop), r, vote
+		repeats[who] = e
+	else
+		repeats[who] = nil
+	end
+	Data.ChangedSoon(r) -- (1.2.1: within NOTIFY_GAP, once for a burst)
 	return true
+end
+
+function Data.Receive(r, sender)
+	local h = r ~= nil and heard.r == r and heard.who == ns.FullName(sender) and heard or nil
+	local taken = Take(r, sender, h)
+	heard.r, heard.text, heard.entry = nil, nil, nil -- (the text goes with its report)
+	return taken
+end
+
+-- (1.2.3) Once a minute, with the evening count: the claims CLAIM_TTL old keep only their guild
+-- (Data.ClaimGuild), still answered by Data.ClaimedGuild; the kept reports whose row went another
+-- way than a report (a reset, another realm's store) or is older than FRESH (its guild quiet) go:
+-- their sender's next report is decoded, as any.
+function Data.Housekeeping(now)
+	now = now or ns.Now()
+	for who, c in pairs(senderGuild) do
+		if type(c) == "table" and now - (c.t or 0) >= Data.CLAIM_TTL then senderGuild[who] = c.guild end
+	end
+	local guilds = ns.rdb and ns.rdb.guilds
+	for who, e in pairs(repeats) do
+		if type(guilds) ~= "table" or guilds[e.row.guild] ~= e.row or now - (e.row.t or 0) > Data.FRESH then repeats[who] = nil end
+	end
+end
+-- (Tests: how many senders' reports are kept.)
+function Data.Repeats()
+	local n = 0
+	for _ in pairs(repeats) do n = n + 1 end
+	return n
 end
 
 -- What rank does this sender really have in that guild? Our own guild: from our roster.
@@ -410,8 +662,8 @@ function Data.KnownRank(sender, guild, soft)
 	local _, _, tops = Majority(votes, now)
 	-- The rank the leading picture gives (every leading picture, if they tie: then only what
 	-- they all agree on counts), named by someone else too: a report never proves its own
-	-- sender's rank. The Crown (every guild master, the officers of <Olympus>) needs two
-	-- senders naming them (theirs may be one).
+	-- sender's rank. The Lords (every guild master, the officers of <Olympus>: ns.IsLordRank)
+	-- need two senders naming them (theirs may be one).
 	-- A sender is itself by its name alone: "Asmon-OtherRealm" can't vouch for "Asmon-Realm".
 	local self = ns.ShortName(who)
 	local bySig, total, named, others = {}, 0, 0, 0
@@ -441,7 +693,7 @@ function Data.KnownRank(sender, guild, soft)
 			if sig:sub(-2) == ",+" then return nil end
 		end
 	end
-	if ns.IsCrownRank(guild, rank) then
+	if ns.IsLordRank(guild, rank) then
 		if named < 2 and not soft then return nil end
 		if now - (ns.Comm and ns.Comm.loginAt or 0) < Data.CROWN_AFTER then return nil end
 	end
@@ -614,26 +866,31 @@ function Data.ZoneTrend(key)
 end
 
 ns.On("LOGIN", function()
-	ns.Every(Data.EVENING_EVERY, "evening count", function() Data.SampleEvening() end)
+	ns.Every(Data.EVENING_EVERY, "evening count", function()
+		Data.Housekeeping() -- (1.2.3: the census's own, on the same tick)
+		Data.SampleEvening()
+	end)
 end)
 
+-- (1.2.1) The guilds' names, their leaders' and the zones come from other players' reports: each
+-- through Codec.Discord, so none ends the table's block or shows as Discord's markup.
 function Data.DiscordText()
 	local s = Data.Summary()
-	local F = ns.FormatNumber
+	local F, D = ns.FormatNumber, ns.Codec.Discord
 	local out = {}
 	out[#out + 1] = L.DISCORD_HEADER:format(F(s.total), F(s.online), #s.guilds)
 	local where = {}
 	for i = 1, math.min(8, #s.zoneList) do
 		local z = s.zoneList[i]
-		where[#where + 1] = ns.Zones.NameForKey(z.key) .. " " .. F(z.count)
+		where[#where + 1] = D(ns.Zones.NameForKey(z.key)) .. " " .. F(z.count)
 	end
 	if #where > 0 then out[#out + 1] = L.DISCORD_WHERE .. table.concat(where, " · ") end
 	out[#out + 1] = "```"
 	out[#out + 1] = ("%-22s %7s %7s  %s"):format("Guild", "Members", "Online", "Leader")
 	for _, e in ipairs(s.guilds) do
 		local g = e.g
-		local leader = g.leader and (g.leader .. (g.leaderOnline and " (on)" or "")) or "?"
-		out[#out + 1] = ("%-22s %7s %7s  %s%s"):format(e.name, F(g.total), F(g.online), leader, e.fresh and "" or "  [stale]")
+		local leader = g.leader and (D(g.leader, true) .. (g.leaderOnline and " (on)" or "")) or "?"
+		out[#out + 1] = ("%-22s %7s %7s  %s%s"):format(D(e.name, true), F(g.total), F(g.online), leader, e.fresh and "" or "  [stale]")
 	end
 	out[#out + 1] = "```"
 	out[#out + 1] = ("_Olympus addon v%s_"):format(ns.VERSION)

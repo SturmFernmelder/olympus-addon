@@ -39,7 +39,7 @@ local function Frame(parent)
 	return f
 end
 
-local function WithGossip(fn)
+local function WithGossip(fn, clientGlobals)
 	local w = FW.New({ seed = 7, compliance = "shipped" })
 	local a = w:Player(H.World.NAMES.fighterA, { bonesTrained = false })
 	w:Stand(a.name, FW.INN, true)
@@ -86,7 +86,7 @@ local function WithGossip(fn)
 	end
 	a.globals.UnitGUID = function(unit) if unit == "npc" then return "Creature-0-1-0-1-295-00001" end end
 	a.globals.UnitName = function(unit) if unit == "npc" then return "Localized Innkeeper" end end
-	a.globals.C_GossipInfo = { CloseGossip = function() closed = closed + 1; f:Hide() end }
+	a.globals.C_GossipInfo = { CloseGossip = function() closed = closed + 1; f:Hide(); w:Fire(a, "GOSSIP_CLOSED") end }
 	a.globals.InCombatLockdown = function() return w.combat == true end
 	local after = a.ns.After
 	a.ns.After = function(_, _, call) pending[#pending + 1] = call end
@@ -95,6 +95,8 @@ local function WithGossip(fn)
 		eq(f.shown, false, "native conversation closed before training launch")
 		starts[#starts + 1] = { what = what, id = id, extra = extra }; return true
 	end
+	-- Install optional native globals before As snapshots the host for restoration.
+	for key, value in pairs(clientGlobals or {}) do a.globals[key] = value end
 	w:As(a, function()
 		assert(loadfile(H.ADDON_DIR .. "InnkeeperGossip.lua"))("Olympus", a.ns)
 		local g = a.ns.InnkeeperGossip
@@ -186,6 +188,34 @@ test("Innkeeper gossip: local dialogue follows the native quest contrast theme",
 			eq(fs.fixedColor, true)
 		end
 	end)
+end)
+
+test("Innkeeper gossip: real input switches retain reload notice after native geometry is parked", function()
+	local hostEnum, hostStyle = Enum, C_InputInterfaceStyle
+	local style, notices = 0, 0
+	WithGossip(function(g, t)
+		assert(loadfile(H.ADDON_DIR .. "GamepadRegistry.lua"))("Olympus", t.a.ns)
+		assert(loadfile(H.ADDON_DIR .. "Gamepad.lua"))("Olympus", t.a.ns)
+		t.a.ns.Dialog = { Show = function() notices = notices + 1; return true end }
+		local gate = t.a.ns.Gate
+		eq(g.ShowRow(), true); g.Open(); g.Park()
+		eq(g.State().saved, nil, "borrowed geometry has already been restored")
+		style = 1
+		t.w:Fire(t.a, "INPUT_DEVICE_INTERFACE_TRANSITION", 1, 0)
+		t.pending[#t.pending]()
+		assert(table.concat(gate.leftovers, ","):find("innkeeper-gossip", 1, true), "font registration remains until reload")
+		eq(notices, 1); eq(g.State().mode, "inactive")
+		style = 0
+		t.w:Fire(t.a, "INPUT_DEVICE_INTERFACE_TRANSITION", 0, 1); t.pending[#t.pending]()
+		style = 1
+		t.w:Fire(t.a, "INPUT_DEVICE_INTERFACE_TRANSITION", 1, 0); t.pending[#t.pending]()
+		eq(notices, 1, "notice is once per session")
+	end, {
+		C_InputInterfaceStyle = { GetCurrentStyle = function() return style end },
+		Enum = { InputDeviceInterfaceType = { KeyboardAndMouse = 0, Gamepad = 1 } },
+	})
+	eq(Enum, hostEnum, "the input-switch fixture leaves the host Enum intact")
+	eq(C_InputInterfaceStyle, hostStyle, "the input-switch fixture leaves the host input style intact")
 end)
 
 test("Innkeeper gossip: missing native template or unreadable content extent leaves no visible partial choice", function()
@@ -303,7 +333,10 @@ test("Innkeeper gossip: confirmation starts the real free lesson with the NPC's 
 	end)
 end)
 
-test("Innkeeper gossip: missing native capability retains the existing Olympus offer", function()
+-- (1.2.1, a player's report: "I don't wanna play bones every time I go to an inn." The fallback
+-- window opened by itself at every conversation with an innkeeper; it now waits for the player's
+-- ask on the Bones page, FarkleTable.WantKeeper, and that ask serves one conversation.)
+test("Innkeeper gossip: missing native capability keeps the Olympus offer for a player who asked for the innkeeper, never by itself at each visit", function()
 	WithGossip(function(g, t)
 		GossipFrame = nil
 		local FT = t.a.ns.FarkleTable
@@ -314,15 +347,67 @@ test("Innkeeper gossip: missing native capability retains the existing Olympus o
 			shown = shown + 1; return true
 		end
 		g.OnShow(); t.pending[1]()
-		eq(shown, 1); eq(g.State().mode, "inactive")
+		eq(shown, 0, "a visit alone opens nothing"); eq(g.State().mode, "inactive")
+		FT.WantKeeper()
+		g.OnShow(); t.pending[2]()
+		eq(shown, 1, "asked for on the Bones page: the offer"); eq(g.State().mode, "inactive")
+		g.OnShow(); t.pending[3]()
+		eq(shown, 1, "the ask served that conversation")
 	end)
 end)
 
-test("Innkeeper gossip: a delayed native close event still hides the conversation before training", function()
+-- (1.2.1, review: after a No to "Bones at innkeepers" an untrained player had no way to his first
+-- game. The No hides the row at each visit; the Bones page's ask, FarkleTable.WantKeeper, brings it
+-- back for one conversation, through its Not now and the panel's own events, spent as it closes.)
+test("Innkeeper gossip: with Bones at innkeepers off the row stays hidden; the Bones page's ask shows it for one conversation, spent as it closes", function()
+	WithGossip(function(g, t)
+		local FT = t.a.ns.FarkleTable
+		FT.SetKeeperOffer(false)
+		local ok, why = g.ShowRow()
+		eq(ok, false); eq(why, "off", "off: no row at a visit")
+		FT.WantKeeper()
+		eq(g.ShowRow(), true, "asked for: the row in this conversation")
+		t.w:Fire(t.a, "GUILD_ROSTER_UPDATE")
+		eq(g.State().mode, "row", "the panel's own events keep it")
+		eq(g.Open(), true); g.State().dialog.cancel.scripts.OnClick()
+		eq(g.State().mode, "row", "Not now: back to the row, the same conversation")
+		t.f:Hide(); t.w:Fire(t.a, "GOSSIP_CLOSED")
+		eq(FT.KeeperWanted(), false, "spent as that conversation closed")
+		t.f:Show()
+		ok, why = g.ShowRow()
+		eq(ok, false); eq(why, "off", "the next visit: hidden again")
+		-- Asked again: the free lesson starts from the row as with the switch on.
+		FT.WantKeeper()
+		eq(g.ShowRow(), true); eq(g.Open(), true); eq(g.Confirm(), true)
+		eq(#t.starts, 1); eq(t.starts[1].what, "practice"); eq(t.starts[1].extra.learn, true)
+		eq(FT.KeeperWanted(), false, "spent")
+	end)
+end)
+
+test("Innkeeper gossip: a delayed native close event owns closing the conversation before training", function()
 	WithGossip(function(g, t)
 		C_GossipInfo.CloseGossip = function() end
 		eq(g.ShowRow(), true); eq(g.Open(), true); eq(g.Confirm(), true)
-		eq(t.f.shown, false); eq(#t.starts, 1)
+		eq(t.f.shown, true, "addon never hides the native panel directly"); eq(#t.starts, 0)
+		eq(g.Confirm(), false, "confirmation cannot queue twice")
+		t.f:Hide(); t.w:Fire(t.a, "GOSSIP_CLOSED")
+		eq(#t.starts, 1); eq(t.starts[1].extra.learn, true)
+		t.w:Fire(t.a, "GOSSIP_CLOSED"); eq(#t.starts, 1, "close is idempotent")
+	end)
+end)
+
+test("Innkeeper gossip: native close handler order and cancelled training remain safe", function()
+	WithGossip(function(g, t)
+		C_GossipInfo.CloseGossip = function() end
+		eq(g.ShowRow(), true); eq(g.Open(), true); eq(g.Confirm(), true)
+		t.w:Fire(t.a, "GOSSIP_CLOSED")
+		eq(#t.starts, 0, "our event may run before Blizzard hides its panel")
+		t.f:Hide(); t.pending[#t.pending]()
+		eq(#t.starts, 1)
+		t.f:Show(); eq(g.ShowRow(), true); eq(g.Open(), true); eq(g.Confirm(), true)
+		t.w:Fire(t.a, "PLAYER_REGEN_DISABLED")
+		t.f:Hide(); t.w:Fire(t.a, "GOSSIP_CLOSED")
+		eq(#t.starts, 1, "combat cancels a queued close before training")
 	end)
 end)
 

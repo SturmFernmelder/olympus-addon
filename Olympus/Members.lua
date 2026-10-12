@@ -447,6 +447,9 @@ function Members.CheckLords(now)
 			-- guild where only he runs the addon, every report says he is online.
 			local stale = age > ns.Data.FRESH
 			local days = (g.leaderOnline and 0 or (g.leaderDays or 0)) + ((stale or not g.leaderOnline) and math.max(0, age) / 86400 or 0)
+			-- (1.2.1: seen in his guild by /who this quarter-hour, he is online, whatever the report said:
+			-- the Realm tree's word, Views.SeenNow.)
+			if ns.Views and ns.Views.SeenNow and ns.Views.SeenNow(name, g.leader) then days = 0 end
 			if days < Members.WarnDays() then
 				warned[name] = nil
 			elseif warned[name] ~= g.leader then

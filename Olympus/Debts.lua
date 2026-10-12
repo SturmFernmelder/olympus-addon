@@ -376,7 +376,9 @@ local function OnClaim(dist, sender, mode, body)
 	local gk, pk64, sig64, level = ns.Arena.Fields(body, 4)
 	local guid = ns.Arena.GuidOf(gk)
 	local pk, sig = Raw(pk64, 32), Raw(sig64, 64)
-	if not guid or not pk or not sig or not ns.Ed25519.ValidPublicKey(pk) then return end
+	-- (1.2.1: the key's own check, a point decoded, is the signature job's, Ed25519.Verify, in its
+	-- time slices and one job per sender: never here, where every forged claim would pay for it.)
+	if not guid or not pk or not sig then return end
 	local key = Lower(sender)
 	local have = verified[key]
 	if have and have.gk == gk and have.pk == pk then return end
@@ -1036,6 +1038,16 @@ end
 
 -- Receipts heard (auditors: exposure and evidence; banks: the token's history).
 Debts.receiptHooks = {} -- fn(r, sender, mode)
+Debts.RECEIPTS_MAX = 2000        -- an auditor's receipts kept...
+Debts.RECEIPTS_PER_SENDER = 200  -- ...one sender's at most (his oldest go first): no flood pushes the others' out
+-- (1.2.1) What an auditor or a bank keeps of a receipt (the evidence, an arbiter's exposure, a
+-- bank's standing history) is the Wallet's and the stakes'. With neither (the release), a receipt is
+-- only its two parties' own: the payer's debt it clears, the payee's confirmation.
+local function KeepsReceipts()
+	local C = ns.Compliance
+	if type(C) ~= "table" then return false end
+	return (type(C.Wallet) == "function" and C.Wallet() == true) or (type(C.Arbiters) == "function" and C.Arbiters() == true)
+end
 local function OnReceipt(dist, sender, mode, body)
 	if dist ~= "WHISPER" then return end
 	local ref, payer, payee, copper, how, time, onTime = ns.Arena.Fields(body, 7)
@@ -1056,12 +1068,18 @@ local function OnReceipt(dist, sender, mode, body)
 		end
 	end
 	local R = ns.ArenaRoles
-	if R and R.Auditor(ns.me, mode) then
+	local keeps = KeepsReceipts()
+	if keeps and R and R.Auditor(ns.me, mode) then
 		local s = Store(mode)
 		s.receipts = type(s.receipts) == "table" and s.receipts or {}
 		local list = s.receipts
 		list[#list + 1] = r
-		while #list > 2000 do table.remove(list, 1) end
+		local who, his, oldest = r.from:lower(), 0, nil
+		for i, x in ipairs(list) do
+			if type(x) == "table" and type(x.from) == "string" and x.from:lower() == who then his, oldest = his + 1, oldest or i end
+		end
+		if his > Debts.RECEIPTS_PER_SENDER then table.remove(list, oldest) end
+		while #list > Debts.RECEIPTS_MAX do table.remove(list, 1) end
 	end
 	-- The payer's word to me, the payee: confirmed once I saw the gold (before or after this).
 	r.mode = mode
@@ -1078,7 +1096,9 @@ local function OnReceipt(dist, sender, mode, body)
 			table.insert(echoes[key], r)
 		end
 	end
-	for _, fn in ipairs(Debts.receiptHooks) do ns.SafeCall("arena receipt", fn, r, sender, mode) end
+	if keeps then
+		for _, fn in ipairs(Debts.receiptHooks) do ns.SafeCall("arena receipt", fn, r, sender, mode) end
+	end
 	ns.Arena.Changed()
 end
 ns.Comm.Handle("ZR", ns.Arena.Handle("ZR", OnReceipt))
@@ -1189,6 +1209,9 @@ function Debts.FeeReceipt(payer, copper, ref, mode)
 	if not ns.db or type(payer) ~= "string" or type(ref) ~= "string" then return false end
 	copper = math.floor(tonumber(copper) or 0)
 	if copper <= 0 then return false end
+	-- (1.2.1: ZF waits for the Wallet, Compliance.WALLET_WIRE: a receipt that cannot go is not kept.)
+	local C = ns.Compliance
+	if not (type(C) == "table" and type(C.Wire) == "function" and C.Wire("ZF") == true) then return false end
 	ns.db.arenaFees = type(ns.db.arenaFees) == "table" and ns.db.arenaFees or {}
 	local fees = ns.db.arenaFees
 	local key = ("%s|%s|%d"):format(Lower(payer), ref, copper)

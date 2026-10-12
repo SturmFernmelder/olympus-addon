@@ -207,17 +207,28 @@ function Hop.Chance(mapID, zoneUID)
 	return math.min(1, Hop.OFFERS / math.max(1, crowd))
 end
 
--- 1.2.0: an Olympus member (our roster, or his guild's claim the channel takes, Channels.VerifiedLevel
--- 1+), never a stranger on an unsealed channel: only one gets an offer, a window or an invite.
+-- 1.2.0: an Olympus member (our roster, or a member of another Olympus guild that
+-- Channels.VerifiedLevel verified), never a stranger on an unsealed channel: only one gets an
+-- offer, a window or an invite, and only one's offer is taken. 1.2.1: a guild named in the sender's
+-- own messages is only his word (VerifiedLevel's 1, false): anyone on the channel can write it.
+-- The King's pinned name, his Steward and Hands, and the High Council (the author's signed list)
+-- are the King's or the author's word, whatever guild they play in: VerifiedLevel verifies the
+-- King's titles only for his own guild, and a councillor below an officer's rank nowhere.
 local function Member(sender)
 	local R = ns.Roster
 	if R and R.RankOf and R.RankOf(sender) ~= nil then return true end
+	local K = ns.King
+	if (ns.IsKingCharacter and ns.IsKingCharacter(sender))
+		or (type(K) == "table" and not K.missing and K.IsStewardName and (K.IsStewardName(sender) or K.IsHandName(sender)))
+		or (ns.IsHighCouncillor and ns.IsHighCouncillor(sender) == true) then
+		return true
+	end
 	local C, M = ns.Channels, ns.Moderation
 	if type(C) ~= "table" or type(C.VerifiedLevel) ~= "function" then return false end
 	local guild = M and M.GuildOf and M.GuildOf(sender)
 	if type(guild) ~= "string" or guild == "" or not (ns.IsFederation and ns.IsFederation(guild)) then return false end
-	local ok, level = pcall(C.VerifiedLevel, sender, guild)
-	return ok and type(level) == "number" and level >= 1
+	local ok, level, verified = pcall(C.VerifiedLevel, sender, guild)
+	return ok and type(level) == "number" and level >= 1 and verified == true
 end
 Hop.Member = Member
 
@@ -251,9 +262,19 @@ function Hop.HandleAsk(dist, sender, text)
 	Hop.after(0.2 + Hop.random() * 2.3, "hop offer", function()
 		-- We may have moved, entered combat or stopped sharing during that pause.
 		if offered[key] ~= offer then return end
-		if not Hop.CanHelp(mapID, zoneUID) then offered[key] = nil; return end
+		local function Allowed()
+			return offered[key] == offer and Member(sender)
+				and not (ns.Moderation.Hides and ns.Moderation.Hides(sender))
+				and Hop.CanHelp(mapID, zoneUID)
+		end
+		if not Allowed() then offered[key] = nil; return end
 		local group, load = Hop.GroupState(), Load()
-		ns.Comm.Whisper(sender, ("LO~%d~%d~%d"):format(id, group, load), nil, true)
+		local body = ("LO~%d~%d~%d"):format(id, group, load)
+		ns.Comm.Whisper(sender, body, nil, true, false, function(sent)
+			if not sent and offered[key] == offer then offered[key] = nil end
+		end, { owner = Hop, key = "hop-offer:" .. key, permit = function(_, _, dist, target, msg)
+			return dist == "WHISPER" and target == sender and msg == body and Allowed()
+		end })
 		stats.offers = stats.offers + 1
 	end)
 end
@@ -291,13 +312,19 @@ function Hop.HandleRequest(dist, sender, text)
 	-- alone or with hop guests; in a group of our own we get the window, until "Always invite"
 	-- is clicked in it (1.1.5, #50: then that group too, GroupAutoActive).
 	-- "For Olympus!" invites on its own only for a King two reports confirm.
-	local auto = ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))
+	-- 1.2.1: both, only for a player the addon can vouch for (Hop.Trusted: roster, signed or
+	-- pinned); a member of another guild the census names gets the window, a click.
+	local wanted = ns.db.layerAutoInvite or (KingChoice() == "auto" and OnKingLayer(true))
+	local auto = wanted and Hop.Trusted(sender)
 	if auto and (OnlyGuests() or GroupAutoActive()) then return Invite(sender, id, true) end
 	if auto then
 		stats.autoBlocked = stats.autoBlocked + 1
 		ns.Print(L.HOP_AUTO_PAUSED_GROUP)
 	end
-	pending = { from = sender, id = id, t = ns.Now(), mapID = offer.mapID, zoneUID = offer.zoneUID }
+	-- unvouched: the player chose not to be asked, and only Hop.Trusted brought this window up
+	-- (Answer: its no is no step towards the pause).
+	pending = { from = sender, id = id, t = ns.Now(), mapID = offer.mapID, zoneUID = offer.zoneUID,
+		unvouched = (wanted and not auto) and true or nil }
 	-- In an instance or on Busy (1.1, ns.Alert): no sound and no window; they come once the player
 	-- is out, while the asker still waits (Hop.WAIT), else the request only lapses.
 	local ask = pending
@@ -311,7 +338,9 @@ local function Answer(data, invite, always)
 	if not data or pending ~= data then return end
 	pending = nil
 	-- A button can be clicked long after its offer. Recheck every eligibility gate.
-	if invite and (ns.Now() - data.t > Hop.WAIT or not Hop.CanHelp(data.mapID, data.zoneUID)) then
+	if invite and (ns.Now() - data.t > Hop.WAIT or not Member(data.from)
+		or (ns.Moderation.Hides and ns.Moderation.Hides(data.from))
+		or not Hop.CanHelp(data.mapID, data.zoneUID)) then
 		SayNo(data.from, data.id)
 		return Changed()
 	end
@@ -327,11 +356,16 @@ local function Answer(data, invite, always)
 		Invite(data.from, data.id, always)
 	else
 		SayNo(data.from, data.id)
-		-- Not now (or no answer) twice in a row: a break from requests.
-		declines = declines + 1
-		if declines >= Hop.DECLINES then
-			declines = 0
-			pausedUntil = ns.Now() + Hop.PAUSE
+		-- Not now (or no answer) twice in a row: a break from requests. 1.2.1: never for a window
+		-- of "Always invite" or "For Olympus!" that only trust brought up (unvouched): a helper away
+		-- from the keyboard would stop inviting his guildmates on their own too, and one member of
+		-- another guild could keep him switched off with two requests every 5 minutes.
+		if not data.unvouched then
+			declines = declines + 1
+			if declines >= Hop.DECLINES then
+				declines = 0
+				pausedUntil = ns.Now() + Hop.PAUSE
+			end
 		end
 	end
 	Changed()
@@ -587,33 +621,25 @@ function Hop.SendAsk()
 	Changed()
 end
 
--- A helper the addon can vouch for: a guildmate (our roster), or a Lord or Captain. Until the
--- author explicitly activates signed enforcement, preserve the documented census rule exactly;
--- after it, only the manifest (plus the pinned Crown identities) counts. Their invite is accepted
--- for the player; anyone else's is left to the game's invite
--- window (one click), so nobody pulls a player into their group just by answering an ask read
--- on the channel. (A layer announcement is the sender's own word: it proves nothing here.)
+-- A player the addon can vouch for, and so may act for without a click: a guildmate (our roster),
+-- the King's pinned character, his Steward and Hands, or a Lord or Captain of the King's guild in
+-- the author's signed manifest (once signed enforcement is on). Their invite is accepted for the
+-- player, and "Always invite" or "For Olympus!" invites them; anyone else's invite is left to the
+-- game's invite window (one click), and anyone else's request to ours, so nobody pulls a player
+-- into a group just by answering an ask read on the channel. 1.2.1: never a census rank: two
+-- cooperating characters can forge an "officer" in one guild's reports, and the census rule still
+-- holds while enforcement is off. A census officer of another guild still hops, by a click.
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army) nor another guild's
+-- signed Lord or Captain: under enforcement any guild's would have been trusted by every Olympus
+-- client; he still helps with a hop, by the player's click. (A layer announcement is the sender's
+-- own word: it proves nothing here.)
 function Hop.Trusted(name)
 	name = ns.FullName(name)
 	if ns.Roster.RankOf(name) then return true end
-	if ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced() then
-		if ns.IsKingCharacter(name) or (ns.King and (ns.King.IsStewardName(name) or ns.King.IsHandName(name))) then return true end
-		local guild, rank = ns.Authority.Role(name)
-		if guild and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild)) then return true end
-		return false
-	end
-	local short = ns.ShortName(name)
-	for guild, g in pairs(ns.rdb.guilds or {}) do
-		-- (1.1: never a guild the moderators took off the network, Moderation.lua.)
-		if type(g) == "table" and not (ns.Data.NetOff and ns.Data.NetOff(guild)) then
-			local listed = g.leader and ns.ShortName(g.leader) == short
-			for _, o in ipairs(not listed and g.officers or {}) do
-				if o.name and ns.ShortName(o.name) == short then listed = true break end
-			end
-			if listed and ns.Data.KnownRank(name, guild) then return true end
-		end
-	end
-	return false
+	if ns.IsKingCharacter(name) or (ns.King and (ns.King.IsStewardName(name) or ns.King.IsHandName(name))) then return true end
+	if not (ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced()) then return false end
+	local guild, rank = ns.Authority.Role(name)
+	return (guild and ns.IsKingGuild(guild) and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild))) and true or false
 end
 
 function Hop.HandleOffer(dist, sender, text)
@@ -623,6 +649,8 @@ function Hop.HandleOffer(dist, sender, text)
 	sender = ns.FullName(sender)
 	if ns.Moderation.Hides and ns.Moderation.Hides(sender) then return end -- (1.1: net-off: no offer of theirs)
 	if ask.offers[sender] or ask.count >= Hop.MAX_OFFERS then return end
+	-- 1.2.1: only a member's offer (Member): the ask's id is on the channel for anyone to answer.
+	if not Member(sender) then stats.strangers = (stats.strangers or 0) + 1 return end
 	ask.offers[sender] = { name = sender, group = math.min(tonumber(group), 40), load = math.min(tonumber(load), 99), t = ns.Now(),
 		trusted = Hop.Trusted(sender) }
 	ask.count = ask.count + 1
@@ -631,19 +659,18 @@ end
 
 function Hop.HandleNo(dist, sender, text)
 	if dist ~= "WHISPER" or not ask or ask.phase ~= "requested" then return end
-	if tonumber(text:match("^LN~(%d+)$")) ~= ask.id or ns.ShortName(ns.FullName(sender)) ~= ns.ShortName(ask.helper) then return end
+	if tonumber(text:match("^LN~(%d+)$")) ~= ask.id or ns.FullName(sender) ~= ask.helper then return end -- (1.2.1: the whole name)
 	Hop.Next()
 end
 
 -- The invite we asked for: accept it for the player (anyone else's invite is left alone).
 -- A helper asked before may still invite late (after we moved on): theirs counts too.
+-- 1.2.1: by the whole name (the game names an inviter of our realm without it, ns.FullName): a
+-- namesake on another realm of our group is not the helper we asked.
 local function AskedHelper(name)
-	if not name then return nil end
-	local short = ns.ShortName(name)
-	for helper in pairs(ask.tried) do
-		if ns.ShortName(helper) == short then return helper end
-	end
-	return nil
+	if type(name) ~= "string" or name == "" then return nil end
+	local full = ns.FullName(name)
+	return ask.tried[full] and full or nil
 end
 
 function Hop.OnInvite(name) -- gp:party-invite
@@ -656,9 +683,10 @@ function Hop.OnInvite(name) -- gp:party-invite
 	if problem then return Finish(problem) end
 	-- Not one the addon can vouch for (Hop.Trusted): the game's own window, the player's click.
 	-- With the gamepad UI, always: the addon leaves the game's popups alone there (Dialog.lua),
-	-- and the game's invite window is the one a controller answers.
+	-- and the game's invite window is the one a controller answers. (1.2.1: asked again now, not
+	-- only when the offer came: a signed role can lapse, a guildmate leave, in between.)
 	local o = ask.offers[helper]
-	if not (o and o.trusted) or ns.GamepadUI() then
+	if not (o and o.trusted and Hop.Trusted(helper)) or ns.GamepadUI() then
 		-- The player decides: the wait starts over from this invite, and the group they may
 		-- join counts as this helper's (OnRoster) even before the game names its members.
 		ask.helper, ask.invitedBy, ask.asked = helper, helper, ns.Now()
@@ -791,7 +819,7 @@ end
 function Hop.HandleRelease(dist, sender, text)
 	if dist ~= "WHISPER" or not ask or ask.phase ~= "joined" or not ask.helper then return end
 	if tonumber(text:match("^LX~(%d+)$")) ~= ask.id then return end
-	if ns.ShortName(ns.FullName(sender)) ~= ns.ShortName(ask.helper) then return end
+	if ns.FullName(sender) ~= ask.helper then return end -- (1.2.1: the whole name, not a namesake's)
 	Leave(L.HOP_RELEASED:format(ns.DisplayName(ask.helper)))
 end
 

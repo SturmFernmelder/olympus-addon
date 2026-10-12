@@ -326,19 +326,370 @@ test("hop adversarial (1.2.0): a stranger on the channel gets no offer, and his 
 		eq(#w.whispered, 0, "no offer to a stranger")
 		H.HandleRequest("WHISPER", "Stranger-Realm", "LR~42")
 		eq(#w.invited, 0); eq(#w.popups, 0)
-		-- A member of another federation guild, whose guild claim the channel takes: helped.
+		-- A member of another federation guild the channel verified (Channels.VerifiedLevel's
+		-- level, verified: here an officer the census names) is helped: the offer and the window.
+		-- (Changed on purpose, 1.2.1: the stub returned 1, false, a guild only claimed, and expected
+		-- an invite; such a claim is anyone's word now, its own test below.)
 		w.strangers["Ally-Realm"] = true
 		local guildOf, level = ns.Moderation.GuildOf, ns.Channels.VerifiedLevel
 		ns.Moderation.GuildOf = function(n) return ns.FullName(n) == "Ally-Realm" and "Olympus III" or guildOf(n) end
-		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 1, false end return level(n, g) end
+		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 2, true, 1 end return level(n, g) end
+		ns.db.layerAutoInvite = nil
 		local ok, err = pcall(function()
 			H.HandleAsk("CHANNEL", "Ally-Realm", "LQ~43~1453~7")
 			eq(w.whispered[1], "Ally-Realm LO~43~0~0")
 			H.HandleRequest("WHISPER", "Ally-Realm", "LR~43")
-			eq(w.invited[1], "Ally", "Always invite: invited")
+			eq(#w.popups, 1, "the window")
+			H.Answer(w.popups[1].data, true)
+			eq(w.invited[1], "Ally", "invited on the click")
 		end)
 		ns.Moderation.GuildOf, ns.Channels.VerifiedLevel = guildOf, level
 		ns.db.layerAutoInvite = nil
 		if not ok then error(err, 0) end
 	end)
+end)
+
+-- Review of 1.2.1: a guild named in the sender's own messages (Moderation.GuildOf) is only his
+-- word, and anyone on the channel can write "Olympus" into one: Channels.VerifiedLevel answers
+-- 1, false for it. Not membership: no offer (it tells him who helps on that layer), no window and
+-- no invite, even with Always invite.
+test("hop security (1.2.1): a claimed Olympus guild gets no offer, window or invite, even with Always invite", function()
+	WithHop(function(w, H)
+		w.see(7)
+		w.strangers["Claimer-Realm"] = true
+		local guildOf = ns.Moderation.GuildOf
+		ns.Moderation.GuildOf = function(n) if ns.FullName(n) == "Claimer-Realm" then return "Olympus Claimed" end return guildOf(n) end
+		local ok, err = pcall(function()
+			local level, verified = ns.Channels.VerifiedLevel("Claimer-Realm", "Olympus Claimed")
+			eq(level, 1); eq(verified, false, "the channel's own answer: a claim, not verified")
+			ns.db.layerAutoInvite = true
+			H.HandleAsk("CHANNEL", "Claimer-Realm", "LQ~42~1453~7")
+			eq(#w.whispered, 0, "no offer")
+			H.HandleRequest("WHISPER", "Claimer-Realm", "LR~42")
+			eq(#w.invited, 0, "no invite"); eq(#w.popups, 0, "no window")
+			eq(H.Stats().strangers, 2)
+		end)
+		ns.Moderation.GuildOf = guildOf
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- The asker's side (HandleOffer had no check): the ask's id is on the channel, so anyone could
+-- answer it with an offer and be asked for the invite.
+test("hop security (1.2.1): the asker takes no offer from a claimed guild; a verified member of another guild still helps", function()
+	WithHop(function(w, H)
+		w.see(7)
+		w.strangers["Claimer-Realm"], w.strangers["Stranger-Realm"], w.strangers["Ally-Realm"] = true, true, true
+		local guildOf, level = ns.Moderation.GuildOf, ns.Channels.VerifiedLevel
+		ns.Moderation.GuildOf = function(n)
+			local full = ns.FullName(n)
+			if full == "Claimer-Realm" then return "Olympus Claimed" end
+			if full == "Ally-Realm" then return "Olympus III" end
+			return guildOf(n)
+		end
+		ns.Channels.VerifiedLevel = function(n, g) if ns.FullName(n) == "Ally-Realm" then return 2, true, 1 end return level(n, g) end
+		local ok, err = pcall(function()
+			H.Ask(1453, 8, "destination")
+			H.HandleOffer("WHISPER", "Stranger-Realm", "LO~1~0~0")
+			H.HandleOffer("WHISPER", "Claimer-Realm", "LO~1~0~0")
+			eq(H.State().count, 0, "neither offer is taken")
+			w.clock = w.clock + H.WINDOW; H.Tick()
+			eq(#w.whispered, 0, "nobody is asked for the invite")
+			H.HandleOffer("WHISPER", "Ally-Realm", "LO~1~0~0")
+			eq(H.State().count, 1, "a verified member of another guild")
+			H.Tick()
+			eq(w.whispered[1], "Ally-Realm LR~1")
+		end)
+		ns.Moderation.GuildOf, ns.Channels.VerifiedLevel = guildOf, level
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- Review of 1.2.1: Hop.Trusted counted a Lord or Captain the census names, and while signed
+-- enforcement is off (as 1.2.1 ships) two cooperating characters can forge one in their guild's
+-- reports. That trust accepted his invite for the player (AcceptGroup) and let "Always invite" or
+-- "For Olympus!" invite him without a click. Now only our roster, signed or pinned people; a
+-- census officer of another guild (Channels.VerifiedLevel's 2, true) still hops by a click.
+local RealTrusted = ns.Hop.Trusted
+local function WithCensusOfficer(w, H, fn)
+	H.Trusted = RealTrusted -- (WithHop puts it back)
+	w.strangers["Officer-Realm"] = true
+	local guildOf, known, guilds = ns.Moderation.GuildOf, ns.Data.KnownRank, ns.rdb.guilds
+	ns.rdb.guilds = { ["Olympus III"] = { total = 40, online = 4, zones = {}, t = w.clock, leader = "Leadperson",
+		leaderOnline = false, officers = { { name = "Officer" } }, top = {} } }
+	-- The census's word that "Officer" is an officer there (two reports, Data.KnownRank).
+	ns.Data.KnownRank = function(n, g, soft)
+		if ns.FullName(n) == "Officer-Realm" and g == "Olympus III" then return 1, 2 end
+		return known(n, g, soft)
+	end
+	ns.Moderation.GuildOf = function(n) if ns.FullName(n) == "Officer-Realm" then return "Olympus III" end return guildOf(n) end
+	local ok, err = pcall(function()
+		local level, verified = ns.Channels.VerifiedLevel("Officer-Realm", "Olympus III")
+		eq(level, 2); eq(verified, true, "the census verifies him: a member")
+		fn()
+	end)
+	ns.Moderation.GuildOf, ns.Data.KnownRank, ns.rdb.guilds = guildOf, known, guilds
+	if not ok then error(err, 0) end
+end
+
+test("hop security (1.2.1): Always invite and For Olympus! invite a census officer of another guild only on a click", function()
+	for _, mode in ipairs({ "always", "king" }) do
+		WithHop(function(w, H)
+			WithCensusOfficer(w, H, function()
+				local S, saved = ns.HopSightings, ns.HopSightings.LocalKingLayer
+				local ok, err = pcall(function()
+					w.see(7)
+					if mode == "always" then ns.db.layerAutoInvite = true
+					else
+						S.LocalKingLayer = function(mapID, zoneUID) return mapID == 1453 and zoneUID == 7 end
+						H.ChooseKing("auto")
+					end
+					eq(RealTrusted("Officer-Realm"), false, "the census alone vouches for nobody")
+					H.HandleAsk("CHANNEL", "Officer-Realm", "LQ~42~1453~7")
+					eq(w.whispered[1], "Officer-Realm LO~42~0~0", "still offered")
+					H.HandleRequest("WHISPER", "Officer-Realm", "LR~42")
+					eq(#w.invited, 0, mode .. ": not invited on its own")
+					eq(#w.popups, 1, mode .. ": the window")
+					H.Answer(w.popups[1].data, true)
+					eq(w.invited[1], "Officer", "invited on the click")
+					-- A guildmate is still invited on its own (alone with a hop guest: OnlyGuests).
+					w.group, w.lead, w.party.party1 = 2, true, "Officer"
+					w.clock = w.clock + H.HELP_GAP + 1
+					H.HandleAsk("CHANNEL", "Mate-Realm", "LQ~43~1453~7")
+					H.HandleRequest("WHISPER", "Mate-Realm", "LR~43")
+					eq(w.invited[2], "Mate", mode .. ": a guildmate, on its own"); eq(#w.popups, 1)
+				end)
+				S.LocalKingLayer = saved
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end
+end)
+
+test("hop security (1.2.1): a census officer's invite is never accepted for the player; a guildmate's is", function()
+	WithHop(function(w, H)
+		WithCensusOfficer(w, H, function()
+			w.see(7)
+			H.Ask(1453, 8, "destination")
+			H.HandleOffer("WHISPER", "Officer-Realm", "LO~1~0~0")
+			eq(H.State().count, 1, "his offer is taken: a verified member")
+			w.clock = w.clock + H.WINDOW; H.Tick()
+			eq(w.whispered[1], "Officer-Realm LR~1")
+			H.OnInvite("Officer")
+			eq(w.accepted, 0, "the game's invite window: the player clicks")
+			eq(H.State().phase, "requested")
+			-- The player accepts by hand: the hop goes on as the officer's.
+			w.group, w.party.party1 = 2, "Officer"; H.OnRoster()
+			eq(H.State().phase, "joined")
+		end)
+	end)
+	WithHop(function(w, H)
+		H.Trusted = RealTrusted
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Mate-Realm", "LO~1~0~0")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		H.OnInvite("Mate")
+		eq(w.accepted, 1, "a guildmate's invite is accepted for the player")
+	end)
+end)
+
+test("hop security (1.2.1): trust is asked again at the invite, and a pinned or signed title still counts", function()
+	WithHop(function(w, H)
+		H.Trusted = RealTrusted
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Mate-Realm", "LO~1~0~0")
+		assert(H.State().offers["Mate-Realm"].trusted, "a guildmate when he offered")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		w.strangers["Mate-Realm"] = true -- (out of our roster before his invite)
+		H.OnInvite("Mate")
+		eq(w.accepted, 0, "not one of ours any more: the player clicks")
+		local K, saved = ns.King, ns.King.IsStewardName
+		K.IsStewardName = function(n) return ns.FullName(n) == "Stewardy-Realm" end
+		local ok, err = pcall(function()
+			w.strangers["Stewardy-Realm"] = true
+			eq(RealTrusted("Stewardy-Realm"), true, "the signed titles' Steward")
+			eq(RealTrusted("Nobody-Realm"), true, "(a guildmate in this harness)")
+			w.strangers["Nobody-Realm"] = true
+			eq(RealTrusted("Nobody-Realm"), false, "anyone else")
+		end)
+		K.IsStewardName = saved
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- Review of 1.2.1: the helper we asked was matched by his short name, so a namesake on another
+-- realm of our group ("Helper-Otherrealm") had his invite accepted for the player as the helper's,
+-- and his LN or LX (the ask's id is on the channel) moved our ask on or took us out of the group.
+test("hop security (1.2.1): a namesake on another realm is not the helper we asked: invite, no and release", function()
+	WithHop(function(w, H)
+		w.see(7)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Helper-Realm", "LO~1~0~0")
+		H.HandleOffer("WHISPER", "Second-Realm", "LO~1~0~0")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		eq(H.State().helper, "Helper-Realm")
+		H.OnInvite("Helper-Otherrealm")
+		eq(w.accepted, 0, "a namesake's invite is not accepted for the player")
+		eq(H.State().invitedBy, nil, "nor taken as the helper's")
+		H.HandleNo("WHISPER", "Helper-Otherrealm", "LN~1")
+		eq(H.State().helper, "Helper-Realm", "a namesake's no does not move the ask on")
+		eq(H.State().phase, "requested")
+		H.OnInvite("Helper")
+		eq(w.accepted, 1, "the helper of our realm, named without it by the game")
+		w.group, w.party.party1 = 2, "Helper"; H.OnRoster()
+		eq(H.State().phase, "joined")
+		H.HandleRelease("WHISPER", "Helper-Otherrealm", "LX~1")
+		eq(w.left, 0, "a namesake's release does not take us out of the group")
+		eq(H.State().phase, "joined")
+		H.HandleRelease("WHISPER", "Helper-Realm", "LX~1")
+		eq(w.left, 1, "the helper's own does")
+	end)
+end)
+
+-- Review of 1.2.1, after 52b7a66: with Always invite or For Olympus! on, a member of another guild
+-- the addon cannot vouch for gets the window. Two of those windows left unanswered (a helper away
+-- from the keyboard, For Olympus!'s very case) paused all helping for 5 minutes, a guildmate's
+-- automatic invite too, and one census officer could keep automatic helpers switched off that way
+-- with two requests every 5 minutes. Such a window's no is still a no to him, never a step towards
+-- the pause: before 52b7a66 he was invited without one, so it could not pause the helper either.
+test("hop security (1.2.1): unanswered windows of members we cannot vouch for never pause an automatic helper", function()
+	for _, mode in ipairs({ "always", "king" }) do
+		WithHop(function(w, H)
+			WithCensusOfficer(w, H, function()
+				local S, saved = ns.HopSightings, ns.HopSightings.LocalKingLayer
+				local ok, err = pcall(function()
+					w.see(7)
+					if mode == "always" then ns.db.layerAutoInvite = true
+					else
+						S.LocalKingLayer = function(mapID, zoneUID) return mapID == 1453 and zoneUID == 7 end
+						H.ChooseKing("auto")
+					end
+					for i = 1, H.DECLINES do
+						H.HandleAsk("CHANNEL", "Officer-Realm", ("LQ~%d~1453~7"):format(40 + i))
+						H.HandleRequest("WHISPER", "Officer-Realm", ("LR~%d"):format(40 + i))
+						eq(#w.popups, i, mode .. ": window " .. i)
+						-- Not answered: its timeout (OnCancel), as Escape or Not now.
+						StaticPopupDialogs.OLYMPUS_HOP_REQUEST.OnCancel(nil, w.popups[i].data)
+						eq(w.whispered[#w.whispered], ("Officer-Realm LN~%d"):format(40 + i), mode .. ": still a no to him")
+						w.clock = w.clock + H.HELP_GAP + 1
+					end
+					eq(#w.invited, 0)
+					eq(H.CanHelp(1453, 7), true, mode .. ": no pause")
+					H.HandleAsk("CHANNEL", "Mate-Realm", "LQ~50~1453~7")
+					eq(w.whispered[#w.whispered], "Mate-Realm LO~50~0~0", mode .. ": a guildmate is offered")
+					H.HandleRequest("WHISPER", "Mate-Realm", "LR~50")
+					eq(w.invited[1], "Mate", mode .. ": and invited on his own"); eq(#w.popups, H.DECLINES)
+				end)
+				S.LocalKingLayer = saved
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end
+	-- The pause itself stays for windows the player has to answer: no automatic mode.
+	WithHop(function(w, H)
+		WithCensusOfficer(w, H, function()
+			w.see(7)
+			for i = 1, H.DECLINES do
+				H.HandleAsk("CHANNEL", "Officer-Realm", ("LQ~%d~1453~7"):format(40 + i))
+				H.HandleRequest("WHISPER", "Officer-Realm", ("LR~%d"):format(40 + i))
+				StaticPopupDialogs.OLYMPUS_HOP_REQUEST.OnCancel(nil, w.popups[i].data)
+				w.clock = w.clock + H.HELP_GAP + 1
+			end
+			eq(H.CanHelp(1453, 7), false, "two unanswered windows: a break")
+			w.clock = w.clock + H.PAUSE
+			w.see(7)
+			eq(H.CanHelp(1453, 7), true, "over after the pause")
+		end)
+	end)
+end)
+
+-- Review of 1.2.1, after 395d290: the King's pinned name, his Steward and Hands, and the High
+-- Council (the author's signed list) are the King's or the author's word, not a guild claim.
+-- Channels.VerifiedLevel verifies the King's titles only for his own guild, and a councillor below
+-- an officer's rank nowhere, so one who plays in another Olympus guild got no offer, window or
+-- invite, and his offers were dropped. A guild only claimed still counts for nothing.
+test("hop security (1.2.1): a councillor or the King's Hand of another guild still hops; a claimed guild alone does not", function()
+	local function With(fn)
+		WithHop(function(w, H)
+			H.Trusted = RealTrusted
+			w.see(7)
+			local names = { ["Councilly-Realm"] = true, ["Handy-Realm"] = true, ["Claimant-Realm"] = true }
+			for name in pairs(names) do w.strangers[name] = true end
+			local guildOf, rdb, K, hand = ns.Moderation.GuildOf, ns.rdb, ns.King, ns.King.IsHandName
+			local council = rdb.council
+			ns.Moderation.GuildOf = function(n) if names[ns.FullName(n)] then return "Olympus III" end return guildOf(n) end
+			rdb.council = { names = { councilly = true } }
+			K.IsHandName = function(n) return ns.FullName(n) == "Handy-Realm" end
+			local ok, err = pcall(function()
+				for name in pairs(names) do
+					local level, verified = ns.Channels.VerifiedLevel(name, "Olympus III")
+					eq(level, 1); eq(verified, false, name .. ": the channel verifies none of them")
+				end
+				eq(ns.IsHighCouncillor("Councilly-Realm"), true, "the signed council names him")
+				fn(w, H)
+			end)
+			ns.Moderation.GuildOf, rdb.council, K.IsHandName = guildOf, council, hand
+			if not ok then error(err, 0) end
+		end)
+	end
+	With(function(w, H)
+		eq(H.Member("Councilly-Realm"), true, "a councillor")
+		eq(H.Member("Handy-Realm"), true, "the King's Hand")
+		eq(H.Member("Claimant-Realm"), false, "a claim alone")
+		-- Helping: the councillor gets the offer and the window, and is invited on the click.
+		H.HandleAsk("CHANNEL", "Councilly-Realm", "LQ~42~1453~7")
+		eq(w.whispered[1], "Councilly-Realm LO~42~0~0", "offered")
+		H.HandleRequest("WHISPER", "Councilly-Realm", "LR~42")
+		eq(#w.popups, 1, "the window")
+		H.Answer(w.popups[1].data, true)
+		eq(w.invited[1], "Councilly", "invited on the click")
+		-- The Hand, with Always invite: the addon vouches for him (Hop.Trusted), so on his own.
+		ns.db.layerAutoInvite = true
+		H.HandleAsk("CHANNEL", "Handy-Realm", "LQ~43~1453~7")
+		eq(w.whispered[#w.whispered], "Handy-Realm LO~43~0~1", "offered (one recent invite)")
+		H.HandleRequest("WHISPER", "Handy-Realm", "LR~43")
+		eq(w.invited[2], "Handy", "invited on his own"); eq(#w.popups, 1)
+		-- The claim alone: nothing, even with Always invite.
+		H.HandleAsk("CHANNEL", "Claimant-Realm", "LQ~44~1453~7")
+		H.HandleRequest("WHISPER", "Claimant-Realm", "LR~44")
+		eq(#w.invited, 2); eq(#w.popups, 1)
+		eq(w.whispered[#w.whispered], "Handy-Realm LO~43~0~1", "no offer to a claim")
+	end)
+	-- Asking: the councillor's and the Hand's offers are taken, the claimer's is not.
+	With(function(w, H)
+		H.Ask(1453, 8, "destination")
+		H.HandleOffer("WHISPER", "Claimant-Realm", "LO~1~0~0")
+		eq(H.State().count, 0, "a claim's offer")
+		H.HandleOffer("WHISPER", "Councilly-Realm", "LO~1~0~0")
+		H.HandleOffer("WHISPER", "Handy-Realm", "LO~1~0~0")
+		eq(H.State().count, 2, "the councillor's and the Hand's")
+		w.clock = w.clock + H.WINDOW; H.Tick()
+		assert(w.whispered[1] == "Councilly-Realm LR~1" or w.whispered[1] == "Handy-Realm LR~1", tostring(w.whispered[1]))
+	end)
+end)
+
+-- Review of 1.2.1: the texts of Always invite and For Olympus! still promised that every player
+-- who asks is invited without a window, while only the players Hop.Trusted vouches for are (our
+-- guildmates, the King's Steward and Hands). They say so now, and that players of other guilds still
+-- get the window, in both languages.
+test("hop texts (1.2.1): Always invite and For Olympus! say who is invited on his own, and that other guilds still get the window", function()
+	local root = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]hop%-regressions%.lua$")) or "./"
+	local pt = { L = setmetatable({}, { __index = ns.L }) }
+	local savedLocale = GetLocale
+	GetLocale = function() return "ptBR" end
+	local ok, err = pcall(function() assert(loadfile(root .. "Olympus/Locales.lua"))("Olympus", pt) end)
+	GetLocale = savedLocale
+	if not ok then error(err, 0) end
+	for _, key in ipairs({ "HOP_KING_PROMPT", "HOP_KING_AUTO", "HOP_AUTO_ON", "HOP_AUTO_TIP", "HOP_AUTO_GROUP_ON" }) do
+		local en, br = ns.L[key], rawget(pt.L, key)
+		assert(type(br) == "string" and br ~= en, key .. ": its own Portuguese")
+		assert(en:find("guildmates", 1, true), "English " .. key .. " names who: " .. en)
+		assert(br:find("colegas de guilda", 1, true), "pt-BR " .. key .. " names who: " .. br)
+		if key ~= "HOP_AUTO_GROUP_ON" then
+			assert(en:find("other guilds", 1, true), "English " .. key .. ": other guilds still asked")
+			assert(br:find("outras guildas", 1, true), "pt-BR " .. key .. ": other guilds still asked")
+		end
+	end
 end)

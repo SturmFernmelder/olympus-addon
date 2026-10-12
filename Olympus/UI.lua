@@ -131,15 +131,27 @@ UI.personRows = {}
 -- the card then shows "Edit my profile", which calls it (ProfileEdit.lua's Edit in this window).
 UI.profileEditors = {}
 
+-- (1.2.3) The send box names where it goes: another guild's master's Royal decree or Tabard
+-- inspection, his or its officers' Call to Arms or Muster, his own guild alone (Decree.Ask).
 local function DecreeAction(kind)
 	return function()
 		if ns.Decree.CanSend(kind) then
-			ns.ShowDialog("OLYMPUS_DECREE", ns.Decree.Label({ kind = kind }), nil, kind)
+			ns.ShowDialog("OLYMPUS_DECREE", ns.Decree.Ask(kind), nil, kind)
 		else
 			ns.Print(ns.Decree.CROWN_ONLY[kind] and L.CROWN_PREVIEW_NOTE or L.DECREE_PREVIEW_NOTE)
 			ns.Decree.Preview(kind)
 		end
 	end
+end
+-- (1.2.3) A decree's button says what this player's does: its name (another guild's master's or
+-- officer's: his guild's) and whom it reaches, or that a click is a preview.
+local function DecreeButton(key, kind)
+	return { key, DecreeAction(kind),
+		label = function() return ns.Decree.ButtonLabel(kind) end,
+		tooltip = function(tt)
+			tt:AddLine(ns.Decree.ButtonLabel(kind), 1, 0.82, 0)
+			tt:AddLine(ns.Decree.ButtonTip(kind), 1, 1, 1, true)
+		end }
 end
 
 -- Three buttons per tab, like "Guild Information / Add Member / Guild Control".
@@ -164,9 +176,9 @@ local BUTTONS = {
 		{ "COPY_BTN", function() UI.ShowCopy(L.COPY_DISCORD, ns.Data.DiscordText()) end },
 	},
 	decrees = {
-		{ "ARMS_BTN", DecreeAction("ARMS") },
-		{ "MUSTER_BTN", DecreeAction("MUSTER") },
-		{ "ROYAL_BTN", DecreeAction("ROYAL") },
+		DecreeButton("ARMS_BTN", "ARMS"),
+		DecreeButton("MUSTER_BTN", "MUSTER"),
+		DecreeButton("ROYAL_BTN", "ROYAL"),
 	},
 	heraldry = {
 		{ "PATROL_BTN", function() ns.Inspect.SetPatrol(not ns.Inspect.IsPatrolling()) end },
@@ -295,7 +307,7 @@ local DETAIL_BUTTONS = {
 			label = function() return ns.ViewAs.Previewing() and L.VIEW_AS_PREVIEW_BTN:format(ns.ViewAs.Label()) or L.VIEW_AS_TITLE end },
 	},
 	heraldry = {
-		{ "HERALDRY_BTN", DecreeAction("HERALDRY") },
+		DecreeButton("HERALDRY_BTN", "HERALDRY"),
 		{ "CLEAR", function() ns.ShowDialog("OLYMPUS_CLEAR_INSPECT") end },
 	},
 	-- The King's switches: what the army sees of the treasury (each its own).
@@ -1538,18 +1550,10 @@ local function SetButtons(list, defs)
 	if list == main.detailButtons then LayoutDetailButtons() end
 end
 
--- Shows tab `key` in the window in use, and the window if it is closed. `focus`: the id of the
--- row it opens on (Views.lua: a guild clicked in the Census), in sight (UI.KeepPlace).
-local function ShowTab(key, focus)
-	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
-	main.tab = key
-	for k, v in pairs(main.views) do v:SetShown(k == key) end
-	main.scroll:SetScrollChild(main.views[key])
-	main.scroll:SetVerticalScroll(0)
-	-- A tab opened: its list starts at the top, or at the row it opens on (UI.KeepPlace).
-	main.page, main.wantScroll, main.focus = nil, nil, focus
-	-- The Throne is a page of parchment with dark ink (the rows use line.font).
-	if key == "throne" and not main.parchment then
+-- The Throne and explicitly registered Realm parchment pages share this existing surface.
+-- Refresh owns its visibility: in-page navigation need not select an outer tab again.
+local function SetParchment(on)
+	if on and not main.parchment then
 		local p = main.scroll:CreateTexture(nil, "BACKGROUND")
 		p:SetAllPoints(main.scroll)
 		local file = UI.FirstTexture(UI.PARCHMENTS)
@@ -1562,7 +1566,19 @@ local function ShowTab(key, focus)
 		end
 		main.parchment = p
 	end
-	if main.parchment then main.parchment:SetShown(key == "throne") end
+	if main.parchment then main.parchment:SetShown(on) end
+end
+
+-- Shows tab `key` in the window in use, and the window if it is closed. `focus`: the id of the
+-- row it opens on (Views.lua: a guild clicked in the Census), in sight (UI.KeepPlace).
+local function ShowTab(key, focus)
+	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
+	main.tab = key
+	for k, v in pairs(main.views) do v:SetShown(k == key) end
+	main.scroll:SetScrollChild(main.views[key])
+	main.scroll:SetVerticalScroll(0)
+	-- A tab opened: its list starts at the top, or at the row it opens on (UI.KeepPlace).
+	main.page, main.wantScroll, main.focus = nil, nil, focus
 	for i, tab in ipairs(main.tabs) do
 		if main.tabStyle == "side" then
 			-- The HD window's icon tabs: the selected one stays checked.
@@ -1871,7 +1887,7 @@ function UI.Refresh()
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
 		else
-			lines, title, text = ns.Views.Build(main.tab)
+			lines, title, text = ns.Views.Build(main.tab, s) -- (1.2.3: the header's summary, not a second one)
 			-- The treasury next to the soldiers, on the Treasury tab (Treasury.HeaderText; 1.1.5, the
 			-- author's call: no longer on the Throne, the treasury has its own tab).
 			if main.tab == "treasury" then
@@ -1880,6 +1896,8 @@ function UI.Refresh()
 			end
 		end
 		-- 1.2: the author's View as says in the header that what shows is a role's preview.
+		SetParchment(not locked and not playerProfile and (main.tab == "throne"
+			or main.tab == "realm" and ns.Views.PageParchment and ns.Views.PageParchment() == true))
 		if previewing then main.sub:SetText("|cffff9933" .. L.VIEW_AS_PREVIEWING:format(views.Label()) .. "|r") end
 		FitHeader()
 		if main.viewAs then
@@ -2510,7 +2528,7 @@ function UI.Toggle()
 end
 
 -- Reports come in bursts (every guild answers a census request within seconds, a patrol
--- inspects a crowd): the window redraws at once for the first news and then at most once
+-- inspects a crowd): the window redraws soon for the first news and then at most once
 -- every REDRAW_GAP, so a busy channel never redraws it dozens of times a second.
 UI.REDRAW_GAP = 0.5
 -- 1.1.6 (the owner's game: a 1000-member guild, about two census reports a second, a laptop):
@@ -2524,16 +2542,19 @@ UI.lastCost = 0
 function UI.RedrawGap()
 	return math.min(UI.REDRAW_MAX_GAP, math.max(UI.REDRAW_GAP, (UI.lastCost or 0) * UI.REDRAW_COST))
 end
+-- 1.2.1: always through its timer (at the next frame when the gap is over), never inside the
+-- listener that asked: a census change, a search typed, an event of the game's.
 local redrawQueued = false
+-- (1.2.3: one function for every queued redraw, not a new one each time.)
+function UI.QueuedRefresh()
+	redrawQueued = false
+	UI.Refresh()
+end
 function UI.RefreshSoon()
 	if not main or not main:IsShown() or redrawQueued then return end
-	local wait = UI.RedrawGap() - (GetTime() - (UI.lastRedraw or 0))
-	if wait <= 0 then return UI.Refresh() end
+	local wait = math.max(0, UI.RedrawGap() - (GetTime() - (UI.lastRedraw or 0)))
 	redrawQueued = true
-	ns.After(wait, "ui redraw", function()
-		redrawQueued = false
-		UI.Refresh()
-	end)
+	ns.After(wait, "ui redraw", UI.QueuedRefresh)
 end
 
 -- Typed into a tab's search box (Views.SetFilter): that list again, soon. A search that starts
@@ -2615,7 +2636,11 @@ UI.LINKS = {
 -- for the privacy switches and the chats (the same strings, so they never disagree), and the
 -- links. In the copy box, so a link can be copied; its buttons are Report a bug and (1.1.5) the
 -- version letters, every one (Letters.lua): the Olympus window's "i" keeps them.
-function UI.ShowHelp()
+-- (1.2.1) Its text is made once a session (its lines never change in one), and the copy box keeps
+-- it while nothing else is shown there: the help opened again sets no text (UI.ShowCopy).
+local helpText
+function UI.HelpText()
+	if helpText then return helpText end
 	local lines = {
 		L.TITLE .. " " .. tostring(ns.VERSION),
 		"",
@@ -2651,7 +2676,11 @@ function UI.ShowHelp()
 		"  " .. L.HELP_ISSUES .. ": " .. UI.LINKS.issues,
 		"  CurseForge: " .. UI.LINKS.curseforge,
 	}
-	UI.ShowCopy(L.HELP_TITLE, table.concat(lines, "\n"), { label = L.REPORT_BUG, fn = function() UI.ShowBugReport() end },
+	helpText = table.concat(lines, "\n")
+	return helpText
+end
+function UI.ShowHelp()
+	UI.ShowCopy(L.HELP_TITLE, UI.HelpText(), { label = L.REPORT_BUG, fn = function() UI.ShowBugReport() end },
 		{ second = { label = L.LETTERS_BTN, fn = function() ns.Letters.ShowHistory() end } })
 end
 
@@ -2701,7 +2730,9 @@ local function CopyFrame(key, big)
 	eb:SetAutoFocus(false)
 	eb:SetScript("OnEscapePressed", function() f:Hide() end)
 	eb:SetScript("OnTextChanged", function(self, userInput)
-		if userInput then -- read only
+		-- Read only: what the player typed goes. (1.2.1) Only a text that is not the box's own is
+		-- set back: a client that called the box's own SetText typed would set it again and again.
+		if userInput and self:GetText() ~= (f.text or "") then
 			self:SetText(f.text or "")
 			self:HighlightText()
 		end
@@ -2733,11 +2764,18 @@ local function CopyFrame(key, big)
 	return f
 end
 
+-- (1.2.1) Its first opening's parts each in a ns.SafeCall of their own (the window made, its text
+-- set, shown, the Issue Reporter's step, the keyboard), so the in-game timer that measured 2.7 s
+-- for a whole first opening of the help on a slow laptop says which part takes it.
 function UI.ShowCopy(title, text, action, opts)
 	text = ns.Codec.NoMentions(text)
 	opts = type(opts) == "table" and opts or {}
 	local key = type(opts.key) == "string" and opts.key or "copy"
-	local copyFrame = CopyFrame(key, opts.big)
+	local copyFrame = copyFrames[key]
+	if not copyFrame then
+		ns.SafeCall("copy window made", function() copyFrame = CopyFrame(key, opts.big) end)
+		if not copyFrame then return nil end
+	end
 	local button = copyFrame.action
 	button.fn = action and action.fn or nil
 	button:SetShown(action ~= nil)
@@ -2791,9 +2829,13 @@ function UI.ShowCopy(title, text, action, opts)
 		end
 	end
 	ns.SetWindowTitle(copyFrame, title)
-	copyFrame.text = text
-	copyFrame.eb:SetText(text)
-	copyFrame:Show()
+	-- (1.2.1) The text the box shows already (the help opened again): kept as it is laid out, never
+	-- set again for the client to lay out once more.
+	if copyFrame.text ~= text or copyFrame.eb:GetText() ~= text then
+		copyFrame.text = text
+		ns.SafeCall("copy text", function() copyFrame.eb:SetText(text) end)
+	end
+	ns.SafeCall("copy show", function() copyFrame:Show() end)
 	-- At its own place it steps above the Issue Reporter, like our window (its hint is
 	-- right over the reporter's default spot).
 	if not copyFrame.movedByPlayer then
@@ -2804,8 +2846,10 @@ function UI.ShowCopy(title, text, action, opts)
 	-- opts.auto (1.1.2): opened by itself, not by the player's click (a bug report that came in,
 	-- a version check's answer): never the keyboard, in either input mode, or his movement keys
 	-- and the chat line he was typing would go into it. A click in the text (or Select all) takes it.
-	if opts.auto or not ns.Focus(copyFrame.eb) then copyFrame.eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end) end
-	copyFrame.eb:HighlightText()
+	ns.SafeCall("copy focus", function()
+		if opts.auto or not ns.Focus(copyFrame.eb) then copyFrame.eb:SetScript("OnEditFocusGained", function(self) self:HighlightText() end) end
+		copyFrame.eb:HighlightText()
+	end)
 	return copyFrame
 end
 function UI.CopyFrame(key) return copyFrames[key or "copy"] end
@@ -2817,6 +2861,7 @@ function UI.CopyFrame(key) return copyFrames[key or "copy"] end
 local minimapButton
 
 local function PositionMinimapButton() -- gp:minimap
+	if not (minimapButton and rawget(_G, "Minimap")) then return end -- (no minimap: nothing to place on)
 	local angle = math.rad(ns.db.minimapAngle or 200)
 	-- On the ring, like Blizzard's own minimap buttons (and LibDBIcon): 5 past the map's edge.
 	local radius = (Minimap:GetWidth() / 2) + 5

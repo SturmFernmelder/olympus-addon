@@ -15,6 +15,14 @@ local function Read(path)
 end
 local function HN(w, c) return W3.M(w, c, "HonorsNet") end
 local function Prof(w, c) return W3.M(w, c, "ArenaProfile") end
+-- A logout and a login: the release client, its save came back (Arena.Persists). Where it did not
+-- (a first session, the Forever beta) the King's letter waits in the Edit's list (honors-letter.lua).
+local function Kept(w, c)
+	w:Logout(c)
+	w:Login(c)
+	W3.Rules(w, c)
+	return c
+end
 
 -- A title fight won by `winner` (a vacant global belt: he holds it), as its public arbiter's AE
 -- reaches `to` (the core keeps the title fights: no companion needed).
@@ -29,9 +37,11 @@ end
 
 print("HonorsNet: the level race (IL)")
 
-test("1.2 the fights part: the level race (the design: the first to 20, 40, 60): a level-up claim goes 60 s after, is kept unvouched until a census report of another sender lists him there, then takes the place after CONFIRM_AFTER; a later claim never takes it; the place never moves", function()
+-- (1.2.1, the security review: one census row of anyone else's vouched for a claim, so a forged
+-- report could win a place. Two senders of the claimant's guild are asked now: the second report.)
+test("1.2 the fights part: the level race (the design: the first to 20, 40, 60): a level-up claim goes 60 s after, is kept unvouched until two census senders of his guild list him there, then takes the place after CONFIRM_AFTER; a later claim never takes it; the place never moves", function()
 	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } }, { "late", "Corin Ash", { level = 19 } },
-		{ "reporter", "Dovan Quell" } } })
+		{ "reporter", "Dovan Quell" }, { "reporter2", "Elsa Thornby" } } })
 	local young, viewer = cast.young, cast.spectator
 	-- (The race starts at the 1.2 release, after the test world's clock: here, a day before it.)
 	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
@@ -48,8 +58,12 @@ test("1.2 the fights part: the level race (the design: the first to 20, 40, 60):
 	for _, c in pairs(s.claims) do claim = c end
 	eq(claim.level, 20); eq(claim.vouched, false)
 	eq(#(s.levels[20] or {}), 0, "unvouched: no place")
-	-- The census: another sender's report of her guild, her at 20.
+	-- The census: another sender's report of her guild, her at 20: one row, no proof (1.2.1).
 	W3.Report(viewer, "Olympus Vale", cast.reporter, { { name = "Brisa Vale", level = 20, class = "MA" } })
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	eq(claim.vouched, false, "one census row")
+	-- Her guild's second sender, in his turn: vouched.
+	W3.Report(viewer, "Olympus Vale", cast.reporter2, { { name = "Brisa Vale", level = 20, class = "MA" } })
 	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
 	eq(claim.vouched, true)
 	eq(#(s.levels[20] or {}), 0, "vouched, still waiting CONFIRM_AFTER")
@@ -62,6 +76,8 @@ test("1.2 the fights part: the level race (the design: the first to 20, 40, 60):
 	w:Fire(cast.late, "PLAYER_LEVEL_UP", 20)
 	w:Run(61)
 	W3.Report(viewer, "Olympus Ash", cast.reporter, { { name = "Corin Ash", level = 20, class = "WA" } })
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	W3.Report(viewer, "Olympus Ash", cast.reporter2, { { name = "Corin Ash", level = 20, class = "WA" } })
 	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
 	w:Run(viewer.ns.Honors.CONFIRM_AFTER + 2)
 	eq(#s.levels[20], 1); eq(s.levels[20][1].name, young.name, "the place never moves")
@@ -88,6 +104,276 @@ test("1.2 the fights part: IL is never sent once the milestone's place is known 
 	viewer.globals.GetPlayerInfoByGUID = function(guid) return "Mage", "MAGE", "Human", "Human", 2, "Other Person", "" end
 	w:As(viewer, function() viewer.ns.Arena.Inject("CHANNEL", young.name, "IL~L1~" .. table.concat({ viewer.ns.Arena.GK(young.guid), "k", "0" }, "~")) end)
 	eq(viewer.ns.HonorsNet.Stats().refused.gk, 1)
+	W3.NoErrors(w)
+end)
+
+-- 1.2.1 (the stutter players reported, measured on the owner's PC): every census report heard ran
+-- the whole level race inside the game's message event, and the race worked out every name of every
+-- report for every claim waiting (a release client keeps 200 claims for 7 days): a fifth of a second
+-- and more, about once a second. H.Vouched looks the claimant up in a listing of the census by name
+-- now, built again only when the rows change; a census change or an IL looks at the claims at once
+-- and the race runs RACE_SOON later, once for a burst; a claim waiting CONFIRM_AFTER has one re-check.
+
+-- Our own guild's roster on c (as Roster.lua answers RankOf: by full name), fresh, `n` members.
+local function Members(c, n)
+	local R = { members = {}, byName = {}, snapshotAt = c.ns.Now() }
+	for i = 1, n do
+		local full = ("Rowan%d Pell-%s"):format(i, c.realm)
+		R.members[i] = { full = full, level = 60 }
+		R.byName[full] = 3
+	end
+	function R.Fresh() return R end
+	function R.RankOf(name) return type(name) == "string" and R.byName[c.ns.FullName(name)] or nil end
+	rawset(c.ns, "Roster", R)
+	return R
+end
+
+test("1.2.1 the level race: a census change with 200 claims waiting and 150 guilds' reports works out under 2,000 names, the change and its race together (it was some 170,000 each report); a change that moved no row lists the census no new", function()
+	local w, cast = W3.New()
+	local viewer = cast.spectator
+	local net = HN(w, viewer)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	Members(viewer, 1000)
+	local s = net.Store(true)
+	s.vouchRule = net.VOUCH_RULE
+	for i = 1, 150 do
+		local top = {}
+		for j = 1, 5 do top[j] = { name = ("Tamsin%d Row%d"):format(j, i), level = 60, class = "WA" } end
+		W3.Report(viewer, ("Olympus Row %d"):format(i), { short = ("Odell%d Row"):format(i), name = ("Odell%d Row-%s"):format(i, viewer.realm) }, top)
+	end
+	-- 200 claims heard this hour, nobody listing them.
+	for i = 1, 200 do
+		local name = ("Lark%d Brook-%s"):format(i, viewer.realm)
+		s.claims[name:lower() .. ":20"] = { gk = ("3e8.%08x"):format(i), name = name, level = 20, t = w.clock - i, heardLocal = w.clock - i, vouched = false }
+	end
+	local real, n = viewer.ns.FullName, 0
+	viewer.ns.FullName = function(...) n = n + 1 return real(...) end
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	w:Run(6)
+	local first = n
+	assert(first < 2000, "one census change and its race: " .. first .. " names worked out")
+	-- Nothing moved in the census: no new listing, and only the race's own names.
+	local builds = net.ListingBuilds()
+	n = 0
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	eq(net.ListingBuilds(), builds, "the census as it was: its listing kept")
+	assert(n < 400, "a change that moved no row: " .. n .. " names (our roster asked of each claim waiting)")
+	viewer.ns.FullName = real
+	for _, c in pairs(s.claims) do eq(c.vouched, false, "nobody lists them") end
+	W3.NoErrors(w)
+end)
+
+test("1.2.1 the level race: a claim's vouch is what it was with the census looked up by name: two senders of his one guild, not him, at or above the level, within 24 hours; never his own report, a level below, a day off, two guilds, a guild off the network; the rows as they stand", function()
+	local w, cast = W3.New({ more = { { "claimant", "Brisa Vale", { level = 19 } }, { "f1", "Dovan Quell" }, { "f2", "Elsa Thornby" } } })
+	local viewer, who = cast.spectator, cast.claimant
+	local net = HN(w, viewer)
+	local WINDOW = net.VOUCH_WINDOW
+	-- A claim of hers, the census emptied first (each case its own reports).
+	local function Claim(level, heard)
+		for k in pairs(viewer.rdb.guilds) do viewer.rdb.guilds[k] = nil end
+		heard = heard or w.clock
+		return { gk = "3e8.0000abcd", name = who.name, level = level, t = heard, heardLocal = heard, vouched = false }
+	end
+	local function Row(guild, reporter, level, name)
+		return W3.Report(viewer, guild, reporter, { { name = "Corin Ash", level = 60, class = "WA" }, { name = name or who.short, level = level, class = "MA" } })
+	end
+	local function Senders(c, guild)
+		local out = {}
+		for k in pairs(c.by and c.by[guild] or {}) do out[#out + 1] = k end
+		table.sort(out)
+		return table.concat(out, ",")
+	end
+	-- Two senders of her guild, one after the other (each report replaces the last).
+	local c = Claim(20)
+	Row("Olympus Vale", cast.f1, 20)
+	eq(net.Vouched(c), false, "one sender")
+	Row("Olympus Vale", cast.f2, 20)
+	eq(net.Vouched(c), true, "her guild's second sender")
+	eq(Senders(c, "olympus vale"), "dovan quell,elsa thornby")
+	-- Her own report: never her proof.
+	c = Claim(40)
+	Row("Olympus Solo", who, 40)
+	eq(net.Vouched(c), false, "her own report")
+	eq(next(c.by), nil)
+	-- A level below the claim's.
+	c = Claim(40)
+	Row("Olympus Low", cast.f1, 39)
+	Row("Olympus Low", cast.f2, 39)
+	eq(net.Vouched(c), false, "listed below it")
+	-- Reports a day and more after the claim; at the day's very end, yes.
+	c = Claim(20, w.clock - WINDOW - 1)
+	Row("Olympus Late", cast.f1, 20)
+	Row("Olympus Late", cast.f2, 20)
+	eq(net.Vouched(c), false, "a day off")
+	c = Claim(20, w.clock - WINDOW)
+	Row("Olympus Edge", cast.f1, 20)
+	eq(net.Vouched(c), false)
+	Row("Olympus Edge", cast.f2, 20)
+	eq(net.Vouched(c), true, "within the day")
+	-- Two guilds, one sender each.
+	c = Claim(60)
+	Row("Olympus East", cast.f1, 60)
+	Row("Olympus West", cast.f2, 60)
+	eq(net.Vouched(c), false, "two guilds")
+	-- A guild off the network (Data.NetOff, the harness's census here): its rows say nothing while it is.
+	local D = viewer.ns.Data
+	local netOff = D.NetOff
+	D.NetOff = function(g) return g == "Olympus Off" or netOff(g) end
+	c = Claim(20)
+	Row("Olympus Off", cast.f1, 20)
+	eq(net.Vouched(c), false)
+	Row("Olympus Off", cast.f2, 20)
+	eq(net.Vouched(c), false, "off the network")
+	D.NetOff = netOff
+	eq(net.Vouched(c), false, "back: one sender in its row now")
+	Row("Olympus Off", cast.f1, 20)
+	eq(net.Vouched(c), true, "and the other one's next report")
+	-- Her name however a report spells it (no realm, another case), and a row changed where it stands.
+	c = Claim(40)
+	Row("Olympus Case", cast.f1, 40, who.short:upper())
+	eq(net.Vouched(c), false)
+	eq(Senders(c, "olympus case"), "dovan quell", "her short name in capitals")
+	local r = Row("Olympus Case", cast.f2, 39, who.name)
+	eq(net.Vouched(c), false, "39")
+	r.top[2].level = 40
+	eq(net.Vouched(c), true, "the row as it stands")
+	-- Forever's split names: "First-Surname" is hers only where this client splits names.
+	c = Claim(60)
+	Row("Olympus Split", cast.f1, 60, "Brisa-Vale")
+	Row("Olympus Split", cast.f2, 60, "Brisa-Vale")
+	eq(net.Vouched(c), false, "not split: Brisa")
+	eq(next(c.by), nil)
+	viewer.ns.splitNames = true
+	eq(net.Vouched(c), false, "split: Brisa Vale, one sender in the row")
+	Row("Olympus Split", cast.f1, 60, "Brisa-Vale")
+	eq(net.Vouched(c), true, "and the other one")
+	viewer.ns.splitNames = nil
+	W3.NoErrors(w)
+end)
+
+test("1.2.1 the level race: a burst of census changes (50 in a second) looks at the claims at once and runs the race once, RACE_SOON later; an IL runs none in its handler; each report with a DATA_CHANGED of its own, every sender of the burst is seen (the census's own burst, one DATA_CHANGED for it: the next test)", function()
+	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } } } })
+	local viewer, young = cast.spectator, cast.young
+	local net = HN(w, viewer)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	local runs = 0
+	local race = viewer.ns.HonorsNet.RunRace
+	viewer.ns.HonorsNet.RunRace = function(...) runs = runs + 1 return race(...) end
+	w:Fire(young, "PLAYER_LEVEL_UP", 20)
+	w:Run(60)
+	local s = net.Store()
+	local claim
+	for _, c in pairs(s.claims) do claim = c end
+	assert(claim, "her claim")
+	eq(runs, 0, "no race inside the IL's handler")
+	w:Run(net.RACE_SOON)
+	eq(runs, 1, "the race RACE_SOON after")
+	-- 50 reports of her guild within a second, each from another of its senders.
+	runs = 0
+	for i = 1, 50 do
+		W3.Report(viewer, "Olympus Vale", { short = ("Hollis%d Quell"):format(i), name = ("Hollis%d Quell-%s"):format(i, viewer.realm) },
+			{ { name = young.name, level = 20, class = "MA" } })
+		w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+		w:Run(0.02)
+	end
+	eq(runs, 0, "none inside the census's handler")
+	eq(claim.vouched, true, "her guild's senders seen as they came")
+	local kept = {}
+	for k in pairs(claim.by["olympus vale"]) do kept[#kept + 1] = k end
+	table.sort(kept)
+	eq(table.concat(kept, ","), "hollis1 quell,hollis2 quell", "the first two (each replaced within the second): vouched, the rest not looked for")
+	w:Run(net.RACE_SOON)
+	eq(runs, 1, "one race for the burst")
+	w:Run(viewer.ns.Honors.CONFIRM_AFTER)
+	eq(s.levels[20] and s.levels[20][1] and s.levels[20][1].name, young.name, "first to 20")
+	W3.NoErrors(w)
+end)
+
+test("1.2.1 the level race: a vouched claim waiting CONFIRM_AFTER has one re-check, when it is old enough (100 races leave one, not 100 timers of 601 s); the place then", function()
+	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 20 } } } })
+	local viewer, young = cast.spectator, cast.young
+	local net = HN(w, viewer)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	local s = net.Store(true)
+	s.vouchRule = net.VOUCH_RULE
+	local gk = w:As(viewer, function() return viewer.ns.Arena.GK(young.guid) end)
+	-- Heard 5 minutes ago, vouched since.
+	s.claims[young.name:lower() .. ":20"] = { gk = gk, name = young.name, level = 20, t = w.clock - 300, heardLocal = w.clock - 300, vouched = true }
+	for _ = 1, 100 do net.RunRace() end
+	local function Waiting()
+		local n = 0
+		for _, t in ipairs(w:Timers(viewer)) do if t.where == "arena level race" then n = n + 1 end end
+		return n
+	end
+	eq(Waiting(), 1, "one re-check")
+	eq(#(s.levels[20] or {}), 0, "too fresh yet")
+	w:Run(viewer.ns.Honors.CONFIRM_AFTER - 300 + 1)
+	eq(s.levels[20] and s.levels[20][1] and s.levels[20][1].name, young.name, "the place once it is old enough")
+	eq(Waiting(), 0)
+	W3.NoErrors(w)
+end)
+
+-- (1.2.1) The census's own news: Data.Receive takes a report and DATA_CHANGED follows within
+-- Data.NOTIFY_GAP, once for a burst. A guild's row is its newest report, and the race keeps each
+-- sender it sees on a claim: a second report of one guild within the gap must not hide the first.
+
+-- The viewer's own census: the real Data.lua in its namespace (the test world's clients read the
+-- harness's). Its sightings go nowhere.
+local function OwnCensus(w, c)
+	return w:As(c, function()
+		rawset(c.ns, "Who", { Listen = function() end })
+		assert(loadfile(H.ADDON_DIR .. "Data.lua"))("Olympus", c.ns)
+		return rawget(c.ns, "Data")
+	end)
+end
+-- A report of `guild` from `sender` (a name) listing `top`, as the census's message gives it.
+local function Heard(w, c, guild, sender, top, faction)
+	return w:As(c, function()
+		return c.ns.Data.Receive({ guild = guild, faction = faction or "Alliance", total = 20, online = 2, zones = {}, leader = "Corin Ash",
+			officers = {}, top = top }, sender)
+	end)
+end
+
+test("1.2.1 the level race: two senders of her guild heard through the census within Data.NOTIFY_GAP (the first one's row replaced before the burst's DATA_CHANGED) are both kept on her claim, which is vouched; her own report, a level below or a refused report vouch nothing; the place after CONFIRM_AFTER", function()
+	local w, cast = W3.New({ more = { { "young", "Brisa Vale", { level = 19 } } } })
+	local viewer, young = cast.spectator, cast.young
+	local net = HN(w, viewer)
+	viewer.ns.HonorsNet.RACE_START = w.clock - 86400
+	local D = OwnCensus(w, viewer)
+	w:Fire(young, "PLAYER_LEVEL_UP", 20)
+	w:Run(60 + net.RACE_SOON)
+	local s = net.Store()
+	local claim
+	for _, c in pairs(s.claims) do claim = c end
+	assert(claim and not claim.vouched, "her claim, waiting")
+	local realm = viewer.realm
+	local f1, f2, f3 = "Dovan Quell-" .. realm, "Elsa Thornby-" .. realm, "Ivo Marsh-" .. realm
+	local function Senders()
+		local out = {}
+		for k in pairs(claim.by and claim.by["olympus vale"] or {}) do out[#out + 1] = k end
+		table.sort(out)
+		return table.concat(out, ",")
+	end
+	-- Her own report, one listing her a level below, and one the census refuses (the other faction's).
+	eq(Heard(w, viewer, "Olympus Solo", young.name, { { name = young.short, level = 20, class = "MA" } }), true)
+	eq(Heard(w, viewer, "Olympus Vale", f3, { { name = young.short, level = 19, class = "MA" } }), true)
+	eq(Heard(w, viewer, "Olympus Vale", "Hal Brenn-" .. realm, { { name = young.short, level = 20, class = "MA" } }, "Horde"), false)
+	w:Run(D.NOTIFY_GAP)
+	eq(Senders(), "", "nothing kept")
+	eq(claim.vouched, false)
+	-- Two senders of her guild, 0.3 s apart: the second report takes the first one's place in the census
+	-- before the burst's DATA_CHANGED.
+	eq(Heard(w, viewer, "Olympus Vale", f1, { { name = "Corin Ash", level = 60, class = "WA" }, { name = young.short, level = 20, class = "MA" } }), true)
+	w:Run(0.3)
+	eq(Heard(w, viewer, "Olympus Vale", f2, { { name = young.short, level = 21, class = "MA" } }), true)
+	eq(viewer.rdb.guilds["Olympus Vale"].reporterFull, f2, "the first sender's row replaced")
+	w:Run(D.NOTIFY_GAP)
+	eq(Senders(), "dovan quell,elsa thornby", "both senders kept")
+	eq(claim.vouched, true, "vouched")
+	eq(#(s.levels[20] or {}), 0, "the race later")
+	w:Run(net.RACE_SOON)
+	w:Run(viewer.ns.Honors.CONFIRM_AFTER)
+	eq(s.levels[20] and s.levels[20][1] and s.levels[20][1].name, young.name, "first to 20")
 	W3.NoErrors(w)
 end)
 
@@ -166,7 +452,8 @@ end)
 
 test("1.2 the fights part: a newly earned honour switches on by itself and the King's letter comes (Olympus's own frame, queued, 'Wear it'); a locked pick stays as set; the letters stay to read again", function()
 	local w, cast = W3.New()
-	local A = cast.A
+	local A = Kept(w, cast.A)
+	Kept(w, cast.B)
 	Belt(w, cast, A, cast.B, { A })
 	w:Run(3)
 	local pick = A.ns.ArenaProfile.Pick()
@@ -490,6 +777,50 @@ test("1.2 the fights part: the author's preview (Borders.SetPreview) takes an ho
 	W3.NoErrors(w)
 end)
 
+-- 1.2.1 (the author's ask): the new frames, a preview only. /oly borders test <key> shows each round
+-- his own portrait as a holder sees his own, on its plain metal (the red cross on the black), and
+-- its mark on the plates; nobody else can preview them, and nobody's real border changes.
+test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-race-skyborn(-2/-3) and apostle-red show the cross, the charm, the owlcat and the red cross round the author's own portrait, and their marks", function()
+	local w = World.New()
+	local author = w:Client(N.author)
+	local other = w:Client(N.fighterA)
+	local r = Frames(w, author)
+	author.target = other.name
+	local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
+	local want = {
+		{ "apostle-1", "cross-gold", "1 1 1 1" }, { "apostle-2", "cross-silver", "1 1 1 1" }, { "apostle-3", "cross-bronze" },
+		{ "bones-1", "charm-gold" }, { "bones-2", "charm-silver" }, { "bones-3", "charm-bronze" },
+		{ "arena-race-skyborn", "owlcat-gold" }, { "arena-race-skyborn-2", "owlcat-silver" }, { "arena-race-skyborn-3", "owlcat-bronze" },
+		{ "apostle-red", "cross-red", "0.24 0.24 0.27 1" },
+	}
+	for _, row in ipairs(want) do
+		local key, art, color = row[1], row[2], row[3]
+		eq(r.B.SetPreview(key), true, key)
+		eq(r.B.Preview(), key)
+		r.B.Refresh("player", true)
+		eq(r.Shown("player"), MEDIA .. art, key)
+		local t
+		for _, x in ipairs(r.textures) do if x.owner == "player" and x.sublevel ~= 2 and x.shown then t = x end end
+		eq(t.coord, "0.78125 0 0 0.78125", key .. ": the plain box, turned round on his own frame")
+		eq(t.size, "100x100")
+		local under = r.Underlay("player")
+		eq(under.shown, true, key .. ": on its plain metal")
+		if color then eq(under.color, color, key .. "'s underlay") end
+		if key == "apostle-red" then
+			eq(under.atlas, "ui-hud-unitframe-target-portraiton-boss-rare-silver", "the plain underlay...")
+			eq(under.desaturated, true, "...tinted black")
+		end
+		r.NP.RefreshAll(true)
+		eq(r.Shown("plate"), MEDIA .. art .. "-mark", key .. "'s mark")
+	end
+	eq(r.B.SetPreview("off"), true)
+	-- Anyone else: no preview.
+	local rr = Frames(w, other)
+	eq(rr.B.SetPreview("apostle-red"), false)
+	eq(rr.B.SetPreview("bones-1"), false)
+	W3.NoErrors(w)
+end)
+
 -- 1.2 (the owner's ask, test build 33): every Olympus portrait identical to the player's own on his
 -- unit frame. The core's windows that show his portrait with a frame (the King's letter, the
 -- profile's Edit) drew their own: a square picture and the frame centred on it at a size of their
@@ -518,7 +849,7 @@ local GRYPHON = "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold"
 
 test("1.2 the King's letter: his portrait drawn as his own on his unit frame (Borders.NewPortrait, his frame's 60 across, turned round): the honour won the very art round his own portrait, his picture square; the words clear of the art", function()
 	local w, cast = W3.New()
-	local A = cast.A
+	local A = Kept(w, cast.A)
 	local r = Frames(w, A)
 	local points, pictures = Placed(A)
 	Belt(w, cast, A, cast.B, { A })
@@ -630,7 +961,7 @@ test("1.2 the fights part: every art file the honours name ships in Olympus/medi
 		eq(want[name], true, "an honour's file: " .. name)
 	end
 	p:close()
-	eq(n, 134)
+	eq(n, 160, "67 frames and 67 marks, (1.2.1) the ten preview frames and their marks, and (1.2.3) the three crooks and theirs")
 end)
 
 test("1.2 the fights part: the words of fights and honours exist in English and pt-BR, the same keys (tables with the same entries); every title and letter the honours can name", function()

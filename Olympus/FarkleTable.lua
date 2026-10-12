@@ -16,8 +16,8 @@ local L = ns.L
 --     documented interfaces of Stakes, Wallet, Markets, Debts and ArenaMoney;
 --   - the tavern rule (the design; 1.1.6: a tavern or a camp, for every game that counts, staked or
 --     not): played in one party, within about 10 yd, both at one inn (IsResting and Places.InnAt by
---     position) or by a camp one of the two dropped (the Board's, Board.CampOf, in the zone they are
---     in); checked at the start and all through the game: someone walks off, the game pauses; gone
+--     position), at a Forever campfire each player can read locally, or by a Board camp one of
+--     the two dropped in their zone; checked throughout: someone walks off, the game pauses; gone
 --     past TAVERN_GRACE, he forfeits. Practice against the House and rehearsals play anywhere;
 --   - spectators (the design): a player who allows them announces the table (KN) and relays its state
 --     (KS) to the watchers; watching never feeds settlement. Allowed unless a player says no (the
@@ -115,6 +115,8 @@ FT.WATCHERS_MAX = 40      -- watchers a table keeps
 FT.WATCH_TTL = 150        -- a watcher who has not asked again for this long is dropped
 FT.WATCH_ASK = 60         -- a watcher asks again this often
 FT.NOTICE_EVERY = 60      -- KN every minute while the table is open
+FT.NOTICES_MAX = 100      -- the live tables' notices (KN) this client keeps at once, the oldest heard going first
+FT.NOTICES_EACH = FT.ARBITRATE_MAX -- ...from one sender (a public arbiter holds that many tables), his oldest going first
 FT.KEEP_NOTICE = 259200   -- a public table's event kept this long where its crowd's market involves the client
 FT.ROLL_WAIT = 6          -- a Roll click with no /roll line after this asks for a typed /roll
 FT.KR_CODES = 20          -- event codes in one KR
@@ -124,7 +126,11 @@ FT.HIST_MAX, FT.TX_MAX, FT.TX_EVENTS, FT.TX_DAYS = 100, 10, 600, 7
 FT.WHY = { target = "t", cap = "c", concede = "o", forfeit = "f", void = "v" }
 FT.WHY_OF = { t = "target", c = "cap", o = "concede", f = "forfeit", v = "void" }
 FT.HOUSE_PAUSE = { think = 0.6, bank = 0.85, next = 0.35, farkle = 1.6, roll = 0.45 } -- the House's pace (the lab's)
-FT.REASONS = { b = true, d = true, l = true, n = true, a = true, g = true, c = true, x = true, m = true, t = true, r = true, s = true, p = true, v = true, k = true, o = true, f = true }
+FT.REASONS = { b = true, d = true, l = true, n = true, a = true, g = true, c = true, x = true, m = true, t = true, r = true, s = true, p = true, v = true, k = true, o = true, f = true,
+	i = true } -- (1.2.1, "i": the guest turned Bones invitations off; an older host reads it as "d")
+-- (1.2.1, a player's report: "I don't wanna play bones every time I go to an inn. Or ever.")
+FT.INVITES_BURST = 2      -- invitations from this many different players...
+FT.INVITES_WINDOW = 600   -- ...within this many seconds: one question, stop receiving them?
 
 -- The stake sources by kind (the design): direct o/o; arbiter t/t or w/w; the King w/w.
 FT.SOURCES = { d = { o = true }, a = { t = true, w = true } }
@@ -291,14 +297,46 @@ local function PeekHeavy(mode)
 	local m = type(h) == "table" and type(h.farkle) == "table" and h.farkle[Key()]
 	return type(m) == "table" and type(m.hist) == "table" and m or nil
 end
+-- A peer game can finish before the load-on-demand companion's saved data is attached.
+-- Its compact own ledger survives in the core; recover only its recorded facts for this read,
+-- never manufacture a transcript or write back into either saved store.
+local function HistoryRecord(r)
+	if type(r) ~= "table" or r.g ~= "b" or (r.mode ~= "L" and r.mode ~= "T")
+		or type(r.id) ~= "string" or r.id == "" or type(r.p1) ~= "string" or type(r.p2) ~= "string"
+		or type(r.t) ~= "number" or type(r.s1) ~= "number" or type(r.s2) ~= "number"
+		or (r.w ~= "1" and r.w ~= "2" and r.w ~= "v") then return nil end
+	local seat = Same(r.p1, Me()) and 1 or (Same(r.p2, Me()) and 2 or nil)
+	if not seat and not Same(r.arb, Me()) then return nil end
+	local kind, stake, target, hash
+	if type(r.x) == "string" then kind, stake, target, hash = r.x:match("^([ad])%.([0-9a-z]+)%.(%d+)%.[0-9a-z]+%.([0-9a-f]+)$") end
+	local entry = { id = r.id, t = r.t, host = r.p1, guest = r.p2, arb = r.arb,
+		seat = seat, opp = seat and (seat == 1 and r.p2 or r.p1) or nil,
+		res = r.w == "v" and "V" or (not seat and "D" or (r.w == tostring(seat) and "W" or "L")),
+		s1 = r.s1, s2 = r.s2, why = r.how, reh = r.mode == "T" or nil }
+	if kind then
+		entry.mode, entry.stake, entry.target, entry.hash8 = kind, N36(stake, 0), R().TARGET_BY_CODE[tonumber(target)], hash
+	end
+	return entry
+end
 -- This character's games of both modes, newest first (the screens' "Your games"): the live realm's
 -- and the rehearsals', where every game goes while the King's live switch is off (1.1.6's case).
 function FT.MyGames()
-	local all = {}
+	local all, seen = {}, {}
 	for _, mode in ipairs({ "L", "T" }) do
 		local m = PeekHeavy(mode)
 		for i, e in ipairs(m and m.hist or {}) do
-			if type(e) == "table" then all[#all + 1] = { e = e, t = tonumber(e.t) or 0, i = i, mode = mode } end
+			if type(e) == "table" then
+				all[#all + 1] = { e = e, t = tonumber(e.t) or 0, i = i, mode = mode }
+				if type(e.id) == "string" then seen[mode .. ":" .. e.id] = true end
+			end
+		end
+	end
+	local ledger = Call("ArenaLedger", "MyGames")
+	for i, r in ipairs(type(ledger) == "table" and ledger or {}) do
+		local e = HistoryRecord(r)
+		if e and not seen[r.mode .. ":" .. e.id] then
+			seen[r.mode .. ":" .. e.id] = true
+			all[#all + 1] = { e = e, t = e.t, i = FT.HIST_MAX + i, mode = r.mode }
 		end
 	end
 	-- (each list is newest first: within one second, its own order)
@@ -307,8 +345,12 @@ function FT.MyGames()
 		if a.mode ~= b.mode then return a.mode < b.mode end
 		return a.i < b.i
 	end)
-	local out = {}
-	for i, x in ipairs(all) do out[i] = x.e end
+	local out, count = {}, { L = 0, T = 0 }
+	for _, x in ipairs(all) do
+		if count[x.mode] < FT.HIST_MAX then
+			out[#out + 1] = x.e; count[x.mode] = count[x.mode] + 1
+		end
+	end
 	return out
 end
 
@@ -455,9 +497,21 @@ function FT.InnkeeperVoice()
 	return race
 end
 
--- A camp either player has up (the Board's camp, dropped where he stood: its zone and nothing
--- finer) in the zone this client is in now, or nil. The client reads no campfire in the world, so
--- the camp is the one Olympus already knows: the Board's (Board.CampOf).
+-- Forever's own Campfire Nearby aura, not the old Cooking Fire spell or a retained camp benefit.
+-- Build 70205: Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua:395-409.
+-- Read only this player's aura: another player's word never grants a venue, and nothing here
+-- posts a Board camp or changes location consent. Unknown/restricted reads are not absences.
+function FT.CampfireNearby()
+	local C = C_UnitAuras
+	if type(C) ~= "table" or type(C.GetPlayerAuraBySpellID) ~= "function" then return nil end
+	local ok, aura = pcall(C.GetPlayerAuraBySpellID, 1283391)
+	if not ok or Secret(aura) then return nil end
+	if aura == nil then return false end
+	if type(aura) ~= "table" or Secret(aura.spellId) or type(aura.spellId) ~= "number" then return nil end
+	return aura.spellId == 1283391
+end
+
+-- A camp either player explicitly posted on the Board, in this client's current zone.
 local function CampFor(a, b)
 	local Bd = ns.Board
 	if type(Bd) ~= "table" or not Bd.CampOf then return nil end
@@ -472,10 +526,17 @@ local function CampFor(a, b)
 end
 FT.CampFor = CampFor
 
+local function TableCamp(a, b)
+	if A().InInstance() then return nil end
+	if FT.CampfireNearby() == true then return { campfire = true } end
+	return CampFor(a, b)
+end
+
 function FT.CanOpen()
 	if A().Sim() then return true end
 	if A().Blocked() then return false end
 	if Resting() == true and InnAt(Position("player")) then return true end
+	if FT.CampfireNearby() == true then return true end
 	if CampFor(Me(), Me()) then return true end
 	local n = GetNumGroupMembers and GetNumGroupMembers() or 0
 	local raid = IsInRaid and IsInRaid()
@@ -488,15 +549,16 @@ end
 
 -- The place rule (the design's tavern rule, 1.1.6 with camps): a game between players that counts
 -- is played at a tavern or at a camp. Both in one party, within about 10 yd of each other, and
--- either both resting at the same inn, or by a camp one of the two dropped (the Board) in the zone
--- they are in. Returns ok, why, the inn (nil at a camp), the spot (the middle of the two) and the
+-- either both resting at the same inn, near a real Forever campfire (checked independently by
+-- each participant at opening), or by a Board camp in their zone. Returns ok, why, the inn
+-- (nil at a camp), the spot (the middle of the two) and the
 -- camp. why: "group", "rest" (neither at an inn nor by a camp), "inn" (at an inn, not the same
 -- one, no camp), "far", "unknown".
 function FT.TavernStart(other)
 	local unit = UnitOf(other)
 	if not unit or unit == "player" then return false, "group" end
 	local resting = Resting() == true
-	local camp = CampFor(Me(), other)
+	local camp = TableCamp(Me(), other)
 	if not resting and not camp then return false, "rest" end
 	local me, them = Position("player"), Position(unit)
 	if not me or not them then return false, "unknown" end
@@ -522,6 +584,7 @@ local function SetPlace(t, other)
 	local ok, _, inn, spot, camp = FT.TavernStart(other)
 	if not ok then return end
 	t.inn, t.camp, t.spot = inn and inn.id or nil, (not inn and camp) and true or nil, spot
+	t.campfire = not inn and camp and camp.campfire or nil
 end
 
 -- A seat is away when this client can see it is: its position off the table's inn or its spot,
@@ -532,6 +595,7 @@ local function Away(t, seat)
 	local unit = UnitOf(name)
 	if not unit then return true end -- (left the group: gone from the table)
 	if t.inn and unit == "player" and Resting() == false then return true end
+	if t.campfire and unit == "player" and FT.CampfireNearby() == false then return true end
 	-- (by position only: CheckInteractDistance, the start's check, says two players are apart,
 	-- never which of them walked off)
 	local pos = Position(unit)
@@ -831,7 +895,7 @@ end
 ---------------------------------------------------------------------------
 
 local RECORD = { "id", "mode", "role", "host", "guest", "arbiter", "kind", "stake", "cur", "target", "secs", "hic", "hiccupRule", "salt",
-	"state", "created", "inn", "camp", "spot", "first", "crowd", "crowdOpen", "crowdLock", "noWatch" }
+	"state", "created", "inn", "camp", "campfire", "spot", "first", "crowd", "crowdOpen", "crowdLock", "noWatch", "bankRolls" }
 local function Save(t)
 	if t.role == "watch" or t.role == "practice" then return end
 	local m = Mine(t.mode)
@@ -874,7 +938,7 @@ local function NewGame(t)
 	return g
 end
 
-local Progress, Finished, SendState -- (below)
+local Progress, Finished, SendState, SendNotice -- (below)
 
 -- The events one Apply wrote (a decision can take the lines held behind it, a turn's end the next
 -- player's lines ahead of it), each as the board animates it: its code, seat, dice (a roll), the
@@ -981,6 +1045,21 @@ local function Witness(t, seat, value, lo, hi)
 		else return end
 	else
 		return
+	end
+	-- A smaller roll after our bank can reach the witness before the bank (W4).
+	-- Remember only our actual server lines, so a relay cannot invent that exception.
+	if seat == t.seat and ev.t == "R" and ev.k < R().DICE and g.current ~= seat then
+		local ordinal, last = 0, nil
+		for _, code in ipairs(g.events) do
+			local choice = R().Event(code)
+			if choice and choice.t == "K" and choice.p == seat then ordinal, last = ordinal + 1, choice end
+		end
+		if last and last.act == "b" then
+			t.bankRolls = t.bankRolls or {}
+			t.bankRolls[ordinal] = R().Code(ev)
+			for index in pairs(t.bankRolls) do if index <= ordinal - 32 then t.bankRolls[index] = nil end end
+			Save(t) -- the rejected server line still proves W4 after a reload
+		end
 	end
 	local since = t.lastDecisionAt and (Clock() - t.lastDecisionAt) or nil
 	local ok, note = Apply(t, ev, "seen")
@@ -1341,6 +1420,12 @@ Finished = function(t)
 		Changed(t, "end")
 		return
 	end
+	-- Progress returns here before its ordinary SendState. Tell existing watchers and the
+	-- notice lane the game is over before settlement stops the relay's involvement.
+	if t.state == "end" and g and g.over then
+		if SendState then SendState(t) end
+		if SendNotice then SendNotice(t) end
+	end
 	if t.state == "end" and not t.sentKE and g then
 		t.sentKE = true
 		local body = KEBody(t)
@@ -1587,6 +1672,10 @@ end
 
 ApplyItem = function(t, item)
 	local g = t.game
+	if item.awaySeat then
+		local since = t.away and t.away[item.awaySeat]
+		if not since or not Away(t, item.awaySeat) or Clock() - since < FT.TAVERN_GRACE then return end
+	end
 	if item.kind == "KL" then
 		local ok, why = R().Floor(g, item.seat, item.turn, item.lvl)
 		if t.own ~= g and t.own then R().Floor(t.own, item.seat, item.turn, item.lvl) end
@@ -1790,8 +1879,6 @@ local function InviteTick(t)
 	end
 	return false
 end
-
-local SendNotice -- (below)
 
 Tick = function()
 	local now = Clock()
@@ -2453,6 +2540,132 @@ local function Hides(sender)
 	return type(blocked) == "table" and blocked[Full(sender):lower()] ~= nil
 end
 
+---------------------------------------------------------------------------
+-- (1.2.1) Fewer pop-ups: Bones invitations and the innkeeper's offer, each with its switch
+---------------------------------------------------------------------------
+-- Invitations from other players are on until the player says No (ns.db.bonesInvites: nil on,
+-- true kept after the question, false off; the privacy page's line, /oly farkle invites). Off,
+-- each is refused quietly with "i", which the inviter's table names; a matched partner's still
+-- comes (the player searched). From INVITES_BURST different players within INVITES_WINDOW, one
+-- question in place of the invitation's own pop-up asks whether to stop them: answered, never
+-- again; dismissed, not again this session.
+-- The innkeeper's offer (ns.db.bonesKeeper: false hides it; the privacy page's line, /oly farkle
+-- keeper) is the quiet line in his conversation (InnkeeperGossip.lua). Where that line cannot show
+-- (the gamepad UI, a changed NPC panel) his Olympus window opens only after the player asked for
+-- him on the Bones page (WantKeeper), never by itself at each visit. The ask has no time limit
+-- (the walk to an inn has none) and is kept in this character's Bones options through a /reload:
+-- it serves the next conversation with a mapped innkeeper where his offer shows, and brings that
+-- offer back once with the switch off too (the player asked; an untrained one could not train).
+local invitesSeen = {}    -- [sender, lower case] = when his invitation was last shown or told
+local invitesAsked = false -- the question came this session
+
+function FT.InvitesOn() return not (type(ns.db) == "table" and ns.db.bonesInvites == false) end
+-- Off: every invitation still waiting for this player's answer is refused the same way. silent:
+-- no chat line (a restore, Backup.NOES).
+function FT.SetInvites(on, silent)
+	if type(ns.db) ~= "table" then return false end
+	ns.db.bonesInvites = on and true or false
+	if not on then
+		for _, t in pairs(tables) do
+			if t.role == "guest" and t.state == "invite" then
+				t.state = "declined"
+				Refuse(t, t.host, "i")
+				Say(t, "FARKLE_LOG_DECLINED_ME")
+				Finished(t)
+			end
+		end
+	end
+	if not silent then ns.Print(on and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF) end
+	A().Changed()
+	return true
+end
+function FT.KeeperOffer() return not (type(ns.db) == "table" and ns.db.bonesKeeper == false) end
+-- Off: an ask made before it is dropped (the No came after it).
+function FT.SetKeeperOffer(on, silent)
+	if type(ns.db) ~= "table" then return false end
+	ns.db.bonesKeeper = on and true or false
+	if not on then
+		FT.WantKeeper(false)
+		if ns.InnkeeperGossip and ns.InnkeeperGossip.Park then ns.InnkeeperGossip.Park() end
+	end
+	if not silent then ns.Print(on and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF) end
+	return true
+end
+-- The player asked for the innkeeper (the Bones page): his next conversation shows the offer.
+function FT.WantKeeper(on)
+	if on == false then
+		local m = Peek("L")
+		if m and type(m.opts) == "table" then m.opts.keeperAsked = nil end
+		return
+	end
+	local m = Mine("L")
+	if m then m.opts.keeperAsked = true end
+end
+function FT.KeeperWanted()
+	local m = Peek("L")
+	return m ~= nil and type(m.opts) == "table" and m.opts.keeperAsked == true
+end
+
+-- The different players whose invitations reached this player within INVITES_WINDOW, his own
+-- counted now.
+local function InvitesFrom(key)
+	local now = Clock()
+	invitesSeen[key] = now
+	local n = 0
+	for k, at in pairs(invitesSeen) do
+		if now - at > FT.INVITES_WINDOW then invitesSeen[k] = nil else n = n + 1 end
+	end
+	return n
+end
+-- The newest invitation still waiting, in its own pop-up.
+local function ShowWaiting()
+	local newest
+	for id, t in pairs(tables) do
+		if t.role == "guest" and t.state == "invite" and (not newest or (t.invitedAt or 0) > (tables[newest].invitedAt or 0)) then newest = id end
+	end
+	if newest then FT.ShowUI("invite", newest) end
+end
+-- The question, once (true: it shows in place of the invitation's pop-up).
+local function AskStop(n)
+	if invitesAsked or n < FT.INVITES_BURST or type(ns.db) ~= "table" or ns.db.bonesInvites ~= nil then return false end
+	invitesAsked = true
+	ns.Alert("arena", "soft", { what = L.CONSENT_BONES_INVITES, key = "farkle-invites",
+		open = function() return type(ns.db) == "table" and ns.db.bonesInvites == nil end,
+		show = function() ns.ShowDialog("OLYMPUS_BONES_INVITES", L.FARKLE_INVITES_ASK:format(n)) end })
+	return true
+end
+function FT.InvitesAnswer(stop, clicked)
+	if stop then return FT.SetInvites(false) end
+	if clicked and type(ns.db) == "table" then ns.db.bonesInvites = true end
+	ShowWaiting()
+	return true
+end
+StaticPopupDialogs["OLYMPUS_BONES_INVITES"] = {
+	text = "%s",
+	button1 = L.FARKLE_INVITES_STOP,
+	button2 = L.FARKLE_INVITES_KEEP,
+	OnAccept = function() ns.SafeCall("bones invitations", FT.InvitesAnswer, true, true) end,
+	-- Keep them: kept, never asked again; another popup's place: not answered, the invitation shown.
+	OnCancel = function(_, _, reason) ns.SafeCall("bones invitations", FT.InvitesAnswer, false, reason == "clicked") end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+	-- Escape only closes it, answering nothing (the game's StaticPopup_CallEscapeHandler would call
+	-- OnCancel with "clicked", a Keep them for good); the invitation waits on the Bones page.
+	noCancelOnEscape = true,
+	preferredIndex = 3,
+	buttonHeight = 24,
+	textFont = "GameFontHighlightMed2",
+}
+-- Their lines on the privacy page: on until the player says No, so they never open it by themselves.
+if ns.Consent and ns.Consent.Register then
+	local function Shown() return ns.IsMember() == true and not A().Off() end
+	ns.Consent.Register({ key = "bonesInvites", label = "CONSENT_BONES_INVITES", text = "CONSENT_BONES_INVITES_TEXT", shown = Shown,
+		get = function() return FT.InvitesOn() end, set = function(on) FT.SetInvites(on) end, pending = function() return false end })
+	ns.Consent.Register({ key = "bonesKeeper", label = "CONSENT_BONES_KEEPER", text = "CONSENT_BONES_KEEPER_TEXT", shown = Shown,
+		get = function() return FT.KeeperOffer() end, set = function(on) FT.SetKeeperOffer(on) end, pending = function() return false end })
+end
+
 -- KI: an invitation to this client (the design).
 local function OnInvite(dist, sender, mode, body)
 	if dist ~= "WHISPER" then return end
@@ -2476,12 +2689,16 @@ local function OnInvite(dist, sender, mode, body)
 		cur = ns.ArenaRoles.Currency(), target = R().TARGET_BY_CODE[tcode], secs = secs, hic = hic == "2", hiccupRule = "bones2", salt = salt,
 		src = { stake > 0 and hostSrc or "-" }, spec = { false, false }, created = Now(), invitedAt = now, state = "invite", seat = 2, log = {} }
 	t.players = { t.host, t.guest }
+	-- (1.2.1: invitations off: refused quietly, the host told why, "i"; a matched partner's comes.)
+	if not FT.InvitesOn() and Call("ArenaMatch", "MatchedWith", sender) ~= true then return Refuse(t, sender, "i") end
 	if invitedBy[key] and now - invitedBy[key] < FT.GUEST_GAP then return Refuse(t, sender, "b") end
 	invitedBy[key] = now
 	-- (1.2.0: his first game with an innkeeper still to play: he is told so, and the host why, "f".)
 	if not FT.CanPlayPlayers() then
 		ns.Print(L.FARKLE_INVITED_NOT_TRAINED:format(ns.DisplayName(sender) or "?"))
-		return Refuse(t, sender, "f")
+		Refuse(t, sender, "f")
+		AskStop(InvitesFrom(key))
+		return
 	end
 	if FT.Live() then return Refuse(t, sender, "b") end
 	if (InCombatLockdown and InCombatLockdown()) or A().Blocked() then return Refuse(t, sender, "c") end
@@ -2508,6 +2725,9 @@ local function OnInvite(dist, sender, mode, body)
 	Involve(t, true)
 	Say(t, "FARKLE_LOG_INVITE_FROM", ns.DisplayName(sender))
 	Changed(t, "invite")
+	-- (1.2.1: the second player's within the window: the question instead; it waits on the Bones
+	-- page, and Keep them shows it.)
+	if not t.from and AskStop(InvitesFrom(key)) then return end
 	-- the popup is Olympus's own (the companion's), raised as an arena alert
 	ns.Alert("arena", "soft", { text = L.FARKLE_ALERT_INVITE:format(ns.DisplayName(sender)), key = "farkle-invite " .. id,
 		open = function() local x = tables[id] return x ~= nil and x.state == "invite" end,
@@ -2670,7 +2890,10 @@ local function OnGo(dist, sender, mode, body)
 		if a and b then
 			local spot = { cont = a.cont, wx = (a.wx + b.wx) / 2, wy = (a.wy + b.wy) / 2 }
 			if inn then t.inn, t.spot = inn.id, spot
-			elseif CampFor(t.host, t.guest) then t.camp, t.spot = true, spot end
+			else
+				local camp = TableCamp(t.host, t.guest)
+				if camp then t.camp, t.campfire, t.spot = true, camp.campfire, spot end
+			end
 		end
 	end
 	FT.Begin(t)
@@ -2740,9 +2963,17 @@ local function OnClaim(dist, sender, mode, body)
 		-- the judge: the arbiter, else the waiting player (never about himself)
 		if t.arbiter then if not fromArbiter then return end elseif senderSeat ~= 3 - seat then return end
 		ev = kind == "g" and { t = "C", p = seat } or { t = kind == "a" and "A" or "T", p = seat }
-		-- accepted only once this client's own clock agrees (a timeout after secs - 5; gone
-		-- after the grace less the claim's margin)
-		if kind ~= "g" then
+		-- A departure needs this client's own observation for the full grace, including
+		-- when an early claim waits or the player returns before it can be applied.
+		if kind == "g" then
+			local since = t.away and t.away[seat]
+			if not since or not Away(t, seat) then return end
+			local left = FT.TAVERN_GRACE - (Clock() - since)
+			if left > 0 then
+				return Pend(t, { kind = "KT", from = sender, step = step, chain = chain, ev = ev,
+					awaySeat = seat, notBefore = Clock() + left })
+			end
+		else
 			ResetClock(t)
 			local click = Limits(t)
 			if t.clock and t.clock.seat == seat and Used(t) < click then
@@ -2758,7 +2989,7 @@ local function OnClaim(dist, sender, mode, body)
 	else
 		return
 	end
-	Offer(t, { kind = "KT", from = sender, step = step, chain = chain, ev = ev })
+	Offer(t, { kind = "KT", from = sender, step = step, chain = chain, ev = ev, awaySeat = kind == "g" and seat or nil })
 end
 ns.Comm.Handle("KT", ns.Arena.Handle("KT", OnClaim))
 
@@ -2869,11 +3100,48 @@ local function OnReplay(dist, sender, mode, body)
 	if not step then return end
 	local codes = {}
 	for code in (f[3] or ""):gmatch("[^,]+") do codes[#codes + 1] = code end
+	if #codes > FT.KR_CODES or table.concat(codes, ",") ~= (f[3] or "") then return end
 	-- Replay also reads saved historical penalties. A live relay must never introduce one,
 	-- even through a divergent record: reject the whole batch before applying any prefix.
-	for _, code in ipairs(codes) do
+	local senderSeat = SeatOf(t, sender)
+	local fromArbiter = t.arbiter and Same(sender, t.arbiter)
+	local choices, seenChoices = { {}, {} }, { 0, 0 }
+	for i, own in ipairs(t.game.events) do
+		local ev = R().Event(own)
+		if ev and ev.t == "K" then
+			local list = choices[ev.p]
+			list[#list + 1] = own
+			if i <= step then seenChoices[ev.p] = seenChoices[ev.p] + 1 end
+		end
+	end
+	for i, code in ipairs(codes) do
 		local ev = R().Event(code)
-		if ev and (ev.t == "F" or (ev.t == "H" and t.game.hiccupRule == "bones2")) then return end
+		if not ev or ev.t == "F" or (ev.t == "H" and t.game.hiccupRule == "bones2") then return end
+		-- A peer may witness our server rolls, but cannot choose our dice or bank for us.
+		-- Previously recorded decisions can travel in an honest prefix; new or changed
+		-- decisions belong to the sending seat (or the table's arbiter).
+		local own = t.game.events[step + i]
+		local matches = own and own:gsub("%*$", "") == code:gsub("%*$", "")
+		if ev.t == "K" then
+			seenChoices[ev.p] = seenChoices[ev.p] + 1
+			local choice = choices[ev.p][seenChoices[ev.p]]
+			-- Witnessed server rolls can shift event indexes (W4). Compare each seat's
+			-- decisions in their own order, rather than at the same transcript step.
+			local following = R().Event(codes[i + 1] or "")
+			local bankRoll = ev.p == t.seat and t.bankRolls and t.bankRolls[seenChoices[ev.p]]
+			-- At a packet boundary the next part carries the roll; our local server
+			-- observation already proves the bank must read as rolling on.
+			local witnessed = choice and choice:gsub(":b", ":r", 1) == code and bankRoll
+				and (not following or (following.t == "R" and following.p == ev.p
+					and bankRoll == R().Code({ t = "R", p = following.p, k = following.k, value = following.value })))
+			if choice ~= code and not witnessed and (ev.p == t.seat or (not fromArbiter and ev.p ~= senderSeat)) then return end
+		end
+		-- A concession is the named player's decision too. The only other way to
+		-- concede our seat is an observed departure after the same local grace as KT.
+		if ev.t == "C" and ev.p == t.seat and not matches then
+			local since = t.away and t.away[ev.p]
+			if not since or not Away(t, ev.p) or Clock() - since < FT.TAVERN_GRACE then return end
+		end
 	end
 	FT.Note("%s resync: KR from %s, %d events from step %d", t.id, tostring(sender), #codes, step)
 	TakeRelay(t, sender, step, codes)
@@ -2913,6 +3181,36 @@ local function OnState(dist, sender, mode, body)
 end
 ns.Comm.Handle("KS", ns.Arena.Handle("KS", OnState))
 
+-- Room for a new table's notice from this sender (1.2.1: anyone may announce a table naming
+-- himself, so made-up ids grew the list without end): FT.NOTICES_EACH from him at most and
+-- FT.NOTICES_MAX in all, the oldest heard going first (a live table's KN comes again every
+-- minute, so it is not the oldest for long). A table this client watches or sits at keeps its
+-- notice and takes none of its sender's room (a fan who watched three of one host's games, never
+-- pressing Stop watching, still hears his next); it counts towards FT.NOTICES_MAX. false: no room
+-- (every notice that could go is such a table's). (heard: the order notices were last heard in,
+-- so two in the same second still have an oldest)
+local heard = 0
+local function NoticeRoom(sender)
+	local by = (Full(sender) or ""):lower()
+	local his, all, hisOldest, oldest = 0, 0, nil, nil
+	for id, n in pairs(notices) do
+		all = all + 1
+		local free = tables[id] == nil
+		if free and (n.by or ""):lower() == by then
+			his = his + 1
+			if not hisOldest or n.heard < notices[hisOldest].heard then hisOldest = id end
+		end
+		if free and (not oldest or n.heard < notices[oldest].heard) then oldest = id end
+	end
+	if his >= FT.NOTICES_EACH then
+		notices[hisOldest] = nil
+	elseif all >= FT.NOTICES_MAX then
+		if not oldest then return false end
+		notices[oldest] = nil
+	end
+	return true
+end
+
 -- KN: a table announced (a public arbiter's, raising the alert; or a player's who allows watchers).
 local function OnNotice(dist, sender, mode, body)
 	local f = Split(body)
@@ -2924,8 +3222,11 @@ local function OnNotice(dist, sender, mode, body)
 	if not official and not (Same(sender, p1) or Same(sender, p2)) then return end
 	if Hides(sender) then return end
 	local was = notices[id]
+	if not was and not NoticeRoom(sender) then return end
 	notices[id] = { id = id, p1 = p1, p2 = p2, arbiter = arb, official = official, target = R().TARGET_BY_CODE[tonumber(f[5] or "")] or 5000,
-		map = N36(f[6] or "", 1), state = f[7] == "e" and "e" or "o", winner = tonumber(f[8] or ""), by = Full(sender), mode = mode, at = Now() }
+		map = N36(f[6] or "", 1), state = f[7] == "e" and "e" or "o", winner = tonumber(f[8] or ""), by = Full(sender), mode = mode, at = Now(),
+		heard = heard + 1 }
+	heard = heard + 1
 	if official and not was then ns.Fire("FARKLE_PUBLIC", id, "open") end
 	FT.KeepNotice(notices[id])
 	A().Changed()
@@ -3269,12 +3570,13 @@ function FT.ShowUI(what, id, extra)
 end
 
 -- Prefer an opt-in local row inside a compatible native panel. Its capability checks retain
--- the separate Olympus dialogue on clients whose native layout is unavailable.
+-- the separate Olympus dialogue on clients whose native layout is unavailable, opened only
+-- once the player asked for the innkeeper (1.2.1: FT.KeeperWanted, never at each visit).
 pcall(ns.RegisterEvent, "GOSSIP_SHOW", function()
-	if not ns.IsMember() or FT.Live() then return end
+	if not ns.IsMember() or FT.Live() or not (FT.KeeperOffer() or FT.KeeperWanted()) then return end
 	if ns.InnkeeperGossip then ns.InnkeeperGossip.OnShow(); return end
 	local keeper = FT.Innkeeper(true)
-	if keeper then FT.ShowUI("innkeeper", nil, keeper) end
+	if keeper and FT.KeeperWanted() then FT.WantKeeper(false); FT.ShowUI("innkeeper", nil, keeper) end
 end)
 
 ---------------------------------------------------------------------------
@@ -3302,6 +3604,33 @@ A0.Action("farkle.staked", function(src, stake, arbiter)
 end, function() return true end)
 for _, fill in ipairs({ "Pay", "PayFee", "PayStake", "Payout", "Refund", "Change" }) do
 	A0.Action("farkle." .. fill:lower(), nil, function(id) return FT[fill](id) end)
+end
+
+-- Chat derives its audience from this live table model, never from an EC's claimed public flag
+-- or a kept historical market notice. No new wire fields or spectator permission are granted.
+function FT.ChatSpec(id)
+	if not ValidId(id) then return nil end
+	local t, n = tables[id], notices[id]
+	if t and (t.role == "practice" or t.role == "bank") then return nil end
+	if not t and not n then return nil end
+	local watch = not t or t.role == "watch"
+	local live, spectators, host, guest, arbiter, mode
+	if watch then
+		if not n or n.at < Now() - 3 * FT.NOTICE_EVERY or n.state ~= "o" then return nil end
+		if n.official and not ns.ArenaRoles.IsPublicArbiter(n.arbiter, n.mode) then return nil end
+		if not n.official and not (Same(n.by, n.p1) or Same(n.by, n.p2)) then return nil end
+		host, guest, arbiter, mode = n.p1, n.p2, n.arbiter, n.mode
+		live = not (t and t.snap and t.snap.phase == "over")
+		spectators = live
+	else
+		host, guest, arbiter, mode = t.host, t.guest, t.arbiter, t.mode
+		live = PLAYING[t.state] == true and not t.closed and not (t.game and t.game.over)
+		spectators = live and t.noWatch ~= true
+	end
+	if not host or not guest or Same(host, guest) then return nil end
+	if arbiter and not ns.ArenaRoles.IsArbiter(arbiter, mode) then arbiter = nil end
+	return { id = id, host = host, guest = guest, arbiter = arbiter, mode = mode,
+		live = live == true, spectators = spectators == true, model = t or n }
 end
 
 A0.Events.Register("K", function(eid)
@@ -3350,6 +3679,14 @@ A0.Slash("farkle", function(args)
 		o.chatRolls = rest:lower() ~= "off"
 		FT.ChatFilter()
 		return ns.Print(o.chatRolls and L.FARKLE_CHATROLLS_ON or L.FARKLE_CHATROLLS_OFF)
+	end
+	-- (1.2.1) The two switches of the privacy page's Bones lines.
+	if sub == "invites" or sub == "keeper" then
+		local on = rest:lower()
+		local set, get = sub == "invites" and FT.SetInvites or FT.SetKeeperOffer, sub == "invites" and FT.InvitesOn or FT.KeeperOffer
+		if on == "on" or on == "off" then return set(on == "on") end
+		return ns.Print(sub == "invites" and (get() and L.FARKLE_INVITES_ON or L.FARKLE_INVITES_OFF)
+			or (get() and L.FARKLE_KEEPER_OFFER_ON or L.FARKLE_KEEPER_OFFER_OFF))
 	end
 	if sub == "rules" or sub == "help" then return FT.ShowUI("guide") end
 	if sub == "" or sub == "open" then return FT.ShowUI("board") end
@@ -3440,5 +3777,6 @@ function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
 	tables, invitedBy, notices = {}, {}, {}
 	selftest, lastSelfTest = nil, nil
+	invitesSeen, invitesAsked = {}, false
 end
 FT._ = { tables = function() return tables end, notices = function() return notices end, Split = Split, Terms = Terms, Fields = Fields }

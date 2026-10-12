@@ -108,10 +108,11 @@ function P.Mine(make)
 	return mine
 end
 
--- The pick as Honors takes it: { frame, title, seen, locked }.
+-- The pick as Honors takes it: { frame, title, seen, locked, back } (1.2.3: back, Honors.Update's
+-- memory of an honour lost while worn, its frame or title stood in for until it is his again).
 function P.Pick()
 	local m = P.Mine()
-	return { frame = m.frame or "rank", title = m.title, seen = m.seen, locked = m.locked }
+	return { frame = m.frame or "rank", title = m.title, seen = m.seen, locked = m.locked, back = m.back }
 end
 local function SavePick(pick)
 	local m = P.Mine(true)
@@ -119,6 +120,7 @@ local function SavePick(pick)
 	m.title = pick.title
 	m.seen = pick.seen
 	m.locked = pick.locked or nil
+	m.back = type(pick.back) == "table" and pick.back or nil
 	m.at = Now()
 end
 P.SavePick = SavePick
@@ -283,10 +285,35 @@ local function Picks(make)
 	end
 	return s.picks
 end
+-- The companion may load an older save above the cap. Trim it once when attached, and on a new
+-- identity: oldest heard first, stable by key at equal ages. Our own profile and the row just
+-- accepted go last, so a flood neither discards our own old card nor the current sender's card.
+local function PruneProfiles(profiles, keep)
+	local n = 0
+	for _ in pairs(profiles) do n = n + 1 end
+	if n <= P.PROFILES_MAX then return end
+	local rows = {}
+	for key, p in pairs(profiles) do
+		local own = type(p) == "table" and Same(p.name, ns.me)
+		local at = type(p) == "table" and (tonumber(p.heard) or tonumber(p.t)) or 0
+		rows[#rows + 1] = { key = key, keep = key == keep or own == true, at = at or 0 }
+	end
+	table.sort(rows, function(a, b)
+		if a.keep ~= b.keep then return not a.keep end
+		if a.at ~= b.at then return a.at < b.at end
+		return tostring(a.key) < tostring(b.key)
+	end)
+	for i = 1, n - P.PROFILES_MAX do profiles[rows[i].key] = nil end
+end
+local checkedProfiles
 local function Profiles()
 	local h = Arena.Heavy("L")
 	if not h then return nil end
 	if type(h.profiles) ~= "table" then h.profiles = {} end
+	if checkedProfiles ~= h.profiles then
+		PruneProfiles(h.profiles)
+		checkedProfiles = h.profiles
+	end
 	return h.profiles
 end
 
@@ -333,6 +360,7 @@ function P.Take(sender, body)
 			p.formerly = old.formerly
 		end
 		profiles[pk] = p
+		if not old then PruneProfiles(profiles, pk) end
 	end
 	stats.taken = stats.taken + 1
 	ns.Fire("HONORS_CHANGED", p.name)

@@ -11,11 +11,14 @@ local L = ns.L
 --     menu sends nothing.
 --   * Ask to update, when they are behind the newest version this client knows (Latest: its own,
 --     or the one the author's presence named as out; on his own client the one he marked as out,
---     /oly released; nothing a player sends raises it). The author's is his usual update window
---     (Workshop.AskUpdate, V3, which every version shows). Anyone else's is V9, which 1.1.2 and
---     newer show as a small notice with both versions and where to update: once a day at most,
---     never for 7 days after its "Don't remind me", never from a player they block (/oly block),
---     ignore or the moderators took off, and never naming a version the author has not released.
+--     /oly released; nothing a player sends raises it). Only the author, the King and the High
+--     Council have it (1.2.1, the author's call: MayAsk); every client drops an ask from anyone
+--     else, which older versions still send. The author's is his usual update window
+--     (Workshop.AskUpdate, V3, which every version shows). The King's and a councillor's is V9,
+--     which 1.1.2 and newer show as a small notice with both versions and where to update: once a
+--     day at most, never for 7 days after its "Don't remind me", never from a player they block
+--     (/oly block), ignore or the moderators took off, and never naming a version the author has
+--     not released.
 --     A player older than 1.1.2 can't show it: the click opens a whisper the player sends himself.
 --     One ask per player a day, ASK_HOUR an hour at most (the author's too).
 --   * Check version, when nothing is known (or what is known is old): one addon whisper (V7) that
@@ -35,7 +38,7 @@ local L = ns.L
 -- keyboard and waits out a fight.
 --   V7~<id>                 check: what version do you run?        (whisper)
 --   V8~<id>~<version>       the answer                             (whisper)
---   V9~<version>            "please update": the newest the sender knows  (whisper, not the author)
+--   V9~<version>            "please update": the newest the sender knows  (whisper: King, High Council)
 
 local Versions = {}
 ns.Versions = Versions
@@ -68,6 +71,16 @@ local function W() return ns.Workshop end
 local function Newer(a, b) return W().Newer(a, b) == true end
 local function Full(name) return ns.FullName(ns.Normal(tostring(name or ""))) end
 local function IsAuthor() local w = W() return w.IsAuthor ~= nil and w.IsAuthor() == true end
+-- Who may ask a player to update: the author, the King and the High Council, by the name the
+-- server stamps (for a sender) or our own. The Ask to update line shows for them alone.
+local function MayAsk(name)
+	if type(name) ~= "string" or name == "" then return false end
+	local w = W()
+	if type(w) == "table" and type(w.IsAuthorName) == "function" and w.IsAuthorName(name) == true then return true end
+	return (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(name) == true)
+		or (type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true)
+end
+Versions.MayAsk = MayAsk
 -- Checks are kept by the short name, folded: the menu may give the name without its realm while
 -- the server stamps the answer with it (Forever's names are one across a realm group).
 local function Key(name) return ns.Fold(ns.ShortName(Full(name)) or "") end
@@ -361,7 +374,7 @@ end
 -- Merely opening the question never spends a rate-limit slot or sends anything.
 local function AskContext(name)
 	local full = Full(name)
-	if full == "" then return nil end
+	if full == "" or not MayAsk(ns.me) then return nil end
 	if ns.ChatLocked() then
 		ns.Print(L.VERSION_LOCKED)
 		return nil
@@ -478,6 +491,9 @@ StaticPopupDialogs["OLYMPUS_UPDATE_CONFIRM_LEGACY"] = {
 -- is his, and being on it (or newer) is being up to date; without it, no number of theirs is shown.
 function Versions.HandleAsk(dist, sender, text)
 	if dist ~= "WHISPER" then return end
+	-- (1.2.1: from the author, the King or a councillor alone; his client sends V3. Older
+	-- versions let anyone send one.)
+	if not MayAsk(Full(sender)) then return end
 	local latest = tostring(text or ""):match("^V9~(%d+%.%d+%.%d+)$")
 	if not latest or #latest > 12 or not Newer(latest, ns.VERSION) or Ignored(sender) then return end
 	local M = ns.Moderation
@@ -656,8 +672,9 @@ function Versions.MenuLines(target, menu)
 	local function Tip(text) return locked and L.PLAYERMENU_LOCKED or text end
 	-- Ask to update and Check version (the owner's call, 2026-09-30): both there for anyone who
 	-- runs Olympus or may, greyed with the reason when they can't go (he runs the latest; checked
-	-- a moment ago; a dungeon, a raid or a match).
-	if state ~= "none" and state ~= "checking" then
+	-- a moment ago; a dungeon, a raid or a match). Ask to update only in the author's, the King's
+	-- and the High Council's menus (1.2.1).
+	if MayAsk(ns.me) and state ~= "none" and state ~= "checking" then
 		local tipText = IsAuthor() and L.VERSION_ASK_AUTHOR_TIP or L.VERSION_ASK_TIP
 		if not IsAuthor() and version and Newer(Versions.FIRST, version) then tipText = L.VERSION_ASK_OLD_TIP:format(version) end
 		local latest = state == "current" or state == "newer"

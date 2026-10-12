@@ -147,7 +147,7 @@ local MEDIA = "Interface\\AddOns\\Olympus\\media\\borders\\"
 Borders.TIERS = {
 	{ name = "gold-elite", atlas = WINGED, metal = "gold", x = 11, y = -4, king = true },
 	{ name = "treasurer-dragon", file = MEDIA .. "treasurer-dragon", coords = { 0, 200 / 256, 0, 190 / 256 }, width = 100, height = 95,
-		x = 0, y = 1, fallback = PLAIN, treasurer = true, metal = "none", party = { x = -8, y = -4 } }, -- (its own art whole: no plain dragon under it; party: its ring on the smaller portrait, from the owner's screenshot)
+		x = 0, y = 1, fallback = PLAIN, treasurer = true, metal = "none", party = { x = 0, y = -2 } }, -- (its own art whole: no plain dragon under it; party: see PartyRig)
 	{ name = "silver-elite", atlas = "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Rare-Silver-Winged", x = 8, y = -7,
 		metal = "silver", council = true },
 	{ name = "silver", atlas = PLAIN_SILVER, metal = "silver", x = 0, y = 1, dev = true },
@@ -227,6 +227,7 @@ local function IsDev(who)
 	local W = ns.Workshop
 	return type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(who) == true
 end
+Borders.IsDevName = IsDev -- (1.2.3: HonorsNet's The Royal Dev title asks the core, never naming the author)
 
 -- Named by that guild's master (1.1.5, Nominees.lua): a centurion or a correspondent.
 local function Nominee(who, guild)
@@ -350,7 +351,8 @@ end
 -- King's the game's gold elite mark (his alone), the High Council's its silver, a guild master's
 -- the bronze, and the people a guild master names the same bronze (1.1.5). The dev's silver has
 -- none: his plate and his lines show what they would without it.
-Borders.MARK_OF = { ["gold-elite"] = "gold", ["silver-elite"] = "silver", ["bronze-elite"] = "bronze", bronze = "bronze" }
+-- (1.2.3, the author's ask: the dev's silver has its mark too, the High Council's silver dragon.)
+Borders.MARK_OF = { ["gold-elite"] = "gold", ["silver-elite"] = "silver", silver = "silver", ["bronze-elite"] = "bronze", bronze = "bronze" }
 
 -- The mark a unit gets next to its name on a nameplate, from the same facts and trust rules as
 -- its border: "gold" (the King), "silver" (the High Council), "bronze" (a guild master, or one he
@@ -392,6 +394,7 @@ function Borders.MarkOfName(who, guild)
 	f.off = NetOff(who, guild, true)
 	f.councillor = ns.IsHighCouncillor(who) == true
 	f.council = f.councillor and not ns.CouncilMasked()
+	f.dev = IsDev(who) -- (1.2.3: the dev's silver has its mark, before his name in the game's chat)
 	if f.off then return nil, f end
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
@@ -561,6 +564,13 @@ end
 
 -- A party member frame's textures: the target's art and offsets scaled to its portrait about the
 -- portrait's top corner, turned round (from the frame's top left); under its ring and name.
+-- A tier's party = { x, y } replaces its x, y here (the target's units). 1.2.1 (the owner's report:
+-- the Treasurer's dragon sat off round a party portrait): measured, the inner edge of the dragon's
+-- ring is centred 3.2 px higher in its art than the plain gold's (whose offsets it has) and on the
+-- same line across, so on the party portrait it goes 3 down (y -2) and nowhere across (x 0); the
+-- earlier -8, -4, read off a screenshot, put its ring 4 px right of the portrait's centre. Every
+-- other tier is the game's art or drawn over it, at the game's offsets: its ring is round the
+-- portrait as is. (An honour's frame never shows here: ShowHonor, the rank's borders alone.)
 local function PartyRig(frame)
 	local s = PARTY_SCALE
 	return MakeRig(frame, true, s, function(tex, t)
@@ -819,15 +829,80 @@ function Borders.ShowHonour(rig, key, metal)
 	return first ~= nil and ShowHonor(rig, first, metal)
 end
 
+---------------------------------------------------------------------------
+-- An Apostle's own look (1.2.1, the owner's call, for an Apostle who asked for it)
+---------------------------------------------------------------------------
+-- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
+-- on his own screen alone, while everyone else sees his normal frame. Offered in the frame picker
+-- (ProfileEdit) to anyone the signed Apostles list names (Church.SignedApostles: the author's
+-- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the
+-- plain underlay tinted black (UNDERLAY.black). Kept in this account's save, by character
+-- (ns.db.ownLooks), and never sent: the profile's word (AP) carries his pick as ever, so every
+-- other client works out his frame from his pick and his honours. It shows where his own portrait
+-- is: his unit frame, his target or focus while that is himself, his Olympus portraits
+-- (Borders.ShowPreviewOn); never on one drawn as others see him (the Edit's preview, the letters).
+-- Off the signed list, it shows no more and the picker drops it. The author's preview beats it.
+Borders.OWN_LOOKS = { ["apostle-red"] = "black" } -- key -> the metal under it
+
+-- On the signed Apostles list of the titles list we hold (our faction's), by Church's key.
+function Borders.IsSignedApostle(name)
+	local C = ns.Church
+	if type(name) ~= "string" or name == "" or type(C) ~= "table" or C.missing
+		or type(C.SignedApostles) ~= "function" or type(C.Key) ~= "function" then return false end
+	local ok, list = pcall(C.SignedApostles)
+	local key = C.Key(name)
+	if not ok or type(list) ~= "table" or not key then return false end
+	for _, a in ipairs(list) do
+		if type(a) == "table" and a.key == key then return true end
+	end
+	return false
+end
+
+-- A look this character may take: one of OWN_LOOKS, while the signed list names him.
+function Borders.OwnLookAllowed(key)
+	return type(key) == "string" and Borders.OWN_LOOKS[key] ~= nil and type(ns.me) == "string" and Borders.IsSignedApostle(ns.me)
+end
+
+-- The look this character took and may still take, or nil.
+function Borders.OwnLook()
+	local looks = ns.db and ns.db.ownLooks
+	local key = type(looks) == "table" and type(ns.me) == "string" and looks[ns.me] or nil
+	if key and Borders.OwnLookAllowed(key) then return key end
+	return nil
+end
+
+-- Take a look (nil: none). False, and nothing changed, for one he may not take. Saved here alone.
+function Borders.SetOwnLook(key)
+	if key ~= nil and not Borders.OwnLookAllowed(key) then return false, "apostle" end
+	local db = ns.db
+	if type(db) ~= "table" or type(ns.me) ~= "string" then return false, "db" end
+	if key == nil and type(db.ownLooks) ~= "table" then return true end
+	db.ownLooks = type(db.ownLooks) == "table" and db.ownLooks or {}
+	db.ownLooks[ns.me] = key
+	if next(db.ownLooks) == nil then db.ownLooks = nil end
+	Borders.RefreshAll()
+	ns.Fire("BORDERS_PREVIEW")
+	return true
+end
+
+-- His own look on a rig of his own portrait: true when it shows there.
+local function ShowOwnLook(rig)
+	local look = Borders.OwnLook()
+	return look ~= nil and ShowHonor(rig, look, Borders.OWN_LOOKS[look])
+end
+
 -- An Olympus portrait of the author himself while his preview is on: the preview, as round his
 -- own portrait (his screen alone, as ever), and only while it shows there (Active: the borders
 -- on, mouse and keyboard, an Olympus member; SetPreview says why not), so the two always match.
+-- 1.2.1: else an Apostle's own look, the same way, round his own (Borders.OwnLook).
 -- True and what shows ("rank", "honour" or nil), or false for anyone else, no preview or not
 -- now, nothing changed.
 function Borders.ShowPreviewOn(rig, who)
-	if not preview or type(who) ~= "string" or who == "" or type(ns.me) ~= "string" or not Active() then return false end
+	if type(who) ~= "string" or who == "" or type(ns.me) ~= "string" or not Active() then return false end
 	if ns.FullName(who):lower() ~= ns.me:lower() then return false end
-	return true, ShowPreview(rig, preview)
+	if preview then return true, ShowPreview(rig, preview) end
+	if ShowOwnLook(rig) then return true, "honour" end
+	return false
 end
 -- His preview changed, or whether it shows (the borders on or off, the gamepad UI): his Olympus
 -- portraits already drawn follow at once, as his unit frame does (the Arena's Kit listens).
@@ -898,6 +973,8 @@ function Borders.Refresh(unit, fresh)
 	if fresh or not k or guid == nil or k.guid ~= guid then k = Compute(unit, guid) end
 	local chosen = preview and UnitExists(unit) and IsMe(unit, guid) and preview or nil
 	if chosen then return ShowPreview(rig, chosen) end
+	-- 1.2.1: an Apostle's own look, on his own portrait on his own screen (Borders.OwnLook).
+	if Borders.OwnLook() and UnitExists(unit) and IsMe(unit, guid) and ShowOwnLook(rig) then return end
 	if k.off then return Show(rig, nil) end
 	-- 1.2: Most Wanted may only return a frame after an authenticated global snapshot activates its
 	-- fail-closed authority gate. The ordinary local kill ledger can never award one.

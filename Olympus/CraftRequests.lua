@@ -102,9 +102,10 @@ Requests.FEE_DUE = 72 * 60 * 60       -- the seller's deadline for the guild's 6
 Requests.CONFIRM_WAIT = 72 * 60 * 60  -- a sale the buyer neither confirmed nor disputed: its fee is owed after this all the same
 Requests.FEE_WARN_GAP = 86400         -- an overdue fee's warning, once a session and a day
 Requests.FEES_MAX = 1000              -- fees on the desk's ledger at most
-Requests.FEES_BUYER_ONLY = 20         -- open fees on the buyer's word alone, per buyer, at most
-Requests.FEES_PER_SELLER = 50         -- open fees on a seller's own word, per seller, at most
+Requests.FEES_BUYER_ONLY = 20         -- open fees on the buyer's word alone, per buyer, at most (the desk's own confirmations aside)
+Requests.FEES_PER_SELLER = 50         -- open fees on a seller's own word or fee mail alone, per seller, at most (the same)
 Requests.FEES_KEEP = 30 * 86400       -- a paid or waived fee stays on the ledger this long
+Requests.FEES_GONE_MAX = 250          -- open fees evicted for room kept for their return, at most
 Requests.DEBTS_ANSWER_MAX = 40        -- fees one answer to the King names at most
 Requests.DEBTS_ASK_GAP = 300          -- the King asks the desk, and is answered, this often at most
 Requests.DEBTS_RETRY = 150            -- an ask the desk never answered may go again this soon (an answer takes 2 min at most)
@@ -946,7 +947,8 @@ Requests.Publish = Publish
 -- A line and the "craft" sound switch's soft sound, as a treasury donation is told: never a window
 -- or a tab that opens by itself (ns.Alert's show would switch the player's page at once). The one
 -- exception is the deal's own room once a claim is won (Requests.OpenChat: the owner's pattern for
--- every pending conversation, ChatRooms.OpenMatter).
+-- every pending conversation, ChatRooms.OpenMatter), on the requester's side only into the Olympus
+-- window he has open (1.2.3).
 local function Notify(r, text)
 	if not Bucket(alertTimes, "alerts", 600, 5) then return end
 	ns.Print(text)
@@ -1155,14 +1157,16 @@ local function WinClaim(r, crafter, guild, nonce)
 	SendPrivate(r, "accepted", r.rev, nonce)
 	Notify(r, L.CRAFT_REQUEST_ACCEPTED_ALERT:format(ns.DisplayName(crafter), r.itemName))
 	Changed()
-	ns.SafeCall("craft request room", Requests.OpenChat, r.id, true)
+	-- (1.2.3: another member's claim is no click of the requester's, hours after his request maybe:
+	-- its room comes only into the Olympus window he has open, Requests.OpenChat's ifOpen.)
+	ns.SafeCall("craft request room", Requests.OpenChat, r.id, true, true)
 	return true
 end
 
 local function TakeClaim(r, sender, seq, f)
 	local key = Lower(sender)
 	local rev, nonce, guild = Clamp(f[6], 0, 2147483647), f[7], Clean(f[8], Requests.GUILD_MAX)
-	if not Same(r.requester, ns.me) or type(nonce) ~= "string" or #nonce > 16 or not nonce:match("^[0-9a-z]+$")
+	if not rev or not Same(r.requester, ns.me) or type(nonce) ~= "string" or #nonce > 16 or not nonce:match("^[0-9a-z]+$")
 		or guild == "" or not ns.IsFederation(guild) or not ns.Data.ClaimGuild(sender, guild) then return false, "claim" end
 	r.seenActions[key] = seq
 	if r.state ~= "open" or rev ~= r.rev or Requests.PrivilegeStatus(sender).canAccept == false then
@@ -1177,16 +1181,19 @@ end
 local function TakeAnswer(r, sender, seq, verb, f)
 	local nonce = verb == "accepted" and f[7] or f[6]
 	if not Same(sender, r.requester) or type(r.claimNonces) ~= "table" or type(nonce) ~= "string" or not r.claimNonces[nonce] then return false, "authority" end
-	r.seenActions[Lower(sender)] = seq
 	if verb == "taken" then
+		r.seenActions[Lower(sender)] = seq
 		r.claimPending, r.claimLost = nil, Now()
 		Audit(r, "claim-lost", sender)
 		Changed()
 		return true
 	end
 	if (r.crafter and not Same(r.crafter, ns.me)) or (r.state ~= "open" and r.state ~= "accepted") then return false, "state" end
+	local rev = Clamp(f[6], 0, 2147483647)
+	if not rev then return false, "answer" end
+	r.seenActions[Lower(sender)] = seq
 	r.crafter, r.claimNonce, r.claimPending, r.state = ns.me, nonce, nil, "accepted"
-	r.rev, r.updated = math.max(r.rev or 0, Clamp(f[6], 0, 2147483647) or 0), Now()
+	r.rev, r.updated = math.max(r.rev or 0, rev), Now()
 	Suggested(r); AddContext(r); InstallMoneyWatch(r); Audit(r, "accepted", ns.me)
 	Changed()
 	ns.SafeCall("craft request room", Requests.OpenChat, r.id, true)
@@ -1281,7 +1288,6 @@ function Requests.ReceiveAction(dist, sender, text)
 	if verb == "claim" then return TakeClaim(r, sender, seq, f) end
 	if verb == "accepted" or verb == "taken" then return TakeAnswer(r, sender, seq, verb, f) end
 	if not ActionAllowed(r, sender, verb) then return false, "authority" end
-	r.seenActions[Lower(sender)] = seq
 	local s = r.settlement
 	if verb == "offer" then
 		local ok, why = ApplyOffer(r, sender, f)
@@ -1308,6 +1314,7 @@ function Requests.ReceiveAction(dist, sender, text)
 		local d = r.delivery
 		if not d or qty ~= d.quantity or price ~= d.price then return false, "figures" end
 		if r.state == "completed" then
+			r.seenActions[Lower(sender)] = seq
 			SendPrivate(r, "completeok", d.price)
 			Changed(); return true
 		end
@@ -1366,6 +1373,8 @@ function Requests.ReceiveAction(dist, sender, text)
 			ForgetMoneyWatch(r)
 		end
 	end
+	-- Invalid payloads consume the sender's rate budget, not the deal's replay window.
+	r.seenActions[Lower(sender)] = seq
 	Changed()
 	return true
 end
@@ -1722,12 +1731,82 @@ do
 		return (tonumber(e.grossB) or 0) <= (tonumber(e.grossS) or 0)
 	end
 
+	-- Whose a fee the desk never confirmed by hand is, for room on a full ledger: the buyer's once his
+	-- word is on it (a seller's own flood never pushes out the word of his sale that the buyer gave),
+	-- the seller's on his own word alone, the payer's for his fee mail no word named.
+	local function Holder(e)
+		if e.fee and type(e.by) == "table" and e.by.b then return Lower(e.requester) or "-" end
+		return Lower(e.crafter) or "-"
+	end
+	-- Of one holder's fees, which goes first: one holding no gold before a payment, then the oldest.
+	local function GoesFirst(a, b)
+		local ga, gb = (tonumber(a.paid) or 0) > 0, (tonumber(b.paid) or 0) > 0
+		if ga ~= gb then return gb end
+		local ta, tb = tonumber(a.created) or 0, tonumber(b.created) or 0
+		if ta ~= tb then return ta < tb end
+		return tostring(a.key) < tostring(b.key)
+	end
+
+	-- An evicted fee is kept by its key (led.gone), whole: booked again (the seller's client tells the
+	-- desk again each ASK_GAP while his fee is open; a buyer's word that comes late), it comes back
+	-- as it was, its deadline the first one, a buyer's figure above the seller's still kept, the gold
+	-- on it still there. FEES_GONE_MAX at most: then the oldest kept of whoever has the most kept goes.
+	local function Gone(led)
+		if type(led.gone) ~= "table" then led.gone = {} end
+		return led.gone
+	end
+	local function KeptFirst(a, b)
+		local ta, tb = tonumber(a.goneAt) or 0, tonumber(b.goneAt) or 0
+		if ta ~= tb then return ta < tb end
+		return tostring(a.key) < tostring(b.key)
+	end
+	local function KeepGone(led, e, now)
+		local gone = Gone(led)
+		e.goneAt = now
+		gone[e.key] = e
+		while true do
+			local n, count, oldest = 0, {}, {}
+			for key, x in pairs(gone) do
+				if type(x) ~= "table" then
+					gone[key] = nil
+				else
+					n = n + 1
+					local h = Holder(x)
+					count[h] = (count[h] or 0) + 1
+					if not oldest[h] or KeptFirst(x, oldest[h]) then oldest[h] = x end
+				end
+			end
+			if n <= Requests.FEES_GONE_MAX then return end
+			local most
+			for h, k in pairs(count) do
+				if not most or k > count[most] or (k == count[most] and KeptFirst(oldest[h], oldest[most])) then most = h end
+			end
+			gone[oldest[most].key] = nil
+		end
+	end
+	-- The fee kept for this key, back on the ledger's side (nil when none was kept).
+	local function ReturnGone(led, key)
+		local gone = led.gone
+		local e = type(gone) == "table" and gone[key]
+		if type(e) ~= "table" then return nil end
+		gone[key], e.goneAt = nil, nil
+		ns.Log("craft fee %s back on the ledger as it was", tostring(key))
+		return e
+	end
+
 	-- Room for one more: the paid, the waived and a payment no word of a sale ever named go after
-	-- FEES_KEEP, then the oldest paid or waived; an open fee never goes. One member's words fill a
-	-- bounded part of it (a modified client's flood of made-up sales): the buyer's word alone opens
-	-- FEES_BUYER_ONLY fees at most per buyer, the seller's own FEES_PER_SELLER per seller.
+	-- FEES_KEEP. Full, the oldest paid or waived goes first. Then a fee the desk never confirmed by
+	-- hand (one party's word or both: two characters of one member can name any sale) of whoever
+	-- holds the most of those, while he holds more than the new fee's holder would then (Holder):
+	-- a flood of made-up sales makes room from its own senders' fees, and someone holding one or two
+	-- keeps his. Of his, one holding no gold goes before a payment, then the oldest. It is kept
+	-- (KeepGone), logged and counted (/oly status). A fee the desk confirmed by hand stays while
+	-- open. One member's words fill a bounded part of it (a modified client's flood): of the fees the
+	-- desk never confirmed by hand, the buyer's word alone opens FEES_BUYER_ONLY at most per buyer,
+	-- the seller's own word or his fee mail no word named FEES_PER_SELLER per seller (role "mail":
+	-- the payer).
 	local function FeeRoom(led, role, requester, crafter, now)
-		local n, settled, buyerOnly, sellers = 0, {}, 0, 0
+		local n, settled, held, first, buyerOnly, sellers = 0, {}, {}, {}, 0, 0
 		for key, e in pairs(led.entries) do
 			if type(e) ~= "table" then
 				led.entries[key] = nil
@@ -1735,22 +1814,77 @@ do
 				led.entries[key] = nil
 			else
 				n = n + 1
-				if FeeSettled(e) then settled[#settled + 1] = e end
-				if e.state == "due" and type(e.by) == "table" then
-					if role == "b" and e.by.b and not e.by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
-					if role == "s" and e.by.s and Same(e.crafter, crafter) then sellers = sellers + 1 end
+				if FeeSettled(e) then
+					settled[#settled + 1] = e
+				elseif not e.checkedBy then
+					local h = Holder(e)
+					held[h] = held[h] or {}
+					held[h][#held[h] + 1] = e
+					if not first[h] or GoesFirst(e, first[h]) then first[h] = e end
+					local by = type(e.by) == "table" and e.by or {}
+					if role == "b" and by.b and not by.s and Same(e.requester, requester) then buyerOnly = buyerOnly + 1 end
+					if role ~= "b" and (by.s or not e.fee) and Same(e.crafter, crafter) then sellers = sellers + 1 end
 				end
 			end
 		end
 		if role == "b" and buyerOnly >= Requests.FEES_BUYER_ONLY then return false, "buyer-cap" end
-		if role == "s" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
+		if role ~= "b" and sellers >= Requests.FEES_PER_SELLER then return false, "seller-cap" end
 		if n < Requests.FEES_MAX then return true end
-		table.sort(settled, function(a, b) return (a.paidAt or a.created or 0) < (b.paidAt or b.created or 0) end)
-		for i = 1, math.min(#settled, n - Requests.FEES_MAX + 1) do
+		table.sort(settled, function(a, b)
+			local ta, tb = tonumber(a.paidAt or a.created) or 0, tonumber(b.paidAt or b.created) or 0
+			if ta ~= tb then return ta < tb end
+			return tostring(a.key) < tostring(b.key)
+		end)
+		for i = 1, #settled do
+			if n < Requests.FEES_MAX then break end
 			led.entries[settled[i].key] = nil
 			n = n - 1
 		end
+		local mine = (role == "b" and Lower(requester) or Lower(crafter)) or "-"
+		local own = held[mine] and #held[mine] or 0
+		while n >= Requests.FEES_MAX do
+			local most
+			for h, list in pairs(held) do
+				if h ~= mine and #list > own + 1
+					and (not most or #list > #held[most] or (#list == #held[most] and GoesFirst(first[h], first[most]))) then most = h end
+			end
+			if not most then break end
+			local e, list = first[most], held[most]
+			for i = #list, 1, -1 do if list[i] == e then table.remove(list, i) break end end
+			first[most] = nil
+			for _, x in ipairs(list) do if not first[most] or GoesFirst(x, first[most]) then first[most] = x end end
+			led.entries[e.key] = nil
+			n = n - 1
+			KeepGone(led, e, now)
+			led.evicted, led.evictedAt = (tonumber(led.evicted) or 0) + 1, now
+			ns.Log("craft fee %s evicted for room: %s held %d", tostring(e.key), tostring(most), #held[most] + 1)
+		end
 		return n < Requests.FEES_MAX, "full"
+	end
+
+	-- A fee mail's row's gold, onto the fee it paid.
+	local function AddMail(e, early)
+		e.paid = (tonumber(e.paid) or 0) + (tonumber(early.paid) or 0)
+		e.payments = type(e.payments) == "table" and e.payments or {}
+		for _, p in ipairs(type(early.payments) == "table" and early.payments or {}) do e.payments[#e.payments + 1] = p end
+		while #e.payments > 10 do table.remove(e.payments, 1) end
+	end
+	-- A seller's fee mail that came before his word of the sale waits on its own (the request, the
+	-- payer, no buyer): his own word of that sale takes it, or the desk's confirmation by hand of a
+	-- fee naming him for it. Never a buyer's word alone: anyone may name himself the buyer of
+	-- another's sale, and so would take the gold its seller paid and leave his real fee unpaid. (A
+	-- mail's row evicted for room is still his: kept, it joins all the same.)
+	local function JoinEarly(led, e)
+		local key = FeeKey(e.id, e.crafter, nil)
+		local early = led.entries[key]
+		if type(early) == "table" and early ~= e then
+			led.entries[key] = nil
+		else
+			early = type(led.gone) == "table" and led.gone[key]
+			if type(early) ~= "table" or early == e then return end
+			led.gone[key] = nil
+		end
+		AddMail(e, early)
 	end
 
 	-- A party's word of a sale, on the desk. Each party's figure is kept, and the higher one is the
@@ -1761,12 +1895,15 @@ do
 		local led, now = Ledger(), Now()
 		local key = FeeKey(id, crafter, requester)
 		local e = led.entries[key]
-		if not e then
-			-- The seller's fee mail came before any word of the sale: it was his, for this request.
+		if not e and role == "s" then
+			-- The seller's fee mail came before his word of the sale: it was his, for this request (in
+			-- its place, the fee kept for this key when one was evicted, with that mail's gold).
 			local early = FeeKey(id, crafter, nil)
-			if type(led.entries[early]) == "table" then
-				e, led.entries[early] = led.entries[early], nil
-				e.key, e.requester = key, requester
+			local mail = led.entries[early]
+			if type(mail) == "table" then
+				led.entries[early] = nil
+				e = ReturnGone(led, key)
+				if e then AddMail(e, mail) else e, mail.key, mail.requester = mail, key, requester end
 				led.entries[key] = e
 			end
 		end
@@ -1776,11 +1913,12 @@ do
 				ns.Log("craft fee %s not booked: %s", tostring(id), tostring(why))
 				return nil, why
 			end
-			e = { key = key, id = id, crafter = crafter, requester = requester, created = now, paid = 0, by = {}, state = "due" }
+			e = ReturnGone(led, key) or { key = key, id = id, crafter = crafter, requester = requester, created = now, paid = 0, by = {}, state = "due" }
 			led.entries[key] = e
 		end
 		e.by = type(e.by) == "table" and e.by or {}
 		e.by[role] = e.by[role] or now
+		if e.by.s then JoinEarly(led, e) end
 		if role == "s" then e.grossS = gross else e.grossB = gross end
 		e.gross = math.max(tonumber(e.grossS) or 0, tonumber(e.grossB) or 0)
 		e.fee = Requests.FeeBreakdown(e.gross, 0).guildFee
@@ -1826,11 +1964,12 @@ do
 	end
 
 	-- A party's word of the sale, to the desk: queued once per figure (the buyer's on the crafter's
-	-- recorded price, the seller's at completion), never where nothing can take the fee.
+	-- recorded price, the seller's at completion), never where nothing can take the fee, nor while
+	-- the Wallet is off (Compliance.Wallet: no fee then, so no word of one either).
 	QueueFeeReport = function(r, role, gross)
 		local s = r and r.settlement
 		gross = Clamp(gross, 1, Requests.PRICE_MAX)
-		if not s or s.rail ~= "direct" or not gross or not FeeReceiver() or TestBuild() then return false end
+		if not s or s.rail ~= "direct" or not gross or not WalletShown() or not FeeReceiver() or TestBuild() then return false end
 		if Requests.FeeBreakdown(gross, 0).guildFee <= 0 then return false end
 		local rep = s.feeReport
 		if rep and rep.role == role and rep.gross == gross then return false end
@@ -1843,7 +1982,7 @@ do
 	SendFeeReport = function(r, now)
 		local s = r and r.settlement
 		local rep = s and s.feeReport
-		if not rep then return false end
+		if not rep or not WalletShown() then return false end
 		if rep.acked and (rep.role ~= "s" or not (s.feeState == "due" or s.feeState == "mailed")) then return false end
 		if rep.sentAt and now - rep.sentAt < Requests.ASK_GAP then return false end
 		local guild = Same(r.crafter, ns.me) and Clean(GetGuildInfo and GetGuildInfo("player"), 40) or Clean(r.crafterGuild, 40)
@@ -1860,9 +1999,11 @@ do
 		return FeeWord(desk, r.id, "fee", rep.role, r.requester, r.crafter, B36(rep.gross), B36(r.itemID or 0), tostring(r.quantity), guild)
 	end
 
-	-- The desk hears a party's word.
+	-- The desk hears a party's word (none while the Wallet is off on the desk's own client: no fee
+	-- is owed then, so a word of one is a modified client's, and its ledger takes none).
 	local function TakeFeeReport(id, sender, f)
 		if not FeeDesk() then return false, "authority" end
+		if not WalletShown() then return false, "off" end
 		local role, requester, crafter = f[6], Full(f[7]), Full(f[8])
 		local gross, itemID, qty = UnB36(f[9], 1, Requests.PRICE_MAX), UnB36(f[10], 0, 999999999), Clamp(f[11], 1, Requests.QUANTITY_MAX)
 		local guild = Clean(f[12], Requests.GUILD_MAX)
@@ -1890,21 +2031,23 @@ do
 		return true
 	end
 
-	-- A fee mail that reached the desk: booked against that seller's fee for that request (or kept
-	-- for it, until the word of the sale comes).
+	-- A fee mail that reached the desk: booked against that seller's fee for that request, one his
+	-- own word named (or kept for it, until his word comes: JoinEarly).
 	local function BookFeePayment(id, payer, copper)
 		local led, now = Ledger(), Now()
 		local e
 		for _, x in pairs(led.entries) do
-			if type(x) == "table" and x.id == id and Same(x.crafter, payer) and (not e or (x.created or 0) < (e.created or 0)) then e = x end
+			if type(x) == "table" and x.id == id and Same(x.crafter, payer) and type(x.by) == "table" and x.by.s
+				and (not e or (x.created or 0) < (e.created or 0)) then e = x end
 		end
+		local key = FeeKey(id, payer, nil)
+		if not e and type(led.entries[key]) == "table" then e = led.entries[key] end
 		if not e then
 			if not FeeRoom(led, "mail", nil, payer, now) then
 				ns.Log("craft fee mail %s from %s not booked: full", tostring(id), tostring(payer))
 				return nil
 			end
-			local key = FeeKey(id, payer, nil)
-			e = { key = key, id = id, crafter = payer, created = now, paid = 0, by = {}, state = "due" }
+			e = ReturnGone(led, key) or { key = key, id = id, crafter = payer, created = now, paid = 0, by = {}, state = "due" }
 			led.entries[key] = e
 		end
 		e.paid = (tonumber(e.paid) or 0) + copper
@@ -1928,7 +2071,8 @@ do
 		local id = FeeSubjectId(subject)
 		copper = Clamp(copper, 1, Requests.PRICE_MAX)
 		if out or how ~= "mail" or not id or not copper or type(name) ~= "string" or Secret(name) then return false end
-		if FeeDesk() then BookFeePayment(id, Full(name), copper) end
+		-- (The Wallet off, no fee is owed: still the guild's money in the book, booked on no fee.)
+		if FeeDesk() and WalletShown() then BookFeePayment(id, Full(name), copper) end
 		return true
 	end
 
@@ -1948,6 +2092,9 @@ do
 			if Fee.Confirmed(e) then return false, "state" end
 			e.checkedBy, e.checkedAt, e.checkNote = ns.me, now, note
 			e.due = math.max(tonumber(e.due) or now, now + Requests.FEE_DUE)
+			-- (A sale the desk checked is its seller's: the fee mail he sent for it before any word of his.)
+			JoinEarly(Ledger(), e)
+			if (tonumber(e.paid) or 0) >= e.fee then e.state, e.paidAt = "paid", now end
 			Changed()
 			return true
 		end
@@ -2272,6 +2419,22 @@ do
 	end
 	Fee.TakeReport, Fee.TakeState, Fee.SubjectId, Fee.MailSent, Fee.WarnOverdue = TakeFeeReport, TakeFeeState, FeeSubjectId, FeeMailSent, WarnOverdue
 	Fee.Answer, Fee.TakeDebt, Fee.TakeReminder, Fee.MailReturned, Fee.Arise = AnswerDebtors, TakeDebt, TakeFeeReminder, FeeMailReturned, Arise
+
+	-- /oly status and /oly bug (Diagnostics.lua: ns.statusLines), on the desk's own client: its
+	-- ledger's size, the fees evicted for room and those kept for their return.
+	function Requests.FeeStatusLine()
+		if not FeeDesk() then return nil end
+		local led, n, kept = Ledger(), 0, 0
+		for _ in pairs(led.entries) do n = n + 1 end
+		for _ in pairs(type(led.gone) == "table" and led.gone or {}) do kept = kept + 1 end
+		return ("craft fee desk: %d of %d fees on the ledger  |  evicted for room: %d (last %s)  |  kept for their return: %d"):format(
+			n, Requests.FEES_MAX, tonumber(led.evicted) or 0, ns.Ago(led.evictedAt), kept)
+	end
+	ns.statusLines = ns.statusLines or {}
+	table.insert(ns.statusLines, function(lines)
+		local line = Requests.FeeStatusLine()
+		if line then lines[#lines + 1] = line end
+	end)
 end
 
 -- (A real keeper: Treasury.IsKeeper is also true in the author's previews, on his screen only.)
@@ -3558,9 +3721,10 @@ end
 -- The deal's own room, as every pending conversation opens (ChatRooms.OpenMatter): its tab on the
 -- Chat page with the Olympus window in front. By itself (`auto`) once a claim is won, on both
 -- parties' clients (in an instance or Busy, a fight, or while the player writes in the Chat page's
--- box, it waits; its sound, the "craft" switch's); then from the request's page, where a tab the
--- player removed comes back.
-function Requests.OpenChat(id, auto)
+-- box, it waits; its sound, the "craft" switch's); `ifOpen` (1.2.3, the requester's: another
+-- member's claim), only into the Olympus window he has open, never opening it; then from the
+-- request's page, where a tab the player removed comes back.
+function Requests.OpenChat(id, auto, ifOpen)
 	local r = Requests.Get(id)
 	if not r or not Mine(r) or not r.crafter then return false, "state" end
 	local R = rawget(ns, "ChatRooms")
@@ -3569,7 +3733,8 @@ function Requests.OpenChat(id, auto)
 		r.chatRemoved = nil
 		ns.Fire("CHAT_ROOMS_CHANGED")
 	end
-	return R.OpenMatter({ room = RoomId(id), auto = auto == true, kind = "craft", live = function() return Active(Requests.Get(id)) == true end })
+	return R.OpenMatter({ room = RoomId(id), auto = auto == true, ifOpen = auto == true and ifOpen == true, kind = "craft",
+		live = function() return Active(Requests.Get(id)) == true end })
 end
 function Requests.RemoveChat(id)
 	local r = Requests.Get(id)

@@ -29,8 +29,9 @@ local L = ns.L
 -- and added only on its yes (a text with 2000 names could silence a guild's officers unseen).
 -- Never a yes to sharing (the location, a keeper's book, a sister guild's bank, the roll call, the
 -- inspection, layer help): a text someone else made must never turn sharing on. The addon asks
--- those again. A No to a line that is on until its No (Backup.NOES: 1.2's Most Wanted sightings)
--- is carried and comes back, the No alone: a wipe would otherwise turn it on again unasked.
+-- those again. A No to a line that is on until its No (Backup.NOES: 1.2's Most Wanted sightings,
+-- 1.2.1's Bones invitations and Bones at innkeepers) is carried and comes back, the No alone: a
+-- wipe would otherwise turn it on again unasked.
 -- Nothing restores before the player reads what changes and says yes.
 
 local Backup = {}
@@ -55,7 +56,9 @@ Backup.SETTINGS = {
 -- 1.2: lines on until their No (nil is on): only their No (false) goes in a backup, and only a No
 -- comes back, so a restore turns sharing off, never on. [key] = the module's own switch, called
 -- quietly on a restore (Wanted.SetSightings: what waits is cancelled at once).
-Backup.NOES = { wantedSightings = { module = "Wanted", set = "SetSightings" } }
+Backup.NOES = { wantedSightings = { module = "Wanted", set = "SetSightings" },
+	-- (1.2.1: FarkleTable.lua's switches; their No refuses what waits and hides the offer at once)
+	bonesInvites = { module = "FarkleTable", set = "SetInvites" }, bonesKeeper = { module = "FarkleTable", set = "SetKeeperOffer" } }
 
 -- 1.2, the Blood Arena (the design). Settings: arenaUI, arenaFollow and each character's
 -- arenaProfile without its "pub" (a text someone else made never turns sharing on). Data: the

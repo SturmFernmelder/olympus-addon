@@ -1,6 +1,7 @@
 -- GitHub #23: signed cross-guild leadership is a dormant, explicit migration. Old HT1 lists keep
 -- legacy behaviour; an author-signed enforce marker creates a sticky fail-closed boundary.
-local ns, test, eq = ...
+local ns, test, eq, extra = ...
+	local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]authority%.lua$")) or "./"
 	local A, D, T0 = ns.Authority, ns.Data, 1800000000
 	local function Hex(s)
 		return (s:gsub(".", function(c) return ("%02x"):format(c:byte()) end))
@@ -60,6 +61,15 @@ local ns, test, eq = ...
 		ns.rdb.councilTitles = { at = at, realm = "Realm+Other", depts = {},
 			blob = ("HT1~%d~Realm+Other~0~%s~a"):format(at, list or "^^") }
 		A.Reset()
+	end
+	-- This client's own H3 ask, its sends dropped (1.2.1: an H2 part counts only as an answer to one).
+	local function AskOnce()
+		local comm, isMember, after, every = ns.Comm, ns.IsMember, ns.After, ns.Every
+		ns.Comm = { Handle = function() end, Send = function() return true end }
+		ns.IsMember, ns.After, ns.Every = function() return true end, function() end, function() end
+		local ok, err = pcall(function() A.Start(); assert(A.Ask(true), "the ask") end)
+		ns.Comm, ns.IsMember, ns.After, ns.Every = comm, isMember, after, every
+		if not ok then error(err, 0) end
 	end
 	local function Census(guild, who, rank)
 		local ranks = { [who] = rank }
@@ -173,7 +183,8 @@ local ns, test, eq = ...
 			eq(ns.King.Verified("Forger-Realm", "Olympus Zeus"), false, "nor write names onto the King's page")
 			eq(ns.King.Verified("Real Captain-Other", "Olympus Zeus"), true)
 			eq(ns.Hop.Trusted("Forger-Realm"), false, "nor auto-accept a layer invite")
-			eq(ns.Hop.Trusted("Real Captain-Other"), true)
+			-- (1.2.3: another guild's signed Captain no more either: the King's guild's alone.)
+			eq(ns.Hop.Trusted("Real Captain-Other"), false)
 			Install(Entry("Olympus Zeus=Rollback-Realm", 3), T0 + 1)
 			eq(D.AuthorizedRank("Rollback-Realm", "Olympus Zeus"), nil, "lower epoch")
 			Install(Entry("Olympus Zeus=Next-Realm", 5), T0 + 2)
@@ -184,6 +195,69 @@ local ns, test, eq = ...
 			eq(A.Enforced(), true); eq(D.AuthorizedRank("Next-Realm", "Olympus Zeus"), nil, "empty tombstone")
 			Install("^^", T0 + 4)
 			eq(A.Enforced(), true); eq(D.AuthorizedRank("Forger-Realm", "Olympus Zeus"), nil, "newer absence cannot reopen")
+		end)
+	end)
+
+	-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) Under signed
+	-- enforcement Hop.Trusted vouched for any guild's signed Lord or Captain on every client: his
+	-- invite accepted for the player, "Always invite" and "For Olympus!" inviting him without a
+	-- click. Now only the King's guild's signed Lord and Captains, beside our roster, the King, his
+	-- Steward and his Hands.
+	test("authority: under enforcement layer-hop trust is the King's guild's signed Lord and Captains', never another guild's (1.2.3)", function()
+		WithState(function()
+			Install(Entry("Olympus Zeus=Zeus Lord-Realm,Zeus Captain-Other!Olympus=Crown Lord-Realm,Crown Captain-Other", 4), T0)
+			eq(A.Enforced(), true)
+			eq(D.AuthorizedRank("Zeus Lord-Realm", "Olympus Zeus"), 0, "signed, as the author's list has him")
+			eq(D.AuthorizedRank("Crown Captain-Other", "Olympus"), 1)
+			eq(ns.Hop.Trusted("Zeus Lord-Realm"), false, "another guild's signed master")
+			eq(ns.Hop.Trusted("Zeus Captain-Other"), false, "another guild's signed Captain")
+			eq(ns.Hop.Trusted("Crown Lord-Realm"), true, "the King's guild's signed master")
+			eq(ns.Hop.Trusted("Crown Captain-Other"), true, "the King's guild's signed Captain")
+			-- Our own roster still vouches for our guild's master, whichever guild it is.
+			ns.Roster.byName = { ["Zeus Lord-Realm"] = 0 }
+			eq(ns.Hop.Trusted("Zeus Lord-Realm"), true, "a guildmate")
+		end)
+	end)
+
+	-- (1.2.3) No census rank calls the whole army to arms or musters it (Decree.lua: one report
+	-- named anyone an officer of <Olympus> on the clients its members did not report to). Once
+	-- the author's signed enforcement is on, the King's guild's signed officers call it on every
+	-- other guild's client, as its roster's do on its own members'; another guild's signed master
+	-- and officers never do, and a name the signed list lacks is nobody.
+	test("authority: under enforcement the King's guild's signed Captain calls the whole army to arms on another guild's client; another guild's signed master never does (1.2.3)", function()
+		WithState(function()
+			local saved = { guild = GetGuildInfo, notice = RaidNotice_AddMessage, frame = RaidWarningFrame, alert = ns.PlayAlert,
+				print = ns.Print, chat = C_ChatInfo }
+			local ok, err = pcall(function()
+				GetGuildInfo = function() return "Olympus II", "rank", 3 end
+				local warnings = {}
+				RaidWarningFrame = {}
+				RaidNotice_AddMessage = function(_, text) warnings[#warnings + 1] = text end
+				ns.PlayAlert, ns.Print = function() end, function() end
+				-- The real receive path (tests/run.lua's FreshComm) with Decree.lua loaded on it.
+				local cns, Deliver = extra.FreshComm()
+				cns.Now = function() return T0 end
+				cns.Comm.loginAt = T0 - 3600
+				assert(loadfile(ROOT .. "Olympus/Decree.lua"))("Olympus", cns)
+				local function Call(sender, kind, guild)
+					Deliver("CHANNEL", sender, ns.Codec.EncodeDecree(kind, 1453, 0.5, 0.5, guild, 1, "x"))
+				end
+				Install(Entry("Olympus Zeus=Zeus Lord-Realm,Zeus Captain-Other!Olympus=Crown Lord-Realm,Crown Captain-Other", 4), T0)
+				eq(A.Enforced(), true)
+				Call("Zeus Lord-Realm", "ARMS", "Olympus Zeus")
+				Call("Zeus Captain-Other", "MUSTER", "Olympus Zeus")
+				eq(#cns.Decree.Active(), 0, "another guild's signed master and Captain: never the whole army's")
+				Call("Crown Captain-Other", "ARMS", "Olympus")
+				eq(#cns.Decree.Active(), 1, "the King's guild's signed Captain: the whole army's Call to Arms")
+				eq(cns.Decree.Active()[1].kind, "ARMS"); eq(cns.Decree.Active()[1].scope, nil); eq(#warnings, 1, "its raid warning")
+				Call("Crown Lord-Realm", "MUSTER", "Olympus")
+				eq(#cns.Decree.Active(), 2, "and its signed master's Muster")
+				Call("Nobody Signed-Realm", "ARMS", "Olympus")
+				eq(#cns.Decree.Active(), 2, "a name the signed list lacks")
+			end)
+			GetGuildInfo, RaidNotice_AddMessage, RaidWarningFrame = saved.guild, saved.notice, saved.frame
+			ns.PlayAlert, ns.Print, C_ChatInfo = saved.alert, saved.print, saved.chat
+			if not ok then error(err, 0) end
 		end)
 	end)
 
@@ -243,13 +317,17 @@ local ns, test, eq = ...
 					{ at = T0 + 10, epoch = 7 })
 				local ok, why = A.TakePart(parts[2], nil, "LOCAL")
 				eq(ok, true); eq(why, "partial")
-				eq(A.Enforced(), true, "one verified part establishes the fail-closed boundary")
+				-- (1.2.1: one verified part used to establish the boundary at once; a part alone, which
+				-- anyone holding an old one could replay, now moves nothing account-wide.)
+				eq(A.Enforced(), false, "one verified part moves no boundary: only the whole verified set does")
+				eq(next(ns.db.authorityEnforced), nil, "nothing account-wide is written for a part")
 				eq(A.Manifest(), nil, "a partial set grants nobody")
 				eq(A.Rank("Signed Captain-Other", "Olympus Ares"), nil)
 				ok, why = A.TakePart(parts[2], nil, "LOCAL")
 				eq(ok, true); eq(why, "partial", "a duplicate does not advance the part count")
 				ok, why = A.TakePart(parts[1], nil, "LOCAL")
 				eq(ok, true); eq(why, "complete")
+				eq(A.Enforced(), true, "the whole verified set establishes the fail-closed boundary")
 				eq(A.Rank("Signed Lord-Realm", "Olympus Zeus"), 0)
 				eq(A.Rank("Signed Captain-Other", "Olympus Ares"), 0,
 					"the first identity in each guild is that guild's Lord")
@@ -275,12 +353,18 @@ local ns, test, eq = ...
 				local replacement = Parts({ "Olympus Zeus=New Lord-Realm", "Olympus Ares=New Ares-Other" },
 					{ at = T0 + 20, epoch = 4 })
 				eq(select(2, A.TakePart(replacement[2], nil, "LOCAL")), "partial")
-				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), nil, "the first newer part revokes the older complete set")
+				-- (1.2.1: the first newer part used to revoke the older set at once, by moving the
+				-- account-wide boundary; a part alone no longer moves it, so the older set stands until
+				-- the newer one is whole.)
+				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), 0, "a partial newer set moves nothing")
+				eq(select(2, A.TakePart(replacement[1], nil, "LOCAL")), "complete")
+				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0, "the newer set, once whole")
+				eq(A.Rank("Old Lord-Realm", "Olympus Zeus"), nil, "revokes the older complete set")
 				local conflict = Parts({ "Olympus Zeus=Other Lord-Realm" }, { at = T0 + 20, epoch = 4, sig = "b" })
 				local ok, why = A.TakePart(conflict[1], nil, "LOCAL")
-				eq(ok, false); eq(why, "conflict"); eq(A.Manifest(), nil)
-				eq(select(2, A.TakePart(replacement[1], nil, "LOCAL")), "complete")
-				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0, "the exact pending root can still finish")
+				eq(ok, false); eq(why, "conflict")
+				eq(A.Rank("Other Lord-Realm", "Olympus Zeus"), nil, "another set of the same time never replaces it")
+				eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0)
 
 				local downgrade = Parts({ "Olympus Zeus=Downgrade-Realm" }, { at = T0 + 30, epoch = 2 })
 				ok, why = A.TakePart(downgrade[1], nil, "LOCAL")
@@ -295,7 +379,9 @@ local ns, test, eq = ...
 					{ at = T0 + 50, epoch = 6, root = string.rep("0", 64) })
 				eq(select(2, A.TakePart(bad[1], nil, "LOCAL")), "partial")
 				ok, why = A.TakePart(bad[2], nil, "LOCAL")
-				eq(ok, false); eq(why, "digest"); eq(A.Manifest(), nil, "individually signed parts with a false root grant nobody")
+				eq(ok, false); eq(why, "digest")
+				eq(A.Rank("Digest One-Realm", "Olympus Zeus"), nil, "individually signed parts with a false root grant nobody")
+				eq(A.Rank("Recovered-Realm", "Olympus Zeus"), 0, "(1.2.1) nor move the boundary off the set held")
 
 				local tombstone = Parts({ "-" }, { at = T0 + 60, epoch = 7 })
 				eq(select(2, A.TakePart(tombstone[1], nil, "LOCAL")), "complete")
@@ -368,6 +454,7 @@ local ns, test, eq = ...
 		WithState(function()
 			WithFakeSign(function(Parts)
 				local function Junk(i) return Parts({ "Olympus Zeus=Junk" .. i .. "-Realm" }, { at = T0 + i, epoch = 2, unsigned = true })[1] end
+				AskOnce() -- (1.2.1: whispered parts count only as answers to our own ask)
 				for i = 1, A.VERIFY_EACH or 4 do eq(select(2, A.HandlePart("WHISPER", "Spammer-Realm", "H2~" .. Junk(i))), "signature") end
 				eq(select(2, A.HandlePart("WHISPER", "Spammer-Realm", "H2~" .. Junk(99))), "budget", "past his share")
 				-- Another sender's part is still checked, and a real holder's set completes.
@@ -377,7 +464,7 @@ local ns, test, eq = ...
 		end)
 	end)
 
-	test("authority: while enforcement is dormant H3 asks stop after the login burst; past the boundary they keep recovering", function()
+	test("authority: while enforcement is dormant H3 asks stop after the login burst; past the boundary, or with part of a set in, they keep recovering", function()
 		WithState(function()
 			local comm, isMember, after, every = ns.Comm, ns.IsMember, ns.After, ns.Every
 			local sent = 0
@@ -397,11 +484,215 @@ local ns, test, eq = ...
 					local parts = Parts({ "Olympus Zeus=Answer Lord-Realm", "Olympus Ares=Answer Ares-Other" }, { at = T0 + 10, epoch = 2 })
 					eq(select(2, A.TakePart(parts[1], nil, "LOCAL")), "partial")
 				end)
-				eq(A.Enforced(), true)
-				eq(A.Ask(false), true)
+				-- (1.2.1: a part alone no longer moves the boundary; holding it, the client still asks.)
+				eq(A.Enforced(), false)
+				eq(A.Ask(false), true, "holding part of a set, the client keeps asking for the rest")
 				eq(sent, 2 * (A.ASKS + 1), "the channel and the guild each time")
 			end)
 			ns.Comm, ns.IsMember, ns.After, ns.Every = comm, isMember, after, every
 			if not ok then error(err, 0) end
 		end)
+	end)
+
+	-- 1.2.1 security review: old or expired signed material used to lock a client for good into
+	-- "enforced, nobody authorized". It moves the account-wide boundary only while current, and a
+	-- set only once it is whole.
+	test("authority: an expired, not yet valid or unfinished signed set never moves the account-wide boundary", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				Census("Olympus Zeus", "Legacy-Realm", 0)
+				local expired = Parts({ "Olympus Zeus=Old Lord-Realm" }, { at = T0 + 10, epoch = 3, issued = T0 - 2000, expires = T0 - 1000 })
+				local ok, why = A.TakePart(expired[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				local early = Parts({ "Olympus Zeus=Early Lord-Realm" }, { at = T0 + 11, epoch = 3, issued = T0 + A.CLOCK_SKEW + 100, expires = T0 + 5000 })
+				ok, why = A.TakePart(early[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				eq(A.Enforced(), false, "an expired or future set sets no boundary")
+				eq(next(ns.db.authorityEnforced), nil, "nothing account-wide is written")
+				eq(select(2, D.AuthorizedRank("Legacy-Realm", "Olympus Zeus")), "census", "the documented census behaviour stays")
+				-- A set whose window ends before its last part comes: never whole, never a boundary.
+				local slow = Parts({ "Olympus Zeus=Slow Lord-Realm", "Olympus Ares=Slow Ares-Other" }, { at = T0 + 12, epoch = 3 })
+				eq(select(2, A.TakePart(slow[1], nil, "LOCAL")), "partial")
+				eq(A.Enforced(), false, "a part alone moves nothing")
+				ns.Now = function() return T0 + 1001 end
+				ok, why = A.TakePart(slow[2], nil, "LOCAL")
+				eq(ok, false); eq(why, "window")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				-- The same kind of set, whole and current: the boundary, and its roles.
+				ns.Now = function() return T0 end
+				local current = Parts({ "Olympus Zeus=Current Lord-Realm" }, { at = T0 + 13, epoch = 3 })
+				eq(select(2, A.TakePart(current[1], nil, "LOCAL")), "complete")
+				eq(A.Enforced(), true); eq(A.Rank("Current Lord-Realm", "Olympus Zeus"), 0)
+			end)
+		end)
+	end)
+
+	test("authority: an old or expired legacy HT1 marker never moves the account-wide boundary", function()
+		WithState(function()
+			Census("Olympus Zeus", "Legacy-Realm", 0)
+			Install(Entry("Olympus Zeus=Zed-Realm", 2, T0 - 2000, T0 - 1000))
+			eq(A.Enforced(), false, "an expired marker sets no boundary")
+			eq(next(ns.db.authorityEnforced), nil)
+			eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), 0, "census authority as documented")
+			Install(Entry("Olympus Zeus=Zed-Realm", 2, T0 + A.CLOCK_SKEW + 100, T0 + 5000), T0 + 1)
+			eq(A.Enforced(), false, "nor one not valid yet")
+			Install(Entry("Olympus Zeus=Zed-Realm", 2), T0 + 2)
+			eq(A.Enforced(), true, "a current marker still does")
+			eq(D.AuthorizedRank("Zed-Realm", "Olympus Zeus"), 0)
+			eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), nil)
+		end)
+	end)
+
+	test("authority: whispered H2 parts count only as answers to this client's own H3 ask", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local parts = Parts({ "Olympus Zeus=Answer Lord-Realm" }, { at = T0 + 10, epoch = 2 })
+				local ok, why = A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. parts[1])
+				eq(ok, false); eq(why, "unasked", "nobody asked: an unsolicited whisper is dropped unread")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				AskOnce()
+				local horde = Parts({ "Olympus Zeus=Horde Lord-Realm" }, { at = T0 + 11, epoch = 2, faction = "Horde" })
+				eq(select(2, A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. horde[1])), "unasked", "not the faction asked for")
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. parts[1])), "complete", "an answer to our ask")
+				eq(A.Enforced(), true); eq(A.Rank("Answer Lord-Realm", "Olympus Zeus"), 0)
+				-- The next ask says what we hold: the same set again is no answer to it.
+				AskOnce()
+				eq(select(2, A.HandlePart("WHISPER", "Stranger-Realm", "H2~" .. parts[1])), "unasked", "not newer than the set held")
+				-- Past the window of our last ask: nothing, however new.
+				local newer = Parts({ "Olympus Zeus=Newer Lord-Realm" }, { at = T0 + 20, epoch = 3 })
+				ns.Now = function() return T0 + A.ANSWER_WINDOW + 1 end
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. newer[1])), "unasked", "too long after our ask")
+				ns.Now = function() return T0 end
+				eq(select(2, A.HandlePart("WHISPER", "Holder-Realm", "H2~" .. newer[1])), "complete", "within it")
+			end)
+		end)
+	end)
+
+	-- 1.2.1 review: every receiver drops a part past its window, so a holder used to whisper up to
+	-- eight large parts to each new asker for nothing once his set had expired.
+	test("authority: a holder answers no ask with a set past its window, and stops a transfer when it expires", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local parts = Parts({ "Olympus Zeus=Answer Lord-Realm", "Olympus Ares=Answer Ares-Other" },
+					{ at = T0 + 10, epoch = 2, expires = T0 + 1000 })
+				eq(select(2, A.TakePart(parts[1], nil, "LOCAL")), "partial")
+				eq(select(2, A.TakePart(parts[2], nil, "LOCAL")), "complete")
+				local comm, workshop, moderation, after, isMember = ns.Comm, ns.Workshop, ns.Moderation, ns.After, ns.IsMember
+				local queued, now = {}, T0
+				local ok, err = pcall(function()
+					ns.Comm = {
+						Handle = function() end, PeerCount = function() return 1 end,
+						QueueRoom = function() return 60 end, Send = function() return true end,
+						SendBatch = function(dist, pieces, key, target, urgent, done, options)
+							queued[#queued + 1] = { target = target, pieces = pieces, done = done, options = options }
+							return true
+						end,
+					}
+					ns.Workshop = setmetatable({ IsAuthor = function() return true end }, { __index = workshop })
+					ns.Moderation = { missing = false, Blocks = function() return false end }
+					ns.IsMember = function() return true end
+					ns.After = function(seconds, _, fn) if seconds < 5 then fn() end end
+					ns.Now = function() return now end
+					-- While current: answered, the first part on its way.
+					eq(A.HandleAsk("GUILD", "Early-Realm", "H3~Alliance~0~0"), true)
+					eq(#queued, 1); eq(queued[1].target, "Early-Realm")
+					eq(queued[1].options.guard(), true)
+					-- The set expires during the transfer: its next part never leaves.
+					now = T0 + 1001
+					eq(queued[1].options.guard(), false, "a part of an expired set is not sent")
+					queued[1].done(true)
+					eq(#queued, 1, "the transfer stops when the set expires")
+					-- Asked after it expired: no answer at all.
+					eq(A.HandleAsk("GUILD", "Late-Realm", "H3~Alliance~0~0"), false, "an expired set is no answer")
+					eq(A.HandleAsk("CHANNEL", "Later-Realm", "H3~Alliance~0~0"), false)
+					eq(#queued, 1, "nothing whispered")
+				end)
+				ns.Comm, ns.Workshop, ns.Moderation, ns.After, ns.IsMember = comm, workshop, moderation, after, isMember
+				A.Reset()
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end)
+
+	test("authority: signed material issued before this release's floor never moves the boundary, and an older build's record no longer counts", function()
+		WithState(function()
+			WithFakeSign(function(Parts)
+				local FLOOR = A.RELEASE_FLOOR
+				assert(FLOOR and FLOOR < T0 - 10, "this file's material is issued after the floor")
+				-- A clock just past the floor: material signed just before it is still inside its window.
+				ns.Now = function() return FLOOR + 100 end
+				local old = Parts({ "Olympus Zeus=Old Lord-Realm" }, { at = FLOOR - 50, epoch = 9, issued = FLOOR - 200, expires = FLOOR + 1000 })
+				local ok, why = A.TakePart(old[1], nil, "LOCAL")
+				eq(ok, false); eq(why, "window", "issued before the floor")
+				eq(A.Enforced(), false); eq(next(ns.db.authorityEnforced), nil)
+				Install(Entry("Olympus Zeus=Zed-Realm", 9, FLOOR - 200, FLOOR + 1000), FLOOR - 40)
+				eq(A.Enforced(), false, "nor an HT1 marker issued before it")
+				eq(next(ns.db.authorityEnforced), nil)
+				-- Material issued after the floor still does, at a lower epoch than the old one.
+				local new = Parts({ "Olympus Zeus=New Lord-Realm" }, { at = FLOOR + 60, epoch = 1, issued = FLOOR + 50, expires = FLOOR + 5000 })
+				eq(select(2, A.TakePart(new[1], nil, "LOCAL")), "complete")
+				eq(A.Enforced(), true); eq(A.Rank("New Lord-Realm", "Olympus Zeus"), 0)
+			end)
+		end)
+		WithState(function()
+			-- What an older build wrote from old material: no issued time on or after the floor.
+			Census("Olympus Zeus", "Legacy-Realm", 0)
+			local stale = { at = T0 - 100, epoch = 9, kind = "HA", root = string.rep("0", 64) }
+			ns.db.authorityEnforced = { ["realm|Alliance"] = stale, ["other|Alliance"] = stale }
+			A.Reset()
+			eq(A.Enforced(), false, "a boundary recorded from older material no longer locks the client")
+			eq(select(2, D.AuthorizedRank("Legacy-Realm", "Olympus Zeus")), "census", "the documented census behaviour is back")
+			WithFakeSign(function(Parts)
+				local fresh = Parts({ "Olympus Zeus=Fresh Lord-Realm" }, { at = T0 - 50, epoch = 1 })
+				eq(select(2, A.TakePart(fresh[1], nil, "LOCAL")), "complete", "a current set is not a replay of it")
+				eq(A.Rank("Fresh Lord-Realm", "Olympus Zeus"), 0)
+				eq(D.AuthorizedRank("Legacy-Realm", "Olympus Zeus"), nil)
+			end)
+		end)
+	end)
+
+	-- 1.2.1 security review: a signed list for another realm group used to replace ours (and, newer,
+	-- shut ours out until a list newer still came), though nobody here is on it.
+	test("authority: a signed council list for another realm group never replaces ours, nor shuts it out", function()
+		local W, S = ns.Workshop, ns.Sign
+		local saved = { council = ns.rdb.council, titles = ns.rdb.councilTitles, plausible = S.Plausible, verify = S.Verify,
+			me = ns.me, enforced = ns.db.authorityEnforced, chunked = ns.Comm.SendChunked }
+		local ok, err = pcall(function()
+			local SIG, sent = string.rep("a", 512), {}
+			ns.me, ns.db.authorityEnforced, ns.rdb.council, ns.rdb.councilTitles = "Tester-Realm", nil, nil, nil
+			S.Plausible = function(sig) return type(sig) == "string" and #sig == 512 end
+			S.Verify = function() return true end -- (the signatures are not what is tested here)
+			ns.Comm.SendChunked = function(msg) sent[#sent + 1] = msg end
+			W.ResetVerify()
+			local ours = "HS1~1800000001~Realm~Our Councillor~" .. SIG
+			local theirs = "HS1~1800000009~Elsewhere~Their Councillor~" .. SIG
+			eq(W.TakeCouncil(ours), true)
+			eq(W.TakeCouncil(theirs, "Relay-Realm"), false, "another realm group's list, newer than ours")
+			W.HandleCouncil("CHANNEL", "Relay-Realm", "HS~" .. theirs)
+			eq(ns.rdb.council.blob, ours, "ours stays")
+			eq(ns.IsHighCouncillor("Our Councillor-Realm"), true)
+			local oursT = "HT1~1800000002~Realm~0~^^Our Councillor=Speaker~" .. SIG
+			local theirsT = "HT1~1800000010~Elsewhere~1~^^Their Councillor=Speaker~" .. SIG
+			eq(W.TakeTitles(oursT), true)
+			eq(W.TakeTitles(theirsT, "Relay-Realm"), false, "nor its titles")
+			eq(ns.CouncilTitles() and ns.CouncilTitles().blob, oursT, "our titles stay")
+			-- A list naming our realm among others is ours.
+			local shared = "HS1~1800000020~Other+Realm~Our Councillor,Second Councillor~" .. SIG
+			eq(W.TakeCouncil(shared, "Relay-Realm"), true, "a group with our realm in it")
+			eq(ns.IsHighCouncillor("Second Councillor-Realm"), true)
+			-- Another group's list an older build kept: counts as none, so ours replaces it though
+			-- older, and it is never passed on.
+			ns.rdb.council = { at = 1800000050, names = { ["their councillor"] = "Their Councillor" }, realm = "Elsewhere", blob = theirs }
+			ns.rdb.councilTitles = { at = 1800000051, realm = "Elsewhere", depts = {}, blob = theirsT }
+			W.RelayCouncil(true)
+			eq(#sent, 0, "another group's lists are not relayed")
+			eq(W.NeedLists(), true, "this client asks for its own")
+			eq(W.TakeCouncil(ours), true, "ours replaces it")
+			eq(W.TakeTitles(oursT), true)
+			eq(ns.rdb.council.blob, ours); eq(ns.rdb.councilTitles.blob, oursT)
+		end)
+		ns.rdb.council, ns.rdb.councilTitles, S.Plausible, S.Verify = saved.council, saved.titles, saved.plausible, saved.verify
+		ns.me, ns.db.authorityEnforced, ns.Comm.SendChunked = saved.me, saved.enforced, saved.chunked
+		W.ResetVerify()
+		if not ok then error(err, 0) end
 	end)

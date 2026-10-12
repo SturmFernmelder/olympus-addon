@@ -29,21 +29,14 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
+- **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
+  from members' own kills and deaths, bounties by office and level; the missionaries' crook
+- **1.2.1**: Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
 - **1.2.0**: The Watch (each guild's moderation desk, the Tabards in it); crafting requests on the Crafters
   tab; the King's arrow on the minimap; Vox Populi's history and a guild master's own questions; the
   Guild treasuries in one list with one search; Bones between players for points, at a tavern or at a
   camp; no arbiters without bets (duels and Bones between their two players); duel points that
   consider levels; Find a player by level, distance and game
-- **1.1.5**: Three elite borders (the King gold, the High Council silver, guild masters bronze) and
-  their marks in the game's own chat (`/oly chatmarks`), none on Olympus lines; councillors'
-  tooltips; a guild the High Council removed is no Olympus guild, with an appeal through the signed
-  approved list; `<OLYMPIANS>` approved; the version letters (`/oly letters`); Blizzard's player
-  menus untouched in gamepad mode ([#56](https://github.com/dnl-gentile/olympus-addon/issues/56)); restricted secret values ignored safely; the Chat tab's
-  second help "i" gone (the window's own, left of the X, is the one there); the gamepad gate (every
-  way into the game's own UI listed and asked of one gate: with the gamepad UI no typed command, no
-  button in the guild windows, nothing on the world map; a switch steps back and says what a
-  `/reload` completes); the nameplate marks no longer hook a plate's own layout (Lua errors)
-- **1.1.4**: Crafters as its own tab; the side tabs keep one order when they run out of room
 
 Every version's notes are in the [GitHub releases](https://github.com/dnl-gentile/olympus-addon/releases). This page is the short one for CurseForge: the [README](https://github.com/dnl-gentile/olympus-addon#olympus) has every section in full.
 
@@ -215,7 +208,8 @@ Layer"** with his crown. One click (or `/oly hop`) and the addon does the asking
   saved: a later group asks first again, after a `/reload` the window asks once more, and
   `/oly layerauto off` ends it at once.
 - The invite is accepted for you when that player is one the addon can vouch for (a member of
-  your own guild, or a Lord or Captain the census confirms); anyone else's, and every invite
+  your own guild, the King, his Steward or Hands, or, once the author's signed list is on, a Lord
+  or Captain of `<Olympus>` it names; never a census rank); anyone else's, and every invite
   while Blizzard's gamepad UI is on, waits for your click in the game's own invite window. The
   game moves you to the layer, and the addon takes you out of the group as soon as it sees the
   move (or offers a **Leave group** button if it can't tell).
@@ -270,7 +264,7 @@ same as their card); none on the King's screen while the council's names are hid
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the
-friends list, the guild roster) and the game's menu gets an **Olympus** part at the bottom:
+friends list, a community roster) and the game's menu gets an **Olympus** part at the bottom:
 - **Their version**: "Olympus 1.1.1 (out of date)", "up to date" or "not seen yet", and under it
   where it came from and when. Guildmates show up by themselves (their addon says hello to your
   guild), and so does a known version on the person card. Opening the menu sends nothing.
@@ -279,11 +273,12 @@ friends list, the guild roster) and the game's menu gets an **Olympus** part at 
   answer, so no answer in 10 seconds can mean no Olympus, an older one, a dungeon or raid, or no
   Olympus guild (outside one the addon sends nothing). The author's check is his roll call to that
   player alone, which every version since 0.9.9 answers, and only after their yes to his roll calls.
-- **Ask to update**, when they are behind the newest version your addon knows: first a small
-  confirmation asks you before anything is sent. On 1.1.2 or newer their addon shows a compact
-  notice with both versions and where to update; **Read update** opens a parchment letter in plain
-  language, with reviewed public release notes and the safe next step. An older one can't show the
-  notice, so after your confirmation Olympus opens a whisper with the ask for you to send. One ask per player a day, 5 an hour;
+- **Ask to update** (1.2.1: the author, the King and the High Council only; others' asks are
+  dropped), when they are behind the newest version your addon knows: nothing goes before you
+  confirm. On 1.1.2 or newer their addon shows a compact notice with both versions and where to
+  update; **Read update** opens a plain-language parchment letter: reviewed public release notes
+  and the safe next step. For an older one, confirming opens a whisper you send with the ask. One
+  ask per player a day, 5 an hour;
   they see one a day at most, **Don't remind me** hides them for 7 days (on the beta, which forgets
   addon data at login, these last until you log out), and a player they block (`/oly block`) or
   ignore, or one the moderators took off, never gets through. The notice never names a version the
@@ -329,22 +324,25 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
-| **Royal decree** | The Crown | A proclamation with free text, as a raid warning to the whole army |
-| **Tabard inspection** | The Crown | Announces an inspection at the caller's position: wear your colors |
+| **Call to arms!** | The Crown, the High Council, the King's Hands | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown, the High Council, the King's Hands | Rally point: horn marker on the map for 30 min, soft alert |
+| **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
+| **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-*The Crown* means the guild masters of Olympus guilds and the officers of the main
-`<Olympus>` guild. Everyone else gets a local preview when they press the buttons. Since 1.0.0
-the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
-server's word) names them: on every other client, where only the census could, they count as
-Captains, and the Crown of `<Olympus>` there is the King himself (by his character's name) and
-the Hands his list or a Steward's own list names, on their word alone: while a list names them,
-a Hand who is one of its officers has its Royal decrees, Tabard inspections and [Lords] lines
-on every client. The King can't take back a Hand his Steward named: that Steward does, or the
-author, by removing him. The
-King's Steward (1.0.0, below) sends the Crown's decrees for `<Olympus>` on every client,
-whatever his rank, like the King.
+For decrees *the Crown* means the King, his Steward and the officers of the main `<Olympus>`
+guild (a Hand sends them as one of its officers). Since 1.2.3 any other guild master's Royal
+decree and Tabard inspection reach his own guild alone, as guild decrees, and so do his and his
+officers' Calls to Arms and Musters (the same alarm, sound and marker, for his guild's members
+alone): no guild master has a decree for the whole army, and every client refuses one of
+theirs sent to it, a 1.2.2 officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
+officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
+names them. On every other client its Crown is the King himself (by his character's name) and
+the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its
+officers has all its decrees and [Lords] lines there. A census officer of `<Olympus>` counts as
+a Captain there and, since 1.2.3, calls nobody to arms (one report can name anyone) until the
+author's signed list counts. The King can't take back a Hand his Steward named: that Steward
+does, or the author, by removing him. The King's Steward (1.0.0, below) sends the Crown's
+decrees for `<Olympus>` on every client, whatever his rank, like the King.
 
 **Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
 Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:
@@ -692,8 +690,9 @@ account, `/oly discord forget` drops this character's request and proof.
 - **Version letters** (1.1.5): after the addon updates, once a version, a short letter on
   parchment, in a window like the Olympus window's, says what changed in that version, in the
   dev's own words. It waits until the privacy page is closed, and never opens in combat, in a
-  dungeon or outside an Olympus guild. On the Forever beta, whose saved variables never load, it
-  shows again every session, as the privacy page asks again. The Olympus window's help button
+  dungeon or outside an Olympus guild. Without saved history the letter stays quiet and unread.
+  If the beta forgets saved data, it cannot detect updates; manual history stays available
+  without repeat login popups. With retained data, updates can show once. The Olympus window's help button
   (the **i** left of the X) keeps every letter: **Version letters** on its page lists them,
   newest first, and a click opens one; `/oly letters` (or `/oly letters 1.1.4`) does too. Nothing
   is sent: which letters you saw is kept on your computer, for your account.

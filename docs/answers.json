@@ -1032,15 +1032,15 @@
     {
       "id": "feat-decrees",
       "topic": "features",
-      "status": "current (1.1.1)",
+      "status": "current (1.2.3)",
       "questions": [
         "What's a Call to arms?",
         "How do I send a muster?"
       ],
-      "answer": "Captains and up send a Call to arms (an alarm and map marker for every guild) or a Muster (a rally point for 30 minutes). Royal decrees and Tabard inspections are for the Crown. Others get a local preview; /oly arms test tries it.",
-      "in_game": "Captains+: Call to arms (/oly arms) or Muster (/oly muster). Add test for a preview only you see.",
+      "answer": "The Crown (the King, his Steward, <Olympus>'s officers; other guilds hear those named Hands) sends the army a Call to arms (alarm, map marker) or a Muster (30-minute rally point); another guild's officers call their own guild alone. Royal decrees: the Crown and the High Council. Others get a preview: /oly arms test.",
+      "in_game": "The Crown calls the army: Call to arms (/oly arms) or Muster (/oly muster); another guild's officers call their own guild alone. Add test for a preview only you see.",
       "sources": [
-        "README.md:214-233"
+        "README.md: Decrees"
       ]
     },
     {
@@ -1826,9 +1826,9 @@
         "How do I ask someone to update?",
         "Can I tell a guildmate their addon is old?"
       ],
-      "answer": "Right-click them and pick Ask to update (it only shows when they're behind). On 1.1.2 or newer their addon shows a small notice with where to update; older ones can't, so it opens a whisper with the ask for you to send. One ask per player a day, 5 an hour.",
-      "in_game": "Right-click them, Ask to update (it shows when they're behind). 1.1.2+ get a small notice; for older ones it opens a whisper you send.",
-      "notes": "The author's pick sends his usual update window (V3), which every version shows, naming the version he marked as released. Anyone else's sends V9, shown once a day at most, 7 days of quiet after Don't remind me. On the beta the limits last until logout (addon data isn't loaded back).",
+      "answer": "Only the author, the King and the High Council can (1.2.1): right-click them, Ask to update (it shows when they're behind). On 1.1.2 or newer they get a small notice with where to update; older ones get a whisper you send. One ask per player a day, 5 an hour.",
+      "in_game": "The author, the King and the High Council: right-click them, Ask to update (when they're behind). 1.1.2+ get a small notice; older ones a whisper you send.",
+      "notes": "The author's pick sends his usual update window (V3), which every version shows, naming the version he marked as released. The King's and a councillor's send V9, shown once a day at most, 7 days of quiet after Don't remind me; since 1.2.1 a V9 from anyone else is dropped (older versions still send them). On the beta the limits last until logout (addon data isn't loaded back).",
       "sources": [
         "Versions.lua",
         "Workshop.lua AskUpdate"
@@ -1873,7 +1873,7 @@
       ],
       "answer": "It shows on players you can reach, while you're in an Olympus guild: not on yourself, enemies, offline names or Battle.net friends. In a dungeon or raid its buttons are greyed. Game clients without the new right-click menus don't get it at all.",
       "in_game": "It only shows where it can help: not on yourself, enemies, offline names or Battle.net friends, and only while you're in an Olympus guild.",
-      "notes": "Hooked menus: PLAYER, PARTY, RAID_PLAYER, RAID, FRIEND, COMMUNITIES_GUILD_MEMBER, COMMUNITIES_WOW_MEMBER, GUILD, CHAT_ROSTER, RECENT_ALLY (Menu.ModifyMenu).",
+      "notes": "Hooked menus: PLAYER, PARTY, RAID_PLAYER, RAID, FRIEND, COMMUNITIES_WOW_MEMBER, CHAT_ROSTER, RECENT_ALLY (Menu.ModifyMenu). 1.2.1: never the game's guild roster menus (COMMUNITIES_GUILD_MEMBER, GUILD), which hold its promote, demote, rank and removal.",
       "sources": [
         "PlayerMenu.lua"
       ]

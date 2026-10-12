@@ -23,6 +23,8 @@ local _, own = ...; local ns = own.host; if not ns then return end
 --   - How to play: a pop-up of its own, centred on the screen above the table's strata, on the
 --     game's parchment, four pages (Rules, Scores, Examples, Drink), every number and example from
 --     FarkleRules; shown by itself the first time the table opens, and on "How to play";
+--   - a collapsible chat panel right of a live two-player table (BonesChat.lua): Players and
+--     Everyone use the core's actual room permissions, and the main Chat window's bubble renderer;
 --   - the lesson (1.1.6): an innkeeper practice game with Show tips checked says,
 --     in the column, what the rules make of the dice in front of the player: which dice of a throw
 --     score and for how much, what is at stake, the chance of BONES! with the dice left, hot dice,
@@ -35,7 +37,8 @@ local _, own = ...; local ns = own.host; if not ns then return end
 -- The rules every companion file keeps: frames named OlympusArena... (so /oly photo keeps them);
 -- animation with AnimationGroup and FlipBook only (a short C_Timer ticker counts numbers up and
 -- steps the tumble where the client has no FlipBook); no game popup; Escape only through
--- ns.EscapeCloses; no edit box; closes in combat and comes back after it while a table is live.
+-- ns.EscapeCloses; the conversation's edit box is Olympus's own, never the game's chat;
+-- closes in combat and comes back after it while a table is live.
 --
 -- API (the hub's and the core's way in, the screens' panes call it):
 --   ArenaUI.Farkle(what, id, extra)   what: "board" (the table, or the setup when there is none),
@@ -1596,6 +1599,9 @@ Refresh = function()
 	create:SetShown(S.mode == "create")
 	if create:IsShown() then Board.CreateRefresh() end
 	local playing = S.mode == "table" and v ~= nil
+	if ArenaUI.BonesChat then
+		ArenaUI.BonesChat.Attach(win, S.id, playing and not v.practice and not v.over and v.state ~= "closed", Board.ChatLayout)
+	end
 	for _, p in ipairs(rows) do
 		for _, part in ipairs({ p.name, p.line, p.total, p.tray }) do part:SetShown(playing) end
 	end
@@ -1707,11 +1713,18 @@ Refresh = function()
 	extraBtn:SetShown(what ~= nil)
 	if what then Set(extraBtn, label, true) end
 	if win.bar and win.bar.Relayout then win.bar.Relayout() end
-	-- this player's dice in play can be picked only while he chooses (not the ones set aside)
+	-- this player's dice in play can be picked only while he chooses (not the ones set aside).
+	-- (1.2.1) A die he picked stays lit while the table is busy for a moment, the mouse on it or
+	-- not: only its hover goes. Its light went with the hover, so a 2 picked looked put back while
+	-- it still counted, and Keep & roll stayed off ("the 2 doesn't score") until a click on it.
 	for _, d in ipairs(sides[1].dice) do
 		local on = Pickable(d)
 		d.f:EnableMouse(on)
-		if not on and (d.hover or (d.lit and not d.moving and not S.sel[d.i] and d.where == "lane")) then d.hover = nil; d.lit = nil; Draw(d) end
+		if not on and (d.hover or (d.lit and not d.moving and not S.sel[d.i] and d.where == "lane")) then
+			d.hover = nil
+			if not S.sel[d.i] then d.lit = nil end
+			Draw(d)
+		end
 	end
 	for _, d in ipairs(sides[2].dice) do d.f:EnableMouse(false) end
 	-- a clock on screen: one ticker while it shows
@@ -3160,6 +3173,9 @@ local function Build()
 		Sync()
 	end)
 	win:SetScript("OnHide", function()
+		if ArenaUI.BonesChat then ArenaUI.BonesChat.Hide() end
+		local sim = ArenaUI.SimModule
+		if type(sim) == "table" and type(sim.BonesChatHidden) == "function" then sim.BonesChatHidden(win) end
 		if not held then shell:Hide() end
 		if help then help:Hide() end
 		EscSync()
@@ -3262,6 +3278,23 @@ function Board.Rehost()
 end
 function Board.Window() return win end
 function Board.Host() return held end
+end
+
+do
+local sizedHost, hostScale
+function Board.ChatLayout(extra)
+	if not win then return end
+	if held then
+		if sizedHost ~= held then sizedHost, hostScale = held, held:GetScale() end
+		if extra == 0 then held:SetScale(hostScale)
+		else ArenaUI.Kit.FitWindow(held, held:GetWidth() + extra, held:GetHeight(), hostScale) end
+	else
+		if sizedHost then sizedHost:SetScale(hostScale); sizedHost, hostScale = nil, nil end
+		local width, height = (W + extra) * 1.1 + 24, (H + ACTION_H) * 1.1 + 24
+		shell:SetSize(width, height)
+		ArenaUI.Kit.FitWindow(shell, width, height, 1)
+	end
+end
 end
 
 local function Ensure()

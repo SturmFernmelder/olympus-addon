@@ -67,7 +67,10 @@ test("1.1.6 compliance: as it ships, the gate allows no wager of any kind, on an
 		assert(C.KINDS[what], kind .. ": " .. tostring(what))
 	end
 	for _, kind in ipairs({ "BM", "BS", "BK", "ZA", "KD", "KH", "LW", "IO" }) do assert(C.WIRE[kind], kind) end
-	for _, kind in ipairs({ "AF", "AS", "AE", "AP", "KI", "KK", "KE", "ZT", "ZR", "ZH", "ZV", "AM", "EC" }) do eq(C.Wire(kind), true, kind) end
+	-- (1.2.1: ZT and ZH left this list. The account key's claims are asked only by the Wallet, a bet's
+	-- slip and a staked challenge, and ZH is a bank's head: both wait for the Wallet with its other
+	-- messages, below. ZR stays: a receipt settles the custodian's debts on crafting's guild rail.)
+	for _, kind in ipairs({ "AF", "AS", "AE", "AP", "KI", "KK", "KE", "ZR", "ZQ", "ZV", "AM", "EC" }) do eq(C.Wire(kind), true, kind) end
 	-- 1.2.0: debt marks and their details wait for the Wallet (off in the release).
 	eq(C.Wallet(), false); eq(C.Wire("ZX"), false, "ZX"); eq(C.Wire("ZY"), false, "ZY")
 	for name in pairs(C.ACTIONS) do eq(C.Action(name), false, name) end
@@ -80,9 +83,14 @@ test("1.1.6 compliance: as it ships, the gate allows no wager of any kind, on an
 		local en, p = rawget(L, key), rawget(pt, key)
 		assert(type(en) == "string" and en ~= "" and type(p) == "string" and p ~= "" and p ~= en, key)
 	end
-	assert(L.COMPLIANCE_WAIT:find("region by region", 1, true))
-	assert(pt.COMPLIANCE_WAIT:find("região por região", 1, true))
-	assert(L.COMPLIANCE_LOTTERY_PRACTICE:find("country by country", 1, true))
+	-- The release policy no longer promises wagers after a regional review. Keep the gate tests
+	-- above unchanged; these assertions cover only the intended player-facing explanation.
+	assert(L.COMPLIANCE_WAIT:find("no bets or gold stakes", 1, true))
+	assert(pt.COMPLIANCE_WAIT:find("não têm apostas", 1, true))
+	assert(L.COMPLIANCE_LOTTERY_PRACTICE:find("no gold moves", 1, true))
+	for _, words in ipairs({ L.COMPLIANCE_WAIT, L.COMPLIANCE_WAIT_SHORT, L.COMPLIANCE_LOTTERY_PRACTICE }) do
+		assert(not words:find("review", 1, true) and not words:find("2.0", 1, true), "no future wager promise")
+	end
 	for _, key in ipairs({ "ARENA_REFUSE_COMPLIANCE", "FARKLE_WHY_COMPLIANCE", "LOTTERY_WHY_COMPLIANCE", "MATCH_WHY_COMPLIANCE", "ARENA_WHY_COMPLIANCE" }) do
 		eq(rawget(L, key), L.COMPLIANCE_WAIT, key); eq(rawget(pt, key), pt.COMPLIANCE_WAIT, key)
 	end
@@ -130,6 +138,42 @@ test("1.1.6 compliance: on the wire, a 1.1.6 client sends no wager's message and
 	eq((w:As(a, a.ns.Arena.Stats).dropped.compliance or 0) - before, #types, "each dropped by the gate")
 	-- A type that is not a wager goes as before.
 	assert(w:As(a, a.ns.Arena.Send, "AP", "T", "x", { to = evil.name }))
+	NoErrors(w)
+end)
+
+-- The account key's claims, the fee receiver's receipts and the banks' own messages carry nothing
+-- the release uses (the Wallet is off), as debt marks and details (ZX, ZY) already did not.
+local WALLET_ONLY = { "ZT", "ZF", "ZH", "ZE", "ZN", "ZG", "ZD", "ZK", "ZC", "ZW", "ZS", "ZL", "ZJ" }
+
+test("1.2.1 compliance: the Wallet's own messages (key claims, fee receipts, every bank's) go and come only with the Wallet on; the games' ledger's hello and the receipts are not among them", function()
+	local C = Gate()
+	eq(C.Wallet(), false)
+	for _, kind in ipairs(WALLET_ONLY) do eq(C.Wire(kind), false, kind) end
+	-- ZQ's hello is how the games' ledger finds its auditors; a receipt settles crafting's guild rail.
+	for _, kind in ipairs({ "ZQ", "ZR", "ZV", "AY" }) do eq(C.Wire(kind), true, kind) end
+	C.WALLET_ENABLED = true
+	for _, kind in ipairs(WALLET_ONLY) do eq(C.Wire(kind), true, kind .. " with the Wallet on") end
+end)
+
+test("1.2.1 compliance: on the wire, a shipped client sends none of the Wallet's own messages and drops each one a modified client sends it; a fee receipt that cannot go is not kept", function()
+	local w = World.New({ compliance = "shipped" })
+	local a = w:Client(N.bettor1)
+	local evil = w:Client(N.bettor2, { compliance = "open" })
+	for _, kind in ipairs(WALLET_ONLY) do
+		local ok, why = w:As(a, a.ns.Arena.Send, kind, "T", "x", { to = evil.name })
+		eq(ok, false, kind); eq(why, "compliance", kind)
+		assert(w:As(a, a.ns.Arena.Handles, kind), kind .. " has a handler on the shipped client: the gate drops it, not a missing file")
+	end
+	w:Run(0)
+	eq(#w:Sent({ from = a }), 0, "nothing went")
+	local before = w:As(a, a.ns.Arena.Stats).dropped.compliance or 0
+	for _, kind in ipairs(WALLET_ONLY) do assert(w:As(evil, evil.ns.Arena.Send, kind, "T", "x", { to = a.name }), kind) end
+	w:Run(0)
+	eq(#w:Sent({ from = evil }), #WALLET_ONLY, "the modified client sent them all")
+	eq((w:As(a, a.ns.Arena.Stats).dropped.compliance or 0) - before, #WALLET_ONLY, "each dropped by the gate")
+	-- A fee mail's receipt (ZF) cannot go: nothing waits in the saved data for a send that never comes.
+	eq(w:As(a, a.ns.Debts.FeeReceipt, evil.name, 600, "A1x", "L"), false)
+	eq(w:As(a, function() return a.ns.db.arenaFees end), nil)
 	NoErrors(w)
 end)
 
@@ -270,7 +314,7 @@ test("1.1.6 compliance: Bone Throw: a stake or the crowd's bets are refused, a m
 	NoErrors(w)
 end)
 
-test("1.1.6 compliance: the Lottery: no ticket, no day opened, no draw paid; the board and its practice table say a compliance review is under way, practice first, and the practice draw plays", function()
+test("1.1.6 compliance: the Lottery: no ticket, no day opened, no draw paid; the board explains free practice, practice opens first, and the practice draw plays", function()
 	local w = World.New({ compliance = "shipped" })
 	local king = w:Role("king")
 	local a = w:Client(N.bettor1)

@@ -10,6 +10,8 @@ local GATE = "innkeeper-gossip"
 G.DICE_TEXTURE = "Interface\\Buttons\\UI-GroupLoot-Dice-Up"
 G.ROW_GAP = 4
 local host, row, dialog, saved, keeper, innID
+local pendingPractice
+local served -- the Bones page's ask brought this conversation's row: it is spent as it closes
 local generation, mode = 0, "inactive"
 local hooked = setmetatable({}, { __mode = "k" })
 local function Method(obj, key) return obj and type(obj[key]) == "function" end
@@ -19,6 +21,9 @@ local function Context()
 	if not InCombatLockdown or InCombatLockdown() then return nil, "combat" end
 	local FT = ns.FarkleTable
 	if not FT or not FT.Innkeeper or not FT.Live or FT.Live() then return nil, "game" end
+	-- (1.2.1: the player hid the offer, the privacy page's line or /oly farkle keeper off, and did
+	-- not ask for the innkeeper on the Bones page since.)
+	if FT.KeeperOffer and not FT.KeeperOffer() and not (FT.KeeperWanted and FT.KeeperWanted()) then return nil, "off" end
 	local name, id = FT.Innkeeper(true)
 	if not name or not id then return nil, "npc" end
 	return name, id
@@ -31,7 +36,7 @@ local function Native() -- gp:innkeeper-gossip
 	local scroll, bar = panel and panel.ScrollBox, panel and panel.ScrollBar
 	if not Method(f, "IsShown") or not f:IsShown() or not Method(f, "HookScript")
 		or not Method(f, "RegisterFontStrings") or not Method(f, "UpdateFontStrings")
-		or not Method(f, "IsProtected") or not Method(f, "Hide")
+		or not Method(f, "IsProtected")
 		or not panel or not Method(scroll, "GetHeight") or not Method(scroll, "SetHeight")
 		or not Method(scroll, "GetDerivedExtent")
 		or not Method(scroll, "GetNumPoints") or scroll:GetNumPoints() ~= 1
@@ -60,7 +65,7 @@ function G.Park() -- gp:innkeeper-gossip!undo
 		if saved.scrollShown then saved.scroll:Show() else saved.scroll:Hide() end
 		if saved.barShown then saved.bar:Show() else saved.bar:Hide() end
 	end
-	saved, keeper, innID, mode = nil, nil, nil, "inactive"
+	saved, keeper, innID, mode, pendingPractice = nil, nil, nil, "inactive", nil
 end
 
 local function Button(parent, width, caption, click) -- gp:innkeeper-gossip
@@ -117,6 +122,7 @@ local function Build(f, panel, scroll) -- gp:innkeeper-gossip
 	if not nextDialog.cancel then return false end
 	nextDialog.cancel:SetPoint("TOPLEFT", nextDialog.confirm, "BOTTOMLEFT", 0, 0)
 	-- Native choices register with the host's quest contrast theme before it colors them.
+	ns.Gate.Used(GATE)
 	f:RegisterFontStrings(nextRow.label, nextDialog.text, nextDialog.confirm.label, nextDialog.cancel.label)
 	f:UpdateFontStrings()
 	host, row, dialog = f, nextRow, nextDialog
@@ -146,11 +152,12 @@ function G.ShowRow() -- gp:innkeeper-gossip
 	if extent > rowTop then scroll:SetHeight(rowTop) end
 	row:ClearAllPoints(); row:SetPoint("TOPLEFT", scroll, "TOPLEFT", 0, -(rowTop + G.ROW_GAP))
 	row:Show()
+	if ns.FarkleTable.KeeperWanted and ns.FarkleTable.KeeperWanted() then served = true end
 	if not hooked[f] then
 		hooked[f] = true
 		f:HookScript("OnHide", function() -- gp:innkeeper-gossip
 			if not ns.Gate.Allowed(GATE) then return end
-			G.Park()
+			if not pendingPractice then G.Park() end
 		end)
 	end
 	return true
@@ -179,8 +186,38 @@ function G.Cancel() -- gp:innkeeper-gossip
 	return G.ShowRow()
 end
 
+local function Closed() -- gp:innkeeper-gossip
+	if not ns.Gate.Allowed(GATE) then return end
+	local request = pendingPractice
+	G.Park()
+	-- (1.2.1: the ask served the conversation that just closed, the row shown in it.)
+	if served then
+		served = nil
+		if ns.FarkleTable.WantKeeper then ns.FarkleTable.WantKeeper(false) end
+	end
+	if not request then return end
+	local current = generation
+	local function Start() -- gp:innkeeper-gossip
+		if not ns.Gate.Allowed(GATE) then return end
+		if current ~= generation then return end
+		G.Park()
+		if request.native:IsShown() or not ns.IsMember()
+			or InCombatLockdown() or ns.FarkleTable.Live() then return end
+		local _, id = ns.FarkleTable.Innkeeper()
+		if id ~= request.inn then return end
+		if ns.InnkeeperArrow then ns.InnkeeperArrow.Cancel("training") end
+		return ns.FarkleTable.ShowUI("practice", nil, request.opts)
+	end
+	-- Blizzard's own GOSSIP_CLOSED handler may follow ours in this event dispatch.
+	if request.native:IsShown() then
+		pendingPractice, mode = request, "closing"
+		ns.After(0, "Bones closed gossip", Start)
+	else return Start() end
+end
+
 function G.Confirm() -- gp:innkeeper-gossip
 	if not ns.Gate.Allowed(GATE) then return false, "gamepad" end
+	if pendingPractice then return false, "closing" end
 	local name, id = Context()
 	local native = Native()
 	if mode ~= "dialog" or not native or not name or id ~= innID or name ~= keeper then G.Park(); return false, "npc" end
@@ -189,17 +226,30 @@ function G.Confirm() -- gp:innkeeper-gossip
 	local opts = not FT.TrainingComplete() and { target = R.TARGETS[1], learn = true } or nil
 	if FT.InnkeeperVoice then FT.InnkeeperVoice() end
 	G.Park()
+	pendingPractice, mode = { native = native, inn = id, opts = opts }, "closing"
 	local closed = pcall(rawget(_G, "C_GossipInfo").CloseGossip)
-	if not closed then return false, "native-api" end
-	-- Some clients deliver GOSSIP_CLOSED later. Finish closing the checked, unprotected panel
-	-- before the board opens; its Blizzard OnHide handler still owns the normal close cleanup.
-	if native:IsShown() then native:Hide() end
-	if ns.InnkeeperArrow then ns.InnkeeperArrow.Cancel("training") end
-	return FT.ShowUI("practice", nil, opts)
+	if not closed then G.Park(); return false, "native-api" end
+	return true
+end
+
+-- The Olympus dialogue where no row can show: never by itself at each visit (1.2.1, a player's
+-- report), only once the player asked for the innkeeper on the Bones page (FT.KeeperWanted), and
+-- that ask is spent.
+local function Fallback()
+	local name = Context()
+	local FT = ns.FarkleTable
+	if not name or not (FT.KeeperWanted and FT.KeeperWanted()) then return false end
+	FT.WantKeeper(false)
+	return FT.ShowUI("innkeeper", nil, name)
 end
 
 function G.OnShow() -- gp:innkeeper-gossip
-	if not ns.Gate.Allowed(GATE) then return end
+	if not ns.Gate.Allowed(GATE) then
+		-- The existing Olympus dialogue has no child in Blizzard's NPC panel and
+		-- remains available with a controller once asked for, without registering native fonts.
+		Fallback()
+		return
+	end
 	G.Park()
 	if not ns.After then return end
 	local current = generation
@@ -208,10 +258,7 @@ function G.OnShow() -- gp:innkeeper-gossip
 		if not ns.Gate.Allowed(GATE) then return end
 		if current == generation then
 			local shown = G.ShowRow()
-			if not shown then
-				local name = Context()
-				if name then ns.FarkleTable.ShowUI("innkeeper", nil, name) end
-			end
+			if not shown then Fallback() end
 		end
 	end)
 end
@@ -231,7 +278,8 @@ function G.Listen()
 	for _, event in ipairs({ "GOSSIP_CLOSED", "PLAYER_REGEN_DISABLED", "PLAYER_GUILD_UPDATE", "GUILD_ROSTER_UPDATE" }) do
 		pcall(ns.RegisterEvent, event, function() -- gp:innkeeper-gossip
 			if not ns.Gate.Allowed(GATE) then return end
-			if event == "GOSSIP_CLOSED" or event == "PLAYER_REGEN_DISABLED" or not Context() then G.Park() end
+			if event == "GOSSIP_CLOSED" then Closed()
+			elseif event == "PLAYER_REGEN_DISABLED" or not Context() then G.Park() end
 		end)
 	end
 end

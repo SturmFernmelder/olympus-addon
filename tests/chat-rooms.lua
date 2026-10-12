@@ -70,6 +70,8 @@ local function WithRooms(fn)
 		c.On = function(name, call) w.listeners[name] = call end
 		c.RegisterEvent = function(name, call) w.nativeEvents[name] = call end
 		c.Print = function(message) w.printed = tostring(message) end
+		w.logs = {}
+		c.Log = function(fmt, ...) w.logs[#w.logs + 1] = tostring(fmt):format(...) end
 		c.ShowDialog = function(which, a, b, data) w.dialog = { which = which, a = a, b = b, data = data } end
 		c.Consent = {
 			Register = function(spec) w.consent = spec end,
@@ -152,38 +154,106 @@ test("chat Artisanry department: canonical label and signed legacy aliases prese
 	end)
 end)
 
-test("chat rooms: race and class are explicit open-topic choices with independent bounded histories", function()
+-- 1.2.3 (the author: "remove class and race chats from chat tab... no one uses them"): the race and
+-- class rooms are gone for every member, of either faction: no tab, no list, no room to select,
+-- subscribe to or send in, and nothing of the character is read to decide it.
+test("chat rooms (1.2.3): no race or class room for a member of either faction: not listed, selectable or subscribable", function()
 	WithRooms(function(w, R, c)
 		UnitClass = function() error("room discovery must not inspect the character's class") end
+		UnitRace = function() error("room discovery must not inspect the character's race") end
 		C_CreatureInfo = { GetRaceInfo = function() error("room discovery must not inspect the character's race") end }
+		local RETIRED = { "race:1", "race:2", "race:8", "race:95", "class:WA", "class:SH", "class:DR" }
+		for _, faction in ipairs({ "Alliance", "Horde" }) do
+			c.faction = faction
+			local tabs = R.Tabs()
+			eq(#tabs, 1, faction .. ": Guild alone for an ordinary member"); eq(tabs[1].id, "guild")
+			for _, tab in ipairs(tabs) do
+				assert(tab.kind ~= "race" and tab.kind ~= "class", faction .. ": no " .. tostring(tab.kind) .. " tab")
+			end
+			eq(#R.Options("race"), 0, faction); eq(#R.Options("class"), 0, faction)
+			for _, id in ipairs(RETIRED) do
+				local where = faction .. ", " .. id
+				eq(R.Info(id), nil, where); eq(R.CanAccess(id), false, where); eq(R.IsOpen(id), false, where)
+				local ok, why = R.Select(id)
+				eq(ok, false, where); eq(why, "access", where)
+				eq(#R.History(id), 0, where)
+				ok, why = R.Send(id, "anyone here?")
+				eq(ok, false, where); eq(why, "access", where)
+			end
+		end
+		eq(#w.jobs, 0, "nothing queued"); eq(w.attempts, 0); eq(#w.nativeSent, 0, "nothing sent")
+		eq(c.db.chatRoomChoices, nil, "no choice saved")
+		for _, e in ipairs(w.events) do assert(e[1] ~= "CHAT_ROOM_SELECTED", "nothing selected") end
+	end)
+end)
+
+test("chat rooms (1.2.3): an older client's line to a race or class room is dropped quietly and said once a session in the log", function()
+	WithRooms(function(w, R, c)
+		local me = c.me:lower()
+		w.council[me], w.council["peer-realm"] = true, true
+		local lines = {
+			{ "CHANNEL", RoomMessage("race:1", 1, "for the Alliance") },
+			{ "CHANNEL", RoomMessage("race:95", 2, "Skyborn hello") },
+			{ "CHANNEL", RoomMessage("class:MA", 3, "please invite me", "1", nil, "RQ") },
+			{ "WHISPER", RoomMessage("class:WA", 4, "a whisper") },
+			{ "GUILD", RoomMessage("race:2", 5, "over guild") },
+		}
+		for i, line in ipairs(lines) do
+			local ok, why = R.Receive(line[1], "Peer " .. i .. "-Realm", line[2], 1000 + i)
+			eq(ok, false, line[2]); eq(why, "retired", line[2])
+		end
+		-- The M2 handler this file gives Comm takes the same road.
+		eq(w.handlerKind, "M2")
+		w.handler("CHANNEL", "Peer Six-Realm", RoomMessage("race:3", 6, "through the handler"))
+		eq(R.Stats().dropped.retired, #lines + 1); eq(R.Stats().shown, 0)
+		eq(#R.KeptRooms(), 0, "no history kept for them")
+		for _, e in ipairs(w.events) do
+			assert(e[1] ~= "CHAT_ROOM_LINE" and e[1] ~= "CHAT_ROOM_CHANGED", "no unread count, no redraw: " .. tostring(e[1]))
+		end
+		eq(w.printed, nil, "not a word to the player")
+		eq(#w.logs, 1, "said once a session"); assert(w.logs[1]:find("race room", 1, true), w.logs[1])
+		assert(not w.logs[1]:find("Peer", 1, true) and not w.logs[1]:find("Alliance", 1, true), "nothing of the wire in the log: " .. w.logs[1])
+		-- Every other room still hears its lines.
+		eq(R.Receive("GUILD", "Peer-Realm", RoomMessage("guild", 7, "still heard"), 1010), true)
+		eq(R.Receive("WHISPER", "Peer-Realm", RoomMessage("council", 8, "council still heard"), 1011), true)
+		eq(R.History("guild")[1].text, "still heard"); eq(R.History("council")[1].text, "council still heard")
+		-- The next session says it once again.
+		R.Reset()
+		eq(select(2, R.Receive("CHANNEL", "Peer-Realm", RoomMessage("class:DR", 9, "next session"), 1012)), "retired")
+		eq(select(2, R.Receive("CHANNEL", "Peer-Realm", RoomMessage("race:4", 10, "and again"), 1013)), "retired")
+		eq(#w.logs, 2); assert(w.logs[2]:find("class room", 1, true), w.logs[2])
+	end)
+end)
+
+test("chat rooms (1.2.3): a saved race or class choice falls back without an error, and the old saved records go", function()
+	WithRooms(function(w, R, c)
+		c.db.chatRoomChoices = { race = "race:1", class = "class:WA" }
+		c.db.chatRoomRequests = { ["member-realm|class:MA"] = { sentAt = w.epoch } }
+		R.Reset() -- (what INIT does at login)
+		eq(c.db.chatRoomChoices, nil); eq(c.db.chatRoomRequests, nil)
 		local tabs = R.Tabs()
-		eq(#tabs, 3); eq(tabs[1].id, "guild"); eq(tabs[2].kind, "race"); eq(tabs[2].id, nil)
-		eq(tabs[3].kind, "class"); eq(tabs[3].id, nil)
-		eq(R.Selected("race"), nil); eq(R.Selected("class"), nil)
-		-- (1.2.1: only our faction's races: an Alliance character gets no Orc room, a Horde one no Human
-		-- room; every class for both, Forever's Alliance having Shamans too.)
-		local faction = c.faction
-		c.faction = "Alliance"
-		eq(#R.Options("race"), 5); eq(#R.Options("class"), 9)
-		for _, o in ipairs(R.Options("race")) do assert(o.id ~= "race:2", "no Orc room for the Alliance") end
-		eq(R.Options("race")[5].id, "race:95", "the Skyborn's room"); eq(R.Options("race")[5].raceName, "Skyborn")
-		c.faction = "Horde"
-		eq(#R.Options("race"), 4); eq(R.Options("race")[1].id, "race:2"); eq(#R.Options("class"), 9)
-		c.faction = faction
+		eq(#tabs, 1); eq(tabs[1].id, "guild", "the default room")
+		eq(R.IsOpen("race:1"), false); eq(R.IsOpen("class:WA"), false)
+		eq(R.Receive("CHANNEL", "Peer-Realm", RoomMessage("race:1", 1, "the old choice"), 1000), false, "no subscription survives")
+		eq(#R.History("race:1"), 0)
+	end)
+end)
 
-		assert(R.Select("race:1")); assert(R.Select("class:MA"))
-		eq(R.Selected("race"), "race:1"); eq(R.Selected("class"), "class:MA")
-		eq(R.Receive("CHANNEL", "Peer One-Realm", RoomMessage("race:2", 1, "not selected"), 1000), false)
-		eq(R.Receive("CHANNEL", "Peer One-Realm", RoomMessage("race:1", 2, "race one"), 1001), true)
-		eq(R.Receive("CHANNEL", "Peer Two-Realm", RoomMessage("class:MA", 3, "class one"), 1002), true)
-		eq(#R.History("race:1"), 1); eq(R.History("race:1")[1].text, "race one")
-		eq(#R.History("class:MA"), 1); eq(R.History("class:MA")[1].text, "class one")
-
+-- (Changed in 1.2.3: two logical rooms' independent bounded histories, shown before with a race and
+-- a class room, now with two restricted rooms.)
+test("chat rooms: logical rooms keep independent bounded histories", function()
+	WithRooms(function(w, R, c)
+		local me = c.me:lower()
+		w.council[me], w.departments[me] = true, "War"
+		for i = 1, 7 do w.council["peer " .. i .. "-realm"] = true end
+		w.departments["peer 2-realm"] = "War"
+		eq(R.Receive("WHISPER", "Peer 1-Realm", RoomMessage("council", 1, "council one"), 1001), true)
+		eq(R.Receive("WHISPER", "Peer 2-Realm", RoomMessage("dept:war", 2, "war one"), 1002), true)
 		R.HISTORY = 3
-		for i = 4, 7 do assert(R.Receive("CHANNEL", "Peer " .. i .. "-Realm", RoomMessage("race:1", i, "line " .. i), 1000 + i)) end
-		local history = R.History("race:1")
+		for i = 3, 7 do assert(R.Receive("WHISPER", "Peer " .. i .. "-Realm", RoomMessage("council", i, "line " .. i), 1000 + i)) end
+		local history = R.History("council")
 		eq(#history, 3); eq(history[1].text, "line 5"); eq(history[3].text, "line 7")
-		eq(#R.History("class:MA"), 1, "another logical room is untouched")
+		eq(#R.History("dept:war"), 1, "another logical room is untouched")
 	end)
 end)
 
@@ -206,7 +276,9 @@ test("chat rooms: the new audiences have separate consent and old or malformed w
 	end)
 end)
 
-test("chat rooms: Guild uses native chat and open topics retain their scoped logged transports", function()
+-- (Changed in 1.2.3: its second half, a class room's line refused once the Olympus channel moved,
+-- went with the class rooms; Guild's native transport is unchanged.)
+test("chat rooms: Guild uses native chat, never a hidden addon guild message", function()
 	WithRooms(function(w, R)
 		UnitClass = function() error("M2 must not inspect or publish the character's class") end
 		assert(R.Send("guild", "guild line"))
@@ -221,14 +293,6 @@ test("chat rooms: Guild uses native chat and open topics retain their scoped log
 			if event[1] == "CHAT_ROOM_LINE" then roomLine = roomLine + 1 end
 		end
 		eq(roomChanged, 1); eq(roomLine, 0, "a local echo must not create unread state")
-
-		UnitClass = function() return "Warrior", "WARRIOR" end
-		R.Reset(); w.clearJobs(); w.advance(2); assert(R.Select("class:WA"))
-		assert(R.Send("class:WA", "topic line"))
-		eq(#w.jobs, 1); eq(w.jobs[1].dist, "CHANNEL"); eq(w.jobs[1].logged, true)
-		w.channel = "A different channel"
-		local permitted, why = w.finish(w.jobs[1], true)
-		eq(permitted, false); eq(why, "moved"); eq(#R.History("class:WA"), 0, "never rerouted or echoed")
 	end)
 end)
 
@@ -252,107 +316,19 @@ test("native Guild destination: actual server event, identical messages, bounded
 	end)
 end)
 
-test("chat rooms: topic members send normally while outsiders need a warning and both request gates", function()
-	WithRooms(function(w, R)
-		assert(R.Select("class:WA"))
-		assert(R.Send("class:WA", "member line"), "a member sends without a warning")
-		eq(w.dialog, nil)
-		assert(w.jobs[1].msg:match("^M2~1~class:WA~%d+~~Olympus II~member line$"), w.jobs[1].msg)
-		w.finish(w.jobs[1], true)
-
-		R.Reset(); w.clearJobs(); w.advance(2); assert(R.Select("class:MA"))
-		local status = R.RequestStatus("class:MA")
-		eq(status.member, false); eq(status.outsider, true); eq(status.canSend, true)
-		assert(R.StatusText("class:MA"):find("not a member", 1, true), R.StatusText("class:MA"))
-		local ok, why = R.Send("class:MA", "please invite me")
-		eq(ok, false); eq(why, "confirm"); eq(#w.jobs, 0)
-		assert(w.dialog and w.dialog.which == "OLYMPUS_CHATROOM_REQUEST", "explicit pre-send warning")
-		assert(w.dialog.data.text == "please invite me" and w.dialog.data.id == "class:MA")
-		assert(R.ConfirmRequest(w.dialog.data, true))
-		eq(#w.jobs, 1); assert(w.jobs[1].msg:match("^M2~1~class:MA~%d+~RQ~Olympus II~please invite me$"), w.jobs[1].msg)
-		eq(R.RequestStatus("class:MA").pending, true, "no second request races a queued one")
-		w.finish(w.jobs[1], true)
-		status = R.RequestStatus("class:MA")
-		eq(status.canSend, false); eq(status.replied, false); eq(status.wait, R.REQUEST_WAIT)
-		eq(R.History("class:MA")[1].request, true)
-
-		w.advance(2)
-		eq(R.Receive("CHANNEL", "Mage Member-Realm", RoomMessage("class:MA", 91, "I can help", "1", nil, "MA"), w.mono), true)
-		status = R.RequestStatus("class:MA")
-		eq(status.replied, true); eq(status.canSend, false, "a reply alone does not open the timer gate")
-		assert(R.StatusText("class:MA"):find("wait", 1, true))
-		w.advance(R.REQUEST_WAIT)
-		status = R.RequestStatus("class:MA")
-		eq(status.wait, 0); eq(status.replied, true); eq(status.canSend, true, "both gates open")
-		R.Reset()
-		eq(R.RequestStatus("class:MA").canSend, true, "the successful request record survives a session reset")
-		w.dialog = nil
-		eq(select(2, R.Send("class:MA", "second request")), "confirm", "every permitted request warns")
-		assert(w.dialog and w.dialog.data.text == "second request")
-		R.ConfirmRequest(w.dialog.data, false)
-
-		R.Reset(); w.clearJobs(); w.dialog = nil; w.advance(2); assert(R.Select("race:2"))
-		status = R.RequestStatus("race:2")
-		eq(status.member, false); eq(status.outsider, true, "the same outsider rule covers race rooms")
-		eq(select(2, R.Send("race:2", "orc request")), "confirm")
-		assert(w.dialog and w.dialog.data.id == "race:2")
-	end)
-end)
-
-test("chat rooms: King, signed councillor and real author are exempt from outsider request limits", function()
-	WithRooms(function(w, R, c)
-		local function SendAs(label, set)
-			R.Reset(); w.clearJobs(); w.dialog = nil; w.advance(2)
-			w.council, w.author = {}, false
-			c.me = "Member-Realm"
-			set()
-			assert(R.Select("class:MA"), label)
-			assert(R.Send("class:MA", label), label)
-			eq(w.dialog, nil, label .. ": no outsider popup")
-			assert(w.jobs[1].msg:match("^M2~1~class:MA~%d+~~Olympus II~"), label .. ": no RQ marker")
-		end
-		SendAs("king", function() c.me = w.king end)
-		SendAs("councillor", function() w.council[c.me:lower()] = true end)
-		SendAs("author", function() w.author = true end)
-		w.author, w.preview = false, true
-		R.Reset(); w.clearJobs(); w.dialog = nil; w.advance(2); assert(R.Select("class:MA"))
-		eq(select(2, R.Send("class:MA", "preview is not authority")), "confirm", "Preview/ViewAs is not an exemption")
-	end)
-end)
-
-test("chat rooms: receivers throttle marked or known outsider requests until time and a member reply", function()
-	WithRooms(function(w, R, c)
-		assert(R.Select("class:MA"))
-		local function Receive(sender, line, words, class)
-			return R.Receive("CHANNEL", sender, RoomMessage("class:MA", line, words, "1", nil, class), w.mono)
-		end
-		eq(Receive("Outsider-Realm", 1, "first request", "RQ"), true)
-		w.advance(2)
-		eq(Receive("Outsider-Realm", 2, "too soon", "RQ"), false)
-		c.Roster.members = { { full = "Mage-Realm", class = "MA" }, { full = "Warrior-Realm", class = "WA" } }
-		eq(Receive("Warrior-Realm", 3, "not a member reply", "WA"), true, "a known mismatch is itself one outsider request")
-		eq(Receive("Mage-Realm", 4, "member reply", ""), true)
-		w.advance(R.REQUEST_WAIT)
-		eq(Receive("Outsider-Realm", 5, "after both gates", "RQ"), true)
-		eq(Receive("Outsider-Realm", 6, "blocked again", "RQ"), false)
-		eq(Receive("No Reply-Realm", 7, "request without reply", "RQ"), true)
-		w.advance(R.REQUEST_WAIT)
-		eq(Receive("No Reply-Realm", 8, "time alone is not enough", "RQ"), false)
-		eq(Receive("Mage-Realm", 9, "later member reply", ""), true)
-		eq(Receive("No Reply-Realm", 10, "now both gates", "RQ"), true)
-	end)
-end)
-
+-- (1.2.3: the outsider-request tests, the warning before a request and its two gates on both ends,
+-- went with the race and class rooms, the only rooms that had outsiders. Below, Guild alone before
+-- Roles: the Race and Class tabs are gone.)
 test("chat rooms: restricted tabs and recipients come only from current shared authority", function()
 	WithRooms(function(w, R, c)
-		eq(#R.Tabs(), 3, "ordinary members get no restricted destination")
+		eq(#R.Tabs(), 1, "ordinary members get no restricted destination")
 		local me = c.me:lower()
 		w.council[me] = true
 		c.rdb.council.names[me] = true -- an older retained signed-list representation
 		c.rdb.council.names["other councillor"] = "Other Councillor"
 		w.council["other councillor-realm"] = true
 		local tabs = R.Tabs()
-		eq(tabs[4].kind, "role"); eq(tabs[4].dropdown, true)
+		eq(#tabs, 2); eq(tabs[2].kind, "role"); eq(tabs[2].dropdown, true)
 		eq(R.Options("role")[1].id, "council")
 		local recipients = R.Recipients("council")
 		eq(#recipients, 3)
@@ -403,13 +379,14 @@ test("chat rooms: a restricted room whispers no one the server says is offline (
 	end)
 end)
 
-test("chat rooms: a race or class room gives each sender a fair share of its minute (PER_MINUTE), so one sender cannot crowd the others out", function()
+-- (Changed in 1.2.3: shown before in a race room; the share is every room's, here the Council's.)
+test("chat rooms: a room gives each sender a fair share of its minute (PER_MINUTE), so one sender cannot crowd the others out", function()
 	WithRooms(function(w, R, c)
-		assert(R.Select("race:1"))
-		for i = 1, R.PER_MINUTE do eq(R.Receive("CHANNEL", "Loud One-Realm", RoomMessage("race:1", i, "line " .. i), 1000 + i), true) end
-		eq(R.Receive("CHANNEL", "Loud One-Realm", RoomMessage("race:1", 50, "one too many"), 1010), false, "past his share")
-		eq(R.Receive("CHANNEL", "Quiet Two-Realm", RoomMessage("race:1", 51, "still heard"), 1011), true, "another sender")
-		eq(R.Receive("CHANNEL", "Loud One-Realm", RoomMessage("race:1", 52, "a minute later"), 1062), true)
+		w.council[c.me:lower()], w.council["loud one-realm"], w.council["quiet two-realm"] = true, true, true
+		for i = 1, R.PER_MINUTE do eq(R.Receive("WHISPER", "Loud One-Realm", RoomMessage("council", i, "line " .. i), 1000 + i), true) end
+		eq(R.Receive("WHISPER", "Loud One-Realm", RoomMessage("council", 50, "one too many"), 1010), false, "past his share")
+		eq(R.Receive("WHISPER", "Quiet Two-Realm", RoomMessage("council", 51, "still heard"), 1011), true, "another sender")
+		eq(R.Receive("WHISPER", "Loud One-Realm", RoomMessage("council", 52, "a minute later"), 1062), true)
 	end)
 end)
 
@@ -494,6 +471,6 @@ test("chat rooms: a provider's private rooms answer for themselves, never ride M
 		eq(sent[1], "a fellow-member price?"); eq(#w.jobs, 0, "nothing queued by the rooms themselves")
 		c.db.chatRooms = true
 		eq(R.Receive("WHISPER", "Wren Thistle-Realm", RoomMessage("craft:abc1", 1, "over M2"), 1000), false, "an M2 line never lands in a provider's room")
-		eq(R.RequestStatus("craft:abc1").canSend, true)
+		-- (1.2.3: no request status to ask any more: the outsider requests went with the race and class rooms.)
 	end)
 end)

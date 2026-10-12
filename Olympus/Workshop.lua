@@ -1709,10 +1709,26 @@ end
 local lanes = { CHANNEL = NewLane(), GUILD = NewLane() }
 local passing         -- lists taken from our guild, on their way to our channel: { HS = blob, HT = blob, send }
 
--- The list of a kind ("HS" names, "HT" titles) we hold, as signed, and its time (0: none).
+-- A signed list is for the realm group it names ("A+B"; none: any). One for another group is not
+-- ours (1.2.1 security review): it never replaces our list nor shuts it out with a newer time, and
+-- one kept from before counts as none. Ours when any realm of it is one whose census we share
+-- (ns.InGroup: the group these saved lists belong to) or of our own realm's group, as this client
+-- groups realms (ns.GroupOf: a realm linked since counts, as the readers count it). In the game
+-- the two are one group.
+local function OurGroup(realm)
+	if realm == nil or realm == "" then return true end
+	local mine = ns.GroupOf(ns.realm or ns.CurrentRealm())
+	for _, r in ipairs(ns.GroupRealms(realm)) do
+		if ns.InGroup(r) or ns.GroupOf(r) == mine then return true end
+	end
+	return false
+end
+
+-- The list of a kind ("HS" names, "HT" titles) we hold, as signed, and its time (0: none; 1.2.1:
+-- none either for another realm group's).
 local function HeldList(kind)
 	local l = ns.rdb and ns.rdb[LIST_STORE[kind]]
-	if type(l) ~= "table" then return nil, 0 end
+	if type(l) ~= "table" or not OurGroup(l.realm) then return nil, 0 end
 	return type(l.blob) == "string" and l.blob or nil, tonumber(l.at) or 0
 end
 
@@ -1884,10 +1900,12 @@ function Workshop.TakeCouncil(blob, sender, guild)
 	local text, at, realm, list, sig = blob:match("^(HS1~(%d+)~([^~]*)~([^~]*))~(%x+)$")
 	at = tonumber(at)
 	if not at then return false end
+	-- Another realm group's list never replaces ours (1.2.1), nor is it checked.
+	if not OurGroup(realm) then return false end
 	-- The list we hold (or an older one) is not checked again: each relay would cost every
 	-- client a signature check for nothing (0.9.8).
-	local c = ns.rdb.council
-	if type(c) == "table" and (tonumber(c.at) or 0) >= at then return false end
+	local _, held = HeldList("HS")
+	if held >= at then return false end
 	if not ns.Sign or not ns.Sign.Plausible(sig) then return false end -- (costs nothing: Konig's review)
 	if sender and not MayVerify(sender, "HS", blob, ns.Now(), guild) then
 		if not falseLists[blob] then Advertise("HS", at) end -- (not checked: asked for later)
@@ -1957,8 +1975,9 @@ function Workshop.TakeTitles(blob, sender, guild)
 	local text, at, realm, public, list, sig = blob:match("^(HT1~(%d+)~([^~]*)~([01])~([^~]*))~(%x+)$")
 	at = tonumber(at)
 	if not at then return false end
-	local t = ns.rdb.councilTitles
-	if type(t) == "table" and (tonumber(t.at) or 0) >= at then return false end
+	if not OurGroup(realm) then return false end -- (1.2.1, as the names)
+	local _, held = HeldList("HT")
+	if held >= at then return false end
 	if not ns.Sign or not ns.Sign.Plausible(sig) then return false end
 	if sender and not MayVerify(sender, "HT", blob, ns.Now(), guild) then
 		if not falseLists[blob] then Advertise("HT", at) end
@@ -2106,9 +2125,7 @@ end
 -- minutes; any other one now and then, so about RELAYS clients a half hour, whatever the
 -- army's size.
 function Workshop.RelayCouncil(force)
-	local c, t = ns.rdb and ns.rdb.council, ns.rdb and ns.rdb.councilTitles
-	local names = type(c) == "table" and type(c.blob) == "string" and c.blob or nil
-	local titles = type(t) == "table" and type(t.blob) == "string" and t.blob or nil
+	local names, titles = HeldList("HS"), (HeldList("HT")) -- (1.2.1: ours alone)
 	if not names and not titles then return end
 	local now = ns.Now()
 	local mine = AuthorLists()
@@ -2150,7 +2167,8 @@ end
 
 -- Whether we should ask: no name list at all, or one older than a list heard of.
 function Workshop.NeedLists()
-	if type(ns.rdb and ns.rdb.council) ~= "table" then return true end
+	local c = ns.rdb and ns.rdb.council
+	if type(c) ~= "table" or not OurGroup(c.realm) then return true end
 	local _, names = HeldList("HS")
 	local _, titles = HeldList("HT")
 	return names < advertised.HS or titles < advertised.HT
@@ -2836,6 +2854,8 @@ function Workshop.ShowIconPicker()
 	end
 	picker = picker or MakePicker()
 	Unhost()
+	ns.SetWindowTitle(picker, L.COUNCIL_ICON_TITLE)
+	picker.hint:SetText(L.COUNCIL_ICON_HINT)
 	local names
 	gameIcons, names = Workshop.GameIcons()
 	shownIcons, iconChoice = gameIcons, MyIcon()
@@ -2889,6 +2909,10 @@ function Workshop.IconPickerHost(parent, list, onPick, current)
 		end
 	end
 	host = { onPick = onPick }
+	-- 1.2.3: hosted, it picks the profile's emblem, not the council's icon: its own title and words
+	-- (the council's promised a silver dragon in the chat to anyone who opened it).
+	ns.SetWindowTitle(picker, L.EMBLEM_ICON_TITLE)
+	picker.hint:SetText(L.EMBLEM_ICON_HINT)
 	local icons, names = {}, false
 	local chosen = ns.CouncilIconValue(current)
 	if type(list) == "table" then

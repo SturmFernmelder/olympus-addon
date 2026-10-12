@@ -54,13 +54,53 @@ end
 Views.ClassColored = ClassColored
 
 -- `dim`: what an old report said (older than Data.FRESH), all grey, as its guild is in the tree.
-local function Presence(online, days, dim)
+-- `at`: (1.2.1) when an old report said he was online, nobody seeing him now: "online <age> ago".
+local function Presence(online, days, dim, at)
+	if online == nil and type(at) == "number" then
+		local age = math.max(0, ns.Now() - at)
+		return Grey(age >= 86400 and L.ONLINE_DAYS_AGO:format(math.floor(age / 86400)) or L.ONLINE_AGO:format(ns.Ago(at)))
+	end
 	if online then return (dim and Grey or Green)(L.ONLINE_NOW) end
 	if not days or days < 1 then return Grey(L.OFFLINE_TODAY) end
 	local d = math.floor(days)
 	local text = L.OFFLINE_DAYS:format(d)
 	if d >= (ns.db.warnDays or 3) then return (dim and Grey or Red)(text .. " !") end
 	return Grey(text)
+end
+
+-- 1.2.1 (an officer: his guild master "has been online for hours" while the census showed him away).
+-- A guild's report is its word when it was made; /who's is this quarter-hour's. Seen in that guild
+-- by /who now (its own search when its row was opened, or the round), a Lord or Captain of another
+-- guild is online whatever an old report said; otherwise a report older than Data.FRESH says what it
+-- said, grey (Presence's `dim`), never in red as if it were today's; where it said online, he is not
+-- known to be online now: nil, and when it said so (Presence's `at`), as Members.CheckLords counts him
+-- away from then. Our own guild is our roster, the server's word. `e`: a guild of Data.Summary's
+-- list; returns online, days, dim, at.
+local roundIndex = {} -- the round's players as "<guild>\0<name folded>", made again when the round grows
+function Views.SeenNow(guild, name)
+	local W = ns.Who
+	if not W or type(guild) ~= "string" or type(name) ~= "string" or name == "" then return false end
+	local key = ns.Fold(ns.ShortName(name))
+	for _, p in ipairs(W.GuildSeen and W.GuildSeen(guild) or {}) do
+		if p.guild == guild and type(p.name) == "string" and ns.Fold(ns.ShortName(p.name)) == key then return true end
+	end
+	local sweep = W.sweep
+	local round = sweep and sweep.started and GetTime() - sweep.started <= (W.ROUND_TTL or 900) and sweep.list
+	if type(round) ~= "table" then return false end
+	if roundIndex.list ~= round or roundIndex.n ~= #round then
+		local set = {}
+		for _, p in ipairs(round) do
+			if type(p.guild) == "string" and type(p.name) == "string" then set[p.guild .. "\0" .. ns.Fold(ns.ShortName(p.name))] = true end
+		end
+		roundIndex = { list = round, n = #round, set = set }
+	end
+	return roundIndex.set[guild .. "\0" .. key] == true
+end
+function Views.PresenceNow(e, name, online, days)
+	if type(e) ~= "table" or e.name == GetGuildInfo("player") then return online, days, false end
+	if Views.SeenNow(e.name, name) then return true, 0, false end
+	if e.fresh == false and online then return nil, nil, true, type(e.g) == "table" and tonumber(e.g.t) or nil end
+	return online, days, e.fresh == false
 end
 
 ---------------------------------------------------------------------------
@@ -821,12 +861,13 @@ local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "
 -- player seen at each letter typed and at each redraw, and a name reads the same each time.
 -- Emptied past SEARCH_NAMES_KEPT, a long session's worth.
 Views.SEARCH_NAMES_KEPT = 20000
-local searchNames, seenNames, namesKept = {}, {}, 0
+local searchNames, seenNames, lookNames, namesKept = {}, {}, {}, 0
 local function Kept()
 	namesKept = namesKept + 1
 	if namesKept > Views.SEARCH_NAMES_KEPT then
 		wipe(searchNames)
 		wipe(seenNames)
+		wipe(lookNames)
 		namesKept = 1
 	end
 end
@@ -851,6 +892,31 @@ end
 -- Does `name` hold the search `q`, as its row shows it?
 local function NameHolds(q, name)
 	return type(name) == "string" and name ~= "" and SearchName(name):find(q, 1, true) ~= nil
+end
+
+-- 1.2.1: the Census's search reads letters that look alike as one: l, I and 1, and 0 and O (a
+-- guild's name may mix them, "OLYMPUS XIlI", and the player types what he sees). A folded text
+-- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o.
+local function Lookalike(s) return (s:gsub("[l1]", "i"):gsub("0", "o")) end
+-- Does `name` hold the Census's search `lq` (Lookalike of the query), as its row shows it? Kept
+-- like SearchName.
+local function LookHolds(lq, name)
+	if type(name) ~= "string" or name == "" then return false end
+	local k = lookNames[name]
+	if not k then
+		Kept()
+		k = Lookalike(SearchName(name))
+		lookNames[name] = k
+	end
+	return k:find(lq, 1, true) ~= nil
+end
+-- Does one of the texts hold `lq`, as ns.Holds but with look-alike letters as one?
+local function CensusHolds(lq, ...)
+	for i = 1, select("#", ...) do
+		local s = select(i, ...)
+		if type(s) == "string" and s ~= "" and Lookalike(ns.Searchable(s)):find(lq, 1, true) then return true end
+	end
+	return false
 end
 
 function Views.Filter(tab) return filters[tab] or "" end
@@ -885,6 +951,7 @@ function Views.ClearFilters()
 	searchRows = Views.SEARCH_ROWS
 	wipe(searchNames)
 	wipe(seenNames)
+	wipe(lookNames)
 	namesKept = 0
 end
 
@@ -1234,12 +1301,13 @@ local function RecruitingLines(lines, s, min)
 	lines[#lines].gapAfter = true
 end
 
--- The zones whose name holds `q`, most soldiers first: each with its count, how it moved tonight
--- on this client, and its guilds there. Only what reporters who share their zone count (the tip).
-local function ZoneLines(lines, s, q)
+-- The zones whose name holds `lq` (the search, Lookalike), most soldiers first: each with its
+-- count, how it moved tonight on this client, and its guilds there. Only what reporters who share
+-- their zone count (the tip).
+local function ZoneLines(lines, s, lq)
 	for _, z in ipairs(s.zoneList) do
 		local name = ns.Zones.NameForKey(z.key)
-		if NameHolds(q, name) then
+		if LookHolds(lq, name) then
 			local _, change = ns.Data.ZoneTrend(z.key)
 			local e = ns.Data.Evening()
 			lines[#lines + 1] = {
@@ -1279,12 +1347,13 @@ end
 -- The players of a guild the Census's search finds, its Lord aside (his match shows the row
 -- alone): its Captains, its highest levels (the report's top five) and who of it was seen online
 -- (our roster for our own guild, /who's round for the others). Each once, as its row shows it.
+-- (lq: the search, Lookalike)
 Views.CENSUS_FOUND = 5 -- players listed under a guild's row, the rest counted
-local function PlayersFound(e, q, own, swept)
+local function PlayersFound(e, lq, own, swept)
 	local g, out, seen = e.g, {}, {}
 	local function Add(p)
 		local short = p.name and ns.ShortName(p.name)
-		if not short or seen[short] or not NameHolds(q, p.name) then return end
+		if not short or seen[short] or not LookHolds(lq, p.name) then return end
 		seen[short] = true
 		out[#out + 1] = p
 	end
@@ -1317,20 +1386,22 @@ end
 -- `q`, the search (Views.Query): "recruiting" (every guild with room), the zones whose name holds
 -- it (1.1), then the guilds whose name or Lord holds it, and those where it finds a Captain, a
 -- player of the top five or one seen online (under its row), the reported ones then the ones only
--- seen (by name: nobody knows their Lord), in the same order as ever.
+-- seen (by name: nobody knows their Lord), in the same order as ever. Letters that look alike
+-- read as one (Lookalike, 1.2.1).
 local function CensusLines(s, q)
 	local lines = {}
 	if q then
 		local min = RecruitQuery(q)
 		if min then RecruitingLines(lines, s, min) end
-		ZoneLines(lines, s, q)
+		local lq = Lookalike(q)
+		ZoneLines(lines, s, lq)
 		local own, swept = GetGuildInfo("player"), nil
 		for _, e in ipairs(SortedGuilds(s.guilds)) do
-			if ns.Holds(q, Plain(e.name), e.g.leader and Plain(e.g.leader)) then
+			if CensusHolds(lq, Plain(e.name), e.g.leader and Plain(e.g.leader)) then
 				lines[#lines + 1] = CensusRow(e)
 			else
 				swept = swept or CensusSwept()
-				local found = PlayersFound(e, q, own, swept)
+				local found = PlayersFound(e, lq, own, swept)
 				if #found > 0 then
 					lines[#lines + 1] = CensusRow(e)
 					for i = 1, math.min(#found, Views.CENSUS_FOUND) do lines[#lines + 1] = PersonLine(e, found[i]) end
@@ -1341,7 +1412,7 @@ local function CensusLines(s, q)
 			end
 		end
 		for _, e in ipairs(s.seen or {}) do
-			if ns.Holds(q, Plain(e.name)) then lines[#lines + 1] = SeenRow(e) end
+			if CensusHolds(lq, Plain(e.name)) then lines[#lines + 1] = SeenRow(e) end
 		end
 		if #lines == 0 then lines[1] = NoMatch() end
 		return lines
@@ -1479,7 +1550,7 @@ local boardShown = false -- the Board (Board.lua, 1.1) shown instead of the Real
 -- Pages of the Realm tab (1.1): a module lists one in ns.RealmPages (Loot.lua's loot notes):
 -- { key, Link = function() return its link line, or nil end,
 -- Lines = function(q) return its lines end, tip = what its search finds (L.SEARCH_TIP_...) }.
--- A link line opens it in place of the tree.
+-- A link line opens it in place of the tree; beforeBoard places that link ahead of the Board.
 local pageShown -- the page shown instead of the Realm tree, or nil
 
 -- Another tab opened: the Realm opens on its tree again next time (our guild's members page, the
@@ -1510,6 +1581,10 @@ local function RealmPage(key)
 	return nil
 end
 function Views.PageShown() return pageShown end
+function Views.PageParchment()
+	local page = realmMode == "guilds" and not boardShown and pageShown and RealmPage(pageShown)
+	return type(page) == "table" and page.parchment == true
+end
 function Views.ShowPage(key)
 	pageShown = RealmPage(key) and key or nil
 	if pageShown then
@@ -1788,7 +1863,7 @@ local function RealmLines(s, q)
 		lines[#lines + 1] = {
 			header = true,
 			text = CROWN .. L.KING .. ": " .. Gold(Plain(king.g.leader or "?")),
-			right = Presence(king.g.leaderOnline, king.g.leaderDays),
+			right = Presence(Views.PresenceNow(king, king.g.leader, king.g.leaderOnline, king.g.leaderDays)),
 			tooltip = GuildTooltip(king),
 		}
 		-- The Treasurer of Olympus, under the King: when that guild's report has him (the
@@ -1798,12 +1873,13 @@ local function RealmLines(s, q)
 			if ns.IsTreasurer(o.name, king.name) then t = o end
 		end
 		if t then
+			local on, days, dim, at = Views.PresenceNow(king, t.name, t.online, t.days)
 			local person = { name = t.name, realm = king.g.realm, guild = king.name, class = t.class, level = t.level, zone = t.zone,
-				rank = L.CAPTAIN, online = t.online, days = t.days }
+				rank = L.CAPTAIN, online = on, days = days }
 			lines[#lines + 1] = {
-				key = t.name, player = t.name, offline = not t.online,
+				key = t.name, player = t.name, offline = not on,
 				text = ns.COIN .. L.TREASURER .. ": " .. Gold(Plain(t.name)),
-				right = Presence(t.online, t.days),
+				right = Presence(on, days, dim, at),
 				onClick = function() ns.UI.ShowPerson(person) end,
 			}
 			-- The treasury, when he shares it (Treasury.lua).
@@ -1824,15 +1900,19 @@ local function RealmLines(s, q)
 		rebuilding = RebuildLines(lines)
 		if #lines > before and lines[before] then lines[before].gapAfter = true end
 	end
-	-- The Board (1.1, Board.lua) and the Realm's other pages (1.1, ns.RealmPages), one link each,
+	-- The member's week, the Board and the Realm's other pages, one link each,
 	-- close together with one gap after the last so the guilds stay in sight on the short list.
-	local links = {}
-	local board = not q and ns.Board and ns.Board.LinkLine and ns.Board.LinkLine()
-	if board then links[#links + 1] = board end
+	local links, trailing = {}, {}
 	for _, p in ipairs(not q and ns.RealmPages or {}) do
 		local link = p.Link and p.Link()
-		if link then links[#links + 1] = link end
+		if link then
+			local group = p.beforeBoard and links or trailing
+			group[#group + 1] = link
+		end
 	end
+	local board = not q and ns.Board and ns.Board.LinkLine and ns.Board.LinkLine()
+	if board then links[#links + 1] = board end
+	for _, link in ipairs(trailing) do links[#links + 1] = link end
 	if #links > 0 then
 		local prev = lines[#lines]
 		if prev then prev.gapAfter = not prev.pageLink end
@@ -1848,10 +1928,11 @@ local function RealmLines(s, q)
 	-- closes and opens what the search opened, instead of the guild itself.
 	local function Guild(e, open, only, folds)
 		local g = e.g
+		local lordOn, lordDays, lordDim, lordAt = Views.PresenceNow(e, g.leader, g.leaderOnline, g.leaderDays)
 		lines[#lines + 1] = {
 			id = Views.GuildId(e.name),
 			text = (open and "[-] " or "[+] ") .. Views.DisputeMark(g) .. Green("<" .. Plain(e.name) .. ">") .. " " .. Plain(g.leader or "?"),
-			right = Presence(g.leaderOnline, g.leaderDays),
+			right = Presence(lordOn, lordDays, lordDim, lordAt),
 			onClick = function()
 				if folds then
 					folded[e.name] = not folded[e.name] or nil
@@ -1869,12 +1950,12 @@ local function RealmLines(s, q)
 		if not open then return end
 		if g.leader and (not only or only.lord) then
 			local lord = { name = g.leader, realm = g.realm, class = g.leaderClass, level = g.leaderLevel, zone = g.leaderZone,
-				guild = e.name, rank = L.LORD, online = g.leaderOnline, days = g.leaderDays }
+				guild = e.name, rank = L.LORD, online = lordOn, days = lordDays }
 			lines[#lines + 1] = {
-				key = g.leader, player = g.leader, offline = not g.leaderOnline,
-				indent = 1, text = Mark(g.leader, g.realm, g.leaderOnline) .. CROWN .. Gold(L.LORD) .. "  " .. ClassColored(g.leader, lord.class and ns.CLASS_FILES[lord.class])
+				key = g.leader, player = g.leader, offline = not lordOn,
+				indent = 1, text = Mark(g.leader, g.realm, lordOn) .. CROWN .. Gold(L.LORD) .. "  " .. ClassColored(g.leader, lord.class and ns.CLASS_FILES[lord.class])
 					.. Tag(g.leader, g.realm),
-				right = Presence(g.leaderOnline, g.leaderDays),
+				right = Presence(lordOn, lordDays, lordDim, lordAt),
 				onClick = function() ns.UI.ShowPerson(lord) end,
 			}
 		end
@@ -1891,13 +1972,14 @@ local function RealmLines(s, q)
 				end }
 		end
 		for _, o in ipairs(listed) do
+			local on, days, dim, at = Views.PresenceNow(e, o.name, o.online, o.days)
 			local person = { name = o.name, realm = g.realm, class = o.class, level = o.level, zone = o.zone, guild = e.name,
-				rank = L.CAPTAIN, online = o.online, days = o.days }
+				rank = L.CAPTAIN, online = on, days = days }
 			lines[#lines + 1] = {
-				key = o.name, player = o.name, offline = not o.online,
-				indent = 2, text = Mark(o.name, g.realm, o.online) .. ASSIST .. ClassColored(o.name, o.class and ns.CLASS_FILES[o.class])
+				key = o.name, player = o.name, offline = not on,
+				indent = 2, text = Mark(o.name, g.realm, on) .. ASSIST .. ClassColored(o.name, o.class and ns.CLASS_FILES[o.class])
 					.. Tag(o.name, g.realm) .. (ns.IsTreasurer(o.name, e.name) and ("  " .. ns.COIN .. Grey(L.TREASURER)) or ""),
-				right = (o.level and Grey(L.LEVEL_N:format(o.level)) .. "  " or "") .. Presence(o.online, o.days),
+				right = (o.level and Grey(L.LEVEL_N:format(o.level)) .. "  " or "") .. Presence(on, days, dim, at),
 				onClick = function() ns.UI.ShowPerson(person) end,
 			}
 		end
@@ -2155,22 +2237,30 @@ local function RealmPeople(s)
 			p = { full = full, name = ns.DisplayName(full), realm = ns.RealmOf(full), sources = {} }
 			byKey[key], out[#out + 1] = p, p
 		end
+		-- (1.2.1: our roster is the server's word now, over any report; /who's only while it is this
+		-- quarter-hour's, Views.SeenNow, and never over our roster: an hour-old round is no "online".)
+		local who = x.source == "who"
 		for _, field in ipairs({ "guild", "class", "race", "raceName", "level", "zone", "online", "days" }) do
-			if p[field] == nil and x[field] ~= nil then p[field] = x[field] end
+			if p[field] == nil and x[field] ~= nil and not (who and (field == "online" or field == "days")) then p[field] = x[field] end
 		end
 		if x.rank and (p.rank == nil or x.rankExact) then p.rank, p.rankExact = x.rank, x.rankExact or nil end
+		if x.source == "roster" and x.online ~= nil then p.online, p.days = x.online, x.days
+		elseif who and not p.sources.roster and Views.SeenNow(x.guild, x.name) then p.online, p.days = true, 0 end
 		if x.source then p.sources[x.source] = true end
 		return p
 	end
 
 	for _, e in ipairs(s.guilds or {}) do
 		local g = e.g or {}
-		if g.leader then Add({ name = g.leader, realm = g.realm, guild = e.name, class = g.leaderClass,
-			level = g.leaderLevel, zone = g.leaderZone, rank = L.LORD, online = g.leaderOnline,
-			days = g.leaderDays, source = "report" }) end
+		if g.leader then
+			local on, days = Views.PresenceNow(e, g.leader, g.leaderOnline, g.leaderDays)
+			Add({ name = g.leader, realm = g.realm, guild = e.name, class = g.leaderClass,
+				level = g.leaderLevel, zone = g.leaderZone, rank = L.LORD, online = on, days = days, source = "report" })
+		end
 		for _, o in ipairs(g.officers or {}) do
+			local on, days = Views.PresenceNow(e, o.name, o.online, o.days)
 			Add({ name = o.name, realm = g.realm, guild = e.name, class = o.class, level = o.level,
-				zone = o.zone, rank = L.CAPTAIN, online = o.online, days = o.days, source = "report" })
+				zone = o.zone, rank = L.CAPTAIN, online = on, days = days, source = "report" })
 		end
 		for _, top in ipairs(g.top or {}) do
 			Add({ name = top.name, realm = g.realm, guild = e.name, class = top.class, level = top.level,
@@ -2513,12 +2603,10 @@ local function SoundLines(lines)
 	end
 end
 
+-- What this player's decrees do (1.2.3, Decree.YouCan): another guild's master is told his Royal
+-- decrees and Tabard inspections reach his guild alone, never that he is the Crown.
 local function DecreeDetail()
-	local who
-	if ns.IsCrown() then who = L.YOU_ARE_CROWN
-	elseif ns.Roster.IsOfficer() then who = L.YOU_ARE_OFFICER
-	else who = L.YOU_ARE_SOLDIER end
-	return L.DECREES_DETAIL_TITLE, who
+	return L.DECREES_DETAIL_TITLE, ns.Decree.YouCan()
 end
 
 ---------------------------------------------------------------------------
@@ -2751,9 +2839,13 @@ function Views.RecruitLines()
 	-- "Showing 50 of 312 online", and which levels the next click searches.
 	WhoStatus(lines)
 	if #lines > 1 then lines[#lines].gapAfter = true end
-	-- Where to go (1.1, Fern's #20): what a member's census said (Recruit.Route), the King's gates
-	-- first (two answers agree on them), then the most free slots of the guilds /who found; a
-	-- click asks one of that guild's officers /who found online.
+	-- Where to go: confirmed gates, optional corroborated affinity, then room. The player
+	-- still chooses a click and the contact must have been found by this client's /who.
+	if ns.GuildCharter then
+		lines[#lines + 1] = { text = L.CHARTER_ORDER, gapAfter = true }
+		lines[#lines + 1] = { text = L.CHARTER_FRIEND_CHOOSE,
+			onClick = function() ns.GuildCharter.Prompt("friend") end, gapAfter = true }
+	end
 	local route = R.Route()
 	if route and #R.RouteOrder(route) > 0 then
 		lines[#lines + 1] = {
@@ -2790,6 +2882,9 @@ function Views.RecruitLines()
 				tt:AddLine(L.RECRUIT_ASK_TIP, 1, 1, 1, true)
 			end,
 		}
+		if ns.GuildCharter then
+			for _, row in ipairs(ns.GuildCharter.CardLines(g.name, true)) do lines[#lines + 1] = row end
+		end
 		for _, p in ipairs(g.members) do
 			local state = ""
 			local closed = R.NoContact(p.name)
@@ -2909,10 +3004,13 @@ local BUILD = {
 	end,
 }
 
-function Views.Build(tab)
+-- s (1.2.3): the census's summary the caller read a moment ago (UI.Refresh's, for the window's
+-- header), else read here. The window's redraw summed the census twice, once for its header and
+-- once for its tab, a few hundred KB each time on a big census.
+function Views.Build(tab, s)
 	local build = BUILD[tab]
 	if not build then return {}, nil, nil end
-	return build(ns.Data.Summary())
+	return build(s or ns.Data.Summary())
 end
 
 -- 1.2: another file's tab (UI.AddTab: the Blood Arena's, ArenaHome.lua): builder(s) returns its

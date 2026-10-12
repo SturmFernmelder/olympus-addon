@@ -23,6 +23,8 @@ local L = ns.L
 --           With a key, an act repeated as it is (the gates, a switch, every few minutes) is
 --           written once: only when `value` differs from the last one written under `key`
 --           (or from `default` when none was). `words` show under the block-term filter.
+--           `id` deduplicates a received act while its row is retained, including after reload;
+--           `to` records its recipient, when the act was a private message.
 --
 -- Only acts heard from whoever did them: a repeat or a relay of someone else's act (the Treasurer's
 -- book carrying the King's switches, an editor's list carrying another's block term) is no act
@@ -49,7 +51,7 @@ Chronicle.TEXT_MAX = 160 -- bytes of what was done, and of a player's words
 
 local KINDS = {
 	decree = "ACTS_KIND_DECREE", gates = "ACTS_KIND_GATES", pardon = "ACTS_KIND_PARDON", switch = "ACTS_KIND_SWITCH",
-	netoff = "ACTS_KIND_NETOFF", guildnetoff = "ACTS_KIND_GUILDNETOFF", terms = "ACTS_KIND_TERMS",
+	netoff = "ACTS_KIND_NETOFF", guildnetoff = "ACTS_KIND_GUILDNETOFF", terms = "ACTS_KIND_TERMS", court = "ACTS_KIND_COURT",
 }
 
 local function Clean(s, n)
@@ -74,6 +76,10 @@ function Chronicle.Add(kind, by, what, opts)
 	local list = Store()
 	if not list or type(kind) ~= "string" or kind == "" then return false end
 	opts = type(opts) == "table" and opts or {}
+	local id = opts.id and Clean(opts.id) or nil
+	if id then
+		for _, e in ipairs(list) do if e.kind == kind and e.id == id then return false end end
+	end
 	if opts.key ~= nil then
 		local states, key, value = States(), tostring(opts.key), tostring(opts.value)
 		local last = states[key]
@@ -85,7 +91,8 @@ function Chronicle.Add(kind, by, what, opts)
 	list[#list + 1] = {
 		t = ns.Now(), st = ServerNow(), kind = Clean(kind, 16),
 		by = Clean(by ~= nil and ns.FullName(tostring(by)) or "?", 64),
-		what = Clean(what), words = words ~= "" and words or nil,
+		what = Clean(what), words = words ~= "" and words or nil, id = id,
+		to = opts.to and Clean(ns.FullName(tostring(opts.to)), 64) or nil,
 	}
 	while #list > Chronicle.MAX do table.remove(list, 1) end
 	ns.Fire("ACTS_CHANGED")
@@ -129,10 +136,10 @@ local function TermsShown(e)
 	if e.kind ~= "terms" or type(e.words) ~= "string" or not F or F.missing or type(F.Shown) ~= "function" then return e.words end
 	return (e.words:gsub("([%+%-]?)([^%s%+%-]+)", function(sign, term) return sign .. F.Shown(term) end))
 end
-local function Words(e)
+local function Words(e, esc)
 	if not e.words then return nil end
 	if Veiled(e) then return ns.L.FILTER_WORDS_HIDDEN_SHORT end
-	return '"' .. TermsShown(e) .. '"'
+	return '"' .. (esc or tostring)(TermsShown(e)) .. '"'
 end
 
 -- The sender as this screen shows it: cut short on the King's while the council's names are
@@ -143,11 +150,13 @@ local function Who(e)
 	return by
 end
 
--- One entry as a line of text: when (this computer's clock), what, and who sent it.
-function Chronicle.Line(e)
+-- One entry as a line of text: when (this computer's clock), what, and who sent it. esc (1.2.1, the
+-- copy, Chronicle.Text): what the sender sent and his name through it (Codec.Discord).
+function Chronicle.Line(e, esc)
+	esc = esc or tostring
 	local when = date and date("%m-%d %H:%M", tonumber(e.t) or 0) or tostring(e.t)
-	local words = Words(e)
-	return ("%s  %s: %s%s  (%s)"):format(when, KindLabel(e.kind), tostring(e.what or ""), words and (" " .. words) or "", Who(e))
+	local words = Words(e, esc)
+	return ("%s  %s: %s%s  (%s)"):format(when, KindLabel(e.kind), esc(e.what or ""), words and (" " .. words) or "", esc(Who(e)))
 end
 
 -- Does an entry hold the search (folded, ns.Holds)? Only what this screen shows of the sender
@@ -156,11 +165,12 @@ local function Found(e, q)
 	return ns.Holds(q, KindLabel(e.kind), e.what, Who(e), TermsShown(e), date and date("%m-%d %H:%M", tonumber(e.t) or 0) or "")
 end
 
--- The whole log as text, newest first, for the copy box: its caveat on top.
+-- The whole log as text, newest first, for the copy box: its caveat on top. (1.2.1) What other
+-- players sent, as written, never as Discord's markup (Codec.Discord).
 function Chronicle.Text()
 	local out = { L.ACTS_TITLE, L.ACTS_NOTE, "" }
 	local list = Chronicle.Entries()
-	for i = #list, 1, -1 do out[#out + 1] = Chronicle.Line(list[i]) end
+	for i = #list, 1, -1 do out[#out + 1] = Chronicle.Line(list[i], ns.Codec.Discord) end
 	if #list == 0 then out[#out + 1] = L.ACTS_EMPTY end
 	return table.concat(out, "\n")
 end

@@ -344,6 +344,52 @@ test("1.1.6 Church: the tree is the same whatever order the acts come in; a cycl
 	eq(w:As(y, y.Church.MayAct, "+", "M", "Their Pick-Realm", nil, nil, "Cyc One-Realm"), false, "no naming")
 end)
 
+test("Church correspondent authority: census claims never appoint; signed or roster masters may appoint, and revocation removes the derived role", function()
+	local w, c = Cast()
+	local rank
+	c.member.ns.Authority = { Rank = function(name, guild)
+		if name == c.gm.name and guild == World.GUILD2 then return rank, rank ~= nil and "signed" or nil end
+	end }
+	w.census[ns.Fold(World.GUILD2) .. ":" .. Key(c.gm.name)] = 0
+	local text = w:As(c.gm, c.gm.Church.ActText, "+", "C", "Vale Helper-Realm", nil, World.GUILD2, w.clock)
+	w:As(c.member, c.member.Church.Receive, "CHANNEL", c.gm.name, text)
+	eq(Role(w, c.member, "Vale Helper"), nil, "a census guild master has no appointment power")
+	w:As(c.member, c.member.Church.RetryPending)
+	eq(Role(w, c.member, "Vale Helper"), nil)
+	rank = 0
+	w:As(c.member, c.member.ns.Fire, "DATA_CHANGED")
+	eq(Role(w, c.member, "Vale Helper"), "C", "the signed guild master's pending act takes effect")
+	rank = nil
+	eq(Role(w, c.member, "Vale Helper"), nil, "a revoked or expired issuer loses authority even without a book change")
+	eq(w:As(c.member, c.member.Church.Book).c[ns.Fold(World.GUILD2)].n, "Vale Helper-Realm", "the appointment stays archived")
+	-- A trusted root can issue a new appointment; local guild masters still use the real roster.
+	w:Run(1)
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Root Helper", World.GUILD2), true)
+	eq(Role(w, c.member, "Root Helper"), "C")
+	local master = w:Client("Ember Master", { rank = 0 })
+	eq(w:Act(master, master.Church.NameCorrespondent, "Plain Member"), true)
+	eq(Role(w, c.member, "Plain Member"), "C")
+	master.rank = 1
+	eq(Role(w, c.member, "Plain Member"), nil, "own-roster demotion is rechecked")
+end)
+
+test("Church correspondent authority: a keeper's page cannot invent a nomination issuer, and a signed appointment is rechecked after import", function()
+	local w, c = Cast()
+	local rank
+	c.councillor.ns.Authority = { Rank = function(name, guild)
+		if name == c.gm.name and guild == World.GUILD2 then return rank, rank ~= nil and "signed" or nil end
+	end }
+	eq(w:As(c.councillor, c.councillor.Church.AskPages, c.a1.name), true)
+	local page = ("NB~1~p~C~%s~Vale Helper-Realm~%s~G~-~%s"):format(World.GUILD2, c.gm.name, ns.Codec.Base36(w.clock))
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, page), false, "the relay's keeper role does not authenticate the original namer")
+	eq(Role(w, c.councillor, "Vale Helper"), nil)
+	rank = 0
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, page), true)
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	rank = nil
+	eq(Role(w, c.councillor, "Vale Helper"), nil, "imported appointments lose their role when the issuer's authority ends")
+end)
+
 test("1.1.6 Church: correspondents: a guild master for his own guild, a root for any; replaced by a newer naming", function()
 	local w, c = Cast()
 	local master = w:Client("Ember Master", { rank = 0 })
@@ -352,12 +398,16 @@ test("1.1.6 Church: correspondents: a guild master for his own guild, a root for
 	Everyone(w, function(cl) if cl.guild == World.GUILD then eq(Role(w, cl, "Plain Member"), "C", cl.name) end end)
 	-- Another guild's master: only for his own guild, never for ours.
 	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper", World.GUILD), false)
-	-- His own guild, on a client of another guild: by the census (two vouches); unknown, it waits.
+	-- His own guild, on a client of another guild: signed leadership, never census vouches.
+	local signedRank
+	c.member.ns.Authority = { Rank = function(name, guild)
+		if name == c.gm.name and guild == World.GUILD2 then return signedRank, signedRank ~= nil and "signed" or nil end
+	end }
 	local text = w:As(c.gm, c.gm.Church.ActText, "+", "C", "Vale Helper-Realm", nil, World.GUILD2, w.clock)
 	w:As(c.member, c.member.Church.Receive, "GUILD", c.gm.name, text)
 	eq(w:As(c.member, c.member.Church.State).corr[ns.Fold(World.GUILD2)], nil, "not yet")
 	eq(#w:As(c.member, c.member.Church.Pending), 1)
-	w.census[ns.Fold(World.GUILD2) .. ":" .. Key(c.gm.name)] = 0
+	signedRank = 0
 	w:As(c.member, c.member.Church.RetryPending)
 	eq(w:As(c.member, c.member.Church.State).corr[ns.Fold(World.GUILD2)].n, "Vale Helper-Realm")
 	-- A newer naming replaces; the correspondent himself may step down.
@@ -712,6 +762,10 @@ test("1.1.6 Church: the Head's keep: never past the new parent's quota, none in 
 	local B = ns.Codec.Base36
 	local hour = math.floor(namedAt / 3600) + 1
 	local ev = ("NV~1~w~Grand Kid-Realm~Fresh Face-Realm~%s~%s~%s"):format(World.GUILD, B(hour), B(hour + 1))
+	-- (1.2.1: a guildmate's word counts for a recruit Aldric's roster shows.)
+	w.members[World.GUILD] = w.members[World.GUILD] or {}
+	table.insert(w.members[World.GUILD], "Fresh Face")
+	w:RefreshRosters()
 	eq(select(2, w:As(c.a1, c.a1.Count.TakeEvidence, "Plain Member-Realm", ev)), nil, "not refused as invited before his place")
 	-- The since travels in the book's pages: another client reads it back.
 	local line = w:As(c.a1, c.a1.Church.PageLines, w:As(c.a1, c.a1.Church.PageOf, Key("Grand Kid")))
@@ -766,4 +820,45 @@ test("1.2.0 chat rooms: an M2 line whose guild field carries a pipe is dropped a
 	plain.Consent = { Register = function() end }
 	assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", plain)
 	eq(select(2, plain.ChatRooms.Receive("WHISPER", "Aldric Vane-Realm", "M2~1~guild~1~~Olympus II|cffff0000~hi")), "shape")
+end)
+
+test("1.2.1 Church: a keeper's page can't take a guild's correspondent away: its removal only from a root, the guild's master or the correspondent himself", function()
+	local w, c = Cast()
+	local B = ns.Codec.Base36
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Vale Helper", World.GUILD2), true)
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	w:Run(1)
+	eq(w:As(c.councillor, c.councillor.Church.AskPages, c.a1.name), true)
+	local function Y(actor, role) return ("NB~1~p~Y~%s~-~%s~%s~-~%s"):format(World.GUILD2, actor, role, B(w.clock)) end
+	eq(select(2, w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.member.name, "G"))), "issuer")
+	eq(select(2, w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.a1.name, "A"))), "issuer", "nor the relaying Apostle's own word")
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y("Vale Helper-Realm", "M")), true, "his own removal")
+	eq(Role(w, c.councillor, "Vale Helper"), nil)
+	w:Run(1)
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Vale Second", World.GUILD2), true)
+	w:Run(1)
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, Y(c.king.name, "K")), true, "a root's")
+	eq(Role(w, c.councillor, "Vale Second"), nil)
+end)
+
+test("1.2.1 Church: listing the keepers online rechecks the correspondents once, not once per name heard", function()
+	local w, c = Cast()
+	local calls = 0
+	local root = c.member.Church.RootCode
+	c.member.Church.RootCode = function(name, ...)
+		if type(name) == "string" and name:find(c.king.name, 1, true) then calls = calls + 1 end
+		return root(name, ...)
+	end
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Root Helper", World.GUILD2), true)
+	local H, cn = w:As(c.member, c.member.Church.Heard), c.member.ns
+	for i = 1, 40 do
+		local name = "Heard" .. i .. "-Realm"
+		H[c.member.Church.Key(name)] = { name = name, role = "M", t = w.clock }
+	end
+	local before = calls
+	w:As(c.member, c.member.Church.KeepersOnline, true)
+	local one = calls - before
+	assert(one >= 1 and one <= 4, "one listing: " .. one .. " correspondent checks")
+	c.member.Church.RootCode = root
 end)

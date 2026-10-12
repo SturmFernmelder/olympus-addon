@@ -405,14 +405,25 @@ end
 ns.Comm.Handle("W1", function(...) Crafters.HandleListing(...) end)
 ns.Comm.Handle("W0", function(...) Crafters.HandleListing(...) end)
 
--- The board now, listings heard in the last LIST_KEEP: { { name, guild, profs, t } }. Never a
--- crafter the moderators took off since (1.1, Konig's review): back on, his next listing shows.
-function Crafters.Board()
-	local now, out = ns.Now(), {}
+-- The board forgets the listings not heard in the last LIST_KEEP. Returns how many it forgot.
+function Crafters.Prune()
+	local now, gone = ns.Now(), 0
 	for name, e in pairs(board) do
 		if now - e.t > Crafters.LIST_KEEP then
-			board[name], boardCount = nil, boardCount - 1
-		elseif not Off(name, e.guild) then
+			board[name], boardCount, gone = nil, boardCount - 1, gone + 1
+		end
+	end
+	return gone
+end
+
+-- The board now, listings heard in the last LIST_KEEP: { { name, guild, profs, t } }. Never a
+-- crafter the moderators took off since (1.1, Konig's review): back on, his next listing shows.
+-- (Built and sorted for its page, while that shows: Crafters.Lines, the Realm's professions.)
+function Crafters.Board()
+	Crafters.Prune()
+	local out = {}
+	for name, e in pairs(board) do
+		if not Off(name, e.guild) then
 			out[#out + 1] = { name = name, guild = e.guild, profs = e.profs, t = e.t }
 		end
 	end
@@ -878,6 +889,9 @@ end
 
 -- Each minute: our listing again every LIST_EVERY, or a change that waited its time; the board
 -- forgets who went quiet. (Not before our login's own listing: one listing at a login.)
+-- 1.2.1 (the once-a-minute hitch players felt): it only forgets them; the board itself, up to
+-- BOARD_MAX crafters each asked of the moderators' word and then sorted, is built for its page alone
+-- (Crafters.Board, when the Crafters tab or the Realm's professions draw).
 function Crafters.Tick()
 	if not loginWait then
 		if ns.Now() - lastListing >= Crafters.LIST_EVERY then
@@ -886,7 +900,7 @@ function Crafters.Tick()
 			Crafters.SendListing()
 		end
 	end
-	Crafters.Board()
+	Crafters.Prune()
 end
 
 -- The profession's data can come a moment after its window opens: read then, and again when the

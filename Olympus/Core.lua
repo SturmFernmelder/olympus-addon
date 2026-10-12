@@ -2,7 +2,7 @@ local ADDON, ns = ...
 local L = ns.L
 
 ns.NAME = "Olympus"
-ns.VERSION = "1.2.0"
+ns.VERSION = "1.2.3"
 ns.PREFIX = "OLYMPUS"        -- addon message prefix (max 16 chars)
 ns.CHANNEL = "OlympusNet"    -- hidden chat channel shared by every Olympus guild (Alliance)
 ns.CHANNEL_HORDE = "OlympusNetH" -- the Horde's: the two factions never see each other's guilds
@@ -437,7 +437,8 @@ function ns.LinkRealms(a, b)
 		ns.group = mine
 		ns.rdb = OpenStore(Stores(db), mine)
 		ns.Print(L.REALMS_LINKED:format((mine:gsub("%+", " + "))))
-		ns.Fire("DATA_CHANGED")
+		-- (Another store: the census's reports are others, Data.Revision with them.)
+		if ns.Data and ns.Data.ChangedNow then ns.Data.ChangedNow() else ns.Fire("DATA_CHANGED") end
 		-- A new key means another channel. Before our first join, that join picks it up (and
 		-- the login's key request asks for a dropped key).
 		if ns.rdb.realmKey ~= oldKey and ns.Comm and ns.Comm.ChannelName() then
@@ -1401,7 +1402,7 @@ function ns.Holds(query, ...)
 	return false
 end
 
--- The Crown: guild masters of any Olympus guild, and the officers of the King's guild. Those
+-- The Lords: guild masters of any Olympus guild, and the officers of the King's guild. Those
 -- officers only on the clients of the King's guild's own members (1.0.0), where their rank is
 -- the server's word (our roster: Data.KnownRank and Channels.VerifiedLevel read our own guild
 -- from it, never from the census). Anywhere else the census alone could name them, and three
@@ -1410,10 +1411,27 @@ end
 -- the Hands his list or a Steward's own names (King.IsHandName: their word, never a vote), who
 -- speak for his guild with his Crown there (Decree.lua, Channels.VerifiedLevel) besides his
 -- tools (King.Authorized).
-function ns.IsCrownRank(guild, rankIndex)
+-- (1.2.3) Their seats, not powers: [Lords] (Channels.LevelOf), the King's writs to his Lords
+-- (Acts.lua) and the census's two reports for them (Data.KnownRank). This was ns.IsCrownRank, and
+-- counted every guild master as the Crown; a feature that gives the Crown a power at the level of
+-- the whole army asks ns.IsCrownRank (below), the King's guild's alone.
+function ns.IsLordRank(guild, rankIndex)
 	if not guild or not rankIndex then return false end
 	if rankIndex == 0 then return true end
 	return ns.IsKingGuild(guild) and rankIndex <= ns.CAPTAIN_RANK and ns.IsKingGuild(GetGuildInfo("player"))
+end
+
+function ns.IsLord()
+	local guild, _, rankIndex = GetGuildInfo("player")
+	return ns.IsFederation(guild) and ns.IsLordRank(guild, rankIndex)
+end
+
+-- The Crown's own rank (1.2.3, Daniel: a guild master has nothing at the level of the whole army):
+-- the Lords of the King's guild alone (its master, and its officers on its own members' clients).
+-- Another guild's master is a Lord, never the Crown. The Royal decree and the Tabard inspection
+-- for the whole army ask this (Decree.lua); so may any later feature.
+function ns.IsCrownRank(guild, rankIndex)
+	return ns.IsKingGuild(guild) and ns.IsLordRank(guild, rankIndex)
 end
 
 function ns.IsCrown()
@@ -1627,8 +1645,25 @@ end)
 function ns.After(seconds, where, fn)
 	C_Timer.After(seconds, function() ns.SafeCall(where, fn) end)
 end
+-- A ticker (1.2.1): it starts after a random part of its period, EVERY_SPREAD at most, so the
+-- dozens started at login do not all tick on one frame (the owner's PC: a hitch once a minute).
+-- Its first tick comes one period after that start, never sooner than before. The handle's Cancel
+-- stops it before its start, from inside a tick, or after.
+ns.EVERY_SPREAD = 60
 function ns.Every(seconds, where, fn)
-	return C_Timer.NewTicker(seconds, function() ns.SafeCall(where, fn) end)
+	local ticker, cancelled = nil, false
+	local handle = {}
+	function handle.Cancel()
+		cancelled = true
+		if ticker and ticker.Cancel then ticker:Cancel() end
+	end
+	function handle.IsCancelled() return cancelled end
+	local function Tick() if not cancelled then ns.SafeCall(where, fn) end end
+	local spread = math.max(0, math.min(tonumber(seconds) or 0, ns.EVERY_SPREAD)) * math.random()
+	C_Timer.After(spread, function()
+		if not cancelled then ticker = C_Timer.NewTicker(seconds, Tick) end
+	end)
+	return handle
 end
 
 ---------------------------------------------------------------------------
@@ -1731,7 +1766,7 @@ StandIn("Watch", { "Slash" }) -- 1.2: the guild-local moderation desk
 StandIn("Judgment", {}) -- 1.2: a case to the King, the High Council's votes, his final word
 StandIn("Church", { "Slash" }) -- 1.1.6: the Missionary Church of Olympus (Church.lua)
 StandIn("WatchChat", {}) -- 1.1.6: chat moderation (deleted lines, timeouts, sanctions' bars)
-StandIn("Wanted", { "SightingsSlash" }) -- 1.2: the Horde Most Wanted ledger and its sightings
+StandIn("Wanted", { "SightingsSlash", "Slash" }) -- 1.2: the Horde Most Wanted ledger and its sightings (1.2.3: /oly wanted)
 StandIn("Board", { "Slash" }) -- (1.1: the Board)
 StandIn("Week", {}) -- (1.1: the King's week)
 -- 1.1: net-off (Moderation.lua), alt links (Alts.lua), the King's key rotation (Keys.lua).
@@ -1819,18 +1854,66 @@ ns.Gate.Hooks("escape-list", {
 
 -- (1.1.5, the gamepad gate's "dialogs": a game popup of ours still up at a switch to the gamepad UI
 -- leaves the popups' shared state behind in Olympus's taint until a /reload; the player is told.)
-local gamePopups = {} -- [which] = true: shown as the game's popup this session
+-- 1.2.1 (a guild officer: "get a fail from addon when kick ppl from guild"): while one of the game's
+-- guild windows is on screen, Olympus's own window too. There the game asks its Remove from Guild
+-- in an exclusive popup of its own (REMOVE_GUILDMEMBER) whose Yes is a call the game refuses from
+-- tainted code (C_GuildInfo.RemoveFromGuild); showing it, the game goes through the popups on
+-- screen (StaticPopup_HideExclusive, StaticPopup_FindVisible, StaticPopup_SetUpPosition), and one
+-- opened from Olympus's code hands Olympus's taint to that question: the removal failed with
+-- "Interface action failed because of an AddOn". When the member's card (where Remove is) opens,
+-- ours still up as the game's move into Olympus's windows (ns.MoveDialogsOffGame, GuildFrame.lua).
+local gamePopups = {} -- [which] = { a, b, data }: shown as the game's popup this session, as last shown
+local function GuildWindowShown()
+	local hook = ns.GuildFrameHook
+	if ns.Dialog.missing or type(hook) ~= "table" or type(hook.GameWindowShown) ~= "function" then return false end
+	local ok, shown = pcall(hook.GameWindowShown)
+	return ok and shown == true
+end
 function ns.ShowDialog(which, a, b, data) -- gp:dialogs
-	local own = not ns.Gate.Allowed("dialogs")
-	ns.Log("dialog %s (%s)", tostring(which), own and "olympus window, gamepad UI" or "game popup")
-	if own then
+	local pad = not ns.Gate.Allowed("dialogs")
+	local guild = not pad and GuildWindowShown()
+	ns.Log("dialog %s (%s)", tostring(which), pad and "olympus window, gamepad UI" or guild and "olympus window, a guild window open" or "game popup")
+	if pad or guild then
 		-- Updated without restarting the game (Dialog.lua not loaded yet): never the game's
 		-- popup there, the player is told to restart.
 		if ns.Dialog.missing then ns.Print(L.RESTART_NEEDED) return nil end
-		return ns.Dialog.Show(which, a, b, data)
+		local f = ns.Dialog.Show(which, a, b, data)
+		-- (The game's popup it would have been closes on Escape: so does this one, Dialog.lua.)
+		if guild then ns.Dialog.CloseOnEscape(f) end
+		return f
 	end
-	if type(which) == "string" then gamePopups[which] = true end
+	if type(which) == "string" then gamePopups[which] = { a = a, b = b, data = data } end
 	return StaticPopup_Show(which, a, b, data)
+end
+-- What the player has in a game popup's box (StaticPopup_Visible's second value is the popup:
+-- Blizzard_StaticPopup's own lookup), read before its OnHide empties it; nothing is written there.
+local function TypedIn(popup)
+	local box = type(popup) == "table" and (popup.editBox or popup.EditBox) or nil
+	if type(box) ~= "table" or type(box.GetText) ~= "function" then return nil end
+	local ok, text = pcall(box.GetText, box)
+	if not ok or (issecretvalue and issecretvalue(text)) or type(text) ~= "string" then return nil end
+	return text
+end
+-- 1.2.1: each question of ours still up as the game's popup closes there unanswered (its OnHide
+-- alone, as ns.HideDialog closes one) and is asked again in Olympus's own window, with what it was
+-- shown with and what the player has in its box (a note half typed, a prefilled line edited), put
+-- back after its OnShow. How many moved.
+function ns.MoveDialogsOffGame() -- gp:dialogs
+	if ns.Dialog.missing or not ns.Gate.Allowed("dialogs") or type(StaticPopup_Visible) ~= "function" then return 0 end
+	local moved = 0
+	for which, shown in pairs(gamePopups) do
+		local up, popup
+		if type(shown) == "table" then up, popup = StaticPopup_Visible(which) end
+		if up then
+			local typed = TypedIn(popup)
+			ns.HideDialog(which)
+			local f = ns.Dialog.Show(which, shown.a, shown.b, shown.data)
+			if f and typed and f.def and f.def.hasEditBox and f.editBox then f.editBox:SetText(typed) end
+			ns.Dialog.CloseOnEscape(f)
+			moved = moved + 1
+		end
+	end
+	return moved
 end
 function ns.HideDialog(which, data) -- gp:dialogs
 	if not ns.Dialog.missing then ns.Dialog.Hide(which, data) end
@@ -1993,6 +2076,7 @@ local function Help()
 	print(L.HELP_LAYERAUTO)
 	print(L.HELP_LOCATION)
 	print(L.HELP_SIGHTINGS) -- (1.2)
+	print(L.HELP_WANTED) -- (1.2.3)
 	print(L.HELP_ROLLCALL)
 	print(L.HELP_PRIVACY_PAGE)
 	print(L.HELP_PROFILE)
@@ -2029,7 +2113,9 @@ local function Help()
 	print(L.HELP_CMD_SHARE)
 	print(L.HELP_CMD_BUG)
 	print(L.HELP_CMD_STATUS)
+	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
+	print(L.HELP_MAINKEY)
 	if ns.Keys.CanRotate and ns.Keys.CanRotate() then print(L.HELP_KEY_ROTATE) end -- (1.1: the King's alone)
 	print(L.HELP_CMD_BLOCK)
 	print(L.HELP_NETOFF)
@@ -2143,6 +2229,7 @@ local function Slash(input)
 			ns.UI.SelectTab("realm")
 		elseif cmd == "decrees" then
 			ns.UI.SelectTab("decrees")
+			ns.Print(ns.Decree.YouCan()) -- (1.2.3: what this player's decrees reach)
 		elseif cmd == "arms" or cmd == "muster" then
 			local kind = cmd == "arms" and "ARMS" or "MUSTER"
 			if rest == "test" or not ns.Decree.CanSend(kind) then ns.Decree.Preview(kind) else ns.Decree.Send(kind, rest) end
@@ -2220,6 +2307,10 @@ local function Slash(input)
 		elseif cmd == "sightings" or cmd == "avistamentos" then
 			-- 1.2 (Wanted.lua): this client's Most Wanted sightings, on until a No; alone, says which.
 			ns.Wanted.SightingsSlash(rest)
+		elseif cmd == "wanted" or cmd == "procurados" then
+			-- 1.2.3 (Wanted.lua): what Most Wanted captured, shared and heard this session, and why
+			-- each kill or death was refused, in the copy window (a chat line cannot be copied).
+			ns.Wanted.Slash(rest)
 		elseif cmd == "kingarrow" or cmd == "setarei" then
 			if ns.KingArrow then ns.KingArrow.Slash(rest) else ns.Print(L.KING_ARROW_STATUS:format(L.KING_ARROW_OFF)) end
 		elseif cmd == "filter" or cmd == "filtro" then
@@ -2259,6 +2350,9 @@ local function Slash(input)
 			ns.Print(ns.L.DEMO_REMOVED)
 		elseif cmd == "bug" then
 			ns.UI.ShowBugReport()
+		elseif cmd == "perf" then
+			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
+			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "status" then
 			-- (1.2: the memory figures in it are measured now, on the command alone: Diagnostics' arena lines.)
 			if UpdateAddOnMemoryUsage then pcall(UpdateAddOnMemoryUsage) end
@@ -2284,6 +2378,8 @@ local function Slash(input)
 			else
 				ns.Comm.SetRealmKey(rest)
 			end
+		elseif cmd == "hotkey" then
+			if ns.MainKey then ns.MainKey.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "block" then
 			if rest ~= "" then
 				-- Stored as the sender reaches Comm (ns.FullName(ns.Normal(name)), the realm's
@@ -2323,7 +2419,7 @@ local function Slash(input)
 			wipe(ns.rdb.guilds)
 			wipe(ns.Data.Seen())
 			ns.Who.Reset()
-			ns.Fire("DATA_CHANGED")
+			if ns.Data.ChangedNow then ns.Data.ChangedNow() else ns.Fire("DATA_CHANGED") end
 			ns.Print(L.CACHE_CLEARED)
 		elseif cmd == "error" then
 			error("test error from /oly error")   -- to check that bug capture works

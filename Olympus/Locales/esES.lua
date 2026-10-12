@@ -87,7 +87,7 @@ ns.Locale({ "esES", "esMX" }, {
 	ROYAL = "DECRETO REAL",
 	ROYAL_BTN = "Decreto real",
 	HERALDRY_CALL = "INSPECCIÓN DE TABARDOS: ¡a vestir los colores!",
-	CROWN_ONLY = "Solo la Corona (los maestros de hermandad y los oficiales de <Olympus>) puede hacer esto.",
+	CROWN_ONLY = "Solo la Corona (el Rey, su Senescal y sus Manos, los oficiales de <Olympus>) y el Alto Consejo envían esto a todo el ejército, y un maestro de hermandad a su propia hermandad.",
 	YOU_ARE_CROWN = "Eres la Corona: todos los decretos, la inspección y el Muro de la Vergüenza son tuyos.",
 	YOU_ARE_OFFICER = "Como Capitán puedes llamar a las armas y a reunión. Los decretos reales son de la Corona.",
 	YOU_ARE_SOLDIER = "Los Capitanes llaman a las armas y la Corona emite los decretos reales. Los botones te muestran una vista previa.",

@@ -105,8 +105,8 @@ end
 
 function Channels.LevelOf(guild, rankIndex)
 	if not ns.IsFederation(guild) then return 0 end
-	-- To keep [Lords] for guild masters only, use rankIndex == 0 here instead of the Crown.
-	if rankIndex and ns.IsCrownRank(guild, rankIndex) then return 3 end
+	-- To keep [Lords] for guild masters only, use rankIndex == 0 here instead of the Lords.
+	if rankIndex and ns.IsLordRank(guild, rankIndex) then return 3 end
 	if rankIndex and rankIndex <= ns.CAPTAIN_RANK then return 2 end
 	return 1
 end
@@ -202,7 +202,19 @@ end
 -- "[Captains] [Name] <Guild>: text". The name is a player link, like in any chat line, so a
 -- click opens the usual whisper and menu (to the name the server finds, ns.TellName). The
 -- text is sanitized again here: history comes from the SavedVariables too. bare (1.1.1, the
--- Olympus tab): without "[Captains] ", the rest byte for byte the same.
+-- Olympus tab): without "[Captains] ", the rest byte for byte the same. 1.2.1: "[Captains]" is
+-- Channels.Tag's, a link where this client may write there (the end of this file).
+function Channels.ShowGuildNames()
+	return not (ns.db and ns.db.chatHideGuildNames == true)
+end
+
+function Channels.SetGuildNamesShown(shown)
+	if not ns.db then return false end
+	ns.db.chatHideGuildNames = shown == false or nil
+	ns.Fire("CHAT_SETTINGS_CHANGED")
+	return true
+end
+
 function Channels.FormatLine(tier, sender, guild, class, text, bare)
 	local name = ns.DisplayName(sender) or "?"
 	-- The High Council (the moderators, Core.lua): their colour. For everyone, as in 0.9.8, but the
@@ -225,8 +237,9 @@ function Channels.FormatLine(tier, sender, guild, class, text, bare)
 	-- 1.2: the marks other files put before the name (Channels.nameDecorators: the honour's chat
 	-- mark, ChatMarks.lua), inside the link's brackets like the Treasurer's coin.
 	name = Channels.Decorations(sender) .. name
-	return (bare and "" or "[" .. Label(tier) .. "] ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h <"
-		.. tostring(guild or "?"):gsub("|", "||") .. ">: " .. Codec.SanitizeChat(text)
+	local guildLabel = Channels.ShowGuildNames() and (" <" .. tostring(guild or "?"):gsub("|", "||") .. ">") or ""
+	return (bare and "" or Channels.Tag(tier) .. " ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h"
+		.. guildLabel .. ": " .. Codec.SanitizeChat(text)
 end
 
 ---------------------------------------------------------------------------
@@ -841,7 +854,7 @@ end
 -- the name greyed (still a player link), "[deleted by a moderator]", no mark and no words.
 function Channels.FormatDeleted(tier, sender, guild, bare)
 	local name = "|cff9d9d9d" .. (ns.DisplayName(sender) or "?") .. "|r"
-	return (bare and "" or "[" .. Label(tier) .. "] ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h <"
+	return (bare and "" or Channels.Tag(tier) .. " ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h <"
 		.. tostring(guild or "?"):gsub("|", "||") .. ">: |cff9d9d9d" .. L.WATCHCHAT_DELETED .. "|r"
 end
 
@@ -892,7 +905,10 @@ end
 
 -- The lines of a channel we may read (for a future Channels view, with CHAT_CHANGED). None
 -- while the chats are off on this client (1.1): lines kept before that don't show either.
-function Channels.History(tier)
+-- 1.2.3: memo (optional, the Chat tab's: ChatWindow.offMemo), line -> left out, as this caller asked
+-- last; the caller empties it whenever what a moderator's word rests on may have changed (its era).
+-- A line already asked about is not asked again: each redraw of a busy channel asked about them all.
+function Channels.History(tier, memo)
 	if not Channels.CanUse(tier) or not Channels.ChatOn() then return {} end
 	local list = Store(tier)
 	-- 1.1: lines kept before the moderators took their writer off leave the view too (net-off).
@@ -900,7 +916,12 @@ function Channels.History(tier)
 	if not (M.Any and M.Any()) then return list end
 	local out = {}
 	for _, e in ipairs(list) do
-		if not M.Hides(e.sender, e.guild) then out[#out + 1] = e end
+		local off = memo and memo[e]
+		if off == nil then
+			off = M.Hides(e.sender, e.guild) and true or false
+			if memo then memo[e] = off end
+		end
+		if not off then out[#out + 1] = e end
 	end
 	return out
 end
@@ -2077,3 +2098,123 @@ ns.Gate.Hooks("slash", { key = "channels", leftover = function() return slashDon
 	SlashCmdList.OLYMPUSCAPTAINS = Slash("C", "slash /olc")
 	SlashCmdList.OLYMPUSLORDS = Slash("L", "slash /oll")
 end })
+
+---------------------------------------------------------------------------
+-- 1.2.1 (the author's ask): the channel's name before a line in the game's chat, [Olympus],
+-- [Captains] or [Lords], is a link, as the game's own [Party], [Guild] or [1. General] are: a
+-- left click opens the game's chat box with /ol, /olc or /oll in it, the cursor after it, ready
+-- for the line. Only where this client may write in that channel now (Channels.CanWrite: a
+-- member of its rank, the chats on, not taken off them nor timed out): elsewhere the plain name,
+-- as before. At the click it is asked again, and a channel closed since says why instead.
+-- How, on Forever's own UI (Blizzard_UIPanels_Game): its links of type "addon"
+-- (LinkTypes.AddOn) go from SetItemRef to its AddOn handler, which only fires EventRegistry's
+-- "SetItemRef" and calls the link handled (ItemRefHandlersShared.lua): no tooltip, no error, and
+-- a Shift-click or a right-click does nothing there, as on the plain name before. The click is
+-- ours after that, from a post-hook (hooksecurefunc keeps SetItemRef the game's own): a left
+-- click on "addon:Olympus:chan:<A|C|L>" and nothing else, every other link left as the game
+-- handled it. The game's own [Party] link (type "channel") can't be borrowed: its right-click
+-- builds a menu from ChatTypeInfo, which has no entry of ours. A tab of Chattynator's gets the
+-- link too, and its click comes here only if Chattynator hands its links to SetItemRef as the
+-- game's own windows do: its code is not in this repository and that is not yet checked in game.
+-- The chat box: ChatFrameUtil.OpenChat (ChatFrameUtil.lua:433), the one the game's own [Party]
+-- handler calls (ItemRefHandlersShared.lua:37/42); the global ChatFrame_OpenChat is only its
+-- alias, set while the loadDeprecationFallbacks setting is on (Deprecated_ChatFrame.lua:4/74),
+-- and is used only where ChatFrameUtil has no OpenChat. The gamepad gate
+-- (GamepadRegistry.lua's "chat-links"): the hook is registered at a login with mouse and
+-- keyboard, or at the first switch to it, once a session; with the gamepad UI it does nothing
+-- from its first line and no line gets the link. Opening the chat box from Olympus is the gate's
+-- "chat-box", as a whisper is.
+---------------------------------------------------------------------------
+
+local TAG_LINK = "addon:Olympus:chan:"
+Channels.TAG_LINK = TAG_LINK
+local tagHooked = false
+
+-- Whether this client may write in tier now, in the order Channels.Send checks it before a line
+-- leaves. tell: why not, said in Send's words.
+function Channels.CanWrite(tier, tell)
+	local t = TIERS[tier]
+	if not t then return false end
+	local why
+	if not ns.IsMember() then
+		why = L.MEMBERS_ONLY
+	elseif not Channels.CanUse(tier) then
+		why = L[t.deny]:format(Label(tier))
+	elseif not Channels.ChatOn() then
+		why = ns.db and ns.db.addonChat == nil and L.CHAT_OFF_UNANSWERED or L.CHAT_OFF
+	else
+		local M = ns.Moderation
+		local off = M and M.SelfOff and M.SelfOff()
+		if off then
+			why = M.YouText(off)
+		else
+			local WC = ns.WatchChat
+			local timeout = WC and WC.SelfTimeout and WC.SelfTimeout()
+			if not timeout then return true end
+			if tell and WC.TellTimeout then WC.TellTimeout(timeout) end
+			return false
+		end
+	end
+	if tell then ns.Print(why) end
+	return false
+end
+
+-- The game's opener of its chat box: ChatFrameUtil.OpenChat, else the deprecated global
+-- ChatFrame_OpenChat (the same function, there only while loadDeprecationFallbacks is on); nil
+-- when the gate refuses the chat box or the client has neither.
+local function ChatOpener() -- gp:chat-box
+	if not ns.Gate.Allowed("chat-box") then return nil end
+	local U = ChatFrameUtil
+	if type(U) == "table" and type(U.OpenChat) == "function" then return U.OpenChat end
+	if type(ChatFrame_OpenChat) == "function" then return ChatFrame_OpenChat end
+	return nil
+end
+
+-- Whether tier's name is a link on a line printed now: the hook in place, the gate allowing it and
+-- the chat box, /ol, /olc and /oll registered, the game's chat box there to open, and the channel
+-- this client's to write in.
+function Channels.TagLinked(tier)
+	return tagHooked and slashDone and ns.Gate.Allowed("chat-links") and ChatOpener() ~= nil
+		and Channels.CanWrite(tier) or false
+end
+
+-- "[Olympus]", "[Captains]" or "[Lords]" before a line: the link where Channels.TagLinked says so.
+-- No colour of its own: the line's, as [Party] is.
+function Channels.Tag(tier)
+	local name = "[" .. Label(tier) .. "]"
+	if not Channels.TagLinked(tier) then return name end
+	return "|H" .. TAG_LINK .. tier .. "|h" .. name .. "|h"
+end
+
+-- The chat window clicked, when it is one of the game's with its own box (the game's handler
+-- opens the box of the window clicked, ChatFrameUtil.ChooseBoxForSend); else none, and the game
+-- picks its box (a window of Chattynator's).
+local function BoxFrame(frame)
+	if type(frame) == "table" and type(frame.editBox) == "table" then return frame end
+	return nil
+end
+
+-- A link clicked in the game's chat (after SetItemRef, the game's work done): ours alone, a left
+-- click without Shift. Returns true when it opened the chat box.
+function Channels.TagClick(link, text, button, frame) -- gp:chat-box
+	if not ns.Gate.Allowed("chat-links") or not ns.Gate.Allowed("chat-box") then return false end
+	if type(issecretvalue) == "function" and (issecretvalue(link) == true or issecretvalue(button) == true) then return false end
+	if type(link) ~= "string" or link:sub(1, #TAG_LINK) ~= TAG_LINK then return false end
+	local tier = link:sub(#TAG_LINK + 1)
+	if not TIERS[tier] or button ~= "LeftButton" or (IsShiftKeyDown and IsShiftKeyDown()) then return false end
+	if not Channels.CanWrite(tier, true) then return false end
+	local open = ChatOpener()
+	if not open then return false end
+	ns.Gate.Used("chat-box") -- (the gate's: told at a switch to the gamepad UI)
+	open(TIERS[tier].slash .. " ", BoxFrame(frame))
+	return true
+end
+
+ns.Gate.Hooks("chat-links", { install = function() -- gp:chat-links!hook
+	if tagHooked or type(hooksecurefunc) ~= "function" then return end
+	tagHooked = pcall(hooksecurefunc, "SetItemRef", function(link, text, button, frame)
+		if not ns.Gate.Allowed("chat-links") then return end
+		ns.SafeCall("chat tag link", Channels.TagClick, link, text, button, frame)
+	end) == true
+end })
+ns.On("LOGIN", function() ns.Gate.Install("chat-links") end)

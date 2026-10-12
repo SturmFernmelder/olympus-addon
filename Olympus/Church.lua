@@ -137,11 +137,25 @@ end
 local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
 
 -- A person however a name reaches us: folded, no realm (Forever's names are one across a group).
+-- (1.2.3: the key of a name ns.Normal leaves as it is, whatever realm groups this client knows, is kept,
+-- KEY_MEMO_MAX names at most: one with no "-" followed by more, or with a space before its first "-", as
+-- the server writes "First Surname-Realm". The roster's thousand names and the ledger's were folded again
+-- on every pass. "First-Surname" is never kept: a realm group learned later can change its key.)
+Church.KEY_MEMO_MAX = 5000
+local keyMemo, keyMemoN = {}, 0
 local function Key(name)
 	if type(name) ~= "string" or name == "" or name == "-" then return nil end
+	local k = keyMemo[name]
+	if k then return k end
 	local short = ns.ShortName(ns.Normal(name))
 	if not short or short == "" then return nil end
-	return ns.Fold(short)
+	k = ns.Fold(short)
+	local first = name:match("^([^%-]+)%-.")
+	if not first or first:find(" ", 1, true) then
+		if keyMemoN >= Church.KEY_MEMO_MAX then keyMemo, keyMemoN = {}, 0 end
+		keyMemo[name], keyMemoN = k, keyMemoN + 1
+	end
+	return k
 end
 Church.Key = Key
 
@@ -397,23 +411,30 @@ local function Derive()
 			S.invalid[#S.invalid + 1] = { key = info.key, n = info.n, role = "M", why = info.why }
 		end
 	end
-	-- Correspondents: one per Olympus guild.
-	for gkey, c in pairs(b.c) do
-		if type(c.g) == "string" and ns.IsFederation(c.g) then
-			S.corr[gkey] = c
-			local k = Key(c.n)
-			if k then S.corrOf[k] = S.corrOf[k] or gkey end
-		end
-	end
 	return S
 end
 
+-- 1.2.1: inside one listing (KeepersOnline asks a role for every name heard) the state is taken
+-- once, at its start, instead of rechecking every correspondent for every name.
+local held
 -- The tree as this client holds it now (cached until the book or the signed list changes).
 function Church.State()
+	if held then return held end
 	local _, listAt = Church.SignedApostles()
 	if not derived or derived.rev ~= rev or derived.listAt ~= listAt or derived.blob ~= (signedMemo and signedMemo.blob) then
 		derived = Derive()
 		derived.blob = signedMemo and signedMemo.blob
+	end
+	-- Correspondents grant a private room and counting duties. Recheck their original issuer,
+	-- even when the book is cached: a roster demotion or expired signed role ends that authority.
+	derived.corr, derived.corrOf = {}, {}
+	for gkey, c in pairs((Book() or { c = {} }).c) do
+		if type(c.g) == "string" and ns.IsFederation(c.g)
+			and (Church.RootCode(c.ac) or Church.IsGuildMaster(c.ac, c.g) == true) then
+			derived.corr[gkey] = c
+			local k = Key(c.n)
+			if k then derived.corrOf[k] = derived.corrOf[k] or gkey end
+		end
 	end
 	return derived
 end
@@ -482,7 +503,7 @@ function Church.Children(key)
 end
 
 -- The guild master of `guild`: true, false, or nil while this client can't tell (another guild's
--- census not fresh yet). Our own guild from the server's roster; another from Data.AuthorizedRank.
+-- signed authority not held yet). Our own guild from the server's roster; another from Authority.
 function Church.IsGuildMaster(name, guild)
 	if type(name) ~= "string" or type(guild) ~= "string" then return false end
 	local mine = OwnGuild()
@@ -497,9 +518,9 @@ function Church.IsGuildMaster(name, guild)
 		local rank = R.RankOf(ns.FullName(name))
 		return rank == 0
 	end
-	local D = ns.Data
-	if not (D and D.AuthorizedRank) then return nil end
-	local rank = D.AuthorizedRank(ns.FullName(name), guild)
+	local A = ns.Authority
+	if not (A and A.Rank) then return nil end
+	local rank = A.Rank(ns.FullName(name), guild)
 	if rank == nil then return nil end
 	return rank == 0
 end
@@ -806,7 +827,7 @@ function Church.TakeAct(sender, text, quiet, maxAge)
 end
 
 -- The acts this client could not check when they came (an actor's place not heard yet, another
--- guild's census not fresh): tried again after each change, oldest first.
+-- guild's signed authority not held): tried again after each change, oldest first.
 function Church.RetryPending()
 	if #pending == 0 then return end
 	table.sort(pending, function(a, b) return a.at < b.at end)
@@ -1123,6 +1144,15 @@ function Church.TakeEntry(sender, text)
 	end
 	if onApostle and root ~= "W" and root ~= "H" then return Drop("apostle page") end
 	if kind == "C" and not ns.IsFederation(e.g) then return Drop("guild") end
+	if kind == "C" and not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true) then return Drop("issuer") end
+	-- (1.2.1: a correspondent's removal too, by whom the act could come from, Church.MayAct: a root, the
+	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.)
+	if kind == "Y" then
+		local held = (Book() or { c = {} }).c[slot]
+		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true or (held ~= nil and Same(held.n, e.ac))) then
+			return Drop("issuer")
+		end
+	end
 	e.via = Key(sender) ~= Key(e.ac) and ns.FullName(sender) or nil
 	local before, wasAudience = Church.Role(ns.me), Church.InAudience(ns.me)
 	if not Put(kind, slot, e) then return false, "same" end
@@ -1264,6 +1294,13 @@ function Church.Heard() return heard end
 -- The keepers online (by their presence) and this client when it is one, in the desk's order:
 -- the Head, the Apostles by name, the author. Never the King's client.
 function Church.KeepersOnline(withSelf)
+	if not held then
+		held = Church.State()
+		local ok, out = pcall(Church.KeepersOnline, withSelf)
+		held = nil
+		if not ok then error(out, 0) end
+		return out
+	end
 	local out = {}
 	local function Order(role) return role == "H" and 1 or (role == "A" and 2 or 3) end
 	for _, h in pairs(heard) do

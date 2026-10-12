@@ -87,7 +87,7 @@ ns.Locale("deDE", {
 	ROYAL = "KÖNIGLICHER ERLASS",
 	ROYAL_BTN = "Königlicher Erlass",
 	HERALDRY_CALL = "WAPPENROCK-INSPEKTION - tragt eure Farben!",
-	CROWN_ONLY = "Nur die Krone (die Gildenmeister und die Offiziere von <Olympus>) kann das.",
+	CROWN_ONLY = "Nur die Krone (der König, sein Seneschall und seine Hände, die Offiziere von <Olympus>) und der Hohe Rat senden das an die ganze Armee, und ein Gildenmeister an seine eigene Gilde.",
 	YOU_ARE_CROWN = "Du bist die Krone: jeder Erlass, die Inspektion und die Schandwand gehören dir.",
 	YOU_ARE_OFFICER = "Als Hauptmann kannst du zu den Waffen und zum Sammeln rufen. Königliche Erlasse gehören der Krone.",
 	YOU_ARE_SOLDIER = "Hauptleute rufen zu den Waffen, die Krone gibt königliche Erlasse heraus. Die Knöpfe zeigen dir eine Vorschau.",
