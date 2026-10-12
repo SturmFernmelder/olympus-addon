@@ -64,8 +64,9 @@ until you turn it on.
   census report is its sender's word: nothing the server tells an addon proves which guild a
   sender belongs to. So a few characters working together can, today (1.0.0):
   - make one of them the Lord of a made-up Olympus guild with two characters, even two alts of
-    one account logged in one after the other: [Lords] lines and the Crown's decrees (raid
-    warnings) on every client;
+    one account logged in one after the other: [Lords] lines and his Calls to Arms and Musters
+    (raid warnings) on every client (since 1.2.3 never a Royal decree or a Tabard inspection:
+    a guild master's reach his own guild alone);
   - make Captains of a made-up guild with one report, and with six of them fill the army's
     flood guard (6 decrees a minute), so that every other decree a census rank vouches for is
     dropped for that minute;

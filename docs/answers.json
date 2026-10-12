@@ -1032,12 +1032,12 @@
     {
       "id": "feat-decrees",
       "topic": "features",
-      "status": "current (1.1.1)",
+      "status": "current (1.2.3)",
       "questions": [
         "What's a Call to arms?",
         "How do I send a muster?"
       ],
-      "answer": "Captains and up send a Call to arms (an alarm and map marker for every guild) or a Muster (a rally point for 30 minutes). Royal decrees and Tabard inspections are for the Crown. Others get a local preview; /oly arms test tries it.",
+      "answer": "Captains and up send a Call to arms (an alarm and map marker for every guild) or a Muster (a rally point for 30 minutes). Royal decrees and Tabard inspections: the Crown and the High Council, a guild master for his guild. Others get a local preview; /oly arms test tries it.",
       "in_game": "Captains+: Call to arms (/oly arms) or Muster (/oly muster). Add test for a preview only you see.",
       "sources": [
         "README.md:214-233"

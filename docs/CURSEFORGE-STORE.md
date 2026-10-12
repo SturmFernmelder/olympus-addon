@@ -327,11 +327,13 @@ from it.
 |---|---|---|
 | **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
 | **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
-| **Royal decree** | The Crown | A proclamation with free text, as a raid warning to the whole army |
-| **Tabard inspection** | The Crown | Announces an inspection at the caller's position: wear your colors |
+| **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
+| **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-*The Crown* means the guild masters of Olympus guilds and the officers of the main
-`<Olympus>` guild. Everyone else gets a local preview when they press the buttons. Since 1.0.0
+For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
+`<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
+reach his own guild alone, as guild decrees; every client refuses one he sends the whole army.
+Everyone else gets a local preview when they press the buttons. Since 1.0.0
 the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
 server's word) names them: on every other client, where only the census could, they count as
 Captains, and the Crown of `<Olympus>` there is the King himself (by his character's name) and

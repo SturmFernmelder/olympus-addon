@@ -8,6 +8,20 @@ local L = ns.L
 -- rate-limit per sender and, for senders only the census vouches for, the whole army (the
 -- flood guard). A decree's words are its sender's own text: sent with the logged API (1.0.0),
 -- like a chat line.
+-- The Royal decree and the Tabard inspection (CROWN_ONLY) reach the whole army from the Crown
+-- alone (1.2.3: a guild master of another Olympus guild sent the whole realm "ROYAL DECREE
+-- Ironforge - Summon me", as every guild master could since the Crown counted them all): the
+-- King (his pinned name), his Steward and his Hands, as before; the High Council (the author's
+-- signed list, ns.IsHighCouncillor); and the King's guild's own Crown, as before (ns.IsCrownRank
+-- for his guild: its master, and its officers on its own members' clients). The master of any
+-- other Olympus guild decrees for his guild alone: over GUILD, which the server carries between
+-- its members only, shown by his guildmates' clients alone (their roster names him: the
+-- server's word), as a guild decree, never a royal one. On the channel every client refuses
+-- those two from anyone else, whatever the message says (a 1.2.2 guild master's among them):
+--   D1 on the channel   the whole army's (any kind)
+--   D1 over GUILD       a guild decree: a Royal decree or a Tabard inspection, from our guild's
+--                       own master (clients before 1.2.3 hear D1 on the channel alone: theirs
+--                       never shows it)
 
 local Decree = {}
 ns.Decree = Decree
@@ -44,10 +58,20 @@ local ICONS = {
 	ROYAL = "Interface\\AddOns\\Olympus\\media\\logo64",
 	HERALDRY = "Interface\\Icons\\INV_Shirt_GuildTabard_01",
 }
+-- A guild decree's own names (1.2.3, d.scope "guild": a guild master's, to his guild alone),
+-- never the Royal decree's.
+local GUILD_LABEL = { ROYAL = "GUILD_DECREE", HERALDRY = "GUILD_HERALDRY_CALL" }
+local GUILD_HELP = { ROYAL = "HELP_GUILD_DECREE_NAME", HERALDRY = "HELP_GUILD_HERALDRY_NAME" }
 local function Label(d)
+	if d.scope == "guild" and GUILD_LABEL[d.kind] then return L[GUILD_LABEL[d.kind]] end
 	return L[LABEL[d.kind] or "MUSTER"]
 end
 Decree.Label = Label
+-- Its name in the alerts held in an instance or on Busy (ns.Alert).
+local function HelpName(d)
+	if d.scope == "guild" and GUILD_HELP[d.kind] then return L[GUILD_HELP[d.kind]] end
+	return L["HELP_" .. d.kind .. "_NAME"]
+end
 
 local function PinEnter(self)
 	local d = self.decree
@@ -93,7 +117,7 @@ local function Show(d, own)
 	ns.Print(("|cffff4040%s|r  (%s <%s>)"):format(text, d.sender, d.guild))
 	ns.Alert(SOUND[d.kind] or "muster", d.kind == "MUSTER" and "soft" or "loud", {
 		text = text, color = { r = 1, g = 0.3, b = 0.1 }, own = own,
-		what = ("%s (%s)"):format(L["HELP_" .. d.kind .. "_NAME"], zone),
+		what = ("%s (%s)"):format(HelpName(d), zone),
 		open = function() return ns.Now() <= d.expires end,
 	})
 	if Pins then d.pin = MakePin(d) end
@@ -127,10 +151,31 @@ end
 -- name, as the King's (below).
 local function Steward() return ns.King ~= nil and ns.King.IsSteward ~= nil and ns.King.IsSteward() end
 
+-- Where this player's decree of `kind` goes (1.2.3): "army" (the channel: every Olympus
+-- member), "guild" (GUILD: his own guild alone) or nil (a local preview only), and why:
+--   steward  the King's Steward: every kind, for the King's guild
+--   captain  a Call to Arms or a Muster from an officer (rank <= ns.CAPTAIN_RANK), as before
+--   council  a Royal decree or a Tabard inspection from the High Council (the signed list)
+--   crown    the same from the King's guild's own Crown (ns.IsCrown in his guild: the King, its
+--            master, its officers on their own client), as before
+--   lord     the same from the master of any other Olympus guild: his guild's alone
+-- (A Hand sends from his own client as one of the King's guild's officers, as before; the
+-- receivers know him by the King's list or a Steward's, King.IsHandName.)
+function Decree.Scope(kind)
+	if Steward() then return "army", "steward" end
+	if not CROWN_ONLY[kind] then
+		if ns.Roster.IsOfficer() then return "army", "captain" end
+		return nil
+	end
+	if not ns.IsMember() then return nil end
+	if ns.IsHighCouncillor(ns.me) == true then return "army", "council" end
+	if ns.IsKingGuild(GetGuildInfo("player")) and ns.IsCrown() then return "army", "crown" end
+	if ns.Roster.MyRank() == 0 then return "guild", "lord" end
+	return nil
+end
+
 function Decree.CanSend(kind)
-	if Steward() then return true end
-	if CROWN_ONLY[kind] then return ns.IsCrown() end
-	return ns.Roster.IsOfficer()
+	return Decree.Scope(kind) ~= nil
 end
 
 function Decree.Send(kind, text)
@@ -139,12 +184,9 @@ function Decree.Send(kind, text)
 		ns.Print(L.MEMBERS_ONLY)
 		return
 	end
-	if not steward and CROWN_ONLY[kind] and not ns.IsCrown() then
-		ns.Print(L.CROWN_ONLY)
-		return
-	end
-	if not steward and not ns.Roster.IsOfficer() then
-		ns.Print(L.DECREE_OFFICERS_ONLY)
+	local scope = Decree.Scope(kind)
+	if not scope then
+		ns.Print(CROWN_ONLY[kind] and L.CROWN_ONLY or L.DECREE_OFFICERS_ONLY)
 		return
 	end
 	-- 1.1: the moderators took this character off (net-off, Moderation.lua): nobody would see it.
@@ -166,11 +208,50 @@ function Decree.Send(kind, text)
 	lastSent = now
 	local guild = steward and ns.KingGuildName() or GetGuildInfo("player") or ""
 	local rank = steward and 0 or ns.Roster.MyRank()
+	-- A guild master's Royal decree or Tabard inspection (1.2.3): over GUILD, to his guild alone.
+	local own = scope == "guild" and "guild" or nil
 	-- Logged (1.0.0): the server keeps its words, so abuse can be reported (Comm.Send).
-	ns.Comm.Send("CHANNEL", ns.Codec.EncodeDecree(kind, mapID, x, y, guild, rank, text), nil, nil, true)
+	ns.Comm.Send(own and "GUILD" or "CHANNEL", ns.Codec.EncodeDecree(kind, mapID, x, y, guild, rank, text), nil, nil, true)
+	local d = { kind = kind, scope = own, mapID = mapID, x = x, y = y, guild = guild, rank = rank, text = text or "", sender = ns.DisplayName(ns.me), t = now }
 	-- 1.1 (#12): our own decree never comes back to us: in our log as we send it.
-	ns.Chronicle.Add("decree", ns.me, Label({ kind = kind }) .. " " .. ns.Zones.NameForKey("m" .. mapID), { words = text })
-	Show({ kind = kind, mapID = mapID, x = x, y = y, guild = guild, rank = rank, text = text or "", sender = ns.DisplayName(ns.me), t = now }, true)
+	ns.Chronicle.Add("decree", ns.me, Label(d) .. " " .. ns.Zones.NameForKey("m" .. mapID), { words = text })
+	Show(d, true)
+end
+
+-- What a Royal decree's or a Tabard inspection's button says for this player (1.2.3): its name
+-- (a guild master's: the guild decree's) and its tip: whom it reaches, or that a click is a
+-- preview. The send box's question names a guild master's guild: it reaches that guild alone.
+local BUTTON = { ROYAL = "ROYAL_BTN", HERALDRY = "HERALDRY_BTN" }
+local GUILD_BUTTON = { ROYAL = "GUILD_DECREE_BTN", HERALDRY = "GUILD_HERALDRY_BTN" }
+local TIP = { ROYAL = "ROYAL_BTN_TIP", HERALDRY = "HERALDRY_BTN_TIP" }
+local GUILD_TIP = { ROYAL = "GUILD_DECREE_BTN_TIP", HERALDRY = "GUILD_HERALDRY_BTN_TIP" }
+function Decree.ButtonLabel(kind)
+	if Decree.Scope(kind) == "guild" then return L[GUILD_BUTTON[kind]] end
+	return L[BUTTON[kind] or "MUSTER_BTN"]
+end
+function Decree.ButtonTip(kind)
+	local scope = Decree.Scope(kind)
+	if scope == "guild" then return L[GUILD_TIP[kind]]:format(GetGuildInfo("player") or "?") end
+	local tip = L[TIP[kind] or "MUSTER_BTN_TIP"]
+	if not scope then tip = tip .. "\n" .. L.CROWN_PREVIEW_NOTE end
+	return tip
+end
+function Decree.Ask(kind)
+	if Decree.Scope(kind) == "guild" then
+		return L.GUILD_DECREE_ASK:format(Label({ kind = kind, scope = "guild" }), GetGuildInfo("player") or "?")
+	end
+	return Label({ kind = kind })
+end
+
+-- What this player's decrees do, in one line (1.2.3): the Decrees tab's detail and /oly decrees.
+function Decree.YouCan()
+	local royal, why = Decree.Scope("ROYAL")
+	local arms = Decree.Scope("ARMS") ~= nil
+	if why == "council" then return L.YOU_ARE_COUNCIL_DECREES end
+	if royal == "army" then return L.YOU_ARE_CROWN end
+	if royal == "guild" then return L.YOU_ARE_GUILD_LORD:format(GetGuildInfo("player") or "?") end
+	if arms then return L.YOU_ARE_OFFICER end
+	return L.YOU_ARE_SOLDIER
 end
 
 -- Local-only preview so anyone can see what a decree looks like (nothing is sent).
@@ -205,8 +286,25 @@ function Decree.Active()
 	return out
 end
 
+-- A guild decree heard over GUILD (1.2.3): a Royal decree or a Tabard inspection that names our
+-- own guild, from its master as our roster has him (rank 0: the server's word, never the rank
+-- the message writes or the census's); the server carries GUILD between its members alone.
+-- Returns the rank and its source, or nil.
+local function GuildDecree(sender, d)
+	local why
+	if not CROWN_ONLY[d.kind] then why = "over GUILD only a Royal decree or a Tabard inspection"
+	elseif d.guild ~= GetGuildInfo("player") then why = "it names <" .. d.guild .. ">, not our guild"
+	elseif ns.Roster.RankOf(sender) ~= 0 then why = "not our guild master in our roster" end
+	if why then
+		ns.Log("guild decree %s from %s ignored: %s", d.kind, sender, why)
+		return nil
+	end
+	d.scope = "guild"
+	return 0, "roster"
+end
+
 ns.Comm.Handle("D1", function(dist, sender, text)
-	if dist ~= "CHANNEL" then return end
+	if dist ~= "CHANNEL" and dist ~= "GUILD" then return end
 	local d = ns.Codec.DecodeDecree(text)
 	if not d or not ns.IsFederation(d.guild) then return end
 	-- 1.1: a name the moderators took off (net-off, Moderation.lua).
@@ -217,34 +315,47 @@ ns.Comm.Handle("D1", function(dist, sender, text)
 	-- census. So do his Hands' for his guild (his list or a Steward's, King.IsHandName), on every
 	-- client outside it: there they are of his Crown on his word (1.0.0); on its own members'
 	-- clients its roster says who speaks for it. His Steward's (1.0.0: the signed titles list
-	-- names him, King.IsStewardName) on every client, as the King's. Everyone else: the rank we
-	-- can verify, never the rank written in the message.
-	local mine = GetGuildInfo("player")
-	local kings = ns.IsKingGuild(d.guild)
-	local king = kings and ns.IsKingCharacter(sender)
-	local steward = kings and not king and ns.King ~= nil and ns.King.IsStewardName(sender)
-	local hand = kings and not king and not steward and not ns.IsKingGuild(mine) and ns.King ~= nil and ns.King.IsHandName(sender)
-	local rank, source
-	if king or steward or hand then
-		rank, source = 0, "crown"
+	-- names him, King.IsStewardName) on every client, as the King's. A High Councillor's Royal
+	-- decree and Tabard inspection (1.2.3: the author's signed list, by the name the server
+	-- stamps) on every client, whichever guild he is in. Everyone else: the rank we can verify,
+	-- never the rank written in the message.
+	local king, steward, hand, council, rank, source
+	if dist == "GUILD" then
+		rank, source = GuildDecree(sender, d)
+		if not rank then return end
 	else
-		rank, source = ns.Data.AuthorizedRank(sender, d.guild)
-	end
-	if not rank then
-		ns.Log("decree from %s ignored: rank in %s not verified", sender, d.guild)
-		return
+		local mine = GetGuildInfo("player")
+		local kings = ns.IsKingGuild(d.guild)
+		king = kings and ns.IsKingCharacter(sender)
+		steward = kings and not king and ns.King ~= nil and ns.King.IsStewardName(sender)
+		hand = kings and not king and not steward and not ns.IsKingGuild(mine) and ns.King ~= nil and ns.King.IsHandName(sender)
+		council = CROWN_ONLY[d.kind] and not (king or steward or hand) and ns.IsHighCouncillor(sender) == true
+		if king or steward or hand or council then
+			rank, source = 0, "crown"
+		else
+			rank, source = ns.Data.AuthorizedRank(sender, d.guild)
+		end
+		if not rank then
+			ns.Log("decree from %s ignored: rank in %s not verified", sender, d.guild)
+			return
+		end
+		if CROWN_ONLY[d.kind] then
+			-- (1.2.3) For the whole army: the King's guild's own Crown (ns.IsCrownRank in his
+			-- guild, as before), never another guild's master: his goes to his guild over GUILD.
+			if not (king or steward or hand or council or (kings and ns.IsCrownRank(d.guild, rank))) then
+				return ns.Log("%s from %s <%s> refused: for the whole army only the Crown and the High Council (a guild master decrees for his guild alone)",
+					d.kind, sender, d.guild)
+			end
+		elseif rank > ns.CAPTAIN_RANK then
+			return
+		end
 	end
 	d.rank = rank
-	if CROWN_ONLY[d.kind] then
-		if not (king or steward or hand or ns.IsCrownRank(d.guild, rank)) then return end
-	elseif rank > ns.CAPTAIN_RANK then
-		return
-	end
-	-- The King, his Steward, his Hands, signed identities and our own guild's officers (our
-	-- roster: the server's word) never wait behind the flood guard, which legacy census ranks
-	-- (anyone's votes) can fill. A legacy census sender still speaks for one guild only, exactly
-	-- as before the dormant signed-authority migration (Data.ClaimGuild).
-	local sure = king or steward or hand or source == "roster" or source == "signed" or source == "pinned"
+	-- The King, his Steward, his Hands, the High Council, signed identities and our own guild's
+	-- officers and master (our roster: the server's word) never wait behind the flood guard, which
+	-- legacy census ranks (anyone's votes) can fill. A legacy census sender still speaks for one
+	-- guild only, exactly as before the dormant signed-authority migration (Data.ClaimGuild).
+	local sure = king or steward or hand or council or source == "roster" or source == "signed" or source == "pinned"
 	if source == "census" and not ns.Data.ClaimGuild(sender, d.guild) then
 		ns.Log("decree from %s ignored: speaks for another guild than %s", sender, d.guild)
 		return

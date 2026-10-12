@@ -2603,12 +2603,10 @@ local function SoundLines(lines)
 	end
 end
 
+-- What this player's decrees do (1.2.3, Decree.YouCan): another guild's master is told his Royal
+-- decrees and Tabard inspections reach his guild alone, never that he is the Crown.
 local function DecreeDetail()
-	local who
-	if ns.IsCrown() then who = L.YOU_ARE_CROWN
-	elseif ns.Roster.IsOfficer() then who = L.YOU_ARE_OFFICER
-	else who = L.YOU_ARE_SOLDIER end
-	return L.DECREES_DETAIL_TITLE, who
+	return L.DECREES_DETAIL_TITLE, ns.Decree.YouCan()
 end
 
 ---------------------------------------------------------------------------
