@@ -290,9 +290,12 @@ local function Store(create)
 	end
 	-- (voids, 1.2.3: [sender#digest] = when a reviewer voided that shared row, so a copy heard later
 	-- is refused too. recapsRead, 1.2.3: [killer GUID@time] = when, each death recap this client
-	-- read, so it never counts twice; inside: this client's own times in an instance, { from, to }.)
+	-- read, so it never counts twice; inside: this client's own times in an instance, { from, to }.
+	-- 1.2.4, the notices': mine, [Horde GUID] = { name, deaths }: this store's characters' own deaths
+	-- to him, open; avenged, the avenged notices waiting; slayerLetters, the Slayer letters waiting;
+	-- avengedTold, [claim id|character] = when, the claims each character was told of: once.)
 	for _, key in ipairs({ "targets", "aliases", "slayers", "slayerAliases", "baseSlayers", "evidence", "seen", "seenOrder", "recent", "audit", "voids",
-		"recapsRead", "inside" }) do
+		"recapsRead", "inside", "mine", "avenged", "slayerLetters", "avengedTold" }) do
 		if type(s[key]) ~= "table" then s[key] = {} end
 	end
 	s.seq = Whole(s.seq, 0, 2147483647) or 0
@@ -1193,6 +1196,9 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 		zone = opts.zone, precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
 		peer = peer or nil, own = opts.own == true or nil, earlier = earlier or nil }
 	if worth then e.office, e.ml, e.hl, e.hf = worth.office, worth.ml, worth.hl, worth.hf or nil end
+	-- (1.2.4 repair: a member's claim keeps the guild its row named, for the avenged notice's words
+	-- when a death before it is heard after it: Bounty.Grieve.)
+	if peer and action == "claim" then e.guild = Clean(opts.guild, 48) end
 	e.digest = peer and opts.digest or Digest(table.concat({ e.id, e.at, e.kind, e.action, e.killerGuid or "", e.victimGuid or "" }, "|"))
 	Remember(s, id, fingerprint, now, e.seq)
 	-- In the order of the deaths: a shared row may come after a later one (a relay, a catch-up),
@@ -1210,6 +1216,9 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	end
 	stats.accepted = stats.accepted + 1
 	Changed()
+	-- (1.2.4: what the row tells its members: an own death kept for the avenged notice, a claim's
+	-- avenged notices, an own kill's Slayer letter: the section "The notices" below.)
+	Bounty.Recorded(s, e)
 	return true, e
 end
 
@@ -1310,7 +1319,8 @@ local function ReadSelfDeathRecap()
 	-- (Dated by its killing blow, not when it was read: RecordKill.)
 	local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(kb.stamp), horde, mine,
 		{ zone = Zone(), precision = "approximate", horde = "killer", own = true, at = kb.at, bounty = Bounty.Capture(horde.guid) })
-	if ok then Share.Send(e) end
+	-- (1.2.4: and the toast, at the death: a retry's second reading is a replay, so once a death.)
+	if ok then Share.Send(e) Bounty.DeathToast(e) end
 	return ok, e, horde.name
 end
 
@@ -3520,8 +3530,11 @@ function Share.Take(dist, sender, row)
 	-- (1.2.3: what the row is worth, as this client freezes it: never above what its sender says,
 	-- nor an office it cannot verify, nor a level above one it sees: Bounty.Intake.)
 	local worth = row.worth and Bounty.Intake(row.worth, from, row.guild, relay, ownGuid, horde.guid) or nil
+	-- (1.2.4: guild, the one the row names, kept on a claim for the avenged notice's words alone:
+	-- RecordKill, Bounty.AvengeOpen.)
 	local ok, e = RecordKill(row.kind == "S" and "SELF_DEATH" or "PARTY_KILL", id, killer, victim,
-		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire, bounty = worth })
+		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire, bounty = worth,
+			guild = Sight.GuildName(row.guild) })
 	-- (A reviewer relays what he took from a member; another reviewer's own row every client takes
 	-- from him directly.)
 	if ok and not relay and Wanted.CanPublish(ns.me) and not Wanted.CanPublish(from) then Share.RelaySoon(e) end
@@ -4395,19 +4408,30 @@ end
 -- Why the notice waits now, or nil: this session's reading of the earlier deaths not over (it
 -- would add to it: one notice), combat, an instance, a death, the privacy page (shown, or waiting
 -- to ask this session: Consent.Waiting, as the version letter waits for it).
+-- (1.2.4: Bounty.Blocked's, the notices' too, and the update letter open: a window over another.)
 function Bounty.Busy()
 	if not Bounty.session.read then return "reading" end
+	return Bounty.Blocked()
+end
+function Bounty.Blocked()
 	if Bounty.InCombat() then return "combat" end
 	if InInstance() then return "instance" end
 	local okD, dead = pcall(function() return UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") end)
 	if not okD or dead == true then return "dead" end
-	local C = ns.Consent
+	local C, LT = ns.Consent, ns.Letters
 	if type(C) == "table" and not C.missing then
 		local ok, shown = pcall(function()
 			local f = type(C.Frame) == "function" and C.Frame() or nil
 			return f and f.IsShown and f:IsShown() or type(C.Waiting) == "function" and C.Waiting() == true
 		end)
 		if not ok or shown then return "privacy" end
+	end
+	if type(LT) == "table" and not LT.missing and type(LT.Frame) == "function" then
+		local ok, shown = pcall(function()
+			local f = LT.Frame()
+			return f and f.IsShown and f:IsShown() or false
+		end)
+		if not ok or shown then return "letter" end
 	end
 	return nil
 end
@@ -4480,9 +4504,22 @@ function Bounty.Login()
 	local session = Bounty.session
 	session.gen = (session.gen or 0) + 1
 	session.read, session.due, session.ticking, session.again, session.passes = false, false, false, false, 0
+	session.noticeTick, session.loginAt = false, math.floor(Clock())
+	session.askSettle, session.held, session.heldTick = nil, nil, false
 	Bounty.Spans()
 	local gen = session.gen
 	if not ns.After then Bounty.EarlierDone() return end
+	-- (1.2.4: the notices that waited, a reload or a logout before they could show, NOTICE_LOGIN
+	-- later: after the privacy page's ask and the update letter's; none shows before, a notice heard
+	-- meanwhile neither, Bounty.Notices. None waiting, no timer.)
+	if Bounty.Waiting() then
+		ns.After(Bounty.NOTICE_LOGIN, "wanted notices", function()
+			if gen == Bounty.session.gen then Bounty.NoticesSoon() end
+		end)
+	end
+	-- (1.2.4 repair: while this character keeps deaths open, the avenged ask, W7: Bounty.Ask. None
+	-- open, no timer.)
+	if #Bounty.Open(Store(false), NameKey(ns.me)) > 0 then Bounty.AskLater(gen, 1) end
 	ns.After(Bounty.EARLIER_WAIT, "wanted earlier deaths", function()
 		if gen ~= Bounty.session.gen then return end
 		Bounty.session.due = true
@@ -4499,6 +4536,812 @@ function Bounty.Zone()
 	if session.due and not session.read and not session.again then Bounty.Earlier() end
 	local s = Store(false)
 	if s and type(s.earlierNotice) == "table" then Bounty.NoticeSoon() end
+	-- (1.2.4: and the notices that waited for the outside.)
+	if Bounty.Waiting() then Bounty.NoticesSoon() end
+end
+
+---------------------------------------------------------------------------
+-- The notices (1.2.4). Daniel: "quando ela morrer por um player da Horda, toda vez devia aparecer
+-- uma mensagem para ela"; "quando os players que morreram para aquele jogador forem mortos,
+-- deveria aparecer uma mensagem avisando que o cara que matou eles foi morto, que eles foram
+-- vingados e explicando quem matou ele"; and the Slayer letter, in the King's letter's model.
+--
+-- The death. At each own death to a Horde player that counts (ReadSelfDeathRecap: the recap's
+-- gate, outside an instance; the retries' second success is a replay, so once a death), a toast:
+-- Olympus's own window at the bottom of the screen (the game's release popup is at its top), his
+-- name and the points this death added to his bounty ("again", no points, inside the
+-- corpse-camping gap), TOAST_SECONDS, then gone. No button, no mouse, no keyboard, off the escape
+-- list (the game's sweep at a death leaves it), at the death itself, in both input modes.
+--
+-- Avenged. Each own death to a Horde player (live or earlier) is kept apart, open, by his GUID
+-- (s.mine: a fold empties the rows, Checkpoint), each by the character who died (one account's
+-- characters share the store), GRUDGE_DAYS at most. A claim on him recorded here (a member's own
+-- kill heard on the channel, a reviewer's relay, the catch-up answer at the next login, this
+-- client's own kill: RecordKill) avenges every such death before it, once: one notice for each
+-- character (s.avenged, AVENGED_MAX waiting, the oldest drop), saved until it shows; a later claim
+-- finds nothing open. The character who is himself the avenger has them closed with no notice (his
+-- letter says it). The notice is Olympus's own dialog (Dialog.Show, in both input modes, never the
+-- game's popups): who slew him and his guild, the Horde player, how many times he had killed this
+-- one; Thank (Olympus's whisper window with the thanks written in it: nothing goes until the
+-- player's own Send or Enter), Whisper (that window, empty), See (the avenger's Olympus profile;
+-- the dialog stays) and Close. It carries no point (the points are the rows') and names the member
+-- whose own kill it was. It waits out combat, an instance, a death, the privacy page, the update
+-- letter and the King's letter, one at a time; with the gamepad UI nothing of Olympus opens by
+-- itself, so it waits for the Olympus window, and chat says so once.
+-- (1.2.4 repair: the rows come in any order. A death heard after the claim that avenged it, its
+-- recap read at a retry or by the earlier deaths' reader, is avenged at once by that claim's
+-- slayer, Bounty.Grieve, and its toast says so; a member offline at the kill asks for it at his
+-- next login, W7, "The avenged ask" below.)
+--
+-- The Slayer letter. At this client's own killing blow that paid points (Share.PartyKill), the
+-- King's letter (HonorsNet: its window, the profile Edit's list to read it again, never to the King
+-- himself), its words Wanted's (Wanted.LetterText) and made of its key alone (Bounty.LetterKey), so
+-- they read the same after any reload, in the reader's language: whom he slew, how many of ours
+-- that one had slain in the bounty paid, the bounty, his level's points, the revenge and the total,
+-- as this client counts them LETTER_SETTLE after the kill (every member's own rows reach every
+-- client, a moment after: the whole bounty, no review; its key made then, once: Bounty.SettledKey).
+-- Never in combat, an instance, a death, over the privacy page or the update letter: it waits,
+-- saved (s.slayerLetters), and goes to HonorsNet when nothing is in the way, one at a time, and with
+-- the gamepad UI only while the Olympus window is open (chat says once that one waits:
+-- HonorsNet.WaitForWindow), so it shows as it goes, once (this queue's: HonorsNet keeps no mark of
+-- it). Its first button is Slayers (the Wanted tab), its portrait his rank's frame. The King: a
+-- toast instead.
+---------------------------------------------------------------------------
+
+Bounty.TOAST_SECONDS = 10  -- a toast shows this long
+Bounty.TOAST_W = 360       -- its width (its height follows its words)
+Bounty.TOAST_Y = 150       -- above the screen's bottom: clear of the game's popups at its top
+Bounty.MINE_MAX = 32       -- Horde players this store keeps its own open deaths to...
+Bounty.MINE_DEATHS = 8     -- ...and this many of them each, the newest
+Bounty.AVENGED_MAX = 5     -- avenged notices waiting at most (the oldest drop)
+Bounty.LETTERS_MAX = 20    -- Slayer letters waiting at most (HonorsNet keeps 20 to read again)
+Bounty.NOTICE_LOGIN = 90   -- what waited is tried this long after login (the privacy page asks at 45, the update letter at 60)
+Bounty.WINDOW_TICK = 2     -- a notice waiting for a window (the Olympus window, a dialog, the King's letter) looks this often
+
+-- The toast: Olympus's own window (ns.Window: the Olympus window's bronze metal, "Wanted" in its
+-- title bar), the words in ink on a parchment, at the bottom centre; the newest takes the place of
+-- the one shown. Where no window can be made (ns.Window missing), one chat line.
+function Bounty.Toast(text)
+	if type(text) ~= "string" or text == "" then return nil end
+	local f = Bounty.toast
+	if not f then
+		if type(ns.Window) ~= "function" then ns.Print(text) return nil end
+		f = ns.Window("OlympusWantedToast", UIParent, { title = L.TAB_WANTED, inset = false, close = false, escape = false })
+		f:SetFrameStrata("DIALOG")
+		f:SetClampedToScreen(true)
+		f:EnableMouse(false)
+		f:SetWidth(Bounty.TOAST_W)
+		local inner = type(f.inner) == "table" and f.inner or { 9, -24, -6, 4 }
+		f.bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+		f.bg:SetPoint("TOPLEFT", inner[1], inner[2])
+		f.bg:SetPoint("BOTTOMRIGHT", inner[3], inner[4])
+		local UI = ns.UI
+		local file = type(UI) == "table" and type(UI.FirstTexture) == "function" and type(UI.PARCHMENTS) == "table"
+			and UI.FirstTexture(UI.PARCHMENTS) or "Interface\\QuestFrame\\QuestBG"
+		if type(GetFileIDFromPath) == "function" and not GetFileIDFromPath(file) then
+			f.bg:SetColorTexture(0.87, 0.80, 0.64, 0.97)
+		else
+			f.bg:SetTexture(file)
+			if file:find("QuestBG", 1, true) then f.bg:SetTexCoord(0, 296 / 512, 0, 331 / 512) end
+		end
+		f.text = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+		f.text:SetPoint("TOPLEFT", inner[1] + 12, inner[2] - 10)
+		f.text:SetWidth(Bounty.TOAST_W - inner[1] + inner[3] - 24)
+		f.text:SetJustifyH("LEFT")
+		f.text:SetTextColor(0.18, 0.10, 0.02)
+		if f.text.SetWordWrap then f.text:SetWordWrap(true) end
+		f.inside = inner
+		f:Hide()
+		Bounty.toast = f
+	end
+	f.text:SetText(text)
+	-- (As tall as its words: the client's measure, else about 50 letters a line.)
+	local h = f.text.GetStringHeight and f.text:GetStringHeight()
+	if type(h) ~= "number" or h <= 0 then h = 14 * math.max(1, math.ceil(#text / 50)) end
+	f:SetHeight(math.ceil(h) - f.inside[2] + 10 + f.inside[4] + 14)
+	f:ClearAllPoints()
+	f:SetPoint("BOTTOM", UIParent, "BOTTOM", 0, Bounty.TOAST_Y)
+	f:Show()
+	Bounty.toastGen = (Bounty.toastGen or 0) + 1
+	local gen = Bounty.toastGen
+	if ns.After then
+		ns.After(Bounty.TOAST_SECONDS, "wanted toast", function() if Bounty.toastGen == gen then f:Hide() end end)
+	end
+	return f
+end
+-- A toast, else (its window failed) its chat line: a notice is never lost to the interface, nor
+-- breaks the row that brought it.
+function Bounty.Say(text)
+	local ok, f = pcall(Bounty.Toast, text)
+	if ok then return f end
+	if ns.CaptureError then ns.CaptureError("wanted toast", f) end
+	ns.Print(text)
+	return nil
+end
+
+-- The death's toast: its row's Horde player and what the death added to his bounty; none added,
+-- "again" inside the corpse-camping gap (an earlier death of his kept it), else his name alone (a
+-- bounty at BOUNTY_MAX). Returns the window and its words.
+-- (1.2.4 repair: a death whose killer this client already holds slain after it, a member's kill
+-- row heard before this death's own was read (the recap ready only at a retry), is avenged
+-- already: the toast says so, never "we will avenge you", and the avenged notice tells by whom,
+-- Bounty.Grieve.)
+function Bounty.DeathToast(e)
+	if type(e) ~= "table" or e.action ~= "bounty" or not e.own or e.earlier then return nil end
+	local s = Store(false)
+	local t = s and s.targets[e.targetKey] or nil
+	local name = Display({ name = CleanName(type(t) == "table" and t.name or e.killerName) })
+	local points = Whole(e.points, 0, Wanted.MAX_POINTS) or 0
+	local text
+	if Bounty.AvengedBy(t, Whole(e.at, 0, 4294967295)) then
+		text = L.WANTED_DEATH_TOAST_SLAIN:format(name)
+	elseif points > 0 then
+		text = L.WANTED_DEATH_TOAST:format(name, points)
+	else
+		local st = type(t) == "table" and type(t.bounty) == "table" and t.bounty or {}
+		local last = type(st.gap) == "table" and tonumber(st.gap[Bounty.Who(e.victimName)]) or nil
+		text = (last and last < (tonumber(e.at) or 0)) and L.WANTED_DEATH_TOAST_AGAIN:format(name) or L.WANTED_DEATH_TOAST_PLAIN:format(name)
+	end
+	Bounty.session.toasts = (Bounty.session.toasts or 0) + 1
+	return Bounty.Say(text), text
+end
+
+-- A row recorded (RecordKill), for the notices: an own death kept, a claim's avenged notices, an
+-- own kill's letter.
+function Bounty.Recorded(s, e)
+	if e.action == "bounty" then
+		if e.own then Bounty.Grieve(s, e) end
+	elseif e.action == "claim" then
+		Bounty.Avenge(s, e)
+		if e.own then Bounty.Slain(s, e) end
+	end
+end
+
+-- s.mine kept to its bounds: GRUDGE_DAYS, MINE_DEATHS a Horde player (the newest), MINE_MAX Horde
+-- players (those with the newest deaths).
+function Bounty.TrimMine(s, now)
+	local since, keys = (now or math.floor(Clock())) - Bounty.SCORE.GRUDGE_DAYS * 86400, {}
+	for guid, m in pairs(s.mine) do
+		local kept = {}
+		for _, d in ipairs(type(m) == "table" and type(m.deaths) == "table" and m.deaths or {}) do
+			if type(d) == "table" and (tonumber(d.at) or 0) >= since then kept[#kept + 1] = d end
+		end
+		table.sort(kept, function(a, b) return a.at < b.at end)
+		while #kept > Bounty.MINE_DEATHS do table.remove(kept, 1) end
+		if #kept == 0 then s.mine[guid] = nil else m.deaths = kept keys[#keys + 1] = guid end
+	end
+	if #keys <= Bounty.MINE_MAX then return end
+	local function Last(guid) local d = s.mine[guid].deaths return d[#d].at end
+	table.sort(keys, function(a, b)
+		if Last(a) ~= Last(b) then return Last(a) < Last(b) end
+		return a < b
+	end)
+	for i = 1, #keys - Bounty.MINE_MAX do s.mine[keys[i]] = nil end
+end
+
+-- The claim on an entry that avenged a death at `at`: the first held at or after it (a death
+-- before a kill in the same second, Share.Before), within GRUDGE_DAYS, or nil. (1.2.4 repair: the
+-- rows come in any order, the claim's before the death's own; the claims are the rebuilt ones.)
+function Bounty.AvengedBy(t, at)
+	if type(t) ~= "table" or type(t.claims) ~= "table" or not at then return nil end
+	local first, span = nil, Bounty.SCORE.GRUDGE_DAYS * 86400
+	for _, c in ipairs(t.claims) do
+		local when = type(c) == "table" and Whole(c.at, 0, 4294967295) or nil
+		if when and when >= at and when - at <= span and (not first or when < first.at) then first = c end
+	end
+	return first
+end
+
+-- The ledger's row of a claim (its id), or nil once folded (Checkpoint).
+function Bounty.RowOf(s, id)
+	for i = #s.evidence, 1, -1 do
+		local e = s.evidence[i]
+		if type(e) == "table" and e.id == id then return e end
+	end
+	return nil
+end
+
+-- The avenger's guild for the notice's words: the one his own messages named last (Moderation),
+-- else the one his row named, else this client's own for its own kill.
+function Bounty.AvengerGuild(name, given, own)
+	local M, guild = ns.Moderation, nil
+	if type(M) == "table" and not M.missing and type(M.GuildOf) == "function" then
+		local ok, g = pcall(M.GuildOf, name)
+		guild = ok and Sight.GuildName(g) or nil
+	end
+	return guild or Sight.GuildName(given) or (own and Sight.OwnGuild()) or nil
+end
+
+-- One avenged notice queued for a character (r: id, the claim's; who, the character; name, guild,
+-- horde, times, at), once a claim each character: another death of his that claim avenged, heard
+-- while its notice waits, adds to its times; once it went (s.avengedTold), nothing again. true
+-- when one was queued or grew.
+Bounty.TOLD_MAX = 64 -- claims told of kept (the newest), GRUDGE_DAYS at most
+function Bounty.Tell(s, r)
+	local told = tostring(r.id) .. "|" .. tostring(r.who)
+	for _, w in ipairs(s.avenged) do
+		if type(w) == "table" and w.id == r.id and w.who == r.who then
+			w.times = math.min(Bounty.MINE_DEATHS, (tonumber(w.times) or 1) + (tonumber(r.times) or 1))
+			return true
+		end
+	end
+	if s.avengedTold[told] then return false end
+	s.avenged[#s.avenged + 1] = r
+	while #s.avenged > Bounty.AVENGED_MAX do table.remove(s.avenged, 1) end
+	s.avengedTold[told] = Whole(r.at, 0, 4294967295) or math.floor(Clock())
+	Bounty.TrimTold(s)
+	return true
+end
+function Bounty.TrimTold(s, now)
+	local since, keys = (now or math.floor(Clock())) - Bounty.SCORE.GRUDGE_DAYS * 86400, {}
+	for key, at in pairs(s.avengedTold) do
+		if type(key) ~= "string" or #key > 300 or not Whole(at, 0, 4294967295) or at < since then s.avengedTold[key] = nil
+		else keys[#keys + 1] = key end
+	end
+	if #keys <= Bounty.TOLD_MAX then return end
+	table.sort(keys, function(a, b)
+		if s.avengedTold[a] ~= s.avengedTold[b] then return s.avengedTold[a] < s.avengedTold[b] end
+		return a < b
+	end)
+	for i = 1, #keys - Bounty.TOLD_MAX do s.avengedTold[keys[i]] = nil end
+end
+
+-- An own death kept, open, for the avenged notice (its character's key: this player's name as
+-- ns.me holds it, the one the notices are shown for).
+-- (1.2.4 repair: then avenged at once by a claim on him held already at or after it, its row heard
+-- before this death's own (the recap read at a retry, or by the earlier deaths' reader at the next
+-- login): Bounty.AvengeSoon. Before, the death stayed open and the next kill on him, days later,
+-- was told as its avenger, the first never.)
+function Bounty.Grieve(s, e)
+	local guid, who, at = Guid(e.killerGuid), NameKey(ns.me), Whole(e.at, 0, 4294967295)
+	if not guid or not who or not at then return end
+	local t = s.targets[e.targetKey]
+	local m = type(s.mine[guid]) == "table" and s.mine[guid] or { deaths = {} }
+	m.name = CleanName(type(t) == "table" and t.name or e.killerName) or m.name
+	m.deaths[#m.deaths + 1] = { at = at, who = who }
+	s.mine[guid] = m
+	Bounty.TrimMine(s)
+	Bounty.AvengeSoon(s, guid, e.targetKey)
+end
+
+-- A claim on a Horde player: the deaths of his kept here that it avenged (Bounty.AvengeSoon).
+function Bounty.Avenge(s, e)
+	local guid = Guid(e.victimGuid)
+	if not guid or type(s.mine[guid]) ~= "table" then return 0 end
+	return Bounty.AvengeSoon(s, guid, e.targetKey)
+end
+
+-- Every open death to a Horde player that a claim held here avenged, closed: each by the first
+-- claim at or after it (Bounty.AvengedBy), so the order the rows came in does not matter; one
+-- notice for each claim and character (Bounty.Tell: another death of his it avenged adds to its
+-- times), none for the avenger himself (his letter says it). targetKey: his entry. How many notices
+-- were queued or grew.
+-- (1.2.4 repair: while this session's avenged ask is answered (ASK_SETTLE after it went, W7), the
+-- answers' claims come from several clients in any order: the deaths wait for them all, so that a
+-- later kill heard first never names its slayer as the avenger of a death an earlier one avenged.)
+Bounty.ASK_SETTLE = 15 -- seconds after the ask (its answers' ASK_DELAY, their part of 5 s, the channel's wait)
+function Bounty.AvengeSoon(s, guid, targetKey)
+	local session = Bounty.session
+	local now = math.floor(Clock())
+	if (tonumber(session.askSettle) or 0) > now and ns.After then
+		session.held = session.held or {}
+		session.held[guid] = targetKey
+		if not session.heldTick then
+			session.heldTick = true
+			local gen = session.gen
+			ns.After(math.max(1, session.askSettle - now), "wanted avenged settle", function()
+				if gen ~= Bounty.session.gen then return end
+				local held = Bounty.session.held or {}
+				Bounty.session.held, Bounty.session.heldTick = nil, false
+				local st = Store(false)
+				if st then for g, key in pairs(held) do Bounty.AvengeOpen(st, g, key) end end
+			end)
+		end
+		return 0
+	end
+	return Bounty.AvengeOpen(s, guid, targetKey)
+end
+function Bounty.AvengeOpen(s, guid, targetKey)
+	local m = s.mine[guid]
+	if type(m) ~= "table" or type(m.deaths) ~= "table" then return 0 end
+	local t = type(targetKey) == "string" and s.targets[targetKey] or nil
+	local groups, order, kept = {}, {}, {}
+	for _, d in ipairs(m.deaths) do
+		local c = type(d) == "table" and Bounty.AvengedBy(t, Whole(d.at, 0, 4294967295)) or nil
+		if c then
+			local k = tostring(c.id) .. "|" .. tostring(d.who)
+			if not groups[k] then groups[k], order[#order + 1] = { claim = c, who = d.who, times = 0 }, k end
+			groups[k].times = groups[k].times + 1
+		else
+			kept[#kept + 1] = d
+		end
+	end
+	m.deaths = kept
+	if #kept == 0 then s.mine[guid] = nil end
+	table.sort(order)
+	local horde, n = CleanName(m.name or (type(t) == "table" and t.name or nil)), 0
+	for _, k in ipairs(order) do
+		local g = groups[k]
+		local c, row = g.claim, Bounty.RowOf(s, g.claim.id)
+		local own = row ~= nil and row.own == true
+		local by = own and NameKey(row.from) or NameKey(c.slayer)
+		local name = CleanName(c.slayer)
+		if by ~= g.who and name and horde and Bounty.Tell(s, { id = c.id, who = g.who, name = name,
+			guild = Bounty.AvengerGuild(c.slayer, row and row.guild, own), horde = horde, times = g.times,
+			at = Whole(c.at, 0, 4294967295) or 0 }) then n = n + 1 end
+	end
+	if n > 0 then Bounty.NoticesSoon() end
+	return n
+end
+
+-- The Slayer letter's key, its place in HonorsNet's list and its words' every part (Wanted.LetterText):
+-- wanted@<digest>~<points>~<level's points>~<bounty>~<revenge>~<kills>~<level>[+]~<name>, as this
+-- client counts the claim (its row's digest: one letter a kill; 1.2.4 repair: made as the letter
+-- goes, Bounty.SettledKey, and kept at the kill for a claim gone by then). The level shown is the one the
+-- kill paid for, else the one seen (a kill inside KILL_GAP pays none); "+" a floor (a "??").
+function Bounty.LetterKey(e, claim, name)
+	name = CleanName(name)
+	local digest = type(e.digest) == "string" and #e.digest == 16 and e.digest:match("^%x+$") or nil
+	local points = Whole(e.points, 0, Wanted.MAX_POINTS)
+	if not name or not digest or not points or type(claim) ~= "table" then return nil end
+	local S, paid = Bounty.SCORE, Bounty.Level(e.level)
+	local level = paid > 0 and paid or Bounty.Level(e.hl)
+	local floor = level > 0 and e.hf == true and level == Bounty.Level(e.hl)
+	local kills = math.min(Wanted.MAX_POINTS, #(type(claim.victims) == "table" and claim.victims or {}) + (Whole(claim.overflow, 0, Wanted.MAX_POINTS) or 0))
+	return ("wanted@%s~%d~%d~%d~%d~%d~%d%s~%s"):format(digest, points, math.min(Wanted.MAX_POINTS, S.HORDE_LEVEL * paid),
+		Whole(claim.bounty, 0, Wanted.MAX_POINTS) or 0, e.revenge and S.REVENGE or 0, kills, level, floor and "+" or "", name)
+end
+-- Its parts, or nil.
+function Bounty.LetterOf(key)
+	if type(key) ~= "string" or #key > 200 then return nil end
+	local digest, points, base, bounty, revenge, kills, level, floor, name =
+		key:match("^wanted@(%x+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)(%+?)~([^~]+)$")
+	if not digest or #digest ~= 16 then return nil end
+	local M = Wanted.MAX_POINTS
+	local r = { digest = digest, points = Whole(tonumber(points), 0, M), base = Whole(tonumber(base), 0, M), bounty = Whole(tonumber(bounty), 0, M),
+		revenge = Whole(tonumber(revenge), 0, M), kills = Whole(tonumber(kills), 0, M), level = Whole(tonumber(level), 0, 255),
+		floor = floor == "+" or nil, name = CleanName(name) }
+	if not (r.points and r.base and r.bounty and r.revenge and r.kills and r.level and r.name) then return nil end
+	return r
+end
+
+-- The letter's words (HonorsNet.LetterText's for its "wanted@" keys) and its title; nil for a key
+-- that is none.
+function Wanted.LetterText(key)
+	local r = Bounty.LetterOf(key)
+	if not r then return nil end
+	local name = Display({ name = r.name })
+	local level = r.level > 0 and (r.floor and L.WANTED_LEVEL_FLOOR:format(r.level) or tostring(r.level)) or L.WANTED_LEVEL_UNKNOWN
+	local more = (r.base > 0 and L.WANTED_LETTER_LEVEL:format(r.base) or "") .. (r.revenge > 0 and L.WANTED_LETTER_REVENGE:format(r.revenge) or "")
+	local text
+	if r.kills > 0 then text = L.WANTED_LETTER:format(name, level, r.kills, r.bounty, more, r.points)
+	else text = L.WANTED_LETTER_FIRST:format(name, level, more, r.points) end
+	return text, Wanted.LetterTitle(key)
+end
+-- (HonorsNet.TitleText's for its "wanted@" keys: the list in the profile's Edit.)
+function Wanted.LetterTitle(key)
+	local r = Bounty.LetterOf(key)
+	return r and L.WANTED_LETTER_TITLE:format(Display({ name = r.name })) or nil
+end
+
+-- An own kill: its letter waits to go (Bounty.Notices), and its numbers to settle.
+-- (1.2.4 repair: the letter's key was made here, at the kill, but a member's death before the kill
+-- often reaches this client after it (his recap read at a retry, then the channel): the Rebuild
+-- orders it in and the claim, and the Slayers ranking, pay more than the letter said. Now the
+-- letter keeps its claim (id, entry) and what the row saw of his level, and its key is made once,
+-- as it goes, from the claim as this client holds it then (Bounty.SettledKey), LETTER_SETTLE after
+-- the kill at the soonest. A kill that pays nothing then has no letter; the key made here is kept
+-- for a claim this client no longer holds, its entry gone.)
+Bounty.LETTER_SETTLE = 15 -- seconds after the kill (the recap's retries, 2 s, and the channel's own wait)
+function Bounty.Slain(s, e)
+	local t = s.targets[e.targetKey]
+	local claim
+	for _, c in ipairs(type(t) == "table" and type(t.claims) == "table" and t.claims or {}) do if c.id == e.id then claim = c end end
+	local key = claim and Bounty.LetterKey(e, claim, t.name or e.victimName) or nil
+	local who = NameKey(ns.me)
+	if not key or not who then return nil end
+	s.slayerLetters[#s.slayerLetters + 1] = { key = key, who = who, at = Whole(e.at, 0, 4294967295) or 0, id = e.id, target = e.targetKey,
+		digest = e.digest, hl = Bounty.Level(e.hl), hf = e.hf == true or nil, due = math.floor(Clock()) + Bounty.LETTER_SETTLE }
+	while #s.slayerLetters > Bounty.LETTERS_MAX do table.remove(s.slayerLetters, 1) end
+	Bounty.NoticesSoon()
+	return key
+end
+
+-- A waiting letter's key, as it goes: made from its claim as this client holds it now (a death
+-- heard after the kill and ordered in: Rebuild), else the key the kill made (its entry made room,
+-- or its claims past MAX_CLAIMS); nil for none: the kill pays nothing now, its row was voided or
+-- its entry taken off.
+function Bounty.SettledKey(s, r)
+	local t = type(r.target) == "string" and (s.targets[r.target] or s.targets[s.aliases[r.target] or ""]) or nil
+	if type(t) == "table" and t.active ~= true then return nil end
+	local row = r.id and Bounty.RowOf(s, r.id) or nil
+	if row and row.void then return nil end
+	local claim
+	for _, c in ipairs(type(t) == "table" and type(t.claims) == "table" and t.claims or {}) do if c.id == r.id then claim = c end end
+	local key = claim and Bounty.LetterKey({ digest = r.digest, points = claim.points, level = claim.level, hl = r.hl, hf = r.hf,
+		revenge = claim.revenge }, claim, t.name) or r.key
+	local parts = Bounty.LetterOf(key)
+	return parts and parts.points > 0 and key or nil
+end
+
+-- A letter to HonorsNet's queue (it shows, and keeps it to read again); to the King, or where
+-- HonorsNet is not there, the toast. true when it went (or there was none to send), else false
+-- and why it waits.
+-- (1.2.4 repair: one at a time, with nothing of the King's letter's open or waiting in its queue,
+-- so it shows as it goes; with the gamepad UI it stays here, saved, until the Olympus window is
+-- open (chat says once that a letter waits, HonorsNet.WaitForWindow), then shows at once. Before,
+-- it went to HonorsNet's queue at once, which marked it told: a /reload or a logout before the
+-- Olympus window opened lost its showing, and the window's opening showed it even in an instance.
+-- The letter is never marked told in the profile: this queue shows it once, HonorsNet.QueueLetter.)
+function Bounty.SendLetter(key)
+	local r = Bounty.LetterOf(key)
+	if not r then return true end
+	local toast = L.WANTED_LETTER_TOAST:format(Display({ name = r.name }), r.points)
+	local HN = ns.HonorsNet
+	if type(HN) ~= "table" or HN.missing or type(HN.QueueLetter) ~= "function" then Bounty.Say(toast) return true end
+	local okK, king = pcall(function() return type(HN.LetterToSender) == "function" and HN.LetterToSender() == true end)
+	if not okK or king then Bounty.Say(toast) return true end
+	local okB, busy = pcall(function()
+		local f = type(HN.LetterFrame) == "function" and HN.LetterFrame() or nil
+		local queued = type(HN.QueuedLetters) == "function" and HN.QueuedLetters() or nil
+		return f and f.IsShown and f:IsShown() or type(queued) == "table" and queued[1] ~= nil
+	end)
+	if not okB or busy then return false, "kings-letter" end
+	local UI = ns.UI
+	if ns.GamepadUI() and not (type(UI) == "table" and type(UI.IsShown) == "function" and UI.IsShown()) then
+		if type(HN.WaitForWindow) == "function" then pcall(HN.WaitForWindow) end
+		return false, "window"
+	end
+	if not pcall(HN.QueueLetter, key, nil, true) then Bounty.Say(toast) end
+	return true
+end
+
+-- The letters waiting for this character: each once its numbers settled (its due), the oldest
+-- first, as long as each goes (Bounty.SendLetter: one at a time). How many went, and why the rest
+-- wait (nil: none waits); "settling", its due then in Bounty.session.settleAt.
+function Bounty.SendLetters(s, me)
+	local now, n, i, soonest = math.floor(Clock()), 0, 1, nil
+	while i <= #s.slayerLetters do
+		local r = s.slayerLetters[i]
+		local due = type(r) == "table" and Whole(r.due, 0, 4294967295) or 0
+		if type(r) ~= "table" or r.who ~= me then
+			i = i + 1
+		elseif due > now then
+			soonest = math.min(soonest or due, due)
+			i = i + 1
+		else
+			local key = Bounty.SettledKey(s, r)
+			if key then
+				local went, why = Bounty.SendLetter(key)
+				if not went then return n, why end
+				n = n + 1
+			end
+			table.remove(s.slayerLetters, i)
+		end
+	end
+	Bounty.session.settleAt = soonest
+	return n, soonest and "settling" or nil
+end
+
+-- The avenged notice's words.
+function Bounty.AvengedText(r)
+	local avenger, horde = Display({ name = r.name }), Display({ name = r.horde })
+	local times = (tonumber(r.times) or 1) > 1 and L.WANTED_AVENGED_TIMES:format(r.times) or ""
+	if r.guild then return L.WANTED_AVENGED:format(avenger, r.guild, horde, times) end
+	return L.WANTED_AVENGED_NOGUILD:format(avenger, horde, times)
+end
+
+-- Its buttons: Thank (Olympus's whisper window with the thanks in its box: nothing is sent until the
+-- player's own Send or Enter), Whisper (that window, its box empty: Olympus's in both input modes,
+-- its box never taking the keyboard from the chat's, ns.Focus) and See (his Olympus profile).
+function Bounty.Thank(r)
+	local UI, name = ns.UI, type(r) == "table" and CleanName(r.name) or nil
+	if not name or type(UI) ~= "table" or type(UI.WhisperText) ~= "function" then return false end
+	return UI.WhisperText(ns.TellName(name), L.WANTED_THANK_TEXT) ~= nil
+end
+function Bounty.Whisper(r)
+	local D, name = ns.Dialog, type(r) == "table" and CleanName(r.name) or nil
+	if not name then return false end
+	if type(D) ~= "table" or D.missing or type(D.Show) ~= "function" then ns.Print(L.RESTART_NEEDED) return false end
+	local tell = ns.TellName(name)
+	return D.Show("OLYMPUS_WHISPER", tell, nil, tell) ~= nil
+end
+function Bounty.See(r)
+	local UI, name = ns.UI, type(r) == "table" and CleanName(r.name) or nil
+	if not name or type(UI) ~= "table" or type(UI.ShowPerson) ~= "function" then return false end
+	return UI.ShowPerson({ name = ns.ShortName(name), realm = ns.RealmOf(name), guild = r.guild, source = "addon" }) and true or false
+end
+
+-- The first of a list's notices for this character, or nil, and its place.
+function Bounty.For(list, me)
+	for i, r in ipairs(type(list) == "table" and list or {}) do if type(r) == "table" and r.who == me then return r, i end end
+	return nil
+end
+-- Whether a notice waits for this character.
+function Bounty.Waiting()
+	local s, me = Store(false), NameKey(ns.me)
+	return s ~= nil and me ~= nil and (Bounty.For(s.slayerLetters, me) ~= nil or Bounty.For(s.avenged, me) ~= nil)
+end
+
+-- The notices for this character shown, when nothing is in the way (NOTICE_LOGIN after login, and
+-- Bounty.Blocked): the letters waiting whose numbers settled, one at a time (Bounty.SendLetters),
+-- then one avenged dialog, unless one of ours is up already (an avenged one, a whisper window it
+-- opened), the King's letter shows or, with the gamepad UI, the Olympus window is closed. Returns
+-- how many went, and why the rest wait (nil: none waits; of the letters' and the dialog's, the one
+-- looked at again soonest).
+Bounty.DIALOGS_UP = { "OLYMPUS_WANTED_AVENGED", "OLYMPUS_WHISPER_TEXT", "OLYMPUS_WHISPER" }
+function Bounty.Notices()
+	local s, me = Store(false), NameKey(ns.me)
+	if not s or not me or not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" then return 0 end
+	if not Bounty.Waiting() then return 0 end
+	if Bounty.LoginLeft() > 0 then return 0, "login" end
+	local why = Bounty.Blocked()
+	if why then return 0, why end
+	local n, letters = Bounty.SendLetters(s, me)
+	local function Sooner(other)
+		if not letters then return other end
+		if not other then return letters end
+		return Bounty.NoticeWait(other) <= Bounty.NoticeWait(letters) and other or letters
+	end
+	local r, i = Bounty.For(s.avenged, me)
+	if not r then return n, letters end
+	local D, HN, UI = ns.Dialog, ns.HonorsNet, ns.UI
+	if type(D) ~= "table" or D.missing or type(D.Show) ~= "function" then
+		table.remove(s.avenged, i)
+		ns.Print(Bounty.AvengedText(r))
+		return n + 1, Sooner(Bounty.For(s.avenged, me) and "dialog" or nil)
+	end
+	if type(D.Find) == "function" then
+		for _, which in ipairs(Bounty.DIALOGS_UP) do if D.Find(which) then return n, Sooner("dialog") end end
+	end
+	local okL, letter = pcall(function()
+		local f = type(HN) == "table" and not HN.missing and type(HN.LetterFrame) == "function" and HN.LetterFrame() or nil
+		return f and f.IsShown and f:IsShown() or false
+	end)
+	if not okL or letter then return n, Sooner("kings-letter") end
+	if ns.GamepadUI() and not (type(UI) == "table" and type(UI.IsShown) == "function" and UI.IsShown()) then
+		if not Bounty.session.toldAvenged then
+			Bounty.session.toldAvenged = true
+			ns.Print(L.WANTED_AVENGED_WAITING)
+		end
+		return n, Sooner("window")
+	end
+	table.remove(s.avenged, i)
+	Bounty.session.toldAvenged = nil
+	local text = Bounty.AvengedText(r)
+	local ok, f = pcall(D.Show, "OLYMPUS_WANTED_AVENGED", text, nil, r)
+	if not ok or not f then
+		if not ok and ns.CaptureError then ns.CaptureError("wanted avenged", f) end
+		ns.Print(text)
+	end
+	return n + 1, Sooner(Bounty.For(s.avenged, me) and "dialog" or nil)
+end
+
+-- The seconds left of NOTICE_LOGIN since this session's login (0 past it, or before any login).
+function Bounty.LoginLeft()
+	local at = Bounty.session.loginAt
+	if type(at) ~= "number" then return 0 end
+	local left = Bounty.NOTICE_LOGIN - (math.floor(Clock()) - at)
+	return (left > 0 and left <= Bounty.NOTICE_LOGIN) and left or 0
+end
+-- The notices now, else again while some wait (one beat a session): the rest of NOTICE_LOGIN after
+-- a login, WINDOW_TICK for a window to open or close, NOTICE_TICK for the rest; a letter settling,
+-- until its due (Bounty.SendLetters).
+function Bounty.NoticeWait(why)
+	if why == "login" then return math.max(1, Bounty.LoginLeft()) end
+	if why == "settling" then
+		local left = (tonumber(Bounty.session.settleAt) or 0) - math.floor(Clock())
+		return math.max(1, math.min(Bounty.LETTER_SETTLE, left))
+	end
+	return (why == "window" or why == "dialog" or why == "kings-letter") and Bounty.WINDOW_TICK or Bounty.NOTICE_TICK
+end
+function Bounty.NoticesSoon()
+	local n, why = Bounty.Notices()
+	if not why or Bounty.session.noticeTick or not ns.After then return n end
+	Bounty.session.noticeTick = true
+	local gen = Bounty.session.gen
+	local function Tick()
+		if gen ~= Bounty.session.gen then return end
+		local _, again = Bounty.Notices()
+		if not again then Bounty.session.noticeTick = false return end
+		ns.After(Bounty.NoticeWait(again), "wanted notices", Tick)
+	end
+	ns.After(Bounty.NoticeWait(why), "wanted notices", Tick)
+	return n
+end
+
+-- The avenged dialog: Olympus's own (Dialog.Show), in both input modes, no edit box; See keeps it.
+StaticPopupDialogs["OLYMPUS_WANTED_AVENGED"] = {
+	text = "%s",
+	button1 = L.WANTED_AVENGED_THANK,
+	button2 = L.WANTED_AVENGED_CLOSE,
+	button3 = L.WANTED_AVENGED_WHISPER,
+	extra = { label = L.WANTED_AVENGED_SEE, onClick = function(_, r) Bounty.See(r) end },
+	OnAccept = function(_, r) Bounty.Thank(r) end,
+	OnAlt = function(_, r) Bounty.Whisper(r) end,
+	-- (The next one waiting, a moment after.)
+	OnHide = function() if ns.After then ns.After(1, "wanted notices", Bounty.NoticesSoon) end end,
+	timeout = 0,
+	whileDead = true,
+	hideOnEscape = true,
+	preferredIndex = 3,
+}
+
+---------------------------------------------------------------------------
+-- The avenged ask (1.2.4 repair, W7). A member offline when the Horde player who killed him was
+-- slain heard that kill's row from nobody but a reviewer's catch-up answer (W4: its newest rows
+-- alone, and only while a reviewer is online), so most often he was never told. Now, at login,
+-- while this character keeps deaths open (s.mine), his client asks the channel ASK_AFTER after
+-- login (after the catch-up's answer) and ASK_EVERY apart, ASK_TRIES at most, until none is open:
+--   W7~1~<scope>~<d>[,<d>...]   channel: ASK_MAX digests at most, his newest deaths' first, each
+--       the first 8 hex of the digest of "OLYW7|<scope>|<the Horde player's GUID>" (Bounty.AskDigest):
+--       no GUID, name, time or count of his deaths on the wire.
+-- A client answers only with rows every client takes from it anyway, on the channel, as it sends
+-- them: its player's own kills of a Horde player a digest names (Share.Send: his own row again),
+-- and a reviewer's client the other members' too (Share.Relay "R": his relay), the claims its
+-- ledger holds live and fresh (SHARE_AGE), the newest ASK_ROWS sent oldest first (each avenges the
+-- deaths before it, Bounty.Avenge). ASK_PER answers to one asker in ASK_WINDOW, ASK_ALL asks
+-- answered a minute in all; never its own echo, an asker the moderators hide, another realm group
+-- or faction, nor from a client the moderators took off. A plain member never answers with another
+-- member's row: no client would take it from him. The asker takes the rows as any row
+-- (Share.Take), and the first claim after each open death avenges it, the answers heard within
+-- ASK_SETTLE of the ask together, whatever the order they came in (Bounty.AvengeSoon).
+---------------------------------------------------------------------------
+
+Bounty.ASK_AFTER = 120  -- the ask this long after login (the catch-up's answer first: W4 at 45 s)...
+Bounty.ASK_EVERY = 600  -- ...again this often...
+Bounty.ASK_TRIES = 3    -- ...this many times a login at most, while a death is open
+Bounty.ASK_MAX = 4      -- Horde players one ask names at most (the newest deaths')
+Bounty.ASK_ROWS = 6     -- rows one answer carries at most (the newest)
+Bounty.ASK_PER = 2      -- answers to one asker...
+Bounty.ASK_WINDOW = 600 -- ...in this many seconds...
+Bounty.ASK_ALL = 10     -- ...and asks answered a minute, everyone's
+Bounty.ASK_DELAY = 2    -- an answer this long after the ask (and a part of 5 s of its own)
+
+-- A Horde player's GUID as an ask names it: the first 8 hex of its digest with the scope.
+function Bounty.AskDigest(guid, scope)
+	guid = Guid(guid)
+	local d = guid and type(scope) == "string" and Digest("OLYW7|" .. scope .. "|" .. guid) or nil
+	return d and d:sub(1, 8) or nil
+end
+
+-- This character's open deaths' Horde players, his newest death first: { guid, at } each.
+function Bounty.Open(s, me)
+	local out = {}
+	if not s or not me then return out end
+	for guid, m in pairs(s.mine) do
+		local last
+		for _, d in ipairs(type(m) == "table" and type(m.deaths) == "table" and m.deaths or {}) do
+			if type(d) == "table" and d.who == me and (not last or (tonumber(d.at) or 0) > last) then last = tonumber(d.at) or 0 end
+		end
+		if last then out[#out + 1] = { guid = guid, at = last } end
+	end
+	table.sort(out, function(a, b)
+		if a.at ~= b.at then return a.at > b.at end
+		return a.guid < b.guid
+	end)
+	return out
+end
+
+-- The ask, now: true when it went to Comm, else false and why ("none": no death open).
+function Bounty.Ask()
+	local s, me, C = Store(false), NameKey(ns.me), ns.Comm
+	if not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" or NetOff() then return false, "member" end
+	if not s or not me then return false, "none" end
+	Bounty.TrimMine(s)
+	local open, scope, digests = Bounty.Open(s, me), Scope(), {}
+	for i = 1, math.min(#open, Bounty.ASK_MAX) do digests[#digests + 1] = Bounty.AskDigest(open[i].guid, scope) end
+	if #digests == 0 then return false, "none" end
+	if type(C) ~= "table" or type(C.Send) ~= "function" then return false, "transport" end
+	local body = table.concat({ "W7", 1, scope, table.concat(digests, ",") }, "~")
+	local session = Bounty.session
+	session.asked = (session.asked or 0) + 1
+	-- (Its answers avenge together, ASK_SETTLE after it: Bounty.AvengeSoon.)
+	return C.Send("CHANNEL", body, "wanted-ask", false, false, function(went)
+		if went then session.askSettle = math.floor(Clock()) + Bounty.ASK_SETTLE end
+	end, { owner = Wanted, guardKey = "wanted-ask", guard = function()
+		return ns.IsMember() == true and ns.faction ~= "Horde" and not NetOff() and Scope() == scope
+	end }) == true
+end
+-- The ask's next try (try: 1 the first, ASK_AFTER after login), this session's only.
+function Bounty.AskLater(gen, try)
+	if not ns.After then return end
+	ns.After(try == 1 and Bounty.ASK_AFTER or Bounty.ASK_EVERY, "wanted avenged ask", function()
+		if gen ~= Bounty.session.gen then return end
+		local _, why = Bounty.Ask()
+		if why ~= "none" and try < Bounty.ASK_TRIES then Bounty.AskLater(gen, try + 1) end
+	end)
+end
+
+-- The W7 handler: an ask heard, answered later with the rows found (Bounty.ASK_DELAY). true and
+-- how many rows will go, or false and why.
+function Bounty.Answer(dist, sender, text)
+	if dist ~= "CHANNEL" or type(text) ~= "string" or #text > 255 then return false, "lane" end
+	if not ns.IsMember or ns.IsMember() ~= true or not ns.me or ns.faction == "Horde" or NetOff() then return false, "member" end
+	sender = CleanName(sender)
+	if not sender or SameName(sender, ns.me) then return false, "own" end
+	local scope, list = text:match("^W7~1~(%x+)~([%x,]+)$")
+	if not scope then return false, "shape" end
+	if scope ~= Scope() then return false, "scope" end
+	local asked, n = {}, 0
+	for d in list:gmatch("[^,]+") do
+		if #d ~= 8 then return false, "shape" end
+		n = n + 1
+		if n > Bounty.ASK_MAX then return false, "shape" end
+		asked[d:lower()] = true
+	end
+	if n == 0 or #list ~= n * 9 - 1 then return false, "shape" end
+	local M = ns.Moderation
+	if type(M) == "table" and not M.missing and type(M.Hides) == "function" then
+		local ok, hidden = pcall(M.Hides, sender)
+		if not ok or hidden then return false, "olympus" end
+	end
+	local s = Store(false)
+	if not s then return false, "none" end
+	local reviewer, now, rows = Wanted.CanPublish(ns.me), math.floor(Clock()), {}
+	for i = #s.evidence, 1, -1 do
+		if #rows >= Bounty.ASK_ROWS then break end
+		local e = s.evidence[i]
+		local t = type(e) == "table" and s.targets[e.targetKey] or nil
+		if type(t) == "table" and t.active == true and e.action == "claim" and not e.void and now - (tonumber(e.at) or 0) <= Wanted.SHARE_AGE
+			and (e.own and SameName(e.from, ns.me) or reviewer and e.peer) and asked[Bounty.AskDigest(e.victimGuid, scope) or ""] then
+			rows[#rows + 1] = e
+		end
+	end
+	if #rows == 0 then return false, "none" end
+	local session = Bounty.session
+	session.asks, session.askers = session.asks or {}, session.askers or {}
+	if not Share.Count(session.asks, "all", now, 60, Bounty.ASK_ALL) then return false, "rate" end
+	if not Share.Count(session.askers, ns.Fold(sender), now, Bounty.ASK_WINDOW, Bounty.ASK_PER) then return false, "rate" end
+	local gen = session.gen
+	local function Go()
+		if gen ~= Bounty.session.gen then return end
+		for i = #rows, 1, -1 do
+			local e = rows[i]
+			if not e.void then
+				if e.own then Share.Send(e) elseif Wanted.CanPublish(ns.me) then Share.Relay(e, "R") end
+			end
+		end
+	end
+	if ns.After then ns.After(Bounty.ASK_DELAY + Share.Offset() % 5, "wanted avenged answer", Go) else Go() end
+	return true, #rows
+end
+
+-- The notices' saved parts by shape (Wanted.Prune): s.mine within its bounds (Bounty.TrimMine), the
+-- avenged notices (AVENGED_MAX) and the letters (LETTERS_MAX) waiting.
+function Bounty.PruneNotices(s, now)
+	for guid, m in pairs(s.mine) do
+		local deaths = {}
+		for _, d in ipairs(type(m) == "table" and type(m.deaths) == "table" and m.deaths or {}) do
+			local at, who = type(d) == "table" and Whole(d.at, 0, 4294967295) or nil, type(d) == "table" and d.who or nil
+			if at and type(who) == "string" and #who <= 120 then deaths[#deaths + 1] = { at = at, who = who } end
+		end
+		if type(guid) ~= "string" or Guid(guid) ~= guid or #deaths == 0 then s.mine[guid] = nil
+		else s.mine[guid] = { name = CleanName(m.name), deaths = deaths } end
+	end
+	Bounty.TrimMine(s, now)
+	local avenged, letters = {}, {}
+	for _, r in ipairs(s.avenged) do
+		local name, horde = type(r) == "table" and CleanName(r.name) or nil, type(r) == "table" and CleanName(r.horde) or nil
+		if name and horde and type(r.who) == "string" and #r.who <= 120 then
+			avenged[#avenged + 1] = { id = Clean(r.id, 160), who = r.who, name = name, guild = Sight.GuildName(r.guild), horde = horde,
+				times = Whole(r.times, 1, Bounty.MINE_DEATHS) or 1, at = Whole(r.at, 0, 4294967295) or 0 }
+		end
+	end
+	while #avenged > Bounty.AVENGED_MAX do table.remove(avenged, 1) end
+	-- (1.2.4 repair: a letter keeps its claim, its row's digest and level, and its due: Bounty.Slain.)
+	for _, r in ipairs(s.slayerLetters) do
+		if type(r) == "table" and Bounty.LetterOf(r.key) and type(r.who) == "string" and #r.who <= 120 then
+			local digest = type(r.digest) == "string" and #r.digest == 16 and r.digest:match("^%x+$") or nil
+			letters[#letters + 1] = { key = r.key, who = r.who, at = Whole(r.at, 0, 4294967295) or 0, id = Clean(r.id, 160),
+				target = type(r.target) == "string" and #r.target <= 160 and r.target or nil, digest = digest, hl = Bounty.Level(r.hl),
+				hf = r.hf == true or nil, due = Whole(r.due, 0, 4294967295) or 0 }
+		end
+	end
+	while #letters > Bounty.LETTERS_MAX do table.remove(letters, 1) end
+	s.avenged, s.slayerLetters = avenged, letters
+	-- (1.2.4 repair: the claims told of, by shape, within GRUDGE_DAYS and TOLD_MAX.)
+	Bounty.TrimTold(s, now)
 end
 
 -- /oly wanted status: what Most Wanted holds and did this session, in the copy window (a chat line
@@ -4635,7 +5478,9 @@ function Wanted.Prune()
 				correctedAt = Whole(e.correctedAt, 0, 4294967295), correctedBy = CleanName(e.correctedBy),
 				correction = Clean(e.correction, 80), from = CleanName(e.from), digest = digest,
 				peer = peer or nil, own = e.own == true and not peer or nil, shared = e.shared == true or nil,
-				earlier = e.earlier == true and not peer or nil }
+				earlier = e.earlier == true and not peer or nil,
+				-- (1.2.4 repair: a member's claim, the guild its row named: Bounty.Grieve.)
+				guild = peer and e.action == "claim" and Sight.GuildName(e.guild) or nil }
 			-- (1.2.3: what it is worth, as frozen; a malformed one is none: it counts as a row without it.)
 			local worth = Bounty.Fields(e)
 			if worth then
@@ -4713,6 +5558,8 @@ function Wanted.Prune()
 	end
 	while #waiting > Wanted.MAX_VICTIMS do table.remove(waiting, 1) end
 	s.earlierNotice = #waiting > 0 and { rows = waiting } or nil
+	-- 1.2.4: the notices' saved parts (the own deaths kept open, the notices and letters waiting).
+	Bounty.PruneNotices(s, now)
 	-- 1.2.2's review: its ledger (a reviewer's accepted rows) and when his evidence went to each
 	-- reviewer. There is no review any more (1.2.3); they count for nothing and are dropped.
 	s.ledger, s.sentAt = nil, nil
@@ -4853,6 +5700,9 @@ ns.RegisterEvent("UPDATE_MOUSEOVER_UNIT", function() Wanted.ObserveUnit("mouseov
 -- (1.2.3: and the bounty's: this client's own times in an instance, what waited for the outside.)
 ns.RegisterEvent("PLAYER_ENTERING_WORLD", function() Wanted.RefreshPins() Bounty.Zone() end)
 ns.RegisterEvent("ZONE_CHANGED_NEW_AREA", function() Wanted.RefreshPins() Bounty.Zone() end)
+-- (1.2.4: the notices that waited out a fight, at once when it ends: Bounty.Notices. A death's end
+-- is caught by their beat, NOTICE_TICK: Forever's UI source lists no event of its own for it.)
+ns.RegisterEvent("PLAYER_REGEN_ENABLED", function() if Bounty.Waiting() then Bounty.NoticesSoon() end end)
 -- (1.2.3: no WX handler, 1.2.2's evidence whispered for a review: there is none any more, and a
 -- member of 1.2.2 who still sends one is heard by nobody.)
 if ns.Comm and ns.Comm.Handle then
@@ -4863,4 +5713,6 @@ if ns.Comm and ns.Comm.Handle then
 	ns.Comm.Handle("W4", function(...) Wanted.AnswerGlobal(...) Share.Answer(...) end)
 	ns.Comm.Handle("W5", function(...) Wanted.HandleGlobalRelay(...) end)
 	ns.Comm.Handle("WS", function(...) Wanted.HandleSighting(...) end)
+	-- (1.2.4 repair: a member's avenged ask, answered with the matching kills' rows: Bounty.Answer.)
+	ns.Comm.Handle("W7", function(...) return Bounty.Answer(...) end)
 end

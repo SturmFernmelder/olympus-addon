@@ -41,6 +41,8 @@ L.HONOR_METAL_GOLD, L.HONOR_METAL_SILVER, L.HONOR_METAL_BRONZE = "gold", "silver
 L.HONOR_LETTER_HEAD = "A letter from the King"
 L.HONOR_LETTER_SIGN = "- The King"
 L.HONOR_LETTER_WEAR = "Wear it"
+-- (1.2.4: Most Wanted's Slayer letter, its first button: the Wanted tab.)
+L.HONOR_LETTER_SLAYERS = "Slayers"
 L.HONOR_LETTER_LATER = "Later"
 L.HONOR_LETTER = {
 	arena = "Okay, listen.\n\nYou walked into the arena and beat everybody. Not most people. Everybody. So you're %s now, and the gryphon is yours.\n\nHeads up: every tryhard in Olympus wants it off you now. Don't let them.",
@@ -155,6 +157,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HONOR_LETTER_HEAD = "Uma carta do Rei"
 	L.HONOR_LETTER_SIGN = "- O Rei"
 	L.HONOR_LETTER_WEAR = "Usar"
+	L.HONOR_LETTER_SLAYERS = "Slayers"
 	L.HONOR_LETTER_LATER = "Depois"
 	L.HONOR_LETTER = {
 		arena = "Olha só.\n\nVocê entrou na arena e ganhou de todo mundo. Não da maioria. De todo mundo. Agora você é %s, e o grifo é seu.\n\nSó avisando: todo tryhard do Olympus vai querer tirar ele de você. Não deixa.",
