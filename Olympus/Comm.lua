@@ -370,13 +370,14 @@ end
 --   1.2, the Blood Arena (each one enveloped, <type>~<mode>1~<body>, and registered through
 --   Arena.Handle): ArenaNet EP | ArenaChat EC EM | ArenaTest ER EH | Wallet ZH ZE ZN ZG ZD ZK ZC
 --   ZW ZS ZQ ZL ZJ | Debts ZT ZX ZY ZR ZF | Stakes ZA ZV | Markets BM BO BS BK BV | MarketBank BF |
---   ArenaFights AF AG AC AW AR AS AN | ArenaLedger AE AB AQ AV AH AY | ArenaTourney AT AD |
+--   ArenaFights AF AG AC AW AR AS AN | ArenaLedger AE AB AQ AV AH AY AX | ArenaTourney AT AD |
 --   ArenaProfile AP | HonorsNet IL ID IO | FarkleTable KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD |
 --   ArenaMatch AM | Lottery LW | ArenaRoles AU.
 --   (The Lottery's: a day's bank publishes that day's winners for the Games tab's rankings.)
 --   FarkleTable also registers KL at runtime (the design: the arbiter's floor under a drunk level),
 --   without extending this legacy inventory.
---   (ArenaLedger's last one, 1.1.6: a finished game's record, any game, from its players to the auditors, the games' ledger.)
+--   (ArenaLedger's last two: 1.1.6's, a finished game's record, any game, from its players to the auditors, the games'
+--   ledger; 1.2.3's, a fighter's signed half of a direct duel, the rankings' two halves.)
 --   (The King's arena words are kinds of the King's type, King.Register in ArenaRoles.lua.)
 --   1.1.2, the right-click menus: Versions V7 V8 V9 | Workshop VR (the author asks for a bug report).
 --   1.1.5, the guild masters' centurions and correspondents: Nominees NM (a list in parts, never chunked;

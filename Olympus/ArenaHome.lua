@@ -397,8 +397,8 @@ function Data.MyTable()
 	if type(t) == "table" and t.id then return Call("FarkleTable", "View", t.id) or t end
 	return t
 end
--- This player's own games, both modes, newest first (while the King's live switch is off, as in
--- 1.1.6, every game is a rehearsal's).
+-- This player's own games, both modes, newest first (1.2.3: a free game counts in L whatever the
+-- King's live switch says, Arena.GameMode; a rehearsal's and a test build's are T).
 function Data.BoneHistory()
 	local sim = From("BoneHistory")
 	if sim ~= false then return sim or {} end
@@ -728,6 +728,7 @@ function ArenaHome.TabLines()
 	local lines = {}
 	local kind, banner = ArenaHome.Banner()
 	if banner then lines[#lines + 1] = { text = (kind == "sim" and "|cffc080ff" or "|cffff6060") .. banner .. "|r", gapAfter = true } end
+	-- (1.2.3: the switch is the bets' alone; the line says the games count without it.)
 	local R = ns.ArenaRoles
 	if not (R and R.Live and R.Live()) and not ns.Arena.TestBuild() then
 		lines[#lines + 1] = { text = Grey(L.ARENA_TAB_LIVE_OFF), gapAfter = true }
@@ -1441,7 +1442,11 @@ local function OnChallenge(oid)
 	local mine = type(F) == "table" and type(F.challenges) == "table" and F.challenges[oid] or nil
 	if type(mine) == "table" and not mine.incoming and mine.state ~= "asked" and answered[oid] ~= mine.state then
 		answered[oid] = mine.state
-		local key = ({ no = "ARENA_CHALLENGE_NO", yes = "ARENA_CHALLENGE_YES", set = "ARENA_CHALLENGE_SET", ["arbiter-no"] = "ARENA_CHALLENGE_ARBITER_NO" })[mine.state]
+		local key = ({ no = "ARENA_CHALLENGE_NO", yes = "ARENA_CHALLENGE_YES", set = "ARENA_CHALLENGE_SET", ["arbiter-no"] = "ARENA_CHALLENGE_ARBITER_NO",
+			expired = "ARENA_CHALLENGE_EXPIRED" })[mine.state]
+		-- (1.2.3) A no that says why: a duel between them still open, or gold while bets are off.
+		if mine.state == "no" and mine.why == "b" then key = "ARENA_CHALLENGE_BUSY"
+		elseif mine.state == "no" and mine.why == "live" then key = "ARENA_CHALLENGE_LIVE" end
 		if key then ArenaHome.Toast(L[key]:format(ArenaHome.Name(mine.state == "arbiter-no" and mine.arbiter or mine.B))) end
 	end
 	return false

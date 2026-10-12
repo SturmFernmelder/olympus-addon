@@ -389,6 +389,8 @@ function Roles.Settings(realm)
 	return out
 end
 -- The live switch of this realm (a test build is never live: Arena.Mode gives T there anyway).
+-- 1.2.3 (the owner's decision): the bets' switch alone, off until 2.0. A free game (a duel or a
+-- Bones game with no gold on it) counts without it (Arena.GameMode); nothing here turns it on.
 function Roles.Live(realm) return Roles.Settings(realm).live == 1 end
 function Roles.Currency(realm) return Roles.Settings(realm).cur == "p" and "p" or "g" end
 -- The King's published stream delay for this realm, while fresh (it lapses DELAY_LAPSE after his

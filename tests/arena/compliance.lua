@@ -218,8 +218,10 @@ test("1.1.6 compliance: fights: a stake is refused (nothing sent), a modified cl
 	-- Stakes and their payouts, asked directly.
 	eq(select(2, M(w, arb, "Stakes").Open({ id = "F1", kind = "fight", A = { name = a.name }, B = { name = evil.name }, stake = { A = 10000, B = 10000 }, arbiter = arb.name })), "compliance")
 	eq(select(2, M(w, a, "Stakes").Direct({ id = "F1", loser = a.name, winner = evil.name, copper = 10000 })), "compliance")
-	-- A challenge without a stake: taken, answered, the fight made on both sides.
-	w:Run(5)
+	-- A challenge without a stake: taken, answered, the fight made on both sides. (1.2.3: once the
+	-- modified client's own staked one, never answered, lapsed on its side: until then it is that
+	-- pair's open duel, ArenaFights.OpenDuel.)
+	w:Run(evil.ns.ArenaFights.CHALLENGE_TIME + evil.ns.ArenaFights.CHALLENGE_SLACK)
 	local casual = assert(M(w, evil, "ArenaFights").Challenge(a.name, { bo = 1 }))
 	w:Run(0)
 	assert(a.ns.ArenaFights.challenges[casual], "a casual challenge is taken")
@@ -626,8 +628,10 @@ test("1.1.6 compliance: no arbiters without a wager: the gate's rule; a challeng
 	local f = assert(a.ns.ArenaFights.Find("fights", oid), "the fight is made at the yes")
 	eq(f.arb, nil, "between the two fighters")
 	eq(#w:Sent({ to = arb.name }), 0, "the arbiter is never asked")
-	-- A modified client's challenge that waits on an arbiter: never taken.
+	-- A modified client's challenge that waits on an arbiter: never taken. (1.2.3: the modified
+	-- client also ignores its own one-duel-per-pair rule, ArenaFights.OpenDuel: the duel above is open.)
 	w:Run(5)
+	evil.ns.ArenaFights.OpenDuel = function() return nil end
 	local evilOid = assert(M(w, evil, "ArenaFights").Challenge(a.name, { bo = 1, how = "a", arbiter = arb.name }))
 	w:Run(0)
 	eq(a.ns.ArenaFights.challenges[evilOid], nil, "never taken")

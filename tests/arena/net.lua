@@ -87,7 +87,10 @@ test("1.2 the arena's foundation: a release sends L only with its realm's live s
 	local got = Catch(b, "AF")
 	eq(a.Arena.NewMode(false), "T", "the live switch off: everything new is a rehearsal")
 	eq(a.Arena.Mode({ mode = "T" }), "T"); eq(a.Arena.Mode({}), "L"); eq(a.Arena.Mode("L"), "L")
-	eq(select(2, a.Arena.Send("AF", "L", "x")), "live-off")
+	-- (1.2.3, the owner's decision: a free game counts whatever the switch says, so its types go in
+	-- L, Arena.FREE_TYPES; a card's AN still waits for the switch.)
+	eq(select(2, a.Arena.Send("AN", "L", "x")), "live-off")
+	eq(a.Arena.Send("AF", "L", "x"), true, "a free duel's fight goes")
 	eq(a.Arena.Send("AP", "L", "profile"), true, "a profile is an honour's")
 	eq(a.Arena.Send("ZR", "L", "receipt", { to = b.name }), true, "a receipt: the player's own obligation")
 	eq(a.Arena.Send("ZX", "L", "mark", { obligation = true }), true, "a debt mark about himself")
@@ -97,7 +100,7 @@ test("1.2 the arena's foundation: a release sends L only with its realm's live s
 	eq(select(2, a.Arena.Send("AF", "X", "x")), "mode")
 	eq(select(2, a.Arena.Send("AF", "T", "x", { dist = "GUILD" })), "guild-lane", "nothing but ID rides GUILD")
 	w:Run(0)
-	eq(Types(w:Sent{ from = a }), "AP ZR ZX AF")
+	eq(Types(w:Sent{ from = a }), "AF AP ZR ZX AF")
 	eq(w:Sent{ from = a, type = "ZR" }[1].dist, "WHISPER"); eq(w:Sent{ from = a, type = "ZR" }[1].target, b.name)
 	eq(w:Sent{ from = a, type = "AF" }[1].dist, "CHANNEL")
 	eq(a.Arena.Lane("L", true), "CHANNEL"); eq(a.Arena.Lane("T", true), "CHANNEL", "an army rehearsal"); eq(a.Arena.Lane("L", false), "WHISPER")
@@ -127,8 +130,9 @@ test("1.2 the arena's foundation: a release takes L only with its realm's live s
 	for _, text in ipairs({ "AF~L1~x", "AE~L1~x", "AP~L1~x", "ZR~L1~x", "ZX~L1~x", "AY~L1~x", "AF~T1~t" }) do
 		b.Arena.Inject("CHANNEL", a.name, text)
 	end
-	eq(#af, 1, "only the rehearsal's AF"); eq(af[1].mode, "T"); eq(#ae, 0, "no ledger entry")
-	eq(b.Arena.Stats().dropped["live-off"], 2)
+	-- (1.2.3: a free duel's AF counts whatever the switch says, Arena.FREE_TYPES: taken in L too.)
+	eq(#af, 2, "the free duel's AF and the rehearsal's"); eq(af[1].mode, "L"); eq(af[2].mode, "T"); eq(#ae, 0, "no ledger entry")
+	eq(b.Arena.Stats().dropped["live-off"], 1, "the arbiter's entry alone")
 	eq(#ap, 1, "a profile is an honour's"); eq(#zr, 1, "a receipt: an obligation"); eq(#zx, 1, "a debtor's own mark may be one")
 	eq(#ay, 1, "the games' ledger")
 	-- The King turns it on: L comes in.
@@ -1099,15 +1103,16 @@ print("ArenaNet: the registry, the source rules, the hooks")
 -- which takes the design's count from 63 to 64), and the Lottery's LW (a day's bank publishes its
 -- winners for the Games tab's rankings: only the bank knows whose tickets they are), and the
 -- games' ledger's AY (1.1.6: a finished game's record, any game, from its players to the auditors;
--- ArenaLedger's, as Bone Throw's KW was before the ledger took every kind of game).
+-- ArenaLedger's, as Bone Throw's KW was before the ledger took every kind of game), and (1.2.3)
+-- the duels' signed halves AX (ArenaLedger's, in Comm.lua's list as every new type).
 local SPEC_TYPES = {
 	ArenaNet = "EP", ArenaChat = "EC EM", ArenaTest = "ER EH", Wallet = "ZH ZE ZN ZG ZD ZK ZC ZW ZS ZQ ZL ZJ", Debts = "ZT ZX ZY ZR ZF",
-	Stakes = "ZA ZV", Markets = "BM BO BS BK BV", MarketBank = "BF", ArenaFights = "AF AG AC AW AR AS AN", ArenaLedger = "AE AB AQ AV AH AY",
+	Stakes = "ZA ZV", Markets = "BM BO BS BK BV", MarketBank = "BF", ArenaFights = "AF AG AC AW AR AS AN", ArenaLedger = "AE AB AQ AV AH AY AX",
 	ArenaTourney = "AT AD", ArenaProfile = "AP", HonorsNet = "IL ID IO", FarkleTable = "KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD KL",
 	ArenaMatch = "AM", Lottery = "LW", ArenaRoles = "AU",
 }
 
-test("1.2 the arena's foundation: the registry: Arena.TYPES names all 66 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
+test("1.2 the arena's foundation: the registry: Arena.TYPES names all 69 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
 	local src = Read(H.ADDON_DIR .. "Comm.lua")
@@ -1137,12 +1142,12 @@ test("1.2 the arena's foundation: the registry: Arena.TYPES names all 66 types b
 			eq(a.ns.Arena.TYPES[kind], owner, kind .. " in Arena.TYPES")
 		end
 	end
-	eq(n, 68)
-	eq(legacy, 67)
+	eq(n, 69)
+	eq(legacy, 68)
 	for kind in pairs(listed) do assert(spec[kind], kind .. " in Comm.lua is no arena type") end
 	local m = 0
 	for kind in pairs(a.ns.Arena.TYPES) do m = m + 1; assert(spec[kind], kind .. " is not in the design's list") end
-	eq(m, 68)
+	eq(m, 69)
 	-- Registered only by their owners' files, through Arena.Handle, with a literal.
 	for _, file in ipairs(World.ARENA_FILES) do
 		local code = Read(H.ADDON_DIR .. file .. ".lua"):gsub("%-%-[^\n]*", "")

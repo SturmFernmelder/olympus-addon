@@ -913,6 +913,12 @@ local function ProfileLines(st)
 					local theirs = last.mine == "A" and last.levelB or last.levelA
 					tt:AddLine(L.ARENA_QUAL_LAST:format(mine, theirs), 1, 1, 1, true)
 				end
+				-- (1.2.3, the triple check's bug 10: a win that earned nothing says why, never a silent 0.)
+				local none = m.qualification.lastWhy
+				if type(none) == "table" and type(none.why) == "string" then
+					local reason = L["ARENA_QUAL_WHY_" .. none.why:upper()] or none.why
+					tt:AddLine(L.ARENA_QUAL_LAST_NONE:format(Name(none.opp or "?"), reason), 1, 0.82, 0, true)
+				end
 			end }
 	end
 	if m.record then Row(L.ARENA_CARD_RECORD, m.record) end

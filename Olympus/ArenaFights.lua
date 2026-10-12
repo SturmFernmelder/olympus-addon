@@ -60,7 +60,19 @@ F.REPORT_LATE = 60      -- a report is taken up to this long after its round
 F.GRACE = 120           -- the grace for corrections...
 F.GRACE_HELD = 300      -- ...with markets open or stakes held (the design)
 F.FINAL_SLACK = 30      -- other clients turn a result final this long after its grace
-F.DIRECT_WAIT = 600     -- a direct fight with one side's report missing this long is disputed
+F.DIRECT_WAIT = 600     -- a direct fight with one side's report missing (or the two apart) this long ends, no contest
+-- 1.2.3 (the Arena's triple check): a direct duel's life, on both fighters' clients alike.
+F.CHALLENGE_TIME = 60   -- the opponent answers a challenge within this (ArenaHome's pop-up shows as long)...
+F.CHALLENGE_SLACK = 30  -- ...and the challenger hears that it went nowhere this much later
+F.DIRECT_EXPIRE = 1800  -- an agreed duel not fought, or a best-of left between rounds, this long: over
+F.AW_RESEND = 60        -- a fighter's own report again this often while the other's is missing
+F.AW_ANSWER = 20        -- a repeat of the other's report is answered with ours at most this often
+F.COMBAT_GAP = 30       -- out of combat this long before the next combat: the duel's clock starts again
+F.SEE_EVERY = 3         -- the opponent's unit looked for this often while the duel is on (his level, guild, GUID)
+F.DEATH_WINDOW = 120    -- a death of a fighter's own this close before his duel line: something else killed him
+F.QUAL_WAIT = 3         -- after a confirmed win, the qualification's word waits for the game's DUEL_FINISHED
+F.HALF_REPEAT = 900     -- a fighter's signed half of a confirmed duel again this often (two pieces a time)...
+F.HALF_FOR = 1800       -- ...for this long after it (the clerk's carousel brings it to later logins)
 F.REPEAT_NEAR = 60      -- AF again every minute for a live bout and the next one...
 F.REPEAT_FAR = 600      -- ...every 10 minutes otherwise
 F.REPEAT_AFTER = 3600   -- ...and for an hour after it ended
@@ -668,6 +680,11 @@ local function HookSystem()
 		nativeFinish = Now()
 		for _, f in ipairs(All("fights")) do if Qualify then Qualify(f, f.round) end end
 	end)
+	-- (1.2.3) The duel's own clock (bug 9: this fighter's combat, F.Combat) and a death of his that a
+	-- duel never causes (bug 11: F.Died). Forever has all three (Blizzard_FrameXML's own handlers).
+	pcall(ns.RegisterEvent, "PLAYER_REGEN_DISABLED", function() ns.SafeCall("arena duel clock", F.Combat, true) end)
+	pcall(ns.RegisterEvent, "PLAYER_REGEN_ENABLED", function() ns.SafeCall("arena duel clock", F.Combat, false) end)
+	pcall(ns.RegisterEvent, "PLAYER_DEAD", function() ns.SafeCall("arena duel death", F.Died) end)
 end
 
 Changed = function(f, was)
@@ -915,8 +932,11 @@ function F.New(opts)
 	if not A then return nil, "fighter" end
 	local B = opts.B and Arena.Name(opts.B) or nil
 	if B and SamePerson(A, B) then return nil, "same" end
-	local mode = Arena.NewMode(opts.rehearsal)
 	local direct = opts.direct == true
+	-- (1.2.3: a direct duel with no gold on it is a free game, L whatever the live switch says,
+	-- Arena.GameMode; one with a wager on it, and an arbiter's fight, take the switch's word.)
+	local staked = opts.stakes or (tonumber(opts.stake) or 0) > 0
+	local mode = (direct and not staked) and Arena.GameMode(opts.rehearsal) or Arena.NewMode(opts.rehearsal)
 	local arb = not direct and Arena.Name(opts.arb or ns.me) or nil
 	local promoter = (opts.card and CardPromoter(opts.card)) or (opts.tid and TourneyPromoter(opts.tid)) or nil
 	if direct then
@@ -1442,8 +1462,12 @@ end
 -- Local qualifying evidence is separate from the arbiter's realm ledger, ranks and belts.
 -- No wire message imports this tally: a remote tournament cannot treat a self-reported tally
 -- as proof. The organizer's cutoff/verification policy is deliberately not invented here.
+-- (1.2.3, the triple check's bug 8) A row the ledger's own limits leave out (capped: "short" under
+-- MIN_RATED_DUR or of no known length, "day" past DAY_MAX duels in a server day, "pair" past
+-- PAIR_MAX against one opponent in PAIR_DAYS) is kept, for the reason it shows, and earns nothing.
+local CAPPED = { short = true, day = true, pair = true }
 local function QualificationPoints(e)
-	if e.mine ~= e.w then return 0 end
+	if e.mine ~= e.w or e.capped then return 0 end
 	local myLevel = e.mine == "A" and e.levelA or e.levelB
 	local otherLevel = e.mine == "A" and e.levelB or e.levelA
 	return math.max(0, math.min(20, 10 + otherLevel - myLevel))
@@ -1456,12 +1480,15 @@ local function QualificationRow(e)
 		and QualificationInt(e.levelA, 1, 1000) and QualificationInt(e.levelB, 1, 1000)
 		and (e.mine == "A" or e.mine == "B") and (e.w == "A" or e.w == "B")
 		and (e.m == "K" or e.m == "R") and e.provenance == "local-native-bilateral"
+		and (e.capped == nil or CAPPED[e.capped] == true)
 end
 local function QualificationBase(q)
 	local wins, points = q.baseWins or 0, q.basePointsTenths or 0
 	if not QualificationInt(wins, 0, 2147483647) or not QualificationInt(points, 0, 2147483647) or points > wins * 20 then return 0, 0 end
 	return wins, points
 end
+-- (1.2.3, bug 10) out.lastWhy: why this character's last confirmed win earned no points (or 0):
+-- { why, fid, t, opp }, the profile's line.
 function F.Qualification()
 	local s = Arena.Store("L")
 	local all = s and type(s.duelQualification) == "table" and s.duelQualification or {}
@@ -1471,7 +1498,7 @@ function F.Qualification()
 	for _, e in pairs(type(q.records) == "table" and q.records or {}) do
 		if QualificationRow(e) then
 			out[#out + 1] = e
-			if e.mine == e.w then
+			if e.mine == e.w and not e.capped then
 				out.pointsTenths = out.pointsTenths + QualificationPoints(e)
 				out.wins = out.wins + 1
 			end
@@ -1479,6 +1506,8 @@ function F.Qualification()
 	end
 	table.sort(out, function(a, b) return a.t < b.t end)
 	out.points = out.pointsTenths / 10
+	local last = q.lastWhy
+	if type(last) == "table" and type(last.why) == "string" then out.lastWhy = last end
 	return out
 end
 
@@ -1487,22 +1516,42 @@ function F.QualificationPointReason()
 	return { equal = 1, perLevel = 0.1, min = 0, max = 2, measured = "both-local-unit-levels" }
 end
 
+-- The ledger's limits on a counted duel (ArenaLedger: MIN_RATED_DUR, DAY_MAX, PAIR_MAX,
+-- PAIR_DAYS), the same for the points (bug 8).
+local function Limit(key, fallback)
+	local LG = rawget(ns, "ArenaLedger")
+	local v = type(LG) == "table" and tonumber(rawget(LG, key)) or nil
+	return v or fallback
+end
+
+-- (1.2.3) A direct round's evidence lives on its fight record (F.Reports, below): what each
+-- fighter's own line said, and this client's own reading of both units at its line (proof).
+-- Returns nothing once recorded or with nothing to say; else why it earned nothing, kept on the
+-- fight (f.qualWhy) for the word after a win (F.QualNote).
 Qualify = function(f, round)
 	if f.mode ~= "L" or not Arena.Counts(f.mode) or f.stake or not Has(f.fl, "d") then return end
+	-- (Each round once: a later DUEL_FINISHED, another duel's, says nothing about this one.)
+	if type(f.qualDone) == "table" and f.qualDone[round] then return end
 	local mine = SideOf(f, ns.me)
-	local o = obs[f.fid] and obs[f.fid][round]
+	local r = type(f.reports) == "table" and f.reports[round] or nil
 	local x = f.rounds and f.rounds[round]
-	local proof = o and o.localDuel
-	if not mine or not proof or not nativeFinish or math.abs(nativeFinish - proof.t) > 2 then return end
-	if not x or x.src ~= "F" or x.w ~= proof.w or x.m ~= proof.m then return end
-	local a, b = o.fighters.A, o.fighters.B
-	if not a or not b or a.w ~= b.w or a.m ~= b.m then return end
-	if not (proof.A and proof.B and proof.A.gk and proof.B.gk and proof.A.gk ~= proof.B.gk) then return end
+	local proof = r and r.proof
+	if not mine or not proof or not x then return end
+	local function No(why) f.qualWhy = why return why end
+	if not nativeFinish or math.abs(nativeFinish - proof.t) > 2 then return No("native") end
+	if x.src ~= "F" or x.w ~= proof.w or x.m ~= proof.m then return No("report") end
+	local a, b = r.A, r.B
+	if not a or not b or a.w ~= b.w or a.m ~= b.m then return No("report") end
+	-- (bug 11) A fighter killed by something else in the round: nothing (F.Died).
+	if x.int then return No("int") end
+	if not (proof.A and proof.B and proof.A.gk and proof.B.gk and proof.A.gk ~= proof.B.gk) then return No("unseen") end
 	for _, side in ipairs({ "A", "B" }) do
 		local facts = proof[side]
-		if not facts.guild or not ns.IsFederation(facts.guild) or Arena.RealmOf(f[side].name) ~= ns.realm then return end
-		if f[side].gk and f[side].gk ~= facts.gk then return end
-		if not facts.level or facts.level < 1 or facts.level > 1000 or facts.level % 1 ~= 0 then return end
+		if not facts.guild or not ns.IsFederation(facts.guild) then return No("guild") end
+		-- (bug 7) The realm group's other realm is ours too (ns.InGroup), not ns.realm alone.
+		if not ns.InGroup(Arena.RealmOf(f[side].name)) then return No("realm") end
+		if f[side].gk and f[side].gk ~= facts.gk then return No("unseen") end
+		if not facts.level or facts.level < 1 or facts.level > 1000 or facts.level % 1 ~= 0 then return No("level") end
 	end
 	local s = Arena.Store("L")
 	if not s then return end
@@ -1517,17 +1566,59 @@ Qualify = function(f, round)
 	-- One native completion, even when several active challenges heard the same system line.
 	if q.lastFinish and nativeFinish <= q.lastFinish then return end
 	q.lastFinish = nativeFinish
-	q.records[key] = { fid = f.fid, round = round, t = nativeFinish, A = proof.A.gk, B = proof.B.gk,
+	-- (bug 8) The ledger's limits: the round's length (the shorter of the two fighters' own clocks,
+	-- F.DirectCheck; none known is too short), this character's duels of the server day, his duels
+	-- against this opponent in PAIR_DAYS. Only the rows that counted fill a limit.
+	local oppGk = mine == "A" and proof.B.gk or proof.A.gk
+	local capped
+	if not x.dur or x.dur < Limit("MIN_RATED_DUR", 15) then capped = "short" end
+	if not capped then
+		local day, today, pair = math.floor(nativeFinish / 86400), 0, 0
+		for _, e in pairs(q.records) do
+			if not e.capped then
+				if math.floor(e.t / 86400) == day then today = today + 1 end
+				if (e.mine == "A" and e.B or e.A) == oppGk and nativeFinish - e.t < Limit("PAIR_DAYS", 7) * 86400 then pair = pair + 1 end
+			end
+		end
+		if today >= Limit("DAY_MAX", 10) then capped = "day"
+		elseif pair >= Limit("PAIR_MAX", 3) then capped = "pair" end
+	end
+	local rec = { fid = f.fid, round = round, t = nativeFinish, A = proof.A.gk, B = proof.B.gk,
 		nameA = f.A.name, nameB = f.B.name, guildA = proof.A.guild, guildB = proof.B.guild,
-		levelA = proof.A.level, levelB = proof.B.level, w = x.w, m = x.m, mine = mine,
+		levelA = proof.A.level, levelB = proof.B.level, w = x.w, m = x.m, mine = mine, capped = capped,
 		provenance = "local-native-bilateral" }
+	q.records[key] = rec
+	f.qualDone = type(f.qualDone) == "table" and f.qualDone or {}
+	f.qualDone[round] = true
+	f.qualWhy = capped or ((x.w == mine and QualificationPoints(rec) == 0) and "levels") or nil
 	local list = F.Qualification()
 	for i = 1, #list - F.KEEP do
 		local e = list[i]
 		q.basePointsTenths = q.basePointsTenths + QualificationPoints(e)
-		if e.mine == e.w then q.baseWins = q.baseWins + 1 end
+		if e.mine == e.w and not e.capped then q.baseWins = q.baseWins + 1 end
 		q.records[tostring(e.t)] = nil
 	end
+	Arena.Changed()
+end
+
+-- (1.2.3, the triple check's bug 10) A confirmed win that earned nothing says why, once: a line
+-- in chat and the profile's (F.Qualification's lastWhy), never a silent 0. QUAL_WAIT after the
+-- win, once the game's DUEL_FINISHED had its time.
+function F.QualNote(f)
+	if type(f) ~= "table" or f.qualNoted then return end
+	local mine = SideOf(f, ns.me)
+	if not mine or f.w ~= mine or State(f) ~= "F" or f.mode ~= "L" or not Arena.Counts(f.mode) or f.stake then return end
+	local why = f.code == "int" and "int" or f.qualWhy
+	if not why then return end
+	f.qualNoted = true
+	local opp = f[Other(mine)]
+	local s = Arena.Store("L")
+	if s then
+		if type(s.duelQualification) ~= "table" then s.duelQualification = {} end
+		if type(s.duelQualification[ns.me]) ~= "table" then s.duelQualification[ns.me] = {} end
+		s.duelQualification[ns.me].lastWhy = { why = why, fid = f.fid, t = Now(), opp = opp and opp.name }
+	end
+	Say("ARENA_QUAL_NONE", opp and ns.ShortName(opp.name) or "?", L["ARENA_QUAL_WHY_" .. why:upper()] or why)
 	Arena.Changed()
 end
 
@@ -1682,6 +1773,106 @@ local function SendAW(f, to, round, side, method)
 	Arena.Send("AW", f.mode, body, { to = to, urgent = true, must = staked or nil, obligation = staked or nil })
 end
 
+-- (1.2.3, the triple check's bug 5) A direct fight's reports live on its record, saved with it:
+-- f.reports[round] = { at (the first), A = { w, m, dur, t, int }, B = {...}, proof (this client's
+-- own reading of both units at its line: { w, m, t, A = facts, B = facts }), sentAt, answeredAt }.
+-- A reload, a disconnect or a lost whisper no longer leaves one side's result in memory alone.
+local function Reports(f, round)
+	if type(f.reports) ~= "table" then f.reports = {} end
+	local r = f.reports[round]
+	if type(r) ~= "table" then
+		r = { at = Now() }
+		f.reports[round] = r
+	end
+	return r
+end
+F.Reports = Reports
+local function MyReport(f, round)
+	local mine = SideOf(f, ns.me)
+	local r = mine and type(f.reports) == "table" and f.reports[round]
+	return r and r[mine] or nil
+end
+
+-- This fighter's own report to the other (AW), from his record: must-deliver (a target offline
+-- keeps it until he is back), its length the fighter's own clock ("-" when it never started), "i"
+-- when something else killed him in the round (F.Died). AW's 8th field is a staked fight's
+-- signature ("-" otherwise), the 9th these flags (a client before 1.2.3 reads neither).
+local function SendDirectAW(f, round)
+	local mine = SideOf(f, ns.me)
+	local r = mine and type(f.reports) == "table" and f.reports[round]
+	local x = r and r[mine]
+	if not x or not f[Other(mine)] then return false end
+	r.sentAt = Now()
+	local staked = f.stake ~= nil
+	local sig = "-"
+	local sign = staked and Hook("Debts", "SignResult")
+	if sign then
+		local ok, s = pcall(sign, f.fid, round, f[x.w].gk, f[Other(x.w)].gk)
+		if ok and type(s) == "string" and s ~= "" and s ~= "-" and not s:find("~", 1, true) then
+			sig = s
+			f.sigs = f.sigs or {}
+			f.sigs[round] = f.sigs[round] or {}
+			f.sigs[round][mine] = s
+		end
+	end
+	local body = table.concat({ f.fid, B36(round), x.m, Wire(f[x.w].name), Wire(f[Other(x.w)].name), B36(x.t or Now()),
+		x.dur and B36(x.dur * 1000) or "-", sig, x.int and "i" or "-" }, "~")
+	return Arena.Send("AW", f.mode, body, { to = f[Other(mine)].name, urgent = true, must = true, obligation = staked or nil,
+		key = "aw " .. f.fid .. "." .. round })
+end
+F.SendDirectAW = SendDirectAW
+
+-- (1.2.3, bug 9) The duel's clock: it starts with this fighter's combat (PLAYER_REGEN_DISABLED)
+-- while his duel is agreed or between rounds, and again after COMBAT_GAP out of combat (a fight
+-- with a creature before the duel is not the duel); it stops at his duel line. No combat seen: the
+-- length is unknown, never the time since the challenge.
+function F.Combat(on)
+	local now = Now()
+	for _, f in ipairs(All("fights")) do
+		if Has(f.fl, "d") and SideOf(f, ns.me) and (f.st == "S" or f.st == "B") then
+			if on then
+				if not f.fightAt or (f.peaceAt and now - f.peaceAt > F.COMBAT_GAP) then f.fightAt = now end
+				f.peaceAt = nil
+			else
+				f.peaceAt = now
+			end
+		end
+	end
+end
+-- (1.2.3, bug 11) A duel never kills: this fighter dead (PLAYER_DEAD) while his duel is agreed,
+-- live or between rounds was killed by something else (a creature, a guard, a third player). His
+-- report of a line that comes within DEATH_WINDOW says so ("i"): the round counts for nothing.
+function F.Died()
+	for _, f in ipairs(All("fights")) do
+		if Has(f.fl, "d") and SideOf(f, ns.me) and (f.st == "S" or f.st == "B" or f.st == "L") then f.died = Now() end
+	end
+end
+local function Interfered(f) return f.died ~= nil and Now() - f.died <= F.DEATH_WINDOW end
+
+-- (1.2.3, bug 10) The fighters' units as this client last saw them during the duel (F.Look, every
+-- SEE_EVERY while it is agreed, live or between rounds): their GUID, level and guild for the line
+-- when no unit is at hand then (the target cleared before the last hit).
+local function Look(f, now)
+	f.seenAt = now or Now()
+	for _, side in ipairs({ "A", "B" }) do
+		local p = f[side]
+		local x = p and Facts(p.gk, p.name)
+		if x then
+			f.seen = type(f.seen) == "table" and f.seen or {}
+			f.seen[side] = x
+		end
+	end
+end
+F.Look = Look
+local function Seen(f, side)
+	local p = f[side]
+	local x = p and Facts(p.gk, p.name)
+	if x then return x end
+	local s = type(f.seen) == "table" and f.seen[side] or nil
+	if type(s) == "table" and (s.t or 0) >= (f.tAnn or 0) then return s end
+	return nil
+end
+
 -- A duel line this client read (CHAT_MSG_SYSTEM). With the arena off (Arena.Off) only a staked
 -- direct fight's lines count: the player's own obligation (the design).
 local witnessTimers = {}
@@ -1695,11 +1886,25 @@ OnSystem = function(text)
 	stats.lines = stats.lines + 1
 	local m = method == "fled" and "R" or "K"
 	local off = Arena.Off()
+	-- (1.2.3, the triple check's bug 3) One duel line settles one direct fight of this fighter's:
+	-- the live one still waiting for his own line, else the oldest agreed or between rounds. Every
+	-- other direct fight of the pair stays as it was (F.OpenDuel keeps a second from opening).
+	local pick, rank
+	for _, f in ipairs(All("fights")) do
+		local st = State(f)
+		if Has(f.fl, "d") and SideOf(f, ns.me) and LineSide(f, winner, loser) and not (off and not f.stake) then
+			local r = (st == "L" and not MyReport(f, f.round)) and 0 or ((st == "S" or st == "B") and 1 or nil)
+			if r and (not pick or r < rank or (r == rank and ((f.tAnn or 0) < (pick.tAnn or 0) or ((f.tAnn or 0) == (pick.tAnn or 0) and f.fid < pick.fid)))) then
+				pick, rank = f, r
+			end
+		end
+	end
 	for _, f in ipairs(All("fights")) do
 		local side = LineSide(f, winner, loser)
 		local st = State(f)
 		local direct = Has(f.fl, "d")
 		if side and off and not (direct and f.stake) then side = nil end
+		if side and direct and f ~= pick then side = nil end
 		-- (This fighter's own duel in a fight not over: he took part in it.)
 		if side and not ENDED[st] and SideOf(f, ns.me) then f.took = true end
 		-- A direct fight has no bell: agreed, it is live (the game's own duel starts it); between
@@ -1753,12 +1958,15 @@ OnSystem = function(text)
 					Decide(f, round)
 				end
 			elseif direct and mySide then
-				-- Direct: each fighter reports to the other; our own line is ours.
-				local o = Obs(f, round)
-				if not o.fighters[mySide] then
-					o.fighters[mySide] = { w = side, m = m, dur = dur }
-					o.localDuel = { w = side, m = m, t = Now(), A = Facts(f.A.gk, f.A.name), B = Facts(f.B.gk, f.B.name) }
-					SendAW(f, f[Other(mySide)].name, round, side, m)
+				-- Direct: each fighter reports to the other; our own line is ours, kept on the record
+				-- with what this client sees of both units now (or saw during the duel, F.Look).
+				local r = Reports(f, round)
+				if not r[mySide] then
+					local now = Now()
+					r[mySide] = { w = side, m = m, t = now, dur = f.fightAt and math.max(0, now - f.fightAt) or nil, int = Interfered(f) or nil }
+					r.proof = { w = side, m = m, t = now, A = Seen(f, "A"), B = Seen(f, "B") }
+					f.fightAt, f.peaceAt, f.died = nil, nil, nil
+					SendDirectAW(f, round)
 					F.DirectCheck(f, round)
 				end
 			elseif mySide then
@@ -1780,30 +1988,97 @@ OnSystem = function(text)
 end
 F.OnSystem = OnSystem
 
+-- The shorter of the two fighters' clocks for a round, or the one known (nil: neither).
+local function Shorter(a, b)
+	if a and b then return math.min(a, b) end
+	return a or b
+end
+
 -- A direct fight's round: both lines agree, the result stands (the loser's line is his acceptance).
 function F.DirectCheck(f, round)
-	local o = Obs(f, round)
-	local fa, fb = o.fighters.A, o.fighters.B
+	local r = type(f.reports) == "table" and f.reports[round] or nil
+	local fa, fb = r and r.A, r and r.B
 	if round ~= f.round or not (fa and fb) or (f.rounds[round] and f.rounds[round].w) then return end
 	if fa.w ~= fb.w or fa.m ~= fb.m then
 		f.code = "disputed"
 		Arena.Changed()
 		return
 	end
-	local x = { w = fa.w, m = fa.m, dur = fa.dur, src = "F", nW = 0 }
+	local x = { w = fa.w, m = fa.m, dur = Shorter(fa.dur, fb.dur), src = "F", nW = 0, int = (fa.int or fb.int) and true or nil }
 	f.rounds[round] = x
 	if fa.w == "A" then f.sc[1] = f.sc[1] + 1 else f.sc[2] = f.sc[2] + 1 end
-	f.dur = (f.dur or 0) + (fa.dur or 0)
+	f.dur = (f.dur or 0) + (x.dur or 0)
+	if x.int then f.int = true end
 	local was = f.st
 	if f.sc[1] >= Need(f) or f.sc[2] >= Need(f) then
 		f.w, f.m = fa.w, fa.m
 		f.st = "F"
 		f.graceEnd = Now()
+		-- (bug 11) A round something else decided: the result stands in the history, for nothing.
+		if f.int then f.code = "int" end
 	else
 		f.st = "B"
+		f.roundEnd = Now()
 	end
 	Changed(f, was)
 	Qualify(f, round)
+	if f.st == "F" then
+		-- The fighter's signed half for the rankings (F.Half), and a win that earned nothing says why.
+		F.Half(f)
+		local mine = SideOf(f, ns.me)
+		if mine and f.w == mine then Arena.After(F.QUAL_WAIT, "qualify " .. f.fid, function() F.QualNote(f) end) end
+	end
+end
+
+-- (1.2.3, the triple check's bug 4) A direct fight ends by itself on both fighters' clients alike:
+-- agreed and not fought for DIRECT_EXPIRE (void, "late": a casual duel days later is not it), left
+-- between rounds as long (no contest, "late"), live with one side's report missing or the two apart
+-- for DIRECT_WAIT (no contest, "disputed"). Nothing about it is sent: each side ends its own copy.
+local function DirectClose(f, st, code)
+	local was = f.st
+	f.st, f.code = st, code
+	f.graceEnd = f.graceEnd or Now()
+	if f.round == 0 then f.round = 1 end
+	if not Put("fights", f) then return false end
+	Changed(f, was)
+	return true
+end
+-- The direct fight's own clocks (F.Tick, either fighter's client, the writer's too).
+function F.DirectTick(f, side, now)
+	local st = f.st
+	if st == "S" or st == "A" then
+		if now - (f.tAnn or f.heardAt or now) >= F.DIRECT_EXPIRE then return DirectClose(f, "V", "late") end
+	elseif st == "B" then
+		if now - (f.roundEnd or f.heardAt or now) >= F.DIRECT_EXPIRE then return DirectClose(f, "N", "late") end
+	elseif st == "L" then
+		local r = type(f.reports) == "table" and f.reports[f.round] or nil
+		local decided = f.rounds[f.round] and f.rounds[f.round].w
+		if not decided and now - ((r and r.at) or f.roundAt or f.heardAt or now) >= F.DIRECT_WAIT then return DirectClose(f, "N", "disputed") end
+		-- (bug 5) Our report again while his is missing: a reload or a lost whisper on either side.
+		if r and r[side] and not r[Other(side)] and now - (r.sentAt or 0) >= F.AW_RESEND then SendDirectAW(f, f.round) end
+	end
+	if (st == "S" or st == "L" or st == "B") and now - (f.seenAt or 0) >= F.SEE_EVERY then Look(f, now) end
+	-- The signed half again (F.Half), for members who were not on the channel when it first went.
+	if st == "F" and f.half and f.halfAt and now - f.halfAt <= F.HALF_FOR and now - (f.halfSentAt or 0) >= F.HALF_REPEAT then
+		f.halfSentAt = now
+		Arena.Send("AX", f.mode, f.half, { key = "ax " .. f.fid })
+	end
+end
+
+-- (1.2.3, the owner's decision: two signed halves) A confirmed free duel goes to everybody's
+-- rankings with no judge: each fighter's client signs its half of it with his account's key and
+-- publishes it (ArenaLedger.Publish, AX on the channel and to the other fighter); a client counts
+-- the duel only when both halves match. Not for a rehearsal, a stake, or a round something else
+-- decided (bug 11).
+function F.Half(f)
+	if f.half or State(f) ~= "F" or not Has(f.fl, "d") or f.stake or f.code == "int" then return false end
+	if f.mode ~= "L" or not Arena.Counts(f.mode) or not SideOf(f, ns.me) then return false end
+	local publish = Hook("ArenaLedger", "Publish")
+	if not publish then return false end
+	local ok, body = pcall(publish, f)
+	if not ok or type(body) ~= "string" then return false end
+	f.half, f.halfAt, f.halfSentAt = body, Now(), Now()
+	return true
 end
 
 ---------------------------------------------------------------------------
@@ -1852,15 +2127,8 @@ Tick = function()
 					F.Here(f.fid)
 				end
 			end
-			-- A direct fight (either fighter, its writer too): one line missing DIRECT_WAIT, disputed.
-			if side and Has(f.fl, "d") and f.st == "L" and f.code ~= "disputed" then
-				local o = obs[f.fid] and obs[f.fid][f.round]
-				if o and now - o.at >= F.DIRECT_WAIT and not (f.rounds[f.round] and f.rounds[f.round].w) then
-					f.code = "disputed"
-					ns.Fire("ARENA_FIGHT", f.fid, "disputed")
-					Arena.Changed()
-				end
-			end
+			-- A direct fight (either fighter, its writer too): its own clocks (1.2.3, F.DirectTick).
+			if side and Has(f.fl, "d") then F.DirectTick(f, side, now) end
 		end
 	end
 	for _, c in ipairs(All("cards")) do
@@ -2029,9 +2297,12 @@ ns.Comm.Handle("AC", ns.Arena.Handle("AC", OnControl))
 -- AW: a duel line reported (fighters at once, witnesses after their wait).
 local function OnWitness(dist, sender, mode, body)
 	if dist ~= "WHISPER" then return Refuse("lane") end
-	local fid, round, method, winner, loser, t, ms, sig = Arena.Fields(body, 8)
+	-- (1.2.3: a direct report's 9th field, its flags: "i", something else killed him, F.Died.)
+	local fid, round, method, winner, loser, t, ms, sig, flags = Arena.Fields(body, 9)
+	if not flags then fid, round, method, winner, loser, t, ms, sig = Arena.Fields(body, 8) end
 	if not ms then fid, round, method, winner, loser, t, ms = Arena.Fields(body, 7) end
 	if not ms then return Refuse("shape") end
+	if sig == "-" then sig = nil end
 	local f = Find("fights", fid)
 	if not f then return Refuse("fight") end
 	if mode ~= f.mode then return Refuse("mode") end
@@ -2046,8 +2317,19 @@ local function OnWitness(dist, sender, mode, body)
 		-- signature over it is kept on the fight (the winner's proof, the design).
 		local mine = SideOf(f, ns.me)
 		if not senderSide or not mine or senderSide == mine then return Refuse("sender") end
-		if o.fighters[senderSide] then return Refuse("again") end
-		o.fighters[senderSide] = { w = side, m = method, sig = sig }
+		-- (1.2.3, bug 5) Kept on the record (F.Reports). His report again means his client lost ours
+		-- (a reload, a whisper lost): ours goes again, at most every AW_ANSWER.
+		local r = Reports(f, round)
+		if r[senderSide] then
+			local now = Now()
+			if r[mine] and now - (r.answeredAt or 0) >= F.AW_ANSWER then
+				r.answeredAt = now
+				SendDirectAW(f, round)
+			end
+			return Refuse("again")
+		end
+		local dms = ms ~= "-" and N(ms, 0, 86400000) or nil
+		r[senderSide] = { w = side, m = method, t = Time(t) or Now(), dur = dms and math.floor(dms / 1000) or nil, int = flags == "i" or nil }
 		if f.stake and type(sig) == "string" and sig ~= "" and #sig <= 120 then
 			f.sigs = f.sigs or {}
 			f.sigs[round] = f.sigs[round] or {}
@@ -2215,6 +2497,37 @@ local function Salt()
 end
 F.Salt = Salt
 
+-- (1.2.3) Whether a challenge still waits on its answer (asked within CHALLENGE_TIME, and its
+-- slack on the challenger's side) or on its fight (agreed, the challenger's AF not here yet, within
+-- DIRECT_EXPIRE). One that waited longer went nowhere.
+local function Pending(c, now)
+	now = now or Now()
+	if c.state == "asked" then return now - (c.t or 0) < F.CHALLENGE_TIME + (c.incoming and 0 or F.CHALLENGE_SLACK) end
+	if c.state == "yes" then return now - (c.t or 0) < F.DIRECT_EXPIRE end
+	return false
+end
+F.Pending = Pending
+
+-- (1.2.3, the triple check's bug 3) The direct duel this character has open with `name` (or one
+-- of his alts): a fight agreed, live or between rounds, or a challenge between them still pending;
+-- its id, or nil. One at a time per pair: the game's duel line names no challenge, so a second one
+-- open would take the same duel (two wins and two rows for one duel). except: the challenge being
+-- answered.
+function F.OpenDuel(name, except)
+	if type(name) ~= "string" then return nil end
+	for _, f in ipairs(All("fights")) do
+		local st = State(f)
+		if Has(f.fl, "d") and f.fid ~= except and (st == "A" or st == "S" or st == "L" or st == "B")
+			and SideOf(f, ns.me) and F.IsFighter(f, name) and not SamePerson(name, ns.me) then return f.fid end
+	end
+	local now = Now()
+	for oid, c in pairs(chal) do
+		if oid ~= except and not c.judge and c.how == "d" and Pending(c, now) and not c.fid
+			and ((Me(c.B) and SamePerson(c.A, name)) or (Me(c.A) and SamePerson(c.B, name))) then return oid end
+	end
+	return nil
+end
+
 -- Whether I may challenge `opponent` now (the action's rule; matchmaking asks it for "Staked").
 -- opts: { stake (copper), how = "d"|"a", arbiter, cur, rehearsal, mode (an answer's: the
 -- challenge's own mode) }. A stake needs (the design): the realm's currency gold and the
@@ -2247,6 +2560,8 @@ function F.CanChallenge(opponent, opts)
 			if limit <= 0 or 2 * stake > limit then return false, "arbiter-cap" end
 		end
 	end
+	-- (1.2.3) One duel open per pair (F.OpenDuel).
+	if F.OpenDuel(opponent, opts.oid) then return false, "busy" end
 	return true
 end
 
@@ -2291,9 +2606,12 @@ function F.Challenge(opponent, opts)
 	local oid = Arena.NewId("F", function(id) return Find("fights", id) ~= nil or chal[id] ~= nil end)
 	if not oid then return nil, "id" end
 	local how = opts.how == "a" and Arbiters() and "a" or "d"
-	local c = { oid = oid, A = ns.me, B = target, bo = tonumber(opts.bo) or 1, stake = math.floor(tonumber(opts.stake) or 0), how = how,
+	local stake = math.floor(tonumber(opts.stake) or 0)
+	-- (1.2.3) A free duel's mode is L whatever the live switch says (Arena.GameMode): it counts. A
+	-- stake, or a judge (who is there for the money), takes the switch's word.
+	local c = { oid = oid, A = ns.me, B = target, bo = tonumber(opts.bo) or 1, stake = stake, how = how,
 		arbiter = how == "a" and Arena.Name(opts.arbiter or "") or nil, cur = opts.cur or ns.ArenaRoles.Currency(), from = opts.from,
-		state = "asked", t = Now(), mode = Arena.NewMode(opts.rehearsal) }
+		state = "asked", t = Now(), mode = Arena.GameMode(opts.rehearsal, stake > 0 or how == "a") }
 	if c.bo ~= 1 and c.bo ~= 3 and c.bo ~= 5 then return nil, "bo" end
 	if how == "a" and not c.arbiter and c.stake > 0 then return nil, "arbiter" end
 	local body = table.concat({ oid, "X", B36(c.bo), B36(math.floor(c.stake / 100)), how, c.arbiter and Wire(c.arbiter) or "-", c.cur }, "~")
@@ -2310,6 +2628,15 @@ function F.Challenge(opponent, opts)
 	local sent, whySend = Arena.Send("AS", c.mode, body, { to = target, urgent = true })
 	if not sent then return nil, whySend or "send" end
 	chal[oid] = c
+	-- (1.2.3, the triple check's bug 12) No answer within CHALLENGE_TIME and its slack: the challenge
+	-- went nowhere (the opponent offline, on an older Olympus that drops it, or he let it lapse), and
+	-- the challenger is told (ARENA_CHALLENGE: ArenaHome's toast) instead of waiting for good.
+	Arena.After(F.CHALLENGE_TIME + F.CHALLENGE_SLACK, "challenge " .. oid, function()
+		if c.state ~= "asked" then return end
+		c.state = "expired"
+		ns.Fire("ARENA_CHALLENGE", oid)
+		Arena.Changed()
+	end)
 	Arena.Changed()
 	return oid
 end
@@ -2320,11 +2647,17 @@ end
 function F.Answer(oid, yes, why)
 	local c = chal[oid]
 	if not c or not c.incoming or c.judge or c.state ~= "asked" then return false, "challenge" end
+	-- (1.2.3) Past its time the challenger no longer waits for it (F.Pending).
+	if not Pending(c) then
+		c.state = "expired"
+		Arena.Changed()
+		return false, "expired"
+	end
 	local body
 	if yes then
-		local ok, whyNot = F.CanChallenge(c.A, { stake = c.stake, how = c.how, arbiter = c.arbiter, cur = c.cur, mode = c.mode })
+		local ok, whyNot = F.CanChallenge(c.A, { stake = c.stake, how = c.how, arbiter = c.arbiter, cur = c.cur, mode = c.mode, oid = oid })
 		if not ok then return false, whyNot end
-		if c.mode == "L" and Arena.NewMode() ~= "L" then return false, "live" end
+		if c.mode == "L" and Arena.GameMode(false, (c.stake or 0) > 0 or c.how == "a") ~= "L" then return false, "live" end
 		body = table.concat({ oid, "Y", "1", "-" }, "~")
 		if c.how == "d" and c.stake > 0 then
 			local okC, code = F.CheckChallenger(c)
@@ -2436,6 +2769,9 @@ local function OnSign(dist, sender, mode, body)
 		if c.stake > 0 and not Wagers("stake") then return Refuse("compliance") end
 		-- (A challenge that waits on an arbiter: never while there are none.)
 		if c.how == "a" and not Arbiters() then return Refuse("compliance") end
+		-- (1.2.3) Gold on it, or a judge, in L while this realm's live switch is off: that switch is
+		-- the bets', so no, and the challenger hears why (a free duel is L whatever it says).
+		if mode == "L" and (c.stake > 0 or c.how == "a") and Arena.NewMode(false) ~= "L" then return No("live") end
 		if c.bo ~= 1 and c.bo ~= 3 and c.bo ~= 5 then return No("f") end
 		-- A stake in this realm's currency only (the design).
 		if c.stake > 0 and c.cur ~= ns.ArenaRoles.Currency() then return No("c") end
@@ -2456,12 +2792,22 @@ local function OnSign(dist, sender, mode, body)
 			if x.incoming and not x.judge and x.state == "asked" and Same(x.A, sender) and now - (x.t or 0) < F.CHALLENGE_GAP then return Refuse("spam") end
 		end
 		if lastChal[key] and now - lastChal[key] < F.CHALLENGE_GAP then return Refuse("spam") end
+		-- (1.2.3, bug 3) A duel between us still open: no second one (F.OpenDuel), and he hears it.
+		if F.OpenDuel(sender) then return No("b") end
 		chal[oid] = c
+		-- (1.2.3) Unanswered within CHALLENGE_TIME (the pop-up closes then): it lapses here too.
+		Arena.After(F.CHALLENGE_TIME + 1, "challenge " .. oid, function()
+			if c.state ~= "asked" then return end
+			c.state = "expired"
+			Arena.Changed()
+		end)
 		ns.Fire("ARENA_CHALLENGE", oid)
 		Arena.Changed()
 	elseif what == "Y" then
 		local c = chal[oid]
-		if not c or c.incoming or not Same(sender, c.B) or c.state ~= "asked" then return Refuse("challenge") end
+		-- (An answer that came after the challenger's wait, "expired", still counts: it is what the
+		-- opponent agreed to within his own CHALLENGE_TIME.)
+		if not c or c.incoming or not Same(sender, c.B) or (c.state ~= "asked" and c.state ~= "expired") then return Refuse("challenge") end
 		local yes, why, iou = Arena.Fields(rest, 3)
 		if not yes then yes, why = Arena.Fields(rest, 2) end
 		if yes ~= "1" then
