@@ -22,7 +22,9 @@ local L = ns.L
 --   - spectators (the design): a player who allows them announces the table (KN) and relays its state
 --     (KS) to the watchers; watching never feeds settlement. Allowed unless a player says no (the
 --     owner's call, 2026-10-04); the host's no closes the table to watchers for everyone at it
---     (KG's trailing flag), his guest and its arbiter too;
+--     (KG's trailing flag), his guest and its arbiter too. Each player's yes or no is kept in the
+--     live record, so a /reload keeps announcing the table (1.2.3). A game against the House is
+--     never announced (nothing of practice is sent: the House's dice are this client's own);
 --   - the crowd's bets (2026-10-04): at a public arbiter's table whose host let watchers in and
 --     the crowd bet, the arbiter opens a winner market (Markets' MW) when the table opens; the game
 --     waits for its lock (his KH), then he declares it as he settles (the same agreement and
@@ -891,7 +893,9 @@ end
 
 ---------------------------------------------------------------------------
 -- The live record, kept so a /reload finds its table (the design); on the beta it is gone at login,
--- and the table is found again from the next message about it.
+-- and the table is found again from the next message about it. (1.2.3: with each player's yes or no
+-- to watchers, spec: without it a reloaded player stopped announcing his table, ignored a watcher's
+-- ask, and his Play again opened the next table closed to watchers for both players.)
 ---------------------------------------------------------------------------
 
 local RECORD = { "id", "mode", "role", "host", "guest", "arbiter", "kind", "stake", "cur", "target", "secs", "hic", "hiccupRule", "salt",
@@ -905,6 +909,8 @@ local function Save(t)
 		rec = {}
 		for _, k in ipairs(RECORD) do rec[k] = t[k] end
 		rec.src = { t.src[1], t.src[2] }
+		local spec = type(t.spec) == "table" and t.spec or {}
+		rec.spec = { spec[1] == true, spec[2] == true }
 		rec.events = t.game and t.game.events or nil
 	end
 	if t.role == "arbiter" then m.arb[t.id] = rec else m.live = rec end
@@ -3748,7 +3754,10 @@ function FT.Load()
 				for _, k in ipairs(RECORD) do t[k] = rec[k] end
 				t.src = type(rec.src) == "table" and { rec.src[1], rec.src[2] } or {}
 				t.players = { t.host, t.guest }
-				t.spec = { false, false }
+				-- (each player's word on watchers, as saved; a record of 1.2.2 and before has none:
+				-- nobody relays from it, as then)
+				local spec = type(rec.spec) == "table" and rec.spec or {}
+				t.spec = { spec[1] == true, spec[2] == true }
 				t.log = {}
 				t.seat = SeatOf(t, Me())
 				tables[t.id] = t
