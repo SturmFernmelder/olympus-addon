@@ -163,11 +163,19 @@ FT.HALF_SKEW = 600        -- the two halves' starts within this many seconds of 
 FT.HALVES_DAYS = 62       -- games kept this long (the month's and the last, the honours' closed one)
 FT.HALVES_MAX = 2000      -- games this client keeps, the ones with a single half going first
 FT.HALVES_OPEN_MAX = 50   -- games with a single half one sender may have opened here at once
-FT.HALVES_OPEN_DAYS = 7   -- a game with a single half (or two that differ) kept this long
+-- (1.2.4, the author's ask: nothing of the rankings erased early) A game with a single half (or two
+-- that differ) is kept as long as its month's games (it was 7 days: the other half heard on the
+-- 8th never counted).
+FT.HALVES_OPEN_DAYS = FT.HALVES_DAYS
 FT.HALVES_DAY_KEEP = 20   -- agreed games kept per player and server day (Best counts DAY_MAX of them)
 FT.HALVES_REPEAT = 5      -- this player's own games said again at a login (both halves), the newest first...
-FT.HALVES_REPEAT_GAPS = { 3600, 21600, 72000 } -- ...each at as many later logins, this long after its last telling...
+-- ...each at as many later logins, this long after its last telling (1.2.4: 8 over about 14 days,
+-- 1.2.3's three within a day reached nobody away for a weekend)...
+FT.HALVES_REPEAT_GAPS = { 3600, 21600, 72000, 86400, 172800, 259200, 259200, 345600 }
 FT.HALVES_REPEAT_DELAY = 45  -- ...from this long after the login
+-- (1.2.4) A game of his whose other half never came here: the other player asked for it (KN "h"),
+-- at as many of this player's logins as HALVES_ASKS, HALVES_ASK_GAP apart.
+FT.HALVES_ASKS, FT.HALVES_ASK_GAP = 8, 3600
 FT.HALVES_CHECKS = 20     -- relayed halves whose signature is checked at once
 FT.KEYS_MAX = 2000        -- players' keys (pins) kept
 -- The ledger's caps (ArenaLedger's, read there when it is loaded): a counted game lasts this long
@@ -993,8 +1001,11 @@ end
 --       lengths (a loser cannot shorten it under the ledger's minimum), at when this client first
 --       held both (the caps' order),
 --     keys = { [player, lower case] = his key, base64url } (the pins),
---     own = { [id:p1:p2] = { t, mode, mine, theirs, n, last } }: this player's own games: his signed
---       half and the other's (their bodies), the repeats said (n) and the last telling (last) }
+--     own = { [id:p1:p2] = { t, mode, mine, theirs, n, last, asks, askedAt } }: this player's own
+--       games: his signed half and the other's (their bodies), the repeats said (n) and the last
+--       telling (last); (1.2.4) the asks for the other's half (asks) and the last (askedAt),
+--     months = { [monthNo] = { n, at, rows = { { name, games, won, lost }, ... } } }: (1.2.4) each
+--       closed month's list, kept for good (HV.Archive) }
 
 -- (The halves' helpers and state are one table's fields: this file's main chunk is near Lua 5.1's
 -- 200 locals.)
@@ -1015,7 +1026,7 @@ local function RankStore(make)
 		b = {}
 		s[side] = b
 	end
-	for _, k in ipairs({ "open", "done", "keys", "own" }) do
+	for _, k in ipairs({ "open", "done", "keys", "own", "months" }) do
 		if type(b[k]) ~= "table" then b[k] = {} end
 	end
 	b.games = nil -- (the layout of 1.2.3's unreleased drafts: heard again)
@@ -1178,6 +1189,8 @@ end
 -- agreed: no flood of unanswered words ever pushes a counted game out. The pins of players no game
 -- here names go past KEYS_MAX.
 PruneHalves = function(b)
+	-- (1.2.4) Each closed month's list kept first, for good: its games go below.
+	HV.Archive(b)
 	local now = Now()
 	local cut, openCut = now - FT.HALVES_DAYS * 86400, now - FT.HALVES_OPEN_DAYS * 86400
 	local open, done = {}, {}
@@ -1299,6 +1312,94 @@ local function MonthOf(t, offset)
 	return type(d) == "table" and (d.year * 12 + d.month - 1) or 0
 end
 
+-- (1.2.4, the author's ask: rankings are never erased.) Each closed month's list, kept for good in
+-- months[monthNo] = { n (the games its list read: Best's second value), at, rows = { { name, games,
+-- won, lost }, ... } } as this client works it out: at a login's prune, and before agreed games go
+-- past HALVES_MAX. Its games themselves go after HALVES_DAYS. Worked out again while as many games
+-- as it read, or more, are still held (a game heard late; a player hidden here); fewer (pruned), the
+-- list kept stands (HonorsNet's KeptBones rule).
+function HV.Archive(b)
+	local now = MonthOf(Now())
+	local seen = {}
+	for _, s in pairs(b.done) do
+		local r = HV.ReadDone(s)
+		local m = r and MonthOf(r.t)
+		if m and m < now then seen[m] = true end
+	end
+	for m in pairs(seen) do
+		local rows, n = FT.Best("L", { month = m })
+		n = tonumber(n) or 0
+		local kept = b.months[m]
+		if type(rows) == "table" and n > 0 and not (type(kept) == "table" and (tonumber(kept.n) or 0) > n) then
+			local out = {}
+			for i, r in ipairs(rows) do out[i] = { name = r.name, games = r.games, won = r.won, lost = r.lost } end
+			b.months[m] = { n = n, at = Now(), rows = out }
+		end
+	end
+end
+
+-- (1.2.4) A month's list: the one kept (months) when it read more games than this client holds of
+-- that month now (they went past HALVES_DAYS), else Best's: { month, rows (each { name, key, games,
+-- won, lost, place }), champion (its first, with a win; nil), kept (true: the list kept) }. A name
+-- moderation hides or this player blocked is left out of a kept list too, as Best leaves it out.
+function FT.Month(month)
+	month = tonumber(month)
+	if not month then return nil end
+	local rows, n = FT.Best("L", { month = month })
+	local b = RankStore(false)
+	local kept = b and b.months[month]
+	local out = { month = month, rows = rows or {} }
+	if type(kept) == "table" and type(kept.rows) == "table" and (tonumber(kept.n) or 0) > (tonumber(n) or 0) then
+		out.rows, out.kept = {}, true
+		for _, r in ipairs(kept.rows) do
+			if type(r) == "table" and type(r.name) == "string" and not HV.RankHides(r.name) then
+				out.rows[#out.rows + 1] = { name = r.name, key = Low(r.name), games = tonumber(r.games) or 0, won = tonumber(r.won) or 0,
+					lost = tonumber(r.lost) or 0, place = #out.rows + 1 }
+			end
+		end
+	end
+	local first = out.rows[1]
+	out.champion = first and (tonumber(first.won) or 0) >= 1 and first.name or nil
+	return out
+end
+-- (1.2.4) The months this client holds a list of (kept, or games of), the newest first.
+function FT.Months()
+	local b = RankStore(false)
+	if not b then return {} end
+	local set = {}
+	for m in pairs(b.months) do if type(m) == "number" then set[m] = true end end
+	for _, s in pairs(b.done) do
+		local r = HV.ReadDone(s)
+		if r then set[MonthOf(r.t)] = true end
+	end
+	local out = {}
+	for m in pairs(set) do out[#out + 1] = m end
+	table.sort(out, function(x, y) return x > y end)
+	return out
+end
+-- (1.2.4) A player's Bones for his profile (PagesPlayer's stats.bones): the games and wins every
+-- month's list here counts for him (FT.Month: the ranking's own count, caps and all), or nil.
+HV.stats = {} -- { ctx, [name, lower case] = his stats or false }: worked out again when Best's would be
+function FT.PlayerStats(name)
+	local k = Low(name)
+	if not k then return nil end
+	local ctx = HV.Context()
+	if HV.stats.ctx ~= ctx then HV.stats = { ctx = ctx } end
+	if HV.stats[k] ~= nil then return HV.stats[k] or nil end
+	local games, won = 0, 0
+	for _, m in ipairs(FT.Months()) do
+		local x = FT.Month(m)
+		for _, r in ipairs(x and x.rows or {}) do
+			if (r.key or Low(r.name)) == k then
+				games, won = games + (tonumber(r.games) or 0), won + (tonumber(r.won) or 0)
+				break
+			end
+		end
+	end
+	HV.stats[k] = games > 0 and { games = games, won = won } or false
+	return HV.stats[k] or nil
+end
+
 -- After a login: this player's own games of this month and the last said again on the channel (the
 -- low lane), both halves (his and the other's signed one), the newest first, HALVES_REPEAT games
 -- at most. Each game is said again at as many later logins as HALVES_REPEAT_GAPS has, each at
@@ -1342,7 +1443,56 @@ function FT.RepeatHalves()
 			if type(o.theirs) == "string" then A().Send("KN", mode, o.theirs, { dist = lane, low = true, key = "farklen " .. id .. " theirs" }) end
 		end
 	end
+	HV.AskHalves(b, now)
 	return sent
+end
+
+-- (1.2.4) This player's games whose other half never came here (the other's client lost it at the
+-- end: a crash, a whisper given up), this month's and the last: the other player asked for it by a
+-- must-deliver whisper (KN "h": the game's id, seats and target, nothing else), HALVES_REPEAT at
+-- most a login, each at as many logins as HALVES_ASKS, HALVES_ASK_GAP apart (an ask counts once it
+-- went). His client answers with his own signed half (HV.Answer). The number asked.
+HV.asking, HV.answered = {}, {}
+function HV.AskHalves(b, now)
+	local month = MonthOf(now)
+	local n = 0
+	for key, o in pairs(b.own) do
+		if n >= FT.HALVES_REPEAT then break end
+		if type(o) == "table" and type(o.mine) == "string" and type(o.theirs) ~= "string" and not HV.asking[key]
+			and (tonumber(o.asks) or 0) < FT.HALVES_ASKS and MonthOf(tonumber(o.t) or 0) >= month - 1
+			and now - (tonumber(o.askedAt) or tonumber(o.t) or 0) >= FT.HALVES_ASK_GAP then
+			local f = Split(o.mine)
+			local seat, p1, p2 = tonumber(f[16] or ""), A().Name(f[2] or ""), A().Name(f[3] or "")
+			local other = seat == 1 and p2 or (seat == 2 and p1) or nil
+			if type(f[1]) == "string" and #f[1] <= 16 and f[1]:find("^K[0-9a-z]+$") and p1 and p2 and other then
+				local mode = o.mode == "L" and "L" or "T"
+				local ok = A().Send("KN", mode, ("%s~%s~%s~-~%s~-~h"):format(f[1], p1, p2, f[5] or "5"), { to = other, must = true,
+					key = "farklen " .. f[1] .. " ask", done = function(went)
+						HV.asking[key] = nil
+						if went then o.asks, o.askedAt = (tonumber(o.asks) or 0) + 1, Now() end
+					end })
+				if ok == true then
+					HV.asking[key] = true
+					n = n + 1
+				end
+			end
+		end
+	end
+	return n
+end
+-- (1.2.4) The other player of this player's own game asks for his half (KN "h", whispered): his
+-- own signed one, kept with the game (own.mine), back to him alone, once a session per game.
+function HV.Answer(sender, id, p1, p2)
+	local b = RankStore(false)
+	local key = HalfKey(id, p1, p2)
+	local o = b and b.own[key]
+	if type(o) ~= "table" or type(o.mine) ~= "string" or HV.answered[key] then return false end
+	local f = Split(o.mine)
+	local seat = tonumber(f[16] or "")
+	local other = seat == 1 and f[3] or (seat == 2 and f[2]) or nil
+	if not other or not Same(sender, other) then return false end
+	HV.answered[key] = true
+	return A().Send("KN", o.mode == "L" and "L" or "T", o.mine, { to = sender, must = true, key = "farklen " .. id .. " answer" }) == true
 end
 
 -- Pruned at login and while involved: transcripts past 7 days, history past its cap.
@@ -1375,10 +1525,19 @@ end
 
 local RECORD = { "id", "mode", "role", "host", "guest", "arbiter", "kind", "stake", "cur", "target", "secs", "hic", "hiccupRule", "salt",
 	"state", "created", "inn", "camp", "campfire", "spot", "first", "crowd", "crowdOpen", "crowdLock", "noWatch", "bankRolls", "began", "free" }
+-- (1.2.4) A free game of a release (in T while the live switch is off: FreeOffer, so it may count)
+-- keeps its record in the live realm's store, never the rehearsals' (arenaTest), which a rehearsal's
+-- word or `test clear` empties mid-game; the other store's record of the table goes.
 local function Save(t)
 	if t.role == "watch" or t.role == "practice" then return end
-	local m = Mine(t.mode)
+	local where = (t.mode == "T" and FreeOffer(t)) and "L" or t.mode
+	local m = Mine(where)
 	if not m then return end
+	for _, other in ipairs({ "L", "T" }) do
+		local o = other ~= where and Peek(other) or nil
+		if o and t.role == "arbiter" and type(o.arb) == "table" then o.arb[t.id] = nil
+		elseif o and t.role ~= "arbiter" and type(o.live) == "table" and o.live.id == t.id then o.live = nil end
+	end
 	local rec
 	if LIVE[t.state] then
 		rec = {}
@@ -3805,6 +3964,11 @@ local function OnNotice(dist, sender, mode, body)
 	local official = arb ~= nil and Same(sender, arb) and ns.ArenaRoles.IsPublicArbiter(sender, mode)
 	if not official and not (Same(sender, p1) or Same(sender, p2)) then return end
 	if Hides(sender) then return end
+	-- (1.2.4: the other player of this player's game asks for his half: whispered alone, answered so)
+	if f[7] == "h" then
+		if dist == "WHISPER" and not arb then HV.Answer(sender, id, p1, p2) end
+		return
+	end
 	local half = f[7] == "e" and not arb and NoticeHalf(f, id, p1, p2, mode) or nil
 	if half and (dist ~= "WHISPER" or Same(Me(), p1) or Same(Me(), p2)) then HearHalf(dist, sender, half) end
 	-- (a whisper brings a half alone: the live list is the channel's)
@@ -4497,6 +4661,7 @@ function FT.Reset()
 	for id, t in pairs(tables) do A().Involve("table:" .. id, false) end
 	tables, invitedBy, notices = {}, {}, {}
 	bestCache, HV.held, HV.repeating, HV.checking, HV.checks = {}, nil, {}, {}, 0
+	HV.asking, HV.answered, HV.stats = {}, {}, {}
 	selftest, lastSelfTest = nil, nil
 	invitesSeen, invitesAsked = {}, false
 end

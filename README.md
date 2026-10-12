@@ -2108,6 +2108,7 @@ message (the game adds it). What goes where:
 | Slayers catch-up (W4): a request for the current signed ranking | everyone on the Olympus channel | up to three login attempts, starting after 45 seconds and then 5 minutes apart; a role holder answers at most once every 5 minutes, with the signed ranking and (1.2.3) the newest shared rows |
 | The games' rankings ask (AU, 1.2.4): the letters of the games whose publish word your addon lacks, nothing else | everyone on the Olympus channel, and your guild when it spans the realm group's realms | once a session, when you open the Games tab without one of them (never the King's, the High Council's or the author's, who see the rankings anyway) |
 | A games' rankings publish word you hold (AU, 1.2.4): the game, shown or hidden, when, and who gave it (the King or a councillor he named) | the lane the ask came on: the Olympus channel, or your guild | only in answer to an ask, a few seconds after it, from about three holders whatever the army's size, unless the same word went out meanwhile; once every 30 seconds at most |
+| A Bones game's ask for its other half (KN, 1.2.4): the game's id, its two players and its target, nothing else | the game's other player, alone (a whisper) | only when your client holds your own half of a counted game of this month or the last and never got his: at a later login, an hour apart at least, 8 times at most |
 | A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you chose (**Sightings to** on the Most Wanted page; 1.2.2: the one you sent evidence to), alone (whispers), three a minute at most | only after your own Yes on its privacy line (**Accept all** does not turn it on), only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 
@@ -2676,6 +2677,16 @@ giver's name; where the guild spans the group's realms the ask and the answers g
 too. Nothing goes unasked. A told copy carries no signature of the giver's, so it never replaces
 a word a client heard from its giver, the giver's own word replaces any copy of his, and a copy
 naming someone who may not publish that game counts nowhere (`tests/arena/rankings-word.lua`).
+**What the Bones ranking keeps** (1.2.4, `Olympus/FarkleTable.lua`): a game counts once both
+players' signed halves agree. A game with one half is kept as long as its month's games (62 days;
+it was 7), and a player whose client never got the other's half asks him for it at his later
+logins (a whisper with the game's id, seats and target alone); the other's client answers with its
+own signed half. Each player says his games again at 8 later logins over about two weeks (it was
+three within a day). Each closed month's list, every player's games and wins and its champion, is
+kept for good, also once its games go after 62 days; the Games tab shows last month's podium under
+this month's list, and a player's profile shows the games and wins the rankings counted for him.
+A free table's record for a /reload stays in the live realm's store, so `test clear` in the middle
+of a game no longer loses it (`tests/arena/bones-keep.lua`).
 **Find a player** (`Olympus/ArenaMatch.lua`, the Find in the Arena and in the Bones window): each
 game has its own Find, a duel's or a Bones game's, so the game is the one it was opened from; a
 duel filters by level (Any, within 5 or within 10 of the player's own); both filter by distance (Nearby: the

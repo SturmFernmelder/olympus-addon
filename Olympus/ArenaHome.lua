@@ -435,6 +435,15 @@ function Data.GamesRanking(game)
 	if game == "lottery" then return Call("Lottery", "Winners") or {} end
 	return {}
 end
+-- (1.2.4) Bones' list of a month (last month by default): { month, rows, champion, kept }, kept for
+-- good once the month closed (FarkleTable.Month), or nil.
+function Data.BonesMonth(month)
+	local sim = From("BonesMonth", month)
+	if sim ~= false then return sim end
+	local Hs = ns.Honors
+	month = month or (type(Hs) == "table" and type(Hs.MonthOf) == "function" and Hs.MonthOf(Now()) - 1) or nil
+	return month and Call("FarkleTable", "Month", month) or nil
+end
 function Data.Arbiters()
 	local sim = From("Arbiters")
 	if sim ~= false then return sim or {} end
@@ -914,11 +923,25 @@ local function RankingLines(lines)
 				right = (x.rating and tostring(math.floor(x.rating + 0.5)) or "-") .. "  " .. Grey(("%d-%d"):format(tonumber(x.wins) or 0, tonumber(x.losses) or 0)) }
 		end
 	elseif game == "bones" then
+		local function Row(i, x, indent)
+			local games, won = tonumber(x.games) or 0, tonumber(x.won) or 0
+			lines[#lines + 1] = { indent = indent, text = ("#%d  %s"):format(i, ArenaHome.Name(x.name or "?")),
+				right = L.ARENA_GAMES_BONES_ROW:format(won, games > 0 and math.floor(won * 100 / games + 0.5) or 0, games) }
+		end
 		for i, x in ipairs(Data.GamesRanking("bones") or {}) do
 			if i > 10 then break end
-			local games, won = tonumber(x.games) or 0, tonumber(x.won) or 0
-			lines[#lines + 1] = { indent = 1, text = ("#%d  %s"):format(i, ArenaHome.Name(x.name or "?")),
-				right = L.ARENA_GAMES_BONES_ROW:format(won, games > 0 and math.floor(won * 100 / games + 0.5) or 0, games) }
+			Row(i, x, 1)
+		end
+		-- (1.2.4) Last month's, kept for good once it closed: its champion and podium.
+		local last = Data.BonesMonth()
+		if type(last) == "table" and type(last.rows) == "table" and last.rows[1] then
+			if #lines == n0 then lines[#lines + 1] = { indent = 1, text = Grey(L.ARENA_GAMES_RANK_EMPTY) } end
+			lines[#lines + 1] = { indent = 1, text = Gold(L.ARENA_GAMES_BONES_LAST),
+				right = last.champion and Grey(L.ARENA_GAMES_BONES_CHAMPION:format(ArenaHome.Name(last.champion))) or nil }
+			for i, x in ipairs(last.rows) do
+				if i > 3 then break end
+				Row(i, x, 2)
+			end
 		end
 	else
 		local lot = Data.GamesRanking("lottery") or {}
