@@ -22,6 +22,11 @@ local L = ns.L
 -- recent rows. A reviewer can only take an abusive entry off afterwards, or void one row (WV): it
 -- stops counting on every client, and a later event does not bring the entry back.
 --
+-- A full list never refuses a Horde player: the least active entry makes room (Share.MakeRoom),
+-- and the ones taken off are kept off apart, taking no place (MAX_REMOVED). A Horde player is his
+-- GUID: rows find his entry by it alone (ResolveTarget), and his name, only a label, is the one the
+-- game gives for that GUID wherever this client can look it up (Share.HordeOf, Share.Take).
+--
 -- The signed top three (WY) is the publisher's own Slayers board, by verified GUID: GUIDs and
 -- scores only, never victims, locations or rows. It is signed with the existing Arena account key
 -- and accepted only when the server-stamped sender is currently the King, a signed High
@@ -42,7 +47,11 @@ local Wanted = {}
 ns.Wanted = Wanted
 
 Wanted.VERSION = 1
+-- The Horde players held on the list (the most recently active: a full list makes room by itself,
+-- Share.MakeRoom, and never refuses one), and apart from them the ones a reviewer took off, kept
+-- off (the oldest removal goes first).
 Wanted.MAX_TARGETS = 200
+Wanted.MAX_REMOVED = 512
 Wanted.MAX_SLAYERS = 500
 Wanted.MAX_EVIDENCE = 512
 Wanted.MAX_SEEN = 2048
@@ -283,6 +292,11 @@ local function Sighting(value)
 		evidence = value.evidence == "SELF_DEATH" and "SELF_DEATH" or "PARTY_KILL" }
 end
 
+local CopySlayers
+
+-- (paid, 1.2.3: what this entry's claims paid each Slayer, in the shape of the Slayers rows. The
+-- Slayers board is built from the entries on the list, so an entry taken off takes its points with
+-- it, folded or not: Rebuild.)
 local function TargetDerived(t)
 	return {
 		current = Whole(t.current, 0, Wanted.MAX_POINTS) or 0,
@@ -294,6 +308,7 @@ local function TargetDerived(t)
 		victimOverflow = Whole(t.victimOverflow, 0, Wanted.MAX_POINTS) or 0,
 		victims = type(t.victims) == "table" and t.victims or {},
 		claims = type(t.claims) == "table" and t.claims or {},
+		paid = CopySlayers(t.paid),
 	}
 end
 
@@ -312,7 +327,7 @@ local function CopyList(list, limit)
 	return out
 end
 
-local function CopySlayers(rows)
+CopySlayers = function(rows)
 	local out = {}
 	for key, r in pairs(type(rows) == "table" and rows or {}) do
 		if type(key) == "string" and type(r) == "table" then
@@ -350,6 +365,31 @@ local function MergeSlayer(into, from)
 	end
 	into.name, into.guid = into.name or from.name, into.guid or from.guid
 	return into
+end
+
+-- A Slayer's key as this store knows him now (a name known first, his GUID learned later: the
+-- aliases ResolveSlayer keeps).
+function Share.SlayerKey(s, key)
+	for _ = 1, 3 do
+		local alias = s.slayerAliases[key]
+		if type(alias) ~= "string" or alias == key then break end
+		key = alias
+	end
+	return key
+end
+
+-- One entry's contribution (a Slayers-shaped row) added into a Slayers table under its Slayer's
+-- key now (rows: s.slayers, or the points no entry holds any more, s.baseSlayers).
+function Share.AddPaid(s, rows, r)
+	local key = Share.SlayerKey(s, r.key)
+	local into = rows[key]
+	if not into then
+		-- (A GUID's key names his GUID, though the row was folded when his name alone was known.)
+		into = { key = key, name = r.name, guid = r.guid or Guid(key:match("^g:(.+)$")), total = 0, claims = 0,
+			months = {}, monthAt = {}, monthClaims = {} }
+		rows[key] = into
+	end
+	MergeSlayer(into, r)
 end
 
 local function ResolveSlayer(s, value, create, upgrade)
@@ -397,16 +437,74 @@ local function TrimList(list, max)
 	while #list > max do table.remove(list, 1) end
 end
 
-local function ResolveTarget(s, ident, upgrade)
+-- Whether entry a holds a name's alias before entry b (or none): one on the list before one taken
+-- off, a name this client's game gave before one only a shared row wrote, then the newer.
+function Share.Better(a, b)
+	if type(b) ~= "table" then return true end
+	if (a.active == true) ~= (b.active == true) then return a.active == true end
+	if (a.wireName == true) ~= (b.wireName == true) then return b.wireName == true end
+	return (tonumber(a.addedAt) or 0) > (tonumber(b.addedAt) or 0)
+end
+
+-- An entry's name, and its alias (only a lookup by name reads it: a row about a Horde player
+-- finds him by his GUID alone, ResolveTarget). wire: the name is a shared row's, which this
+-- client's game could not check; it takes the alias only from an entry no better (Share.Better).
+-- A name this client's game gave takes it from anyone: the newest proof wins.
+function Share.Name(s, t, ident, wire)
+	local oldKey = NameKey(t.name)
+	-- (The name he had still finds him, unless only a row wrote it.)
+	if oldKey and oldKey ~= ident.nameKey then
+		if t.wireName then
+			if s.aliases[oldKey] == t.key then s.aliases[oldKey] = nil end
+		elseif s.aliases[oldKey] == nil then
+			s.aliases[oldKey] = t.key
+		end
+	end
+	t.name, t.realm, t.wireName = ident.name, ident.realm, wire and true or nil
+	local nk = ident.nameKey
+	if not nk or nk == t.key then return end
+	local holder = s.targets[s.aliases[nk] or nk]
+	if not wire or holder == t or Share.Better(t, holder) then s.aliases[nk] = t.key end
+end
+
+-- An entry taken off lets go of his name: it finds the best other entry under it (Share.Better,
+-- one on the list first), and him only while there is none (his page, as an audit). Nothing a row
+-- counts against is found by a name any more (ResolveTarget), so a name never keeps anyone off.
+function Share.ReleaseName(s, t)
+	local nk = NameKey(t.name)
+	if not nk or nk == t.key or s.aliases[nk] ~= t.key then return end
+	local best = t
+	for key, o in pairs(s.targets) do
+		if o ~= t and key ~= nk and NameKey(o.name) == nk and Share.Better(o, best) then best = o end
+	end
+	s.aliases[nk] = best.key
+end
+
+-- The entry an identity names, or nil. A GUID finds only the entry pinned to it, or a name-only
+-- listing (1.2.2's, a moderator's) under his name while it is on the list, and that only from
+-- what this client proved itself: a shared row's name is its sender's word (wire), and never
+-- pins a GUID to a typed name. A name alone finds the entry under it; from a shared row (wire:
+-- its Olympian, by the name the server stamps), only one pinned to no GUID, so that an entry a
+-- row made under someone's name never stands for him. upgrade: what the identity teaches the
+-- entry (his GUID, a name from this client's game, or a name where it had none).
+local function ResolveTarget(s, ident, upgrade, wire)
 	if not ident then return nil end
-	local key = ident.guidKey and (s.aliases[ident.guidKey] or ident.guidKey) or nil
-	local t = key and s.targets[key] or nil
-	if not t and ident.nameKey then
+	local t, key
+	if ident.guidKey then
+		key = s.aliases[ident.guidKey] or ident.guidKey
+		t = s.targets[key]
+		if t and t.guid ~= ident.guid then t = nil end
+		if not t and ident.nameKey and not wire then
+			local named = s.targets[ident.nameKey]
+			if type(named) == "table" and not named.guid and named.active == true then t, key = named, ident.nameKey end
+		end
+	elseif ident.nameKey then
 		key = s.aliases[ident.nameKey] or ident.nameKey
 		t = s.targets[key]
+		if not t then key = ident.nameKey; t = s.targets[key] end
+		if t and wire and t.guid then t = nil end
 	end
 	if not t then return nil end
-	if t.guid and ident.guid and t.guid ~= ident.guid then return nil end
 	if ident.guid and not t.guid and upgrade then
 		local newKey = ident.guidKey
 		local other = s.targets[newKey]
@@ -414,16 +512,13 @@ local function ResolveTarget(s, ident, upgrade)
 		local oldKey = t.key
 		s.targets[oldKey] = nil
 		t.key, t.guid = newKey, ident.guid
-		if ident.name then t.name, t.realm = ident.name, ident.realm end
 		s.targets[newKey] = t
-		s.aliases[oldKey], s.aliases[ident.nameKey or oldKey] = newKey, newKey
+		s.aliases[oldKey], s.aliases[newKey] = newKey, newKey
+		if ident.name then Share.Name(s, t, ident, false) end
 		for _, e in ipairs(s.evidence) do if e.targetKey == oldKey then e.targetKey = newKey end end
 		key = newKey
-	elseif ident.name and upgrade and (not t.name or ident.guid and t.guid == ident.guid and t.name ~= ident.name) then
-		local oldNameKey = NameKey(t.name)
-		t.name, t.realm = ident.name, ident.realm
-		if oldNameKey then s.aliases[oldNameKey] = t.key end
-		s.aliases[ident.nameKey] = t.key
+	elseif ident.name and ident.guid and upgrade and (not t.name or not wire and t.name ~= ident.name) then
+		Share.Name(s, t, ident, wire)
 	end
 	return t, key
 end
@@ -458,6 +553,16 @@ local function TrimMonths(r, current)
 			if type(r.monthClaims) == "table" then r.monthClaims[month] = nil end
 		end
 	end
+end
+
+-- One paid claim on a Slayers-shaped row: the Slayer's own, or what one entry paid him.
+function Share.Pay(r, points, at, month)
+	r.months, r.monthAt, r.monthClaims = r.months or {}, r.monthAt or {}, r.monthClaims or {}
+	r.total, r.claims, r.reachedAt, r.lastAt = math.min(Wanted.MAX_POINTS, (r.total or 0) + points),
+		math.min(Wanted.MAX_POINTS, (r.claims or 0) + 1), at, at
+	r.months[month], r.monthAt[month] = math.min(Wanted.MAX_POINTS, (r.months[month] or 0) + points), at
+	r.monthClaims[month] = math.min(Wanted.MAX_POINTS, (r.monthClaims[month] or 0) + 1)
+	TrimMonths(r, MonthNow())
 end
 
 local function AddVictim(t, e)
@@ -496,13 +601,13 @@ local function ApplyEvidence(s, e)
 		t.lastDeath, t.openSince, t.cycle = e.at, e.at, math.min(Wanted.MAX_POINTS, t.cycle + 1)
 		if points > 0 then
 			r.name, r.guid = e.killerName or r.name, e.killerGuid or r.guid
-			r.monthClaims = r.monthClaims or {}
-			r.total, r.claims, r.reachedAt, r.lastAt = math.min(Wanted.MAX_POINTS, (r.total or 0) + points),
-				math.min(Wanted.MAX_POINTS, (r.claims or 0) + 1), e.at, e.at
-			local month = e.month
-			r.months[month], r.monthAt[month] = math.min(Wanted.MAX_POINTS, (r.months[month] or 0) + points), e.at
-			r.monthClaims[month] = math.min(Wanted.MAX_POINTS, (r.monthClaims[month] or 0) + 1)
-			TrimMonths(r, MonthNow())
+			Share.Pay(r, points, e.at, e.month)
+			-- (And on this entry's own account of what it paid him: Rebuild, Checkpoint.)
+			if type(t.paid) ~= "table" then t.paid = {} end
+			local p = t.paid[r.key]
+			if not p then p = { key = r.key } t.paid[r.key] = p end
+			p.name, p.guid = r.name, r.guid
+			Share.Pay(p, points, e.at, e.month)
 		end
 	else
 		return false
@@ -511,14 +616,22 @@ local function ApplyEvidence(s, e)
 	return true
 end
 
+-- The totals built again: each entry from its base, the Slayers from the points no entry holds any
+-- more (s.baseSlayers: an entry that made room for another, or folded before 1.2.3) and what each
+-- entry on the list paid, folded (its base's paid: an entry taken off pays nothing any more, on
+-- every client, whenever it folded), then the live rows in the order of the deaths.
 local function Rebuild(s)
 	for _, t in pairs(s.targets) do
 		local b = TargetDerived(type(t.base) == "table" and t.base or {})
 		t.current, t.lifetimeKills, t.cycle, t.openSince, t.lastDeath = b.current, b.lifetimeKills, b.cycle, b.openSince, b.lastDeath
 		t.lastSighting = b.lastSighting
 		t.victimOverflow, t.victims, t.claims = b.victimOverflow, CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
+		t.paid = b.paid
 	end
 	s.slayers = CopySlayers(s.baseSlayers)
+	for _, t in pairs(s.targets) do
+		if t.active == true then for _, p in pairs(t.paid) do Share.AddPaid(s, s.slayers, p) end end
+	end
 	for _, e in ipairs(s.evidence) do if type(e) == "table" and not e.void then ApplyEvidence(s, e) end end
 	return true
 end
@@ -528,8 +641,14 @@ local function Checkpoint(s)
 	for _, t in pairs(s.targets) do
 		t.base = TargetDerived(t)
 		t.base.victims, t.base.claims = CopyList(t.victims, Wanted.MAX_VICTIMS), CopyList(t.claims, Wanted.MAX_CLAIMS)
+		-- (What it paid, each Slayer under his key now.)
+		local paid = {}
+		for _, p in pairs(t.base.paid) do Share.AddPaid(s, paid, p) end
+		for _, p in pairs(paid) do TrimMonths(p, MonthNow()) end
+		t.base.paid = paid
 	end
-	s.baseSlayers = CopySlayers(s.slayers)
+	-- (The Slayers' points stay with the entries that paid them; s.baseSlayers keeps only the
+	-- points no entry holds any more.)
 	for _, r in pairs(s.baseSlayers) do TrimMonths(r, MonthNow()) end
 	-- (1.2.3: the newest death folded. A shared row about a death before it can no longer take its
 	-- place in the order of the deaths, and is refused: "late".)
@@ -572,10 +691,11 @@ function Wanted.AddTarget(value, guid, realm)
 	local t = ResolveTarget(s, ident, true)
 	if t then
 		if t.active then return false, "listed" end
+		Share.MakeRoom(s)
 		t.active, t.removedAt, t.removedBy = true, nil, nil
 		t.addedAt, t.addedBy = math.floor(Clock()), ns.me
 	else
-		if Count(s.targets) >= Wanted.MAX_TARGETS then return false, "full" end
+		Share.MakeRoom(s)
 		t = { key = ident.key, name = ident.name, realm = ident.realm, guid = ident.guid, active = true,
 			addedAt = math.floor(Clock()), addedBy = ns.me, source = "manual", current = 0, lifetimeKills = 0,
 			cycle = 1, openSince = math.floor(Clock()), victims = {}, claims = {}, victimOverflow = 0 }
@@ -594,8 +714,9 @@ function Wanted.CanRemove() return Wanted.CanPublish(ns.me) == true end
 
 -- An abusive entry taken off: here at once, and on every client through the reviewer's word on
 -- the channel (WV, Share.SendMark). Its rows stay, as an audit, and count for nothing any more
--- (ApplyEvidence): no bounty on him, no point paid for him. A later event about him is refused
--- ("removed"), so it never comes back by itself.
+-- (ApplyEvidence): no bounty on him, no point paid for him, even what was folded (Rebuild). A
+-- later event about him is refused ("removed"), so it never comes back by itself. He is kept off
+-- by his GUID apart from the list (MAX_REMOVED), and lets go of his name (Share.ReleaseName).
 function Wanted.RemoveTarget(value, guid, realm)
 	if not Wanted.CanRemove() then return false, "access" end
 	local s, ident = Store(false), Identity(value, guid, realm)
@@ -609,10 +730,32 @@ function Wanted.RemoveTarget(value, guid, realm)
 	return true
 end
 
--- (The entry off, and the totals again without its rows.)
+-- (The entry off, nothing of what it held kept, folded or not, and the totals again without it.)
 function Share.TakeOff(s, t, by, at)
-	t.active, t.removedAt, t.removedBy = false, at, by
+	t.active, t.removedAt, t.removedBy, t.base = false, at, by, nil
+	Share.ReleaseName(s, t)
+	Share.TrimRemoved(s)
 	Rebuild(s)
+end
+
+-- One entry gone from this store: its aliases and its rows with it.
+function Share.Drop(s, key)
+	s.targets[key] = nil
+	for alias, held in pairs(s.aliases) do if held == key then s.aliases[alias] = nil end end
+	for i = #s.evidence, 1, -1 do if s.evidence[i].targetKey == key then table.remove(s.evidence, i) end end
+end
+
+-- The entries taken off, MAX_REMOVED at most, apart from the list: past it the oldest removal goes.
+function Share.TrimRemoved(s)
+	local off = {}
+	for key, t in pairs(s.targets) do if t.active ~= true then off[#off + 1] = key end end
+	if #off <= Wanted.MAX_REMOVED then return end
+	table.sort(off, function(a, b)
+		local x, y = tonumber(s.targets[a].removedAt) or 0, tonumber(s.targets[b].removedAt) or 0
+		if x ~= y then return x < y end
+		return a < b
+	end)
+	for i = 1, #off - Wanted.MAX_REMOVED do Share.Drop(s, off[i]) end
 end
 
 local function UnitIdentity(unit)
@@ -758,9 +901,12 @@ function Share.HordeOf(guid, hint)
 	if not guid then return nil, "identities" end
 	local s, key = Store(false), GuidKey(guid)
 	local t = s and s.targets[s.aliases[key] or key]
-	-- (One kept off by a reviewer's word may have no name here: the lookup's, so that the row is
-	-- refused as "removed".)
-	if type(t) == "table" and t.guid == guid then return Identity(t.name or Share.InfoName(guid) or hint, guid) end
+	-- (His name as the game gives it first, so that a name a shared row wrote, which the game could
+	-- not check then, is corrected now (ResolveTarget learns it); else the one held here, unless a
+	-- row wrote it; else the recap's. One kept off by a reviewer's word may have no name here.)
+	if type(t) == "table" and t.guid == guid then
+		return Identity(Share.InfoName(guid) or (not t.wireName and t.name) or hint or t.name, guid)
+	end
 	local seen, contradicted = KnownHorde(Identity(nil, guid))
 	if seen then return seen end
 	if contradicted then return nil, "faction" end
@@ -816,24 +962,40 @@ function Share.Late(s, at)
 	return folded ~= nil and at <= folded
 end
 
--- Room for one more entry (MAX_TARGETS): the oldest one with nothing open and nothing it ever paid
--- goes, with its rows (a Horde player seen once, killed for no bounty). An entry with an open
--- bounty, one whose claims paid points, and one a reviewer took off (so that it never comes back
--- by itself) stay: with none of them to drop, false ("full").
+-- An entry's last activity: its newest death (a bounty), its last claim, or when it entered.
+function Share.LastActive(t)
+	local at = math.max(tonumber(t.lastDeath) or 0, tonumber(t.openSince) or 0, tonumber(t.addedAt) or 0)
+	local victims = type(t.victims) == "table" and t.victims or {}
+	local last = victims[#victims]
+	return math.max(at, type(last) == "table" and tonumber(last.at) or 0)
+end
+
+-- Room for one more Horde player on the list (MAX_TARGETS; those taken off are kept apart and
+-- take no place). It never refuses one (Daniel: every Horde killer enters by himself): the least
+-- active entry goes, with its rows: the oldest with nothing open and nothing it ever paid (a Horde
+-- player killed once for no bounty), else the oldest of all by its last activity (Share.LastActive),
+-- an open bounty too. What its claims paid stays with its Slayers, in the points no entry holds
+-- any more (s.baseSlayers). Returns true.
 function Share.MakeRoom(s)
-	if Count(s.targets) < Wanted.MAX_TARGETS then return true end
-	local drop, dropAt
-	for key, t in pairs(s.targets) do
-		local paid = false
-		for _, c in ipairs(type(t.claims) == "table" and t.claims or {}) do if (tonumber(c.points) or 0) > 0 then paid = true break end end
-		local at = tonumber(t.lastDeath) or tonumber(t.openSince) or tonumber(t.addedAt) or 0
-		if t.active == true and (tonumber(t.current) or 0) == 0 and not paid and (not drop or at < dropAt) then drop, dropAt = key, at end
+	while true do
+		local listed, drop, dropAt, spare, spareAt = 0, nil, nil, nil, nil
+		for key, t in pairs(s.targets) do
+			if t.active == true then
+				listed = listed + 1
+				local at = Share.LastActive(t)
+				if not drop or at < dropAt or at == dropAt and key < drop then drop, dropAt = key, at end
+				local paid = type(t.paid) == "table" and next(t.paid) ~= nil
+				for _, c in ipairs(type(t.claims) == "table" and t.claims or {}) do if (tonumber(c.points) or 0) > 0 then paid = true break end end
+				if (tonumber(t.current) or 0) == 0 and not paid and (not spare or at < spareAt or at == spareAt and key < spare) then
+					spare, spareAt = key, at
+				end
+			end
+		end
+		if listed < Wanted.MAX_TARGETS or not drop then return true end
+		local key = spare or drop
+		for _, p in pairs(type(s.targets[key].paid) == "table" and s.targets[key].paid or {}) do Share.AddPaid(s, s.baseSlayers, p) end
+		Share.Drop(s, key)
 	end
-	if not drop then return false end
-	s.targets[drop] = nil
-	for alias, key in pairs(s.aliases) do if key == drop then s.aliases[alias] = nil end end
-	for i = #s.evidence, 1, -1 do if s.evidence[i].targetKey == drop then table.remove(s.evidence, i) end end
-	return true
 end
 
 -- One kill or death into this client's ledger, its entry made when the Horde player has none.
@@ -841,7 +1003,8 @@ end
 -- or "victim", the side whose Horde faction the caller proved (Share.HordeOf, or the sharing
 -- member's client: Share.Take), the side whose entry the row may make; own = this client's own
 -- death or killing blow (shared on the channel by its caller); peer = a row another member
--- shared: from (his server-stamped name), digest, id, at and month as he sent them.
+-- shared: from (his server-stamped name), digest, id, at and month as he sent them; wire = the
+-- Horde player's name is that row's, which this client's game could not check (Share.Take).
 local function RecordKill(kind, rawId, killer, victim, opts)
 	opts = opts or {}
 	killer, victim = Identity(killer), Identity(victim)
@@ -860,10 +1023,15 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	end
 	local s = Store(true)
 	if not s then return false, "store" end
+	-- (wire: a side whose name is only a shared row's word: its Olympian, named by the server,
+	-- and its Horde player where this client's game could not check his name, opts.wire. Such a
+	-- name finds no entry pinned to a GUID, and teaches none: ResolveTarget.)
+	local killerWire, victimWire = peer, peer
+	if hordeSide == killer then killerWire = opts.wire == true elseif hordeSide == victim then victimWire = opts.wire == true end
 	-- Resolve first without learning anything: a rejected/forged row must not be able to pin a
 	-- new GUID or spelling onto a listed target merely by naming it.
-	local killerTarget = ResolveTarget(s, killer, false)
-	local victimTarget = ResolveTarget(s, victim, false)
+	local killerTarget = ResolveTarget(s, killer, false, killerWire)
+	local victimTarget = ResolveTarget(s, victim, false, victimWire)
 	if killerTarget and victimTarget then
 		stats.refused = stats.refused + 1
 		return false, "ambiguous"
@@ -878,12 +1046,9 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 			stats.refused = stats.refused + 1
 			return false, "unlisted"
 		end
-		-- A listed namesake pinned to another GUID keeps his name: no second entry under it.
-		local namesake = hordeSide.nameKey and s.targets[s.aliases[hordeSide.nameKey] or hordeSide.nameKey]
-		if type(namesake) == "table" and namesake.guid and namesake.guid ~= hordeSide.guid then
-			stats.refused = stats.refused + 1
-			return false, "identity"
-		end
+		-- (Every proven side carries his GUID, and his entry is his GUID's alone: another entry
+		-- under his name, pinned to another GUID, is another character (a made-up GUID a shared row
+		-- named, a rename, a typed listing), and never keeps him off. Before, it did: "identity".)
 		fresh = { key = hordeSide.key, name = hordeSide.name, realm = hordeSide.realm, guid = hordeSide.guid, active = true,
 			addedAt = now, addedBy = peer and opts.from or CleanName(ns.me), source = peer and "shared" or kind, current = 0,
 			lifetimeKills = 0, cycle = 1, openSince = now, victims = {}, claims = {}, victimOverflow = 0 }
@@ -921,14 +1086,16 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	if peer and Share.Late(s, now) then stats.refused = stats.refused + 1 return false, "late" end
 	if not peer and not RateAllowed(now) then stats.refused = stats.refused + 1 return false, "rate" end
 	if fresh then
-		if not Share.MakeRoom(s) then stats.refused = stats.refused + 1 return false, "full" end
+		Share.MakeRoom(s)
 		s.targets[fresh.key] = fresh
 		if hordeSide.guidKey then s.aliases[hordeSide.guidKey] = fresh.key end
-		if hordeSide.nameKey then s.aliases[hordeSide.nameKey] = fresh.key end
+		Share.Name(s, fresh, hordeSide, opts.wire == true)
 	end
-	local learned = ResolveTarget(s, action == "bounty" and killer or victim, true)
+	local learned
+	if action == "bounty" then learned = ResolveTarget(s, killer, true, killerWire)
+	else learned = ResolveTarget(s, victim, true, victimWire) end
 	if not learned or learned ~= target then
-		if fresh and s.targets[fresh.key] == fresh then s.targets[fresh.key] = nil end
+		if fresh and s.targets[fresh.key] == fresh then Share.Drop(s, fresh.key) end
 		return false, "identity"
 	end
 	target = learned
@@ -3160,6 +3327,14 @@ function Share.Parse(text)
 	return r
 end
 
+-- Whether two names can be one character's: the same given name (Forever's death recap, and a
+-- client the game's lookup did not answer, write "Given-Realm"; the lookup "Given Surname-Realm").
+function Share.SameGiven(a, b)
+	local function Given(name) return ns.Fold((ns.ShortName(tostring(name or "")) or ""):match("^%s*(%S+)") or "") end
+	local given = Given(a)
+	return given ~= "" and given == Given(b)
+end
+
 -- One shared row (WK) taken into this client's ledger: true and the row recorded, or false, why.
 function Share.Take(dist, sender, row)
 	if dist ~= "CHANNEL" then return false, "lane" end
@@ -3194,6 +3369,18 @@ function Share.Take(dist, sender, row)
 		local ok, _, _, _, race = pcall(GetPlayerInfoByGUID, horde.guid)
 		if ok and type(race) == "string" and not Secret(race) and Share.ALLIANCE_RACES[race] then return false, "faction" end
 	end
+	-- His name as this client's game knows his GUID (a unit of his, or its lookup), never as the
+	-- row writes it: a row that gives his GUID another character's name is refused. One the game
+	-- cannot check keeps the row's name as its sender's word (wire): it finds and teaches no entry
+	-- by that name, and holds the name's alias only where no better entry does (Share.Name).
+	local known = seen and seen.name or Share.InfoName(horde.guid)
+	local wire = known == nil
+	if known then
+		if not Share.SameGiven(known, horde.name) then return false, "identity" end
+		horde = Identity(known, horde.guid)
+		if not horde or not horde.name then return false, "shape" end
+		if VerifiedOlympian(horde) then return false, "olympus" end
+	end
 	-- The Olympian side: the sender, his GUID only where this client proves it is his (or the
 	-- reviewer who relays it says his own client did).
 	local ownGuid = row.own
@@ -3214,7 +3401,7 @@ function Share.Take(dist, sender, row)
 	local killer, victim, side = olympian, horde, "victim"
 	if row.kind == "S" then killer, victim, side = horde, olympian, "killer" end
 	local ok, e = RecordKill(row.kind == "S" and "SELF_DEATH" or "PARTY_KILL", id, killer, victim,
-		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side })
+		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire })
 	-- (A reviewer relays what he took from a member; another reviewer's own row every client takes
 	-- from him directly.)
 	if ok and not relay and Wanted.CanPublish(ns.me) and not Wanted.CanPublish(from) then Share.RelaySoon(e) end
@@ -3291,10 +3478,11 @@ function Share.Mark(dist, sender, text)
 			Share.TakeOff(s, t, sender, at)
 		else
 			-- No entry here: one is kept for him, off, so that a later event does not bring him in.
-			if not Share.MakeRoom(s) then return false, "full" end
+			-- (Apart from the list: it takes no place there, MAX_REMOVED.)
 			t = { key = key, guid = guid, active = false, removedAt = at, removedBy = sender, addedAt = at, source = "removed",
 				current = 0, lifetimeKills = 0, cycle = 1, openSince = at, victims = {}, claims = {}, victimOverflow = 0 }
 			s.targets[key], s.aliases[key] = t, key
+			Share.TrimRemoved(s)
 		end
 		Audit(s, "remove", t.key, sender)
 		if opened == t.key then mode, opened = "list", nil end
@@ -3450,10 +3638,10 @@ function Wanted.Prune()
 			t.addedBy = CleanName(t.addedBy)
 			t.source = SOURCES[t.source] and t.source or "manual"
 			t.removedAt, t.removedBy = Whole(t.removedAt, 0, 4294967295), CleanName(t.removedBy)
+			t.wireName = t.wireName == true and t.name ~= nil or nil
 			local d = TargetDerived(t)
 			for field, value in pairs(d) do t[field] = value end
 			t.victims, t.claims = CopyList(t.victims, Wanted.MAX_VICTIMS), CopyList(t.claims, Wanted.MAX_CLAIMS)
-			if ident.nameKey then s.aliases[ident.nameKey] = key end
 			if ident.guidKey then s.aliases[ident.guidKey] = key end
 		end
 	end
@@ -3490,6 +3678,17 @@ function Wanted.Prune()
 		evidence[j] = e
 	end
 	s.evidence = evidence
+	-- (The names' aliases, 1.2.3: each name to the best entry under it, Share.Better.)
+	for alias, held in pairs(s.aliases) do
+		if type(alias) ~= "string" or type(s.targets[held]) ~= "table" then s.aliases[alias] = nil end
+	end
+	for key, t in pairs(s.targets) do
+		local nk = NameKey(t.name)
+		if nk and nk ~= key then
+			local holder = s.targets[s.aliases[nk] or nk]
+			if holder ~= t and Share.Better(t, holder) then s.aliases[nk] = key end
+		end
+	end
 	local order, seen, have = {}, {}, {}
 	first = math.max(1, #s.seenOrder - Wanted.MAX_SEEN + 1)
 	for i = first, #s.seenOrder do

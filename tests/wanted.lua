@@ -871,16 +871,22 @@ test("wanted native autoadd: own fatal recap adds a Horde killer this client pro
 		Refused("Player-1-EF000010", nil)
 		Refused("Player-1-EF000011", "Alliance")
 		Refused("Pet-1-00000012", "Horde")
-		-- (1.2.3: a full list makes room by dropping an entry with nothing open and nothing paid; the
-		-- one here was taken off, which stays, so there is none to drop.)
-		W.MAX_TARGETS = 1; Refused("Player-1-EF000013", "Horde")
+		-- (1.2.3, changed on purpose: a full list never refuses a Horde killer, and the entry taken off
+		-- takes no place on it. Before, the one taken off filled a list of one and this killer was
+		-- refused, "full", as every new one was once 200 open bounties or removals filled it.)
+		W.MAX_TARGETS = 1
+		w.advance(); row.timestamp, row.sourceGUID = w.epoch, "Player-1-EF000013"
+		w.units.target = { name = "Roomy Horde-Realm", guid = "Player-1-EF000013", faction = "Horde" }
+		w.handlers.PLAYER_DEAD()
+		eq(assert(W.Target(nil, "Player-1-EF000013"), "on the list of one").current, 1)
+		eq(W.Target(nil, guid).active, false, "the one taken off is still kept off, apart")
 		W.MAX_TARGETS = 200
 		local oldFaction = UnitFactionGroup
 		UnitFactionGroup = function() error("unit faction unavailable") end
 		Refused("Player-1-EF000014", "Horde")
 		UnitFactionGroup = oldFaction
 		row.overkill = -1; Refused("Player-1-EF000015", "Horde")
-		eq(#W.Targets(), 1, "rejected rows create no targets")
+		eq(#W.Targets(), 2, "rejected rows create no targets")
 		-- A nameplate may vanish on the fatal event. Cache only the actual Horde unit observation.
 		UnitCanAttack, UnitIsPVP = function() return true end, function() return true end
 		w.units.target = { name = "Cached Horde-Realm", guid = "Player-1-EF000016", faction = "Horde" }
@@ -987,7 +993,7 @@ test("wanted native named listing: an unobserved recap identity cannot teach the
 	end)
 end)
 
-test("wanted native named listing: a conflicting pinned GUID cannot be replaced by a different observed killer", function()
+test("wanted native named listing: a pinned GUID is never replaced by a different observed killer, who enters under his own GUID", function()
 	WithWanted(function(w, W)
 		local name = "Pinned Horde-Realm"
 		local pinned, other = "Player-1-EF000093", "Player-1-EF000094"
@@ -998,11 +1004,16 @@ test("wanted native named listing: a conflicting pinned GUID cannot be replaced 
 		C_DeathInfo = nil
 		C_DeathRecap = { HasRecapEvents = function() return true end, GetRecapEvents = function() return { row } end }
 		w.dead = true; w.handlers.PLAYER_DEAD()
-		eq(W.Target(name).guid, pinned, "a matching name cannot replace its pinned identity")
-		eq(W.Target(nil, pinned).current, 0)
-		eq(W.Target(nil, other), nil, "the conflict cannot create a second listing with the same name")
-		eq(#W.Targets(), 1)
-		eq(#w.ns.rdb.wanted.evidence, 0)
+		eq(W.Target(nil, pinned).guid, pinned, "a matching name cannot replace its pinned identity")
+		eq(W.Target(nil, pinned).current, 0, "nor count against it")
+		-- (1.2.3, changed on purpose: his GUID is the identity, a name only a label. Before, an entry
+		-- whose name was pinned to another GUID (here a typed one) kept this Horde killer off for good
+		-- ("identity"), and a forged shared row could pin any name so. He is another character: he
+		-- enters by himself, and his name finds the GUID this client saw under it.)
+		eq(W.Target(nil, other).current, 1, "the killer this client saw enters under his own GUID")
+		eq(W.Target(name).guid, other)
+		eq(#W.Targets(), 2)
+		eq(#w.ns.rdb.wanted.evidence, 1)
 	end)
 end)
 
@@ -1597,39 +1608,207 @@ test("wanted 1.2.3 marks: a reviewer's removal reaches every client (what the Ho
 	end)
 end)
 
-test("wanted 1.2.3: a full Most Wanted makes room by dropping the oldest entry with nothing open and nothing paid, never one with a bounty, one whose claim paid, or one taken off", function()
+-- (1.2.3, changed on purpose: a full Most Wanted never refuses a Horde killer. Before, it dropped
+-- only an entry with nothing open and nothing paid, and kept every one taken off in its places: a
+-- list of open bounties, claims and removals refused every new one ("no entry left to drop:
+-- refused"), so that nothing counted any more.)
+test("wanted 1.2.3: a full Most Wanted never refuses a Horde killer: the least active entry makes room (nothing open and nothing paid first, then the oldest), its paid points stay with their Slayer, and an entry taken off takes no place", function()
 	WithWanted(function(w, W, c)
 		W.MAX_TARGETS = 4
 		local me = w.units.player.guid
 		local function Horde(i) return w.hordePlayer("Full" .. i .. "-Realm", ("Player-1-0F0001%02d"):format(i)), ("Player-1-0F0001%02d"):format(i) end
+		local function Death(i) w.advance(W.DEATH_WINDOW + 1); local name, guid = Horde(i); w.die(w.forever(name, guid)); return guid end
 		local _, nothing = Horde(1) -- killed for no bounty: nothing open, nothing paid
 		assert(w.handlers.PARTY_KILL(me, nothing))
-		w.advance(W.DEATH_WINDOW + 1)
-		local _, open = Horde(2) -- killed us: an open bounty
-		w.die(w.forever("Full2-Realm", open))
-		w.advance(W.DEATH_WINDOW + 1)
-		local _, paid = Horde(3) -- killed us, then we killed him: a claim that paid
-		w.die(w.forever("Full3-Realm", paid))
+		local open = Death(2) -- killed us: an open bounty
+		local paid = Death(3) -- killed us, then we killed him: a claim that paid
 		w.advance(W.DEATH_WINDOW + 1)
 		assert(w.handlers.PARTY_KILL(me, paid))
 		w.advance(W.DEATH_WINDOW + 1)
 		local _, abusive = Horde(4) -- taken off by the King
 		assert(w.handlers.PARTY_KILL(me, abusive))
 		w.authority(c.me, "king"); assert(W.RemoveTarget(nil, abusive)); w.authorities[c.Fold(c.me)] = nil
-		eq(#W.Targets(), 4)
+		eq(#W.Targets(true), 3); eq(#W.Targets(), 4)
+		local fifth = Death(5)
+		eq(W.Target(nil, fifth).current, 1)
+		assert(W.Target(nil, nothing), "the one taken off holds no place: nobody had to go")
+		eq(#W.Targets(true), 4)
+		local sixth = Death(6)
+		eq(W.Target(nil, sixth).current, 1, "a full list made room")
+		eq(W.Target(nil, nothing), nil, "the one with nothing open and nothing paid went first")
+		local seventh = Death(7)
+		eq(W.Target(nil, seventh).current, 1, "a list of bounties and claims alone: still room")
+		eq(W.Target(nil, open), nil, "the least active went: the oldest open bounty")
+		assert(W.Target(nil, paid), "his claim came later")
+		local eighth = Death(8)
+		eq(W.Target(nil, eighth).current, 1)
+		eq(W.Target(nil, paid), nil, "then the oldest claim")
+		eq(W.Rankings().all[1].points, 1, "what his claim paid still counts")
+		eq(#W.Targets(true), 4)
+		eq(W.Target(nil, abusive).active, false, "the one taken off is still kept off")
 		w.advance(W.DEATH_WINDOW + 1)
-		local _, fifth = Horde(5)
-		w.die(w.forever("Full5-Realm", fifth))
-		eq(W.Target(nil, fifth).current, 1, "room was made")
-		eq(W.Target(nil, nothing), nil, "the one with nothing open and nothing paid went")
-		for _, guid in ipairs({ open, paid, abusive }) do assert(W.Target(nil, guid), guid .. " stays") end
-		eq(W.Target(nil, abusive).active, false)
-		eq(W.Rankings().all[1].points, 1, "what was paid still counts")
+		eq(select(2, w.handlers.PARTY_KILL(me, abusive)), "removed")
+		-- After a reload, the totals built again from the saved data: the same.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		eq(W.Rankings().all[1].points, 1); eq(#W.Targets(true), 4); eq(W.Target(nil, abusive).active, false)
+		eq(W.ShareState().why.full, nil, "nothing was refused for want of room")
+	end)
+end)
+
+test("wanted 1.2.3 regression: with the real cap, the 201st Horde killer of 200 unanswered ones still enters and counts, a removal frees a place, and a reviewer's removal of one this client never had is kept", function()
+	WithWanted(function(w, W, c)
+		eq(W.MAX_TARGETS, 200, "the shipped cap")
+		w.manager = false
+		local me = w.units.player.guid
+		local function Killer(i)
+			local guid = ("Player-1-0E%06X"):format(0x100000 + i)
+			w.hordePlayer("Ganker" .. i .. "-Realm", guid)
+			w.advance(W.DEATH_WINDOW + 1)
+			w.die(w.forever("Ganker" .. i .. "-Realm", guid))
+			return guid
+		end
+		local first
+		for i = 1, 200 do local guid = Killer(i); first = first or guid end
+		eq(#W.Targets(true), 200, "200 open bounties: nobody killed back")
+		local new = Killer(201)
+		local t = assert(W.Target(nil, new), "the 201st killer enters (was refused: full)")
+		eq(t.current, 1); eq(#W.Targets(true), 200)
+		eq(W.Target(nil, first), nil, "the least active one made room")
+		eq(W.ShareState().log[#W.ShareState().log].ok, true, "counted, and noted so in /oly wanted status")
+		-- The King takes ten off: they are kept off apart, and ten places are free.
+		w.authority(c.me, "king")
+		local off = {}
+		for i = 2, 11 do off[#off + 1] = ("Player-1-0E%06X"):format(0x100000 + i); assert(W.RemoveTarget(nil, off[#off])) end
+		w.authorities[c.Fold(c.me)] = nil
+		eq(#W.Targets(true), 190); eq(#W.Targets(), 200)
+		local later = Killer(202)
+		eq(W.Target(nil, later).current, 1); eq(#W.Targets(true), 191, "a free place, nobody dropped")
+		for _, guid in ipairs(off) do eq(W.Target(nil, guid).active, false) end
+		-- A reviewer's removal of a Horde player this client never had: kept off, and no place taken.
+		local king = w.authority("Kingly-Realm", "king")
+		assert(w.commHandlers.WV("CHANNEL", king, ("WV~T~1~%s~1.0e2fffff~%d"):format(ScopeOf(c), w.epoch)))
+		eq(W.Target(nil, "Player-1-0E2FFFFF").active, false); eq(#W.Targets(true), 191)
+		eq(W.ShareState().why.full, nil)
+	end)
+end)
+
+test("wanted 1.2.3 regression: one forged row naming a Horde player under a made-up GUID never keeps the real one off, taken off or not; his name is the game's, and a row naming a GUID the game knows by another name is refused", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		local K = w.commHandlers.WK
+		local scope = ScopeOf(c)
+		local forger = w.participant("Forger-Realm", "Player-1-CC000081")
+		local function Row(horde, name, digest)
+			return table.concat({ "WK", 1, scope, "Olympus II", digest, w.epoch, W.MonthNow(), "S", horde, "1.cc000081", name }, "~")
+		end
+		-- One verified member's row (a /run SendAddonMessage will do): his "death" to "Grom-Realm"
+		-- under a made-up GUID, which no client's game can check.
+		assert(K("CHANNEL", forger, Row("1.0d0000aa", "Grom-Realm", "00000000000000e1")))
+		eq(W.Target(nil, "Player-1-0D0000AA").name, "Grom-Realm")
+		w.authority(c.me, "king"); assert(W.RemoveTarget(nil, "Player-1-0D0000AA")); w.authorities[c.Fold(c.me)] = nil
+		-- The real Grom (an Orc, by the game's lookup of his own GUID) kills our member, then dies to him.
+		local real = "Player-1-0D0000BB"
+		w.hordePlayer("Grom-Realm", real)
 		w.advance(W.DEATH_WINDOW + 1)
-		local _, sixth = Horde(6)
-		w.die(w.forever("Full6-Realm", sixth))
-		eq(W.Target(nil, sixth), nil, "no entry left to drop: refused")
-		eq(#W.Targets(), 4)
+		w.die(w.forever("Grom-Realm", real))
+		local t = assert(W.Target(nil, real), "his own death counts (was refused: identity)")
+		eq(t.current, 1); eq(t.name, "Grom-Realm")
+		w.advance(W.DEATH_WINDOW + 1)
+		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, real)
+		assert(ok, tostring(e)); eq(e.points, 1, "and our killing blow on him claims it (was refused: identity)")
+		eq(W.Target("Grom-Realm").guid, real, "his name finds him, not the made-up GUID taken off")
+		eq(W.Target(nil, "Player-1-0D0000AA").active, false, "which stays off")
+		-- Not taken off either: a forged namesake on the list keeps nobody off.
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(K("CHANNEL", forger, Row("1.0d0000cc", "Thrall-Realm", "00000000000000e2")))
+		w.hordePlayer("Thrall-Realm", "Player-1-0D0000DD")
+		w.advance(W.DEATH_WINDOW + 1)
+		w.die(w.forever("Thrall-Realm", "Player-1-0D0000DD"))
+		eq(W.Target(nil, "Player-1-0D0000DD").current, 1)
+		eq(W.Target("Thrall-Realm").guid, "Player-1-0D0000DD", "the GUID this client's game proved holds his name")
+		-- A row that gives a GUID the game knows another character's name: refused, nothing renamed.
+		w.advance(W.DEATH_WINDOW + 1)
+		eq(select(2, K("CHANNEL", forger, Row("1.0d0000bb", "Daniel-Realm", "00000000000000e3"))), "identity")
+		eq(W.Target(nil, real).name, "Grom-Realm"); eq(W.Target(nil, real).current, 0)
+		-- One the game names as the row does (his given name alone, as Forever's recap writes it): his,
+		-- under the game's whole name.
+		w.hordePlayer("Garrosh Hellscream-Realm", "Player-1-0D0000EE")
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(K("CHANNEL", forger, Row("1.0d0000ee", "Garrosh-Realm", "00000000000000e4")))
+		eq(W.Target(nil, "Player-1-0D0000EE").name, "Garrosh Hellscream-Realm")
+		-- A name a row wrote while the game could not check it gives way to the game's, once it can.
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(K("CHANNEL", forger, Row("1.0d000102", "Wrongname-Realm", "00000000000000e5")))
+		w.hordePlayer("Truename-Realm", "Player-1-0D000102")
+		w.advance(W.DEATH_WINDOW + 1)
+		w.die(w.forever("Truename-Realm", "Player-1-0D000102"))
+		local renamed = W.Target(nil, "Player-1-0D000102")
+		eq(renamed.name, "Truename-Realm"); eq(renamed.current, 2)
+		eq(W.Target("Wrongname-Realm"), nil, "the row's name does not stay")
+		-- A forged entry under the name of a member this client knows by his name alone (another
+		-- guild's, heard in a reviewer's relay) never stands for him: his own row counts.
+		w.advance(W.DEATH_WINDOW + 1)
+		assert(K("CHANNEL", forger, Row("1.0d000103", "Faraway-Realm", "00000000000000e6")))
+		local king = w.authority("Kingly-Realm", "king")
+		w.advance(W.DEATH_WINDOW + 1)
+		local relay = ("WK~R~1~%s~Faraway-Realm~0~%016x~%d~%d~S~1.0d000104~-~Victor-Realm"):format(scope, 0xe7, w.epoch, W.MonthNow())
+		local relayed, row = K("CHANNEL", king, relay)
+		assert(relayed, tostring(row)); eq(row.victimName, "Faraway-Realm")
+		eq(W.Target(nil, "Player-1-0D000104").current, 1, "(was refused: ambiguous)")
+		-- And after a reload: his name still finds the real one.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		eq(W.Target("Grom-Realm").guid, real); eq(W.Target("Thrall-Realm").guid, "Player-1-0D0000DD")
+	end)
+end)
+
+test("wanted 1.2.3 regression: a reviewer's Take off cancels the points the entry paid after this client folded them (a checkpoint), as on a client that never folded, and leaves every other Slayer's", function()
+	WithWanted(function(w, W, c)
+		W.MAX_EVIDENCE = 4
+		local scope = ScopeOf(c)
+		local victim = w.participant("Victim-Realm", "Player-1-CC000071")
+		local forger = w.participant("Forger-Realm", "Player-1-CC000072")
+		local honest = w.participant("Honest-Realm", "Player-1-CC000073")
+		-- Another member's client, which never folds (MAX_EVIDENCE as shipped), hears every word too.
+		local other = w.publisher().Wanted
+		local rows, n = {}, 0
+		local function Say(from, own, kind, horde, name)
+			n = n + 1
+			local text = table.concat({ "WK", 1, scope, "Olympus II", ("%016x"):format(0xd000 + n), w.epoch, W.MonthNow(), kind, horde, own, name }, "~")
+			rows[#rows + 1] = { from, text }
+			local ok, e = w.commHandlers.WK("CHANNEL", from, text)
+			assert(ok, tostring(e))
+			w.advance(W.DEATH_WINDOW + 1)
+		end
+		-- Three made-up deaths to a made-up Horde GUID (a bounty of 3), and a claim of it: 3 points.
+		for _ = 1, 3 do Say(victim, "1.cc000071", "S", "1.0f0000a1", "Farmed-Realm") end
+		Say(forger, "1.cc000072", "P", "1.0f0000a1", "Farmed-Realm")
+		eq(W.Rankings().all[1].name, forger); eq(W.Rankings().all[1].points, 3)
+		-- An honest bounty and claim on another, and ordinary rows: the ledger folds.
+		Say(victim, "1.cc000071", "S", "1.0f0000a2", "Real-Realm")
+		Say(honest, "1.cc000073", "P", "1.0f0000a2", "Real-Realm")
+		for i = 3, 5 do Say(victim, "1.cc000071", "S", ("1.0f0000a%d"):format(i), "Other" .. i .. "-Realm") end
+		assert(W.Stats().checkpointed >= 2, "both claims folded into the base")
+		eq(#c.rdb.wanted.evidence, 1)
+		for _, r in ipairs(rows) do assert(other.HandleShared("CHANNEL", r[1], r[2])) end
+		-- The King's word: the made-up entry off, on both clients.
+		local king = w.authority("Kingly-Realm", "king")
+		local off = ("WV~T~1~%s~1.0f0000a1~%d"):format(scope, w.epoch)
+		assert(w.commHandlers.WV("CHANNEL", king, off)); assert(other.HandleMark("CHANNEL", king, off))
+		eq(W.Target(nil, "Player-1-0F0000A1").active, false)
+		for _, client in ipairs({ W, other }) do
+			local all = client.Rankings().all
+			eq(#all, 1, "the forger's 3 points went with the entry (were kept after a checkpoint)")
+			eq(all[1].name, honest); eq(all[1].points, 1, "the honest claim stays")
+			eq(client.Rankings().month[1].points, 1)
+			local signable = client.SignableRankings()
+			eq(#signable, 1); eq(signable[1].guid, "Player-1-CC000073", "nor in the top three a reviewer signs")
+		end
+		-- And after a reload, the totals built again from the base.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		eq(#W.Rankings().all, 1); eq(W.Rankings().all[1].points, 1)
 	end)
 end)
 

@@ -1651,6 +1651,13 @@ catch-up with the newest rows. They alone can **Take off** an abusive entry or *
 afterwards: their word reaches every client, what it counted stops counting, and a later event does
 not bring it back. There is no review and no Send evidence any more.
 
+Wanted holds the 200 most recently active Horde players and never refuses a new one: past 200 the
+least active goes (one with nothing open and nothing paid first), and what his claims paid stays
+with its Slayers (a Take off no longer reaches it). Up to 512 entries taken off are kept off apart
+and take no place. A Horde player is his GUID, never a name: his name is the one the game gives for
+that GUID wherever your client can look it up, a row that gives a GUID the game knows another
+character's name is refused, and an entry under someone's name never keeps that player off.
+
 The signed **Slayers top three** is the publisher's own board, by verified GUID (a slayer his
 client knows by name only is left out and named on his Frames page). A trusted peer can relay that
 unchanged ranking only to a recipient who already independently pinned its original publisher's
