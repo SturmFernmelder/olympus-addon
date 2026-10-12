@@ -380,6 +380,9 @@ local function Make()
 		ns.SafeCall("privacy page", Consent.Refresh)
 	end)
 	f:Hide()
+	-- Closed (its X, Done, Accept all, Escape), not hidden with the whole interface (Alt+Z: it still
+	-- says shown): the version letter that waited for it comes a moment after (1.2.3, Letters.lua).
+	f:HookScript("OnHide", function(self) if not self:IsShown() then ns.Fire("CONSENT_CLOSED") end end)
 	return f
 end
 

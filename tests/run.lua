@@ -60133,7 +60133,14 @@ end)()
 				instance = IsInInstance, gamepad = ns.GamepadUI, member = ns.IsMember, log = ns.Log, print = ns.Print, chat = ns.db.addonChat,
 				template = TEMPLATES.PortraitFrameTemplate }
 			local w = { on = {}, after = {}, every = {}, printed = {} }
+			saved.fire = ns.Fire
 			local ok, err = pcall(function()
+				-- (1.2.3: the privacy page's CONSENT_CLOSED, Consent.lua's ns.Fire, reaches this fresh
+				-- module's listeners too; every event goes where it went before.)
+				ns.Fire = function(n, ...)
+					saved.fire(n, ...)
+					for _, f in ipairs(w.on[n] or {}) do f(...) end
+				end
 				TEMPLATES.PortraitFrameTemplate = function(f)
 					saved.template(f)
 					f.portrait = NewWidget("Texture", nil, f)
@@ -60165,6 +60172,7 @@ end)()
 			ns.db.lettersAutoVersion = saved.baseline
 			InCombatLockdown, IsInInstance, ns.IsMember = saved.combat, saved.instance, saved.member; GamepadStyle(nil)
 			ns.Log, ns.Print, ns.db.addonChat = saved.log, saved.print, saved.chat
+			ns.Fire = saved.fire
 			if not ok then error(err, 0) end
 		end)
 	end
@@ -60486,6 +60494,64 @@ end)()
 			w.tick()
 			assert(Lt.Frame() and Lt.Frame():IsShown(), "then the letter")
 			eq(Lt.IsRead(ns.VERSION), true)
+		end)
+	end)
+
+	-- (1.2.3, the King's stream: the privacy page asked first and he closed it with its X; the
+	-- letter came long after, on the minute's next try, 60 to 120 seconds after login at first.)
+	test("1.2.3 version letters: the privacy page closed after the letter's wait, the letter comes HANDOFF (2 s) after its X, not at the next try; the page hidden with the whole interface (Alt+Z) is no close", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			ns.db.addonChat = nil
+			ns.Consent.Reset()
+			w.login()
+			local page = ns.Consent.Show() -- (its own wait, 45 s after login: shown, not yet closed)
+			eq(w.after[1].sec, Lt.LOGIN_WAIT)
+			w.run() -- (the letter's own wait, the page still up)
+			w.tick()
+			eq(Lt.Frame(), nil, "never over the privacy page")
+			-- Hidden with the whole interface (OnHide while it still says shown): nothing yet.
+			for _, h in ipairs(page.hooks.OnHide or {}) do h(page) end
+			eq(#w.after, 0, "not a close")
+			page:Hide() -- (its X)
+			local a = w.after[1]
+			assert(a, "the letter is asked again after the page's close")
+			eq(a.sec, Lt.HANDOFF); assert(Lt.HANDOFF <= 2, tostring(Lt.HANDOFF))
+			w.run()
+			assert(Lt.Frame() and Lt.Frame():IsShown(), "the letter, a moment after the page")
+			eq(Lt.IsRead(ns.VERSION), true)
+			-- Read: a later close of the page asks nothing.
+			ns.Consent.Show():Hide()
+			eq(#w.after, 0)
+		end)
+		-- Closed before the letter's own wait: the letter at LOGIN_WAIT, as before.
+		WithLetters(function(w)
+			local Lt = w.Letters
+			w.login()
+			ns.Consent.Show():Hide()
+			eq(#w.after, 1, "only the letter's own wait"); eq(w.after[1].sec, Lt.LOGIN_WAIT)
+			w.run()
+			assert(Lt.Frame() and Lt.Frame():IsShown())
+		end)
+	end)
+
+	test("1.2.3 version letters: kept back by combat or an instance after its wait, tried again every RETRY (10 s), not on the minute; never before LOGIN_WAIT", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			ns.Consent.Show():Hide()
+			w.login()
+			eq(w.every[1].sec, Lt.RETRY); assert(Lt.RETRY <= 10, tostring(Lt.RETRY))
+			w.tick()
+			eq(Lt.Frame(), nil, "never before the letter's wait")
+			InCombatLockdown = function() return true end
+			w.run()
+			eq(Lt.Frame(), nil, "never in combat")
+			InCombatLockdown = function() return false end
+			IsInInstance = function() return true end
+			w.tick(); eq(Lt.Frame(), nil, "nor in an instance")
+			IsInInstance = function() return false end
+			w.tick()
+			assert(Lt.Frame() and Lt.Frame():IsShown(), "the next try, RETRY later")
 		end)
 	end)
 
