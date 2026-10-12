@@ -492,7 +492,10 @@ end
 -- A rig shows one border (a tier's name), an honour's frame (1.2, ShowHonor) or none (nil): Show
 -- and Hide alone on the tier's art, fine in combat; the metal underlay where the rig has one
 -- (Borders.Rig), dressed for what shows.
-local function Present(rig, tex, key, metal)
+-- honour: an honour's art (1.2.4, the author's call: "remova dragão de todos, só deixe a moldura em
+-- formato de gota de cabeça pra baixo, como no portrait"): no plain dragon under it, the portrait's
+-- own ring alone (the game's frame on a unit's, an Olympus portrait's own ring).
+local function Present(rig, tex, key, metal, honour)
 	if rig.shownTex ~= tex then
 		if rig.shownTex then rig.shownTex:Hide() end
 		rig.shownTex, rig.shown = nil, nil
@@ -504,6 +507,7 @@ local function Present(rig, tex, key, metal)
 		rig.shown = key
 	end
 	if not rig.underlay then return end
+	if honour then rig.underlay:Hide() return end
 	local tier = key and TIERS_BY_NAME[key] or nil
 	local underlay = metal and { metal = metal } or tier
 	if underlay and DressUnderlay(rig.underlay, underlay, rig.mirror) then
@@ -679,7 +683,7 @@ local function ShowHonor(rig, key, metal)
 		local artOk, _, _, artMetal = pcall(ns.Honors.ArtOf, key)
 		if artOk then metal = artMetal end
 	end
-	Present(rig, tex, key, metal)
+	Present(rig, tex, key, metal, true)
 	return true
 end
 local function HideAll()

@@ -115,10 +115,11 @@ test("1.2.1 an Apostle's own look: a signed Apostle picks the red cross in the f
 	local body = w:As(apostle, apostle.ns.ArenaProfile.Body)
 	eq(body:find("apostle-red", 1, true), nil, "not in his profile's word")
 	eq(apostle.db.ownLooks[apostle.name], "apostle-red", "kept on this account alone")
-	-- Round his own portrait: the red cross, turned round, on the plain underlay tinted black.
+	-- Round his own portrait: the red cross, turned round (1.2.4, the author's call: no plain
+	-- dragon under any honour, the black one under the red cross included).
 	eq(mine.Shown("player"), MEDIA .. "cross-red")
 	local under = mine.Underlay("player")
-	eq(under.shown, true); eq(under.atlas, PLAIN_SILVER); eq(under.desaturated, true); eq(under.color, "0.24 0.24 0.27 1")
+	eq(under.shown, false, "no underlay under the red cross")
 	-- His target while it is himself: his own portrait too.
 	apostle.target = apostle.name
 	mine.B.Refresh("target", true)

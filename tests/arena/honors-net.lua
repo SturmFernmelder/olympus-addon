@@ -601,8 +601,8 @@ test("1.2 the fights part: Borders and Nameplates show the verified honour's fra
 	viewer.target = cast.A.name
 	r.B.Refresh("target", true)
 	eq(r.Shown("target"), "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold", "the gryphon")
-	eq(r.Underlay("target").shown, true, "its metal underlay")
-	eq(r.Underlay("target").atlas, "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Gold")
+	-- (1.2.4, the author's call: no plain dragon under an honour, the portrait's own ring alone.)
+	eq(r.Underlay("target").shown, false, "no metal underlay under an honour")
 	r.NP.Added("nameplate1")
 	eq(r.Shown("plate"), "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold-mark", "its mark")
 	-- B, no belt, and a forged pick of it: his rank's (1.1.5: the bronze wings of a guild master).
@@ -803,13 +803,10 @@ test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-
 		for _, x in ipairs(r.textures) do if x.owner == "player" and x.sublevel ~= 2 and x.shown then t = x end end
 		eq(t.coord, "0.78125 0 0 0.78125", key .. ": the plain box, turned round on his own frame")
 		eq(t.size, "100x100")
+		-- (1.2.4, the author's call: no plain dragon under any honour, the red cross's black one
+		-- too; the portrait's own ring alone.)
 		local under = r.Underlay("player")
-		eq(under.shown, true, key .. ": on its plain metal")
-		if color then eq(under.color, color, key .. "'s underlay") end
-		if key == "apostle-red" then
-			eq(under.atlas, "ui-hud-unitframe-target-portraiton-boss-rare-silver", "the plain underlay...")
-			eq(under.desaturated, true, "...tinted black")
-		end
+		eq(under.shown, false, key .. ": no plain metal under it")
 		r.NP.RefreshAll(true)
 		eq(r.Shown("plate"), MEDIA .. art .. "-mark", key .. "'s mark")
 	end
