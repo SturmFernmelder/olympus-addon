@@ -1152,6 +1152,10 @@ local function World(C, opts)
 		GetCurrentCalendarTime = function() local t = os.date("*t", C.now) return { year = t.year, month = t.month, monthDay = t.day, weekday = t.wday, hour = t.hour, minute = t.min } end,
 		GetSecondsUntilWeeklyReset = function() return 3 * 86400 end,
 	})
+	-- (1.2.3: Most Wanted reads the game's death recaps a moment after login, for the earlier deaths:
+	-- the pass's session has none, as HasRecapEvents says then, with an ID or without:
+	-- DeathRecapDocumentation.lua.)
+	E.C_DeathRecap = Namespace("C_DeathRecap", { HasRecapEvents = function() return false end, GetRecapEvents = function() return {} end })
 	E.C_GameRules = Namespace("C_GameRules", { IsGameRuleActive = function() return false end })
 	E.C_Texture = Namespace("C_Texture", { GetAtlasInfo = function(a) return { width = 64, height = 64, file = a } end })
 	E.C_Item = Namespace("C_Item", {

@@ -43,6 +43,15 @@ local L = ns.L
 -- Sightings (the section "Most Wanted sightings" below): a Horde player this client saw,
 -- where its own player stood then, on its map for 15 minutes and whispered to the one reviewer
 -- the member chose. Off until the member's Yes; never on the channel, never in an instance.
+--
+-- The bounty (1.2.3, Daniel's weights: the section "The bounty" below): a death adds the victim's
+-- office and level to the Horde player's bounty, a kill pays twice his level and his whole bounty,
+-- a member who kills his own killer gets more. Each own row freezes what it was worth where it
+-- was observed (the office, both levels) and carries it on the channel, and every client scores
+-- the same rows with the same function, so every client counts the same points. At each login
+-- the deaths the game's death recaps still hold this session count too, once, and the member is
+-- told so in one window. (In this file, not a new one: a file the TOC adds loads only after the
+-- game restarts, and a restart empties the death recaps; this one loads at the first /reload.)
 local Wanted = {}
 ns.Wanted = Wanted
 
@@ -154,6 +163,10 @@ local watchingNotFound = false
 -- this session's captures and refusals for /oly wanted status.
 local Share = { rates = {}, days = {}, targets = {}, relayed = {}, relayedOrder = {},
 	log = {}, why = {}, counts = {}, catchReplied = -math.huge, catchHeard = -math.huge }
+-- 1.2.3: the bounty's weights, its scoring and the earlier deaths (the section "The bounty" below;
+-- a table, as Share is), and this session's state of the earlier deaths' reader and its notice.
+local Bounty = { session = {} }
+Wanted.Bounty = Bounty -- (tests, /oly wanted status)
 local ScheduleGlobalRepeat
 -- Sightings, this session's only (nothing of them is saved): the pins ([Horde GUID] = the newest
 -- sighting of him), their frames, the ids taken (replays), this client's own last sighting of each
@@ -276,8 +289,10 @@ local function Store(create)
 		ns.rdb.wanted = s
 	end
 	-- (voids, 1.2.3: [sender#digest] = when a reviewer voided that shared row, so a copy heard later
-	-- is refused too.)
-	for _, key in ipairs({ "targets", "aliases", "slayers", "slayerAliases", "baseSlayers", "evidence", "seen", "seenOrder", "recent", "audit", "voids" }) do
+	-- is refused too. recapsRead, 1.2.3: [killer GUID@time] = when, each death recap this client
+	-- read, so it never counts twice; inside: this client's own times in an instance, { from, to }.)
+	for _, key in ipairs({ "targets", "aliases", "slayers", "slayerAliases", "baseSlayers", "evidence", "seen", "seenOrder", "recent", "audit", "voids",
+		"recapsRead", "inside" }) do
 		if type(s[key]) ~= "table" then s[key] = {} end
 	end
 	s.seq = Whole(s.seq, 0, 2147483647) or 0
@@ -296,9 +311,11 @@ local CopySlayers
 
 -- (paid, 1.2.3: what this entry's claims paid each Slayer, in the shape of the Slayers rows. The
 -- Slayers board is built from the entries on the list, so an entry taken off takes its points with
--- it, folded or not: Rebuild.)
+-- it, folded or not: Rebuild. bounty, 1.2.3: what its rows set going for the next ones, the
+-- corpse-camping gaps, the grudges and the cycle's highest level: Bounty.State.)
 local function TargetDerived(t)
 	return {
+		bounty = Bounty.State(t.bounty),
 		current = Whole(t.current, 0, Wanted.MAX_POINTS) or 0,
 		lifetimeKills = Whole(t.lifetimeKills, 0, Wanted.MAX_POINTS) or 0,
 		cycle = Whole(t.cycle, 1, Wanted.MAX_POINTS) or 1,
@@ -567,7 +584,7 @@ end
 
 local function AddVictim(t, e)
 	local row = { name = e.victimName, guid = e.victimGuid, at = e.at, evidence = e.kind, id = e.id,
-		zone = e.zone, precision = e.precision }
+		zone = e.zone, precision = e.precision, points = e.points }
 	t.victims[#t.victims + 1] = row
 	if #t.victims > Wanted.MAX_VICTIMS then
 		table.remove(t.victims, 1)
@@ -582,23 +599,31 @@ local function ApplyEvidence(s, e)
 	-- bounty on him, no point paid for him (Wanted.RemoveTarget rebuilds the totals without them).
 	if t.active ~= true then return true end
 	if e.action == "bounty" then
-		if t.current >= Wanted.MAX_POINTS or t.lifetimeKills >= Wanted.MAX_POINTS then return false end
-		t.current, t.lifetimeKills = t.current + 1, t.lifetimeKills + 1
+		if t.lifetimeKills >= Wanted.MAX_POINTS then return false end
+		-- 1.2.3 (Daniel's weights): what this death adds (Bounty.Death: the victim's office and level,
+		-- nothing inside the corpse-camping gap; 1 for a row without them), the cycle's bounty at
+		-- most BOUNTY_MAX; e.points is what it added.
+		local added = math.max(0, math.min(Bounty.Death(t, e), Bounty.SCORE.BOUNTY_MAX - t.current))
+		t.current, t.lifetimeKills, e.points = t.current + added, t.lifetimeKills + 1, added
 		AddVictim(t, e)
 	elseif e.action == "claim" then
-		local points = t.current
+		-- 1.2.3: what the kill pays (Bounty.Claim: twice his level, the whole bounty and the revenge;
+		-- the bounty alone for a row without the fields), then a new cycle.
+		local points, level, revenge = Bounty.Claim(t, e)
 		local r
 		if points > 0 then
 			r = ResolveSlayer(s, { name = e.killerName, guid = e.killerGuid }, true)
 			if not r then return false end
 		end
-		e.points = points
+		e.points, e.level, e.revenge = points, level, revenge or nil
 		local claim = { id = e.id, at = e.at, slayer = e.killerName, slayerGuid = e.killerGuid, points = points,
-			evidence = e.kind, cycle = t.cycle, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), overflow = t.victimOverflow or 0 }
+			evidence = e.kind, cycle = t.cycle, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), overflow = t.victimOverflow or 0,
+			bounty = t.current, level = level, revenge = revenge or nil }
 		t.claims[#t.claims + 1] = claim
 		TrimList(t.claims, Wanted.MAX_CLAIMS)
 		t.current, t.victims, t.victimOverflow = 0, {}, 0
 		t.lastDeath, t.openSince, t.cycle = e.at, e.at, math.min(Wanted.MAX_POINTS, t.cycle + 1)
+		Bounty.Closed(t, e)
 		if points > 0 then
 			r.name, r.guid = e.killerName or r.name, e.killerGuid or r.guid
 			Share.Pay(r, points, e.at, e.month)
@@ -626,7 +651,7 @@ local function Rebuild(s)
 		t.current, t.lifetimeKills, t.cycle, t.openSince, t.lastDeath = b.current, b.lifetimeKills, b.cycle, b.openSince, b.lastDeath
 		t.lastSighting = b.lastSighting
 		t.victimOverflow, t.victims, t.claims = b.victimOverflow, CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
-		t.paid = b.paid
+		t.paid, t.bounty = b.paid, b.bounty
 	end
 	s.slayers = CopySlayers(s.baseSlayers)
 	for _, t in pairs(s.targets) do
@@ -789,10 +814,11 @@ local function UnitMatches(unit, ident)
 	return u and SameIdentity(u, ident)
 end
 
-local function RememberHorde(ident)
+-- (1.2.3: and his level as the game showed it on that unit, -1 for its "??": Share.SeenLevel.)
+local function RememberHorde(ident, unit)
 	if not ident or not ident.guid or not ident.name then return end
 	local now = math.floor(Clock())
-	knownHorde[ident.guid] = { identity = ident, at = now }
+	knownHorde[ident.guid] = { identity = ident, at = now, level = unit and Share.UnitLevel(unit) or nil }
 	for guid, row in pairs(knownHorde) do if now - row.at > 60 or row.at > now then knownHorde[guid] = nil end end
 	while Count(knownHorde) > Wanted.MAX_TARGETS do
 		local oldest
@@ -801,23 +827,56 @@ local function RememberHorde(ident)
 	end
 end
 
+-- The units this client may see a player by: the game's own token for his GUID first, then the
+-- target, the focus, the mouse's and the nameplates.
+function Share.Units(guid)
+	local units = { "target", "focus", "mouseover" }
+	for i = 1, 40 do units[#units + 1] = "nameplate" .. i end
+	if guid and type(UnitTokenFromGUID) == "function" then
+		local ok, token = pcall(UnitTokenFromGUID, guid)
+		if ok and type(token) == "string" and not Secret(token) then table.insert(units, 1, token) end
+	end
+	return units
+end
+
+-- A unit's level as the game gives it (UnitLevel): a whole level, -1 for the game's "??" (one far
+-- above this player's), nil for none (no unit, a hidden value).
+function Share.UnitLevel(unit)
+	if type(UnitLevel) ~= "function" or type(unit) ~= "string" then return nil end
+	local ok, level = pcall(UnitLevel, unit)
+	if not ok or Secret(level) or type(level) ~= "number" then return nil end
+	if level == -1 then return -1 end
+	return level >= 1 and math.floor(level) or nil
+end
+
+-- A Horde player's level as this client sees it (1.2.3): a unit of his now (his corpse, a
+-- nameplate, the target: the game's token for his GUID first), else the unit it saw him by within
+-- a minute (RememberHorde). -1: the game's "??". nil: none.
+function Share.SeenLevel(guid)
+	guid = Guid(guid)
+	if not guid then return nil end
+	for _, unit in ipairs(Share.Units(guid)) do
+		local ok, g = pcall(function() return UnitGUID and UnitGUID(unit) end)
+		if ok and not Secret(g) and Guid(g) == guid then
+			local level = Share.UnitLevel(unit)
+			if level then return level end
+		end
+	end
+	local row, now = knownHorde[guid], math.floor(Clock())
+	return row and row.at <= now and now - row.at <= 60 and row.level or nil
+end
+
 -- A Horde player this client sees now (a unit with his GUID: the target, the focus, the mouse's,
 -- a nameplate, or the game's own token for that GUID) or saw within a minute, or nil. nil, true
 -- when a unit of his shows now and is no Horde player (or its faction is unknown): the current
 -- unit overrides an old observation.
 local function KnownHorde(ident)
 	if not ident or not ident.guid then return nil end
-	local units = { "target", "focus", "mouseover" }
-	for i = 1, 40 do units[#units + 1] = "nameplate" .. i end
-	if type(UnitTokenFromGUID) == "function" then
-		local ok, token = pcall(UnitTokenFromGUID, ident.guid)
-		if ok and type(token) == "string" and not Secret(token) then table.insert(units, 1, token) end
-	end
-	for _, unit in ipairs(units) do
+	for _, unit in ipairs(Share.Units(ident.guid)) do
 		local observed = UnitIdentity(unit)
 		if observed and observed.guid == ident.guid then
 			local ok, faction = pcall(function() return UnitFactionGroup and UnitFactionGroup(unit) end)
-			if ok and not Secret(faction) and faction == "Horde" then RememberHorde(observed); return observed end
+			if ok and not Secret(faction) and faction == "Horde" then RememberHorde(observed, unit); return observed end
 			return nil, true -- current contradictory/unknown faction overrides an old observation
 		end
 	end
@@ -1005,10 +1064,14 @@ end
 -- death or killing blow (shared on the channel by its caller); peer = a row another member
 -- shared: from (his server-stamped name), digest, id, at and month as he sent them; wire = the
 -- Horde player's name is that row's, which this client's game could not check (Share.Take).
+-- 1.2.3: bounty = what the row is worth, frozen (the Olympian's office and level, the Horde
+-- player's level and whether it is a floor: Bounty.Capture, Bounty.Intake), none for a row
+-- without them; earlier = an own death read from a recap after it (Bounty.Earlier), at its time.
 local function RecordKill(kind, rawId, killer, victim, opts)
 	opts = opts or {}
 	killer, victim = Identity(killer), Identity(victim)
 	local peer = opts.peer == true
+	local earlier = opts.earlier == true and not peer
 	local hordeSide = opts.horde == "killer" and killer or opts.horde == "victim" and victim or nil
 	local olympianSide = opts.horde == "killer" and victim or opts.horde == "victim" and killer or nil
 	-- Both sides must be players the row names and identifies (Guid takes Player- GUIDs only): a
@@ -1036,7 +1099,7 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 		stats.refused = stats.refused + 1
 		return false, "ambiguous"
 	end
-	local now = peer and opts.at or math.floor(Clock())
+	local now = (peer or earlier) and Whole(opts.at, 0, 4294967295) or math.floor(Clock())
 	-- 1.2.3 (Daniel: "that list should never have existed"): a Horde player nobody listed enters
 	-- by himself, from the proven side of the row. Only a row without that proof (the combat-log
 	-- adapter's, CaptureCombatLog) still needs one side already here.
@@ -1072,7 +1135,9 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 		stats.refused = stats.refused + 1
 		return false, "olympus"
 	end
-	if action == "claim" and target.current > 0 and not ResolveSlayer(s, killer, false, false)
+	-- (1.2.3: a kill with no open bounty pays his level now, Bounty.Claim.)
+	local worth = Bounty.Fields(opts.bounty)
+	if action == "claim" and (target.current > 0 or worth and worth.hl > 0) and not ResolveSlayer(s, killer, false, false)
 		and Count(s.slayers) >= Wanted.MAX_SLAYERS then return false, "slayers" end
 	local id = peer and opts.id or EvidenceId(kind, rawId, killer, victim)
 	local fingerprint = table.concat({ killer.guidKey or killer.nameKey, victim.guidKey or victim.nameKey, tostring(math.floor(now / 3)) }, ">")
@@ -1083,8 +1148,8 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	local death = SameDeath(s, killer, victim, now)
 	if death == "replay" then stats.replay = stats.replay + 1 return false, "replay" end
 	if death == "conflict" then stats.conflict = stats.conflict + 1 return false, "conflict" end
-	if peer and Share.Late(s, now) then stats.refused = stats.refused + 1 return false, "late" end
-	if not peer and not RateAllowed(now) then stats.refused = stats.refused + 1 return false, "rate" end
+	if (peer or earlier) and Share.Late(s, now) then stats.refused = stats.refused + 1 return false, "late" end
+	if not peer and not RateAllowed(math.floor(Clock())) then stats.refused = stats.refused + 1 return false, "rate" end
 	if fresh then
 		Share.MakeRoom(s)
 		s.targets[fresh.key] = fresh
@@ -1104,7 +1169,8 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	local e = { id = id, seq = s.seq, at = now, month = peer and opts.month or MonthNow(), kind = kind, action = action,
 		targetKey = target.key, killerName = killer.name, killerGuid = killer.guid, victimName = victim.name, victimGuid = victim.guid,
 		zone = opts.zone, precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
-		peer = peer or nil, own = opts.own == true or nil }
+		peer = peer or nil, own = opts.own == true or nil, earlier = earlier or nil }
+	if worth then e.office, e.ml, e.hl, e.hf = worth.office, worth.ml, worth.hl, worth.hf or nil end
 	e.digest = peer and opts.digest or Digest(table.concat({ e.id, e.at, e.kind, e.action, e.killerGuid or "", e.victimGuid or "" }, "|"))
 	Remember(s, id, fingerprint, now, e.seq)
 	-- In the order of the deaths: a shared row may come after a later one (a relay, a catch-up),
@@ -1163,8 +1229,9 @@ function Share.PartyKill(attackerGUID, targetGUID)
 	if InInstance() then return false, "instance" end
 	local horde, why = Share.HordeOf(victim)
 	if not horde then return false, why end
+	-- (1.2.3: what the kill is worth, frozen here: his level on his corpse, Bounty.Capture.)
 	local ok, e = RecordKill("PARTY_KILL", "native:" .. tostring(math.floor(Clock())), mine, horde,
-		{ zone = Zone(), precision = "approximate", horde = "victim", own = true })
+		{ zone = Zone(), precision = "approximate", horde = "victim", own = true, bounty = Bounty.Capture(horde.guid) })
 	if ok then Share.Send(e) end
 	return ok, e, horde.name
 end
@@ -1191,6 +1258,9 @@ end
 -- proves (Share.HordeOf): no target, nameplate or listing is needed. Never the latest damage, a
 -- pet's possible owner, or a death in an instance (a battleground, an arena). The victim is our
 -- own verified player unit. Returns true and the row, or false and why, and the killer's name.
+-- 1.2.3: the killing blow and its checks are Bounty.KillingBlow's and Bounty.Hostile's, which the
+-- earlier deaths' reader shares; the death read now is marked read (Bounty.MarkRead: counted or
+-- not, that reader never takes it again), and its row freezes what it is worth (Bounty.Capture).
 local function ReadSelfDeathRecap()
 	local recap = C_DeathRecap
 	if type(recap) ~= "table" or type(recap.HasRecapEvents) ~= "function" or type(recap.GetRecapEvents) ~= "function" then return false, "recap" end
@@ -1202,30 +1272,20 @@ local function ReadSelfDeathRecap()
 	local deadOK, dead = pcall(function() return UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") end)
 	if not mine or not deadOK or Secret(dead) or dead ~= true then return false, "alive" end
 	if ns.faction == "Horde" then return false, "faction" end
-	if InInstance() then return false, "instance" end
+	local inside = InInstance()
 	local now = math.floor(Clock())
-	for i = 1, #events do
-		local row = events[i]
-		if type(row) == "table" then
-			if Secret(row.sourceGUID, row.sourceName, row.sourceFlags, row.event, row.overkill, row.timestamp) then return false, "secret" end
-			if Whole(row.overkill, 0, 2147483647) then
-				local stampOK, stamp = pcall(tonumber, row.timestamp)
-				local at = stampOK and stamp and stamp >= now - Wanted.DEATH_WINDOW and stamp <= now + 1 and stamp or nil
-				local name = Clean(row.sourceName, 72)
-				if not at then return false, "stale", name end
-				if type(row.event) ~= "string" or not row.event:match("_DAMAGE$") then return false, "event", name end
-				local flags = row.sourceFlags
-				if flags ~= nil and not (Whole(flags, 0, 2147483647) and bit.band(flags, 0x440) == 0x440) then return false, "flags", name end
-				local horde, why = Share.HordeOf(row.sourceGUID, row.sourceName)
-				if not horde then return false, why, name end
-				local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(at), horde, mine,
-					{ zone = Zone(), precision = "approximate", horde = "killer", own = true })
-				if ok then Share.Send(e) end
-				return ok, e, horde.name
-			end
-		end
-	end
-	return false, "fatal"
+	local kb, why, name = Bounty.KillingBlow(events)
+	if not kb then return false, inside and "instance" or why, name end
+	if kb.stamp < now - Wanted.DEATH_WINDOW or kb.stamp > now + 1 then return false, inside and "instance" or "stale", kb.name end
+	-- (This death's own recap, whatever the answer below: an instance's too.)
+	Bounty.MarkRead(kb)
+	if inside then return false, "instance", kb.name end
+	local horde, refusal = Bounty.Hostile(kb)
+	if not horde then return false, refusal, kb.name end
+	local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(kb.stamp), horde, mine,
+		{ zone = Zone(), precision = "approximate", horde = "killer", own = true, bounty = Bounty.Capture(horde.guid) })
+	if ok then Share.Send(e) end
+	return ok, e, horde.name
 end
 
 -- A reviewer voids one row he finds wrong (the King, a signed High Councillor or the author:
@@ -2141,7 +2201,9 @@ local function TargetLines()
 	if #t.victims == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_VICTIMS) } end
 	for _, v in ipairs(t.victims) do
 		local label = v.name and (ns.DisplayName(v.name) or v.name) or L.WANTED_UNKNOWN
-		lines[#lines + 1] = { indent = 1, text = label, right = Grey(ns.Ago(v.at)), onClick = CorrectClick(v.id, label),
+		-- (1.2.3: what each death added to his bounty, Bounty.Death.)
+		lines[#lines + 1] = { indent = 1, text = label, right = Grey(L.WANTED_VICTIM_POINTS:format(tonumber(v.points) or 0, ns.Ago(v.at))),
+			onClick = CorrectClick(v.id, label),
 			tooltip = function(tt)
 				tt:AddLine(L.WANTED_EVIDENCE, 1, 0.82, 0)
 				tt:AddLine(EvidenceLabel(v.evidence), 1, 1, 1, true)
@@ -2158,6 +2220,10 @@ local function TargetLines()
 		lines[#lines + 1] = { indent = 1, text = label, right = L.WANTED_CLAIM_POINTS:format(c.points or 0), onClick = CorrectClick(c.id, label),
 			tooltip = function(tt)
 				tt:AddLine(L.WANTED_CLAIM_TIP:format(c.points or 0, c.cycle or 0, EvidenceLabel(c.evidence), ns.Ago(c.at)), 1, 1, 1, true)
+				-- (1.2.3: what it paid for: his level, his bounty, the revenge.)
+				local level = tonumber(c.level) or 0
+				tt:AddLine(L.WANTED_CLAIM_PARTS:format(level, Bounty.SCORE.HORDE_LEVEL * level, tonumber(c.bounty) or 0,
+					c.revenge and Bounty.SCORE.REVENGE or 0), 0.8, 0.8, 0.8, true)
 			end }
 	end
 	return lines
@@ -2706,7 +2772,7 @@ function Wanted.ObserveUnit(unit)
 		-- still remembered here, never sent, for one's own death recap. A No stops that too.)
 		if why == "off" and type(ns.db) == "table" and ns.db.wantedSightings == nil and type(unit) == "string" and not InInstance() then
 			local _, _, horde = SightedUnit(unit)
-			if horde then RememberHorde(horde) end
+			if horde then RememberHorde(horde, unit) end
 		end
 		return false, why
 	end
@@ -2722,9 +2788,9 @@ function Wanted.ObserveUnit(unit)
 		return false, "repeat"
 	end
 	local ident, listed, horde = SightedUnit(unit)
-	if horde then RememberHorde(horde) end
+	if horde then RememberHorde(horde, unit) end
 	if not ident then return false, listed end
-	RememberHorde(ident)
+	RememberHorde(ident, unit)
 	local mapID, x, y = Sight.Spot()
 	if not mapID then return false, "position" end
 	local observer = CleanName(ns.me)
@@ -3120,6 +3186,10 @@ end
 --       channel: a reviewer's relay of a row his client took from <from>: b is 1 when his client
 --       proved the GUID is the sender's (else 0, and no GUID: -).
 --   WK~C~1~...   the same, in his answer to a late login's catch-up ask (W4)
+--   WK~2~...~<own guid>~<office>~<level>~<horde level>[+]~<horde name>, WK~R~2~..., WK~C~2~...
+--       1.2.3's bounty: the same rows with what each is worth, frozen where it was observed (the
+--       Olympian's office and level, the Horde player's level, "+" when it is a floor: the section
+--       "The bounty" below); a client reads both, and a WK~1 row counts as one without them.
 --   WV~T~1~<scope>~<horde guid>~<at>            channel: a reviewer took that Horde player off
 --   WV~V~1~<scope>~<from>~<digest>~<at>         channel: a reviewer voided that member's row
 -- GUIDs as WY writes them (server.id), <scope> the realm group and faction (Scope), <digest> the
@@ -3232,8 +3302,13 @@ function Share.Send(e)
 	name = CleanName(name)
 	if not WireGuid(horde) or not WireGuid(own) or not name then return false, "shape" end
 	local scope = Scope()
-	local body = table.concat({ "WK", 1, scope, guild, e.digest, e.at, e.month, e.kind == "SELF_DEATH" and "S" or "P",
-		WireGuid(horde), WireGuid(own), name }, "~")
+	-- (1.2.3: WK~2, what the row is worth after the GUIDs, Bounty.Wire; WK~1 for a row without it.)
+	local worth = Bounty.Wire(e)
+	local fields = { "WK", worth and 2 or 1, scope, guild, e.digest, e.at, e.month, e.kind == "SELF_DEATH" and "S" or "P",
+		WireGuid(horde), WireGuid(own) }
+	if worth then fields[#fields + 1] = worth end
+	fields[#fields + 1] = name
+	local body = table.concat(fields, "~")
 	if #body > 255 then return false, "size" end
 	local sent = C.Send("CHANNEL", body, "wanted-kill:" .. e.digest, false, false, function(went)
 		if went then e.shared = true end
@@ -3289,8 +3364,13 @@ function Share.Relay(e, via)
 	name = CleanName(name)
 	if not (e.own or e.peer) or e.void or not from or not name or not WireGuid(horde) or type(e.digest) ~= "string" then return false end
 	local scope = Scope()
-	local body = table.concat({ "WK", via, 1, scope, from, WireGuid(own) and 1 or 0, e.digest, e.at, e.month,
-		e.kind == "SELF_DEATH" and "S" or "P", WireGuid(horde), WireGuid(own) or "-", name }, "~")
+	-- (1.2.3: what his client froze for the row, as it counts it: Bounty.Wire.)
+	local worth = Bounty.Wire(e)
+	local fields = { "WK", via, worth and 2 or 1, scope, from, WireGuid(own) and 1 or 0, e.digest, e.at, e.month,
+		e.kind == "SELF_DEATH" and "S" or "P", WireGuid(horde), WireGuid(own) or "-" }
+	if worth then fields[#fields + 1] = worth end
+	fields[#fields + 1] = name
+	local body = table.concat(fields, "~")
 	if #body > 255 then return false end
 	Share.Heard(e.id)
 	return C.Send("CHANNEL", body, "wanted-relay:" .. via .. ":" .. e.id, false, false, nil, { owner = Wanted, guardKey = "wanted-relay",
@@ -3308,18 +3388,29 @@ function Share.RelaySoon(e)
 	if ns.After then ns.After(Wanted.SHARE_RELAY_DELAY + Share.Offset() % 8, "wanted relay", Go) else Go() end
 end
 
--- WK's fields, or nil.
+-- WK's fields, or nil. (1.2.3: WK~2 and its relays carry what the row is worth after the GUIDs,
+-- <office>~<level>~<Horde level>[+]: Bounty.Wire, Bounty.Unwire; WK~1 is a row without it.)
 function Share.Parse(text)
 	if type(text) ~= "string" or #text > 255 then return nil end
-	local r = {}
+	local r, worth = {}, nil
 	if text:sub(1, 5) == "WK~1~" then
 		r.scope, r.guild, r.digest, r.at, r.month, r.kind, r.horde, r.own, r.name =
 			text:match("^WK~1~(%x+)~([^~]+)~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~([^~]+)$")
+	elseif text:sub(1, 5) == "WK~2~" then
+		r.scope, r.guild, r.digest, r.at, r.month, r.kind, r.horde, r.own, worth, r.name =
+			text:match("^WK~2~(%x+)~([^~]+)~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~(%u~%d+~%d+%+?)~([^~]+)$")
+	elseif text:sub(5, 7) == "~2~" then
+		r.via, r.scope, r.from, r.bound, r.digest, r.at, r.month, r.kind, r.horde, r.own, worth, r.name =
+			text:match("^WK~([RC])~2~(%x+)~([^~]+)~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~(%u~%d+~%d+%+?)~([^~]+)$")
 	else
 		r.via, r.scope, r.from, r.bound, r.digest, r.at, r.month, r.kind, r.horde, r.own, r.name =
 			text:match("^WK~([RC])~1~(%x+)~([^~]+)~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~([^~]+)$")
 	end
 	if not r.scope or #r.digest ~= 16 then return nil end
+	if worth then
+		r.worth = Bounty.Unwire(worth)
+		if not r.worth then return nil end
+	end
 	r.at, r.month = Whole(tonumber(r.at), 0, 4294967295), Whole(tonumber(r.month), 0, 120000)
 	r.horde = GameGuid(r.horde)
 	if r.own == "-" then r.own = nil elseif r.own then r.own = GameGuid(r.own) or false end
@@ -3400,8 +3491,11 @@ function Share.Take(dist, sender, row)
 	local olympian = Identity(from, ownGuid)
 	local killer, victim, side = olympian, horde, "victim"
 	if row.kind == "S" then killer, victim, side = horde, olympian, "killer" end
+	-- (1.2.3: what the row is worth, as this client freezes it: never above what its sender says,
+	-- nor an office it cannot verify, nor a level above one it sees: Bounty.Intake.)
+	local worth = row.worth and Bounty.Intake(row.worth, from, row.guild, relay, ownGuid, horde.guid) or nil
 	local ok, e = RecordKill(row.kind == "S" and "SELF_DEATH" or "PARTY_KILL", id, killer, victim,
-		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire })
+		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire, bounty = worth })
 	-- (A reviewer relays what he took from a member; another reviewer's own row every client takes
 	-- from him directly.)
 	if ok and not relay and Wanted.CanPublish(ns.me) and not Wanted.CanPublish(from) then Share.RelaySoon(e) end
@@ -3558,10 +3652,646 @@ function Share.CatchUp()
 	return n
 end
 
+---------------------------------------------------------------------------
+-- The bounty (1.2.3, Daniel's decisions of 2026-10-11)
+--
+-- A death adds to the Horde player's open bounty the victim's office (his highest only: the King
+-- 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any other office
+-- 10, a member 0) and his level. The same member killed by the same Horde player counts once in
+-- REPEAT_GAP (corpse camping: the deaths in between stay, worth nothing), and one cycle's bounty
+-- holds BOUNTY_MAX at most. A kill pays the killer twice the Horde player's level and his whole
+-- open bounty, which then starts again at 0 (a new cycle); a kill with no bounty open pays the
+-- level part alone. A member who kills the very Horde player who killed him within GRUDGE_DAYS
+-- (his own death row and his own kill row, the same GUID) gets REVENGE more, once a claim: his
+-- claim closes it, another member's kill or the bounty's reset does not. A Slayer holds MAX_POINTS
+-- at most. Only outside instances (a battleground, an arena, a dungeon, a raid), the death and the
+-- kill alike: the captures refuse one inside, and a member's client never shares it.
+--
+-- What a row is worth is frozen where it is observed: the member's client freezes its own office
+-- and level and the Horde player's level as it saw him (Bounty.Capture) and carries them on the
+-- channel (WK~2); each receiver freezes them again, never higher than the row says nor than it can
+-- verify (Bounty.Intake). Replays, reloads, folds and relays read only the frozen fields, and every
+-- client scores the rows it holds with the same function in the order of the deaths (Bounty.Death,
+-- Bounty.Claim), so the same rows give the same points on every client. A row without the fields
+-- (WK~1, the combat-log adapter's, a saved row from before them) counts as it always did: 1 a
+-- death, its open bounty for a kill, no level, no revenge.
+--
+-- Offices come only from what this client can trust (Bounty.OfficeOf): the pinned King (where none
+-- is pinned, the master of the King's guild, as Borders.lua's rule says); the author-signed High
+-- Council list; for a guild master the game's own rank on his own client, else Data.AuthorizedRank
+-- (the roster of this client's guild, the signed leadership manifest, or the Crown's census rule of
+-- two senders); a centurion or a correspondent from his guild master's own list (Nominees); the
+-- signed titles (a Steward, an arbiter), the King's Hands, the Treasurer's characters, the author's.
+-- Never a census rank alone, a guild officer's rank, or an office a row says that is not verified.
+--
+-- Levels: the member's own from his client at the moment (UnitLevel), never above what a receiver
+-- sees of him (a unit, its own guild's fresh roster: levels never go down); the Horde player's from
+-- a unit of his (his corpse, a nameplate, the target) or the one this client saw him by within a
+-- minute, the game's "??" as this player's level plus HIDDEN_GAP (a floor, the least it can be),
+-- none 0; a claim whose own level is a floor or none counts the highest exact level a row of the
+-- open cycle saw, when higher. A death recap carries no level, and nothing is taken from a name.
+--
+-- Earlier deaths (Daniel: "tem como popular com mortes anteriores de olimpians que baixaram addon,
+-- com mensagem única avisando que foram adicionados"): Olympus kept no death before 1.2.3 and the
+-- game keeps no PvP history, but its death recaps of this game session are still there (the
+-- client's, as its Death Recap shows them: lost when the game closes, kept across a /reload).
+-- Once a login, EARLIER_WAIT after it (Bounty.Earlier), every recap the game still holds is read:
+-- the latest (no ID), and the IDs from 1 up it answers for (RECAP_IDS at most, stopping after
+-- RECAP_MISSES unanswered in a row: an ID comes from the combat log, which Forever restricts, the
+-- chat's death link or the damage meter, and the client's UI source shows no other). Each goes
+-- through the live death's own gate (Bounty.KillingBlow, Bounty.Hostile: an explicit hostile Horde
+-- player's killing blow with both identities), outside an instance (read only outside one, and
+-- never one dated while this client knew it was inside: Bounty.Spans), with the same REPEAT_GAP and
+-- caps, the member's office and level frozen at the reading, and is shared like a live death
+-- (EARLIER_MAX added a reading, the newest: each member's client takes them all within its limit
+-- for one member; the rest at the next login). Each recap is marked read (s.recapsRead, by its
+-- killing blow), counted or not, the live death's too, so none ever counts twice. The member is told once, in an Olympus copy window (never the chat, never the
+-- game's popups; it takes no keyboard, in either input mode), each death added a line: the killer,
+-- his level, the time and the points it added to his bounty; nothing when none was added. The
+-- window waits out combat, an instance, a death and the privacy page (shown, or waiting to ask this
+-- session), and is saved until it shows (s.earlierNotice), so a /reload before then never loses it.
+-- A death typed or reported by hand is never taken: it could not be told from a forged one.
+---------------------------------------------------------------------------
+
+-- The bounty's weights (Daniel's): one table.
+Bounty.SCORE = {
+	OFFICE = { K = 100, H = 50, G = 30, C = 20, O = 10, M = 0 }, -- the victim's highest office (Bounty.OfficeOf)
+	VICTIM_LEVEL = 1,    -- times the victim's level, added to his office for each death
+	HORDE_LEVEL = 2,     -- times the Horde player's level, paid to whoever kills him
+	REVENGE = 100,       -- paid to a member who kills the very Horde player who killed him...
+	GRUDGE_DAYS = 14,    -- ...within this many days of that death, once a claim
+	REPEAT_GAP = 600,    -- one member killed by one Horde player counts once in this many seconds
+	BOUNTY_MAX = 2000,   -- the most one bounty cycle holds
+	MAX_POINTS = 100000, -- the most one claim pays, and a Slayer holds (Wanted.MAX_POINTS, what WY carries)
+	HIDDEN_GAP = 10,     -- a level the game hides ("??") counts as this player's level plus this, at least
+	LEVEL_MAX = 60,      -- every level's clamp when the game gives no highest level (GetMaxPlayerLevel)
+	LEGACY_DEATH = 1,    -- a death in a row without the fields (WK~1, before them)
+}
+Bounty.OFFICES = { "K", "H", "G", "C", "O", "M" } -- the highest first
+Bounty.STATE_MAX = 64      -- members one entry keeps a gap and a grudge for, each (the oldest go)
+Bounty.RECAP_IDS = 256     -- recap IDs the earlier deaths' reader asks the game about, at most...
+Bounty.RECAP_MISSES = 8    -- ...and it stops after this many unanswered in a row once one answered
+Bounty.RECAP_READ_MAX = 64 -- recaps kept as read (the oldest go)
+Bounty.INSIDE_MAX = 16     -- this client's own times in an instance kept (the oldest go)
+Bounty.EARLIER_WAIT = 20   -- the earlier deaths are read this long after login (the game's lookups ready)
+Bounty.EARLIER_MAX = 6     -- earlier deaths added at most a reading (the newest), within SHARE_RATE_MAX
+Bounty.NOTICE_TICK = 15    -- their notice, while it waits, is tried again this often
+
+-- A level as the rows keep it: a whole number, 0 for none.
+function Bounty.Level(v) return Whole(v, 0, 255) or 0 end
+
+-- The game's highest level: every level's clamp.
+function Bounty.LevelMax()
+	if type(GetMaxPlayerLevel) == "function" then
+		local ok, v = pcall(GetMaxPlayerLevel)
+		v = ok and not Secret(v) and Whole(v, 1, 255) or nil
+		if v then return v end
+	end
+	return Bounty.SCORE.LEVEL_MAX
+end
+
+-- An office's place, 1 the highest; nil for none.
+function Bounty.Rank(office)
+	for i, o in ipairs(Bounty.OFFICES) do if o == office then return i end end
+	return nil
+end
+
+-- The lower of two offices (an unknown one counts as a member's).
+function Bounty.Lower(a, b)
+	local last = #Bounty.OFFICES
+	return Bounty.OFFICES[math.max(Bounty.Rank(a) or last, Bounty.Rank(b) or last)]
+end
+
+-- The scoring itself, pure and the same on every client: what one death adds...
+function Bounty.DeathPoints(office, ml)
+	local S = Bounty.SCORE
+	return (S.OFFICE[office] or 0) + S.VICTIM_LEVEL * Bounty.Level(ml)
+end
+-- ...the level a kill pays for: its own exact one, else the higher of its floor (or none) and the
+-- highest exact level a row of the open cycle saw...
+function Bounty.ClaimLevel(hl, hf, cycle)
+	hl = Bounty.Level(hl)
+	if hl > 0 and not hf then return hl end
+	return math.max(hl, Bounty.Level(cycle))
+end
+-- ...and what a kill pays.
+function Bounty.ClaimPoints(level, bounty, revenge)
+	local S = Bounty.SCORE
+	return math.min(S.MAX_POINTS, S.HORDE_LEVEL * Bounty.Level(level) + math.max(0, math.floor(tonumber(bounty) or 0))
+		+ (revenge and S.REVENGE or 0))
+end
+
+-- What a row is worth, checked: { office, ml (the Olympian's level), hl (the Horde player's), hf
+-- (hl is a floor) }, or nil for none.
+function Bounty.Fields(v)
+	if type(v) ~= "table" or not Bounty.Rank(v.office) then return nil end
+	local hl = Bounty.Level(v.hl)
+	return { office = v.office, ml = Bounty.Level(v.ml), hl = hl, hf = v.hf == true and hl > 0 or nil }
+end
+-- Whether a row carries what it is worth.
+function Bounty.Scored(e) return type(e) == "table" and Bounty.Rank(e.office) ~= nil and type(e.hl) == "number" end
+-- On the wire (WK~2): <office>~<level>~<Horde level>, "+" after a floor; nil for a row without it.
+function Bounty.Wire(e)
+	if not Bounty.Scored(e) then return nil end
+	return ("%s~%d~%d%s"):format(e.office, Bounty.Level(e.ml), Bounty.Level(e.hl), e.hf and "+" or "")
+end
+function Bounty.Unwire(text)
+	local office, ml, hl, floor = tostring(text or ""):match("^(%u)~(%d+)~(%d+)(%+?)$")
+	if not office or not Bounty.Rank(office) or #ml > 3 or #hl > 3 then return nil end
+	ml, hl = Whole(tonumber(ml), 0, 255), Whole(tonumber(hl), 0, 255)
+	if not ml or not hl or floor == "+" and hl == 0 then return nil end
+	return { office = office, ml = ml, hl = hl, hf = floor == "+" or nil }
+end
+
+-- A member's key in an entry's account: his name's (a shared row's Olympian is his sender, by the
+-- name the server stamps; this client's own rows, its player's).
+function Bounty.Who(name) return NameKey(name) or "?" end
+
+-- One of an entry's account's maps kept to STATE_MAX members: the oldest go (then by key).
+function Bounty.Trim(map)
+	local keys = {}
+	for key in pairs(map) do keys[#keys + 1] = key end
+	if #keys <= Bounty.STATE_MAX then return end
+	table.sort(keys, function(a, b)
+		if map[a] ~= map[b] then return map[a] < map[b] end
+		return a < b
+	end)
+	for i = 1, #keys - Bounty.STATE_MAX do map[keys[i]] = nil end
+end
+
+-- An entry's own account (t.bounty), checked and copied: gap[member] = his last death that counted
+-- (REPEAT_GAP), grudge[member] = his last death that counted, still open (the revenge), hl = the
+-- highest exact level a row of the open cycle saw. Built again with the rest (Rebuild), folded with
+-- the rest (Checkpoint).
+function Bounty.State(v)
+	local out = { gap = {}, grudge = {} }
+	if type(v) ~= "table" then return out end
+	for _, part in ipairs({ "gap", "grudge" }) do
+		for key, at in pairs(type(v[part]) == "table" and v[part] or {}) do
+			at = Whole(at, 0, 4294967295)
+			if type(key) == "string" and #key <= 120 and at then out[part][key] = at end
+		end
+		Bounty.Trim(out[part])
+	end
+	local hl = Bounty.Level(v.hl)
+	out.hl = hl > 0 and hl or nil
+	return out
+end
+
+-- The entry's account as of a row's time: gaps and grudges that ran out let go.
+function Bounty.Due(t, at)
+	local st = t.bounty
+	if type(st) ~= "table" or type(st.gap) ~= "table" or type(st.grudge) ~= "table" then
+		st = Bounty.State(st)
+		t.bounty = st
+	end
+	for key, last in pairs(st.gap) do if at - last >= Bounty.SCORE.REPEAT_GAP then st.gap[key] = nil end end
+	for key, last in pairs(st.grudge) do if at - last > Bounty.SCORE.GRUDGE_DAYS * 86400 then st.grudge[key] = nil end end
+	return st
+end
+
+-- What one death adds to the entry's bounty (before its cap), and what it sets going for the next
+-- rows; called in the order of the deaths (ApplyEvidence).
+function Bounty.Death(t, e)
+	local at = Whole(e.at, 0, 4294967295) or 0
+	local st = Bounty.Due(t, at)
+	local who = Bounty.Who(e.victimName)
+	if not Bounty.Scored(e) then
+		st.grudge[who] = at
+		Bounty.Trim(st.grudge)
+		return Bounty.SCORE.LEGACY_DEATH
+	end
+	if not e.hf and Bounty.Level(e.hl) > (st.hl or 0) then st.hl = Bounty.Level(e.hl) end
+	if st.gap[who] then return 0 end
+	st.gap[who], st.grudge[who] = at, at
+	Bounty.Trim(st.gap)
+	Bounty.Trim(st.grudge)
+	return Bounty.DeathPoints(e.office, e.ml)
+end
+
+-- What a kill pays (the points, the level it paid for, whether a revenge) as of the open cycle;
+-- nothing changes until it is paid (Bounty.Closed).
+function Bounty.Claim(t, e)
+	local at = Whole(e.at, 0, 4294967295) or 0
+	local st = Bounty.Due(t, at)
+	if not Bounty.Scored(e) then return t.current, 0, false end
+	local grudge = st.grudge[Bounty.Who(e.killerName)]
+	local level = Bounty.ClaimLevel(e.hl, e.hf, st.hl)
+	local revenge = grudge ~= nil and grudge <= at
+	return Bounty.ClaimPoints(level, t.current, revenge), level, revenge
+end
+
+-- A kill paid: the killer's grudge against him closed (paid or not), a new cycle's levels.
+function Bounty.Closed(t, e)
+	local st = Bounty.Due(t, Whole(e.at, 0, 4294967295) or 0)
+	st.grudge[Bounty.Who(e.killerName)] = nil
+	st.hl = nil
+end
+
+-- This client's own guild, as the game says it.
+function Bounty.OwnGuild()
+	if type(GetGuildInfo) ~= "function" then return nil end
+	local ok, guild = pcall(GetGuildInfo, "player")
+	return ok and not Secret(guild) and type(guild) == "string" and guild ~= "" and guild or nil
+end
+
+-- This player's level now, 0 when the game gives none.
+function Bounty.OwnLevel()
+	local level = Share.UnitLevel("player")
+	return level and level >= 1 and math.min(level, Bounty.LevelMax()) or 0
+end
+
+-- A level as this client saw it (Share.UnitLevel, Share.SeenLevel): the level, and whether it is a
+-- floor (the game's "??": this player's level plus HIDDEN_GAP); 0 for none.
+function Bounty.Seen(raw)
+	local max = Bounty.LevelMax()
+	if raw == -1 then return math.min(Bounty.OwnLevel() + Bounty.SCORE.HIDDEN_GAP, max), true end
+	if type(raw) == "number" and raw >= 1 then return math.min(math.floor(raw), max), false end
+	return 0, false
+end
+
+-- Whether name is the master of guild: on his own client the game's own rank for him; else
+-- Data.AuthorizedRank (this client's own roster for its guild, the signed leadership manifest, or
+-- the Crown's census rule: two senders, one of them someone else). Never one report.
+function Bounty.GuildMaster(name, guild)
+	if SameName(name, ns.me) then
+		local ok, mine, _, rank = pcall(GetGuildInfo, "player")
+		if ok and not Secret(mine, rank) and mine == guild then return rank == 0 end
+	end
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.AuthorizedRank) ~= "function" then return false end
+	local ok, rank = pcall(D.AuthorizedRank, name, guild)
+	return ok and rank == 0
+end
+
+-- A member's highest office, from what this client can trust (the section's head): "K", "H",
+-- "G", "C", "O" or "M". guild: the guild he is of (his own client: the game's; a receiver: the one
+-- it heard him speak for, else the one his row names).
+function Bounty.OfficeOf(name, guild)
+	name = CleanName(name)
+	if not name then return "M" end
+	guild = type(guild) == "string" and guild ~= "" and not Secret(guild) and guild or nil
+	local function Is(fn, ...)
+		if type(fn) ~= "function" then return false end
+		local ok, yes = pcall(fn, ...)
+		return ok and yes == true
+	end
+	local master = guild ~= nil and Is(ns.IsFederation, guild) and Bounty.GuildMaster(name, guild)
+	if Is(ns.IsKingCharacter, name) then return "K" end
+	if master and Is(ns.IsKingGuild, guild) and type(ns.KingCharacter) == "function" and ns.KingCharacter() == nil then return "K" end
+	if Is(ns.IsHighCouncillor, name) then return "H" end
+	if master then return "G" end
+	local N, role = ns.Nominees, nil
+	if guild and type(N) == "table" and not N.missing and type(N.RoleOf) == "function" then
+		local ok, r = pcall(N.RoleOf, name, guild)
+		role = ok and r or nil
+	end
+	if role == "centurion" then return "C" end
+	local K, W = ns.King, ns.Workshop
+	if role == "correspondent" or Is(ns.IsSteward, name) or type(K) == "table" and not K.missing and Is(K.IsHandName, name)
+		or Is(ns.IsTreasurerCharacter, name) or Is(ns.IsSignedArbiter, name)
+		or type(W) == "table" and not W.missing and Is(W.IsAuthorName, name) then return "O" end
+	return "M"
+end
+
+-- A member's level as this client sees it: a unit of his (his GUID's token, the target, the focus,
+-- the mouse's, his party or raid), else this client's own guild's fresh roster; nil for none.
+function Bounty.MemberLevel(name, guid)
+	local ident = Identity(name, guid)
+	if not ident then return nil end
+	local units = { "target", "focus", "mouseover" }
+	for i = 1, 4 do units[#units + 1] = "party" .. i end
+	for i = 1, 40 do units[#units + 1] = "raid" .. i end
+	if ident.guid and type(UnitTokenFromGUID) == "function" then
+		local ok, token = pcall(UnitTokenFromGUID, ident.guid)
+		if ok and type(token) == "string" and not Secret(token) then table.insert(units, 1, token) end
+	end
+	for _, unit in ipairs(units) do
+		if UnitMatches(unit, ident) then
+			local level = Share.UnitLevel(unit)
+			if level and level >= 1 then return level end
+		end
+	end
+	local R = ns.Roster
+	local ok, fresh = false, nil
+	if type(R) == "table" and type(R.Fresh) == "function" then ok, fresh = pcall(R.Fresh) end
+	if ok and type(fresh) == "table" and type(fresh.members) == "table" and ident.name then
+		local want = ns.Fold(ns.FullName(ident.name))
+		for _, m in ipairs(fresh.members) do
+			if type(m) == "table" and type(m.full) == "string" and ns.Fold(m.full) == want then return Whole(m.level, 1, 255) end
+		end
+	end
+	return nil
+end
+
+-- What this client's own row is worth, frozen now (its own death, its own killing blow): its
+-- player's office and level, and the Horde player's level as it sees him.
+function Bounty.Capture(hordeGuid)
+	local hl, hf = Bounty.Seen(Share.SeenLevel(hordeGuid))
+	return { office = Bounty.OfficeOf(ns.me, Bounty.OwnGuild()), ml = Bounty.OwnLevel(), hl = hl, hf = hf or nil }
+end
+
+-- What a shared row is worth, as this client freezes it (Share.Take): its sender's office no
+-- higher than the row says and than this client verifies (a reviewer's relay: as his client froze
+-- it, on his word, as the sender's membership is), his level no higher than the row says and than
+-- this client sees of him, the Horde player's no higher than it sees of him; each within the
+-- game's highest level. guild: the one the row names.
+function Bounty.Intake(worth, from, guild, relay, ownGuid, hordeGuid)
+	worth = Bounty.Fields(worth)
+	if not worth then return nil end
+	local max = Bounty.LevelMax()
+	if not relay then
+		local M, heard = ns.Moderation, nil
+		if type(M) == "table" and not M.missing and type(M.GuildOf) == "function" then
+			local ok, g = pcall(M.GuildOf, from)
+			heard = ok and type(g) == "string" and g or nil
+		end
+		worth.office = Bounty.Lower(worth.office, Bounty.OfficeOf(from, heard or Sight.GuildName(guild)))
+	end
+	worth.ml = math.min(worth.ml, Bounty.MemberLevel(from, ownGuid) or worth.ml, max)
+	local seen = Share.SeenLevel(hordeGuid)
+	worth.hl = math.min(worth.hl, type(seen) == "number" and seen >= 1 and seen or worth.hl, max)
+	if worth.hl == 0 then worth.hf = nil end
+	return worth
+end
+
+-- A death recap's killing blow, as the game's Death Recap shows it (Blizzard_DeathRecap.lua: the
+-- rows newest first, the first with overkill 0 or more is the one that killed): { row, stamp (its
+-- time, the server's seconds), at (whole), guid, name, key (what marks it read) }, or nil and why
+-- ("secret", "fatal": none, "stale": no time) and the name it gives.
+function Bounty.KillingBlow(events)
+	for i = 1, #events do
+		local row = events[i]
+		if type(row) == "table" then
+			if Secret(row.sourceGUID, row.sourceName, row.sourceFlags, row.event, row.overkill, row.timestamp) then return nil, "secret" end
+			if Whole(row.overkill, 0, 2147483647) then
+				local ok, stamp = pcall(tonumber, row.timestamp)
+				local name = Clean(row.sourceName, 72)
+				if not ok or type(stamp) ~= "number" or stamp ~= stamp or stamp < 0 or stamp > 4294967295 then return nil, "stale", name end
+				local guid = Guid(row.sourceGUID) or Clean(row.sourceGUID, 64) or "?"
+				return { row = row, stamp = stamp, at = math.floor(stamp), guid = row.sourceGUID, name = name,
+					key = guid .. "@" .. math.floor(stamp) }
+			end
+		end
+	end
+	return nil, "fatal"
+end
+
+-- A killing blow's killer, when it is a hostile player's damage (flags 0x440, where the row has
+-- flags) and a Horde player this client proves (Share.HordeOf): his identity, or nil and why.
+function Bounty.Hostile(kb)
+	local row = kb.row
+	if type(row.event) ~= "string" or not row.event:match("_DAMAGE$") then return nil, "event" end
+	local flags = row.sourceFlags
+	if flags ~= nil and not (Whole(flags, 0, 2147483647) and bit.band(flags, 0x440) == 0x440) then return nil, "flags" end
+	return Share.HordeOf(row.sourceGUID, row.sourceName)
+end
+
+-- A recap marked read (s.recapsRead, RECAP_READ_MAX: the oldest go): it never counts again.
+function Bounty.MarkRead(kb, s)
+	s = s or Store(true)
+	if not s or type(kb) ~= "table" or type(kb.key) ~= "string" then return end
+	s.recapsRead[kb.key] = kb.at
+	Bounty.TrimRead(s)
+end
+function Bounty.TrimRead(s)
+	local keys = {}
+	for key in pairs(s.recapsRead) do keys[#keys + 1] = key end
+	if #keys <= Bounty.RECAP_READ_MAX then return end
+	table.sort(keys, function(a, b)
+		local x, y = tonumber(s.recapsRead[a]) or 0, tonumber(s.recapsRead[b]) or 0
+		if x ~= y then return x < y end
+		return a < b
+	end)
+	for i = 1, #keys - Bounty.RECAP_READ_MAX do s.recapsRead[keys[i]] = nil end
+end
+
+-- This client's own times in an instance (s.inside: { from, to }, the newest INSIDE_MAX): noted at
+-- each login and change of zone, for a member.
+function Bounty.Spans()
+	if not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" then return end
+	local s = Store(true)
+	if not s then return end
+	local now, inside = math.floor(Clock()), InInstance()
+	local last = s.inside[#s.inside]
+	local open = type(last) == "table" and last.to == nil
+	if inside and not open then s.inside[#s.inside + 1] = { from = now }
+	elseif not inside and open then last.to = now end
+	while #s.inside > Bounty.INSIDE_MAX do table.remove(s.inside, 1) end
+end
+
+-- Whether a time falls in one of them (DEATH_WINDOW around it).
+function Bounty.Inside(s, at)
+	for _, span in ipairs(s.inside) do
+		local from = type(span) == "table" and tonumber(span.from) or nil
+		local to = type(span) == "table" and tonumber(span.to) or math.huge
+		if from and at >= from - Wanted.DEATH_WINDOW and at <= to + Wanted.DEATH_WINDOW then return true end
+	end
+	return false
+end
+
+-- One earlier death through the live death's gate: true and the row recorded, or false, why and
+-- the killer's name.
+function Bounty.TakeEarlier(s, kb, mine, now)
+	if kb.stamp > now + 1 or now - kb.at > Wanted.SHARE_AGE then return false, "stale", kb.name end
+	if Bounty.Inside(s, kb.at) then return false, "instance", kb.name end
+	local horde, why = Bounty.Hostile(kb)
+	if not horde then return false, why, kb.name end
+	-- (Its id is the live death's own, "native:" and the killing blow's time: a death counted
+	-- when it happened is a "replay" here.)
+	local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(kb.stamp), horde, mine,
+		{ precision = "approximate", horde = "killer", own = true, earlier = true, at = kb.at, bounty = Bounty.Capture(horde.guid) })
+	if ok then Share.Send(e) end
+	return ok, e, horde.name
+end
+
+-- The earlier deaths, read (once a login, outside an instance): returns how many were added, or 0
+-- and why none was read. The ones added wait for their notice (s.earlierNotice). The recaps: the
+-- latest (no ID), and the IDs from 1 up the game answers for.
+function Bounty.Earlier()
+	local session = Bounty.session
+	if session.read then return 0, "read" end
+	if not ns.IsMember or ns.IsMember() ~= true or not ns.me then return 0, "member" end
+	if ns.faction == "Horde" then return 0, "faction" end
+	if InInstance() then return 0, "instance" end
+	local recap = C_DeathRecap
+	if type(recap) ~= "table" or type(recap.HasRecapEvents) ~= "function" or type(recap.GetRecapEvents) ~= "function" then return 0, "recap" end
+	local mine, s = UnitIdentity("player"), Store(true)
+	if not mine or not s then return 0, "identity" end
+	session.read = true
+	Bounty.Spans()
+	local found, order = {}, {}
+	local function Read(id)
+		local okH, has = pcall(recap.HasRecapEvents, id)
+		if not okH or Secret(has) or has ~= true then return false end
+		local okR, events = pcall(recap.GetRecapEvents, id)
+		local kb = okR and type(events) == "table" and Bounty.KillingBlow(events) or nil
+		if kb and not found[kb.key] then found[kb.key] = true order[#order + 1] = kb end
+		return true
+	end
+	Read(nil)
+	local answered, misses = false, 0
+	for id = 1, Bounty.RECAP_IDS do
+		if Read(id) then answered, misses = true, 0
+		elseif answered then
+			misses = misses + 1
+			if misses >= Bounty.RECAP_MISSES then break end
+		end
+	end
+	-- (The newest first, EARLIER_MAX added at most, so that every member's client takes them all
+	-- within its limit for one member, SHARE_RATE_MAX a minute; the rest wait unread for the next
+	-- login. Each goes in the order of the deaths: RecordKill.)
+	table.sort(order, function(a, b)
+		if a.stamp ~= b.stamp then return a.stamp > b.stamp end
+		return a.key < b.key
+	end)
+	local now, added = math.floor(Clock()), {}
+	for _, kb in ipairs(order) do
+		if #added >= Bounty.EARLIER_MAX then break end
+		if not s.recapsRead[kb.key] then
+			local ok, e, who = Bounty.TakeEarlier(s, kb, mine, now)
+			Bounty.MarkRead(kb, s)
+			if ok then added[#added + 1] = e end
+			-- (/oly wanted status: a player's killing blow, not a creature's.)
+			if ok or Guid(kb.guid) then Share.Note("earlier", ok, e, who or kb.name) end
+		end
+	end
+	session.added = (session.added or 0) + #added
+	if #added == 0 then return 0 end
+	-- (What each added, read after them all, the oldest first: one may have changed another's, REPEAT_GAP.)
+	table.sort(added, function(a, b)
+		if a.at ~= b.at then return a.at < b.at end
+		return a.id < b.id
+	end)
+	local n = type(s.earlierNotice) == "table" and type(s.earlierNotice.rows) == "table" and s.earlierNotice or { rows = {} }
+	for _, e in ipairs(added) do
+		local t = s.targets[e.targetKey]
+		n.rows[#n.rows + 1] = { id = e.id, name = t and t.name or e.killerName, hl = e.hl, hf = e.hf, at = e.at, points = e.points }
+	end
+	while #n.rows > Wanted.MAX_VICTIMS do table.remove(n.rows, 1) end
+	s.earlierNotice = n
+	Bounty.NoticeSoon()
+	return #added
+end
+
+-- Why the notice waits now, or nil: combat, an instance, a death, the privacy page (shown, or
+-- waiting to ask this session: Consent.Waiting, as the version letter waits for it).
+function Bounty.Busy()
+	if type(InCombatLockdown) == "function" then
+		local ok, yes = pcall(InCombatLockdown)
+		if not ok or yes then return "combat" end
+	end
+	if InInstance() then return "instance" end
+	local okD, dead = pcall(function() return UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") end)
+	if not okD or dead == true then return "dead" end
+	local C = ns.Consent
+	if type(C) == "table" and not C.missing then
+		local ok, shown = pcall(function()
+			local f = type(C.Frame) == "function" and C.Frame() or nil
+			return f and f.IsShown and f:IsShown() or type(C.Waiting) == "function" and C.Waiting() == true
+		end)
+		if not ok or shown then return "privacy" end
+	end
+	return nil
+end
+
+-- The notice's text: each death added a line (its row's points now, while the row is held: none
+-- once a reviewer voided it), or nil for none.
+function Bounty.NoticeText(s)
+	local n = s and s.earlierNotice
+	if type(n) ~= "table" or type(n.rows) ~= "table" then return nil end
+	local live = {}
+	for _, e in ipairs(s.evidence) do if type(e) == "table" and e.id then live[e.id] = e end end
+	local dateFn = date or (os and os.date)
+	local lines, count = { L.WANTED_EARLIER_INTRO, "" }, 0
+	for _, r in ipairs(n.rows) do
+		local e = type(r) == "table" and live[r.id] or nil
+		if type(r) == "table" and not (e and e.void) then
+			local hl = Bounty.Level(r.hl)
+			local level = hl > 0 and (r.hf and L.WANTED_LEVEL_FLOOR:format(hl) or tostring(hl)) or L.WANTED_LEVEL_UNKNOWN
+			local at = Whole(r.at, 0, 4294967295) or 0
+			local when = type(dateFn) == "function" and dateFn("%H:%M", at) or tostring(at)
+			lines[#lines + 1] = L.WANTED_EARLIER_ROW:format(Display({ name = CleanName(r.name) }), level, when,
+				Whole(e and e.points or r.points, 0, Wanted.MAX_POINTS) or 0)
+			count = count + 1
+		end
+	end
+	if count == 0 then return nil end
+	lines[#lines + 1] = ""
+	lines[#lines + 1] = L.WANTED_EARLIER_END
+	return table.concat(lines, "\n")
+end
+
+-- The notice shown, when nothing makes it wait, in the Olympus copy window (opened by itself: it
+-- takes no keyboard, UI.ShowCopy's auto), and gone from the saved data: once. true, or false and
+-- why ("none", "ui", or what it waits for: Bounty.Busy).
+function Bounty.ShowNotice()
+	local s = Store(false)
+	if not s or type(s.earlierNotice) ~= "table" then return false, "none" end
+	local busy = Bounty.Busy()
+	if busy then return false, busy end
+	local UI = ns.UI
+	if type(UI) ~= "table" or type(UI.ShowCopy) ~= "function" then return false, "ui" end
+	local text = Bounty.NoticeText(s)
+	s.earlierNotice = nil
+	if not text then return false, "none" end
+	UI.ShowCopy(L.WANTED_EARLIER_TITLE, text, nil, { key = "wanted-earlier", auto = true })
+	Bounty.session.told = (Bounty.session.told or 0) + 1
+	return true
+end
+
+-- The notice now, else again every NOTICE_TICK while it waits for something (one beat a session).
+function Bounty.NoticeSoon()
+	local shown, why = Bounty.ShowNotice()
+	if shown or why == "none" or why == "ui" or Bounty.session.ticking or not ns.After then return shown end
+	Bounty.session.ticking = true
+	local gen = Bounty.session.gen
+	local function Tick()
+		if gen ~= Bounty.session.gen then return end
+		local ok, wait = Bounty.ShowNotice()
+		if ok or wait == "none" or wait == "ui" then Bounty.session.ticking = false return end
+		ns.After(Bounty.NOTICE_TICK, "wanted earlier notice", Tick)
+	end
+	ns.After(Bounty.NOTICE_TICK, "wanted earlier notice", Tick)
+	return false
+end
+
+-- At login (and each /reload): this client's instance time noted; the earlier deaths read
+-- EARLIER_WAIT later (outside an instance: else when it next leaves one, Bounty.Zone); a notice
+-- saved before the reload shown when it can.
+function Bounty.Login()
+	local session = Bounty.session
+	session.gen = (session.gen or 0) + 1
+	session.read, session.due, session.ticking = false, false, false
+	Bounty.Spans()
+	local gen = session.gen
+	if ns.After then
+		ns.After(Bounty.EARLIER_WAIT, "wanted earlier deaths", function()
+			if gen ~= session.gen then return end
+			session.due = true
+			Bounty.Earlier()
+		end)
+	end
+	local s = Store(false)
+	if s and type(s.earlierNotice) == "table" then Bounty.NoticeSoon() end
+end
+
+-- A change of zone (into an instance, or out): noted; out of one, the earlier deaths when they
+-- were due, and a notice that waited.
+function Bounty.Zone()
+	Bounty.Spans()
+	if InInstance() then return end
+	if Bounty.session.due and not Bounty.session.read then Bounty.Earlier() end
+	local s = Store(false)
+	if s and type(s.earlierNotice) == "table" then Bounty.NoticeSoon() end
+end
+
 -- /oly wanted status: what Most Wanted holds and did this session, in the copy window (a chat line
 -- cannot be copied): the store, the sources it reads (the game's own APIs, the native kill event's
 -- registration), what this client captured and shared, what it heard, and why each capture or row
--- was refused, the newest first, with a key to the reasons.
+-- was refused, the newest first, with a key to the reasons. 1.2.3: the bounty's weights, each Horde
+-- player's bounty in points and the Slayers' points (the highest first), and the earlier deaths.
+Wanted.STATUS_ROWS = 10 -- bounties and Slayers listed, each
 function Wanted.StatusText()
 	local s = Store(false)
 	local out = {}
@@ -3585,16 +4315,37 @@ function Wanted.StatusText()
 	local reasons = {}
 	for why, count in pairs(Share.why) do if count > 0 then reasons[#reasons + 1] = why .. " " .. count end end
 	table.sort(reasons)
+	Add(L.WANTED_STATUS_EARLIER_LINE:format(n.earlier or 0, Bounty.session.added or 0))
 	Add(L.WANTED_STATUS_REFUSED:format(#reasons > 0 and table.concat(reasons, ", ") or "-"))
+	Add("")
+	local S = Bounty.SCORE
+	Add(L.WANTED_STATUS_WEIGHTS:format(S.OFFICE.K, S.OFFICE.H, S.OFFICE.G, S.OFFICE.C, S.OFFICE.O, math.floor(S.REPEAT_GAP / 60), S.BOUNTY_MAX,
+		S.HORDE_LEVEL, S.REVENGE, S.GRUDGE_DAYS))
+	Add(L.WANTED_STATUS_BOUNTIES)
+	local listed = 0
+	for _, t in ipairs(Wanted.Targets(true)) do
+		if t.current > 0 and listed < Wanted.STATUS_ROWS then
+			listed = listed + 1
+			Add(L.WANTED_STATUS_BOUNTY_ROW:format(Display(t), t.current, t.lifetimeKills))
+		end
+	end
+	if listed == 0 then Add("  " .. L.WANTED_STATUS_NONE) end
+	Add(L.WANTED_STATUS_SLAYERS)
+	local all = Wanted.Rankings().all
+	for i = 1, math.min(#all, Wanted.STATUS_ROWS) do
+		Add(L.WANTED_STATUS_SLAYER_ROW:format(i, all[i].name and (ns.DisplayName and ns.DisplayName(all[i].name) or all[i].name) or L.WANTED_UNKNOWN,
+			all[i].points, all[i].claims or 0))
+	end
+	if #all == 0 then Add("  " .. L.WANTED_STATUS_NONE) end
 	Add("")
 	Add(L.WANTED_STATUS_LAST)
 	local kinds = { kill = L.WANTED_STATUS_KILL, death = L.WANTED_STATUS_DEATH, heard = L.WANTED_STATUS_HEARD,
-		relay = L.WANTED_STATUS_RELAY, mark = L.WANTED_STATUS_MARK }
+		relay = L.WANTED_STATUS_RELAY, mark = L.WANTED_STATUS_MARK, earlier = L.WANTED_STATUS_EARLIER }
 	local dateFn = date or (os and os.date)
 	for i = #Share.log, 1, -1 do
 		local r = Share.log[i]
 		local when = type(dateFn) == "function" and dateFn("%H:%M:%S", r.at) or tostring(r.at)
-		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0) or L.WANTED_STATUS_BOUNTY)
+		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0) or L.WANTED_STATUS_BOUNTY:format(r.points or 0))
 			or L.WANTED_STATUS_REFUSAL:format(r.why or "?")
 		Add(("  %s  %s  %s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "", result))
 	end
@@ -3668,7 +4419,14 @@ function Wanted.Prune()
 				precision = e.precision == "consented" and "consented" or "approximate", void = e.void == true,
 				correctedAt = Whole(e.correctedAt, 0, 4294967295), correctedBy = CleanName(e.correctedBy),
 				correction = Clean(e.correction, 80), from = CleanName(e.from), digest = digest,
-				peer = peer or nil, own = e.own == true and not peer or nil, shared = e.shared == true or nil }
+				peer = peer or nil, own = e.own == true and not peer or nil, shared = e.shared == true or nil,
+				earlier = e.earlier == true and not peer or nil }
+			-- (1.2.3: what it is worth, as frozen; a malformed one is none: it counts as a row without it.)
+			local worth = Bounty.Fields(e)
+			if worth then
+				local kept = evidence[#evidence]
+				kept.office, kept.ml, kept.hl, kept.hf = worth.office, worth.ml, worth.hl, worth.hf
+			end
 		end
 	end
 	-- (In the order of the deaths, as RecordKill keeps them.)
@@ -3711,6 +4469,31 @@ function Wanted.Prune()
 			or type(v.digest) ~= "string" or now - v.at > Wanted.SHARE_AGE then s.voids[key] = nil end
 	end
 	s.foldedAt = Whole(s.foldedAt, 0, 4294967295)
+	-- 1.2.3: the recaps read (by shape, within SHARE_AGE and RECAP_READ_MAX), this client's own
+	-- times in an instance (whole, in order, INSIDE_MAX), and the earlier deaths' notice waiting.
+	for key, at in pairs(s.recapsRead) do
+		if type(key) ~= "string" or #key > 96 or not Whole(at, 0, 4294967295) or now - at > Wanted.SHARE_AGE then s.recapsRead[key] = nil end
+	end
+	Bounty.TrimRead(s)
+	local inside = {}
+	for _, span in ipairs(s.inside) do
+		local from = type(span) == "table" and Whole(span.from, 0, 4294967295) or nil
+		local to = type(span) == "table" and Whole(span.to, from or 0, 4294967295) or nil
+		if from and (span.to == nil or to) and now - (to or now) <= Wanted.SHARE_AGE then inside[#inside + 1] = { from = from, to = to } end
+	end
+	while #inside > Bounty.INSIDE_MAX do table.remove(inside, 1) end
+	s.inside = inside
+	local notice = type(s.earlierNotice) == "table" and type(s.earlierNotice.rows) == "table" and s.earlierNotice.rows or {}
+	local waiting = {}
+	for _, r in ipairs(notice) do
+		local id = type(r) == "table" and Clean(r.id, 160) or nil
+		if id and Whole(r.at, 0, 4294967295) then
+			waiting[#waiting + 1] = { id = id, name = CleanName(r.name), hl = Bounty.Level(r.hl), hf = r.hf == true or nil, at = r.at,
+				points = Whole(r.points, 0, Wanted.MAX_POINTS) or 0 }
+		end
+	end
+	while #waiting > Wanted.MAX_VICTIMS do table.remove(waiting, 1) end
+	s.earlierNotice = #waiting > 0 and { rows = waiting } or nil
 	-- 1.2.2's review: its ledger (a reviewer's accepted rows) and when his evidence went to each
 	-- reviewer. There is no review any more (1.2.3); they count for nothing and are dropped.
 	s.ledger, s.sentAt = nil, nil
@@ -3755,6 +4538,8 @@ function Wanted.Load()
 	ScheduleLease(leaseGen, Wanted.REVIEWER_FIRST)
 	Share.resendGen = (Share.resendGen or 0) + 1
 	Share.ScheduleResend(Share.resendGen, Wanted.SHARE_RESEND_FIRST)
+	-- 1.2.3: the earlier deaths (this session's death recaps), read EARLIER_WAIT after login.
+	Bounty.Login()
 	if ns.Every and not pinTicker then
 		pinTicker = true
 		ns.Every(Wanted.SIGHT_TICK, "wanted pins", Wanted.RefreshPins)
@@ -3785,6 +4570,7 @@ function Wanted.ResetForTests()
 	Share.log, Share.why, Share.counts, Share.deathRow = {}, {}, {}, nil
 	Share.catchReplied, Share.catchHeard = -math.huge, -math.huge
 	Share.resendGen = (Share.resendGen or 0) + 1
+	Bounty.session = { gen = (Bounty.session.gen or 0) + 1 }
 end
 
 if ns.UI and ns.UI.AddTab then
@@ -3845,8 +4631,9 @@ end)
 ns.RegisterEvent("NAME_PLATE_UNIT_ADDED", function(unit) Wanted.ObserveUnit(unit) end)
 ns.RegisterEvent("PLAYER_TARGET_CHANGED", function() Wanted.ObserveUnit("target") end)
 ns.RegisterEvent("UPDATE_MOUSEOVER_UNIT", function() Wanted.ObserveUnit("mouseover") end)
-ns.RegisterEvent("PLAYER_ENTERING_WORLD", function() Wanted.RefreshPins() end)
-ns.RegisterEvent("ZONE_CHANGED_NEW_AREA", function() Wanted.RefreshPins() end)
+-- (1.2.3: and the bounty's: this client's own times in an instance, what waited for the outside.)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", function() Wanted.RefreshPins() Bounty.Zone() end)
+ns.RegisterEvent("ZONE_CHANGED_NEW_AREA", function() Wanted.RefreshPins() Bounty.Zone() end)
 -- (1.2.3: no WX handler, 1.2.2's evidence whispered for a review: there is none any more, and a
 -- member of 1.2.2 who still sends one is heard by nobody.)
 if ns.Comm and ns.Comm.Handle then

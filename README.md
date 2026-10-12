@@ -1641,9 +1641,8 @@ free-for-all zone) or a race of both factions with no Horde unit seen, nor while
 the identities (an unfinished PvP match).
 
 Each own row goes at once to the Olympus channel, and every member's client adds it to its own
-Wanted and Slayers boards: a death opens a bounty on the Horde player, a killing blow claims his
-open bounty and its points (a kill of a Horde player with no open bounty records the claim and
-scores nothing). A client takes a row only from a member it can verify (its own guild's roster, or
+Wanted and Slayers boards: a death adds to the Horde player's bounty, a killing blow claims it.
+A client takes a row only from a member it can verify (its own guild's roster, or
 a guild rank it can verify), about that member's own death or killing blow (the Olympian is the
 sender as the server names him; his GUID only where the receiving client can prove it is his), of
 its own realm group and faction, at most 7 days old, once, eight a minute from one member and
@@ -1652,6 +1651,39 @@ what his client took, so members of other guilds count it too, and answers a lat
 catch-up with the newest rows. They alone can **Take off** an abusive entry or **Void** one row
 afterwards: their word reaches every client, what it counted stops counting, and a later event does
 not bring it back. There is no review and no Send evidence any more.
+
+**The bounty (1.2.3).** A death adds to the Horde player's bounty the victim's office and his
+level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any
+other office 10 (a Steward, an arbiter, one of the King's Hands, a correspondent, the Treasurer's
+and the author's characters), a member 0; one office only, the highest. The same member killed
+by the same Horde player counts once in 10 minutes (corpse camping), and one bounty holds 2000
+points at most. A killing blow pays twice the Horde player's level and his whole bounty, which
+then starts again at 0; a kill with no bounty open pays the level part alone. A member who kills
+the very Horde player who killed him within 14 days gets 100 more, once for each such kill. A
+Slayer holds 100000 points at most. Nothing counts in an instance (a battleground, an arena, a
+dungeon, a raid), the death nor the kill. Offices come only from what your client can trust: the
+pinned King, the signed High Council list, the game's own rank (or the roster, the signed
+leadership or the Crown's census rule of two senders) for a guild master, his guild master's own
+list for a centurion or correspondent, the signed titles; never a census rank alone, a guild
+officer's rank or what a row says. Levels are the game's: your own from your client at the death
+or kill, the Horde player's from a unit of his (his corpse, a nameplate, the target, or one seen
+within a minute), a level the game hides (??) as your level plus 10 at least, none 0; a kill
+whose level is hidden or unseen counts the highest exact level a death of the open bounty saw.
+Each row carries what it is worth, frozen where it was observed, and every client scores the
+same rows the same way, never higher than it can verify (an office it cannot check, a level
+above one it sees), so every client shows the same points. A row from a client before these
+fields counts as it did: 1 a death, a kill its open bounty.
+
+**Earlier deaths (1.2.3).** Olympus kept no death before 1.2.3, and the game keeps no PvP history,
+but its death recaps of the current game session are still there (gone when the game closes).
+Once a login, a moment after it, your client reads every recap the game still holds, applies the
+live death's own checks to each (a Horde player's killing blow, never in an instance, the same
+10 minutes and caps, your office and level as they are now), shares each one it adds as a live
+death, and never reads one twice. It tells you once, in an Olympus copy window (never the chat
+or the game's pop-ups, and it takes no keyboard), each death added as a line: the killer, his
+level, the time and the points it added to his bounty; nothing when none was added. The window
+waits out combat, an instance, a death and the privacy page. A death typed or reported by hand is
+never taken.
 
 Wanted holds the 200 most recently active Horde players and never refuses a new one: past 200 the
 least active goes (one with nothing open and nothing paid first), and what his claims paid stays
@@ -2041,7 +2073,7 @@ message (the game adds it). What goes where:
 | The Church: what your addon read in your guild's log (an invite by a Church person and the join after it: both names, your guild, the hours), a registration (the name), your public-row choice | the Church's keepers online (the Head, the Apostles, the author), alone (whispers); kept on your client up to 7 days while none is online | a Church person's own addon every 5 minutes; any other member's only where a Church person was heard in the guild lately, drawn so that about two of each guild read; your own invite count and your guild's joins and leaves are never sent |
 | The Church's seen-check (a name) and its answer (the guild your roster saw him in, the first and last day, whether he is in it now) | the check: everyone on the Olympus channel, from the desk (a keeper). The answer: that keeper alone (a whisper) | the desk asks about each new recruit, a registered one on its days and 7 days after a join; about two clients of each guild that knew the name answer |
 | The Church's numbers (rankings, a person's detail) and the keepers' ledger | the Church's audience who asked (the Church, the High Council, the King, the author), alone; the ledger between keepers alone | when a member of that audience opens the tab or refreshes; never on the channel, except, while the author's switch is open, the rows of the people who chose to show theirs and the top 3 of each ranking (names only) |
-| Most Wanted, your own death to a Horde player or your own killing blow on one (WK, 1.2.3): the Horde player's GUID and name, your GUID, the time and month, bounty or claim, your guild, the realm group's digest | everyone on the Olympus channel | at once, by itself (no Send, no review), and again after a login if the channel did not take it; never where it happened, never in an instance |
+| Most Wanted, your own death to a Horde player or your own killing blow on one (WK, 1.2.3): the Horde player's GUID and name, your GUID, the time and month, bounty or claim, your guild, the realm group's digest, and what it is worth (your office as your client verifies it, your level, the Horde player's level as your client saw him) | everyone on the Olympus channel | at once, by itself (no Send, no review), and again after a login if the channel did not take it; once a login, the deaths the game's death recaps still hold this session, each once; never where it happened, never in an instance |
 | A reviewer's relay of a member's row (WK, 1.2.3): the same row, the member's name, and whether the reviewer's client proved the GUID his | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client: once for each row it took from a member, and in its answer to a late login's catch-up (W4), the newest rows only |
 | A reviewer's removal or void (WV, 1.2.3): a Horde player's GUID, or a member's name and his row's digest, and when | everyone on the Olympus channel | when the King, a High Councillor or the author takes an abusive entry off or voids a row, and in his catch-up answer |
 | The signed Slayers top three (WY): GUIDs, scores, claims and tie times, with the issuer, signature and expiry | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client, from his own Slayers board (1.2.3: no review); an unchanged verified word may also be relayed by one of these roles (W5) |
@@ -2068,7 +2100,9 @@ verify for the guild the row names; a claimed guild alone is not enough, and an 
 of another guild counts there through a reviewer's relay. A death must be the sender's own (S, a
 bounty), a claim the sender's own killing blow (P); a row naming another character's GUID as the
 sender is refused, and a GUID the receiving client cannot name is left off the row (the sender by
-his name alone, never a frame by a name). A client before 1.2.3 ignores WK and WV, and nobody
+his name alone, never a frame by a name). What a row is worth (the bounty) counts no higher than
+the row says nor than the receiving client can verify: an office it cannot check counts as a
+member's, a level above one it sees as that one. A client before 1.2.3 ignores WK and WV, and nobody
 reads 1.2.2's WX whispers any more. This does not guarantee that every death is recorded: the
 game must give the recap and the kill event, and a late login sees only the newest rows of a
 reviewer online.
