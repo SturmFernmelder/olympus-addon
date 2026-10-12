@@ -320,6 +320,61 @@ test("1.1.6 Church: the right-click line: an Apostle or a missionary names a mis
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.4 (an Apostle's report on 1.2.3: "can't name missionaries anymore"). One parent's ten
+-- (Church.NAMES_PER, the same since 1.2.0, with no time window: only a removal frees a place) left
+-- him nothing to read: the Name page's header went dead, the People page's line and the
+-- right-click line vanished, and only /oly church name said why, with no count. Each way to name
+-- now says he has named 10 of 10, the most one may, and what frees a place.
+test("1.2.4 Church: an Apostle at his ten is told why and how many he named, wherever he names from", function()
+	local w, c = Cast()
+	for i = 1, 9 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	local per = c.a1.Church.NAMES_PER
+	eq(w:As(c.a1, c.a1.Church.Rights).missionary, 0, "Mira Wells and nine more: his ten")
+	-- The Name page: the header with none left, then the reason with his count, and what frees a place.
+	local name = Build(w, c.a1, "name")
+	local header = Find(name, L.CHURCH_NAME_MISSIONARY:format(0, per))
+	assert(header, Texts(name))
+	eq(header.onClick, nil, "no dialog for an eleventh")
+	assert(Find(name, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(name))
+	assert(Find(name, L.CHURCH_QUOTA_HOW), Texts(name))
+	-- The People page: the missionaries' group and his own row say so instead of losing the line.
+	local people = Build(w, c.a1, "people")
+	assert(Find(people, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(people))
+	Find(people, "Aldric Vane").onClick()
+	people = Build(w, c.a1, "people")
+	eq(Find(people, L.CHURCH_ACT_NAME_UNDER:format("Aldric Vane")), nil, "no naming line past his ten")
+	local full = Find(people, L.CHURCH_ACT_UNDER_FULL:format("Aldric Vane", per, per))
+	assert(full and full.onClick == nil, Texts(people))
+	-- The right-click line stays, greyed, with his count; its tooltip says what he can do.
+	local menu = { buttons = {} }
+	function menu.Button(text, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = text, fn = fn, tip = tip, enabled = enabled } end
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(#menu.buttons, 1)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY_FULL:format(per, per))
+	eq(menu.buttons[1].enabled, false)
+	eq(menu.buttons[1].tip, L.CHURCH_NO_QUOTA_SELF:format(per, per))
+	-- /oly church name: refused, with his count and what frees a place; nobody is named.
+	eq(w:Act(c.a1, c.a1.Church.Slash, "name Kid Eleven"), false)
+	eq(w:Printed(c.a1), L.CHURCH_NO_QUOTA_SELF:format(per, per))
+	eq(w:As(c.member, c.member.Church.Role, "Kid Eleven-Realm"), nil)
+	-- The author naming under him is told it is that Apostle's ten, not his own.
+	eq(w:Act(c.author, c.author.Church.NameMissionary, "Kid Twelve", A1), false)
+	eq(w:Printed(c.author), L.CHURCH_NO_QUOTA_UNDER:format("Aldric Vane", per, per))
+	-- The words on the page (in both languages: the test below) carry both numbers.
+	assert(L.CHURCH_QUOTA_LINE:format(per, per):find(tostring(per) .. "[^%d]+" .. tostring(per)), L.CHURCH_QUOTA_LINE)
+	-- A removal frees a place at once: the page offers the naming again, without the reason.
+	w:Run(61)
+	eq(w:Act(c.a1, c.a1.Church.Remove, "M", "Kid Numbera"), true)
+	name = Build(w, c.a1, "name")
+	local again = Find(name, L.CHURCH_NAME_MISSIONARY:format(1, per))
+	assert(again and again.onClick, Texts(name))
+	eq(Find(name, L.CHURCH_QUOTA_HOW), nil)
+	menu.buttons = {}
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY)
+	eq(menu.buttons[1].enabled, true)
+end)
+
 test("1.1.6 Church: the Church chat button opens the Chat tab on the Church's room; /oly church status opens a window to copy from", function()
 	local w, c = Cast()
 	w:As(c.m1, c.m1.View.OpenChat)
