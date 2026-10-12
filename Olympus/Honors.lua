@@ -1084,7 +1084,7 @@ function Honors.Holdings(player, inputs)
 			held[#held + 1] = Honour("guild", 0, 1, "guild-top-leader", { guild = g.guild })
 		end
 	end
-	-- 1.2.3 (the author's ask): his own title, "The Dev". A title alone (no frame, no mark, no
+	-- 1.2.3 (the author's ask): his own title, "The Royal Dev". A title alone (no frame, no mark, no
 	-- King's letter), held by the author's character (player.author: Workshop.IsAuthorName, his
 	-- name in his realm group, so every client works it out the same); last in ORDER.
 	if player.author == true then

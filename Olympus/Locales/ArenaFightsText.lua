@@ -24,7 +24,7 @@ L.HONOR_TITLES = {
 	["level-race-20"] = "First to 20", ["level-race-40"] = "First to 40", ["level-race-60"] = "First to 60",
 	["guild-top-leader"] = "Wisest of Olympus",
 	["oracle-1"] = "Oracle", ["oracle-2"] = "Seer", ["oracle-3"] = "Soothsayer",
-	["the-dev"] = "The Dev",
+	["the-dev"] = "The Royal Dev",
 }
 L.HONOR_CLASS_TITLE = { "%s Champion", "%s Contender", "%s Challenger" }
 L.HONOR_RACE_TITLE = { "Best %s Fighter", "%s Contender", "%s Challenger" }
@@ -122,7 +122,7 @@ if GetLocale and GetLocale() == "ptBR" then
 		["level-race-20"] = "Primeiro ao 20", ["level-race-40"] = "Primeiro ao 40", ["level-race-60"] = "Primeiro ao 60",
 		["guild-top-leader"] = "O Mais Sábio do Olympus",
 		["oracle-1"] = "Oráculo", ["oracle-2"] = "Vidente", ["oracle-3"] = "Adivinho",
-		["the-dev"] = "The Dev",
+		["the-dev"] = "The Royal Dev",
 	}
 	L.HONOR_CLASS_TITLE = { "Campeão %s", "Desafiante %s", "Pretendente %s" }
 	L.HONOR_RACE_TITLE = { "Melhor Lutador %s", "Desafiante %s", "Pretendente %s" }
