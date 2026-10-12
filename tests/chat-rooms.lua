@@ -57,7 +57,10 @@ local function WithRooms(fn)
 			local codes = { WARRIOR = "WA", MAGE = "MA", PALADIN = "PA" }
 			return codes[file] or ""
 		end }
-		c.Workshop = { IsAuthor = function() return w.author == true end, Visible = function() return w.preview == true end }
+		-- (1.2.4: the author's character by name, w.authorName, and his presence heard, w.authorOnline.)
+		c.Workshop = { IsAuthor = function() return w.author == true end, Visible = function() return w.preview == true end,
+			IsAuthorName = function(name) return w.authorName ~= nil and c.FullName(name):lower() == w.authorName:lower() end,
+			AuthorOnline = function() return w.authorOnline == true end, AuthorName = function() return w.authorName end }
 		c.Moderation = {
 			SelfOff = function() return nil end, YouText = function() return "off" end,
 			Hides = function() return false end, Any = function() return false end,

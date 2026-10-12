@@ -498,6 +498,12 @@ local function NameText(e)
 			tag = " " .. Gold(L.CHATWIN_TAG_HAND)
 		end
 	end
+	-- 1.2.4, the author ("mandar mensagem como desenvolvedor"): his title after his name, on all his
+	-- lines of the page (Borders.IsDevName, his name on his realm group). A tag, no mark before it.
+	local B = ns.Borders
+	if type(B) == "table" and type(B.IsDevName) == "function" and B.IsDevName(who) == true then
+		tag = tag .. " |cffc8c8d2" .. ChatWindow.Localized("CHATWIN_TAG_DEV", "The Royal Dev") .. "|r"
+	end
 	local guildLabel = ns.Channels.ShowGuildNames() and (" " .. Grey("<" .. ns.Codec.Plain(guild or "?") .. ">")) or ""
 	return lead .. name .. tag .. guildLabel
 end

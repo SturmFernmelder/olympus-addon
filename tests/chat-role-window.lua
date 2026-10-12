@@ -193,3 +193,32 @@ test("chat: an ordinary member right-clicks another player's Olympus line, its w
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- 1.2.4, the author ("mandar mensagem como desenvolvedor"): "The Royal Dev" after his name on each
+-- of his lines of the Chat tab, a tag (no mark before a name since 1.1.5); nobody else's.
+test("Chat tab (1.2.4): the author's lines carry The Royal Dev after his name, nobody else's", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = { history = C.History, borders = ns.Borders }
+		local dev, other = "Quill Wright-Realm", "Plain Writer-Realm"
+		C.History = function(t)
+			if t ~= "A" then return {} end
+			return { { t = 100, sender = dev, guild = "Olympus II", text = "a word from the dev" },
+				{ t = 400, sender = other, guild = "Olympus II", text = "thanks" } }
+		end
+		ns.Borders = setmetatable({ IsDevName = function(name) return ns.FullName(name) == dev end }, { __index = saved.borders })
+		local ok, err = pcall(function()
+			local f = w.CW.Open("A")
+			local heads = {}
+			for _, b in ipairs(f.bubbles) do
+				if b:IsShown() and b.entry and b.header:IsShown() then heads[b.entry.sender] = b.who:GetText() end
+			end
+			assert(heads[dev] and heads[dev]:find("The Royal Dev", 1, true), tostring(heads[dev]))
+			assert(heads[dev]:find("Quill Wright", 1, true) < heads[dev]:find("The Royal Dev", 1, true), "after his name")
+			assert(heads[other] and not heads[other]:find("The Royal Dev", 1, true), tostring(heads[other]))
+			eq(ns.L.CHATWIN_TAG_DEV, "The Royal Dev")
+		end)
+		C.History, ns.Borders = saved.history, saved.borders
+		if not ok then error(err, 0) end
+	end)
+end)

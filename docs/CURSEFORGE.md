@@ -540,7 +540,8 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   up; then the line you are reading stays in its place while new lines come in and the oldest go,
   and **N new** at the bottom takes you down to them.
 - By each name, the name in its colour (the High Council's for a councillor, the writer's class
-  for anyone else), the Treasurer's coin, and **Steward** or **Hand** after the King's. No mark
+  for anyone else), the Treasurer's coin, **Steward** or **Hand** after the King's, and (1.2.4)
+  **The Royal Dev** after the author's, on every line of his on the page. No mark
   before a name since 1.1.5: Olympus's marks show in the game's own chat instead, where players
   outside Olympus are ([Channels](#channels), `/oly chatmarks`). A click on a name whispers that
   player, in Olympus's whisper window.

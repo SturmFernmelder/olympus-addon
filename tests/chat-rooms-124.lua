@@ -213,3 +213,58 @@ test("chat rooms (1.2.4): an older client's line to the treasurers', the departm
 		eq(R.Receive("WHISPER", "Peer-Realm", RoomMessage("dept:treasury", 7, "here now"), 1012), true)
 	end)
 end)
+
+local function Has(list, name)
+	for _, n in ipairs(list) do if n:lower() == name:lower() then return true end end
+	return false
+end
+
+-- "Em relação à minha visão de suas outras salas, deixa fora a do High Council. Todas as outras, eu
+-- preciso estar. Eu preciso poder ver e, se precisar, mandar mensagem como desenvolvedor".
+test("chat rooms (1.2.4): the author is in every room but the High Council's: listed for him, a recipient only while his presence is heard, heard as a sender", function()
+	WithRooms(function(w, R, c)
+		local cast, aCorr, aCent, bCorr, bCent = Guilds(w, R, c)
+		c.ApprovedGuilds = function() return {} end
+		w.authorName = "Quill Wright-Realm"
+		local author = w.authorName
+		local kingCent = R.GuildRoom("gcent", "Olympus")
+		-- His own menu: every room but the High Council's and the Secretariat's; each guild's rooms
+		-- (his own, the King's, then the others this client knows of).
+		c.me = author
+		eq(R.CanAccess("council"), false, "never the High Council's by his name"); eq(R.CanAccess("secretariat"), false)
+		eq(Ids(R.Options("role")), table.concat({ "masters", "allcenturions", "dept:treasury", "dept:war", "dept:justice", "dept:citizenry",
+			"dept:heritage", "dept:church", aCorr, bCorr, aCent, kingCent, bCent }, ","))
+		for _, id in ipairs({ "masters", "allcenturions", "dept:justice", aCorr, aCent, bCorr, bCent }) do eq(R.CanAccess(id), true, id) end
+		-- His own guild's rooms reach its people; another guild's, only once the signed list counts.
+		eq(table.concat(R.Recipients(aCent), ","), table.concat({ cast.aMaster, cast.aOfficer, cast.aCenturion }, ","))
+		eq(#R.Recipients(bCent), 0, "another guild's census is never taken")
+		w.enforced = true
+		eq(table.concat(R.Recipients(bCent), ","), table.concat({ cast.bMaster, cast.bOfficer, cast.bCenturion }, ","))
+		w.enforced = false
+		-- Another member's client: he is a recipient while his presence is heard, never of the High Council's.
+		c.me = cast.aMaster
+		w.council[c.me:lower()] = true
+		c.rdb.council.names = { ["ash holt"] = "Ash Holt" }
+		w.authorOnline = false
+		for _, id in ipairs({ "masters", "allcenturions", aCorr, aCent }) do eq(Has(R.Recipients(id), author), false, id) end
+		w.authorOnline = true
+		for _, id in ipairs({ "masters", "allcenturions", aCorr, aCent }) do eq(Has(R.Recipients(id), author), true, id) end
+		w.departments[c.me:lower()] = "Department of War"
+		eq(Has(R.Recipients("dept:war"), author), true)
+		eq(Has(R.Recipients("council"), author), false, "not the High Council's")
+		eq(R.Send(aCent, "the dev may read this"), true)
+		local whispered = false
+		for _, job in ipairs(w.jobs) do if job.target == author then whispered = true end end
+		eq(whispered, true, "one logged whisper to him too")
+		-- His lines are heard as any member's; not in the High Council.
+		eq(R.Receive("WHISPER", author, RoomMessage(aCent, 1, "a word from the dev"), 3000), true)
+		eq(R.Receive("WHISPER", author, RoomMessage("masters", 2, "to the masters"), 3001), true)
+		eq(R.Receive("WHISPER", author, RoomMessage("council", 3, "not here"), 3002), false)
+		eq(R.Stats().dropped.audience, 1)
+		-- A preview of his is a preview: his own rooms stay closed under it.
+		c.me = author
+		c.ViewAs = { Previewing = function() return true end, Role = function() return "officer" end }
+		eq(Ids(R.Options("role")), "allcenturions," .. aCent)
+		eq(R.Select(aCent), false); eq(#R.History(aCent), 0)
+	end)
+end)

@@ -114,6 +114,22 @@ end
 
 local function IsKing(name) return ns.IsKingCharacter and ns.IsKingCharacter(name) == true or false end
 
+-- 1.2.4, the author ("Em relação à minha visão de suas outras salas, deixa fora a do High Council.
+-- Todas as outras, eu preciso estar. Eu preciso poder ver e, se precisar, mandar mensagem como
+-- desenvolvedor"): his character (Workshop.IsAuthorName: his name on his realm group) is in every
+-- room of this file but the High Council's and the Secretariat's.
+local function IsAuthor(name)
+	local W = ns.Workshop
+	return type(name) == "string" and type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(ns.FullName(name)) == true
+end
+-- His character as a recipient: while his presence is heard (Workshop.AuthorOnline, every 5 minutes).
+local function OnlineAuthor()
+	local W = ns.Workshop
+	if type(W) ~= "table" or type(W.AuthorOnline) ~= "function" or type(W.AuthorName) ~= "function" or W.AuthorOnline() ~= true then return nil end
+	local name = W.AuthorName()
+	return type(name) == "string" and name ~= "" and name or nil
+end
+
 local function FederalTreasurer(name)
 	local T = ns.Treasury
 	return T and T.TreasurerPin and T.TreasurerPin(name) == 1 or false
@@ -364,18 +380,18 @@ KINDS[#KINDS + 1] = { id = "secretariat", kind = "authority", label = function()
 		for _, name in ipairs(ns.Stewards and ns.Stewards() or {}) do add(name) end
 	end }
 KINDS[#KINDS + 1] = { id = "masters", kind = "role", label = function() return Text("CHATROOM_MASTERS", "Guild Masters") end,
-	preview = { king = true, gm = true }, leaders = true,
-	Access = function(name) return IsKing(name) or AnyGuild(name, function(n, g) return Rank(n, g) == 0 end) end,
+	preview = { king = true, gm = true }, author = true,
+	Access = function(name) return IsAuthor(name) or IsKing(name) or AnyGuild(name, function(n, g) return Rank(n, g) == 0 end) end,
 	Candidates = function(add) Candidates.Leaders(add) end }
 KINDS[#KINDS + 1] = { id = "allcenturions", kind = "role", label = function() return Text("CHATROOM_ALLCENTURIONS", "Masters & Centurions") end,
-	preview = { king = true, gm = true, officer = true }, leaders = true,
-	Access = function(name) return IsKing(name) or AnyGuild(name, function(n, g) return Master(n, g) or Centurion(n, g) end) end,
+	preview = { king = true, gm = true, officer = true }, author = true,
+	Access = function(name) return IsAuthor(name) or IsKing(name) or AnyGuild(name, function(n, g) return Master(n, g) or Centurion(n, g) end) end,
 	Candidates = function(add) Candidates.Leaders(add) end }
-KINDS[#KINDS + 1] = { prefix = "dept", kind = "department", group = "dept", leaders = true,
+KINDS[#KINDS + 1] = { prefix = "dept", kind = "department", group = "dept", author = true,
 	groupLabel = function() return Text("CHATROOM_GROUP_DEPARTMENTS", "Departments") end,
 	Preview = function(role, d) return role == "councillor" or role == "correspondent" or role == "treasurer" and d == TREASURY end,
 	Access = function(name, d)
-		return DepartmentFor(name) == d or Correspondent(name, d) or (d == TREASURY and FederalTreasurer(name))
+		return IsAuthor(name) or DepartmentFor(name) == d or Correspondent(name, d) or (d == TREASURY and FederalTreasurer(name))
 	end,
 	Candidates = function(add, d)
 		if d == TREASURY and ns.TREASURER then add(ns.TREASURER, 3) end
@@ -387,7 +403,7 @@ KINDS[#KINDS + 1] = { prefix = "dept", kind = "department", group = "dept", lead
 			end
 		end
 	end }
-KINDS[#KINDS + 1] = { prefix = "gcorr", kind = "role", group = "gcorr", perGuild = true,
+KINDS[#KINDS + 1] = { prefix = "gcorr", kind = "role", group = "gcorr", perGuild = true, author = true,
 	groupLabel = function() return Text("CHATROOM_GCORR", "Master & Correspondents") end,
 	label = function(guild)
 		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCORR", "Master & Correspondents") end
@@ -397,10 +413,10 @@ KINDS[#KINDS + 1] = { prefix = "gcorr", kind = "role", group = "gcorr", perGuild
 	Has = function(guild) return not ns.IsKingGuild(guild) end,
 	preview = { gm = true, correspondent = true },
 	Access = function(name, guild)
-		return not Abroad(name, guild) and (Master(name, guild) or Nomination(name, guild) == "correspondent")
+		return IsAuthor(name) or not Abroad(name, guild) and (Master(name, guild) or Nomination(name, guild) == "correspondent")
 	end,
 	Candidates = function(add, guild) Candidates.Guild(add, guild, false) end }
-KINDS[#KINDS + 1] = { prefix = "gcent", kind = "role", group = "gcent", perGuild = true,
+KINDS[#KINDS + 1] = { prefix = "gcent", kind = "role", group = "gcent", perGuild = true, author = true,
 	groupLabel = function() return Text("CHATROOM_GCENT", "Master & Centurions") end,
 	label = function(guild)
 		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCENT", "Master & Centurions") end
@@ -408,7 +424,7 @@ KINDS[#KINDS + 1] = { prefix = "gcent", kind = "role", group = "gcent", perGuild
 	end,
 	preview = { king = true, gm = true, officer = true },
 	Access = function(name, guild)
-		return not Abroad(name, guild) and (Master(name, guild) or Centurion(name, guild))
+		return IsAuthor(name) or not Abroad(name, guild) and (Master(name, guild) or Centurion(name, guild))
 	end,
 	Candidates = function(add, guild) Candidates.Guild(add, guild, true) end }
 for _, k in ipairs(KINDS) do
@@ -542,8 +558,40 @@ function Rooms.PreviewOnly(id)
 	return info ~= nil and info.scope == "restricted" and PreviewRole() ~= nil
 end
 
--- The guilds whose own rooms (gcorr, gcent) this character's menu offers: his own guild's.
+-- 1.2.4: the guilds whose own rooms the author's menu offers: his own, the King's, then the signed
+-- leadership list's guilds while it counts; until it does, the approved guilds and the census's (their
+-- people reach him only once it counts: Rooms.NeedsLeaders).
+local function AuthorGuilds()
+	if listing and listing.authorGuilds then return listing.authorGuilds end
+	local out, seen, rest = {}, {}, {}
+	local function Add(list, guild)
+		if type(guild) == "string" and guild ~= "" and not seen[ns.Fold(guild)] and Federation(guild) then
+			seen[ns.Fold(guild)], list[#list + 1] = true, guild
+		end
+	end
+	Add(out, OwnGuild())
+	if ns.KingGuildName then Add(out, ns.KingGuildName()) end
+	local m = Manifest()
+	if m then
+		for _, g in pairs(m.guilds) do if type(g) == "table" then Add(rest, g.name) end end
+	elseif not Rooms.Enforced() then
+		if ns.ApprovedGuilds then
+			local ok, list = pcall(ns.ApprovedGuilds)
+			for _, guild in ipairs(ok and type(list) == "table" and list or {}) do Add(rest, guild) end
+		end
+		for guild in pairs(ns.rdb and ns.rdb.guilds or {}) do Add(rest, guild) end
+	end
+	table.sort(rest, function(a, b) return ns.Fold(a) < ns.Fold(b) end)
+	for _, guild in ipairs(rest) do out[#out + 1] = guild end
+	if listing then listing.authorGuilds = out end
+	return out
+end
+Rooms.AuthorGuilds = AuthorGuilds
+
+-- The guilds whose own rooms (gcorr, gcent) this character's menu offers: his own guild's (the
+-- author's: AuthorGuilds).
 local function ListedGuilds()
+	if not PreviewRole() and IsAuthor(ns.me) then return AuthorGuilds() end
 	local own = OwnGuild()
 	return own and Federation(own) and { own } or {}
 end
@@ -860,7 +908,10 @@ local function Members(id)
 		for _, name in ipairs(ok and type(list) == "table" and list or {}) do Add(name) end
 	else
 		local k, arg = KindOf(id)
-		if k then k.Candidates(Add, arg) end
+		if k then
+			if k.author then Add(OnlineAuthor()) end
+			k.Candidates(Add, arg)
+		end
 	end
 	table.sort(out)
 	return out
