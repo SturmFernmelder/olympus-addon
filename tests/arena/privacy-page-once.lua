@@ -218,3 +218,86 @@ test("1.2.1 privacy page: a new tabard contract asks its two lines once more", f
 	eq(C.Frame(), nil, "then not again for that contract")
 	NoErrors(w)
 end)
+
+-- (1.2.3, the King's stream right after the update to 1.2.2: the page opened by itself again,
+-- though he had always closed it with its X.) Up to 1.2.1 the page kept the lines it showed for the
+-- session alone and its games notice for good; 1.2.2's record of the lines started empty, so every
+-- line he had left unanswered was taken for a question never asked.
+test("1.2.3 privacy page: an account whose page 1.2.1 showed and was closed unanswered is not asked again by itself after the update; nothing answered, every line off; a later question still asks once", function()
+	local w = World.New({ compliance = "shipped" })
+	local king = w:Role("king")
+	LoadWanted(w, king)
+	if king.Consent.Frame() then king.Consent.Frame():Hide() end
+	-- 1.2.1's saved data: its games notice shown, the lines never answered, no record of them.
+	king.db.consentNotices, king.db.consentAsked = { games = true }, nil
+	king.db.royalInspection, king.db.wantedSightings = nil, nil
+	Relog(w, king)
+	local C = king.Consent
+	local waiting = Keys(C.Pending())
+	for _, key in ipairs({ "inspection", "wantedsightings" }) do
+		assert(waiting:find(key, 1, true), key .. " still waits for his answer: " .. waiting)
+	end
+	eq(C.Waiting(), false, "nothing new to ask (the version letter need not wait)")
+	w:Run(C.LOGIN_WAIT + 125)
+	eq(C.Frame(), nil, "the first session with the record: the page does not open by itself")
+	eq(C.Ask("window"), false, "nor when the window opens")
+	eq(C.Ask("chat"), false, "nor when he types in a chat still unanswered")
+	eq(Keys(C.Pending()), waiting, "nothing answered for him")
+	eq(C.Answer("inspection"), nil); eq(king.db.wantedSightings, nil)
+	for session = 2, 3 do
+		Relog(w, king)
+		C = king.Consent
+		w:Run(C.LOGIN_WAIT + 125)
+		eq(C.Frame(), nil, "session " .. session .. ": not by itself either")
+	end
+	-- /oly privacy: every line on the page, Accept all with them.
+	local page = C.Show()
+	eq(page:IsShown(), true); eq(page.all:IsShown(), true)
+	page:Hide()
+	-- A later build's question the page never showed: asked once, then never again.
+	local function Later()
+		return C.Register({ key = "test-later", label = "A test line", text = "A later build's question.",
+			get = function() return nil end, set = function() end })
+	end
+	Relog(w, king)
+	C = king.Consent
+	assert(Later())
+	eq(C.Ask("login"), true, "a new question: the page, once")
+	C.Frame():Hide()
+	Relog(w, king)
+	C = king.Consent
+	assert(Later())
+	w:Run(C.LOGIN_WAIT + 125)
+	eq(C.Frame(), nil, "then never again")
+	NoErrors(w)
+end)
+
+-- (The same report: his X is kept for good.) An account the page was never shown (no games notice:
+-- a fresh install, or 1.1.5 and before) is asked once; the X (it hides the page) answers nothing,
+-- and no later login or /reload opens it by itself.
+test("1.2.3 privacy page: the King's first page closed with its X leaves every line as it is, and no later session opens it by itself", function()
+	local w = World.New({ compliance = "shipped" })
+	local king = w:Role("king")
+	LoadWanted(w, king)
+	if king.Consent.Frame() then king.Consent.Frame():Hide() end
+	king.db.consentNotices, king.db.consentAsked = nil, nil
+	king.db.royalInspection, king.db.wantedSightings = nil, nil
+	Relog(w, king)
+	local C = king.Consent
+	eq(C.Waiting(), true)
+	w:Run(C.LOGIN_WAIT + 1)
+	local page = C.Frame()
+	assert(page and page:IsShown(), "never shown on this account: the page asks once")
+	page:Hide() -- (the X)
+	eq(C.Answer("inspection"), nil, "the X answers nothing"); eq(king.db.wantedSightings, nil)
+	eq(C.Ask("window"), false, "this session: not again")
+	for session = 2, 3 do
+		Relog(w, king)
+		C = king.Consent
+		eq(C.Waiting(), false, "session " .. session)
+		w:Run(C.LOGIN_WAIT + 125)
+		eq(C.Frame(), nil, "session " .. session .. ": the page does not open by itself")
+		eq(C.Ask("window"), false)
+	end
+	NoErrors(w)
+end)

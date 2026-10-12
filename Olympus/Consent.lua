@@ -165,10 +165,29 @@ local function MarkAsked(item)
 	if store then store[AskedKey(item)] = Version(item) end
 end
 
+-- (1.2.3, the King's stream: the page opened by itself again right after the update to 1.2.2,
+-- though he had always closed it with its X.) Up to 1.2.1 the page kept the lines it showed for
+-- the session alone (each login asked again), but its games notice for good (Consent.Show:
+-- ns.db.consentNotices.games). An account with that notice and no record of the lines yet was
+-- shown the page and left its unanswered lines as they are: in the first session with the record,
+-- every line still waiting counts as asked, as if the page had just shown it. Nothing is answered
+-- for him (unanswered stays off; /oly privacy shows them). The record starts that session, so a
+-- later build's new question is still asked once.
+local adopting = false
+ns.On("INIT", function()
+	if type(ns.db) ~= "table" or type(ns.db.consentAsked) == "table" then return end
+	local seen = ns.db.consentNotices
+	adopting = type(seen) == "table" and seen.games == true
+	ns.db.consentAsked = {}
+end)
+
 -- A line waiting for its answer that the page never showed (a new question).
 local function Fresh()
 	for _, item in ipairs(Consent.Pending()) do
-		if not WasAsked(item) then return true end
+		if not WasAsked(item) then
+			if not adopting then return true end
+			MarkAsked(item)
+		end
 	end
 	return false
 end
@@ -546,7 +565,7 @@ function Consent.Hide() if frame then frame:Hide() end end
 function Consent.Reset()
 	wipe(asked)
 	if type(ns.db) == "table" then ns.db.consentAsked = nil end
-	activeSection = nil
+	activeSection, adopting = nil, false
 	if frame and rawget(_G, "OlympusConsentFrame") ~= frame then frame = nil elseif frame then frame:Hide() end
 end
 
