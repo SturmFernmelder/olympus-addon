@@ -85,7 +85,11 @@ local L = ns.L
 --     ended, steps and transcript hash, their starts within HALF_SKEW), its winner a player, its
 --     two players never one owner's (Debts.SameOwner) nor hidden here; then the ledger's caps
 --     (ArenaLedger's MIN_RATED_DUR, DAY_MAX, PAIR_MAX in PAIR_DAYS) in the order this client came
---     to hold each game; void games never.
+--     to hold each game; void games never. (1.2.4) A second value, held: the games both halves
+--     agree on that this client holds and that month's list reads (before the caps and the
+--     hides): that month's, and the PAIR_DAYS before it, whose games the pair cap counts. Past
+--     HALVES_MAX the oldest go first, so a closed month's only falls as this client prunes what
+--     its list reads (HonorsNet then keeps the charm's list as it stood).
 --   Halves(id) -> what this client holds of a game's halves (the tests'), Pin(name) -> the key it
 --     holds for a player, RepeatHalves() (at login)
 --   the fill actions Pay(id), PayFee(id), PayStake(id), Payout(id), Refund(id), Change(id)
@@ -1197,6 +1201,10 @@ PruneHalves = function(b)
 		for i = 1, n do b.open[open[i].key] = nil end
 		over = over - n
 		if over > 0 then
+			-- (1.2.4) Agreed games about to go, the oldest: the ones the last month's list reads,
+			-- whose top 3 hold the Bones' charm all this month. The honours keep that list as it
+			-- stands first (HonorsNet's BONES_PRUNING, at once), whether anything asked for it yet.
+			ns.Fire("BONES_PRUNING")
 			table.sort(done, Older)
 			for i = 1, min(over, #done) do b.done[done[i].key] = nil end
 		end
@@ -3965,16 +3973,19 @@ function FT.Best(mode, opts)
 	local month = tonumber(opts.month) or MonthOf(Now(), opts.offset)
 	local ctx = HV.Context()
 	local cached = opts.offset == nil and bestCache[month]
-	if cached and cached.ctx == ctx then return cached.rows end
+	if cached and cached.ctx == ctx then return cached.rows, cached.held end
 	-- every game both halves agree on, its players hidden by nobody here and never one owner's
-	-- characters (the alt check, Debts.SameOwner)
-	local games, hidden, same = {}, {}, {}
+	-- characters (the alt check, Debts.SameOwner); held (1.2.4): the agreed games the month's list
+	-- reads, whoever played: the month's own and the PAIR_DAYS before it (the pair cap's)
+	local games, hidden, same, held = {}, {}, {}, 0
+	local minDur, dayMax, pairMax, pairSecs = RankCap("MIN_RATED_DUR"), RankCap("DAY_MAX"), RankCap("PAIR_MAX"), RankCap("PAIR_DAYS") * 86400
 	local function Hidden(name, k)
 		if hidden[k] == nil then hidden[k] = HV.RankHides(name) end
 		return hidden[k]
 	end
 	for key, s in pairs(b.done) do
 		local r = HV.ReadDone(s)
+		if r and (MonthOf(r.t, opts.offset) == month or MonthOf(r.t + pairSecs, opts.offset) == month) then held = held + 1 end
 		local a, c = r and Low(r.p1), r and Low(r.p2)
 		if a and c and a ~= c and not Hidden(r.p1, a) and not Hidden(r.p2, c) then
 			local pk = a < c and (a .. "|" .. c) or (c .. "|" .. a)
@@ -3994,7 +4005,6 @@ function FT.Best(mode, opts)
 		if x.t ~= y.t then return x.t < y.t end
 		return x.key < y.key
 	end)
-	local minDur, dayMax, pairMax, pairSecs = RankCap("MIN_RATED_DUR"), RankCap("DAY_MAX"), RankCap("PAIR_MAX"), RankCap("PAIR_DAYS") * 86400
 	local day, pairs_, rows, byKey = {}, {}, {}, {}
 	for _, x in ipairs(games) do
 		local d = floor(x.t / 86400)
@@ -4032,8 +4042,8 @@ function FT.Best(mode, opts)
 		return x.key < y.key
 	end)
 	for i, r in ipairs(rows) do r.place = i end
-	if opts.offset == nil then bestCache[month] = { ctx = ctx, rows = rows } end
-	return rows
+	if opts.offset == nil then bestCache[month] = { ctx = ctx, rows = rows, held = held } end
+	return rows, held
 end
 
 ---------------------------------------------------------------------------

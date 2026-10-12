@@ -25,6 +25,10 @@ L.HONOR_TITLES = {
 	["guild-top-leader"] = "Wisest of Olympus",
 	["oracle-1"] = "Oracle", ["oracle-2"] = "Seer", ["oracle-3"] = "Soothsayer",
 	["missionary-1"] = "Good Shepherd", ["missionary-2"] = "Faithful Shepherd", ["missionary-3"] = "Shepherd",
+	-- (1.2.4)
+	["apostle-1"] = "Light of Olympus", ["apostle-2"] = "Voice of Olympus", ["apostle-3"] = "Herald of Olympus",
+	["bones-1"] = "Master of Bones", ["bones-2"] = "Luck's Favourite", ["bones-3"] = "Steady Hand",
+	["wanted-slayer-1"] = "Bane of the Horde", ["wanted-slayer-2"] = "Horde Hunter", ["wanted-slayer-3"] = "Bounty Hunter",
 	["the-dev"] = "The Royal Dev",
 }
 L.HONOR_CLASS_TITLE = { "%s Champion", "%s Contender", "%s Challenger" }
@@ -54,7 +58,28 @@ L.HONOR_LETTER = {
 	guild = "Listen,\n\nYour guild has the highest levels in all of Olympus. Top of the list. You're %s, and the owl sits on your banner while your guild stays first.\n\nKeep your people climbing, because the others are coming.",
 	oracle = "Okay,\n\nLast month you called the arena better than anyone. Fight after fight, you just knew. You're %s, and the raven is yours this month.\n\nEverybody's gonna copy your picks now. Can't blame them.",
 	missionary = "Hey,\n\nIn the last thirty days you brought more people into our guilds than almost anyone. That's how Olympus grows. You're %s, and the shepherd's crook is yours while you stay in the top three.\n\nKeep bringing them in.",
+	-- (1.2.4)
+	apostle = "Hey,\n\nIn the last thirty days barely any Apostle brought as many people to Olympus as you did. You're %s, and the cross is yours while you stay in the top three.\n\nKeep the faith. And keep them coming.",
+	bones = "Okay,\n\nThe tavern is still talking about your throws last month. Some of those were actually insane. You're %s, and the lucky charm is yours for the month.\n\nMay the bones keep falling your way.",
+	["wanted-slayer"] = "Okay,\n\nThe Horde keeps counting its dead, and your name keeps coming up. That's what I like to see. You're %s now.\n\nRide the skeletal horse right where the Horde can see it. Let them know who did it.",
 }
+
+-- 1.2.4, the notices (HonorsNet.Tell): every move on a list after the King's first letter for its
+-- place, a strip at the top of the screen and a line in chat. Each list's name, a place's words,
+-- and the lines.
+L.HONOR_RANKING = { ["donor-top"] = "Top donors", ["donor-month"] = "Donors of the month", guild = "Best guild",
+	["wanted-slayer"] = "Slayers", apostle = "Apostles", missionary = "Missionaries", bones = "Bones" }
+L.HONOR_PLACE = { "1st", "2nd", "3rd" }
+L.HONOR_NOTICE_DOWN = "%s: you dropped to %s place."
+L.HONOR_NOTICE_OUT = "%s: you are off the list, and its frame is no longer yours."
+L.HONOR_NOTICE_BACK = "%s: you are back on the list, in %s place."
+L.HONOR_NOTICE_UP = "%s: you regained %s place."
+L.HONOR_NOTICE_GUILD_OUT = "Best guild: your guild is no longer first, and the owl is no longer yours."
+L.HONOR_NOTICE_GUILD_BACK = "Best guild: your guild is first again, and the owl is yours again."
+L.HONOR_NOTICE_SINCE = "Since your last visit: %s."
+L.HONOR_NOTICE_PART_PLACE = "%s, %s place"
+L.HONOR_NOTICE_PART_OUT = "%s, off the list"
+L.HONOR_NOTICE_MORE = "%d more"
 
 -- The rankings' switches (the owner's one compact view).
 L.ARENA_PERIOD_TODAY = "Today"
@@ -152,6 +177,9 @@ L.MYPROFILE_PRIVACY_PAGE = "Open the privacy page"
 L.MYPROFILE_LETTERS_NONE = "No letter from the King yet."
 L.MYPROFILE_GAMES_OFF = "Your frame, title and nickname go out with the Games, which are off on this character."
 L.MYPROFILE_GAMES_PROFILE = "Games profile"
+-- (1.2.4) A letter held in an instance or Busy: its chat line, and its words on the Decrees tab.
+L.HONOR_LETTER_HELD = "A letter from the King awaits you: it opens once you are out of the instance and not Busy (or open the Olympus window to read it now)."
+L.HELD_HONOR_LETTER = "a letter from the King"
 
 if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_EPI_A = { "Inquebrável", "Carmesim", "Silencioso", "de Ferro", "de Ouro", "Veloz", "Sombrio", "Selvagem", "de Pedra", "da Tempestade",
@@ -170,6 +198,9 @@ if GetLocale and GetLocale() == "ptBR" then
 		["guild-top-leader"] = "O Mais Sábio do Olympus",
 		["oracle-1"] = "Oráculo", ["oracle-2"] = "Vidente", ["oracle-3"] = "Adivinho",
 		["missionary-1"] = "Bom Pastor", ["missionary-2"] = "Pastor Fiel", ["missionary-3"] = "Pastor",
+		["apostle-1"] = "Luz do Olympus", ["apostle-2"] = "Voz do Olympus", ["apostle-3"] = "Arauto do Olympus",
+		["bones-1"] = "Mestre dos Ossos", ["bones-2"] = "Favorito da Sorte", ["bones-3"] = "Mão Firme",
+		["wanted-slayer-1"] = "Ruína da Horda", ["wanted-slayer-2"] = "Caçador da Horda", ["wanted-slayer-3"] = "Caçador de Recompensas",
 		["the-dev"] = "The Royal Dev",
 	}
 	L.HONOR_CLASS_TITLE = { "Campeão %s", "Desafiante %s", "Pretendente %s" }
@@ -194,7 +225,23 @@ if GetLocale and GetLocale() == "ptBR" then
 		guild = "Escuta,\n\nA sua guilda tem os níveis mais altos de todo o Olympus. Topo da lista. Você é %s, e a coruja fica no seu estandarte enquanto a sua guilda for a primeira.\n\nMantém o seu pessoal subindo, porque os outros estão vindo.",
 		oracle = "Olha,\n\nNo mês passado você leu a arena melhor que qualquer um. Luta após luta, você simplesmente sabia. Você é %s, e o corvo é seu este mês.\n\nAgora todo mundo vai copiar os seus palpites. Não dá pra culpar.",
 		missionary = "E aí,\n\nNos últimos trinta dias você trouxe mais gente pras nossas guildas do que quase todo mundo. É assim que o Olympus cresce. Você é %s, e o cajado é seu enquanto estiver entre os três primeiros.\n\nContinua trazendo.",
+		apostle = "E aí,\n\nNos últimos trinta dias quase nenhum Apóstolo trouxe tanta gente pro Olympus quanto você. Você é %s, e a cruz é sua enquanto estiver entre os três primeiros.\n\nMantém a fé. E continua trazendo.",
+		bones = "Olha,\n\nA taverna ainda fala dos seus lances do mês passado. Alguns foram insanos de verdade. Você é %s, e o amuleto da sorte é seu este mês.\n\nQue os ossos continuem caindo a seu favor.",
+		["wanted-slayer"] = "Olha só,\n\nA Horda continua contando os mortos, e o seu nome não para de aparecer. É isso que eu gosto de ver. Agora você é %s.\n\nMonta o cavalo esqueleto bem onde a Horda possa ver. Deixa eles saberem quem foi.",
 	}
+	L.HONOR_RANKING = { ["donor-top"] = "Maiores doadores", ["donor-month"] = "Doadores do mês", guild = "Melhor guilda",
+		["wanted-slayer"] = "Slayers", apostle = "Apóstolos", missionary = "Missionários", bones = "Bones" }
+	L.HONOR_PLACE = { "1º", "2º", "3º" }
+	L.HONOR_NOTICE_DOWN = "%s: você caiu para o %s lugar."
+	L.HONOR_NOTICE_OUT = "%s: você saiu da lista, e a moldura não é mais sua."
+	L.HONOR_NOTICE_BACK = "%s: você voltou à lista, em %s lugar."
+	L.HONOR_NOTICE_UP = "%s: você recuperou o %s lugar."
+	L.HONOR_NOTICE_GUILD_OUT = "Melhor guilda: a sua guilda não é mais a primeira, e a coruja não é mais sua."
+	L.HONOR_NOTICE_GUILD_BACK = "Melhor guilda: a sua guilda é a primeira de novo, e a coruja é sua outra vez."
+	L.HONOR_NOTICE_SINCE = "Desde a sua última visita: %s."
+	L.HONOR_NOTICE_PART_PLACE = "%s, %s lugar"
+	L.HONOR_NOTICE_PART_OUT = "%s, fora da lista"
+	L.HONOR_NOTICE_MORE = "mais %d"
 	L.ARENA_PERIOD_TODAY = "Hoje"
 	L.ARENA_PERIOD_WEEK = "Esta semana"
 	L.ARENA_PERIOD_MONTH = "Este mês"
@@ -232,6 +279,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CONSENT_GAMES_RECORDED = "Os resultados dos jogos ficam registrados: cada jogo que você joga (Bones, a Arena, o treino da Loteria: quando, quem, o resultado e o placar) aparece na sua própria lista e vai para o Rei, o Alto Conselho e o autor (e os auditores que ele assina), mais ninguém."
 	L.PROFILE_ICON_REFUSED = "Esse ícone não serve aqui: escolha a marca de uma das suas honras (ou, para o emblema, um ícone do jogo)."
 	L.HONOR_LETTER_WAITING = "Uma carta do Rei espera por você: abra a janela do Olympus (ou o Meu perfil, nela) para lê-la."
+	L.HONOR_LETTER_HELD = "Uma carta do Rei espera por você: ela abre quando você sair da instância e não estiver Ocupado (ou abra a janela do Olympus para lê-la agora)."
+	L.HELD_HONOR_LETTER = "uma carta do Rei"
 	L.PROFILE_FRAME_RANK = "A moldura do meu posto"
 	L.PROFILE_FRAME_NONE = "Sem moldura"
 	L.PROFILE_FRAME_RED_CROSS = "Cruz vermelha (só você a vê)"

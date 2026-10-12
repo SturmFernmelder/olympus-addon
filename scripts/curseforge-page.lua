@@ -40,6 +40,10 @@ M.CUTS = {
 	-- (1.2.4: the page grew past the budget with the API's section: the menu's lines stay, its
 	-- Explanations and Answers paragraph is the README's.)
 	{ title = "Right-click a player (1.1.2)", keep = 2 },
+	-- (1.2.4 integration: the lanes' sections together passed the budget again; two older sections'
+	-- details stay in the README.)
+	{ title = "Decrees", keep = 1 },
+	{ title = "Loot notes (1.1)", keep = 1 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it.

@@ -317,40 +317,7 @@ friends list, a community roster) and the game's menu gets an **Olympus** part a
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-For decrees *the Crown* means the King, his Steward and the officers of the main `<Olympus>`
-guild (a Hand sends them as one of its officers). Since 1.2.3 any other guild master's Royal
-decree and Tabard inspection reach his own guild alone, as guild decrees, and so do his and his
-officers' Calls to Arms and Musters (the same alarm, sound and marker, for his guild's members
-alone): no guild master has a decree for the whole army, and every client refuses one of
-theirs sent to it, a 1.2.2 officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
-officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
-names them. On every other client its Crown is the King himself (by his character's name) and
-the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its
-officers has all its decrees and [Lords] lines there. A census officer of `<Olympus>` counts as
-a Captain there and, since 1.2.3, calls nobody to arms (one report can name anyone) until the
-author's signed list counts. The King can't take back a Hand his Steward named: that Steward
-does, or the author, by removing him. The King's Steward (1.0.0, below) sends the Crown's
-decrees for `<Olympus>` on every client, whatever his rank, like the King.
-
-**Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
-Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:
-`arms` (Call to Arms), `muster`, `royal` (Royal decrees and Tabard inspections), `court`, `vox`,
-`agenda`, `throne` (the roll call, the Royal Inspection, writs), `help` (help requests and bug
-reports), `hop`, `treasury`, `patrol` and `update`. Silence the chimes you don't want and keep
-the Call to Arms: `/oly sound` alone is still the switch for every sound, and each kind keeps its
-own switch under it. A softer chime never silences the Call to Arms that follows it. Only the
-sound changes: the chat line, the raid warning and the Olympus window stay, and nothing is sent.
-
-**In an instance or Busy (1.1).** In a dungeon, raid, battleground or arena, or while you are
-Busy (`/dnd`), Olympus's alerts wait: no raid warning, no sound and no popup from the addon. Each
-one still prints its chat line and waits on top of the Decrees tab, where a click shows it now.
-Once you are out and not Busy, one line (and one raid warning and one sound) says what waited and
-is still current, and only what is still open pops up: a Vox question still open, the King's call
-to his audience within its two minutes, the Agenda still to come, a roll call within its minute,
-an unread writ. What is over by then (a Call to Arms lasts 5 minutes) only stays in its list, and
-nothing is ever answered for you. `/oly alerts always` shows them at once as before; `/oly alerts
-quiet` (the default) holds them again; or a click on the line at the bottom of the Decrees tab.
-Only on your computer: nothing is sent.
+*Continued in the README: [Decrees](https://github.com/dnl-gentile/olympus-addon#decrees).*
 
 ### Channels
 Chat for the whole federation, carried by the addon over its hidden Olympus channel (no
@@ -520,32 +487,8 @@ alone until then).
 ### Loot notes (1.1)
 Loot arguments restart every raid because nobody kept last week's decision: the **Loot notes** of
 your guild keep it (on the Realm tab, or `/oly loot`).
-- Your guild's officers (the guild master and the officer rank right below) write the decision:
-  which item went to whom, and why ("Ann passed on the gloves, Bob gets the next belt"). The
-  items your group loots show to them there this session, from the game's own loot lines, so a
-  click names one in its note.
-- **Points**, if your guild uses them: a number per member that an officer sets by hand
-  ("Bob 12"; the name alone clears it). A notebook: nothing adds or takes any, and the column only
-  shows once someone has points.
-- Every member with the addon reads the book, newest first, with the Realm tab's search and a copy
-  for Discord. An officer's click removes a note for the whole guild.
-- It is not a bid window and not a loot tool: no bids, no rolls, no gold (GDKP is not allowed on
-  Forever), and nothing is handed out, traded or looted for anyone.
-- Over guild addon messages only, never on the Olympus channel: each change once, when an officer
-  makes it, and what a guildmate's addon lacks of the book when it asks (an officer's at login,
-  anyone else's when the page opens): an answer holds some 5 KB, the newest notes first, and the
-  addon asks again after each until its book is whole, however large. One officer's addon answers
-  each ask, and only an officer's addon that holds that part of the book whole itself (the first
-  officer online takes his own as the guild's). Each addon takes a change only from a sender its own
-  roster ranks an officer, and one dated during your session only from the officer it names (a
-  note's writer, the officer of a points change). Another officer's answer passes on changes from
-  before your session began, and those come on the passing officer's word: nothing proves who made
-  them (one made up and dated back looks the same), so the page names the officer who passed each
-  one on ("Offi via Rival" on a note and in the copy for Discord, and in the tooltips of notes and
-  points). Once your addon holds a note, no other officer changes its words (any officer can remove
-  it), save its writer's own copy replacing one another officer passed on; an officer's addon sends
-  a change in his name only as he made it. Kept per guild in your saved variables (on the Forever
-  beta, which forgets them at every login, the book comes back from the officers online).
+
+*Continued in the README: [Loot notes (1.1)](https://github.com/dnl-gentile/olympus-addon#loot-notes-11).*
 
 ### Crafters tab (1.1.4)
 "Who can make this?" is a chat scroll: the top-level **Crafters** tab turns it into one

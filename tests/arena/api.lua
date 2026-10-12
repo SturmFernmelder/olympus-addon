@@ -615,12 +615,13 @@ end
 
 -- (Review of 1.2.4) GetRankings gave the donors' top three of the month and of all time whatever
 -- the King's switch: while he keeps the Treasury's ranking from the army (the default) no page
--- lists them, and 1.2.4 wears no month's koi. In a world as the release ships it (its frames,
+-- lists them. (1.2.4, after the borders lane: the month's koi is worn, so its three come too while
+-- the ranking shows; a build without the koi gives none.) In a world as the release ships it (its frames,
 -- Honors.FRAMES_SHIPPED), without the Wanted boards (so every name in a return is a donor's).
-test("1.2.4 the API: the donors' top three only while the King shows the army the Treasury's ranking, never by the staff's view; the month's never while its koi is not worn", function()
+test("1.2.4 the API: the donors' top three only while the King shows the army the Treasury's ranking, never by the staff's view; the month's only in a build that wears its koi (1.2.4 does)", function()
 	local w, cast, viewer, API = Setup({ wanted = false, world = { compliance = "shipped" } })
 	local O, C = viewer.OlympusAPI, viewer.Consent
-	eq(w:As(viewer, viewer.ns.Honors.FrameShipped, { family = "donor-month" }), false, "1.2.4 wears no koi")
+	eq(w:As(viewer, viewer.ns.Honors.FrameShipped, { family = "donor-month" }), true, "1.2.4 wears the koi")
 	eq(w:As(viewer, viewer.ns.Honors.FrameShipped, { family = "donor-top" }), true)
 	eq(w:As(viewer, viewer.ns.Treasury.PublicShows, "ranking"), false, "the King's switch: off until he turns it")
 	local word = w:As(viewer, viewer.ns.HonorsNet.Donors)
@@ -654,12 +655,13 @@ test("1.2.4 the API: the donors' top three only while the King shows the army th
 	NoName(Do(w, cast.king, kapi, "GetRankings"), names, "the King's addon")
 	w:Run(60)
 	eq(#told, base, "nothing changed")
-	-- He shows the army the ranking: the all-time three, which head it; still no month's.
+	-- He shows the army the ranking: the all-time three, which head it, and the month's (its koi worn).
 	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
 	w:Run(1)
 	eq(w:As(viewer, viewer.ns.Treasury.PublicShows, "ranking"), true, "every client heard the King")
 	d = Do(w, viewer, api, "GetRankings", "donors")
-	eq(Keys(d), "all", "no month: its koi is not worn")
+	eq(Keys(d), "all,month", "the month's too: its koi is worn")
+	eq(table.concat(d.month, ","), table.concat(word.month or {}, ","))
 	eq(table.concat(d.all, ","), table.concat(word.all, ","))
 	-- A listener is told when the switch turns (Olympus's TREASURY_CHANGED), and when it turns back:
 	-- then no name again.
@@ -673,13 +675,12 @@ test("1.2.4 the API: the donors' top three only while the King shows the army th
 	eq(#told, base + 2, "told of it turning back"); eq(told[base + 2].donors, nil)
 	NoName(told[base + 2], names, "the callback")
 	eq(Do(w, viewer, api, "GetRankings", "donors"), nil)
-	-- A build that wears the month's koi (every family's frame) gives the month's three too.
+	-- A build that does not wear the month's koi gives the all-time three alone.
 	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
 	w:Run(1)
-	viewer.ns.Honors.FRAMES_SHIPPED = nil
+	viewer.ns.Honors.FRAMES_SHIPPED = { ["donor-top"] = true }
 	d = Do(w, viewer, api, "GetRankings", "donors")
-	eq(Keys(d), "all,month")
-	eq(table.concat(d.month, ","), table.concat(word.month or {}, ","))
+	eq(Keys(d), "all", "no koi: no month")
 	W3.NoErrors(w)
 end)
 

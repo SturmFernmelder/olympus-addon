@@ -25527,26 +25527,27 @@ do
 			local head, rows = Section()
 			-- (1.0.0, the nameplate marks: a row for the marks' own member star, after the borders; it was
 			-- one row per border tier. 1.1.5: five tiers. 1.2: honours add five representative Workshop
-			-- previews between the rank borders and the member star.)
-			eq(#rows, 12, "rank and honour previews, then the member star at the foot of the tab")
+			-- previews between the rank borders and the member star. 1.2.4: four more, the crook, the
+			-- cross, the charm and the slayers' horse, worn now.)
+			eq(#rows, 16, "rank and honour previews, then the member star at the foot of the tab")
 			assert(head.right:find(ns.L.BORDERS_PREVIEW_NONE, 1, true), "off")
 			for i, t in ipairs(w.B.TIERS) do
 				assert(rows[i].text:find(t.name, 1, true), t.name)
 				assert(rows[i].text:find(ns.L["BORDERS_WHO_" .. t.name:upper():gsub("%-", "_")], 1, true), t.name .. ": who holds it")
 				eq(type(rows[i].onClick), "function"); eq(type(rows[i].tooltip), "function"); eq(rows[i].right, nil)
 			end
-			assert(rows[12].text:find("member", 1, true) and rows[12].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[12].text)
+			assert(rows[16].text:find("member", 1, true) and rows[16].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[16].text)
 			local tip = {}
-			rows[12].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+			rows[16].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
 			eq(tip[2], ns.L.BORDERS_PREVIEW_TIP_MEMBER, "the star's own tooltip")
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member"); eq(w.shown("player"), nil, "the star: no border round his portrait")
 			eq(w.printed[#w.printed], ns.L.BORDERS_PREVIEW_ON_MEMBER)
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member", "the lines were built before the click: a fresh click shows it again")
 			head, rows = Section()
-			assert(rows[12].right and rows[12].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
-			rows[12].onClick()
+			assert(rows[16].right and rows[16].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
+			rows[16].onClick()
 			eq(w.B.Preview(), nil, "clicked again: off")
 			head, rows = Section()
 			rows[5].onClick()

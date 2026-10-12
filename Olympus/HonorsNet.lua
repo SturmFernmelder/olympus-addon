@@ -11,8 +11,12 @@ local ADDON, ns = ...
 -- API (the design): Verified(name) -> { frame, title, mark, chat }, Holdings(name), FrameTexture(key),
 --   MarkTexture(key), ChatMark(key), TitleText(key), Levels(), Donors(), Oracle(), Podium(cat),
 --   ChurchTop() (1.2.3: the Church's top 3 as ChurchCount.Top3 holds it, or nil);
---   NewPortrait(parent, size) and DressPortrait(rig, key): the player's own portrait with a frame.
+--   NewPortrait(parent, size) and DressPortrait(rig, key): the player's own portrait with a frame;
+--   (1.2.4) PickKnown(name), Standing(), Tell(held, known, told), Notices(), NoticeFrames().
 -- The King's letter (the design) when an honour is earned: a popup of Olympus's own, queued.
+-- (1.2.4) Once per place of each list per cycle; any other move a small notice (below). In an
+-- instance or Busy one that would open by itself waits as Olympus's other popups do (ns.Alert's held
+-- list), opened once he is out or by his own click.
 local HonorsNet = {}
 ns.HonorsNet = HonorsNet
 
@@ -53,7 +57,12 @@ ns.HonorsNet = HonorsNet
 -- the crooks move only while the author's client is online with the ranking open, and every client
 -- shows none 30 days after his last word. No word of its own here: the Church's comes on CHANNEL and
 -- GUILD, and CHURCH_TOP_CHANGED (or the ranking's switch, CHURCH_PUBLIC_CHANGED) looks at the
--- honours again.
+-- honours again. (1.2.4) The same word's Apostles hold the cross. The Bones' charm is the last
+-- month's top 3 of FarkleTable.Best (the games both players' halves agree on, as this client holds
+-- them: no word of its own; kept in the honours store as it stood, never recounted from what its
+-- store's cap left of that month); the slayers' skeletal horse the signed Slayers top 3
+-- (Wanted.GlobalSnapshot, by GUID), looked at again when that word changes (WANTED_CHANGED); the
+-- owl's guild master's own honours again when the census changes its first (DATA_CHANGED).
 --
 -- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick; 1.2.3:
 -- only when told for the first time, so an honour earned again, its letter told already, leaves his
@@ -62,6 +71,16 @@ ns.HonorsNet = HonorsNet
 -- re-readable from the profile's Edit (ProfileEdit); once per honour per character (a month's honour:
 -- once per month), never by itself where the save did not come back, and never to the King himself
 -- (1.2.1). Honours count only in the live arena (Arena.Counts).
+-- (1.2.4, the owner: "they must get the letter the first time they get it, and then smaller
+-- notices ... less intrusive, a notice on the screen, not a pop-up, saying he dropped to second, that
+-- he lost it because he left the list, that he is back on the list, that he regained it ... but only
+-- the first time he reaches each level ... for something with a cycle, the monthly rankings, it is
+-- the first time in the month, not the first time in his life"): the letter comes the first time a
+-- character reaches each place of each list, per cycle (Honors.CYCLE: a closed month's list once a
+-- month it ranks, so the same place two months running is two letters; a rolling one once per
+-- calendar month; the others once in his life); every other move (down a place, off the list, back
+-- on it, a place won back) is a notice: a strip of Olympus's own at the top of the screen, no
+-- button, no mouse, no keyboard, gone in a few seconds, and a line in chat (H.Tell).
 
 local L = ns.L
 local H = HonorsNet
@@ -178,6 +197,102 @@ local function ChurchTop()
 end
 H.ChurchTop = ChurchTop
 
+-- (1.2.4) A closed month's Bone Throw list (the charm's, held through the month after it) as this
+-- client last worked it out, kept in the honours store: bones = { side, monthNo, n, names }, n the
+-- games that list read then (FarkleTable.Best's second value: the month's, and the days before it
+-- the pair cap counts). FarkleTable keeps HALVES_MAX games, the oldest going first past it, and the
+-- oldest are those: holding fewer of them now (pruned here), the list kept stands, the same all
+-- month; as many or more (a game heard late; a player hidden here, the same games), worked out
+-- again and kept. (Recounted from what was left, the charm went to another top 3 partway through
+-- the month it is held in, each client at its own prune: "out" for its holder, a letter for a place
+-- nobody held when the month closed.)
+local function KeptBones(month, names, n)
+	local side = tostring(ns.faction or "Alliance")
+	local s = H.Store(n > 0)
+	local kept = s and type(s.bones) == "table" and s.bones or nil
+	local same = kept ~= nil and kept.side == side and tonumber(kept.monthNo) == month and type(kept.names) == "table"
+	if same and n < (tonumber(kept.n) or 0) then
+		local out = {}
+		for _, name in ipairs(kept.names) do
+			if #out >= ns.Honors.BONES_PLACES then break end
+			if type(name) == "string" then out[#out + 1] = name end
+		end
+		return out
+	end
+	if s and n > 0 and not (same and kept.n == n and table.concat(kept.names, "\n") == table.concat(names, "\n")) then
+		s.bones = { side = side, monthNo = month, n = n, names = names }
+	end
+	return names
+end
+
+-- (1.2.4) Bone Throw's top 3 of a month as this client counts it (FarkleTable.Best: the games both
+-- players' halves agree on), with at least one win; nil where the build has no Bones table. A month
+-- closed: as it stood before this client pruned its games (KeptBones).
+local function BonesTop(month)
+	local FT = ns.FarkleTable
+	if type(FT) ~= "table" or FT.missing or type(FT.Best) ~= "function" then return nil end
+	local ok, rows, held = pcall(FT.Best, "L", { month = month })
+	if not ok or type(rows) ~= "table" then return nil end
+	local names = {}
+	for _, r in ipairs(rows) do
+		if #names >= ns.Honors.BONES_PLACES then break end
+		if type(r) == "table" and type(r.name) == "string" and (tonumber(r.won) or 0) >= 1 then names[#names + 1] = r.name end
+	end
+	if month < ns.Honors.MonthOf(Now()) then names = KeptBones(month, names, tonumber(held) or 0) end
+	local out = {}
+	for i, name in ipairs(names) do out[i] = { name = name, place = i } end
+	return { month = out, monthNo = month }
+end
+H.BonesTop = BonesTop
+-- (1.2.4) FarkleTable about to prune agreed games past its cap (the oldest first, the last month's):
+-- that month's list kept first, as it stands now, on every client (no look may have asked yet).
+ns.On("BONES_PRUNING", function() BonesTop(ns.Honors.MonthOf(Now()) - 1) end)
+
+-- (1.2.4) The Slayers' signed top 3 this client shows now (Wanted.GlobalSnapshot: an authenticated,
+-- unexpired word of a role holder), or nil.
+local function WantedTop()
+	local W = ns.Wanted
+	if type(W) ~= "table" or W.missing or W.GLOBAL_BORDERS_ACTIVE ~= true or type(W.GlobalSnapshot) ~= "function" then return nil end
+	local ok, g = pcall(W.GlobalSnapshot)
+	if not ok or type(g) ~= "table" or type(g.rows) ~= "table" then return nil end
+	return g
+end
+H.WantedTop = WantedTop
+-- (1.2.4) That word changed (a newer one, its expiry, its issuer's role gone): the horses, everyone's
+-- frames and our own honours looked at again. WANTED_CHANGED comes with every kill shared too: only a
+-- change of the word itself counts.
+local wantedWord
+ns.On("WANTED_CHANGED", function()
+	local g = WantedTop()
+	local word = g and table.concat({ tostring(g.issuer), tostring(g.epoch), tostring(g.seq), tostring(g.issued) }, "|") or ""
+	if word == wantedWord then return end
+	local had = wantedWord
+	wantedWord = word
+	if had ~= nil or word ~= "" then Changed() end
+end)
+-- (1.2.4) The census changed: where this character is a guild master (a guild master alone holds the
+-- owl) or was told he holds it, his own honours again once its first guild or that guild's leader
+-- changed, BEST_SOON after a burst of reports (one look a burst).
+H.BEST_SOON = 5
+local bestKey, bestDue = nil, false
+ns.On("DATA_CHANGED", function()
+	if bestDue then return end
+	local rank = GetGuildInfo and select(3, GetGuildInfo("player"))
+	if rank ~= 0 then
+		local told = H.Standing().guild
+		if not (type(told) == "table" and (tonumber(told.p) or 0) > 0) then return end
+	end
+	bestDue = true
+	ns.After(H.BEST_SOON, "arena best guild", function()
+		bestDue = false
+		local top = BestGuild()
+		local key = top and (top.guild .. "|" .. top.leader) or ""
+		if key == bestKey then return end
+		bestKey = key
+		H.RefreshSoon()
+	end)
+end)
+
 local inputs, inputsGen, inputsAt
 -- The facts every Holdings call takes (kept while nothing changed, a minute at most).
 function H.Inputs()
@@ -209,7 +324,9 @@ function H.Inputs()
 		levels = store and store.levels or {},
 		guild = BestGuild(),
 		oracle = ow and { month = Places(ow.names), monthNo = lastMonth } or nil,
-		church = church and { missionaries = Places(church.missionaries), at = church.at } or nil,
+		church = church and { missionaries = Places(church.missionaries), apostles = Places(church.apostles), at = church.at } or nil,
+		bones = BonesTop(lastMonth),
+		wanted = WantedTop(),
 		now = now,
 	}
 	inputsGen, inputsAt = gen, math.floor(now / 60)
@@ -244,6 +361,17 @@ local function PickOf(name)
 	local p = P.Of(name)
 	if not p then return nil, nil end
 	return { frame = p.frame or "rank", title = p.title }, p.verified and p.gk or nil
+end
+
+-- (1.2.4) This client knows the player's pick: ours, or a profile heard (Wanted.GlobalBorder then
+-- leaves the slayers' frame to it, Verified: "none", another frame he holds, the horse he picked).
+function H.PickKnown(name)
+	if type(name) ~= "string" or name == "" then return false end
+	if Same(name, ns.me) then return true end
+	local P = ns.ArenaProfile
+	if type(P) ~= "table" or P.missing or type(P.Of) ~= "function" then return false end
+	local ok, p = pcall(P.Of, name)
+	return ok and type(p) == "table"
 end
 
 local cache, cacheGen, cacheHour = {}, -1, -1
@@ -1159,6 +1287,11 @@ function H.Known()
 	-- (1.2.3: the Church's top 3 while it is shown and fresh; closed, unheard or stale it is not
 	-- known, so a missionary's crook is remembered as it was: never "lost", nor "new" when it is back.)
 	local church = ChurchTop()
+	-- (1.2.4: the Apostles' the same; the Bones' wherever the build has its table, its ranking this
+	-- client's own count; the slayers' while a signed word shows, so an expired or revoked one is not
+	-- known, and nobody is "lost" for it.)
+	local FT = ns.FarkleTable
+	local fresh3 = church ~= nil and ns.Honors.ChurchFresh(church, Now())
 	return {
 		belt = (titles and next(titles) ~= nil) or (words and next(words) ~= nil) or Arena.Heavy("L") ~= nil,
 		tier = Arena.Heavy("L") ~= nil,
@@ -1166,7 +1299,10 @@ function H.Known()
 		level = s ~= nil and s.levels ~= nil and next(s.levels) ~= nil,
 		guild = fresh,
 		oracle = s ~= nil and s.oracle ~= nil and next(s.oracle) ~= nil,
-		missionary = church ~= nil and ns.Honors.ChurchFresh(church, Now()),
+		missionary = fresh3,
+		apostle = fresh3,
+		bones = type(FT) == "table" and not FT.missing and type(FT.Best) == "function",
+		wanted = WantedTop() ~= nil,
 	}
 end
 
@@ -1192,9 +1328,12 @@ function H.Refresh()
 			told = copy
 		end
 		H.FirstLook(held)
-		local pick, earned, lost = ns.Honors.Update(before, held, H.Known(), function(h)
+		local known = H.Known()
+		-- (1.2.4: now, so a closed month's list over is remembered where it ended, not lost: the next
+		-- month's list naming him there switches nothing on, Honors.Update's opts.)
+		local pick, earned, lost = ns.Honors.Update(before, held, known, function(h)
 			return told[H.LetterMark(h.key, h.period)] == true
-		end)
+		end, { now = H.Inputs().now })
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
 		if not same or (first and next(pick.seen or {}) ~= nil) then P.SavePick(pick) end
@@ -1203,6 +1342,10 @@ function H.Refresh()
 			P.Send(true)
 			sent = true
 		end
+		-- (1.2.4) Each place against what he was last told: the King's letter the first time he reaches
+		-- it in its cycle, a notice for any other move (H.Tell); then, as before, a letter for anything
+		-- newly earned that has none yet (QueueLetter: once per mark).
+		H.Tell(held, known, H.Lettered())
 		for _, h in ipairs(earned) do
 			if (h.frame or h.title) and not h.noLetter then H.QueueLetter(h.key, h.period) end
 		end
@@ -1345,6 +1488,10 @@ function H.LetterFamily(key)
 	if key:find("^missionary%-") then return "missionary" end
 	-- (1.2.4: Most Wanted's Slayer letter, its words Wanted.lua's: H.LetterText.)
 	if key:find("^wanted@") then return "wanted" end
+	-- (1.2.4)
+	if key:find("^apostle%-[123]$") then return "apostle" end
+	if key:find("^bones%-") then return "bones" end
+	if key:find("^wanted%-slayer%-") then return "wanted-slayer" end
 	return nil
 end
 -- The letter's words: the King's, naming the honour and its title (never a real name).
@@ -1508,6 +1655,22 @@ local function Place(f)
 	f:SetHeight(y + 40 + 12 + 24 + inner[4] + 12)
 end
 
+-- (1.2.4) In an instance or Busy (ns.Quiet) a letter that would open by itself waits as every popup
+-- of Olympus's does (the held alerts, ns.Alert): a chat line now, its line on the Decrees tab, and
+-- opened once he is out (ns.ReleaseHeld: a new zone, a change of his flags, or within 10 seconds).
+-- His own click opens it at once (the Olympus window, H.WindowShown; his profile's Edit; the
+-- Decrees tab's line). One held line for every letter waiting. (1.2.4's first cut opened it over a
+-- dungeon or a raid between pulls: the month's turn, 00:01 UTC, is 21:01 in Brazil.)
+H.LETTER_HELD = "honors letter"
+local function HoldLetter()
+	for _, x in ipairs(ns.Held()) do if x.key == H.LETTER_HELD then return end end
+	ns.Alert("arena", "soft", { what = L.HELD_HONOR_LETTER, key = H.LETTER_HELD,
+		open = function() return letters[1] ~= nil end,
+		-- (still held: the Decrees tab's line, his own click; out: ReleaseHeld's, by itself)
+		show = function() H.ShowLetter(nil, ns.Quiet() ~= nil) end })
+	ns.Print("|cffffd200" .. L.HONOR_LETTER_HELD .. "|r")
+end
+
 -- key: a letter asked for (a click: shown at once); prompted: the player's click opened it.
 function H.ShowLetter(key, prompted)
 	if H.LetterToSender() then return false end
@@ -1517,6 +1680,10 @@ function H.ShowLetter(key, prompted)
 	if frame and frame:IsShown() then return true end
 	if not key and not prompted and ns.GamepadUI() then
 		H.WaitForWindow()
+		return false
+	end
+	if not key and not prompted and ns.Quiet() then
+		HoldLetter()
 		return false
 	end
 	H.toldWaiting = nil
@@ -1567,6 +1734,259 @@ function H.CloseLetter(wear)
 end
 function H.LetterFrame() return frame end
 function H.QueuedLetters() return letters end
+
+---------------------------------------------------------------------------
+-- (1.2.4) The places told: the King's letter the first time, a notice after
+---------------------------------------------------------------------------
+
+H.NOTICE_SETTLE = 120  -- a move is said once it held this long (a swap back meanwhile says nothing)
+H.NOTICE_GAP = 900     -- one family's notices this far apart at least (what moved meanwhile: where it ended, once)
+H.NOTICE_SHOW = 8      -- a notice's strip stays this long on screen
+H.NOTICE_EVERY = 2     -- a new strip this often at most...
+H.NOTICE_STACK = 3     -- ...this many at once...
+H.NOTICE_SESSION = 10  -- ...and this many a session; the rest in chat alone
+H.NOTICE_PARTS = 3     -- the families one "since your last visit" strip names (the rest counted)
+H.NOTICES_KEPT = 20    -- this session's notices kept to read (H.Notices)
+H.NOTICE_W, H.NOTICE_H, H.NOTICE_TOP = 440, 44, 260
+
+-- What this character was last told of each family (Honors.Moves' standing, with t: when it was
+-- said), kept in his profile beside lettered.
+function H.Standing()
+	local P = ns.ArenaProfile
+	local m = type(P) == "table" and type(P.Mine) == "function" and P.Mine() or {}
+	return type(m.standing) == "table" and m.standing or {}
+end
+
+-- A family's list as the notices name it (L.HONOR_RANKING), for a family whose frame this version
+-- wears alone (the level race's comet is never taken back; the Arena's and the Oracle's wait).
+local function Ranking(family)
+	local names = L.HONOR_RANKING
+	if type(names) ~= "table" or type(names[family]) ~= "string" then return nil end
+	return ns.Honors.FrameShipped({ family = family }) and names[family] or nil
+end
+-- A move's honour (its mark on the strip): the one held, else the place he left.
+local function MoveKey(m)
+	if m.honour then return m.honour.key end
+	if m.family == "guild" then return "guild-top-leader" end
+	return m.family .. "-" .. m.from
+end
+local function PlaceText(p) return type(L.HONOR_PLACE) == "table" and L.HONOR_PLACE[p] or tostring(p) end
+-- A notice's words: its own line, and its part of a "since your last visit".
+local function NoticeText(m)
+	local name = Ranking(m.family)
+	if m.kind == "out" then
+		return m.family == "guild" and L.HONOR_NOTICE_GUILD_OUT or L.HONOR_NOTICE_OUT:format(name), L.HONOR_NOTICE_PART_OUT:format(name)
+	end
+	local place = PlaceText(m.to)
+	local part = L.HONOR_NOTICE_PART_PLACE:format(name, place)
+	if m.family == "guild" then return L.HONOR_NOTICE_GUILD_BACK, part end
+	if m.kind == "down" then return L.HONOR_NOTICE_DOWN:format(name, place), part end
+	if m.kind == "back" then return L.HONOR_NOTICE_BACK:format(name, place), part end
+	return L.HONOR_NOTICE_UP:format(name, place), part
+end
+
+-- A family's source loaded (as Honors.Update asks it): the families looked at this session.
+local function Loaded(known, family)
+	if known == true then return true end
+	local source = type(family) == "string" and family:match("^(%a+)") or nil
+	return type(known) == "table" and source ~= nil and known[source] == true
+end
+
+local pendingMoves, looked = {}, {} -- [family] = { p, c, since, away }; [family] = true once loaded this session
+local notices, strips, stripQueue = {}, {}, {}
+local stripsShown, lastStrip, pumping = 0, nil, false
+local lookAt
+-- One look of our honours at `at` (the earliest asked; a later one waits for the look before it).
+local function LookAt(at)
+	if lookAt and lookAt <= at then return end
+	lookAt = at
+	ns.After(math.max(1, at - Now()), "arena honours look", function()
+		if lookAt ~= at then return end
+		lookAt = nil
+		H.Refresh()
+	end)
+end
+-- The next calendar month's first second (the honours' clock, Honors.MonthOf).
+local function NextMonth(now)
+	local Hs = ns.Honors
+	local m = Hs.MonthOf(now)
+	local t = (math.floor(now / 86400) + 1) * 86400
+	while Hs.MonthOf(t) == m do t = t + 86400 end
+	return t
+end
+
+-- A strip of Olympus's own at the top of the screen (OlympusHonourNotice1-3): the honour's mark and
+-- one line. No title, no button, no mouse, no keyboard, never on the escape list (no pop-up: the
+-- gamepad UI's cursor never stops on it, and it takes no click or key from the game), gone after
+-- NOTICE_SHOW.
+local function Strip(i)
+	local f = CreateFrame("Frame", "OlympusHonourNotice" .. i, UIParent)
+	f:SetSize(H.NOTICE_W, H.NOTICE_H)
+	f:SetPoint("TOP", UIParent, "TOP", 0, -(H.NOTICE_TOP + (i - 1) * (H.NOTICE_H + 4)))
+	f:SetFrameStrata("HIGH")
+	f:EnableMouse(false)
+	f:EnableKeyboard(false)
+	f.bg = f:CreateTexture(nil, "BACKGROUND")
+	f.bg:SetAllPoints(f)
+	f.bg:SetColorTexture(0.06, 0.04, 0.02, 0.8)
+	-- (a bronze line at its foot, the Olympus window's metal)
+	f.edge = f:CreateTexture(nil, "BORDER")
+	f.edge:SetPoint("BOTTOMLEFT", f, "BOTTOMLEFT", 0, 0)
+	f.edge:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", 0, 0)
+	f.edge:SetHeight(2)
+	f.edge:SetColorTexture(0.62, 0.46, 0.34, 0.9)
+	f.icon = f:CreateTexture(nil, "ARTWORK")
+	f.icon:SetSize(H.NOTICE_H - 8, H.NOTICE_H - 8)
+	f.icon:SetPoint("LEFT", f, "LEFT", 6, 0)
+	f.text = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+	f.text:SetPoint("LEFT", f.icon, "RIGHT", 8, 0)
+	f.text:SetPoint("RIGHT", f, "RIGHT", -10, 0)
+	f.text:SetJustifyH("LEFT")
+	if f.text.SetWordWrap then f.text:SetWordWrap(true) end
+	f:Hide()
+	return f
+end
+-- The strips waiting, NOTICE_EVERY apart, NOTICE_STACK at once.
+local function Pump()
+	if not stripQueue[1] then return end
+	local now = Now()
+	local free
+	for i = 1, H.NOTICE_STACK do
+		if not strips[i] or not strips[i]:IsShown() then free = i break end
+	end
+	local wait = lastStrip and lastStrip + H.NOTICE_EVERY - now or 0
+	if wait > 0 or not free then
+		if not pumping then
+			pumping = true
+			ns.After(math.max(1, wait), "arena honours notice", function() pumping = false Pump() end)
+		end
+		return
+	end
+	local x = table.remove(stripQueue, 1)
+	local f = strips[free] or Strip(free)
+	strips[free] = f
+	f.text:SetText(x.text)
+	local tex = H.MarkTexture(x.key)
+	if tex then f.icon:SetTexture(tex) f.icon:Show() else f.icon:Hide() end
+	f.key, f.at = x.key, now
+	f:Show()
+	lastStrip = now
+	ns.After(H.NOTICE_SHOW, "arena honours notice", function()
+		if f.at == now then f:Hide() end
+		Pump()
+	end)
+	Pump()
+end
+-- A notice: its line in chat, and its strip (none while the alerts are held, ns.Quiet: an instance,
+-- Busy; none past NOTICE_SESSION). key: the honour whose mark it carries.
+function H.Notice(text, key)
+	if type(text) ~= "string" or text == "" then return false end
+	local mark = H.ChatMark(key)
+	ns.Print((mark and (mark .. " ") or "") .. text)
+	notices[#notices + 1] = { text = text, key = key, t = Now() }
+	while #notices > H.NOTICES_KEPT do table.remove(notices, 1) end
+	if ns.Quiet() or stripsShown >= H.NOTICE_SESSION then return false end
+	stripsShown = stripsShown + 1
+	stripQueue[#stripQueue + 1] = { text = text, key = key }
+	Pump()
+	return true
+end
+function H.Notices() return notices end
+function H.NoticeFrames() return strips end
+
+-- What is said at once: the moves found at a family's first look this session (away: they
+-- happened while he was away) in one "since your last visit", the others each its own.
+local function Say(said)
+	local away, parts = {}, {}
+	for _, x in ipairs(said) do
+		if x.away then
+			away[#away + 1] = x.move
+		else
+			H.Notice((NoticeText(x.move)), MoveKey(x.move))
+		end
+	end
+	if #away == 0 then return end
+	for i, m in ipairs(away) do
+		if i > H.NOTICE_PARTS then
+			parts[#parts + 1] = L.HONOR_NOTICE_MORE:format(#away - H.NOTICE_PARTS)
+			break
+		end
+		parts[#parts + 1] = select(2, NoticeText(m))
+	end
+	H.Notice(L.HONOR_NOTICE_SINCE:format(table.concat(parts, "; ")), MoveKey(away[1]))
+end
+
+-- After a look at our honours (H.Refresh): each family where he stands against what he was last
+-- told (Honors.Moves). The first time he reaches a place in its cycle (a first look, a new cycle, a
+-- place up or back, its mark not in told: H.Lettered), the King's letter, at once (QueueLetter's
+-- rules). A first look or a new cycle at a place told before, a closed month's end, a family the
+-- notices don't name: nothing, his standing kept as it is now. Anything else (down a place, off the
+-- list, back on it or a place won back, told before) is a notice once it held NOTICE_SETTLE and
+-- NOTICE_GAP after his family's last (moving back before that: nothing at all). A family whose source
+-- is not loaded keeps what he was told.
+function H.Tell(held, known, told)
+	local now = Now()
+	local standing = H.Standing()
+	local moves = ns.Honors.Moves(standing, held, known, { now = now })
+	told = type(told) == "table" and told or {}
+	local write, said, moved, due = {}, {}, {}, nil
+	for _, m in ipairs(moves) do
+		local family, h = m.family, m.honour
+		local was = type(standing[family]) == "table" and standing[family] or nil
+		moved[family] = true
+		local reached = m.kind == "seed" or m.kind == "cycle" or m.kind == "up" or m.kind == "back"
+		-- (t: when its last notice was said; a letter is no notice, so it keeps the one before.)
+		local saidAt = was and tonumber(was.t) or nil
+		if reached and h and (h.frame or h.title) and not h.noLetter and not told[H.LetterMark(h.key, h.period)] then
+			H.QueueLetter(h.key, h.period)
+			write[family], pendingMoves[family] = { p = m.to, c = m.cycle, t = saidAt }, nil
+		elseif m.kind == "seed" or m.kind == "cycle" or m.kind == "end" or not Ranking(family) then
+			write[family], pendingMoves[family] = { p = m.to, c = m.cycle, t = saidAt }, nil
+		else
+			local q = pendingMoves[family]
+			if not q or q.p ~= m.to or q.c ~= m.cycle then
+				q = { p = m.to, c = m.cycle, since = now, away = not looked[family] }
+				pendingMoves[family] = q
+			end
+			local at = math.max(q.since + H.NOTICE_SETTLE, (saidAt or -H.NOTICE_GAP) + H.NOTICE_GAP)
+			if now >= at then
+				said[#said + 1] = { move = m, away = q.away }
+				write[family], pendingMoves[family] = { p = m.to, c = m.cycle, t = now }, nil
+			elseif not due or at < due then
+				due = at
+			end
+		end
+	end
+	-- Back where he was told before it was said (or its source gone meanwhile): nothing to say.
+	for family in pairs(pendingMoves) do if not moved[family] then pendingMoves[family] = nil end end
+	local monthly = false
+	for _, h in ipairs(type(held) == "table" and held or {}) do
+		if type(h) == "table" and type(h.family) == "string" then
+			looked[h.family] = true
+			if ns.Honors.CYCLE[h.family] then monthly = true end
+		end
+	end
+	for family in pairs(standing) do if Loaded(known, family) then looked[family] = true end end
+	-- (And while this month's Bone Throw list names him: the charm he may hold when it closes, which
+	-- no word announces.)
+	if not monthly then
+		local bones = BonesTop(ns.Honors.MonthOf(now))
+		for _, r in ipairs(bones and bones.month or {}) do
+			if Same(r.name, ns.me) then monthly = true break end
+		end
+	end
+	if next(write) then
+		local mine = ns.ArenaProfile.Mine(true)
+		mine.standing = type(mine.standing) == "table" and mine.standing or {}
+		for family, v in pairs(write) do mine.standing[family] = v end
+	end
+	if #said > 0 then Say(said) end
+	-- Looked at again when a notice is due, and at the month's turn while he holds a month's honour
+	-- (its new month's letter; a closed list's end): no ticker.
+	if due then LookAt(due) end
+	if monthly then LookAt(NextMonth(now) + 60) end
+	return moves
+end
 
 ---------------------------------------------------------------------------
 -- The role clients' timers (the Treasurer's donors, a bank's Oracle), our own refresh
