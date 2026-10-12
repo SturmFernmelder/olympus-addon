@@ -761,6 +761,9 @@ function ArenaHome.TabLines()
 	-- The games' rankings (the staff always; everyone once the King switches them on), then the
 	-- staff's own section.
 	local staff = ArenaHome.GamesStaff()
+	-- (1.2.4: a member holding no publish word for a game asks the members who hold one, once a
+	-- session: ArenaRoles.AskPublish; the tab shows it as it comes.)
+	if not staff then Call("ArenaRoles", "AskPublish") end
 	if staff or ArenaHome.RankingsPublic() then ArenaHome.RankingLines(lines) end
 	if staff then ArenaHome.StaffLines(lines) end
 	ArenaHome.ArbiterLines(lines)

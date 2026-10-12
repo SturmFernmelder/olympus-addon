@@ -2106,6 +2106,8 @@ message (the game adds it). What goes where:
 | A reviewer's removal or void (WV, 1.2.3): a Horde player's GUID, or a member's name and his row's digest, and when | everyone on the Olympus channel | when the King, a High Councillor or the author takes an abusive entry off or voids a row, and in his catch-up answer |
 | The signed Slayers top three (WY): GUIDs, scores, claims and tie times, with the issuer, signature and expiry | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client, from his own Slayers board (1.2.3: no review); an unchanged verified word may also be relayed by one of these roles (W5) |
 | Slayers catch-up (W4): a request for the current signed ranking | everyone on the Olympus channel | up to three login attempts, starting after 45 seconds and then 5 minutes apart; a role holder answers at most once every 5 minutes, with the signed ranking and (1.2.3) the newest shared rows |
+| The games' rankings ask (AU, 1.2.4): the letters of the games whose publish word your addon lacks, nothing else | everyone on the Olympus channel, and your guild when it spans the realm group's realms | once a session, when you open the Games tab without one of them (never the King's, the High Council's or the author's, who see the rankings anyway) |
+| A games' rankings publish word you hold (AU, 1.2.4): the game, shown or hidden, when, and who gave it (the King or a councillor he named) | the lane the ask came on: the Olympus channel, or your guild | only in answer to an ask, a few seconds after it, from about three holders whatever the army's size, unless the same word went out meanwhile; once every 30 seconds at most |
 | A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you chose (**Sightings to** on the Most Wanted page; 1.2.2: the one you sent evidence to), alone (whispers), three a minute at most | only after your own Yes on its privacy line (**Accept all** does not turn it on), only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 
@@ -2665,6 +2667,15 @@ there pairs each fighter's name with his GUID (a unit in view, or `GetPlayerInfo
 then it is in the history alone, and it goes if the game names another character
 (`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel counts whatever the King's
 live switch says: that switch is the bets' alone.
+**The games' rankings stay shown** (1.2.4, `Olympus/ArenaRoles.lua`): the King's word that shows
+a game's ranking to everyone on the Games tab (or a councillor's he named for that game) is kept
+for the whole realm group, not under its giver's realm, so a member on another realm of the group
+sees it too. Any client that holds a word tells it: a member who opens the Games tab holding no
+word for a game asks once a session, and about three holders answer with the word and its
+giver's name; where the guild spans the group's realms the ask and the answers go over the guild
+too. Nothing goes unasked. A told copy carries no signature of the giver's, so it never replaces
+a word a client heard from its giver, the giver's own word replaces any copy of his, and a copy
+naming someone who may not publish that game counts nowhere (`tests/arena/rankings-word.lua`).
 **Find a player** (`Olympus/ArenaMatch.lua`, the Find in the Arena and in the Bones window): each
 game has its own Find, a duel's or a Bones game's, so the game is the one it was opened from; a
 duel filters by level (Any, within 5 or within 10 of the player's own); both filter by distance (Nearby: the
