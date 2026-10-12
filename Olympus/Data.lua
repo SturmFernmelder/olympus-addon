@@ -662,8 +662,8 @@ function Data.KnownRank(sender, guild, soft)
 	local _, _, tops = Majority(votes, now)
 	-- The rank the leading picture gives (every leading picture, if they tie: then only what
 	-- they all agree on counts), named by someone else too: a report never proves its own
-	-- sender's rank. The Crown (every guild master, the officers of <Olympus>) needs two
-	-- senders naming them (theirs may be one).
+	-- sender's rank. The Lords (every guild master, the officers of <Olympus>: ns.IsLordRank)
+	-- need two senders naming them (theirs may be one).
 	-- A sender is itself by its name alone: "Asmon-OtherRealm" can't vouch for "Asmon-Realm".
 	local self = ns.ShortName(who)
 	local bySig, total, named, others = {}, 0, 0, 0
@@ -693,7 +693,7 @@ function Data.KnownRank(sender, guild, soft)
 			if sig:sub(-2) == ",+" then return nil end
 		end
 	end
-	if ns.IsCrownRank(guild, rank) then
+	if ns.IsLordRank(guild, rank) then
 		if named < 2 and not soft then return nil end
 		if now - (ns.Comm and ns.Comm.loginAt or 0) < Data.CROWN_AFTER then return nil end
 	end

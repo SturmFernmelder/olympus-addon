@@ -50,7 +50,7 @@ function Acts.Audience(to) return L[Acts.AUDIENCES[to] or "WRIT_TO_LORDS"] end
 function Acts.WritFor(to)
 	if not ns.IsMember() then return false end
 	if to == "E" then return true end
-	if to == "L" then return ns.IsCrown() end
+	if to == "L" then return ns.IsLord() end
 	return ns.Roster.MyRank() <= ns.CAPTAIN_RANK
 end
 
@@ -197,7 +197,7 @@ function Acts.HandleAck(dist, sender, text)
 	for _, w in ipairs(Read("writsSent")) do
 		if w.id == id and ns.Now() - w.t < 86400 then
 			if w.to == "E" then return end -- (not acknowledged)
-			if w.to == "L" and not ns.IsCrownRank(guild, rank) then return end
+			if w.to == "L" and not ns.IsLordRank(guild, rank) then return end
 			w.ackBy = w.ackBy or {}
 			if w.ackBy[sender] or (w.acks or 0) >= Acts.MAX_ACKS then return end
 			w.ackBy[sender] = true

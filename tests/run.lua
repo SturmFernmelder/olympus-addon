@@ -1100,19 +1100,33 @@ test("reporter election compares full names", function()
 end)
 
 test("crown permissions", function()
-	eq(ns.IsCrownRank("Olympus II", 0), true, "any guild master")
-	eq(ns.IsCrownRank("Olympus II", 1), false, "officers of other guilds")
+	-- The Lords ([Lords], the writs to the Lords, the census's two reports): every guild master.
+	eq(ns.IsLordRank("Olympus II", 0), true, "any guild master")
+	eq(ns.IsLordRank("Olympus II", 1), false, "officers of other guilds")
+	eq(ns.IsLordRank("Olympus", 3), false)
+	-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army) the Crown is the
+	-- King's guild's alone: another guild's master is a Lord, never the Crown.
+	eq(ns.IsCrownRank("Olympus II", 0), false, "another guild's master: no Crown")
+	eq(ns.IsCrownRank("Olympus II", 1), false)
 	eq(ns.IsCrownRank("Olympus", 3), false)
+	eq(ns.IsCrownRank(nil, 0), false)
 	-- The officers of the main guild (1.0.0): of the Crown on its own members' clients, where
 	-- their rank is the server's (the roster); anywhere else only the census could name them,
 	-- and there they are Captains like any guild's officers.
 	eq(ns.IsCrownRank("Olympus", 1), false, "officers of the main guild, on another guild's client")
+	eq(ns.IsLordRank("Olympus", 1), false)
 	local savedGuild = GetGuildInfo
 	GetGuildInfo = function() return "Olympus", "Knight", 3 end
-	local theirs = ns.IsCrownRank("Olympus", 1)
+	local theirs, lords = ns.IsCrownRank("Olympus", 1), ns.IsLordRank("Olympus", 1)
+	GetGuildInfo = function() return "Olympus II", "Lord", 0 end
+	local lord, crown = ns.IsLord(), ns.IsCrown()
+	GetGuildInfo = function() return "Olympus", "Knight", 1 end
+	local kingsLord, kingsCrown = ns.IsLord(), ns.IsCrown()
 	GetGuildInfo = savedGuild
-	eq(theirs, true, "officers of the main guild, on its members' clients")
-	eq(ns.IsCrownRank("Olympus", 0), true, "its guild master everywhere")
+	eq(theirs, true, "officers of the main guild, on its members' clients"); eq(lords, true)
+	eq(ns.IsCrownRank("Olympus", 0), true, "its guild master everywhere"); eq(ns.IsLordRank("Olympus", 0), true)
+	eq(lord, true, "another guild's master on his own client: a Lord"); eq(crown, false, "never the Crown")
+	eq(kingsLord, true); eq(kingsCrown, true, "an officer of the main guild on his own client: both")
 end)
 
 test("wall of shame round trip", function()
@@ -9647,7 +9661,8 @@ test("the King's guild in one place: <Olympus> on the Alliance, the Horde's once
 	local ok, err = pcall(function()
 		ns.faction = "Alliance"
 		eq(ns.IsKingGuild("Olympus"), true); eq(ns.IsKingGuild("OLYMPUS"), true); eq(ns.IsKingGuild("Olympus II"), false); eq(ns.IsKingGuild(nil), false)
-		eq(ns.IsCrownRank("Olympus II", 1), false); eq(ns.IsCrownRank("Olympus II", 0), true)
+		eq(ns.IsCrownRank("Olympus II", 1), false); eq(ns.IsLordRank("Olympus II", 0), true)
+		eq(ns.IsCrownRank("Olympus II", 0), false, "(1.2.3) another guild's master is a Lord, never the Crown")
 		-- (Its officers are of the Crown on its members' clients, 1.0.0.)
 		GetGuildInfo = function() return "Olympus", "Knight", 3 end
 		eq(ns.IsCrownRank("Olympus", 1), true)
