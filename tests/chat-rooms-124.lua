@@ -268,3 +268,148 @@ test("chat rooms (1.2.4): the author is in every room but the High Council's: li
 		eq(R.Select(aCent), false); eq(#R.History(aCent), 0)
 	end)
 end)
+
+-- 1.2.4 ("Não, não bota limite de 12 salas por pessoa"): no room is let go for another (1.2.3 dropped
+-- the least recently used room's whole history at the thirteenth). Every room's lines together are
+-- bounded instead (LINES_TOTAL), the oldest of all going first, each room keeping its newest.
+test("chat rooms (1.2.4): forty rooms keep their lines: no room is let go, LINES_TOTAL lines in all, the oldest of every room first, each room its newest", function()
+	WithRooms(function(w, R, c)
+		eq(R.ROOMS_MAX, nil, "no cap on rooms")
+		c.ApprovedGuilds = function() return {} end
+		w.authorName, c.me = "Quill Wright-Realm", "Quill Wright-Realm"
+		w.enforced = true
+		c.rdb.guilds = {}
+		local ranks, rooms, leads = {}, {}, {}
+		for i = 1, 20 do
+			local guild, lead = "Olympus " .. (i + 10), "Lead" .. string.char(64 + i) .. " Holt-Realm"
+			c.rdb.guilds[guild] = { leader = lead }
+			ranks[guild] = { [lead] = 0 }
+			for _, prefix in ipairs({ "gcorr", "gcent" }) do rooms[#rooms + 1], leads[#leads + 1] = R.GuildRoom(prefix, guild), lead end
+		end
+		c.Data = setmetatable({ Guild = function(g) return c.rdb.guilds[g] end,
+			AuthorizedRank = function(name, guild)
+				local rank = (ranks[guild] or {})[c.FullName(name)]
+				return rank, rank ~= nil and "signed" or "enforced"
+			end }, { __index = ns.Data })
+		c.Authority = { Enforced = function() return true end, Manifest = function() return nil end }
+		local isFederation = c.IsFederation
+		c.IsFederation = function(g) return c.rdb.guilds[g] ~= nil or isFederation(g) end
+		eq(#rooms, 40)
+		local t = 1000
+		for k = 1, 40 do
+			t = t + 61
+			for j, id in ipairs(rooms) do
+				assert(R.Receive("WHISPER", leads[j], RoomMessage(id, k, "line " .. k), t), id .. " " .. k)
+			end
+		end
+		eq(R.KeptLines(), R.LINES_TOTAL, "1600 lines came, 1200 kept")
+		eq(#R.KeptRooms(), 40, "no room let go")
+		for _, id in ipairs(rooms) do
+			local h = R.History(id)
+			eq(#h, 30, id); eq(h[1].text, "line 11", id .. ": the oldest went first"); eq(h[30].text, "line 40", id)
+		end
+		-- A room quiet since its first line keeps it, however many lines the others bring.
+		R.Reset()
+		eq(R.KeptLines(), 0)
+		t = t + 61
+		assert(R.Receive("WHISPER", leads[1], RoomMessage(rooms[1], 1, "the only line"), t))
+		for k = 1, 40 do
+			t = t + 61
+			for j = 2, #rooms do assert(R.Receive("WHISPER", leads[j], RoomMessage(rooms[j], k, "line " .. k), t)) end
+		end
+		eq(R.KeptLines(), R.LINES_TOTAL)
+		eq(#R.History(rooms[1]), 1, "its newest, its only line, kept"); eq(R.History(rooms[1])[1].text, "the only line")
+		eq(#R.KeptRooms(), 40)
+		-- Each room still its own HISTORY at most.
+		R.Reset(); R.LINES_TOTAL = 10000
+		for k = 1, R.HISTORY + 5 do t = t + 61; assert(R.Receive("WHISPER", leads[1], RoomMessage(rooms[1], k % 10000, "l" .. k), t)) end
+		eq(#R.History(rooms[1]), R.HISTORY); eq(R.KeptLines(), R.HISTORY)
+	end)
+end)
+
+-- A room's lines go as one whisper to each member (1.2 s apart, Comm's queue holding 60): FANOUT a
+-- line at most, the author, the King, the High Council and the guild masters first, then those who
+-- wrote in the room in the last ten minutes, then the others by name; the sender is told how many.
+test("chat rooms (1.2.4): a line goes to FANOUT members at most, the author, the King and those heard lately first, and the sender is told how many it missed", function()
+	WithRooms(function(w, R, c)
+		eq(R.FANOUT, 40)
+		w.authorName, w.authorOnline = "Quill Wright-Realm", true
+		local names = { w.king }
+		for i = 1, 50 do names[#names + 1] = ("Tester %02d-Realm"):format(i) end
+		local left = 3
+		assert(R.RegisterAudience("testers", { label = "Testers", CanAccess = function() return true end,
+			Recipients = function() return names, left end }))
+		-- Tester 50 wrote in the room lately: he goes before the testers he would follow by name.
+		assert(R.Receive("WHISPER", "Tester 50-Realm", RoomMessage("testers", 1, "hello"), 1000))
+		local list, missed = R.Recipients("testers")
+		eq(#list, 40); eq(missed, 11 + left, "51 members, and the 3 the audience left out")
+		eq(list[1], w.king, "the King first"); eq(list[2], "Tester 50-Realm", "heard lately")
+		eq(list[3], "Tester 01-Realm"); eq(list[40], "Tester 38-Realm")
+		-- The author when he is a member of the room: first of all.
+		names[#names + 1] = w.authorName
+		list = R.Recipients("testers")
+		eq(list[1], w.authorName); eq(list[2], w.king)
+		eq(R.Send("testers", "to all"), true)
+		eq(#w.jobs, 40, "40 whispers")
+		eq(w.printed, ns.L.CHATROOM_NOT_REACHED:format(12 + left, 40), "the sender is told")
+		-- Nothing said under the share.
+		w.clearJobs(); w.advance(2); w.printed = nil
+		for i = #names, 30, -1 do names[i] = nil end
+		left = 0
+		eq(R.Send("testers", "to fewer"), true)
+		eq(#w.jobs, 29); eq(w.printed, nil)
+	end)
+end)
+
+-- "não precisa ficar atualizando a todo o tempo ... uma atualização mais lenta, de 1 minuto em 1
+-- minuto": the census's notices check the rooms kept again once a minute at most; a room read or
+-- picked is checked at once, its lines let go when it is no longer this character's.
+test("chat rooms (1.2.4): the census's notices recheck the rooms kept once a minute at most; a room read or picked is checked at once and a room lost lets its lines go", function()
+	WithRooms(function(w, R, c)
+		local me = c.me:lower()
+		w.council[me], w.council["peer-realm"], w.departments[me], w.departments["peer-realm"] = true, true, "Department of War", "Department of War"
+		assert(R.Receive("WHISPER", "Peer-Realm", RoomMessage("council", 1, "council"), 1000))
+		assert(R.Receive("WHISPER", "Peer-Realm", RoomMessage("dept:war", 2, "war"), 1001))
+		local notice = assert(w.listeners.DATA_CHANGED, "the census's notice heard")
+		notice()
+		w.departments[me] = nil
+		notice()
+		eq(table.concat(R.KeptRooms(), ","), "council,dept:war", "a notice within the minute checks nothing")
+		w.advance(R.REFRESH_EVERY)
+		notice()
+		eq(table.concat(R.KeptRooms(), ","), "council", "a minute later: the room lost, its lines gone")
+		-- A room read is checked at once, whatever the minute.
+		w.council[me] = nil
+		eq(#R.History("council"), 0)
+		eq(#R.KeptRooms(), 0, "discarded, not merely hidden")
+		w.council[me] = true
+		eq(#R.History("council"), 0, "nothing comes back")
+		-- And a room picked.
+		assert(R.Receive("WHISPER", "Peer-Realm", RoomMessage("council", 3, "again"), 1100))
+		w.council[me] = nil
+		eq(R.Select("council"), false); eq(#R.KeptRooms(), 0)
+	end)
+end)
+
+-- How many a room reaches, for a page to show, without a census pass at every redraw.
+test("chat rooms (1.2.4): a room's recipients counted for a page at most every RECIPIENTS_EVERY, and at once when it is picked or written in", function()
+	WithRooms(function(w, R, c)
+		local me = c.me:lower()
+		w.council[me] = true
+		c.rdb.council.names = { member = "Member", alpha = "Alpha" }
+		w.council["alpha-realm"] = true
+		local n = R.RecipientCount("council")
+		eq(n, 3, "the King, the Treasurer, Alpha")
+		c.rdb.council.names.beta = "Beta"; w.council["beta-realm"] = true
+		eq(R.RecipientCount("council"), 3, "not counted again yet")
+		w.advance(R.RECIPIENTS_EVERY)
+		eq(R.RecipientCount("council"), 4)
+		c.rdb.council.names.gamma = "Gamma"; w.council["gamma-realm"] = true
+		eq(R.Select("council"), true)
+		eq(R.RecipientCount("council"), 5, "picked: counted at once")
+		c.rdb.council.names.delta = "Delta"; w.council["delta-realm"] = true
+		eq(R.Send("council", "hello"), true)
+		eq(R.RecipientCount("council"), 6, "written in: counted at once")
+		eq(R.RecipientCount("dept:war"), nil, "not a room of his")
+	end)
+end)

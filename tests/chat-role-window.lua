@@ -222,3 +222,55 @@ test("Chat tab (1.2.4): the author's lines carry The Royal Dev after his name, n
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- 1.2.4 (the author: "para mim, que estou em 200 rows, ou para quem está no rankals, que também tem
+-- um monte, pode não ficar atualizando o tempo todo, talvez. Tem uma atualização mais lenta, de 1
+-- minuto em 1 minuto"): a line in a room not shown is only counted; the destinations' rooms are
+-- listed again when the tab opens, and else at most once a minute (never at the census's redraw);
+-- the room shown stays live.
+test("Chat tab (1.2.4): a line in a room not shown is only counted, no redraw; the rooms are listed at the opening and at most once a minute after; the room shown stays live", function()
+	WithWindow(function(w)
+		local council, savedTime = ns.IsHighCouncillor, GetTime
+		local real = w.CW.Render
+		local clock = 1000
+		local ok, err = pcall(function()
+			GetTime = function() return clock end
+			ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+			ns.db.chatRooms = true
+			local renders = 0
+			w.CW.Render = function(...) renders = renders + 1; return real(...) end
+			local f = w.CW.Open("A")
+			local function Tick(s) clock = clock + s; f:Fire("OnUpdate", s) end
+			local function Roles()
+				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then return b end end
+			end
+			Tick(0.3)
+			local builds = w.CW.navBuilds
+			renders = 0
+			for i = 1, 20 do w.fire("CHAT_ROOM_LINE", "council", "Peer-Realm", "line " .. i); Tick(0.3) end
+			eq(renders, 0, "twenty lines in a room not shown: no redraw")
+			eq(w.CW.navBuilds, builds, "nor a listing of the rooms")
+			-- The census's notices redraw the tab (DATA_GAP) and list no room.
+			for _ = 1, 10 do w.fire("DATA_CHANGED"); Tick(5.1) end
+			assert(renders > 0, "the census's redraws")
+			eq(w.CW.navBuilds, builds, "the census's redraws list no room")
+			assert(Roles().label:GetText():find("(20)", 1, true), "the count drawn at a redraw: " .. Roles().label:GetText())
+			Tick(w.CW.NAV_EVERY - 51 + 0.3)
+			eq(w.CW.navBuilds, builds + 1, "listed again once the minute went by")
+			Tick(30); eq(w.CW.navBuilds, builds + 1, "not before the next minute")
+			-- The room shown is live.
+			assert(w.CW.SelectLogical("council"))
+			renders = 0
+			w.fire("CHAT_ROOM_LINE", "council", "Peer-Realm", "in the room shown")
+			Tick(0.3)
+			eq(renders, 1, "a line in the room shown: drawn at the next look")
+			-- Opening the tab lists them at once.
+			builds = w.CW.navBuilds
+			w.CW.Window():Hide()
+			w.CW.Open("A")
+			eq(w.CW.navBuilds, builds + 1, "listed at the opening")
+		end)
+		w.CW.Render, GetTime, ns.IsHighCouncillor = real, savedTime, council
+		if not ok then error(err, 0) end
+	end)
+end)

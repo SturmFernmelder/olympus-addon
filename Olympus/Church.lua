@@ -1574,11 +1574,10 @@ if ns.ChatRooms and ns.ChatRooms.RegisterAudience then
 		-- (1.2.4: the King's and a councillor's previews list it, View as.)
 		preview = { king = true, councillor = true },
 		CanAccess = function(name) return Church.InAudience(name or ns.me) end,
-		Recipients = function()
-			local list, left = Church.RoomRecipients()
-			if left > 0 then ns.Print(L.CHURCH_ROOM_NOT_REACHED:format(left)) end
-			return list
-		end,
+		-- (1.2.4: the list and how many it left out; the sender is told that when he writes, ChatRooms'
+		-- Send, never when he only picks the room.)
+		Recipients = function() return Church.RoomRecipients() end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
 	})
 end
 

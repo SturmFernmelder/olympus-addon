@@ -154,7 +154,22 @@ function ChatWindow.NewEra()
 	ChatWindow.Wipe(ChatWindow.offMemo)
 	ChatWindow.Wipe(ChatWindow.logicalOf)
 	if ChatWindow.nameOf then ChatWindow.Wipe(ChatWindow.nameOf); ChatWindow.Wipe(ChatWindow.tellOf) end
-	ChatWindow.navCache = nil
+	-- (1.2.4: not the destinations' rooms, ChatWindow.NavItems: they are listed again on their own.)
+end
+-- 1.2.4 (the author: "para mim, que estou em 200 rows ... pode não ficar atualizando o tempo todo,
+-- talvez. Tem uma atualização mais lenta, de 1 minuto em 1 minuto"): the destinations' rooms (each
+-- room's access read again, ChatRooms.Listing) are listed again when the tab opens, at a change of
+-- the rooms, of a room picked, of the consents or of the role previewed, when a list of them opens,
+-- and else at most every NAV_EVERY seconds while the tab shows; never for a line that came, nor at
+-- the census's redraw. (A redraw of the player's doing, ChatWindow.Render, lists them too.) A line
+-- in a room not shown only adds to its count (no redraw for it); the room shown stays live.
+ChatWindow.NAV_EVERY = 60
+function ChatWindow.NavStale() ChatWindow.navCache = nil end
+-- What the rooms listed rest on besides their own access: the role previewed (View as).
+function ChatWindow.NavKey()
+	local V = ns.ViewAs
+	return tostring(type(V) == "table" and type(V.Previewing) == "function" and V.Previewing()
+		and type(V.Role) == "function" and V.Role() or false)
 end
 -- The era a redraw draws in: a new one when ERA_MAX went by (or the clock went back).
 function ChatWindow.Era()
@@ -319,8 +334,9 @@ local function PutTabLineAway()
 end
 
 local function MarkDirty() dirty = true end
--- (1.2.3) A change the lines' looks may rest on: a new era (ChatWindow.era), and a redraw.
-function ChatWindow.Changed() ChatWindow.NewEra(); dirty = true end
+-- (1.2.3) A change the lines' looks may rest on: a new era (ChatWindow.era), and a redraw. (1.2.4:
+-- each such change, a room's, a consent's, a room picked, opened or gone, lists the rooms again too.)
+function ChatWindow.Changed() ChatWindow.NewEra(); ChatWindow.NavStale(); dirty = true end
 
 function ChatWindow.SaveDraft()
 	if not frame or not tier or not frame.input then return end
@@ -1391,11 +1407,14 @@ end
 -- (All of them in one listing of the rooms, ChatRooms.Listing: each room's access read once.)
 function ChatWindow.NavItems()
 	local items = ChatWindow.navCache
+	local key = ChatWindow.NavKey()
+	if items and ChatWindow.navKey ~= key then items = nil end
 	if not items then
 		local R = ns.ChatRooms
 		if type(R) == "table" and type(R.Listing) == "function" then items = R.Listing(ChatWindow.BuildNav)
 		else items = ChatWindow.BuildNav() end
-		ChatWindow.navCache = items
+		ChatWindow.navCache, ChatWindow.navKey, ChatWindow.navAt = items, key, GetTime and GetTime() or 0
+		ChatWindow.navBuilds = (ChatWindow.navBuilds or 0) + 1 -- (tests: how often they were listed)
 		return items
 	end
 	for _, item in ipairs(items) do ChatWindow.PaintSubtab(item) end
@@ -1424,6 +1443,7 @@ end
 
 function ChatWindow.OpenSubMenu(entry, owner)
 	if not frame then return end
+	ChatWindow.NavStale() -- (1.2.4: a list opened: the destinations' rooms and counts at the next redraw)
 	local options = ChatWindow.SubMenuOptions(entry)
 	if #options == 0 then return end
 	CloseMenu()
@@ -2507,7 +2527,9 @@ end
 function ChatWindow.Render(keep)
 	dirty = false
 	ChatWindow.sinceDraw = 0
-	if keep then ChatWindow.Era() else ChatWindow.NewEra() end
+	-- (1.2.4: a redraw of the player's doing, a click, a room picked, lists the rooms again too; the
+	-- throttled one, for lines that came, never: ChatWindow.NAV_EVERY.)
+	if keep then ChatWindow.Era() else ChatWindow.NewEra(); ChatWindow.NavStale() end
 	local started = ChatWindow.Clock()
 	Draw()
 	local finished = started and ChatWindow.Clock()
@@ -2713,11 +2735,15 @@ local function OnUpdate(_, elapsed)
 		ChatWindow.NewEra()
 	end
 	ChatWindow.Era()
+	-- (1.2.4: the destinations' rooms listed again at most every NAV_EVERY, while the tab shows.)
+	if ChatWindow.navCache and (GetTime() - (ChatWindow.navAt or 0) >= ChatWindow.NAV_EVERY or GetTime() < (ChatWindow.navAt or 0)) then
+		ChatWindow.NavStale(); dirty = true
+	end
 	-- A rank that no longer reads this channel (a demotion, out of the guild), or a room whose
 	-- retention ended: drawn again at once.
 	if ChatWindow.PruneDynamicRooms and GetTime() - lastRoomPrune >= LOOK_GAP then ChatWindow.PruneDynamicRooms() end
 	local lost = tier ~= nil and not Choice(tier)
-	if lost then dirty = true; ChatWindow.NewEra() end
+	if lost then dirty = true; ChatWindow.NewEra(); ChatWindow.NavStale() end
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local status = logical and logical.scope == "topic" and type(R) == "table" and type(R.RequestStatus) == "function" and R.RequestStatus(tier) or nil
@@ -3726,6 +3752,7 @@ function ChatWindow.Attach(h, places)
 	Place(p, places)
 	if not p:IsShown() then
 		ChatWindow.NewEra() -- (1.2.3: opened, nothing kept from before is read: Pick's rooms neither)
+		ChatWindow.NavStale() -- (1.2.4: and the destinations' rooms listed anew)
 		tier = Pick()
 		if tier and ns.Channels.TIERS[tier] then ChatWindow.globalTier = tier; Remember(tier) end
 		unread = {}
@@ -3819,6 +3846,7 @@ function ChatWindow.Reset()
 	pointer = nil
 	keyButton, boundKeys, keysLater, toldLater, syncing = nil, nil, false, false, false
 	ChatWindow.NewEra() -- (1.2.3: nothing kept from before)
+	ChatWindow.NavStale()
 end
 
 ---------------------------------------------------------------------------
@@ -3839,10 +3867,13 @@ ns.On("CHAT_LINE", function(t)
 	end
 	MarkDirty()
 end)
+-- (1.2.4: a line in a room not shown only adds to its count, drawn at the next redraw: no redraw of
+-- its own, ChatWindow.NAV_EVERY. The room shown stays live.)
 ns.On("CHAT_ROOM_LINE", function(id)
 	if not Shown() or not ChatWindow.Logical(id) then return end
 	if id ~= tier then
 		unread[id] = (unread[id] or 0) + 1
+		return
 	elseif not stick then
 		newCount = newCount + 1
 	end
@@ -3862,6 +3893,7 @@ ns.On("ARENA_CHAT", function(id)
 	if not dynamicRooms[key] or not Shown() then return end
 	if key ~= tier then
 		unread[key] = (unread[key] or 0) + 1
+		return -- (1.2.4: counted, drawn at the next redraw, as a role room's: CHAT_ROOM_LINE)
 	elseif not stick then
 		newCount = newCount + 1
 	end

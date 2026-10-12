@@ -34,15 +34,32 @@ local Rooms = {}
 ns.ChatRooms = Rooms
 
 Rooms.HISTORY = 100
-Rooms.ROOMS_MAX = 12
+-- 1.2.4 (the author: "Não, não bota limite de 12 salas por pessoa"): no room is let go to make room
+-- for another. What a session keeps of every room's lines together is bounded instead: LINES_TOTAL
+-- lines, the oldest of all going first, each room keeping its newest (HISTORY a room as before).
+Rooms.LINES_TOTAL = 1200
 Rooms.TEXT_MAX = 150
 Rooms.SEND_GAP = 1.5
 Rooms.PER_MINUTE = 6
 Rooms.FLOOD = 60
 Rooms.GONE_FOR = 10 * 60    -- a recipient the server said is not playing: no whisper this long
 Rooms.GUILD_KEYS_MAX = 512  -- guild keys remembered (the census keeps 300 guilds, the signed list 128)
+-- 1.2.4 ("para quem tem muitas ou para mim, não precisa ficar atualizando a todo o tempo ... de 1
+-- minuto em 1 minuto, de 3 em 3 minutos"): the census's notices (every second or so on the author's
+-- game) check the rooms' access again at most once a minute; the rooms' own reads (History, Select)
+-- still check it at once. How many a room reaches, for a page to show, is counted again at most
+-- every RECIPIENTS_EVERY seconds (at once when the room is picked or written in).
+Rooms.REFRESH_EVERY = 60
+Rooms.RECIPIENTS_EVERY = 180
+-- A line goes to FANOUT members of a room at most (one whisper each, 1.2 s apart: 40 take about 48 s;
+-- Comm's queue holds 60): the author, the King, the High Council, the guild masters, those heard in the
+-- room in the last HEARD_FOR seconds, then the others by name; the sender is told how many it missed.
+Rooms.FANOUT = 40
+Rooms.HEARD_FOR = 10 * 60
 
 local states = {}          -- room -> bounded session history and receive budgets
+local kept, keptSeq = 0, 0 -- 1.2.4: every room's lines together (LINES_TOTAL), and the last line's stamp
+local Forget               -- (below: a room's state and its lines let go)
 local nextId = math.random and math.random(0, 9999) or 0
 local lastSend = -math.huge
 local sentTimes = {}
@@ -676,7 +693,12 @@ function Rooms.Select(id)
 		ns.Fire("CHAT_ROOM_SELECTED", id)
 		return true
 	end
-	if not Rooms.Info(id) or not Rooms.CanAccess(id) then return false, "access" end
+	if not Rooms.Info(id) or not Rooms.CanAccess(id) then
+		-- (1.2.4: a room no longer this character's: its lines are let go at once, not at the next refresh.)
+		if id ~= "guild" then Forget(id) end
+		return false, "access"
+	end
+	Rooms.Recount(id)
 	ns.Fire("CHAT_ROOM_SELECTED", id)
 	return true
 end
@@ -703,28 +725,46 @@ function Rooms.SetChatOn(on)
 	return true
 end
 
+-- (1.2.4: no room is let go for another any more: ROOMS_MAX and its least recently used room are gone.)
 local function State(id, make)
 	local r = states[id]
 	if r or not make then return r end
-	local count = 0
-	for _ in pairs(states) do count = count + 1 end
-	if count >= Rooms.ROOMS_MAX then
-		local oldest, at
-		for key, one in pairs(states) do
-			if key ~= "guild" and (not at or (one.used or 0) < at) then oldest, at = key, one.used or 0 end
-		end
-		if oldest then states[oldest] = nil end
-	end
 	r = { id = id, lines = {}, recent = {}, used = Now() }
 	states[id] = r
 	return r
 end
 
+Forget = function(id)
+	local r = states[id]
+	if not r then return false end
+	kept = math.max(0, kept - #r.lines)
+	states[id] = nil
+	return true
+end
+
+-- Over LINES_TOTAL: the oldest line of every room goes, one at a time, a room's newest line never.
+local function Budget()
+	while kept > Rooms.LINES_TOTAL do
+		local oldest, at
+		for _, r in pairs(states) do
+			local first = r.lines[2] and r.lines[1]
+			if first and (not at or (first.seq or 0) < at) then oldest, at = r, first.seq or 0 end
+		end
+		if not oldest then return end
+		table.remove(oldest.lines, 1)
+		kept = kept - 1
+	end
+end
+
 local function Keep(id, e)
 	local r = State(id, true)
 	if not r then return end
+	keptSeq = keptSeq + 1
+	e.seq = keptSeq
 	r.lines[#r.lines + 1] = e
-	while #r.lines > Rooms.HISTORY do table.remove(r.lines, 1) end
+	kept = kept + 1
+	while #r.lines > Rooms.HISTORY do table.remove(r.lines, 1); kept = kept - 1 end
+	Budget()
 	r.used = Now()
 	ns.Fire("CHAT_ROOM_CHANGED", id)
 	-- The window uses CHAT_ROOM_LINE for unread state. A local echo is already visible to
@@ -765,7 +805,12 @@ function Rooms.History(id, memo)
 		local ok, history = pcall(provider.History, id)
 		return ok and type(history) == "table" and history or {}
 	end
-	if not Rooms.ChatOn() or not Accepts(id) then return {} end
+	if not Rooms.ChatOn() then return {} end
+	if not Accepts(id) then
+		-- (1.2.4: discarded at once, not merely hidden until the next refresh, RefreshAuthority.)
+		if id ~= "guild" then Forget(id) end
+		return {}
+	end
 	local r = State(id, false)
 	if not r then return {} end
 	r.used = Now()
@@ -796,6 +841,8 @@ function Rooms.RawHistory(id)
 	local r = State(id, false)
 	return r and r.lines or {}
 end
+-- (Tests, /oly status: the lines every room keeps together, LINES_TOTAL at most.)
+function Rooms.KeptLines() return kept end
 
 -- 1.2.0: a restricted room whispers nobody the game says is offline: our roster's offline members,
 -- and a name the server just answered "not currently playing" for (ERR_CHAT_PLAYER_NOT_FOUND_S,
@@ -888,24 +935,41 @@ function Candidates.Guild(add, guild, officers)
 	end
 end
 
+-- The members a line of room `id` goes to (this character left out, nobody the server says is
+-- offline), FANOUT at most in their order (Rooms.FANOUT), and how many of those online were left out
+-- (an audience's own count of those it left out too). Run inside one listing (Rooms.Listing): each
+-- candidate's access read once.
 local function Members(id)
-	local out, seen = {}, {}
+	if not listing then return Rooms.Listing(Members, id) end
+	local list, seen = {}, {}
 	local roster = {}
 	for _, m in ipairs(ns.Roster and ns.Roster.members or {}) do
 		if type(m) == "table" and type(m.name) == "string" and m.online ~= nil then roster[Lower(ns.FullName(m.full or m.name))] = m.online == true end
 	end
-	local function Add(name)
+	-- Who wrote in the room lately (HEARD_FOR): they go before the rest.
+	local heard, since = {}, ns.Now() - Rooms.HEARD_FOR
+	local r = states[id]
+	for _, e in ipairs(r and r.lines or {}) do
+		if (tonumber(e.t) or 0) >= since and type(e.sender) == "string" then heard[e.sender:lower()] = true end
+	end
+	local function Add(name, order)
 		if type(name) ~= "string" or name == "" then return end
 		local full = ns.FullName(name)
 		local key = full:lower()
 		if not seen[key] and not IsMe(full) and Rooms.CanAccess(id, full) then
 			seen[key] = true
-			if not Offline(full, roster) then out[#out + 1] = full end
+			if not Offline(full, roster) then
+				order = IsAuthor(full) and 1 or IsKing(full) and 2 or (ns.IsHighCouncillor and ns.IsHighCouncillor(full) == true) and 3
+					or (order == 3 or order == 4) and order or heard[key] and 5 or 6
+				list[#list + 1] = { name = full, order = order }
+			end
 		end
 	end
+	local left = 0
 	if audiences[id] then
-		local ok, list = pcall(audiences[id].Recipients)
-		for _, name in ipairs(ok and type(list) == "table" and list or {}) do Add(name) end
+		local ok, names, more = pcall(audiences[id].Recipients)
+		for _, name in ipairs(ok and type(names) == "table" and names or {}) do Add(name) end
+		left = ok and tonumber(more) or 0
 	else
 		local k, arg = KindOf(id)
 		if k then
@@ -913,10 +977,42 @@ local function Members(id)
 			k.Candidates(Add, arg)
 		end
 	end
-	table.sort(out)
-	return out
+	table.sort(list, function(a, b)
+		if a.order ~= b.order then return a.order < b.order end
+		return a.name < b.name
+	end)
+	local out = {}
+	for i = 1, math.min(#list, Rooms.FANOUT) do out[i] = list[i].name end
+	return out, left + math.max(0, #list - Rooms.FANOUT)
 end
 Rooms.Recipients = Members -- diagnostics/tests: the signed audience, with this character left out
+
+-- 1.2.4: how many members of room `id` a line reaches now, and how many online it would leave out,
+-- for a page to show: counted again at most every RECIPIENTS_EVERY seconds, at once when the room is
+-- picked (Rooms.Select) or written in (Rooms.Send). Nil for a room this character is not in.
+local counts = {}
+function Rooms.RecipientCount(id)
+	if id == "guild" or ProviderFor(id) or not Rooms.Info(id) or not Rooms.CanAccess(id) then return nil end
+	local c, now = counts[id], Now()
+	if not c or now - c.at >= Rooms.RECIPIENTS_EVERY or now < c.at then
+		local list, left = Members(id)
+		c = { n = #list, left = left, at = now }
+		counts[id] = c
+	end
+	return c.n, c.left
+end
+function Rooms.Recount(id) counts[id] = nil end
+
+-- What a sender is told when his line left `left` members online out: the audience's own words
+-- (the Church's), else the rooms'.
+local function NotReached(id, left)
+	local a = audiences[id]
+	if a and type(a.notReached) == "function" then
+		local ok, text = pcall(a.notReached, left)
+		if ok and type(text) == "string" then return text end
+	end
+	return Text("CHATROOM_NOT_REACHED", "%d members of this room online were not reached: a line goes to %d at most (the author, the King, the High Council and the guild masters first)."):format(left, Rooms.FANOUT)
+end
 
 local function CleanGuild(guild)
 	return tostring(guild or ""):gsub("[~|%c]", ""):sub(1, 72)
@@ -1022,7 +1118,8 @@ local function Send(id, text)
 	local msg = ("M2~1~%s~%d~~%s~%s"):format(id, lineId, CleanGuild(guild), text)
 	if #msg > 255 then return false, "size" end
 	-- (1.2.3: past Guild every room of this file is restricted: one logged whisper to each recipient.)
-	local recipients = Members(id)
+	local recipients, left = Members(id)
+	counts[id] = { n = #recipients, left = left, at = Now() }
 	WatchGone()
 	local count = #recipients
 	if ns.Comm.QueueRoom and ns.Comm.QueueRoom() < count then ns.Print(L.CHAN_BUSY) return false, "busy" end
@@ -1059,6 +1156,7 @@ local function Send(id, text)
 	end
 	lastSend = now
 	sentTimes[#sentTimes + 1] = now
+	if left > 0 then ns.Print(NotReached(id, left)) end
 	return true, "ok"
 end
 
@@ -1154,16 +1252,30 @@ function Rooms.Stats() return stats end
 -- whispers through their permits. Histories no longer authorized are discarded, not merely hidden.
 function Rooms.RefreshAuthority()
 	local changed = false
-	for id in pairs(states) do
+	local ids = {}
+	for id in pairs(states) do ids[#ids + 1] = id end
+	for _, id in ipairs(ids) do
 		local info = Rooms.Info(id)
-		if info and info.scope == "restricted" and not Rooms.CanAccess(id) then states[id], changed = nil, true end
+		-- (1.2.4: a per-guild room whose guild this client no longer lists is no room any more either.)
+		if id ~= "guild" and (not info or info.scope == "restricted" and not Rooms.CanAccess(id)) then changed = Forget(id) or changed end
 	end
 	if changed then ns.Fire("CHAT_ROOMS_CHANGED") end
 	return changed
 end
 
+-- 1.2.4: the census's notice (DATA_CHANGED, every second or so on the author's game): the same check
+-- of every room kept, at most once every REFRESH_EVERY seconds, in one listing. A room read or
+-- picked meanwhile is checked at once (Rooms.History, Rooms.Select).
+local lastRefresh = -math.huge
+function Rooms.RefreshSoon()
+	local now = Now()
+	if now - lastRefresh < Rooms.REFRESH_EVERY and now >= lastRefresh then return false end
+	lastRefresh = now
+	return Rooms.Listing(Rooms.RefreshAuthority)
+end
+
 function Rooms.Reset()
-	states = {}
+	states, kept, keptSeq, counts, lastRefresh = {}, 0, 0, {}, -math.huge
 	nextId = 0
 	lastSend, sentTimes = -math.huge, {}
 	receiveBuckets, receiveSeen, receiveMine = {}, {}, {}
@@ -1380,7 +1492,7 @@ if ns.Consent and ns.Consent.Register then
 	})
 end
 
-ns.On("DATA_CHANGED", Rooms.RefreshAuthority)
+ns.On("DATA_CHANGED", function() Rooms.RefreshSoon() end)
 ns.RegisterEvent("CHAT_MSG_GUILD", Rooms.ReceiveGuild)
 ns.On("INIT", Rooms.Reset)
 ns.On("ARENA_CHAT_ROOM", function(spec) Rooms.MatterChanged(spec) end)
