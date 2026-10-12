@@ -1295,15 +1295,27 @@ end
 -- login; a first session) nothing told is known: every honour held looks new at each login. The
 -- letter is kept in the profile's list, unread, to open from the Edit, and never opens by itself
 -- (1.2.1, the owner's ask: never again at each update; as the update letter, Letters.lua).
-function H.QueueLetter(key, period)
+-- (1.2.4 repair: a Slayer letter, Wanted's "wanted@" family, one a kill, is never marked in
+-- lettered: its own queue in Wanted.lua shows it once, and a mark a kill grew the account's saved
+-- data without end. It is kept in the list like any letter, once (the same key listed already
+-- queues nothing), and marks an earlier build left are let go. now: its caller found nothing in
+-- the way and, with the gamepad UI, the Olympus window open: it shows now, as the window's own
+-- opening shows a letter waiting, H.WindowShown.)
+function H.QueueLetter(key, period, now)
 	if type(key) ~= "string" then return end
 	local told = H.Lettered()
+	local slayer = H.LetterFamily(key) == "wanted"
 	local mark = H.LetterMark(key, period)
-	if told[mark] then return end
+	if not slayer and told[mark] then return end
 	local P = ns.ArenaProfile
 	local m = P.Mine(true)
 	m.lettered = told
-	told[mark] = true
+	if slayer then
+		for k in pairs(told) do if type(k) == "string" and k:find("^wanted@") then told[k] = nil end end
+		for _, x in ipairs(type(m.letters) == "table" and m.letters or {}) do if type(x) == "table" and x.key == key then return end end
+	else
+		told[mark] = true
+	end
 	-- (1.2.3: the King's honours are told too, with no letter, so they switch on as anyone's: once.)
 	if H.LetterToSender() then return end
 	m.letters = type(m.letters) == "table" and m.letters or {}
@@ -1311,7 +1323,7 @@ function H.QueueLetter(key, period)
 	while #m.letters > H.LETTERS_MAX do table.remove(m.letters, 1) end
 	if not Arena.Persists() then return end
 	letters[#letters + 1] = { key = key, t = Now() }
-	H.ShowLetter()
+	H.ShowLetter(nil, now == true)
 end
 function H.Letters()
 	if H.LetterToSender() then return {} end
@@ -1331,6 +1343,8 @@ function H.LetterFamily(key)
 	if key:find("^oracle%-") then return "oracle" end
 	if key == "guild-top-leader" then return "guild" end
 	if key:find("^missionary%-") then return "missionary" end
+	-- (1.2.4: Most Wanted's Slayer letter, its words Wanted.lua's: H.LetterText.)
+	if key:find("^wanted@") then return "wanted" end
 	return nil
 end
 -- The letter's words: the King's, naming the honour and its title (never a real name).
@@ -1512,11 +1526,16 @@ function H.ShowLetter(key, prompted)
 	frame.key = nextLetter.key
 	frame.body:SetText(text or "")
 	Place(frame)
-	H.DressPortrait(frame.rig, nextLetter.key)
+	-- (1.2.4 repair: a Slayer letter has no honour to wear: its first button opens the Slayers, the
+	-- Wanted tab, and his portrait wears his rank's frame, as his own does.)
+	local slayer = H.LetterFamily(nextLetter.key) == "wanted"
+	frame.wear:SetText(slayer and L.HONOR_LETTER_SLAYERS or L.HONOR_LETTER_WEAR)
+	H.DressPortrait(frame.rig, slayer and "rank" or nextLetter.key)
 	frame:Show()
 	return true
 end
--- "Wear it" (its frame and title picked) or "Later"; the next letter after it.
+-- "Wear it" (its frame and title picked) or "Later"; the next letter after it. (1.2.4: a Slayer
+-- letter's first button, Slayers: the Olympus window on the Wanted tab, the player's own click.)
 function H.CloseLetter(wear)
 	local cur = table.remove(letters, 1)
 	if frame then
@@ -1525,7 +1544,10 @@ function H.CloseLetter(wear)
 	end
 	if cur then
 		for _, x in ipairs(H.Letters()) do if x.key == cur.key then x.read = true end end
-		if wear then
+		if wear and H.LetterFamily(cur.key) == "wanted" then
+			local UI = ns.UI
+			if type(UI) == "table" and type(UI.SelectTab) == "function" then ns.SafeCall("slayer letter", UI.SelectTab, "wanted") end
+		elseif wear then
 			local held = H.Holdings(ns.me, ns.ArenaProfile.MyGk())
 			local frameKey, titleKey
 			for _, h in ipairs(held) do

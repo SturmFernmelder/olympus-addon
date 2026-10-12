@@ -33,6 +33,14 @@ local function Key(W, c, digest)
 	return W.Bounty.LetterKey({ digest = digest or "00000000000a1b2c", points = 210, level = 60, hl = 60 },
 		{ victims = { {}, {} }, bounty = 90 }, "Grimtooth Gorefang-" .. c.realm)
 end
+-- (1.2.4 repair) The Olympus window of client c as the letter sees it: whether it is open (state.open)
+-- and the tabs its clicks select (state.tabs); the rest of the harness's UI as it is.
+local function Window(c)
+	local state = { open = false, tabs = {} }
+	rawset(c.ns, "UI", setmetatable({ IsShown = function() return state.open end,
+		SelectTab = function(key) state.tabs[#state.tabs + 1] = key end }, { __index = H.ns.UI }))
+	return state
+end
 
 print("Most Wanted: the Slayer letter and the notices (1.2.4)")
 
@@ -40,6 +48,7 @@ test("1.2.4 the Slayer letter is the King's letter: its window, with Wanted's wo
 	local w, cast = W3.New()
 	local A, king = Kept(w, cast.A), Kept(w, cast.king)
 	local WA = WithWanted(w, A)
+	Window(A)
 	local L = A.ns.L
 	local key = Key(WA, A)
 	eq(key:sub(1, 7), "wanted@")
@@ -57,7 +66,8 @@ test("1.2.4 the Slayer letter is the King's letter: its window, with Wanted's wo
 	eq(w:As(A, HN.TitleText, key), title, "its title, as the profile Edit's list shows it")
 	local list = HN.Letters()
 	eq(#list, 1); eq(list[1].key, key)
-	-- "Wear it": no honour is the letter's; the pick stays, and the letter closes.
+	-- Its first button: no honour is the letter's; the pick stays, and the letter closes. (1.2.4
+	-- repair: that button is Slayers now, the Wanted tab, below.)
 	eq(w:As(A, HN.CloseLetter, true), true)
 	eq(Shown(A), false); eq(A.ns.ArenaProfile.Pick().frame, pick, "nothing to wear")
 	-- Once a kill: the same key again shows nothing; another kill's key, its own letter.
@@ -154,4 +164,98 @@ test("1.2.4 Most Wanted's notices on the real windows: the death's toast is Olym
 		StaticPopup_Show = savedPopup
 		if not ok then error(err, 0) end
 	end)
+end)
+
+-- 1.2.4 repair (the notices' review): the Slayer letter as the King's letter's model has it (its
+-- first button the Slayers, the Wanted tab; his portrait his rank's frame), its show-once Wanted's
+-- own queue (no mark a kill in the profile), and with the gamepad UI it waits in Wanted, saved,
+-- until the Olympus window is open. Each fails on v124/notices.
+test("1.2.4 repair: the Slayer letter's first button is Slayers (the Olympus window on the Wanted tab, the pick unchanged), its portrait his rank's frame; an honour's letter keeps Wear it and its honour's frame", function()
+	local w, cast = W3.New()
+	local A = Kept(w, cast.A)
+	local WA = WithWanted(w, A)
+	local win = Window(A)
+	local L, HN = A.ns.L, A.ns.HonorsNet
+	local dressed = {}
+	local Dress = HN.DressPortrait
+	HN.DressPortrait = function(rig, key) dressed[#dressed + 1] = key return Dress(rig, key) end
+	local pick = A.ns.ArenaProfile.Pick().frame
+	local key = Key(WA, A)
+	eq(w:As(A, WA.Bounty.SendLetter, key), true)
+	local f = HN.LetterFrame()
+	eq(Shown(A), true); eq(f.key, key)
+	eq(f.wear:GetText(), L.HONOR_LETTER_SLAYERS, "Slayers, not Wear it"); eq(L.HONOR_LETTER_SLAYERS, "Slayers")
+	eq(f.later:GetText(), L.HONOR_LETTER_LATER)
+	eq(dressed[#dressed], "rank", "his rank's frame on his portrait")
+	-- Slayers: the Wanted tab, the player's own click; the letter closes, nothing worn.
+	w:As(A, f.wear:GetScript("OnClick"))
+	eq(Shown(A), false); eq(#win.tabs, 1); eq(win.tabs[1], "wanted", "the Wanted tab")
+	eq(A.ns.ArenaProfile.Pick().frame, pick, "nothing worn")
+	-- An honour's letter after it: Wear it, and its honour's frame.
+	eq(w:As(A, HN.ShowLetter, "arena-champion"), true)
+	eq(f.wear:GetText(), L.HONOR_LETTER_WEAR); eq(dressed[#dressed], "arena-champion")
+	w:As(A, HN.CloseLetter, false)
+	eq(#win.tabs, 1, "Later opens nothing")
+	HN.DressPortrait = Dress
+	W3.NoErrors(w)
+end)
+
+test("1.2.4 repair: 25 Slayer letters (one a kill) leave the profile's told marks as they were: none for a Slayer letter, its show-once Wanted's own queue; each shows once and the list keeps the newest 20 to read again", function()
+	local w, cast = W3.New()
+	local A = Kept(w, cast.A)
+	local WA = WithWanted(w, A)
+	Window(A)
+	local HN = A.ns.HonorsNet
+	-- (A mark an earlier build left for one is let go.)
+	local m = A.ns.ArenaProfile.Mine(true)
+	m.lettered = m.lettered or {}
+	m.lettered[Key(WA, A, "00000000000a0000")] = true
+	local function Marks()
+		local all, slayer = 0, 0
+		for mark in pairs(w:As(A, HN.Lettered)) do
+			all = all + 1
+			if mark:find("^wanted@") then slayer = slayer + 1 end
+		end
+		return all, slayer
+	end
+	local before = Marks()
+	for i = 1, 25 do
+		local key = Key(WA, A, ("00000000000a%04x"):format(i))
+		eq(w:As(A, WA.Bounty.SendLetter, key), true)
+		eq(Shown(A), true, "letter " .. i); eq(HN.LetterFrame().key, key)
+		w:As(A, HN.CloseLetter, false)
+	end
+	local all, slayer = Marks()
+	eq(slayer, 0, "no Slayer letter's mark"); eq(all, before - 1, "nothing grew: the old build's mark let go")
+	eq(#HN.Letters(), HN.LETTERS_MAX, "the newest 20 to read again")
+	eq(HN.Letters()[#HN.Letters()].key, Key(WA, A, ("00000000000a%04x"):format(25)))
+	-- The same key again (Wanted never sends one twice): nothing, while the list holds it.
+	w:As(A, HN.QueueLetter, Key(WA, A, ("00000000000a%04x"):format(25)))
+	eq(Shown(A), false); eq(#HN.Letters(), HN.LETTERS_MAX)
+	W3.NoErrors(w)
+end)
+
+test("1.2.4 repair: with the gamepad UI a Slayer letter goes to the King's letter only with the Olympus window open: before, nothing queued there and chat says once that a letter waits; then it shows at once", function()
+	local w, cast = W3.New()
+	local A = Kept(w, cast.A)
+	local WA = WithWanted(w, A)
+	local win = Window(A)
+	local L, HN = A.ns.L, A.ns.HonorsNet
+	A.globals.C_InputInterfaceStyle = { GetCurrentStyle = function() return 1 end }
+	A.globals.Enum = setmetatable({ InputDeviceInterfaceType = { Mkb = 0, Gamepad = 1 } }, { __index = Enum })
+	eq(w:As(A, A.ns.GamepadUI), true)
+	local key = Key(WA, A)
+	local function Said() local n = 0 for _, p in ipairs(A.printed) do if p == L.HONOR_LETTER_WAITING then n = n + 1 end end return n end
+	for _ = 1, 3 do
+		local went, why = w:As(A, WA.Bounty.SendLetter, key)
+		eq(went, false); eq(why, "window")
+	end
+	eq(Shown(A), false); eq(#HN.QueuedLetters(), 0, "nothing in the King's letter's queue"); eq(#HN.Letters(), 0)
+	eq(Said(), 1, "chat says once")
+	win.open = true
+	eq(w:As(A, WA.Bounty.SendLetter, key), true)
+	eq(Shown(A), true, "the window open: at once"); eq(HN.LetterFrame().key, key)
+	w:As(A, HN.CloseLetter, false)
+	A.globals.C_InputInterfaceStyle, A.globals.Enum = nil, nil
+	W3.NoErrors(w)
 end)

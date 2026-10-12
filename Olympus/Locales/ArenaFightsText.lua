@@ -40,6 +40,8 @@ L.HONOR_METAL_GOLD, L.HONOR_METAL_SILVER, L.HONOR_METAL_BRONZE = "gold", "silver
 L.HONOR_LETTER_HEAD = "A letter from the King"
 L.HONOR_LETTER_SIGN = "- The King"
 L.HONOR_LETTER_WEAR = "Wear it"
+-- (1.2.4: Most Wanted's Slayer letter, its first button: the Wanted tab.)
+L.HONOR_LETTER_SLAYERS = "Slayers"
 L.HONOR_LETTER_LATER = "Later"
 L.HONOR_LETTER = {
 	arena = "Warrior,\n\nThe sand remembers every blow, and so do I. You stood where others fell, and Olympus names you %s. Wear the gryphon with pride: every eye in the arena is on you now.\n\nDefend it well.",
@@ -154,6 +156,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HONOR_LETTER_HEAD = "Uma carta do Rei"
 	L.HONOR_LETTER_SIGN = "- O Rei"
 	L.HONOR_LETTER_WEAR = "Usar"
+	L.HONOR_LETTER_SLAYERS = "Slayers"
 	L.HONOR_LETTER_LATER = "Depois"
 	L.HONOR_LETTER = {
 		arena = "Guerreiro,\n\nA areia se lembra de cada golpe, e eu também. Você ficou de pé onde outros caíram, e o Olympus o chama de %s. Use o grifo com orgulho: todos os olhos da arena estão em você agora.\n\nDefenda-o bem.",
