@@ -2091,3 +2091,74 @@ test("watch: chat moderation: its strings in English and pt-BR, with the same pl
 	local readme = assert(io.open(ROOT .. "README.md", "rb")):read("*a")
 	assert(readme:find("Chat moderation (1.1.6)", 1, true) and readme:find("keep what they already showed", 1, true))
 end)
+
+-- 1.2.4, the author: "Precisam de uma sala para as pessoas que estão na The Watch ... Teria que serem
+-- as pessoas nomeadas, mais o High Council ali que está na The Watch, para os moderadores poderem
+-- conversar entre si." The Watch's room on the Chat tab: whoever acts in Olympus scope (an Olympus
+-- moderator's level or above, WatchChat.ActorLevel): the author, the King, every councillor, the
+-- moderators a fresh list names. Not a guild's own Watchers, nor anyone sanctioned.
+test("watch: chat moderation (1.2.4): The Watch's room: the author, the King, every councillor and the Olympus moderators named talk there; a lapsed list, a sanction and a guild's own Watcher keep one out", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		w.author, w.king = "Quill Wright-Realm", "Crown Rook-Realm"
+		local Au = w.Client("Quill Wright", Y, 3)
+		local K = w.Client("Crown Rook", Y, 3)
+		w.council[Fold("Councillor-Realm")] = true
+		local Co = w.Client("Councillor", Y, 3)
+		local Mo = w.Client("Modder", Y, 3)
+		assert(w.As(Co, Co.WC.SetMod, Mo.name, true))
+		w.epoch = w.epoch + 3
+		w.Run()
+		-- A guild master's own Watcher (and his officers): his guild's, not Olympus's.
+		assert(w.As(G, G.WC.SetWatcher, B.name, true))
+		w.epoch = w.epoch + 3
+		w.Run()
+		eq(w.As(D, D.WC.IsNamedWatcher, B.name), true)
+		local function In(cl, name) return w.As(cl, cl.R.CanAccess, "watch", name) end
+		for _, who in ipairs({ Au.name, K.name, Co.name, Mo.name }) do eq(In(D, who), true, who) end
+		for _, who in ipairs({ B.name, A.name, G.name, Y1.name }) do eq(In(D, who), false, who) end
+		eq(w.As(D, D.R.Info, "watch").label, "The Watch")
+		local function Listed(cl)
+			for _, o in ipairs(w.As(cl, cl.R.Options, "role")) do if o.id == "watch" then return true end end
+			return false
+		end
+		eq(Listed(Mo), true); eq(Listed(Co), true); eq(Listed(B), false, "a guild's Watcher"); eq(Listed(D), false)
+		-- A councillor's line: one logged whisper to each member he knows of (the author while his
+		-- presence is heard, the King, the High Council's signed names, the moderators named), heard there.
+		Co.ns.Workshop.AuthorOnline = function() return true end
+		Co.ns.Workshop.AuthorName = function() return w.author end
+		Co.ns.rdb.council = { names = { [Fold("Councillor")] = "Councillor" } }
+		w.wire = {}
+		assert(w.As(Co, Co.R.Send, "watch", "a word among the moderators"))
+		local targets = {}
+		for _, job in ipairs(w.wire) do eq(job.dist, "WHISPER"); eq(job.logged, true); targets[#targets + 1] = Fold(Full(job.target)) end
+		table.sort(targets)
+		eq(table.concat(targets, ","), table.concat({ Fold(K.name), Fold(Mo.name), Fold(Au.name) }, ","))
+		w.Run()
+		for _, cl in ipairs({ Au, K, Mo }) do
+			local h = cl.R.RawHistory("watch")
+			eq(#h, 1, cl.short); eq(h[1].text, "a word among the moderators")
+		end
+		-- A guild's Watcher's line is not heard there.
+		local msg = "M2~1~watch~9~~" .. X .. "~let me in"
+		eq(w.Inject("WHISPER", B.name, Mo, msg), false)
+		-- The moderators' list lapses LIST_FRESH after it was last heard: out of the room.
+		w.epoch = w.epoch + D.WC.LIST_FRESH + 1
+		eq(In(D, Mo.name), false, "a list not heard lately")
+		w.As(Co, Co.WC.SendMods, true)
+		w.Run()
+		eq(In(D, Mo.name), true, "heard again")
+		-- Sanctioned: out, whatever his place.
+		w.off[Fold(Mo.name)] = true
+		eq(In(D, Mo.name), false, "a moderator taken off")
+		w.off[Fold(Co.name)] = true
+		eq(In(D, Co.name), false, "a councillor taken off")
+		eq(In(D, K.name), true, "never the King")
+		-- The King's and a councillor's previews list it (View as), inert; a guild master's does not.
+		for role, want in pairs({ king = true, councillor = true, gm = false, officer = false }) do
+			D.ns.ViewAs = { Previewing = function() return true end, Role = function() return role end }
+			eq(Listed(D), want, role)
+		end
+		eq(w.As(D, D.R.Select, "watch"), false, "a preview opens nothing")
+	end)
+end)

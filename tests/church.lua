@@ -862,3 +862,87 @@ test("1.2.1 Church: listing the keepers online rechecks the correspondents once,
 	assert(one >= 1 and one <= 4, "one listing: " .. one .. " correspondent checks")
 	c.member.Church.RootCode = root
 end)
+
+-- 1.2.4, the author: "Da igreja: precisa de um dos apóstolos, um do de toda a igreja, de todo mundo
+-- falando sobre igreja, e precisa de um dos apóstolos com os missionários." The Apostles' room (the
+-- roots, the Head and the signed Apostles), the Apostles' and missionaries' room, and the whole
+-- Church's as before; each line one logged whisper to each member heard online, nobody else.
+test("1.2.4 Church: the Apostles' room and the Apostles' and missionaries' room: each its own audience, heard online, nobody else", function()
+	local w, c = Cast()
+	local m1 = w:Client("Mira Wells")
+	w:Act(c.a1, c.a1.Church.NameMissionary, "Mira Wells")
+	w:Presence()
+	local function Rooms(cl)
+		local out = {}
+		for _, t in ipairs(w:As(cl, cl.c.ChatRooms.Options, "role")) do
+			if t.id == "apostles" or t.id == "missionaries" or t.id == "church" then out[#out + 1] = t.id end
+		end
+		return table.concat(out, ",")
+	end
+	for _, cl in ipairs({ c.a1, c.a2, c.author, c.king, c.head }) do eq(Rooms(cl), "apostles,missionaries,church", cl.name) end
+	eq(Rooms(m1), "missionaries,church", "a missionary")
+	eq(Rooms(c.councillor), "church", "a councillor: the whole Church's alone")
+	eq(Rooms(c.member), ""); eq(Rooms(c.gm), "")
+	local R = c.a1.c.ChatRooms
+	eq(w:As(c.a1, R.Info, "apostles").label, "Apostles"); eq(w:As(c.a1, R.Info, "missionaries").label, "Apostles & Missionaries")
+	eq(w:As(c.a1, R.Info, "apostles").group, "church"); eq(w:As(c.a1, R.Info, "church").groupLabel, "Church")
+	local function Targets(from, room, text)
+		w:ClearSent()
+		eq(w:As(from, from.c.ChatRooms.Send, room, text), true, room)
+		local got = {}
+		for _, e in ipairs(w:Sent(from, "M2")) do
+			eq(e.dist, "WHISPER"); eq(e.logged, true)
+			got[#got + 1] = Key(e.target)
+		end
+		table.sort(got)
+		w:Flush()
+		return table.concat(got, ",")
+	end
+	local function Keys(list)
+		local out = {}
+		for _, cl in ipairs(list) do out[#out + 1] = Key(cl.name) end
+		table.sort(out)
+		return table.concat(out, ",")
+	end
+	eq(Targets(c.a1, "apostles", "the twelve meet tonight"), Keys({ c.a2, c.a3, c.author, c.king, c.head }))
+	for _, cl in ipairs({ c.a2, c.author, c.king }) do
+		local h = w:As(cl, cl.c.ChatRooms.History, "apostles")
+		eq(#h, 1, cl.name); eq(h[1].text, "the twelve meet tonight")
+	end
+	w:Run(2)
+	eq(Targets(c.a1, "missionaries", "and our missionaries"), Keys({ c.a2, c.a3, c.author, c.king, c.head, m1 }))
+	eq(w:As(m1, m1.c.ChatRooms.History, "missionaries")[1].text, "and our missionaries")
+	-- Heard from the room's members alone: a missionary's line to the Apostles' room is dropped.
+	local msg = "M2~1~apostles~77~~" .. World.GUILD .. "~let me in"
+	eq(w:As(c.a2, c.a2.c.ChatRooms.Receive, "WHISPER", m1.name, msg), false)
+	eq(w:As(c.a2, c.a2.c.ChatRooms.Receive, "WHISPER", c.councillor.name, msg), false, "a councillor")
+	eq(#w:As(c.a2, c.a2.c.ChatRooms.History, "apostles"), 1)
+	eq(w:As(c.a2, c.a2.c.ChatRooms.Receive, "WHISPER", m1.name, "M2~1~missionaries~78~~" .. World.GUILD .. "~I am here"), true)
+	-- A missionary or a councillor cannot write in the Apostles' room.
+	eq(w:As(m1, m1.c.ChatRooms.Send, "apostles", "no"), false); eq(w:As(c.councillor, c.councillor.c.ChatRooms.Send, "missionaries", "no"), false)
+	-- The King's preview names them (View as), inert.
+	c.author.c.ViewAs = { Previewing = function() return true end, Role = function() return "king" end }
+	eq(Rooms(c.author), "apostles,missionaries,church")
+	for _, t in ipairs(w:As(c.author, c.author.c.ChatRooms.Options, "role")) do eq(t.disabled, true) end
+end)
+
+-- The Church's line past thirty is told when he writes, never when he only picks the room (1.2.4:
+-- the count is the room's Recipients', said by ChatRooms' Send).
+test("1.2.4 Church: picking the Church's room says nothing of those it would miss; writing in it does", function()
+	local w, c = Cast()
+	local m1 = w:Client("Mira Wells")
+	w:Act(c.a1, c.a1.Church.NameMissionary, "Mira Wells")
+	w:Presence()
+	for i = 1, 33 do
+		local n = "Sage " .. string.char(65 + math.floor(i / 26)) .. string.char(97 + i % 26) .. "y-Realm"
+		w.council[Key(n)] = true
+		w:As(m1, m1.Church.TakePresence, "CHANNEL", n, "NK~1~p~N~-~Olympus Ember")
+	end
+	local before = #m1.printed
+	eq(w:As(m1, m1.c.ChatRooms.Select, "church"), true)
+	eq(#m1.printed, before, "nothing said at the pick")
+	eq(w:As(m1, m1.c.ChatRooms.Send, "church", "brothers"), true)
+	local told = false
+	for i = before + 1, #m1.printed do if m1.printed[i]:find("were not reached", 1, true) then told = true end end
+	eq(told, true, "said when he writes")
+end)

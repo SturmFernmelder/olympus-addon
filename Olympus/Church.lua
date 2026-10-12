@@ -1331,15 +1331,17 @@ function Church.IsDesk() local d = Church.Desk() return d ~= nil and Same(d, ns.
 -- own network (his Apostle and its missionaries), the other Apostles, the correspondents, the other
 -- missionaries, then the High Council; the most recently heard first within each. Also how many
 -- members heard online were left out (the sender is told: the room's line says so).
-function Church.RoomRecipients()
+-- 1.2.4: roles (optional, { [role code] = true }): the Apostles' rooms' audience alone.
+function Church.RoomRecipients(roles)
 	local order = { W = 1, K = 1, H = 1, A = 3, C = 4, M = 5, N = 6 }
 	local mine = Church.Place(ns.me)
 	local net = mine and mine.net
 	local list = {}
 	for _, h in pairs(heard) do
 		local ok = Church.Online(h.name)
-		if ok and not Same(h.name, ns.me) then
-			local o = order[Church.Role(h.name)] or 9
+		local role = ok and Church.Role(h.name)
+		if ok and not Same(h.name, ns.me) and (not roles or roles[role or ""]) then
+			local o = order[role] or 9
 			if net and (o == 3 or o == 5) then
 				local p = Church.Place(h.name)
 				if p and p.net == net then o = 2 end
@@ -1568,9 +1570,35 @@ end
 -- recipient, checked again before it leaves; never a broadcast)
 ---------------------------------------------------------------------------
 
+-- 1.2.4 (the author: "Da igreja: precisa de um dos apóstolos, um do de toda a igreja, de todo mundo
+-- falando sobre igreja, e precisa de um dos apóstolos com os missionários"): the Apostles' room (the
+-- author, the King, the Head and the signed Apostles) and the Apostles' and missionaries' room, beside
+-- the whole Church's. Folded together in a long Roles menu (group "church").
+local APOSTLES_ROOM = { W = true, K = true, H = true, A = true }
+local MISSION_ROOM = { W = true, K = true, H = true, A = true, M = true }
+local function RoomOf(roles)
+	return function(name) return roles[Church.Role(name or ns.me) or ""] == true end
+end
 if ns.ChatRooms and ns.ChatRooms.RegisterAudience then
+	ns.ChatRooms.RegisterAudience("apostles", {
+		label = function() return L.CHURCH_ROOM_APOSTLES end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
+		preview = { king = true },
+		CanAccess = RoomOf(APOSTLES_ROOM),
+		Recipients = function() return Church.RoomRecipients(APOSTLES_ROOM) end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
+	})
+	ns.ChatRooms.RegisterAudience("missionaries", {
+		label = function() return L.CHURCH_ROOM_MISSIONARIES end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
+		preview = { king = true },
+		CanAccess = RoomOf(MISSION_ROOM),
+		Recipients = function() return Church.RoomRecipients(MISSION_ROOM) end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
+	})
 	ns.ChatRooms.RegisterAudience("church", {
 		label = function() return L.CHURCH_ROOM end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
 		-- (1.2.4: the King's and a councillor's previews list it, View as.)
 		preview = { king = true, councillor = true },
 		CanAccess = function(name) return Church.InAudience(name or ns.me) end,

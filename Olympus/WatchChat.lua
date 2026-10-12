@@ -2875,6 +2875,52 @@ WC.RegisterSurface({
 	Changed = function(id) ns.Fire("CHAT_ROOM_CHANGED", id) end,
 })
 
+-- 1.2.4 (the author: "Precisam de uma sala para as pessoas que estão na The Watch ... Teria que serem
+-- as pessoas nomeadas, mais o High Council ali que está na The Watch, para os moderadores poderem
+-- conversar entre si"): The Watch's room on the Chat tab. Its members are those who act in Olympus
+-- scope (WC.ActorLevel at an Olympus moderator's level or above): the author, the King, every signed
+-- councillor and the Olympus moderators their lists name here (a list heard lately, its namer not
+-- sanctioned); nobody sanctioned. A guild's own Watchers act on their own guild alone and are not in
+-- it (the author's rule: a guild's officers have no power over the whole army).
+function WC.ModeratorNames()
+	local out, seen = {}, {}
+	for _, list in ipairs(WC.ModLists()) do
+		for _, name in ipairs(type(list.names) == "table" and list.names or {}) do
+			local key = Key(name)
+			if type(name) == "string" and not seen[key] and WC.IsMod(name) then seen[key], out[#out + 1] = true, name end
+		end
+	end
+	return out
+end
+function WC.InRoom(name) return WC.ActorLevel(name or ns.me) >= LEVEL.mod end
+-- Whom a line of the room may go to (ChatRooms checks each again, WC.InRoom): the author while his
+-- presence is heard, the King, the High Council's signed names, the moderators named.
+function WC.RoomRecipients()
+	local out = {}
+	local Wk = Live(ns.Workshop)
+	if Wk and type(Wk.AuthorOnline) == "function" and Wk.AuthorOnline() == true and type(Wk.AuthorName) == "function" then
+		out[#out + 1] = Wk.AuthorName()
+	end
+	if type(ns.KingCharacter) == "function" then out[#out + 1] = ns.KingCharacter() end
+	local c = ns.rdb and ns.rdb.council
+	for key, display in pairs(type(c) == "table" and type(c.names) == "table" and c.names or {}) do
+		out[#out + 1] = type(display) == "string" and display or key
+	end
+	for _, name in ipairs(WC.ModeratorNames()) do out[#out + 1] = name end
+	return out
+end
+do
+	local R = Live(ns.ChatRooms)
+	if R and type(R.RegisterAudience) == "function" then
+		R.RegisterAudience("watch", {
+			label = function() return L.TAB_WATCH end, -- (its tab's name, The Watch, in both languages)
+			preview = { king = true, councillor = true },
+			CanAccess = function(name) return WC.InRoom(name) end,
+			Recipients = function() return WC.RoomRecipients() end,
+		})
+	end
+end
+
 function WC.Stats() return stats end
 
 function WC.ResetForTests()
