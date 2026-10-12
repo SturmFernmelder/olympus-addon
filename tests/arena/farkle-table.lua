@@ -1218,14 +1218,22 @@ test("1.2 the Bone Throw tables: sober tables: either player may ask (KI, KA hic
 	-- both yes
 	local w, a, b, id = Table({ noOpening = true })
 	eq(Get(a, id).hic, true); eq(Get(b, id).hic, true)
-	assert(w:Sent({ from = a, type = "KI" })[1].msg:find("~2~%w%w%w%w$"), "KI explicitly negotiates reuse rule 2")
+	local function Body(msg)
+		local f = {}
+		for part in (msg:match("^%u%u~[LT]%d+~(.*)$") .. "~"):gmatch("([^~]*)~") do f[#f + 1] = part end
+		return f
+	end
+	-- (KI's hic and salt: its 8th and 9th fields; 1.2.3 may add the free game's "c" after its token
+	-- and IOU, decision 1)
+	local ki = Body(w:Sent({ from = a, type = "KI" })[1].msg)
+	eq(ki[8], "2", "KI explicitly negotiates reuse rule 2"); assert(ki[9]:find("^%w%w%w%w$"), "and its salt")
 	-- the host asks for a sober table
 	local w2, c, d, id2 = Table({ noOpening = true, hic = false })
 	eq(Get(c, id2).hic, false); eq(Get(d, id2).hic, false)
 	-- the guest asks
 	local w3, e, f, id3 = Table({ noOpening = true, guestHic = false })
 	eq(Get(e, id3).hic, false); eq(Get(f, id3).hic, false)
-	assert(w3:Sent({ from = f, type = "KA" })[1].msg:find("~0$"), "KA hic 0")
+	eq(Body(w3:Sent({ from = f, type = "KA" })[1].msg)[4], "0", "KA hic 0")
 	assert(w3:Sent({ from = e, type = "KG" })[1].msg:find("~0$"), "KG hic 0")
 	-- another addon blanked a line: that client can't read levels, so it asks for a sober table
 	local w4 = FW.New()

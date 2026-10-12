@@ -54,7 +54,7 @@ local function Ledger116(o)
 	o = o or {}
 	local w = FW.New({ compliance = not o.open and "shipped" or nil, arenaFiles = Files116() })
 	local a = w:Player(N.fighterA, o.nativeUI and { companion = { state = o.coreOnly and "disabled" or nil } } or nil)
-	local b = w:Player(N.fighterB, o.nativeUI and { companion = { state = o.coreOnly and "disabled" or nil } } or nil)
+	local b = w:Player(N.fighterB, o.whereB or (o.nativeUI and { companion = { state = o.coreOnly and "disabled" or nil } } or nil))
 	local king = w:Role("king", { companion = { state = "missing" } })
 	local councillor = w:Role("councillor", { companion = { state = "missing" } })
 	local author = w:Role("author", { companion = { state = "missing" } })
@@ -196,6 +196,25 @@ test("1.1.6 Bones ledger: on the 1.1.6 package, a game for fun between two playe
 		eq(Find(lines, UI.Kit.Name(a.name)), nil, "no game of others")
 		assert(Find(lines, L.ARENA_GAMES_NONE_MINE), "his own, none")
 	end)
+	NoErrors(w)
+end)
+
+-- (Review of v123/bones, 88dec8e: each side decided on its own build whether a free game counts,
+-- so a release player against a test build told the auditors the game in L, the live realm's,
+-- while the test build's word was T. Decision 1: a test build's game never counts.)
+test("1.2.3 Bones ledger: a release player's free game against a test build reaches the auditors as a rehearsal's (T) from both players, never as the live realm's", function()
+	local tb = { n = 3, base = "1.2.3", built = World.CLOCK - 60, expires = World.CLOCK + 86400 }
+	local w, c = Ledger116({ whereB = { testBuild = tb } })
+	local a, b = c.a, c.b
+	assert(w:As(b, b.ns.Arena.TestBuild), "b runs a test build")
+	local id = Play(w, a, b)
+	eq(a.ns.FarkleTable.Get(id).game.over, true)
+	eq(a.ns.FarkleTable.Counted(id), false, "the release host: the test build's answer said its client does not count it")
+	local told = w:Sent({ from = a, type = "AY" })
+	assert(#told > 0, "the release player told the auditors")
+	for _, s in ipairs(told) do eq(s.msg:match("^AY~(%a)%d+~"), "T", "a's word to " .. tostring(s.target)) end
+	for _, s in ipairs(w:Sent({ from = b, type = "AY" })) do eq(s.msg:match("^AY~(%a)%d+~"), "T") end
+	eq(w:As(a, a.ns.ArenaLedger.MyGames)[1].mode, "T", "and his own record")
 	NoErrors(w)
 end)
 
