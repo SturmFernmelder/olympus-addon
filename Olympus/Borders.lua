@@ -176,6 +176,27 @@ local HONOR_SHAPES = {
 	winged = { coords = { 0, 220 / 256, 0, 180 / 256 }, width = 110, height = 90, x = 11, y = -4 },
 	plain = { coords = { 0, 200 / 256, 0, 200 / 256 }, width = 100, height = 100, x = 0, y = 1 },
 }
+-- 1.2.4 (the author, of the red cross: "parece meio pequena... Podia ser um pouco maior"): the
+-- crosses (the red one, an Apostle's own look, and the gold, silver and bronze of the Church's top
+-- 3 Apostles, worn as honours) have a slimmer ring than the beasts' and reach less far (about 37
+-- units from the portrait's centre against the others' 38 to 48), so their plain box is drawn 10%
+-- bigger, 110 across, about the portrait's centre: that is art 88, 100 of the box's 200 on your own
+-- portrait (turned round) and an Olympus portrait (x = 0.56 x width - 56, y = width / 2 - 49), and
+-- 90, 98 on the target's and the focus's, the same offsets within 0.1 of a unit. The crook's size
+-- then, the game's ring whole inside the cross's, and the art itself (not its box) still within
+-- the plain's reach (Borders.PortraitReach). By the art's family (Honors.ArtOf's stem, "cross-red":
+-- "cross"); a texture of its own on each rig.
+local HONOR_SIZED = {
+	cross = { coords = { 0, 200 / 256, 0, 200 / 256 }, width = 110, height = 110, x = 5.6, y = 6 },
+}
+-- An honour's geometry: its family's own size (HONOR_SIZED, plain ones alone) or its shape's, and
+-- the rig's texture it goes on (that family's, or that shape's).
+local function HonorSpec(file, shape)
+	local art = type(file) == "string" and file:match("([%w%-]+)$") or nil
+	local family = art and art:match("^(.+)%-[^%-]+$") or nil
+	if shape == "plain" and family and HONOR_SIZED[family] then return HONOR_SIZED[family], family end
+	return HONOR_SHAPES[shape], shape
+end
 
 -- Where they go: the frame (a global of the game's), its container, and the hook that follows the
 -- game's updates. Your own portrait sits on the left, so there the art is mirrored. (The party's
@@ -194,7 +215,7 @@ local PARTY_SCALE = PARTY_PORTRAIT / TARGET_PORTRAIT
 local PARTY_SUBLEVEL = -1 -- (ARTWORK: under the member frame's ring and name, ARTWORK 0)
 local TRACKED = { target = true, focus = true, player = true, party1 = true, party2 = true, party3 = true, party4 = true }
 
-local rigs = {}  -- [unit] = { tex = { [tier name] = texture }, honor = { [shape] = texture } (not the party's), shown = key or nil }
+local rigs = {}  -- [unit] = { tex = { [tier name] = texture }, honor = { [shape or sized family] = texture } (not the party's), shown = key or nil }
 local partyRigs = {} -- [a party member frame of the game's] = its rig, made once (rigs[party<i>]: the one showing party<i>)
 local known = {} -- [unit] = { guid, tier, guild, report, rt, council }: the last worked out
 local installed, waiting = false, false
@@ -545,7 +566,7 @@ end
 -- 1.2: own). The metal underlay (ARTWORK 2) and one hidden texture per tier (ARTWORK 3), each at
 -- the game's frames' offsets: from the container's TOPRIGHT, or turned round (mirror: your own
 -- portrait's side) from its TOPLEFT. Nothing is called on the container but CreateTexture; an
--- honour's texture is made later, one per shape (ShowHonor).
+-- honour's texture is made later, one per geometry (ShowHonor).
 function Borders.Rig(container, mirror, own)
 	local underlay = container:CreateTexture(nil, "ARTWORK", nil, 2)
 	underlay:Hide()
@@ -654,17 +675,18 @@ function Borders.Install() -- gp:borders
 	return true
 end
 
--- One reusable texture for each geometry, made only out of combat. Every honour of that shape
--- merely changes its file and coordinates; a missing file is reported to the caller so the
--- ordinary rank frame can be used instead.
+-- One reusable texture for each geometry (a shape's, or a family's own size: HonorSpec), made only
+-- out of combat. Every honour of that geometry merely changes its file and coordinates; a missing
+-- file is reported to the caller so the ordinary rank frame can be used instead.
 local function ShowHonor(rig, key, metal)
 	local H = ns.HonorsNet
 	-- (A party member's frame has the rank's borders alone: no honour's texture is made there.)
 	if not rig.honor or type(H) ~= "table" or type(H.FrameTexture) ~= "function" then return false end
 	local ok, file, shape = pcall(H.FrameTexture, key)
-	local spec = ok and HONOR_SHAPES[shape] or nil
-	if type(file) ~= "string" or not spec then return false end
-	local tex = rig.honor[shape]
+	if not ok or type(file) ~= "string" then return false end
+	local spec, slot = HonorSpec(file, shape)
+	if not spec then return false end
+	local tex = rig.honor[slot]
 	if not tex then
 		-- (A game frame's texture is made out of combat only; an Olympus portrait's frame is ours.)
 		if not rig.own and InCombatLockdown and InCombatLockdown() then waiting = true return false end
@@ -673,7 +695,7 @@ local function ShowHonor(rig, key, metal)
 		tex:SetSize(spec.width, spec.height)
 		if rig.mirror then tex:SetPoint("TOPLEFT", rig.container, "TOPLEFT", -(spec.x + 2), spec.y)
 		else tex:SetPoint("TOPRIGHT", rig.container, "TOPRIGHT", spec.x, spec.y) end
-		rig.honor[shape] = tex
+		rig.honor[slot] = tex
 	end
 	local loaded, value = pcall(tex.SetTexture, tex, file)
 	if not loaded or value == false then return false end
@@ -925,8 +947,9 @@ end
 -- How far the art round an Olympus portrait may reach past the portrait's square, in its own
 -- units (60 across): { left, right, top, bottom }, the most of every shape, turned round as yours
 -- (the winged 37 left, 13 right, 15 up and down; the plain 26 left, 14 right, 20 up and down), so
--- a screen keeps its words clear of it. With `size`, for a portrait that size across on screen:
--- whole pixels (times size / 60, rounded up).
+-- a screen keeps its words clear of it. (1.2.4: the crosses' bigger box, HONOR_SIZED, is left out:
+-- their art at that size, not their box, stays within the plain's.) With `size`, for a portrait
+-- that size across on screen: whole pixels (times size / 60, rounded up).
 function Borders.PortraitReach(size)
 	local P = Borders.PORTRAIT
 	local r = { left = 0, right = 0, top = 0, bottom = 0 }

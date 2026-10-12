@@ -77,14 +77,15 @@ local function Letters(c) return c.ns.HonorsNet.Letters() end
 local function Later(w, c) w:Run(c.ns.ArenaProfile.RATE_CHANGED + 1) end
 
 -- The game's unit frames on client c and Borders.lua loaded into it (as tests/arena/honors-crook.lua):
--- what the player's and the target's portraits show.
+-- what the player's and the target's portraits show (and, second, its texture's size).
 local function Frames(w, c)
 	local rec = { textures = {} }
 	local function Texture(owner, sublevel)
 		local t = { owner = owner, sublevel = sublevel, shown = true }
 		t.SetTexture = function(self, file) self.file, self.atlas = file, nil return true end
 		t.SetAtlas = function(self, a) self.atlas, self.file = a, nil end
-		t.SetSize, t.SetPoint, t.ClearAllPoints = function() end, function() end, function() end
+		t.SetSize = function(self, x, y) self.size = x .. "x" .. y end
+		t.SetPoint, t.ClearAllPoints = function() end, function() end
 		t.SetTexCoord, t.SetDesaturated, t.SetVertexColor = function() end, function() end, function() end
 		t.Show = function(self) self.shown = true end
 		t.Hide = function(self) self.shown = false end
@@ -121,7 +122,7 @@ local function Frames(w, c)
 				found = t
 			end
 		end
-		return found and (found.file or found.atlas) or nil
+		return found and (found.file or found.atlas) or nil, found and found.size or nil
 	end
 	return rec
 end
@@ -451,13 +452,19 @@ test("1.2.4 the Apostles' cross: the Church's top 3 Apostles (the same word as t
 		eq(#Letters(c), 1, where .. ": its letter") eq(Letters(c)[1].key, key)
 		local text = w:As(c, c.ns.HonorsNet.LetterText, key)
 		assert(text and text:find(title, 1, true) and text:find("cross", 1, true), where .. ": the Apostles' letter")
-		eq(Frames(w, c).Shown("player"), MEDIA .. art, where .. ": round his own portrait")
+		local file, size = Frames(w, c).Shown("player")
+		eq(file, MEDIA .. art, where .. ": round his own portrait")
+		-- (1.2.4, the author's ask of the cross, "um pouco maior": 110 across, a plain honour's 100
+		-- drawn 10% bigger about the portrait's centre: tests/arena/honors-own-look.lua.)
+		eq(size, "110x110", where .. ": the cross a little bigger")
 		w:As(c, c.ns.HonorsNet.CloseLetter, false)
 	end
 	Later(w, a1)
 	local rv = Frames(w, viewer)
 	viewer.target = a1.name
-	eq(rv.Shown("target"), MEDIA .. "cross-gold", "others see the gold cross on the 1st")
+	local seen, seenSize = rv.Shown("target")
+	eq(seen, MEDIA .. "cross-gold", "others see the gold cross on the 1st")
+	eq(seenSize, "110x110", "as big on their target frame")
 	eq(w:As(viewer, viewer.ns.HonorsNet.Verified, a3.name, a3.guid).art, "cross-bronze")
 	for _, h in ipairs(a4.ns.HonorsNet.Holdings(a4.name)) do assert(h.family ~= "apostle", "the 4th holds no cross") end
 	-- Another order the same month: no letter for a place told; a place first reached, its letter.

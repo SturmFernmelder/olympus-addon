@@ -793,6 +793,7 @@ test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-
 		{ "arena-race-skyborn", "owlcat-gold" }, { "arena-race-skyborn-2", "owlcat-silver" }, { "arena-race-skyborn-3", "owlcat-bronze" },
 		{ "apostle-red", "cross-red", "0.24 0.24 0.27 1" },
 	}
+	local CROSSES = { ["apostle-1"] = true, ["apostle-2"] = true, ["apostle-3"] = true, ["apostle-red"] = true }
 	for _, row in ipairs(want) do
 		local key, art, color = row[1], row[2], row[3]
 		eq(r.B.SetPreview(key), true, key)
@@ -802,7 +803,9 @@ test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-
 		local t
 		for _, x in ipairs(r.textures) do if x.owner == "player" and x.sublevel ~= 2 and x.shown then t = x end end
 		eq(t.coord, "0.78125 0 0 0.78125", key .. ": the plain box, turned round on his own frame")
-		eq(t.size, "100x100")
+		-- (1.2.4, the author's ask of the red cross, "um pouco maior": the crosses' box 110 across,
+		-- 10% bigger than a plain honour's; the charm and the owlcat as ever: tests/arena/honors-own-look.lua.)
+		eq(t.size, CROSSES[key] and "110x110" or "100x100", key)
 		-- (1.2.4, the author's call: no plain dragon under any honour, the red cross's black one
 		-- too; the portrait's own ring alone.)
 		local under = r.Underlay("player")
