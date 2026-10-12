@@ -307,19 +307,7 @@ friends list, a community roster) and the game's menu gets an **Olympus** part a
   without it gets no lines); no Blizzard function is replaced, and nothing opens the game's chat
   box.
 
-**Explanations and Answers.** Each page has a **?** in its bottom box: what the page shows and,
-where it counts, why the numbers can differ between players. The Chat tab has no bottom box and,
-since 1.1.5, no **?** of its own: the help button left of the window's X is the one there.
-A count's tooltip (the header's totals, a guild's row, the Realm's online, Captains and
-Recruiting, a layer's ~N, a zone and a map pin, the Treasury's week and ranking, the dues' guilds,
-the Throne's roll call) ends with **Why can this differ?** and a short answer. The author, the
-High Council and the Stewards also get an **Answers** button at the end of the Chat tab's box and
-in Olympus's whisper window: ready answers by topic (the counts, each feature, installing and
-updating), with a search. A click puts one in the box to edit (Shift-click: the longer one, to
-copy for Discord); nothing is sent until you do. The explanations and answers are in English: in
-another game language the tooltips leave them out, and a page's **?** says so first. The answers
-live in `docs/answers.json`, and `luajit scripts/answers.lua` writes `Olympus/AnswerBank.lua`
-from it.
+*Continued in the README: [Right-click a player (1.1.2)](https://github.com/dnl-gentile/olympus-addon#right-click-a-player-112).*
 
 ### Decrees
 | Decree | Who | What happens |
@@ -768,6 +756,18 @@ account, `/oly discord forget` drops this character's request and proof.
   questions (the rest in English; the pages' **?** explanations and the Answers of 1.1.2 are in
   English too). It follows the game language, and only the text on your
   screen changes: nothing sent between players does. `/oly status` shows the language in use.
+
+### Other addons: the Olympus API (1.2.4)
+
+Another addon can read, with your permission, what Olympus already shows you: the Wanted list
+and its bounties, the public rankings (the Slayers, the donors' and the Church's top three, the
+games the King made public), your own frame and title, and your Olympus guild, rank and role. An
+addon that asks gets its own line on the privacy page and nothing until your **Yes** there
+(**Accept all** never answers for it; `/oly privacy` changes it at any time). It is read-only:
+nothing is sent for you, no chat line, decree or whisper. It never gives your location, the
+census, other players' private data or Olympus's keys; each addon gets its own copy, a limited
+number of calls at a time. After the update it loads once the game restarts (not on a `/reload`).
+For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
 
 ## Install
 

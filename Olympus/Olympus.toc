@@ -36,6 +36,7 @@ Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
 Locales\PerfText.lua
+Locales\APIText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -114,6 +115,7 @@ WatchChat.lua
 OfficerMuster.lua
 Bridge.lua
 Wanted.lua
+API.lua
 ArenaMath.lua
 Compliance.lua
 ArenaRating.lua

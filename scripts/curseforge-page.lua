@@ -37,6 +37,9 @@ M.CUTS = {
 	{ title = "Security and trust", keep = 2 },
 	{ title = "What colluding characters can reach", keep = 1 },
 	{ title = "The Missionary Church of Olympus (1.1.6)", keep = 1 }, -- (1.1.6: its details stay in the README)
+	-- (1.2.4: the page grew past the budget with the API's section: the menu's lines stay, its
+	-- Explanations and Answers paragraph is the README's.)
+	{ title = "Right-click a player (1.1.2)", keep = 2 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it.
