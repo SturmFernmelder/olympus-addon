@@ -19,8 +19,10 @@ ns.ProfileEdit = ProfileEdit
 -- window's Profile tab (the screens) draws the same view model (ProfileEdit.ViewModel) and calls the same
 -- pickers.
 --   ViewModel() -> { frames = { { key, label, art, shape, metal, selected } } (the rank's, none, and
---     every frame held; 1.2.1: and a signed Apostle's own look, own = true: Borders.OwnLook, on his
---     screen alone, never his pick, so never sent), titles = { { key, label, selected } } (none,
+--     every frame held that this version wears, Honors.FrameShipped: 1.2.3, a frame not released
+--     yet is not offered, since Honors.Choose refuses it and its click did nothing; 1.2.1: and a
+--     signed Apostle's own look, own = true: Borders.OwnLook, on his screen alone, never his pick,
+--     so never sent), titles = { { key, label, selected } } (none,
 --     and every title held), nick = { a, n, text, lists = { A, N } }, emblem, pub, locked,
 --     letters = { { key, title, t, read } },
 --     preview = Preview(), councillor, honours = the honours held (Honors.Holdings's) }
@@ -39,6 +41,12 @@ PE.PORTRAIT = 40 -- the preview's portrait (its art reaches past it: HonorsNet.N
 
 local function P() return ns.ArenaProfile end
 local function H() return ns.HonorsNet end
+-- (1.2.3) A held honour's frame this version wears (Honors.FrameShipped), the only ones the
+-- pickers offer: Honors.Choose refuses the rest (the koi, the owl, the comet until they ship).
+local function Worn(h)
+	local Hs = ns.Honors
+	return type(h) == "table" and h.frame ~= nil and type(Hs) == "table" and type(Hs.FrameShipped) == "function" and Hs.FrameShipped(h) == true
+end
 -- (1.2.1: the borders' own looks, Borders.OWN_LOOKS; none where Borders.lua is a stand-in.)
 local function B()
 	local b = ns.Borders
@@ -71,7 +79,8 @@ function PE.ViewModel()
 	vm.frames[2] = { key = "none", label = L.PROFILE_FRAME_NONE, selected = pick.frame == "none" }
 	vm.titles[1] = { key = "none", label = L.PROFILE_TITLE_NONE, selected = pick.title == nil }
 	for _, h in ipairs(held) do
-		if h.frame then
+		-- (1.2.3: the frames worn in this version alone; a title is offered whatever its frame.)
+		if h.frame and Worn(h) then
 			vm.frames[#vm.frames + 1] = { key = h.frame, label = HN.TitleText(h.key) or h.key, art = h.art, shape = h.shape, metal = h.metal,
 				milestone = h.milestone, selected = pick.frame == h.frame }
 		end
@@ -176,8 +185,10 @@ function PE.IconList(kind)
 	local HN = H()
 	local out = {}
 	if kind == "icon" then
+		-- (1.2.3: a mark picks its honour's frame, PickIcon: the marks of frames worn in this version
+		-- alone, as the frame picker.)
 		for _, h in ipairs(HN.Holdings(ns.me, P().MyGk())) do
-			if h.art then
+			if h.art and Worn(h) then
 				out[#out + 1] = { key = h.art, texture = HN.MarkTexture(h.art), label = HN.TitleText(h.key) or h.key }
 			end
 		end
@@ -194,11 +205,11 @@ local function MyCouncilIcon()
 	local v = type(mine) == "table" and mine[ns.me] or nil
 	return v and ns.CouncilIconValue(v) or nil
 end
--- The honour a mark (its art) belongs to among those held, or nil.
+-- The honour a mark (its art) belongs to among those held whose frame this version wears, or nil.
 function PE.HonourOfMark(art)
 	if type(art) ~= "string" then return nil end
 	for _, h in ipairs(H().Holdings(ns.me, P().MyGk())) do
-		if h.art == art then return h end
+		if h.art == art and Worn(h) then return h end
 	end
 	return nil
 end

@@ -138,10 +138,14 @@ test("1.2.1 the King's letter: after the update, a letter 1.2.0 gave (read or no
 	w:Run(3)
 	eq(Shown(C), false); eq(Shown(D), false, "held at the first look: told already (the safe side)")
 	eq(D.ns.ArenaProfile.Pick().frame, "donor-top-3", "his honour still switched on")
-	-- C's cornucopia and koi back: no letter, 1.2.0 gave them (the koi's for this month).
+	-- C's cornucopia and koi back: no letter, 1.2.0 gave them (the koi's for this month). (1.2.3, the
+	-- owner's rule, his pick sticks: an honour told before switches nothing on when it comes back, so
+	-- his pick, the rank's frame, stays; until 1.2.2 the cornucopia switched on here. D's above, never
+	-- told, still does.)
 	Donors(w, C, now + 1, { C }, Short(C.name))
 	w:Run(3)
-	eq(C.ns.ArenaProfile.Pick().frame, "donor-top-1")
+	eq(C.ns.ArenaProfile.Pick().frame, "rank", "told before: his pick stays")
+	eq(w:As(C, C.ns.ProfileEdit.PickFrame, "donor-top-1"), true, "and the cornucopia is his to pick")
 	eq(C.ns.ArenaProfile.Pick().seen["donor-month"].place, 1)
 	eq(Shown(C), false, "the letters 1.2.0 gave, not again")
 	eq(#C.ns.HonorsNet.QueuedLetters(), 0)

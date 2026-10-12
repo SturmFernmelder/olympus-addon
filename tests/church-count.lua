@@ -2009,6 +2009,45 @@ test("1.2.3 Church: the top 3 is worked out again only when the ledger, the book
 	eq(Send(), true); eq(computed, 6); eq(Top(), "Nils Ford,Mira Wells")
 end)
 
+-- 1.2.3, after review: the missionaries' crook comes of this top 3, and the comments (and the handoff)
+-- said the Head's or the King's client sends it too. SendTop takes a keeper whose root is H or W, but
+-- the Head is the King (Church.IsHead), whose root is K, and the King is no keeper (Count.Tick leaves
+-- him out): only the author's client sends it, while it is online with the ranking open. A word from
+-- the King's is still taken (the 1.1.6 test above). Whether the King's client should send it too is
+-- the owner's call (the King's screen's weight), not this test's.
+test("1.2.3 Church: the top 3 goes out from the author's client alone: the King's, online with the ranking open, sends none (root K, no keeper; the Head is the King); the author's sends it, and the King's client takes it", function()
+	local w, c = Cast()
+	c.author.online, c.king.online = true, true
+	w:Presence()
+	local A, K = c.author, c.king
+	for i, by in ipairs({ "Mira Wells", "Nils Ford" }) do
+		for j = 1, i do
+			w:As(A, A.Count.MergeIn, "r " .. i .. j .. ":" .. Key(by), { n = "R B" .. i .. j, bn = by, g = World.GUILD, kind = "i",
+				tc = w.clock - 7200, tj = w.clock - 3600, ws = { "wes brook" } }, false)
+		end
+	end
+	w:Act(c.m1, c.m1.Count.SetPublicRow, true)
+	w:Act(c.m2, c.m2.Count.SetPublicRow, true)
+	w:Act(A, A.Church.SetPublic, true)
+	eq(w:As(K, K.Church.IsHead, World.KING), true, "the Head is the King")
+	eq(w:As(K, K.Church.RootCode, World.KING), "K", "his root: K, never H")
+	eq(w:As(K, K.Church.IsKeeper, World.KING), false, "no keeper")
+	eq(w:As(A, A.Church.RootCode, World.AUTHOR), "W")
+	w:ClearSent()
+	-- The King's client: its ticks, past TOP_EVERY, send none; SendTop itself refuses.
+	w:Tick({ K })
+	w:Run(K.Count.TOP_EVERY + 1)
+	w:Tick({ K })
+	eq(w:As(K, K.Count.SendTop, w.clock), false, "the King's client sends no top 3")
+	eq(#w:Sent(K, "NR", nil, "t"), 0)
+	eq(w:As(c.wes, c.wes.Church.Top3), nil, "nobody holds one yet")
+	-- The author's: sent on CHANNEL, and taken everywhere, the King's client too.
+	w:Tick({ A })
+	eq(#w:Sent(A, "NR", "CHANNEL", "t"), 1, "the author's client sends it")
+	eq(w:As(K, K.Church.Top3).missionaries[1], "Nils Ford", "the King's client holds it")
+	eq(w:As(c.wes, c.wes.Church.Top3).missionaries[1], "Nils Ford")
+end)
+
 test("1.2.3 Church: a keeper's first upkeep of its ledger comes PRUNE_AFTER after its first tick, then hourly; marks past GONE_MAX go, the oldest first", function()
 	local w, c = Cast()
 	local K = c.a1

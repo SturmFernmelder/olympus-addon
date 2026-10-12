@@ -569,17 +569,24 @@ local function Everything()
 	}
 end
 
-test("1.2.0 honours: the release wears the all-time donors' frames alone; the level race's comet, the month's, the arena's and the rest wait (the owner's call)", function()
+-- (1.2.3, the owner's call "Cajado entra na 1.2.3": the missionaries' crook is worn too; the koi, the
+-- owl and the rest still wait. The list below was the donors' alone until then.)
+test("1.2.0 honours: the release wears the all-time donors' frames alone (1.2.3: and the missionaries' crook); the level race's comet, the month's, the arena's and the rest wait (the owner's call)", function()
 	local saved = Honors.FRAMES_SHIPPED
 	local families = {}
 	for family in pairs(SHIPPED or {}) do families[#families + 1] = family end
-	eq(table.concat(families, ","), "donor-top", "Honors.lua ships the all-time donors' frames alone")
+	table.sort(families)
+	eq(table.concat(families, ","), "donor-top,missionary", "Honors.lua ships the all-time donors' and the missionaries' frames alone")
 	Honors.FRAMES_SHIPPED = SHIPPED
 	local ok, err = pcall(function()
-		local held = Honors.Holdings(ME, Everything())
+		local inputs = Everything()
+		inputs.church = { missionaries = { { name = "Aldric", place = 1 } } }
+		local held = Honors.Holdings(ME, inputs)
 		-- Held as before: the honours themselves are untouched, only the frames worn.
 		assert(Keys(held):find("level-race-60", 1, true) and Keys(held):find("donor-top-1", 1, true), Keys(held))
 		eq((Honors.Shown({ frame = "donor-top-1" }, held)), "donor-top-1", "the all-time donors' frame is worn")
+		eq((Honors.Shown({ frame = "missionary-1" }, held)), "missionary-1", "(1.2.3) the missionaries' crook is worn")
+		assert(Honors.Choose({}, held, "missionary-1"), "(1.2.3) the crook can be picked")
 		for _, key in ipairs({ "level-race-60", "donor-month-1", "arena-champion", "arena-class-mage", "guild-top-leader" }) do
 			eq((Honors.Shown({ frame = key }, held)), "rank", key .. ": his rank's frame instead")
 			eq(select(2, Honors.Choose({}, held, key)), "frame", key .. ": not offered to pick")
@@ -634,6 +641,7 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 		["oracle-1"] = "raven-gold", ["oracle-3"] = "raven-bronze", ["guild-top-leader"] = "owl-gold",
 		["wanted-slayer-1"] = "orc-wolf-gold", ["wanted-slayer-2"] = "orc-wolf-silver", ["wanted-slayer-3"] = "orc-wolf-bronze",
 		["level-race-20"] = "comet-bronze", ["level-race-40"] = "comet-silver", ["level-race-60"] = "comet-gold",
+		["missionary-1"] = "crook-gold", ["missionary-2"] = "crook-silver", ["missionary-3"] = "crook-bronze",
 	}
 	for key, art in pairs(want) do
 		local got, shape, metal = Honors.ArtOf(key)
@@ -646,10 +654,11 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 		eq(Honors.ArtOf(key), nil, "no art: " .. key)
 	end
 	-- Every file the honours can name: 3 gryphons, 9 classes and 8 races in three metals, three
-	-- cornucopias, koi and ravens, three comets and the gold owl; and (1.2.1) the ten preview
-	-- frames nobody holds (three crosses, three charms, three owlcats and the red cross).
+	-- cornucopias, koi and ravens, three comets and the gold owl; (1.2.1) the ten preview frames
+	-- nobody holds (three crosses, three charms, three owlcats and the red cross); and (1.2.3) the
+	-- missionaries' three crooks.
 	local files = Honors.ArtFiles()
-	eq(#files, 3 + 27 + 24 + 9 + 3 + 1 + 10)
+	eq(#files, 3 + 27 + 24 + 9 + 3 + 1 + 10 + 3)
 	local listed = {}
 	for _, f in ipairs(files) do listed[f] = true end
 	for _, art in pairs(want) do eq(listed[art], true, art) end
@@ -676,7 +685,8 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 	end
 	local inputs = { belts = belts, podium = podium, donors = Honors.Donors(gifts, NOW),
 		levels = Honors.LevelRace({}, claims, 100000), oracle = { month = oracle, monthNo = Honors.MonthOf(SEP_1) },
-		guild = { guild = "Olympus Aurora", leader = "Una", members = 100, avgLevel = 40 } }
+		guild = { guild = "Olympus Aurora", leader = "Una", members = 100, avgLevel = 40 },
+		church = { missionaries = oracle } } -- (1.2.3: the same three, the Church's top 3)
 	local got = {}
 	for _, p in ipairs(players) do
 		for _, h in ipairs(Honors.Holdings(p, inputs)) do
@@ -789,7 +799,10 @@ test("honours: a first choice, made before any Update, is not undone by the next
 	eq(q.frame, "donor-month-1")
 end)
 
-test("honours: a new honour switches on by itself; a pick no longer held stays, and shows the rank meanwhile", function()
+-- (1.2.3: a pick of a family lost with its source loaded no longer stays as it is, showing the rank's
+-- frame and no title: the owner's "se a pessoa tem cornucopia..." (Update's stand-in). A locked one
+-- still does, below; a gap in the source, the next test.)
+test("honours: a new honour switches on by itself; a pick lost (its source loaded) wears the first frame and title by ORDER held meanwhile and comes back with its honour; a locked one stays and shows the rank meanwhile", function()
 	-- A new profile: the best held switches on.
 	local held = Honors.Holdings(ME, Everything())
 	local p, earned, lost = Honors.Update(nil, held, true)
@@ -808,19 +821,32 @@ test("honours: a new honour switches on by itself; a pick no longer held stays, 
 	q, earned = Honors.Update(q, held, true)
 	eq(q.frame, "donor-month-1") eq(q.title, "donor-month-1")
 	eq(Keys(earned), "donor-month-1")
-	-- The belt lost while picked: the pick stays, and shows the rank's frame and no title.
+	-- The belt lost while picked: the first frame and title by ORDER he holds stand in (the mage's
+	-- belt), the belt's family remembered.
 	p = Honors.Choose(q, held, "arena-champion", "arena-champion")
 	local noBelt = Without(held, "key", "arena-champion")
 	q, earned, lost = Honors.Update(p, noBelt, true)
-	eq(q.frame, "arena-champion") eq(q.title, "arena-champion")
+	eq(q.frame, "arena-class-mage") eq(q.title, "arena-class-mage")
+	eq(q.back.frame, "belt-A") eq(q.back.title, "belt-A")
 	local frame, mark, title = Honors.Shown(q, noBelt)
-	eq(frame, "rank") eq(mark, "rank") eq(title, nil)
+	eq(frame, "arena-class-mage") eq(mark, "mage-gold") eq(title, "arena-class-mage")
 	eq(#earned, 0)
 	eq(Keys(lost, "family"), "belt-A")
-	-- Won back later: new again, switches on.
+	-- Nothing new meanwhile: the stand-in stays.
+	local r = Honors.Update(q, noBelt, true)
+	eq(r.frame, "arena-class-mage") eq(r.back.frame, "belt-A")
+	-- Won back later: his pick back (new again too).
 	q, earned = Honors.Update(q, held, true)
 	eq(Keys(earned), "arena-champion")
-	eq(q.frame, "arena-champion")
+	eq(q.frame, "arena-champion") eq(q.title, "arena-champion") eq(q.back, nil)
+	-- Locked: the pick stays, and shows the rank's frame and no title meanwhile.
+	p = Honors.Choose(q, held, "arena-champion", "arena-champion")
+	p.locked = true
+	q, earned, lost = Honors.Update(p, noBelt, true)
+	eq(q.frame, "arena-champion") eq(q.title, "arena-champion") eq(q.back, nil)
+	frame, mark, title = Honors.Shown(q, noBelt)
+	eq(frame, "rank") eq(mark, "rank") eq(title, nil)
+	eq(Keys(lost, "family"), "belt-A")
 end)
 
 test("honours: a gap in the inputs never undoes a pick; a family is forgotten only once its source is loaded", function()
@@ -840,16 +866,18 @@ test("honours: a gap in the inputs never undoes a pick; a family is forgotten on
 	eq(q.frame, "donor-top-1") eq(#earned, 0) eq(#lost, 0)
 	q, earned, lost = Honors.Update(q, held, true)
 	eq(q.frame, "donor-top-1") eq(q.title, "level-race-60") eq(#earned, 0) eq(#lost, 0)
-	-- The donors loaded, and he is no longer among the top 3: that family is forgotten, the pick stays.
+	-- The donors loaded, and he is no longer among the top 3: that family is forgotten. (1.2.3: his
+	-- frame meanwhile the first by ORDER he holds, the belt; it stayed, showing his rank's. His title,
+	-- not the donors', stays.)
 	local noTop = Without(held, "kind", "donor-top")
 	q, earned, lost = Honors.Update(q, noTop, { donor = true })
 	eq(Keys(lost, "family"), "donor-top")
-	eq(q.frame, "donor-top-1")
-	eq(Honors.Shown(q, noTop), "rank")
-	-- Top donor again: new (it was forgotten), switches on.
+	eq(q.frame, "arena-champion") eq(q.title, "level-race-60") eq(q.back.frame, "donor-top") eq(q.back.title, nil)
+	eq(Honors.Shown(q, noTop), "arena-champion")
+	-- Top donor again: new (it was forgotten), and his pick back.
 	q, earned = Honors.Update(q, held, true)
 	eq(Keys(earned), "donor-top-1")
-	eq(q.frame, "donor-top-1")
+	eq(q.frame, "donor-top-1") eq(q.back, nil)
 end)
 
 test("honours: 'none' stays none until something new; down a place in a family, a pick of the old place follows it", function()
@@ -1443,4 +1471,300 @@ test("honours: the game's GUID and the arena's short one (gk) are one character:
 	book, fresh = Honors.LevelRace({ [20] = { { guid = FULL, name = "Lida Fenn", t = 1 } } },
 		{ Up("Lida Fenn", "4395-0a1b2c3d", 20, 500, true) }, 100000)
 	eq(Keys(book[20], "name"), "Lida Fenn") eq(book[20][1].guid, FULL) eq(#fresh, 0)
+end)
+
+---------------------------------------------------------------------------
+-- 1.2.3: the missionaries' crook, and only the frames worn switch on
+---------------------------------------------------------------------------
+
+-- The Church's top 3 as ChurchCount.Top3 gives it (its names in order, its time), in Holdings' shape.
+local function Church(names, at)
+	local list = {}
+	for i, n in ipairs(names) do list[i] = { name = n, place = i } end
+	return { missionaries = list, at = at }
+end
+
+test("1.2.3 honours: the Church's top 3 missionaries hold the crook, gold, silver and bronze, frame and title; the 4th nothing; a word older than its own 30 days, or without its time, names nobody once now is given; told for now's month", function()
+	local inputs = { church = Church({ "Aldric", "Brenna", "Cato", "Dara" }, NOW - DAY), now = NOW }
+	local want = { Aldric = { "missionary-1", "crook-gold", "gold" }, Brenna = { "missionary-2", "crook-silver", "silver" },
+		Cato = { "missionary-3", "crook-bronze", "bronze" } }
+	for name, x in pairs(want) do
+		local held = Honors.Holdings({ name = name }, inputs)
+		eq(Keys(held), x[1], name)
+		local h = held[1]
+		eq(h.family, "missionary") eq(h.kind, "missionary") eq(h.art, x[2]) eq(h.mark, x[2]) eq(h.metal, x[3]) eq(h.shape, "plain")
+		eq(h.frame, x[1]) eq(h.title, x[1])
+		eq(h.period, Honors.MonthOf(NOW), name .. ": its letter told for October")
+	end
+	eq(#Honors.Holdings({ name = "Dara" }, inputs), 0, "the 4th: nothing, even named 4th")
+	eq(#Honors.Holdings({ name = "Elric" }, inputs), 0, "anyone else: nothing")
+	-- (By name, as the Church's top 3 carries them: any case, no realm.)
+	eq(Keys(Honors.Holdings({ name = "aldric-Emberfall" }, inputs)), "missionary-1")
+	-- Its own 30 days: the word of a day ago holds; one older than CHURCH_MAX_AGE, or without a time, not.
+	eq(Honors.CHURCH_MAX_AGE, 30 * DAY)
+	eq(#Honors.Holdings({ name = "Aldric" }, { church = Church({ "Aldric" }, NOW - Honors.CHURCH_MAX_AGE), now = NOW }), 1, "30 days old: still")
+	eq(#Honors.Holdings({ name = "Aldric" }, { church = Church({ "Aldric" }, NOW - Honors.CHURCH_MAX_AGE - 1), now = NOW }), 0, "older: nobody")
+	eq(#Honors.Holdings({ name = "Aldric" }, { church = Church({ "Aldric" }), now = NOW }), 0, "no time: nobody")
+	eq(Keys(Honors.Holdings({ name = "Aldric" }, { church = Church({ "Aldric" }) })), "missionary-1", "no now: taken as it is")
+	eq(Honors.ChurchFresh({ at = NOW }, NOW), true) eq(Honors.ChurchFresh({}, NOW), false) eq(Honors.ChurchFresh({}, nil), true)
+	-- Beside his other honours, in ORDER: after the cornucopia, before the level race.
+	local both = Everything()
+	both.church = Church({ "Aldric" }, NOW)
+	both.now = nil
+	eq(Keys(Honors.Holdings(ME, both)), "arena-champion,arena-class-mage,arena-race-nightelf,guild-top-leader,donor-top-1,missionary-1,"
+		.. "level-race-60,donor-month-1,arena-tier-gold")
+	-- The crook is the missionaries' alone, and its family the Church's source.
+	eq(Honors.FAMILY_ART.missionary, "crook")
+	local known = Honors.Update(Honors.Choose(nil, Honors.Holdings({ name = "Aldric" }, inputs), "missionary-1"), {}, { missionary = true })
+	eq(known.seen.missionary, nil, "its source loaded and naming someone else: lost")
+	local unknown = Honors.Update(Honors.Choose(nil, Honors.Holdings({ name = "Aldric" }, inputs), "missionary-1"), {}, { donor = true })
+	eq(unknown.seen.missionary.place, 1, "its source not loaded: remembered")
+end)
+
+-- The owner (1.2.3): "se a pessoa tem cornucopia e ganha koi pode até mudar quando ganha mas a pessoa
+-- pode escolher no perfil entre elas". 1.2.2's Update switched on the first frame newly earned, worn
+-- or not: the koi took the cornucopia's place, and Shown (the koi not worn) gave his rank's frame.
+test("1.2.3 honours: as Honors.lua ships them, a newly earned frame not worn yet (the koi, the comet, the owl) leaves the cornucopia worn, its title switching on; the crook, worn, switches on; the cornucopia picked back stays; a pick 1.2.2 left on the koi wears the cornucopia again (locked or not, the koi held or not), else his rank's", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW) -- 1st of all time and of September
+		local cornucopia = Honors.Holdings(ME, { donors = { all = donors.all } })
+		local p = Honors.Update(nil, cornucopia, true)
+		eq(p.frame, "donor-top-1") eq(Honors.Shown(p, cornucopia), "donor-top-1")
+		-- The koi earned: not worn in this version. The cornucopia stays; the koi's title switches on.
+		local koi = Honors.Holdings(ME, { donors = donors })
+		eq(Keys(koi), "donor-top-1,donor-month-1")
+		local q, earned = Honors.Update(p, koi, true)
+		eq(Keys(earned), "donor-month-1", "still new (its letter)")
+		eq(q.frame, "donor-top-1", "the cornucopia stays worn")
+		eq(q.title, "donor-month-1", "the koi's title switches on")
+		eq(Honors.Shown(q, koi), "donor-top-1", "and shows")
+		-- The same for the comet and the owl.
+		for _, extra in ipairs({ { levels = { [60] = { { guid = "Player-1-A", name = "Aldric", t = 1 } } } },
+			{ guild = { guild = "Olympus Aurora", leader = "Aldric", members = 100, avgLevel = 40 } } }) do
+			extra.donors = { all = donors.all }
+			local held = Honors.Holdings(ME, extra)
+			local r = Honors.Update(p, held, true)
+			eq(r.frame, "donor-top-1", Keys(held) .. ": the cornucopia stays")
+			eq(Honors.Shown(r, held), "donor-top-1")
+		end
+		-- The crook earned: worn, so it switches on by itself.
+		local crook = Honors.Holdings(ME, { donors = donors, church = Church({ "Aldric" }, NOW), now = NOW })
+		eq(Keys(crook), "donor-top-1,missionary-1,donor-month-1")
+		local c = Honors.Update(q, crook, true)
+		eq(c.frame, "missionary-1", "a worn frame newly earned switches on") eq(c.title, "missionary-1")
+		eq(Honors.Shown(c, crook), "missionary-1")
+		-- He picks the cornucopia back: it shows and stays, whatever comes that is not new.
+		local back = Honors.Choose(c, crook, "donor-top-1", "donor-month-1")
+		eq(back.frame, "donor-top-1")
+		local again = Honors.Update(back, crook, true)
+		eq(again.frame, "donor-top-1", "his pick sticks") eq(again.title, "donor-month-1")
+		eq(Honors.Update(again, crook, true).frame, "donor-top-1")
+		eq(Honors.Shown(again, crook), "donor-top-1")
+		-- Choose never takes a frame not worn; Shown never shows one.
+		eq(select(2, Honors.Choose(again, crook, "donor-month-1")), "frame")
+		-- A pick 1.2.2 left on the koi (it switched it on by itself): the first frame by ORDER this
+		-- version wears that he holds, the cornucopia; with none worn, his rank's; locked, as it is.
+		local stuck = { frame = "donor-month-1", title = "donor-month-1", seen = again.seen }
+		eq(Honors.Shown(stuck, crook), "rank", "(1.2.2: his rank's frame showed)")
+		local fixed = Honors.Update(stuck, crook, true)
+		eq(fixed.frame, "donor-top-1", "the cornucopia again") eq(fixed.title, "donor-month-1", "his title as it was")
+		local koiOnly = Without(Honors.Holdings(ME, { donors = donors }), "key", "donor-top-1")
+		eq(Honors.Update({ frame = "donor-month-1", seen = again.seen }, koiOnly, true).frame, "rank", "none worn: his rank's")
+		-- (After review: a locked pick, or one whose koi is not held now, is mended too, below: Choose
+		-- never took a frame not released, so only 1.2.2's switch-on put it there. Both were left as
+		-- they were, and his rank's frame showed.)
+		local locked = Honors.Update({ frame = "donor-month-1", seen = again.seen, locked = true }, crook, true)
+		eq(locked.frame, "donor-top-1", "locked: mended") eq(locked.locked, true, "and still locked")
+		eq(Honors.Update({ frame = "donor-month-1", seen = again.seen }, cornucopia, true).frame, "donor-top-1", "the koi not held now")
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.3, after review: the crook is the first frame worn that a 30-day moving ranking gives, so its
+-- holders drop out of it and come back routinely. The owner's rule ("se a pessoa tem cornucopia e
+-- ganha koi pode até mudar quando ganha mas a pessoa pode escolher no perfil entre elas"): a new frame
+-- may switch on by itself, only a released one, and his pick sticks.
+-- The cornucopia held, the crook switched on, a fresh word without him (its source loaded): it stayed
+-- his pick, and his rank's frame showed with no title.
+test("1.2.3 honours: the crook lost while worn (a fresh top 3 without him): the cornucopia he holds and its title stand in, never his rank's frame; back in the top 3, the crook again; with no other frame worn, his rank's meanwhile; a gap in the Church's word changes nothing", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW)
+		local all = { all = donors.all }
+		local function With(names) return Honors.Holdings(ME, { donors = all, church = Church(names, NOW), now = NOW }) end
+		local p = Honors.Update(nil, Honors.Holdings(ME, { donors = all }), true)
+		eq(p.frame, "donor-top-1") eq(p.title, "donor-top-1")
+		-- Named 3rd: the crook switches on.
+		local third = With({ "Brenna", "Cato", "Aldric" })
+		local q = Honors.Update(p, third, true)
+		eq(q.frame, "missionary-3") eq(q.title, "missionary-3")
+		-- A fresh word without him: the cornucopia and its title, the crook remembered.
+		local out = With({ "Brenna", "Cato", "Dara" })
+		eq(Keys(out), "donor-top-1")
+		local r, earned, lost = Honors.Update(q, out, true)
+		eq(Keys(lost, "family"), "missionary") eq(#earned, 0)
+		eq(r.frame, "donor-top-1", "the cornucopia, not his rank's frame") eq(r.title, "donor-top-1")
+		local frame, mark, title = Honors.Shown(r, out)
+		eq(frame, "donor-top-1") eq(mark, "cornucopia-gold") eq(title, "donor-top-1")
+		eq(r.back.frame, "missionary") eq(r.back.title, "missionary")
+		-- Words without him again: still the cornucopia.
+		eq(Honors.Update(r, out, true).frame, "donor-top-1")
+		-- The Church's word closed or stale meanwhile (its source not loaded): nothing moves.
+		local gap = Honors.Update(r, Honors.Holdings(ME, { donors = all }), { donor = true })
+		eq(gap.frame, "donor-top-1") eq(gap.back.frame, "missionary")
+		-- Back in the top 3 the same month (told already: no switch-on of its own): his crook again.
+		local told = function(h) return h.family == "missionary" end
+		local s, again = Honors.Update(gap, third, true, told)
+		eq(Keys(again), "missionary-3", "earned again")
+		eq(s.frame, "missionary-3", "his crook back") eq(s.title, "missionary-3") eq(s.back, nil)
+		-- Back at another place: at that place.
+		local u = Honors.Update(r, With({ "Aldric", "Brenna", "Cato" }), true, told)
+		eq(u.frame, "missionary-1") eq(u.title, "missionary-1")
+		-- The cornucopia lost too meanwhile: his rank's (nothing worn held), and the cornucopia back
+		-- stands in again (it was no pick of his: told, it switches nothing on itself).
+		local none = Honors.Holdings(ME, { church = Church({ "Brenna" }, NOW), now = NOW })
+		local v = Honors.Update(r, none, true)
+		eq(v.frame, "rank") eq(v.title, nil) eq(v.back.frame, "missionary")
+		local x = Honors.Update(v, out, true, function() return true end)
+		eq(x.frame, "donor-top-1") eq(x.title, "donor-top-1") eq(x.back.frame, "missionary")
+		-- A crook alone: his rank's frame and no title meanwhile, the crook again when he is back.
+		local alone = Honors.Update(nil, Honors.Holdings(ME, { church = Church({ "Aldric" }, NOW), now = NOW }), true)
+		eq(alone.frame, "missionary-1")
+		local gone = Honors.Update(alone, {}, { missionary = true })
+		eq(gone.frame, "rank") eq(gone.title, nil) eq(gone.back.frame, "missionary")
+		eq(Honors.Update(gone, Honors.Holdings(ME, { church = Church({ "Brenna", "Aldric" }, NOW), now = NOW }), true, told).frame, "missionary-2")
+		-- His own pick in the profile ends it: Choose keeps no back.
+		eq(Honors.Choose(r, out, "rank").back, nil)
+		-- A locked pick stays (the rank's frame shows meanwhile).
+		local lockedQ = Honors.Choose(q, third, "missionary-3", "missionary-3")
+		lockedQ.locked = true
+		local w = Honors.Update(lockedQ, out, true)
+		eq(w.frame, "missionary-3") eq(w.back, nil) eq(Honors.Shown(w, out), "rank")
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)
+
+-- His pick back to the cornucopia stuck only until the 30-day ranking moved: back the same month to a
+-- place told already (no letter), or a place up, switched the crook on over it.
+test("1.2.3 honours: only an honour told for the first time switches on by itself (Update's told): the cornucopia picked back stays when the crook comes back to a place told this month; a place first reached this month still switches on; without told, as before", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW)
+		local all = { all = donors.all }
+		local function With(names) return Honors.Holdings(ME, { donors = all, church = Church(names, NOW), now = NOW }) end
+		local marks = {}
+		local function Told(h) return marks[h.key .. "@" .. tostring(h.period)] == true end
+		local function Tell(earned) for _, h in ipairs(earned) do marks[h.key .. "@" .. tostring(h.period)] = true end end
+		local p, earned = Honors.Update(nil, Honors.Holdings(ME, { donors = all }), true, Told)
+		Tell(earned)
+		-- 3rd, first time this month: switches on (its letter comes with it).
+		local third = With({ "Brenna", "Cato", "Aldric" })
+		local q
+		q, earned = Honors.Update(p, third, true, Told)
+		Tell(earned)
+		eq(q.frame, "missionary-3", "told for the first time: on")
+		-- He picks the cornucopia back in the profile.
+		local mine = Honors.Choose(q, third, "donor-top-1", "donor-top-1")
+		-- Out (4th), then 3rd again the same month: his pick stays.
+		local out = With({ "Brenna", "Cato", "Dara" })
+		local r, _, lost = Honors.Update(mine, out, true, Told)
+		eq(Keys(lost, "family"), "missionary") eq(r.frame, "donor-top-1") eq(r.back, nil, "not the crook's: no stand-in")
+		local s
+		s, earned = Honors.Update(r, third, true, Told)
+		eq(Keys(earned), "missionary-3", "earned again (for the letter's own check)")
+		eq(s.frame, "donor-top-1", "his pick stays") eq(s.title, "donor-top-1")
+		Tell(earned)
+		-- 2nd, a place first reached this month: switches on (a letter tells him).
+		local second = With({ "Brenna", "Aldric", "Cato" })
+		local t
+		t, earned = Honors.Update(s, second, true, Told)
+		eq(Keys(earned), "missionary-2") eq(t.frame, "missionary-2") eq(t.title, "missionary-2")
+		Tell(earned)
+		-- Picked back again; down to 3rd and up to 2nd again the same month: it stays.
+		local back = Honors.Choose(t, second, "donor-top-1", "donor-top-1")
+		local u = Honors.Update(back, third, true, Told)
+		eq(u.frame, "donor-top-1")
+		eq(Honors.Update(u, second, true, Told).frame, "donor-top-1", "2nd again, told: his pick stays")
+		-- Next month, his place's letter is new again: it switches on.
+		local nov = Honors.Holdings(ME, { donors = all, church = Church({ "Brenna", "Aldric" }, NOW + 31 * DAY), now = NOW + 31 * DAY })
+		eq(Honors.Update(u, nov, true, Told).frame, "missionary-2", "a new month's honour")
+		-- Without told (every honour earned may switch on): 1.2.2's way.
+		eq(Honors.Update(r, third, true).frame, "missionary-3")
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.2 switched a frame not released on by itself; 1.2.3's first mend took only one held now, on an
+-- unlocked pick: the koi after its month, the owl after his guild lost first, or a pick locked since
+-- showed his rank's frame, the cornucopia held.
+test("1.2.3 honours: a pick 1.2.2 left on a frame not released (the owl, the koi, the comet, an arena belt), held or not, locked or not, wears the first released frame he holds; with none, his rank's, unless a released family waits for its source; a released frame not held stays", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW)
+		local cornucopia = Honors.Holdings(ME, { donors = { all = donors.all } })
+		eq(Keys(cornucopia), "donor-top-1")
+		local seen = Honors.Update(nil, cornucopia, true).seen
+		for _, key in ipairs({ "guild-top-leader", "donor-month-1", "donor-month-3", "level-race-60", "oracle-2", "arena-champion",
+			"arena-champion-2", "arena-class-mage-3", "arena-race-nightelf" }) do
+			local p = Honors.Update({ frame = key, title = "donor-top-1", seen = seen }, cornucopia, true)
+			eq(p.frame, "donor-top-1", key .. ", not held: the cornucopia") eq(p.title, "donor-top-1")
+			eq(Honors.Shown(p, cornucopia), "donor-top-1")
+			local l = Honors.Update({ frame = key, seen = seen, locked = true }, cornucopia, true)
+			eq(l.frame, "donor-top-1", key .. ", locked") eq(l.locked, true)
+		end
+		-- The koi and the cornucopia held, locked on the koi.
+		local both = Honors.Holdings(ME, { donors = donors })
+		eq(Keys(both), "donor-top-1,donor-month-1")
+		local l = Honors.Update({ frame = "donor-month-1", title = "donor-month-1", seen = Honors.Update(nil, both, true).seen, locked = true }, both, true)
+		eq(l.frame, "donor-top-1") eq(l.title, "donor-month-1", "his title as it was") eq(Honors.Shown(l, both), "donor-top-1")
+		-- With no released frame held: his rank's; but while the cornucopia waits for the donors' word
+		-- (remembered, its source not loaded: a login), as it is, and mended once it is in.
+		eq(Honors.Update({ frame = "guild-top-leader", seen = {} }, {}, true).frame, "rank")
+		local wait = Honors.Update({ frame = "guild-top-leader", seen = seen }, {}, { guild = true })
+		eq(wait.frame, "guild-top-leader", "left for a later Update") eq(wait.seen["donor-top"].place, 1)
+		eq(Honors.Update(wait, cornucopia, true).frame, "donor-top-1")
+		-- A released frame not held, with its source not loaded: stays (a gap never undoes a pick).
+		eq(Honors.Update({ frame = "donor-top-1", seen = seen }, {}, nil).frame, "donor-top-1")
+		eq(Honors.Update({ frame = "missionary-2", seen = seen }, cornucopia, true).frame, "missionary-2", "a crook not held, not seen: as it is")
+		-- Rank, none and a key no honour has stay.
+		for _, key in ipairs({ "rank", "none", "comet-gold" }) do
+			eq(Honors.Update({ frame = key, seen = seen }, cornucopia, true).frame, key)
+		end
+		-- Every family worn (2.0, the machinery's tests): nothing is mended.
+		Honors.FRAMES_SHIPPED = nil
+		eq(Honors.Update({ frame = "guild-top-leader", seen = seen }, cornucopia, true).frame, "guild-top-leader")
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)
+
+-- The title's click in the profile and the King's letter's "Wear it" pick a title with the frame as
+-- it is (SetPick(Pick().frame, title)): Choose refused a frame not held now, or not released, and
+-- nothing happened.
+test("1.2.3 honours: Choose takes the pick's own frame unchanged whatever it is (a title alone picked); any other frame still only when held and released; it keeps no back", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW)
+		local both = Honors.Holdings(ME, { donors = donors })
+		local koi = Honors.Choose({ frame = "donor-month-1", seen = {} }, both, "donor-month-1", "donor-month-1")
+		assert(koi, "a title alone, on a pick 1.2.2 left on the koi")
+		eq(koi.frame, "donor-month-1") eq(koi.title, "donor-month-1")
+		local crook = Honors.Choose({ frame = "missionary-3", seen = {}, locked = true }, both, "missionary-3", "donor-top-1")
+		assert(crook, "a crook not held now") eq(crook.title, "donor-top-1") eq(crook.locked, true)
+		eq(select(2, Honors.Choose({ frame = "donor-top-1" }, both, "donor-month-1")), "frame", "the koi, not his pick: refused")
+		eq(select(2, Honors.Choose({ frame = "donor-top-1" }, both, "missionary-3")), "frame", "a crook not held: refused")
+		eq(select(2, Honors.Choose({ frame = "missionary-3" }, both, "missionary-3", "missionary-3")), "title", "a title not held: refused")
+		eq(Honors.Choose({ frame = "donor-top-1", back = { frame = "missionary" } }, both, "donor-top-1").back, nil)
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
 end)
