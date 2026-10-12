@@ -19,7 +19,16 @@ local L = ns.L
 --   root names one under the Apostle or missionary he picks. A parent names NAMES_PER at most (the
 --   ones he adopted not counted), DEPTH_MAX levels below the Apostle, MISSIONARIES_MAX in all.
 -- - One Church correspondent per Olympus guild, answering to the Head: named by that guild's guild
---   master or by a root; a new naming replaces the old one.
+--   master or by a root; a new naming replaces the old one. (1.2.4, the author's ask: "if the GM isn't
+--   online ... it has to be kept".) Another guild's master is known as Data.AuthorizedRank knows him:
+--   that guild's census, as for his bronze wings and the list of nominees he sends, until the author's
+--   signed leadership is enforced, that list alone from then on (since 1.2.1 that list alone, which no
+--   release enforces yet: no client outside a guild took its master's correspondent, and every Church
+--   page showed "none" for it). Each client keeps his correspondent, saved, while it can't tell (that
+--   guild's census quiet, its reporters offline), CORR_KEEP after it last confirmed him that guild's
+--   master; it drops him at once when it can tell he is not (another rank, another master proven), when
+--   he takes it back, or once the signed leadership is enforced and does not name him. A guild master
+--   still gains nothing beyond his own guild's correspondent (Church.MayAct).
 -- - The audience (the room, the tab, the numbers): the roots, the Apostles, the missionaries, the
 --   correspondents and the High Council. The keepers (they serve the book and keep the ledger):
 --   the Head, the Apostles and the author. The King's client does no background work beyond
@@ -74,6 +83,8 @@ Church.MISSIONARIES_MAX = 300
 Church.NAMES_PER = 10          -- direct nominees of one parent (adopted ones not counted)
 Church.DEPTH_MAX = 5           -- missionary levels below the Apostle
 Church.CORRESPONDENTS_MAX = 64
+Church.CORR_KEEP = 30 * 86400  -- (1.2.4) a guild master's correspondent, this long after this client last confirmed him its master
+Church.MASTER_MEMO = 30        -- (1.2.4) another guild's master, as its census or the signed list tells it, asked again after this long
 Church.TOMBS_MAX = 200
 Church.TOMB_KEEP = 30 * 86400  -- a tombstone no entry points to goes after this long
 Church.DATE_AHEAD = 60         -- an act or entry dated later than this ahead of our clock is refused
@@ -427,13 +438,20 @@ function Church.State()
 	end
 	-- Correspondents grant a private room and counting duties. Recheck their original issuer,
 	-- even when the book is cached: a roster demotion or expired signed role ends that authority.
-	derived.corr, derived.corrOf = {}, {}
+	-- (1.2.4: while this client can't tell, the one it last confirmed stays CORR_KEEP: CorrespondentHolds.
+	-- corrCensus: the guilds whose correspondent only another guild's census stands behind, ChurchCount's
+	-- smaller budget for his word as for any census-only witness.)
+	derived.corr, derived.corrOf, derived.corrCensus = {}, {}, {}
+	local now, enforced = Clock(), Church.Enforced()
 	for gkey, c in pairs((Book() or { c = {} }).c) do
-		if type(c.g) == "string" and ns.IsFederation(c.g)
-			and (Church.RootCode(c.ac) or Church.IsGuildMaster(c.ac, c.g) == true) then
-			derived.corr[gkey] = c
-			local k = Key(c.n)
-			if k then derived.corrOf[k] = derived.corrOf[k] or gkey end
+		if type(c.g) == "string" and ns.IsFederation(c.g) then
+			local holds, census = Church.CorrespondentHolds(c, now, enforced)
+			if holds then
+				derived.corr[gkey] = c
+				if census then derived.corrCensus[gkey] = true end
+				local k = Key(c.n)
+				if k then derived.corrOf[k] = derived.corrOf[k] or gkey end
+			end
 		end
 	end
 	return derived
@@ -502,12 +520,60 @@ function Church.Children(key)
 	return out
 end
 
--- The guild master of `guild`: true, false, or nil while this client can't tell (another guild's
--- signed authority not held yet). Our own guild from the server's roster; another from Authority.
+-- The author's signed leadership enforced (Authority.lua): from then on another guild's master is that
+-- list's alone, never the census's, and never kept from memory.
+function Church.Enforced()
+	local A = ns.Authority
+	return type(A) == "table" and type(A.Enforced) == "function" and A.Enforced() == true
+end
+
+local function Ours(guild)
+	local mine = OwnGuild()
+	return mine ~= nil and type(guild) == "string" and ns.Fold(mine) == ns.Fold(guild)
+end
+
+-- (1.2.4) Another guild's master as Data.AuthorizedRank tells it: its census (two senders naming him, one
+-- of them someone else, Data.KnownRank) until the author's signed leadership is enforced, that list from
+-- then on. false too when nothing names him but the same proof gives that guild another master, and for
+-- a guild the moderators took off the network (it ranks nobody here, Data.KnownRank). The census's answer
+-- is kept MASTER_MEMO at most, and until the next DATA_CHANGED (every census report heard fires it):
+-- Church.State asks it for each correspondent it holds, on every Role. The signed list's is asked each
+-- time, as 1.2.1 to 1.2.3 asked it: its expiry or a revocation ends a naming at once.
+local masterMemo, masterMemoN = {}, 0
+local function ForeignMaster(name, guild)
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.AuthorizedRank) ~= "function" then return nil end
+	if type(D.NetOff) == "function" and D.NetOff(guild) then return false end
+	local mk = not Church.Enforced() and (ns.Fold(guild) .. "|" .. tostring(Key(name))) or nil
+	local m, now = mk and masterMemo[mk], Now()
+	if m and now >= m.t and now - m.t < Church.MASTER_MEMO then return m.v end
+	local full = ns.FullName(name)
+	local rank, v = D.AuthorizedRank(full, guild), nil
+	if rank == 0 then
+		v = true
+	elseif rank ~= nil then
+		v = false
+	else
+		local g = type(D.Guild) == "function" and D.Guild(guild) or nil
+		local lead = type(g) == "table" and type(g.leader) == "string" and g.leader ~= "" and ns.FullName(g.leader, g.realm) or nil
+		if lead and not Same(lead, full) and D.AuthorizedRank(lead, guild) == 0 then v = false end
+	end
+	if mk then
+		if not m then
+			if masterMemoN >= 4 * Church.CORRESPONDENTS_MAX then wipe(masterMemo); masterMemoN = 0 end
+			masterMemoN = masterMemoN + 1
+		end
+		masterMemo[mk] = { v = v, t = now }
+	end
+	return v
+end
+
+-- The guild master of `guild`: true, false, or nil while this client can't tell (another guild's census
+-- quiet, or its signed leadership not held; our roster not read yet). Our own guild from the server's
+-- roster; another from Data.AuthorizedRank (1.2.4; 1.2.1 to 1.2.3: the signed leadership alone).
 function Church.IsGuildMaster(name, guild)
 	if type(name) ~= "string" or type(guild) ~= "string" then return false end
-	local mine = OwnGuild()
-	if mine and ns.Fold(mine) == ns.Fold(guild) then
+	if Ours(guild) then
 		if Same(name, ns.me) then
 			local _, _, rank = GetGuildInfo("player")
 			return rank == 0
@@ -518,11 +584,34 @@ function Church.IsGuildMaster(name, guild)
 		local rank = R.RankOf(ns.FullName(name))
 		return rank == 0
 	end
-	local A = ns.Authority
-	if not (A and A.Rank) then return nil end
-	local rank = A.Rank(ns.FullName(name), guild)
-	if rank == nil then return nil end
-	return rank == 0
+	return ForeignMaster(name, guild)
+end
+
+-- (1.2.4) Does a correspondent's naming hold here, and does only another guild's census stand behind it?
+-- A root's always. A guild master's while this client confirms him that guild's master (the time is noted
+-- on the entry, c.ok: saved, never sent, in no page or digest); while it can't tell, CORR_KEEP after it
+-- last did; never once it tells he is not (the note goes: a census gone quiet after another master was
+-- proven brings nothing back), nor, the signed leadership enforced, for another guild that list does not
+-- confirm. (An entry saved before 1.2.4 has no c.ok: it holds again at its next confirming.)
+function Church.CorrespondentHolds(c, now, enforced)
+	if type(c) ~= "table" then return false end
+	if Church.RootCode(c.ac) then return true end
+	now = now or Clock()
+	if enforced == nil then enforced = Church.Enforced() end
+	local ours = Ours(c.g)
+	local census = not ours and not enforced
+	local gm = Church.IsGuildMaster(c.ac, c.g)
+	if gm == true then
+		c.ok = now
+		return true, census
+	end
+	if gm == false then
+		c.ok = nil
+		return false
+	end
+	if not (ours or census) then return false end
+	local ok = tonumber(c.ok)
+	return ok ~= nil and ok <= now + Church.DATE_AHEAD and now - ok <= Church.CORR_KEEP, census
 end
 
 ---------------------------------------------------------------------------
@@ -610,7 +699,9 @@ function Church.MayAct(op, role, target, under, guild, actor)
 		elseif op == "-" then
 			local c = S.corr[ns.Fold(guild)]
 			if not c then return false, "none" end
-			if root or gm == true or Key(c.n) == ak then return true end
+			-- (1.2.4: and the one who named him, while his naming holds here: kept while that guild's census
+			-- is quiet, the guild master's own word takes him back.)
+			if root or gm == true or Key(c.n) == ak or Key(c.ac) == ak then return true end
 			if gm == nil then return false, "unknown" end
 			return false, "rights"
 		end
@@ -691,7 +782,8 @@ local function Apply(op, role, target, under, guild, at, actor)
 	if role == "C" then
 		guild = CleanGuild(guild)
 		local slot = ns.Fold(guild)
-		if op == "+" then return Put("C", slot, { n = WireName(target), g = guild, ac = ac, ar = ar, at = at }) end
+		-- (1.2.4: Church.MayAct just confirmed a guild master's naming: noted, Church.CorrespondentHolds.)
+		if op == "+" then return Put("C", slot, { n = WireName(target), g = guild, ac = ac, ar = ar, at = at, ok = not Church.RootCode(actor) and Clock() or nil }) end
 		return Put("Y", slot, { g = guild, ac = ac, ar = ar, at = at })
 	end
 	local tk, name = Key(target), WireName(target)
@@ -1146,14 +1238,18 @@ function Church.TakeEntry(sender, text)
 	if kind == "C" and not ns.IsFederation(e.g) then return Drop("guild") end
 	if kind == "C" and not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true) then return Drop("issuer") end
 	-- (1.2.1: a correspondent's removal too, by whom the act could come from, Church.MayAct: a root, the
-	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.)
+	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.
+	-- 1.2.4: or the one who named the correspondent this book holds.)
 	if kind == "Y" then
 		local held = (Book() or { c = {} }).c[slot]
-		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true or (held ~= nil and Same(held.n, e.ac))) then
+		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true
+			or (held ~= nil and (Same(held.n, e.ac) or Same(held.ac, e.ac)))) then
 			return Drop("issuer")
 		end
 	end
 	e.via = Key(sender) ~= Key(e.ac) and ns.FullName(sender) or nil
+	-- (1.2.4: a guild master's naming, its issuer just confirmed here: noted, Church.CorrespondentHolds.)
+	if kind == "C" and not Church.RootCode(e.ac) then e.ok = Clock() end
 	local before, wasAudience = Church.Role(ns.me), Church.InAudience(ns.me)
 	if not Put(kind, slot, e) then return false, "same" end
 	stats.pages = stats.pages + 1
@@ -1583,6 +1679,8 @@ end
 ns.On("INIT", function() Church.CheckSaved() end)
 ns.On("DATA_CHANGED", function()
 	derived = nil
+	-- (1.2.4: a census report heard may prove or depose another guild's master: asked again.)
+	wipe(masterMemo); masterMemoN = 0
 	Church.RetryPending()
 end)
 ns.On("LOGIN", function()

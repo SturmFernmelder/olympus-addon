@@ -386,3 +386,32 @@ test("1.1.6 Church: the README and the CurseForge page tell of the Church in the
 	local bank = Read("Olympus/AnswerBank.lua")
 	assert(bank:find('"feat-church"', 1, true) and bank:find('"feat-church-count"', 1, true))
 end)
+
+-- (1.2.4, the author's ask: the Church's Name page said "none" for every other guild: its master's
+-- naming was taken on no client outside his guild, and nothing kept it.) Fails before: Olympus Vale's
+-- row on the author's Name page read "none" with its master online, and after.
+test("1.2.4 Church: the root's Name page shows each guild's correspondent its master named, with that guild offline and after a reload", function()
+	local w, c = Cast()
+	local vgm = w:Client("Vale Master", { view = true, guild = World.GUILD2, rank = 0 })
+	local function Census(rank)
+		w.census[ns.Fold(World.GUILD2) .. ":" .. Key(vgm.name)] = rank
+		for _, cl in ipairs(w.clients) do if cl.Church and cl.online then w:As(cl, cl.ns.Fire, "DATA_CHANGED") end end
+	end
+	local function Row(cl)
+		local line = Find(Build(w, cl, "name"), World.GUILD2)
+		return tostring(line and line.right)
+	end
+	Census(0)
+	eq(w:Act(vgm, vgm.Church.NameCorrespondent, "Vale Helper"), true)
+	assert(Row(c.author):find("Vale Helper", 1, true), Row(c.author))
+	assert(Find(Build(w, c.author, "people"), L.CHURCH_CORRESPONDENTS:format(1)), "the People page counts him")
+	-- His guild logs off; the author reloads eight hours later.
+	vgm.online, c.other.online = false, false
+	Census(nil)
+	w:Run(8 * 3600)
+	c.author.online = false
+	local author = w:Client(World.AUTHOR, { view = true, rdb = c.author.ns.rdb })
+	w:As(author, author.ns.Fire, "INIT")
+	assert(Row(author):find("Vale Helper", 1, true), "after a reload, his guild offline: " .. Row(author))
+	assert(Find(Build(w, author, "people"), L.CHURCH_CORRESPONDENTS:format(1)), "still counted")
+end)

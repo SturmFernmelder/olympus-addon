@@ -216,9 +216,9 @@ channels; the same charter and Join controls work for each side.
   bronze mark on nameplates and in the game's chat, only while the server gives them that guild.
   His own client sends the list on the Olympus channel; every addon takes it from that guild's
   master alone (proven as for his bronze wings: your roster for your own guild, two census senders
-  for another), keeps it 6 hours after he stops repeating it, and drops it at once when he is no
-  longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent <department
-  number> <name>` and `/oly nominees remove <name>` do the same from the chat.
+  for another), saves it 30 days from his last repeat (6 hours before 1.2.4), and drops it once he
+  is no longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent
+  <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
   guild master's nomination; neither title grants federal powers. Artisanry and Heritage link to
@@ -1604,6 +1604,15 @@ The author's signed list sets the Twelve Apostles. The King, the author and the 
 other Apostles in game. Under the Apostles are their **missionaries**: an Apostle names missionaries, and each missionary may name more under himself, so
 every Apostle's network grows. Each Olympus guild has one **Church correspondent**, named by its guild
 master (or the Head, the King or the author), who keeps that guild full and answers to the Head.
+- **A guild master's correspondent shows everywhere, and stays** (1.2.4). Every addon takes it once that
+  guild's census proves him its master, as for his bronze wings (two senders naming him; the author's
+  signed leadership alone once he enforces it), and keeps it, saved, while he and his guild are offline:
+  until 30 days after it last proved him, at once when it shows another master or another rank for him,
+  or when he takes it back. From 1.2.1 to 1.2.3 only his own guild's addons took it (another guild's
+  master needed the signed leadership, which no release enforces): the author's, the King's and every
+  other guild's Church page said "none". A correspondent named in the **Guild** tab's department line
+  is not a Church appointment: the guild master names his Church correspondent on the Church's
+  **Name** page.
 - **One click to name.** On the **Church** tab's **Name** page, or with a right-click on a player
   (**Name as missionary**), an Apostle or a missionary names a missionary of his network: at most 10
   under one person, 5 levels below the Apostle, 300 in all. Whoever named someone, anyone above him,
@@ -2055,7 +2064,7 @@ message (the game adds it). What goes where:
 | The shared block terms (1.1): each word, whether it was added or removed, and when; for 15 minutes after an edit, the editor's own client adds his name to it (never to anyone else's) | everyone on the Olympus channel | only from the client of the King, his Steward, a Hand or a High Councillor: at once when they edit it, and every 10 minutes while they play (not when another client just sent the same list). Your own filter is never sent |
 | Your position as a dot on the map | your guild | only with `/oly share` (off by default) |
 | A Lord's mentor pair (1.1): the recruit's name to the Captain, the Captain's name to the recruit, as whispers in his words | those two players | only when the Lord clicks **Send both** |
-| A guild master's centurions and correspondents (1.1.5): their names, and each correspondent's department | everyone on the Olympus channel | only from that guild master's client: a few seconds after he names someone or takes a title back, and every 5 minutes while he plays |
+| A guild master's centurions and correspondents (1.1.5): their names, and each correspondent's department | everyone on the Olympus channel; since 1.2.4 each addon that takes it saves it (its guild, his name, the names and departments, when it last heard it), 64 guilds at most, until 30 days after it last heard him or he is no longer guild master | only from that guild master's client: a few seconds after he names someone or takes a title back, and every 5 minutes while he plays |
 | The centurions of the King's guild (1.1.5): their names | everyone on the Olympus channel | only from the King's or a High Councillor's client: a few seconds after one of them names someone or takes a title back, and every 5 minutes from one of them while they play |
 | Join Olympus (1.1, outside an Olympus guild): "which guild should I ask?" (J1), and your request (J3: the guild you ask, your level and class) | the one member the screen asks: one found with `/who` at a search, and the one you are about to whisper | J1 at a search (one member every 15 seconds at most, none while a recent answer is known; while only one answer names the gates, one more member at once, three in 10 minutes at most) and just before a whisper (again if that member never answered); J3 with each whisper you send |
 | The answer (J2): whether you take recruit whispers, the King's gates, and up to 8 guilds with room the census confirms, each with its free slots and up to 2 of its Lords and Captains online that two reports name (never the King) | the recruit who asked, alone | when a recruit's addon asks you, once a minute per recruit and 10 a minute at most (with do not contact on, a bare "no" to the rest) |
@@ -2095,7 +2104,7 @@ message (the game adds it). What goes where:
 | Olympus Link, if you confirm (a key and its certificate from the bot's keeper, High Councillors' too): your proof for another player's request (its time, your key's id, how you know their guild, your signature), and in their finished proof your character's name and your key's certificate | that player alone (a whisper), then the Olympus bot in their finished proof | by itself, without asking you each time, once the bot is ready: only for players of an Olympus guild of your faction, never your own account's characters, one a minute and five a day per character, thirty a minute in all, until `/oly discord key off` |
 | Olympus Link: "a confirmer's key is online" (its certificate: the key's id, public half, tier, expiry and character), "a watcher is online" | everyone on the Olympus channel | every 5 minutes, only from characters with a key from the bot's keeper and its certificate, once the bot is ready (no addon makes or announces a key by itself), or a High Councillor's watcher on (`/oly discord watcher on`) |
 | Olympus Link: a High Councillor's key's public half, and the certificate for it | the author's character, and back (a whisper each) | never while the council authority is off (as it ships: only the author turns it on, and only once the bot is ready); then only from a councillor of the signed list whose addon made its own key, once a session when it hears the author |
-| The Church (1.1.6): a naming or a removal (who, the place, under whom, the guild for a correspondent, the time), the author's switch for the public ranking | everyone on the Olympus channel and your guild (logged); your naming or removal also to each of the Church's keepers (the Head, the Apostles, the author) who was not online then, alone (a logged whisper each) | only when an Apostle, a missionary, a guild master, the Head, the King, a signed High Councillor or the author makes one within their authority; to a keeper who was away, once, when his addon is next heard, up to 7 days after |
+| The Church (1.1.6): a naming or a removal (who, the place, under whom, the guild for a correspondent, the time), the author's switch for the public ranking | everyone on the Olympus channel and your guild (logged); your naming or removal also to each of the Church's keepers (the Head, the Apostles, the author) who was not online then, alone (a logged whisper each). Each addon saves the Church's book it takes; since 1.2.4 it also saves, with a guild master's correspondent, when it last confirmed him that guild's master (kept on that computer, never sent) | only when an Apostle, a missionary, a guild master, the Head, the King, a signed High Councillor or the author makes one within their authority; to a keeper who was away, once, when his addon is next heard, up to 7 days after |
 | The Church: that you hold a place (your role, your guild; a keeper also a digest of his book and the author's switch for the public ranking as his addon holds it) | everyone on the Olympus channel and your guild | while you hold one: every 5 minutes for the Head, the Apostles and the author, every 10 for the others |
 | The Church: what your addon read in your guild's log (an invite by a Church person and the join after it: both names, your guild, the hours), a registration (the name), your public-row choice | the Church's keepers online (the Head, the Apostles, the author), alone (whispers); kept on your client up to 7 days while none is online | a Church person's own addon every 5 minutes; any other member's only where a Church person was heard in the guild lately, drawn so that about two of each guild read; your own invite count and your guild's joins and leaves are never sent |
 | The Church's seen-check (a name) and its answer (the guild your roster saw him in, the first and last day, whether he is in it now) | the check: everyone on the Olympus channel, from the desk (a keeper). The answer: that keeper alone (a whisper) | the desk asks about each new recruit, a registered one on its days and 7 days after a join; about two clients of each guild that knew the name answer |
@@ -2299,7 +2308,9 @@ few characters working together can still reach is said plainly further down
     client sends (the sender the server stamps), and only while the census or your roster proves
     him that guild's master as for his bronze wings; a list from anyone else is refused and never
     replaces his. Their border shows only on a player the server puts in that guild, so nobody can
-    borrow it, and the list ends when he is no longer guild master.
+    borrow it, and the list ends when he is no longer guild master. Since 1.2.4 each addon keeps the
+    list it took while he is offline, saved, for 30 days after it last heard him: a demotion that no
+    census report or roster of yours shows stays unseen that long.
   - A sender speaks for one guild only (a player who changed guilds can speak for the new one
     after 15 quiet minutes). A guild is one whatever the capitals a report spells it with: a
     second spelling is a vote on the same guild, never a second guild.
@@ -2404,6 +2415,13 @@ code.
   roster), and a census officer of `<Olympus>` is a Captain everywhere else (since 1.2.3 one who
   calls nobody to arms), unless the King's list or a Steward's own list names him a Hand (their
   word, never a vote).
+- **The Church correspondent of a made-up guild** (1.2.4). The two characters who make a Lord
+  (above) can name that guild's Church correspondent: every client shows him in the Church with its
+  room, its People page and his recruits' reports, kept 30 days after their reports stop unless a
+  census proves another master. His word as a witness has the census's smaller budget, and a
+  recruit still needs a witness this keeper verifies. Before 1.2.4 nothing but the author's signed
+  leadership named another guild's master in the Church (no release enforces it): then nobody's
+  correspondent showed outside his own guild.
 - **Numbers.** A guild's size and online count are not part of the picture. One outsider who
   copies a guild's leader and officers with other numbers shows his numbers on every screen
   until its reporter's next report (800 members as 1, the King offline). Each made-up guild

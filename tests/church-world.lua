@@ -76,10 +76,22 @@ function World:Client(name, opts)
 		db = { chatRooms = true, addonChat = true } }, { __index = ns })
 	cl.ns = c
 	c.Now = function() return w.clock end
+	-- Another guild's ranks as Data.AuthorizedRank gives them: the census (w.census, a rank by guild and
+	-- name; w.leaders, a guild's leader as its report names him) until this client's signed leadership is
+	-- enforced (its ns.Authority.Enforced), that list's Rank alone from then on.
 	c.Data = setmetatable({ ServerTime = function() return w.clock end,
 		AuthorizedRank = function(who, guild)
+			local A = c.Authority
+			if type(A) == "table" and type(A.Enforced) == "function" and A.Enforced() then
+				local r = A.Rank and A.Rank(ns.FullName(who), guild)
+				return r, r ~= nil and "signed" or "enforced"
+			end
 			local r = w.census[ns.Fold(guild) .. ":" .. Key(who)]
-			return r
+			return r, r ~= nil and "census" or nil
+		end,
+		Guild = function(guild)
+			local lead = w.leaders and w.leaders[ns.Fold(guild)]
+			return lead and { leader = ns.ShortName(lead), realm = ns.RealmOf(lead), t = w.clock } or nil
 		end,
 		Summary = function()
 			local out = { guilds = {} }

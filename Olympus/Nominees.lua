@@ -41,10 +41,13 @@ local L = ns.L
 -- another guild's from its census report, two senders naming him guild master, one of them
 -- someone else (Data.KnownRank). The sender is the name the server stamps, so nobody can send it
 -- for him. A list from anyone else is refused, and never takes the place of the real one. Each
--- client keeps the last list it heard from each guild's master, in memory only (heard this
--- session), for FRESH after his client stopped repeating it, and drops it at once when the census
--- or our roster shows he is no longer that guild's master (another one proven, or his own rank
--- below it), or when his new list names nobody.
+-- client keeps the last list it heard from each guild's master for FRESH after his client stopped
+-- repeating it, and drops it at once when the census or our roster shows he is no longer that
+-- guild's master (another one proven, or his own rank below it), or when his new list names nobody.
+-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept": FRESH is 30 days, and the
+-- lists heard are saved, ns.rdb.nomineesHeard, SAVED_MAX at most, put back after a logout or a
+-- /reload (Restore). Until 1.2.3 they were kept in memory, 6 hours: a guild master offline
+-- since the evening, or a /reload, left his guild with no centurion, no correspondent, no department.)
 --   NM~1~<guild>~<rev>~<i>~<n>~<entry>;<entry>;...
 -- One list in n parts (i of n), each one addon message of PART bytes at most, put together by
 -- their <rev> (the time of his last change); an entry is c=<Name[-Realm]> (a centurion) or
@@ -64,7 +67,8 @@ Nominees.MAX_CENTURIONS = 10
 Nominees.MAX_DEPTS = 6
 Nominees.MAX = Nominees.MAX_CENTURIONS + Nominees.MAX_DEPTS
 Nominees.EVERY = 300          -- his client repeats the list for late logins
-Nominees.FRESH = 6 * 60 * 60  -- a list he stopped repeating (he logged off) counts this long after
+Nominees.FRESH = 30 * 86400   -- a list he stopped repeating (he logged off) counts this long after (1.2.4; 6 hours before)
+Nominees.SAVED_MAX = 64       -- (1.2.4) the lists heard the saved variables keep, the newest heard
 Nominees.SEND_AFTER = 3       -- several changes in a row go out as one list
 Nominees.PART = 250           -- bytes in one part (one addon message)
 Nominees.MAX_PARTS = Nominees.MAX
@@ -73,6 +77,13 @@ Nominees.DEPT_LEN = 40
 Nominees.WIRE = "1"           -- the message's version
 
 local lists = {}   -- [guild, lower case] = { guild, by, rev, at, entries = { { role, dept, name } }, set = { [name, lower case] = entry } }
+-- (1.2.4) The saved variables the lists heard were last put back from (Restore, at the first
+-- look after a login or a /reload; Nominees.Reset(true) forgets it, as a /reload does).
+local restoredFrom, Restore
+local function Lists()
+	if restoredFrom ~= ns.rdb and Restore then Restore() end
+	return lists
+end
 local pending = {} -- [sender] = { guild, rev, n, parts = { [i] = body }, got, t }: a list's parts as they come
 local version = 0  -- one more at each change of what any list counts for (Borders.Changed)
 local lastSent, sendPending = -math.huge, false
@@ -366,7 +377,7 @@ local function ListOf(guild)
 		for _, e in ipairs(entries) do set[e.name:lower()] = e end
 		return { guild = guild, by = ns.me, entries = entries, set = set, own = true }
 	end
-	local l = lists[guild:lower()]
+	local l = Lists()[guild:lower()]
 	if not l or ns.Now() - l.at > Nominees.FRESH then return nil end
 	return l
 end
@@ -703,7 +714,7 @@ end
 -- nobody. This client is told when it is named, or no longer.
 local function Take(sender, guild, rev, entries, set)
 	local key = guild:lower()
-	local old = lists[key]
+	local old = Lists()[key]
 	if old and ns.Now() - old.at > Nominees.FRESH then old = nil end -- (gone quiet: as if none)
 	if old and old.by == sender and rev < (old.rev or 0) then return end -- (an older one, late)
 	local mine = GetGuildInfo("player")
@@ -714,6 +725,7 @@ local function Take(sender, guild, rev, entries, set)
 	else
 		lists[key] = l
 	end
+	Nominees.Keep(key, #entries > 0 and l or nil)
 	local now = #entries > 0 and set[tostring(ns.me):lower()] or nil
 	if mine and guild == mine then
 		if now and not (was and was.role == now.role and was.dept == now.dept) then
@@ -737,7 +749,7 @@ local function TakeMain(sender, guild, rev, entries, set)
 	local own = Nominees.MainEditor() and ns.rdb and ns.rdb.mainNominees or nil
 	local ownRev = type(own) == "table" and tonumber(own.rev) or nil
 	if ownRev and rev < ownRev then return SendMainSoon() end
-	local old = lists[key]
+	local old = Lists()[key]
 	if old and ns.Now() - old.at > Nominees.FRESH then old = nil end
 	if old and rev < (old.rev or 0) then return end
 	if ownRev and rev == ownRev then mainHeardAt = ns.Now() end
@@ -746,6 +758,7 @@ local function TakeMain(sender, guild, rev, entries, set)
 	local was = before and before.set[tostring(ns.me):lower()]
 	local l = { guild = guild, by = sender, rev = rev, at = ns.Now(), entries = entries, set = set, main = true }
 	lists[key] = l
+	Nominees.Keep(key, l)
 	if Nominees.MainEditor() and ns.rdb and (not ownRev or rev > ownRev) then
 		local list = {}
 		for _, e in ipairs(entries) do list[#list + 1] = { r = "c", n = e.name } end
@@ -796,6 +809,66 @@ function Nominees.Handle(dist, sender, text)
 end
 ns.Comm.Handle("NM", function(...) Nominees.Handle(...) end)
 
+-- (1.2.4) A list heard, as the saved variables keep it (ns.rdb.nomineesHeard, by guild in lower case:
+-- { g = guild, by = its master, rev, at = when last heard, main, body = its entries as a part carries
+-- them, each name with its realm }), or none (l nil). SAVED_MAX at most: the one heard longest ago goes.
+function Nominees.Keep(key, l)
+	local r = ns.rdb
+	if type(r) ~= "table" or type(key) ~= "string" then return end
+	local store = r.nomineesHeard
+	if not l then
+		if type(store) == "table" then store[key] = nil end
+		return
+	end
+	if type(store) ~= "table" then store = {}; r.nomineesHeard = store end
+	local body = {}
+	for _, e in ipairs(l.entries) do
+		body[#body + 1] = e.role == "centurion" and ("c=" .. e.name) or ("d=" .. tostring(e.dept) .. "=" .. e.name)
+	end
+	local new = store[key] == nil
+	store[key] = { g = l.guild, by = l.by, rev = l.rev, at = l.at, main = l.main and true or nil, body = table.concat(body, ";") }
+	if not new then return end
+	local n, oldest, oldAt = 0, nil, nil
+	for k, s in pairs(store) do
+		n = n + 1
+		local at = type(s) == "table" and tonumber(s.at) or -math.huge
+		if not oldAt or at < oldAt then oldest, oldAt = k, at end
+	end
+	if n > Nominees.SAVED_MAX and oldest then store[oldest] = nil end
+end
+
+-- (1.2.4) The lists heard before this login or /reload, put back from the saved variables, each one
+-- read again as a list that came (Read: the same caps, names and departments), no older than FRESH and
+-- its guild still an Olympus guild; anything else there is let go. Each was taken from its guild's master
+-- when it came; Nominees.Prune drops one whose master the census or our roster deposes, as any list.
+Restore = function()
+	restoredFrom = ns.rdb
+	local store = type(ns.rdb) == "table" and ns.rdb.nomineesHeard or nil
+	if type(store) ~= "table" then return end
+	local now, any = ns.Now(), false
+	for key, s in pairs(store) do
+		local l
+		if type(key) == "string" and type(s) == "table" and type(s.g) == "string" and type(s.by) == "string"
+			and type(s.body) == "string" and #s.body <= Nominees.MAX_PARTS * Nominees.PART and not lists[key] then
+			local guild, by, rev, at = GuildName(s.g), Person(s.by), tonumber(s.rev), tonumber(s.at)
+			local main = guild ~= nil and IsMain(guild)
+			if guild and guild:lower() == key and by and rev and at and at <= now + 60 and now - at <= Nominees.FRESH
+				and (s.main == true) == main then
+				local entries, set = Read({ s.body }, 1, ns.RealmOf(by), main)
+				if #entries > 0 or main then
+					l = { guild = guild, by = by, rev = rev, at = at, entries = entries, set = set, main = main or nil }
+				end
+			end
+		end
+		if l then
+			lists[key], any = l, true
+		elseif not lists[key] then
+			store[key] = nil
+		end
+	end
+	if any then Bump() end
+end
+
 -- What Deposed reads for a list: our roster for our own guild; another guild's census row as it
 -- stands (its time and votes, as Borders.Changed reads them). Asked again only when these change
 -- (DATA_CHANGED comes with every census report heard).
@@ -815,14 +888,16 @@ end
 -- left waiting: dropped. Returns whether a list went.
 function Nominees.Prune()
 	local now, gone = ns.Now(), false
-	for key, l in pairs(lists) do
+	for key, l in pairs(Lists()) do
 		local a, b, c = DeposedInputs(l)
 		local fresh = l.ia ~= a or l.ib ~= b or l.ic ~= c or not l.asked
 		if fresh then l.ia, l.ib, l.ic, l.asked = a, b, c, true end
 		if now - l.at > Nominees.FRESH then
 			lists[key], gone = nil, true
+			Nominees.Keep(key, nil)
 		elseif fresh and Deposed(l) then
 			lists[key], gone = nil, true
+			Nominees.Keep(key, nil)
 			ns.Log("nominees: <%s>'s list dropped: %s is no longer its guild master", l.guild, l.by)
 		end
 	end
@@ -973,7 +1048,7 @@ function Nominees.PageLines(lines)
 	end
 	if #depts == 0 then lines[#lines + 1] = Line(L.NOMINEES_NO_DEPTS, INK, { indent = 1 }) end
 	lines[#lines].gapAfter = true
-	return Para(lines, L.NOMINEES_NOTE:format(math.floor(Nominees.FRESH / 3600)), INK)
+	return Para(lines, L.NOMINEES_NOTE:format(math.floor(Nominees.FRESH / 86400)), INK)
 end
 
 -- A guild master's Guild tab (1.1.5): the tab in the Throne's place, his guild's page (King.Build).
@@ -1032,7 +1107,7 @@ function Nominees.MainLines(lines)
 	for _, e in ipairs(entries) do lines[#lines + 1] = Row(e, nil, true, editable, IsMain(ns.Roster.guild)) end
 	if #entries == 0 then lines[#lines + 1] = Line(L.NOMINEES_NONE, INK, { indent = 1 }) end
 	lines[#lines].gapAfter = true
-	return Para(lines, L.NOMINEES_MAIN_NOTE:format(math.floor(Nominees.FRESH / 3600)), INK)
+	return Para(lines, L.NOMINEES_MAIN_NOTE:format(math.floor(Nominees.FRESH / 86400)), INK)
 end
 
 -- /oly status: a guild master's own list, and the lists this client holds, each its master's
@@ -1044,7 +1119,7 @@ function Nominees.StatusLine()
 	-- (1.1.5: the King's guild's, on the King's or a councillor's client: theirs to name.)
 	local s, preview = MainStore(false)
 	if s then out[#out + 1] = ("<%s>'s %d of %d (%s)"):format(Nominees.MainGuild(), #MainEntries(s), Nominees.MAX_CENTURIONS, preview and "preview" or "yours to name") end
-	for _, l in pairs(lists) do
+	for _, l in pairs(Lists()) do
 		if now - l.at <= Nominees.FRESH then held[#held + 1] = l end
 	end
 	table.sort(held, function(a, b) return a.guild < b.guild end)
@@ -1148,9 +1223,12 @@ ns.On("LOGIN", function()
 	end)
 end)
 
--- Tests start from a clean state.
-function Nominees.Reset()
+-- Tests start from a clean state: the lists heard, saved ones too. (1.2.4) reload: the session's alone,
+-- as a /reload forgets it: the next look puts the saved lists back.
+function Nominees.Reset(reload)
 	wipe(lists); wipe(pending)
+	restoredFrom = nil
+	if not reload and type(ns.rdb) == "table" then ns.rdb.nomineesHeard = nil end
 	lastSent, sendPending, sentOnce = -math.huge, false, false
 	lastMainSent, mainHeardAt, mainSendPending, mainSentOnce = -math.huge, -math.huge, false, false
 	Bump()

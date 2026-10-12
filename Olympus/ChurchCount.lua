@@ -734,8 +734,11 @@ local function VerifiedWitness(name, guild, invitee, tj)
 	local ours = mine ~= nil and ns.Fold(mine) == ns.Fold(guild)
 	if mate and not ours then return false, "unverified" end
 	if Church.IsKeeper(who) or Church.IsKing(who) or (ns.IsHighCouncillor and ns.IsHighCouncillor(who) == true) then return true end
-	local corr = Church.State().corr[ns.Fold(guild)]
-	if corr and Key(corr.n) == Key(who) then return true end
+	local S = Church.State()
+	local corr = S.corr[ns.Fold(guild)]
+	-- (1.2.4: one whom only another guild's census names its master's correspondent, as any census-only
+	-- witness: the smaller budget. Two characters can make that guild's master.)
+	if corr and Key(corr.n) == Key(who) then return true, S.corrCensus and S.corrCensus[ns.Fold(guild)] and "census" or nil end
 	if ours then
 		if not fresh then return false, "roster" end
 		if not mate then return false, "unverified" end

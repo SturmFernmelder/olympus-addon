@@ -175,9 +175,9 @@ versions before 1.1 just get the whisper, as before.
   bronze mark on nameplates and in the game's chat, only while the server gives them that guild.
   His own client sends the list on the Olympus channel; every addon takes it from that guild's
   master alone (proven as for his bronze wings: your roster for your own guild, two census senders
-  for another), keeps it 6 hours after he stops repeating it, and drops it at once when he is no
-  longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent <department
-  number> <name>` and `/oly nominees remove <name>` do the same from the chat.
+  for another), saves it 30 days from his last repeat (6 hours before 1.2.4), and drops it once he
+  is no longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent
+  <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
   guild master's nomination; neither title grants federal powers. Artisanry and Heritage link to

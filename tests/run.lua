@@ -26442,14 +26442,14 @@ do
 			Fire = ns.Fire, Show = StaticPopup_Show, guilds = ns.rdb.guilds, nominees = ns.rdb.nominees, titles = ns.rdb.councilTitles,
 			byName = ns.Roster.byName, rguild = ns.Roster.guild, stats = ns.Roster.lastStats, loginAt = ns.Comm.loginAt,
 			isPlayer = UnitIsPlayer, unitFull = UnitFullName, main = ns.rdb.mainNominees, previewMain = ns.db.previewMainNominees,
-			council = ns.rdb.council, UI = ns.UI, kingView = ns.db.devKingView, gmView = ns.db.devGMView }
+			council = ns.rdb.council, UI = ns.UI, kingView = ns.db.devKingView, gmView = ns.db.devGMView, heard = ns.rdb.nomineesHeard }
 		local w = { sent = {}, printed = {}, popups = {}, logged = {}, timers = {}, clock = 1800000000, changed = 0 }
 		-- (The departments as the tests' made-up council titles name them; the shipped six are the author's.)
 		local savedDepts = N.DEPARTMENTS
 		N.DEPARTMENTS = { "Events", "Lore", "Trade", "War", "Craft", "Watch" }
 		local ok, err = pcall(function()
 			N.Reset()
-			ns.rdb.nominees, ns.rdb.mainNominees, ns.db.previewMainNominees = nil, nil, nil
+			ns.rdb.nominees, ns.rdb.mainNominees, ns.db.previewMainNominees, ns.rdb.nomineesHeard = nil, nil, nil, nil
 			ns.db.devKingView, ns.db.devGMView = nil, nil
 			-- (1.1.5: the High Council's signed names, made up; the tab the window opens.)
 			ns.rdb.council = { names = { ["vera councillor"] = true } }
@@ -26493,6 +26493,7 @@ do
 		ns.rdb.mainNominees, ns.db.previewMainNominees, ns.rdb.council, ns.UI = saved.main, saved.previewMain, saved.council, saved.UI
 		ns.db.devKingView, ns.db.devGMView = saved.kingView, saved.gmView
 		N.Reset()
+		ns.rdb.nomineesHeard = saved.heard
 		if not ok then error(err, 0) end
 	end
 
@@ -26760,7 +26761,7 @@ do
 				"W1-Realm", "W2-Realm")
 			eq(N.Prune(), true)
 			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "dropped")
-			-- He stopped repeating it (logged off): it lasts FRESH, then ends.
+			-- He stopped repeating it (logged off): it lasts FRESH (1.2.4: 30 days, 6 hours before), then ends.
 			w.clock = w.clock + N.FRESH
 			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "still fresh")
 			w.clock = w.clock + 1
@@ -26777,6 +26778,90 @@ do
 			N.Name("centurion", "Ada"); w.flush()
 			N.Remove("Ada"); w.flush()
 			eq(w.parts()[#w.parts()], Msg(OURS, ns.rdb.nominees[MASTER].rev, ""), "the empty list")
+		end)
+	end)
+
+	-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept".) Fails before: a list heard
+	-- lived in memory 6 hours, so a guild master offline since the evening, or any /reload, left his guild
+	-- with no centurion, no correspondent and no bronze until he logged in again.
+	test("1.2.4 nominees: a list heard is kept while its guild master is offline, saved across a /reload, 30 days after it was last heard; another master proven, an empty list or 30 days without a word end it; nothing else comes back from the saved lists", function()
+		WithNominees(function(w)
+			w.as("Ada-Realm", 3)
+			N.Handle("CHANNEL", MASTER, Msg(OURS, w.clock, "c=Ada;c=Bea;d=Lore=Cid"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, w.clock, "c=Zed;d=War=Wyn"))
+			local heardAt = w.clock
+			-- Seven hours later, nobody repeating them (both masters offline): kept.
+			w.clock = w.clock + 7 * 3600
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "kept past the old six hours")
+			eq(select(2, N.RoleOf("Wyn-Realm", THEIRS)), "War")
+			-- A /reload (or a login the next day): the session's memory goes, the saved lists come back.
+			assert(type(ns.rdb.nomineesHeard) == "table" and ns.rdb.nomineesHeard[OURS:lower()], "saved")
+			N.Reset(true)
+			w.clock = w.clock + 86400
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "kept across a reload")
+			eq(select(2, N.RoleOf("Cid-Realm", OURS)), "Lore")
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion")
+			eq(N.ListOf(OURS).by, MASTER)
+			assert(N.StatusLine():find("<Olympus II> 3 by Boss Hammer", 1, true), N.StatusLine())
+			-- His repeat (he logged in) counts from then; the other guild's last word stays where it was.
+			N.Handle("CHANNEL", MASTER, Msg(OURS, heardAt, "c=Ada;c=Bea;d=Lore=Cid"))
+			local repeated = w.clock
+			w.clock = heardAt + N.FRESH - 60
+			N.Reset(true)
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion", "29 days and some")
+			w.clock = heardAt + N.FRESH + 1
+			eq(N.Prune(), true)
+			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "30 days without a word: gone")
+			eq(ns.rdb.nomineesHeard[THEIRS:lower()], nil, "and from the saved lists")
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "his repeat counts")
+			-- Another master proven, after a reload: the restored list ends at once.
+			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Zeusy", officers = { { name = "Capt" } }, realm = "Realm", t = w.clock },
+				"W1-Realm", "W2-Realm")
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, w.clock, "c=Zed"))
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion")
+			N.Reset(true)
+			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Newboss", officers = { { name = "Zeusy" } }, realm = "Realm", t = w.clock },
+				"W1-Realm", "W2-Realm")
+			eq(N.Prune(), true)
+			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "deposed: dropped")
+			eq(ns.rdb.nomineesHeard[THEIRS:lower()], nil)
+			-- An empty list from him: dropped, saved nowhere.
+			N.Handle("CHANNEL", MASTER, Msg(OURS, repeated + 10, ""))
+			eq(N.ListOf(OURS), nil)
+			eq(ns.rdb.nomineesHeard[OURS:lower()], nil)
+			-- The saved lists are read as lists that came: a bad name, another guild than its key, a guild
+			-- that is not Olympus, a time ahead, past FRESH or of no number: none comes back, each let go.
+			local now = w.clock
+			ns.rdb.nomineesHeard = {
+				[OURS:lower()] = { g = OURS, by = "Bad|Name-Realm", rev = 1, at = now, body = "c=Ada" },
+				[THEIRS:lower()] = { g = OURS, by = MASTER, rev = 1, at = now, body = "c=Ada" },
+				["stormwind traders"] = { g = "Stormwind Traders", by = "Sw Boss-Realm", rev = 1, at = now, body = "c=Ada" },
+				["olympus three"] = { g = "Olympus Three", by = "Three Boss-Realm", rev = 1, at = now + 3600, body = "c=Ada" },
+				["olympus four"] = { g = "Olympus Four", by = "Four Boss-Realm", rev = 1, at = now - N.FRESH - 1, body = "c=Ada" },
+				["olympus five"] = { g = "Olympus Five", by = "Five Boss-Realm", rev = "x", at = now, body = "c=Ada" },
+				["olympus six"] = { g = "Olympus Six", by = "Six Boss-Realm", rev = 1, at = now, body = "c=Ada;c=Ada;c=" .. table.concat(CENTURIONS, ";c=") },
+			}
+			N.Reset(true)
+			for _, g in ipairs({ OURS, THEIRS, "Stormwind Traders", "Olympus Three", "Olympus Four", "Olympus Five" }) do
+				eq(N.ListOf(g), nil, g)
+			end
+			eq(#N.ListOf("Olympus Six").entries, N.MAX_CENTURIONS, "its caps held: ten centurions, each name once")
+			eq(N.RoleOf("Ada-Realm", "Olympus Six"), "centurion"); eq(N.RoleOf("Kit-Realm", "Olympus Six"), nil, "the eleventh left out")
+			local left = {}
+			for k in pairs(ns.rdb.nomineesHeard) do left[#left + 1] = k end
+			eq(table.concat(left, ","), "olympus six", "the rest let go")
+			-- SAVED_MAX at most, the one heard longest ago let go.
+			for i = 1, N.SAVED_MAX + 1 do
+				ns.rdb.guilds["Olympus G" .. i] = Vouched({ guild = "Olympus G" .. i, leader = "Boss" .. i, officers = {}, realm = "Realm", t = w.clock },
+					"W1-Realm", "W2-Realm")
+				w.clock = w.clock + 1
+				N.Handle("CHANNEL", "Boss" .. i .. "-Realm", Msg("Olympus G" .. i, w.clock, "c=Ada"))
+			end
+			local n = 0
+			for _ in pairs(ns.rdb.nomineesHeard) do n = n + 1 end
+			eq(n, N.SAVED_MAX)
+			eq(ns.rdb.nomineesHeard["olympus six"], nil, "the oldest heard let go")
+			assert(ns.rdb.nomineesHeard["olympus g" .. (N.SAVED_MAX + 1)], "the newest kept")
 		end)
 	end)
 
@@ -26998,10 +27083,11 @@ do
 				end
 				eq(Find(lines, "Seventh: "), nil, "six departments")
 				-- Naming guidance is retained before the guild's department panels.
-				local note = L.NOMINEES_NOTE:format(N.FRESH / 3600)
+				local note = L.NOMINEES_NOTE:format(N.FRESH / 86400)
 				local words = {}; for _, line in ipairs(lines) do words[#words + 1] = line.text or "" end
 				assert(table.concat(words, " "):find(note, 1, true), "the complete naming guidance remains")
-				assert(note:find("6 hours", 1, true), note)
+				-- (1.2.4: kept 30 days, saved, while he is offline; 6 hours in memory before.)
+				assert(note:find("30 days", 1, true), note)
 				-- None of the Throne's: no Throne Room, no King's guild's centurions.
 				eq(Find(lines, L.THRONE_ROOM), nil); eq(Find(lines, L.NOMINEES_MAIN_TITLE:format("Olympus")), nil)
 				-- Naming: + asks for a name (his target in the box), the box names.
