@@ -34,6 +34,10 @@ local L = ns.L
 -- A line with `explicit = true` (1.2.0: Most Wanted sightings, Wanted.lua) is off until its own
 -- Yes: it is pending until answered, so the page opens by itself for it once (a member who
 -- answered every other line before is shown it too), but the bulk Yes never answers it (BulkPending).
+-- (1.2.4) Each other addon that asks to read through the Olympus API (API.lua, OlympusAPI.Register)
+-- gets such a line of its own, "api:<its name>", once a session it registers: explicit, versioned
+-- by what the API gives (API.CONSENT_VERSION), its answer kept for the account (ns.db.apiAddons),
+-- and `adopt = false`: never taken as asked by 1.2.3's adoption of 1.2.1's lines (below).
 -- (1.2.1, a player's report: "how many times do I need to update my settings?") A line the page
 -- showed counts as asked for good, kept in the saved data (ns.db.consentAsked): the page opens by
 -- itself once for each new question, never again for one closed unanswered or left off by Accept
@@ -225,7 +229,11 @@ local function Adopting()
 	local plan, me = Plan(), Character()
 	return plan ~= nil and me ~= nil and plan.chars[me] == true
 end
+-- (Review of 1.2.4) Never a line with adopt = false: a question no build before 1.2.3 asked (each
+-- other addon's, API.lua), which an account updating from 1.2.2 straight to a later build was never
+-- shown, so it stays a new question there too.
 local function Adopts(item)
+	if item.adopt == false then return false end
 	if adoptAll then return true end
 	local plan = Plan()
 	return plan ~= nil and plan.lines[item.key] ~= nil and plan.lines[item.key] == Version(item)
