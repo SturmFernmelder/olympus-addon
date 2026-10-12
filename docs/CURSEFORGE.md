@@ -1452,13 +1452,15 @@ account, `/oly discord forget` drops this character's request and proof.
 ### Other addons: the Olympus API (1.2.4)
 
 Another addon can read, with your permission, what Olympus already shows you: the Wanted list
-and its bounties, the public rankings (the Slayers, the donors' and the Church's top three, the
-games the King made public), your own frame and title, and your Olympus guild, rank and role. An
-addon that asks gets its own line on the privacy page and nothing until your **Yes** there
-(**Accept all** never answers for it; `/oly privacy` changes it at any time). It is read-only:
-nothing is sent for you, no chat line, decree or whisper. It never gives your location, the
-census, other players' private data or Olympus's keys; each addon gets its own copy, a limited
-number of calls at a time. After the update it loads once the game restarts (not on a `/reload`).
+and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
+made public, the donors' top three while he shows the Treasury's ranking), your own frame and
+title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
+page and nothing until your **Yes** there (**Accept all** never answers for it; `/oly privacy`
+changes it at any time). Olympus sends nothing for it and gives it no way to send anything for
+you, nor your location, the census, other players' private data or Olympus's keys; each addon
+gets its own copy, a limited number of calls at a time. What that addon then does with what it
+read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
+restarts (not on a `/reload`).
 For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
 
 ## Install
@@ -1621,7 +1623,7 @@ position on the map).
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll
 calls, the Olympus chats, an officer's patrol findings to his guild's officers, your crafter
 listing (and with it your addon's answers to who can make it), another addon's reading through the Olympus API (1.2.4: each
-addon its own Yes, and it reads on your computer alone) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
+addon its own Yes; Olympus sends nothing for it, and what it does with what it read is its own) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
 bot's keeper made them) wait for your yes. The rest of the table goes out while you are in an
 Olympus guild, with no question first: your guild's census (from the member it elects, with the
 names above), the hello, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks

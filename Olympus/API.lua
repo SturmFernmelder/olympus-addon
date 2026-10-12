@@ -10,14 +10,14 @@ local L = ns.L
 --     nor changes anything of Olympus's: an addon reads, and Olympus never learns what it does.
 --   - Only what this player already sees on Olympus's own pages, at no more detail: the Wanted list
 --     and its bounties (the Wanted tab's rows), the public rankings (the Slayers boards of the Wanted
---     tab and the signed top three, the donors' top three of the month and of all time that the
---     honour frames show, the Church's public top three, and each game's ranking the King made
---     public: never a staff view), the player's own frame and title, and his own Olympus guild, rank
---     and role. Never the census, another player's private data, a location (the Wanted page's
---     victims and sightings stay on the page), a GUID of an Olympus member, a timestamp of anyone's
---     activity, nor a secret (a key, the sealed channel's name, a signature, a private list). Each
---     row is built here field by field from those pages' own functions, so what a module adds to its
---     tables later never reaches an addon by itself.
+--     tab and the signed top three, the donors' top three while the King shows the army the
+--     Treasury's ranking (Donors below), the Church's public top three, and each game's ranking the
+--     King made public: never a staff view), the player's own frame and title, and his own Olympus
+--     guild, rank and role. Never the census, another player's private data, a location (the
+--     Wanted page's victims and sightings stay on the page), a GUID of an Olympus member, a
+--     timestamp of anyone's activity, nor a secret (a key, the sealed channel's name, a signature,
+--     a private list). Each row is built here field by field from those pages' own functions, so
+--     what a module adds to its tables later never reaches an addon by itself.
 --   - Asked, one addon at a time. OlympusAPI.Register("TheirAddon") gives that addon its handle and
 --     a line of its own on the privacy page (Consent.lua): explicit, so the page's Accept all never
 --     answers it, and the page opens by itself for it once (Consent.Ask). Nothing comes back before
@@ -209,13 +209,24 @@ local function Names(list, max)
 	return out
 end
 
--- The donors' top three of the month and of all time: the names the Treasurer's word gives every
--- client (HonorsNet.Donors), the ones the cornucopia and koi frames show. Names alone, as the word.
+-- The donors' top three, only where every member's own screen shows them (review of 1.2.4: they
+-- came back whatever the King's switch, names no page showed). The names the Treasurer's word gives
+-- every client (HonorsNet.Donors), names alone, as the word:
+--   - nil unless the King shows the army the Treasury's ranking (Treasury.PublicShows("ranking"):
+--     his own switch as every client keeps it, off by default; never the keepers' or the King's
+--     own view, nor the author's preview, as the games are never a staff view). Off, no page lists
+--     the donors, and a portrait's frame tells of one donor at a time, to whoever looks at him.
+--   - all: the all-time top three, which head that ranking on the Treasury tab.
+--   - month: the month's three only in a build that wears their koi frame (Honors.FrameShipped);
+--     1.2.4 does not (Honors.FRAMES_SHIPPED), and nothing else lists them: then month is nil.
 local function Donors()
 	if not Has("HonorsNet", "Donors") then return nil end
+	if Call("Treasury", "PublicShows", "ranking") ~= true then return nil end
 	local d = Call("HonorsNet", "Donors")
-	if type(d) ~= "table" then return { month = {}, all = {} } end
-	return { month = Names(d.month), all = Names(d.all) }
+	d = type(d) == "table" and d or {}
+	local out = { all = Names(d.all) }
+	if Call("Honors", "FrameShipped", { family = "donor-month" }) == true then out.month = Names(d.month) end
+	return out
 end
 
 -- The Church's public top three (HonorsNet.ChurchTop: nil while its public ranking is closed).
@@ -448,7 +459,10 @@ local function SetAnswer(c, on)
 	Tell(c, "PERMISSION_CHANGED", Status(c))
 end
 
--- The addon's line on the privacy page (Consent.lua): its own Yes and No, never Accept all's.
+-- The addon's line on the privacy page (Consent.lua): its own Yes and No, never Accept all's. A new
+-- question, never one of the lines 1.2.1 and 1.2.2 showed at every login (adopt = false: review of
+-- 1.2.4, an account updating from 1.2.2 straight to 1.2.4 had it taken as asked, and the page never
+-- opened by itself for it).
 local function Line(c)
 	if not Has("Consent", "Register") then return false end
 	return ns.Consent.Register({
@@ -456,6 +470,7 @@ local function Line(c)
 		label = function() return L.API_CONSENT_LABEL:format(c.title) end,
 		text = "API_CONSENT_TEXT",
 		explicit = true,
+		adopt = false,
 		version = API.CONSENT_VERSION,
 		get = function() return Answer(c) end,
 		set = function(on) SetAnswer(c, on) end,
@@ -490,14 +505,16 @@ local function Method(c, fn)
 end
 
 -- A data call: the player's Yes, an Olympus guild (where asked), and the addon within its rate.
+-- Past it, said in the log once a session for that addon (review of 1.2.4: once a window filled the
+-- log's ring, and the 25 lines /oly bug copies, with one addon polling).
 local function Spend(c)
 	local now = ns.Now and ns.Now() or 0
 	local r = c.rate
-	if now - r.at >= API.RATE_WINDOW or now < r.at then r.at, r.n, r.said = now, 0, false end
+	if now - r.at >= API.RATE_WINDOW or now < r.at then r.at, r.n = now, 0 end
 	if r.n >= API.RATE_MAX then
-		if not r.said then
-			r.said = true
-			ns.Log("api: %s asked more than %d times in %d s", c.name, API.RATE_MAX, API.RATE_WINDOW)
+		if not c.rateSaid then
+			c.rateSaid = true
+			ns.Log("api: %s asked more than %d times in %d s (said once a session)", c.name, API.RATE_MAX, API.RATE_WINDOW)
 		end
 		return false
 	end
@@ -608,6 +625,16 @@ ns.On("HONORS_CHANGED", function() Mark("RANKINGS_CHANGED", "PROFILE_CHANGED") e
 -- The Church's top three, or its public ranking's switch.
 ns.On("CHURCH_TOP_CHANGED", function() Mark("RANKINGS_CHANGED") end)
 ns.On("CHURCH_PUBLIC_CHANGED", function() Mark("RANKINGS_CHANGED") end)
+-- The King's switch of the Treasury's ranking, which the donors' top three follow (looked at only
+-- when it turned: the treasury changes often, and nothing else of it is read here).
+local rankingShown
+ns.On("TREASURY_CHANGED", function()
+	local shown = Call("Treasury", "PublicShows", "ranking") == true
+	if shown ~= rankingShown then
+		rankingShown = shown
+		Mark("RANKINGS_CHANGED")
+	end
+end)
 -- The games: a result, a ranking made public or kept to the staff (ArenaRoles: Arena.Changed).
 ns.On("ARENA_CHANGED", function() Mark("RANKINGS_CHANGED") end)
 ns.On("LOTTERY_RESULT", function() Mark("RANKINGS_CHANGED") end)

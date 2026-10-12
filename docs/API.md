@@ -127,7 +127,8 @@ victims, the claims, the sightings, who added or took off an entry, nor any time
 ### `handle:GetRankings([kind])`
 
 Every public ranking (no argument), or one kind: `"slayers"`, `"donors"`, `"church"` or `"games"`.
-A kind this build lacks, or one with nothing public now (the Church's ranking closed), is `nil`.
+A kind this build lacks, or one with nothing public now (the Church's ranking closed, the
+Treasury's ranking not shown to the army), is `nil`.
 
 ```lua
 {
@@ -136,7 +137,7 @@ A kind this build lacks, or one with nothing public now (the Church's ranking cl
 		all = { ... },     -- all time, at most 50
 		signed = { ... },  -- the signed top three this client holds, when it holds one (name nil when unknown)
 	},
-	donors = { month = { "Name-Realm", ... }, all = { "Name-Realm", ... } }, -- the top three of each
+	donors = { all = { "Name-Realm", ... } }, -- the all-time top three (see below)
 	church = { missionaries = { "Name-Realm", ... }, apostles = { "Name-Realm", ... } }, -- its public top three
 	games = { -- only the games the King made public
 		arena = { { place = 1, name = "Name-Realm", rating = 1520, wins = 9, losses = 2 }, ... },
@@ -149,6 +150,11 @@ A kind this build lacks, or one with nothing public now (the Church's ranking cl
 
 The Slayers boards are this client's own (what it observed), as the Wanted tab says. A game the
 King keeps to the staff is not there, whoever the player is. `amount` is in copper.
+
+`donors` is there only while the King shows every member the Treasury's ranking (it is off until he
+does), whoever the player is: the King's and the Treasury keepers' own view never counts. `all` is
+the all-time top three, which head that ranking. `donors.month`, the month's top three, comes only
+in a build whose honour frames show them; 1.2.4's do not, so it is `nil` there: check for it.
 
 ### `handle:GetProfile()`
 
@@ -182,7 +188,9 @@ without `fn`.
 
 - The data events come only while the player's answer is Yes (`WANTED_CHANGED` and
   `RANKINGS_CHANGED` only in an Olympus guild), and only when the data you would get differs from
-  what you were last told: you may register before the Yes.
+  what you were last told: you may register before the Yes. `On` and the Yes take the data as it is
+  then as told, so no event comes for it: read it yourself once (`Status()` is `"granted"`, or
+  `PERMISSION_CHANGED` with `"granted"`), as the examples below do.
 - A burst of changes is told once, about 2 seconds after it, never in combat (it waits for the
   combat to end).
 - Each callback gets its own copy, and its call never counts against the rate limit.
@@ -215,6 +223,11 @@ addon could read Olympus's saved variables directly. The API is the supported an
 in: it asks the player, gives your addon a stable contract, and keeps Olympus from handing out
 anything on its own. Please use it, and only for what the player said Yes to.
 
+Olympus's line on the privacy page tells the player that Olympus sends nothing for your addon and
+that what your addon does with what it read is up to your addon, so that he says Yes only to addons
+he trusts. Keep that trust: what he says Yes to is your addon reading, not it sending what it read
+to other players.
+
 ## Examples
 
 Marking Wanted Horde players on your nameplates, by GUID:
@@ -244,10 +257,16 @@ local function TopSlayer()
 end
 ```
 
-Showing the player's own title in your frame:
+Showing the player's own title in your frame. The data events come only when something changes,
+so read it once at the start and on the player's Yes too:
 
 ```lua
-api:On("PROFILE_CHANGED", function(_, profile)
-	MyFrame.title:SetText(profile.member and profile.title or "")
+local function ShowTitle(profile)
+	MyFrame.title:SetText(profile and profile.member and profile.title or "")
+end
+api:On("PROFILE_CHANGED", function(_, profile) ShowTitle(profile) end)
+api:On("PERMISSION_CHANGED", function(_, status)
+	if status == "granted" then ShowTitle(api:GetProfile()) else ShowTitle(nil) end
 end)
+if api:Status() == "granted" then ShowTitle(api:GetProfile()) end
 ```

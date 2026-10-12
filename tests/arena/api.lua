@@ -100,7 +100,7 @@ end
 -- client has the API; the Treasurer's word names the donors (Lida third, all time).
 local function Setup(opts)
 	opts = opts or {}
-	local w, cast = W3.New({ more = { { "treasurer", N.treasurer, { guild = World.KING_GUILD } } } })
+	local w, cast = W3.New({ world = opts.world, more = { { "treasurer", N.treasurer, { guild = World.KING_GUILD } } } })
 	local viewer = cast.spectator
 	local now = w.clock
 	rawset(cast.treasurer.ns, "Treasury", { DonationRecords = function()
@@ -240,15 +240,15 @@ test("1.2.4 the API: a granted addon gets copies of exactly what the pages show:
 	eq(page[1].name, rows[1].name); eq(page[1].current, rows[1].bounty)
 	-- Rankings: every kind; the Slayers' month and all time, as the tab's boards.
 	local r = Do(w, viewer, api, "GetRankings")
-	eq(Keys(r), "donors,games,slayers")
+	-- (Review of 1.2.4: no donors while the King keeps the Treasury's ranking from the army, the
+	-- default; this test asked for them at once before.)
+	eq(Keys(r), "games,slayers")
 	eq(Keys(r.slayers), "all,month")
 	eq(#r.slayers.month, 1); eq(r.slayers.month[1].name, N.fighterA); eq(r.slayers.month[1].points, 70)
 	eq(Keys(r.slayers.month[1]), "claims,name,place,points")
 	eq(#r.slayers.all, 2); eq(r.slayers.all[2].name, N.fighterB); eq(r.slayers.all[2].place, 2)
 	eq(r.slayers.signed, nil, "no signed top three held")
-	-- The donors' top three: the names the Treasurer's word gave every client.
-	eq(Keys(r.donors), "all,month")
-	eq(r.donors.all[1], cast.A.name); eq(r.donors.all[3], viewer.name)
+	eq(r.donors, nil, "the Treasury's ranking kept from the army: no donors (below once shown)")
 	-- The games: none the King kept to the staff.
 	eq(Keys(r.games), "")
 	eq(Do(w, viewer, api, "GetRankings", "games").lottery, nil)
@@ -296,6 +296,14 @@ test("1.2.4 the API: a granted addon gets copies of exactly what the pages show:
 	eq(none, nil); eq(why, "guild")
 	eq(select(2, Do(w, viewer, api, "GetRankings")), "guild")
 	viewer.guild = World.GUILD
+	-- The donors' top three once the King shows the army the Treasury's ranking: the names the
+	-- Treasurer's word gave every client (this world wears every family's frame: the month's too).
+	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
+	w:Run(1)
+	r = Do(w, viewer, api, "GetRankings")
+	eq(Keys(r), "donors,games,slayers")
+	eq(Keys(r.donors), "all,month")
+	eq(r.donors.all[1], cast.A.name); eq(r.donors.all[3], viewer.name)
 	W3.NoErrors(w)
 end)
 
@@ -308,6 +316,9 @@ test("1.2.4 the API: every table is the addon's own copy: changing it changes no
 	local b = w:As(viewer, O.Register, "BountyBoard")
 	w:As(viewer, C.Choose, "api:mappins", true)
 	w:As(viewer, C.Choose, "api:bountyboard", true)
+	-- (The donors come only while the King shows the army the Treasury's ranking: review of 1.2.4.)
+	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
+	w:Run(1)
 	local rows = Do(w, viewer, a, "GetWanted")
 	rows[1].bounty, rows[1].name, rows[1].guid = 99999, "Someone Else", "Player-1-00000001"
 	rows[2] = { name = "Injected" }
@@ -356,6 +367,27 @@ test("1.2.4 the API: rate-limited per addon (RATE_MAX calls a RATE_WINDOW), the 
 	eq(logged, 1, "said once in the log")
 	w:Run(API.RATE_WINDOW)
 	assert(type(Do(w, viewer, a, "GetWanted")) == "table", "the next window")
+	-- (Review of 1.2.4) An addon polling past the rate window after window: still that one line, not
+	-- one a window (they filled the log's ring and the last lines /oly bug copies).
+	for window = 1, 6 do
+		local busy = 0
+		for _ = 1, API.RATE_MAX + 5 do
+			if select(2, Do(w, viewer, a, "GetProfile")) == "busy" then busy = busy + 1 end
+		end
+		assert(busy >= 5, "window " .. window .. ": past the rate (" .. busy .. ")")
+		w:Run(API.RATE_WINDOW)
+	end
+	local function Lines(name)
+		local n = 0
+		for _, l in ipairs(viewer.log) do if l:find("api: " .. name .. " asked more than", 1, true) then n = n + 1 end end
+		return n
+	end
+	eq(Lines("MapPins"), 1, "once a session, however many windows")
+	-- The other addon's own line, once too.
+	for _ = 1, 2 * API.RATE_MAX do Do(w, viewer, b, "GetProfile") end
+	w:Run(API.RATE_WINDOW)
+	for _ = 1, 2 * API.RATE_MAX do Do(w, viewer, b, "GetProfile") end
+	eq(Lines("BountyBoard"), 1); eq(Lines("MapPins"), 1)
 	W3.NoErrors(w)
 end)
 
@@ -528,6 +560,16 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	for _, word in ipairs({ "location", "census", "keys", "sends nothing", "Accept all" }) do
 		assert(src:find(word, 1, true), "the line says: " .. word)
 	end
+	-- (Review of 1.2.4) Its promises are Olympus's own: it never promised for the other addon that it
+	-- sends nothing, and says that what that addon does with what it read is its own.
+	eq(head:find("it sends nothing for you", 1, true), nil, "no promise for the other addon")
+	eq(tail:find("ele não envia nada por você", 1, true), nil, "no promise for the other addon (pt-BR)")
+	for _, word in ipairs({ "Olympus lets it read", "no way to send anything for you", "up to that addon", "addons you trust" }) do
+		assert(head:find(word, 1, true), "the line says: " .. word)
+	end
+	for _, word in ipairs({ "o Olympus permite", "não lhe dá meio de enviar nada por você", "é com ele", "em que você confia" }) do
+		assert(tail:find(word, 1, true), "the pt-BR line says: " .. word)
+	end
 	local doc = Read(H.ROOT .. "docs/API.md")
 	local api = Read(H.ADDON_DIR .. "API.lua")
 	for m in api:gmatch("\nfunction METHODS%.(%u%a+)%(") do assert(doc:find(":" .. m .. "(", 1, true), "docs/API.md: " .. m) end
@@ -541,7 +583,171 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 		local s = page:match("\n### Other addons: the Olympus API %(1%.2%.4%)\n(.-)\n##")
 		assert(s and s ~= "", path .. ": the section")
 		assert(s:find("docs/API.md", 1, true), path .. ": its link")
+		-- (Review of 1.2.4) Olympus's promise, and the other addon's doing its own.
+		eq(s:find("nothing is sent for you", 1, true), nil, path .. ": no promise for the other addon")
+		for _, word in ipairs({ "Olympus sends nothing for it", "no way to send anything for", "up to it", "addons you trust",
+			"while he shows the Treasury's ranking" }) do
+			assert(s:find(word, 1, true), path .. ": " .. word)
+		end
+		local privacy = page:match("\n%*%*What waits for your yes%.%*%*(.-)\n\n")
+		assert(privacy and privacy:find("Olympus sends nothing for it, and what it does with what it read is its own", 1, true), path .. ": the privacy section")
+		eq(page:find("it reads on your computer alone", 1, true), nil, path .. ": no promise for the other addon")
 		sections[#sections + 1] = s
 	end
 	eq(sections[1], sections[2], "the same words on both pages")
+end)
+
+-- Every string in a return, for what must never be in it.
+local function Strings(v, out, depth)
+	out, depth = out or {}, depth or 0
+	assert(depth < 12, "no cycle")
+	if type(v) == "table" then
+		for k, x in pairs(v) do Strings(k, out, depth + 1) Strings(x, out, depth + 1) end
+	elseif type(v) == "string" then
+		out[#out + 1] = v:lower()
+	end
+	return out
+end
+local function NoName(v, names, what)
+	local all = table.concat(Strings(v), "\n")
+	for _, n in ipairs(names) do eq(all:find(n:lower(), 1, true), nil, what .. ": " .. n) end
+end
+
+-- (Review of 1.2.4) GetRankings gave the donors' top three of the month and of all time whatever
+-- the King's switch: while he keeps the Treasury's ranking from the army (the default) no page
+-- lists them, and 1.2.4 wears no month's koi. In a world as the release ships it (its frames,
+-- Honors.FRAMES_SHIPPED), without the Wanted boards (so every name in a return is a donor's).
+test("1.2.4 the API: the donors' top three only while the King shows the army the Treasury's ranking, never by the staff's view; the month's never while its koi is not worn", function()
+	local w, cast, viewer, API = Setup({ wanted = false, world = { compliance = "shipped" } })
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	eq(w:As(viewer, viewer.ns.Honors.FrameShipped, { family = "donor-month" }), false, "1.2.4 wears no koi")
+	eq(w:As(viewer, viewer.ns.Honors.FrameShipped, { family = "donor-top" }), true)
+	eq(w:As(viewer, viewer.ns.Treasury.PublicShows, "ranking"), false, "the King's switch: off until he turns it")
+	local word = w:As(viewer, viewer.ns.HonorsNet.Donors)
+	eq(#word.all, 3, "the Treasurer's word reached this client")
+	local names = {}
+	for _, n in ipairs(word.all) do names[#names + 1] = n end
+	for _, n in ipairs(word.month or {}) do names[#names + 1] = n end
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	local told = {}
+	eq(Do(w, viewer, api, "On", "RANKINGS_CHANGED", function(_, r) told[#told + 1] = r end), true)
+	-- (The world settles first: the honours' first look and the words of the login are told, so the
+	-- King's switch is the only change below.)
+	w:Run(60)
+	local base = #told
+	-- Off: no donor's name comes back, by kind or with every ranking.
+	local d, why = Do(w, viewer, api, "GetRankings", "donors")
+	eq(d, nil, "the ranking kept from the army: no donors"); eq(why, nil)
+	local r = Do(w, viewer, api, "GetRankings")
+	eq(r.donors, nil)
+	NoName(r, names, "every ranking")
+	for _, t in ipairs(told) do NoName(t, names, "a callback") end
+	-- The King sees the ranking on his own Treasury tab: his addon gets no more (never a staff view).
+	LoadAPI(w, cast.king, false)
+	Install(cast.king, "MapPins", "Map Pins")
+	local kapi = w:As(cast.king, cast.king.OlympusAPI.Register, "MapPins")
+	w:As(cast.king, cast.king.Consent.Choose, "api:mappins", true)
+	eq(w:As(cast.king, cast.king.ns.Treasury.MaySee, "ranking"), true, "his tab shows it")
+	eq(Do(w, cast.king, kapi, "GetRankings", "donors"), nil, "his addon: no donors either")
+	NoName(Do(w, cast.king, kapi, "GetRankings"), names, "the King's addon")
+	w:Run(60)
+	eq(#told, base, "nothing changed")
+	-- He shows the army the ranking: the all-time three, which head it; still no month's.
+	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
+	w:Run(1)
+	eq(w:As(viewer, viewer.ns.Treasury.PublicShows, "ranking"), true, "every client heard the King")
+	d = Do(w, viewer, api, "GetRankings", "donors")
+	eq(Keys(d), "all", "no month: its koi is not worn")
+	eq(table.concat(d.all, ","), table.concat(word.all, ","))
+	-- A listener is told when the switch turns (Olympus's TREASURY_CHANGED), and when it turns back:
+	-- then no name again.
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, base + 1, "told of the switch"); eq(table.concat(told[base + 1].donors.all, ","), table.concat(word.all, ","))
+	w:Run(60)
+	eq(#told, base + 1, "nothing else")
+	W3.M(w, cast.king, "Treasury").SetFlag("ranking", false)
+	w:Run(1)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, base + 2, "told of it turning back"); eq(told[base + 2].donors, nil)
+	NoName(told[base + 2], names, "the callback")
+	eq(Do(w, viewer, api, "GetRankings", "donors"), nil)
+	-- A build that wears the month's koi (every family's frame) gives the month's three too.
+	W3.M(w, cast.king, "Treasury").SetFlag("ranking", true)
+	w:Run(1)
+	viewer.ns.Honors.FRAMES_SHIPPED = nil
+	d = Do(w, viewer, api, "GetRankings", "donors")
+	eq(Keys(d), "all,month")
+	eq(table.concat(d.month, ","), table.concat(word.month or {}, ","))
+	W3.NoErrors(w)
+end)
+
+-- (Review of 1.2.4) 1.2.3's adoption took every line still waiting in an account's first session
+-- with the record (1.2.2's saved data: the games notice shown, no record of the lines) as asked,
+-- an addon's too, which no build before 1.2.4 asked: updating from 1.2.2 straight to 1.2.4, the
+-- page never opened by itself for it. 1.2.1's lines stay taken as asked.
+test("1.2.4 the API: an account updating from 1.2.2 is asked about an addon by itself once, after the login's wait; the old lines stay as 1.2.3 took them", function()
+	local w, cast, viewer, API = Setup({ wanted = false })
+	if viewer.Consent.Frame() then viewer.Consent.Frame():Hide() end
+	viewer.db.consentNotices, viewer.db.consentAsked, viewer.db.consentAdopt = { games = true }, nil, nil
+	viewer.db.apiAddons = nil
+	local function Session()
+		w:Logout(viewer)
+		w:Login(viewer)
+		W3.Rules(w, viewer)
+		Install(viewer, "MapPins", "Map Pins")
+		LoadAPI(w, viewer, false)
+		-- The other addon registers as it loads, before the login's wait is over.
+		local api = w:As(viewer, viewer.OlympusAPI.Register, "MapPins")
+		assert(type(api) == "table", "its handle")
+		return api, viewer.Consent
+	end
+	local api, C = Session()
+	local old = {}
+	for _, item in ipairs(w:As(viewer, C.Pending)) do
+		if item.key ~= "api:mappins" then old[#old + 1] = item.key end
+	end
+	assert(#old > 0, "lines 1.2.2 left unanswered")
+	w:Run(C.LOGIN_WAIT + 1)
+	local page = C.Frame()
+	assert(page and page:IsShown(), "the page opens by itself for the addon's line")
+	eq(viewer.db.consentAsked["api:mappins"], API.CONSENT_VERSION, "shown: asked")
+	for _, key in ipairs(old) do assert(viewer.db.consentAsked[key] ~= nil, key .. ": taken as asked, as 1.2.3 does") end
+	page:Hide()
+	eq(w:As(viewer, C.Ask, "login"), false, "once")
+	eq(Do(w, viewer, api, "Status"), "pending", "nothing answered for him")
+	-- The next session: never again by itself.
+	api, C = Session()
+	w:Run(C.LOGIN_WAIT + 125)
+	eq(C.Frame() == nil or not C.Frame():IsShown(), true, "the next session: not again")
+	eq(Do(w, viewer, api, "Status"), "pending")
+	W3.NoErrors(w)
+end)
+
+-- (Review of 1.2.4) docs/API.md's examples, run as another addon runs them: the data events come
+-- only on a change, so the title example set the title only once it changed, never at the Yes.
+test("1.2.4 the API: docs/API.md's title example shows the player's title on his Yes and at load once granted", function()
+	local w, cast, viewer, API = Setup({ wanted = false })
+	local code = Read(H.ROOT .. "docs/API.md"):match("\nShowing the player's own title in your frame.-\n```lua\n(.-)```")
+	assert(code, "the example")
+	eq(W3.M(w, viewer, "ArenaProfile").SetPick("donor-top-3", "donor-top-3"), true)
+	local title = w:As(viewer, viewer.ns.HonorsNet.TitleText, "donor-top-3")
+	assert(type(title) == "string" and title ~= "", "his title's words")
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, viewer.OlympusAPI.Register, "MapPins")
+	local function Load()
+		local shown = {}
+		local frame = { title = { SetText = function(_, text) shown[#shown + 1] = text end } }
+		local fn = assert(loadstring(code, "=docs/API.md"))
+		setfenv(fn, setmetatable({ api = api, MyFrame = frame }, { __index = _G }))
+		w:As(viewer, fn)
+		return shown
+	end
+	local shown = Load()
+	eq(shown[#shown] or "", "", "before the Yes: no title")
+	w:As(viewer, viewer.Consent.Choose, "api:mappins", true)
+	eq(shown[#shown], title, "his title, on his Yes")
+	eq(Load()[1], title, "already granted: at load")
+	W3.NoErrors(w)
 end)
