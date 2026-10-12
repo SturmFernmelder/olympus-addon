@@ -391,6 +391,8 @@ test("chat rooms: a room gives each sender a fair share of its minute (PER_MINUT
 end)
 
 assert(loadfile(ROOT .. "tests/chat-role-rooms.lua"))(ns, test, eq, WithRooms, RoomMessage)
+-- (1.2.4: the role rooms the author asked for.)
+assert(loadfile(ROOT .. "tests/chat-rooms-124.lua"))(ns, test, eq, WithRooms, RoomMessage)
 
 test("chat rooms: restricted delivery is whisper-only, all-or-none on admission, and revocable in queue", function()
 	WithRooms(function(w, R, c)

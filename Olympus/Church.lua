@@ -1571,6 +1571,8 @@ end
 if ns.ChatRooms and ns.ChatRooms.RegisterAudience then
 	ns.ChatRooms.RegisterAudience("church", {
 		label = function() return L.CHURCH_ROOM end,
+		-- (1.2.4: the King's and a councillor's previews list it, View as.)
+		preview = { king = true, councillor = true },
 		CanAccess = function(name) return Church.InAudience(name or ns.me) end,
 		Recipients = function()
 			local list, left = Church.RoomRecipients()

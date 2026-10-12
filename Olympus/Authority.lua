@@ -154,7 +154,8 @@ local function ParseBody(body, realmGroup, epoch, issued, expires)
 			n, total = n + 1, total + 1
 			if n > Authority.MAX_PEOPLE or total > Authority.MAX_TOTAL then return nil, "player-limit" end
 			roles[key] = n == 1 and 0 or 1
-			manifest.people[key] = { guild = guild, rank = roles[key] }
+			-- (1.2.4: the name as signed too, the role rooms' recipients: ChatRooms.lua.)
+			manifest.people[key] = { guild = guild, rank = roles[key], name = name }
 		end
 		manifest.guilds[guildKey] = { name = guild, roles = roles }
 	end

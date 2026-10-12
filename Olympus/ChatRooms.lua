@@ -13,6 +13,22 @@ local L = ns.L
 -- (<class> is a legacy field: this client leaves it empty, and an older client's class code only
 -- colours its name.) 1.2.3: the race and class rooms, open topic rooms on the Olympus channel, are
 -- gone (the author: nobody used them); an older client's line to one is dropped (Rooms.Receive).
+--
+-- 1.2.4, the role rooms the author asked for ("a gente me ajuda a repensar quais são todos os chats
+-- de função que precisam"), each one check for who reads, sends and is heard (Rooms.CanAccess; the
+-- kinds below, in the Roles menu's order):
+--   council          the High Council: the signed councillors, the King, the Federal Treasurer
+--   secretariat      the King and his Stewards
+--   masters          the guild masters of every Olympus guild
+--   allcenturions    the guild masters and their centurions (officers and named), every guild
+--   dept:<d>         one per department: its titled councillors and every guild's correspondent of it
+--   gcorr:<g>        one per guild: its master and his correspondents
+--   gcent:<g>        one per guild: its master and his centurions
+-- then the rooms other files keep (Rooms.RegisterAudience): the Church's (Apostles, Apostles and
+-- missionaries, the whole Church) and The Watch's. A per-guild room's id is the guild's key, the first
+-- six bytes of SHA-256 of its folded name in hex (GuildKey): never its name, which may hold spaces a
+-- moderator's reference cannot carry (WatchChat.lua). "treasurers", "departments" and "centurions"
+-- (1.2.3's) are gone: their lines from an older client are dropped quietly (Retired).
 
 local Rooms = {}
 ns.ChatRooms = Rooms
@@ -24,22 +40,7 @@ Rooms.SEND_GAP = 1.5
 Rooms.PER_MINUTE = 6
 Rooms.FLOOD = 60
 Rooms.GONE_FOR = 10 * 60    -- a recipient the server said is not playing: no whisper this long
-
--- The signed titles list remains the authority. Aliases only normalize labels that have existed
--- in that list; they never grant somebody absent from it a room.
-local DEPARTMENTS = {
-	{ id = "dept:treasury", label = "Federal Treasury", aliases = { "federal treasury", "treasury" } },
-	{ id = "dept:war", label = "Department of War", aliases = { "department of war", "war" } },
-	{ id = "dept:citizenry", label = "Association of Artisanry", aliases = { "association of artisanry", "association of citizenry", "artisanship" } },
-	{ id = "dept:heritage", label = "Department of Heritage", aliases = { "department of heritage", "heritage", "heraldry", "outreach" } },
-	{ id = "dept:justice", label = "Council of Justice", aliases = { "council of justice", "justice" } },
-	{ id = "dept:church", label = "The Missionary Church of Olympus", aliases = { "the missionary church of olympus" } },
-}
-local DEPT_BY_NAME, DEPT_BY_ID = {}, {}
-for _, d in ipairs(DEPARTMENTS) do
-	DEPT_BY_ID[d.id] = d
-	for _, name in ipairs(d.aliases) do DEPT_BY_NAME[name] = d end
-end
+Rooms.GUILD_KEYS_MAX = 512  -- guild keys remembered (the census keeps 300 guilds, the signed list 128)
 
 local states = {}          -- room -> bounded session history and receive budgets
 local nextId = math.random and math.random(0, 9999) or 0
@@ -51,7 +52,7 @@ local providers = {}       -- private rooms owned by later modules (1.2: craftin
 local held                 -- dynamic-room key -> when Rooms.OpenMatter pinned it (saved; loaded at first use)
 local writing = {}         -- matter key -> a look at the Chat page's box is coming (Rooms.OpenMatter)
 -- 1.1.6: restricted M2 rooms whose audience a later module decides (Rooms.RegisterAudience: the
--- Church's). id -> { label, CanAccess(name), Recipients() }; the transport stays this file's.
+-- Church's). id -> { label, CanAccess(name), Recipients(), group, preview }; the transport stays this file's.
 local audiences, audienceOrder = {}, {}
 
 local function Now() return GetTime and GetTime() or ns.Now() end
@@ -64,10 +65,46 @@ end
 local function IsMe(name)
 	return ns.Channels and ns.Channels.IsMe and ns.Channels.IsMe(name) == true
 end
+-- A locale key's text, else `fallback` (Locales.lua gives a missing key back as the key itself).
+local function Text(key, fallback)
+	local value = type(key) == "string" and rawget(L, key) or nil
+	return type(value) == "string" and value ~= "" and value or fallback
+end
+local function OwnGuild()
+	local guild = GetGuildInfo and GetGuildInfo("player")
+	return type(guild) == "string" and guild ~= "" and guild or nil
+end
+
+-- The departments (1.2.4: Nominees.DEPARTMENT_LIST, the one list a department is added to). The
+-- signed titles list remains the authority. Aliases only normalize labels that have existed in that
+-- list; they never grant somebody absent from it a room.
+-- (Read at first use: the game loads Nominees.lua first, but a file loaded after it may not be.)
+local DEPARTMENTS, DEPT_BY_NAME, DEPT_BY_ID = {}, {}, {}
+local TREASURY
+local function Departments()
+	if DEPARTMENTS[1] then return DEPARTMENTS end
+	local list = ns.Nominees and type(ns.Nominees.DEPARTMENT_LIST) == "table" and ns.Nominees.DEPARTMENT_LIST
+		or type(ns.DEPARTMENT_LIST) == "table" and ns.DEPARTMENT_LIST or {}
+	for _, d in ipairs(list) do
+		if type(d) == "table" and type(d.name) == "string" and type(d.room) == "string" and d.room:match("^dept:%l+$") and not DEPT_BY_ID[d.room] then
+			local dept = { id = d.room, name = d.name, labelKey = d.label, aliases = type(d.aliases) == "table" and d.aliases or {} }
+			DEPARTMENTS[#DEPARTMENTS + 1], DEPT_BY_ID[dept.id] = dept, dept
+			DEPT_BY_NAME[Lower(dept.name)] = DEPT_BY_NAME[Lower(dept.name)] or dept
+			for _, alias in ipairs(dept.aliases) do DEPT_BY_NAME[Lower(alias)] = DEPT_BY_NAME[Lower(alias)] or dept end
+		end
+	end
+	TREASURY = DEPT_BY_ID["dept:treasury"]
+	return DEPARTMENTS
+end
+-- A department by a name the titles or a nominee list gives it.
+local function DeptNamed(name)
+	Departments()
+	return DEPT_BY_NAME[Lower(name)]
+end
 
 local function DepartmentFor(name)
 	local title = ns.CouncilTitle and ns.CouncilTitle(name)
-	return title and type(title.dept) == "string" and DEPT_BY_NAME[Lower(title.dept)] or nil
+	return title and type(title.dept) == "string" and DeptNamed(title.dept) or nil
 end
 
 local function IsSecretariat(name)
@@ -75,15 +112,7 @@ local function IsSecretariat(name)
 		or (ns.IsSteward and ns.IsSteward(name) == true)
 end
 
-local ROLE_ROOMS = {
-	{ id = "masters", label = "Guild Masters", preview = "gm" },
-	{ id = "treasurers", label = "Treasury correspondents", preview = "treasurer" },
-	{ id = "departments", label = "All departments", preview = "correspondent" },
-	{ id = "centurions", label = "Guild Centurions", preview = "officer" },
-	{ id = "allcenturions", label = "All Centurions", preview = "officer" },
-}
-local ROLE_BY_ID = {}
-for _, room in ipairs(ROLE_ROOMS) do ROLE_BY_ID[room.id] = room end
+local function IsKing(name) return ns.IsKingCharacter and ns.IsKingCharacter(name) == true or false end
 
 local function FederalTreasurer(name)
 	local T = ns.Treasury
@@ -108,24 +137,53 @@ function Rooms.Listing(fn, ...)
 	return a, b
 end
 
+-- The signed leadership list, while it counts (Authority.lua): { guilds = { [fold] = { name, roles } },
+-- people = { [fold] = { guild, rank, name } } }, else nil.
+local function Manifest()
+	local A = ns.Authority
+	if type(A) ~= "table" or type(A.Enforced) ~= "function" or not A.Enforced() or type(A.Manifest) ~= "function" then return nil end
+	local ok, m = pcall(A.Manifest)
+	return ok and type(m) == "table" and type(m.guilds) == "table" and m or nil
+end
+function Rooms.Enforced()
+	local A = ns.Authority
+	return type(A) == "table" and type(A.Enforced) == "function" and A.Enforced() == true
+end
+
+-- ns.IsFederation, once a listing for each guild (1.2.4: the per-guild rooms ask it of their guild too).
+local function Federation(guild)
+	if type(guild) ~= "string" then return false end
+	local known = listing and listing.federation
+	if known and known[guild] ~= nil then return known[guild] end
+	local yes = ns.IsFederation(guild) == true
+	if listing then
+		if not known then known = {}; listing.federation = known end
+		known[guild] = yes
+	end
+	return yes
+end
+
 local function Guilds()
 	if listing and listing.guilds then return listing.guilds end
 	local out, seen = {}, {}
 	local function Add(guild)
-		if type(guild) == "string" and ns.IsFederation(guild) and not seen[Lower(guild)] then
+		if type(guild) == "string" and Federation(guild) and not seen[Lower(guild)] then
 			seen[Lower(guild)], out[#out + 1] = true, guild
 		end
 	end
-	Add(GetGuildInfo and GetGuildInfo("player"))
+	Add(OwnGuild())
 	if ns.KingGuildName then Add(ns.KingGuildName()) end
 	for guild in pairs(ns.rdb and ns.rdb.guilds or {}) do Add(guild) end
+	-- (1.2.4: and the signed list's guilds, which the census may not have heard yet.)
+	local m = Manifest()
+	for _, g in pairs(m and m.guilds or {}) do if type(g) == "table" then Add(g.name) end end
 	table.sort(out)
 	if listing then listing.guilds = out end
 	return out
 end
 
 local function Rank(name, guild)
-	if guild == (GetGuildInfo and GetGuildInfo("player")) then
+	if guild == OwnGuild() then
 		local R = ns.Roster
 		if not R or not R.Fresh or not R.Fresh() then return nil end
 	end
@@ -158,8 +216,7 @@ local function Nomination(name, guild)
 	if ns.IsKingGuild(guild) then
 		if not ((ns.IsKingCharacter and ns.IsKingCharacter(list.by)) or ns.IsHighCouncillor(list.by)) then return nil end
 	elseif Rank(list.by, guild) ~= 0 or not N.Proven or N.Proven(list.by, guild) ~= true then return nil end
-	local own = GetGuildInfo and GetGuildInfo("player")
-	if own == guild then
+	if OwnGuild() == guild then
 		local R = ns.Roster
 		if not R or not R.Fresh or not R.Fresh() or not R.RankOf or R.RankOf(ns.FullName(name)) == nil then return nil end
 	end
@@ -177,7 +234,7 @@ local function Correspondent(name, department)
 				local role, dept = Nomination(name, guild)
 				if role == "correspondent" then
 					found.any = true
-					local d = DEPT_BY_NAME[Lower(dept)]
+					local d = DeptNamed(dept)
 					if d then found[d] = true end
 				end
 			end
@@ -188,7 +245,7 @@ local function Correspondent(name, department)
 	end
 	for _, guild in ipairs(Guilds()) do
 		local role, dept = Nomination(name, guild)
-		if role == "correspondent" and (not department or DEPT_BY_NAME[Lower(dept)] == department) then return true end
+		if role == "correspondent" and (not department or DeptNamed(dept) == department) then return true end
 	end
 	return false
 end
@@ -199,33 +256,209 @@ local function Centurion(name, guild)
 		or Nomination(name, guild) == "centurion"
 end
 
-local function RoleAccess(id, name)
-	if id == "treasurers" then return FederalTreasurer(name) or DepartmentFor(name) == DEPT_BY_ID["dept:treasury"] or Correspondent(name, DEPT_BY_ID["dept:treasury"]) end
-	if id == "departments" then return DepartmentFor(name) ~= nil or Correspondent(name) end
-	if id == "centurions" then
-		local guild = GetGuildInfo and GetGuildInfo("player")
-		return guild ~= nil and ns.IsFederation(guild) and Centurion(name, guild) or false
+-- 1.2.4: a guild's master: rank 0 by our roster or the signed list, and the pinned King for his own
+-- guild (without the signed list another guild's client knows him only from the census, which
+-- Rank refuses: the King's guild's rooms would refuse the King).
+local function Master(name, guild)
+	if ns.IsKingGuild(guild) and IsKing(name) then return true end
+	return Rank(name, guild) == 0
+end
+
+-- A member of our own guild is no member of another guild's room (1.2.4: the author's rule, a guild
+-- master or officer has no power over another guild; a guild's room holds its own people alone).
+local function Abroad(name, guild)
+	local own = OwnGuild()
+	if not own or Same(own, guild) then return false end
+	local R = ns.Roster
+	return R ~= nil and type(R.RankOf) == "function" and R.RankOf(ns.FullName(name)) ~= nil
+end
+
+---------------------------------------------------------------------------
+-- 1.2.4: the per-guild rooms' keys
+---------------------------------------------------------------------------
+
+local keyOf, guildOfKey, keyCount = {}, {}, 0
+local missed, missedCount = {}, 0 -- [key] = when no guild this client lists had it (asked again a minute later)
+local function GuildKey(guild)
+	if type(guild) ~= "string" or guild == "" then return nil end
+	local key = keyOf[guild]
+	if key then return key end
+	local S = ns.Sign
+	if type(S) ~= "table" or type(S.SHA256) ~= "function" then return nil end
+	key = S.SHA256(ns.Fold(guild)):sub(1, 6):gsub(".", function(byte) return ("%02x"):format(byte:byte()) end)
+	if keyCount < Rooms.GUILD_KEYS_MAX then
+		keyOf[guild], keyCount = key, keyCount + 1
+		if not guildOfKey[key] then guildOfKey[key] = guild end
 	end
-	for _, guild in ipairs(Guilds()) do
-		if id == "masters" and Rank(name, guild) == 0 or id == "allcenturions" and Centurion(name, guild) then return true end
+	return key
+end
+Rooms.GuildKey = GuildKey
+
+-- The guilds this client lists: ours, the King's, the approved ones, the census's and the signed
+-- list's (each an Olympus guild).
+local function KnownGuilds()
+	local out, seen = {}, {}
+	local function Add(guild)
+		if type(guild) == "string" and guild ~= "" and not seen[ns.Fold(guild)] and Federation(guild) then
+			seen[ns.Fold(guild)], out[#out + 1] = true, guild
+		end
 	end
+	Add(OwnGuild())
+	if ns.KingGuildName then Add(ns.KingGuildName()) end
+	if ns.ApprovedGuilds then
+		local ok, list = pcall(ns.ApprovedGuilds)
+		for _, guild in ipairs(ok and type(list) == "table" and list or {}) do Add(guild) end
+	end
+	for _, guild in ipairs(Guilds()) do Add(guild) end
+	return out
+end
+
+-- The guild a key names, among the guilds this client lists; nil for none.
+local function GuildOfKey(key)
+	if type(key) ~= "string" or not key:match("^%x+$") or #key ~= 12 then return nil end
+	local guild = guildOfKey[key]
+	if guild and Federation(guild) then return guild end
+	local t = missed[key]
+	if t and Now() - t < 60 then return nil end
+	for _, g in ipairs(KnownGuilds()) do
+		if GuildKey(g) == key then return g end
+	end
+	if missedCount >= 64 then missed, missedCount = {}, 0 end
+	missed[key], missedCount = Now(), missedCount + 1
+	return nil
+end
+
+-- A per-guild room's id for `guild` (prefix gcorr or gcent), or nil.
+local function GuildRoom(prefix, guild)
+	local key = GuildKey(guild)
+	return key and (prefix .. ":" .. key) or nil
+end
+Rooms.GuildRoom = GuildRoom
+
+---------------------------------------------------------------------------
+-- 1.2.4: the kinds of room, in the Roles menu's order
+---------------------------------------------------------------------------
+
+-- Each: id (one room) or prefix (one room a department, a guild), the room's kind (Rooms.Options),
+-- its label, Access(name, arg), Candidates(add, arg) (each candidate checked again by Access), its
+-- group (the menu folds a long list by it) and the previews (View as) that list it.
+local KINDS, KIND_BY_ID, KIND_BY_PREFIX = {}, {}, {}
+local RETIRED = { treasurers = true, departments = true, centurions = true } -- (1.2.3's rooms, gone in 1.2.4)
+
+local function AnyGuild(name, check)
+	for _, guild in ipairs(Guilds()) do if check(name, guild) then return true end end
 	return false
 end
 
-local function AudienceLabel(a)
-	local ok, label = pcall(function() return type(a.label) == "function" and a.label() or a.label end)
-	return ok and type(label) == "string" and label or "?"
+local Candidates = {} -- shared candidate sources, below (Members)
+
+KINDS[#KINDS + 1] = { id = "council", kind = "authority", label = function() return Text("CHATROOM_COUNCIL", "High Council") end,
+	preview = { king = true, councillor = true, treasurer = true },
+	Access = function(name) return ns.IsHighCouncillor(name) == true or IsKing(name) or FederalTreasurer(name) end,
+	Candidates = function(add) Candidates.Council(add) end }
+KINDS[#KINDS + 1] = { id = "secretariat", kind = "authority", label = function() return Text("CHATROOM_SECRETARIAT", "Secretariat") end,
+	preview = { king = true },
+	Access = function(name) return IsSecretariat(name) end,
+	Candidates = function(add)
+		if ns.KingCharacter then add(ns.KingCharacter(), 2) end
+		for _, name in ipairs(ns.Stewards and ns.Stewards() or {}) do add(name) end
+	end }
+KINDS[#KINDS + 1] = { id = "masters", kind = "role", label = function() return Text("CHATROOM_MASTERS", "Guild Masters") end,
+	preview = { king = true, gm = true }, leaders = true,
+	Access = function(name) return IsKing(name) or AnyGuild(name, function(n, g) return Rank(n, g) == 0 end) end,
+	Candidates = function(add) Candidates.Leaders(add) end }
+KINDS[#KINDS + 1] = { id = "allcenturions", kind = "role", label = function() return Text("CHATROOM_ALLCENTURIONS", "Masters & Centurions") end,
+	preview = { king = true, gm = true, officer = true }, leaders = true,
+	Access = function(name) return IsKing(name) or AnyGuild(name, function(n, g) return Master(n, g) or Centurion(n, g) end) end,
+	Candidates = function(add) Candidates.Leaders(add) end }
+KINDS[#KINDS + 1] = { prefix = "dept", kind = "department", group = "dept", leaders = true,
+	groupLabel = function() return Text("CHATROOM_GROUP_DEPARTMENTS", "Departments") end,
+	Preview = function(role, d) return role == "councillor" or role == "correspondent" or role == "treasurer" and d == TREASURY end,
+	Access = function(name, d)
+		return DepartmentFor(name) == d or Correspondent(name, d) or (d == TREASURY and FederalTreasurer(name))
+	end,
+	Candidates = function(add, d)
+		if d == TREASURY and ns.TREASURER then add(ns.TREASURER, 3) end
+		Candidates.Leaders(add)
+		local t = ns.CouncilTitles and ns.CouncilTitles()
+		for _, dept in ipairs(t and t.depts or {}) do
+			if DeptNamed(dept.name) == d then
+				for _, m in ipairs(type(dept.members) == "table" and dept.members or {}) do add(m.name, 3) end
+			end
+		end
+	end }
+KINDS[#KINDS + 1] = { prefix = "gcorr", kind = "role", group = "gcorr", perGuild = true,
+	groupLabel = function() return Text("CHATROOM_GCORR", "Master & Correspondents") end,
+	label = function(guild)
+		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCORR", "Master & Correspondents") end
+		return Text("CHATROOM_GCORR_OF", "%s: Master & Correspondents"):format(guild)
+	end,
+	-- (The King's guild has no correspondents, Nominees.lua: no such room for it.)
+	Has = function(guild) return not ns.IsKingGuild(guild) end,
+	preview = { gm = true, correspondent = true },
+	Access = function(name, guild)
+		return not Abroad(name, guild) and (Master(name, guild) or Nomination(name, guild) == "correspondent")
+	end,
+	Candidates = function(add, guild) Candidates.Guild(add, guild, false) end }
+KINDS[#KINDS + 1] = { prefix = "gcent", kind = "role", group = "gcent", perGuild = true,
+	groupLabel = function() return Text("CHATROOM_GCENT", "Master & Centurions") end,
+	label = function(guild)
+		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCENT", "Master & Centurions") end
+		return Text("CHATROOM_GCENT_OF", "%s: Master & Centurions"):format(guild)
+	end,
+	preview = { king = true, gm = true, officer = true },
+	Access = function(name, guild)
+		return not Abroad(name, guild) and (Master(name, guild) or Centurion(name, guild))
+	end,
+	Candidates = function(add, guild) Candidates.Guild(add, guild, true) end }
+for _, k in ipairs(KINDS) do
+	if k.id then KIND_BY_ID[k.id] = k end
+	if k.prefix then KIND_BY_PREFIX[k.prefix] = k end
+end
+
+-- A room id's kind and its argument (the department, the guild), or nil.
+local function KindOf(id)
+	if type(id) ~= "string" then return nil end
+	local k = KIND_BY_ID[id]
+	if k then return k end
+	local prefix, rest = id:match("^(%l+):(.+)$")
+	k = prefix and KIND_BY_PREFIX[prefix]
+	if not k then return nil end
+	if k.prefix == "dept" then
+		Departments()
+		local d = DEPT_BY_ID[id]
+		return d and k or nil, d
+	end
+	local guild = GuildOfKey(rest)
+	if not guild or (k.Has and not k.Has(guild)) then return nil end
+	return k, guild
+end
+
+local function AudienceLabel(a, field)
+	local ok, label = pcall(function()
+		local v = a[field or "label"]
+		return type(v) == "function" and v() or v
+	end)
+	return ok and type(label) == "string" and label or nil
 end
 
 local function Restricted(id)
-	local roleRoom = ROLE_BY_ID[id]
-	if roleRoom then return { id = id, kind = "role", label = roleRoom.label, scope = "restricted" } end
 	local a = audiences[id]
-	if a then return { id = id, kind = id, label = AudienceLabel(a), scope = "restricted", audience = true } end
-	if id == "council" then return { id = id, kind = "authority", label = L.CHATROOM_COUNCIL or "Council", scope = "restricted" } end
-	if id == "secretariat" then return { id = id, kind = "authority", label = L.CHATROOM_SECRETARIAT or "Secretariat", scope = "restricted" } end
-	local d = DEPT_BY_ID[id]
-	return d and { id = id, kind = "department", label = d.label, scope = "restricted", department = d } or nil
+	if a then
+		return { id = id, kind = id, label = AudienceLabel(a) or "?", scope = "restricted", audience = true,
+			group = a.group, groupLabel = a.group and AudienceLabel(a, "groupLabel") or nil }
+	end
+	local k, arg = KindOf(id)
+	if not k then return nil end
+	local info = { id = id, kind = k.kind, scope = "restricted", group = k.group, groupLabel = k.groupLabel and k.groupLabel() or nil }
+	if k.prefix == "dept" then
+		info.label, info.department = Text(arg.labelKey, arg.name), arg
+	elseif k.perGuild then
+		info.label, info.guild = k.label(arg), arg
+	else
+		info.label = k.label()
+	end
+	return info
 end
 
 -- The provider whose private room this is, and its description.
@@ -250,11 +483,13 @@ end
 
 -- 1.1.6: a restricted room over M2 whose audience another module keeps (Church.lua). spec.CanAccess(name)
 -- says who may read and send; spec.Recipients() who is reached (each still checked by CanAccess,
--- this character left out). Never one of the ids above or a provider's. False when refused.
+-- this character left out), and (1.2.4) how many it left out. 1.2.4: spec.group and spec.groupLabel
+-- fold it with its kin in a long Roles menu; spec.preview = { [role] = true } lists it under those
+-- previews (View as). Never one of the ids above or a provider's. False when refused.
 function Rooms.RegisterAudience(id, spec)
 	if type(id) ~= "string" or not id:match("^%l+$") or #id > 16 or type(spec) ~= "table"
 		or type(spec.CanAccess) ~= "function" or type(spec.Recipients) ~= "function" then return false end
-	if id == "guild" or id == "council" or id == "secretariat" or ROLE_BY_ID[id] or DEPT_BY_ID[id] or ProviderFor(id) or audiences[id] then return false end
+	if id == "guild" or KIND_BY_ID[id] or KIND_BY_PREFIX[id] or RETIRED[id] or ProviderFor(id) or audiences[id] then return false end
 	audiences[id] = spec
 	audienceOrder[#audienceOrder + 1] = id
 	return true
@@ -270,18 +505,15 @@ end
 function Rooms.CanAccess(id, name)
 	local provider = ProviderFor(id)
 	if provider then return provider.CanAccess(id, name or ns.me) == true end
-	local info = Rooms.Info(id)
-	if not info then return false end
+	if id == "guild" then return ns.IsMember() == true end
 	name = name or ns.me
-	if info.scope == "guild" then return ns.IsMember() == true end
-	if id == "council" then return ns.IsHighCouncillor(name) == true or (ns.IsKingCharacter and ns.IsKingCharacter(name) == true) or FederalTreasurer(name) end
-	if id == "secretariat" then return IsSecretariat(name) end
-	if ROLE_BY_ID[id] then return RoleAccess(id, name) end
 	if audiences[id] then
 		local ok, yes = pcall(audiences[id].CanAccess, name)
 		return ok and yes == true
 	end
-	return info.department ~= nil and (DepartmentFor(name) == info.department or Correspondent(name, info.department))
+	local k, arg = KindOf(id)
+	if not k then return false end
+	return k.Access(name, arg) == true
 end
 
 local function AuthorityOptions()
@@ -293,7 +525,7 @@ end
 
 local function DepartmentOptions()
 	local out = {}
-	for _, d in ipairs(DEPARTMENTS) do if Rooms.CanAccess(d.id) then out[#out + 1] = Rooms.Info(d.id) end end
+	for _, d in ipairs(Departments()) do if Rooms.CanAccess(d.id) then out[#out + 1] = Rooms.Info(d.id) end end
 	return out
 end
 
@@ -310,6 +542,12 @@ function Rooms.PreviewOnly(id)
 	return info ~= nil and info.scope == "restricted" and PreviewRole() ~= nil
 end
 
+-- The guilds whose own rooms (gcorr, gcent) this character's menu offers: his own guild's.
+local function ListedGuilds()
+	local own = OwnGuild()
+	return own and Federation(own) and { own } or {}
+end
+
 local function RoleOptions()
 	local role, out = PreviewRole(), {}
 	local function Add(id, preview)
@@ -319,12 +557,24 @@ local function RoleOptions()
 			out[#out + 1] = info
 		end
 	end
-	local council = role == "king" or role == "councillor"
-	Add("council", council or role == "treasurer")
-	Add("secretariat", role == "king")
-	for _, d in ipairs(DEPARTMENTS) do Add(d.id, council or role == "correspondent" or role == "treasurer" and d.id == "dept:treasury") end
-	for _, room in ipairs(ROLE_ROOMS) do Add(room.id, role == room.preview or room.id == "departments" and council) end
-	for _, aid in ipairs(audienceOrder) do Add(aid, aid == "church" and council) end
+	for _, k in ipairs(KINDS) do
+		if k.prefix == "dept" then
+			for _, d in ipairs(Departments()) do Add(d.id, role and k.Preview(role, d)) end
+		elseif k.perGuild then
+			for _, guild in ipairs(ListedGuilds()) do
+				if not k.Has or k.Has(guild) then
+					local id = GuildRoom(k.prefix, guild)
+					if id then Add(id, role and k.preview[role]) end
+				end
+			end
+		else
+			Add(k.id, role and k.preview[role])
+		end
+	end
+	for _, aid in ipairs(audienceOrder) do
+		local preview = audiences[aid].preview
+		Add(aid, role and type(preview) == "table" and preview[role] == true)
+	end
 	return out
 end
 
@@ -525,6 +775,71 @@ local function Offline(full, roster)
 	return roster[key] == false
 end
 
+-- 1.2.4: where each kind's candidates come from (Members). Candidate discovery grants nothing:
+-- Members' Add checks each candidate's current access again. add(name, order): order 2 the King,
+-- 3 a councillor, 4 a guild master (who goes first when a room has more than its share).
+function Candidates.Council(add)
+	if ns.KingCharacter then add(ns.KingCharacter(), 2) end
+	if ns.TREASURER then add(ns.TREASURER, 3) end
+	local c = ns.rdb and ns.rdb.council
+	for key, display in pairs(type(c) == "table" and type(c.names) == "table" and c.names or {}) do
+		-- Current signed lists keep lower-case name -> display name. Older in-memory fixtures used
+		-- true for the value; the signed key is still the identity in that representation.
+		add(type(display) == "string" and display or key, 3)
+	end
+end
+
+-- Our roster's guild master and officers (rank CAPTAIN_RANK at most; every member when the roster
+-- gives no rank).
+local function RosterLeaders(add)
+	local R = ns.Roster
+	for _, member in ipairs(R and R.members or {}) do
+		local rank = type(R.RankOf) == "function" and type(member.name) == "string" and R.RankOf(ns.FullName(member.name)) or nil
+		if rank == nil or rank <= ns.CAPTAIN_RANK then add(member.name, rank == 0 and 4 or nil) end
+	end
+end
+
+-- Every guild's master and officers (our roster, the census's word for a candidate, the signed list),
+-- every guild's nominees, the King.
+function Candidates.Leaders(add)
+	if ns.KingCharacter then add(ns.KingCharacter(), 2) end
+	RosterLeaders(add)
+	for _, guild in ipairs(Guilds()) do
+		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
+		if g then
+			if g.leader then add(ns.FullName(g.leader, g.realm), 4) end
+			for _, officer in ipairs(g.officers or {}) do add(ns.FullName(officer.name, g.realm)) end
+		end
+		local N = ns.Nominees
+		local list = N and N.ListOf and N.ListOf(guild)
+		for _, entry in ipairs(list and list.entries or {}) do add(entry.name) end
+	end
+	local m = Manifest()
+	for _, p in pairs(m and m.people or {}) do
+		if type(p) == "table" and type(p.name) == "string" then add(p.name, p.rank == 0 and 4 or nil) end
+	end
+end
+
+-- One guild's master, its officers when `officers`, and its nominees.
+function Candidates.Guild(add, guild, officers)
+	if ns.IsKingGuild(guild) and ns.KingCharacter then add(ns.KingCharacter(), 2) end
+	if Same(guild, OwnGuild()) then RosterLeaders(add) end
+	local g = ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
+	if g then
+		if g.leader then add(ns.FullName(g.leader, g.realm), 4) end
+		if officers then for _, officer in ipairs(g.officers or {}) do add(ns.FullName(officer.name, g.realm)) end end
+	end
+	local N = ns.Nominees
+	local list = N and N.ListOf and N.ListOf(guild)
+	for _, entry in ipairs(list and list.entries or {}) do add(entry.name) end
+	local m = Manifest()
+	for _, p in pairs(m and m.people or {}) do
+		if type(p) == "table" and type(p.name) == "string" and Same(p.guild, guild) and (officers or p.rank == 0) then
+			add(p.name, p.rank == 0 and 4 or nil)
+		end
+	end
+end
+
 local function Members(id)
 	local out, seen = {}, {}
 	local roster = {}
@@ -540,44 +855,12 @@ local function Members(id)
 			if not Offline(full, roster) then out[#out + 1] = full end
 		end
 	end
-	if id == "council" then
-		if ns.KingCharacter then Add(ns.KingCharacter()) end
-		if ns.TREASURER then Add(ns.TREASURER) end
-		local c = ns.rdb and ns.rdb.council
-		for key, display in pairs(type(c) == "table" and type(c.names) == "table" and c.names or {}) do
-			-- Current signed lists keep lower-case name -> display name. Older in-memory fixtures used
-			-- true for the value; the signed key is still the identity in that representation.
-			Add(type(display) == "string" and display or key)
-		end
-	elseif id == "secretariat" then
-		if ns.KingCharacter then Add(ns.KingCharacter()) end
-		for _, name in ipairs(ns.Stewards and ns.Stewards() or {}) do Add(name) end
-	elseif audiences[id] then
+	if audiences[id] then
 		local ok, list = pcall(audiences[id].Recipients)
 		for _, name in ipairs(ok and type(list) == "table" and list or {}) do Add(name) end
 	else
-		-- Candidate discovery grants nothing: Add revalidates each recipient's current role.
-		if ROLE_BY_ID[id] or DEPT_BY_ID[id] then
-			if ns.TREASURER then Add(ns.TREASURER) end
-			for _, member in ipairs(ns.Roster and ns.Roster.members or {}) do Add(member.name) end
-			for _, guild in ipairs(Guilds()) do
-				local g = ns.Data and ns.Data.Guild and ns.Data.Guild(guild)
-				if g then
-					if g.leader then Add(ns.FullName(g.leader, g.realm)) end
-					for _, officer in ipairs(g.officers or {}) do Add(ns.FullName(officer.name, g.realm)) end
-				end
-				local N = ns.Nominees
-				local list = N and N.ListOf and N.ListOf(guild)
-				for _, entry in ipairs(list and list.entries or {}) do Add(entry.name) end
-			end
-		end
-		local d = DEPT_BY_ID[id]
-		local t = ns.CouncilTitles and ns.CouncilTitles()
-		for _, dept in ipairs(t and t.depts or {}) do
-			if (d and DEPT_BY_NAME[Lower(dept.name)] == d) or ROLE_BY_ID[id] then
-				for _, m in ipairs(type(dept.members) == "table" and dept.members or {}) do Add(m.name) end
-			end
-		end
+		local k, arg = KindOf(id)
+		if k then k.Candidates(Add, arg) end
 	end
 	table.sort(out)
 	return out
@@ -759,9 +1042,21 @@ end
 -- 1.2.3: the race and class rooms are gone. A line an older client still sends to one ("race:<n>",
 -- "class:<code>") is dropped without a word to the player, and said in the debug log once a
 -- session (Rooms.Reset), its kind alone: nothing of the wire's words goes there.
-local retiredSaid = false
+-- 1.2.4: so are the treasurers', all the departments' and one guild's centurions' rooms (RETIRED:
+-- the Federal Treasury's room holds the Treasurer now; a guild's master and centurions have a room
+-- of their own, gcent): an older client's line to one is dropped the same way, said once a session.
+local retiredSaid, retired124Said = false, false
 local function Retired(text)
-	local kind = tostring(text or ""):match("^M2~[^~]*~(%l+):")
+	text = tostring(text or "")
+	local id = text:match("^M2~[^~]*~([^~]+)~")
+	if id and RETIRED[id] then
+		if not retired124Said and ns.Log then
+			retired124Said = true
+			ns.Log("chat rooms: a line to the %s room dropped (gone since 1.2.4)", id)
+		end
+		return true
+	end
+	local kind = text:match("^M2~[^~]*~(%l+):")
 	if kind ~= "race" and kind ~= "class" then return false end
 	if not retiredSaid and ns.Log then
 		retiredSaid = true
@@ -824,7 +1119,7 @@ function Rooms.Reset()
 	gone = {}
 	stats = { sent = 0, shown = 0, dropped = {} }
 	held, writing = nil, {}
-	retiredSaid = false
+	retiredSaid, retired124Said = false, false
 	-- (1.2.3: the race and class rooms' saved choices and outsider-request records go with them; a
 	-- Chat page last left on one of them opens on its channel, ChatWindow's Pick.)
 	if ns.db then ns.db.chatRoomChoices, ns.db.chatRoomRequests = nil, nil end
