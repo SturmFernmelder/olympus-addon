@@ -544,3 +544,38 @@ test("chat rooms (1.2.4): without the signed leadership list no room asks anothe
 		eq(table.concat(R.Recipients("masters"), ","), table.concat({ w.king, cast.bMaster }, ","))
 	end)
 end)
+
+-- The role rooms' words in English and pt-BR, with the same placeholders (the author's titles, The
+-- Royal Dev, and the menu's arrow the same in both).
+test("chat rooms (1.2.4): the role rooms' words in English and pt-BR, with the same placeholders", function()
+	local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]chat%-rooms%-124%.lua$")) or "./"
+	local oldLocale = GetLocale
+	local en, pt = {}, {}
+	local ok, err = pcall(function()
+		for _, pair in ipairs({ { en, "enUS" }, { pt, "ptBR" } }) do
+			GetLocale = function() return pair[2] end
+			assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", pair[1])
+			assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", pair[1])
+		end
+	end)
+	GetLocale = oldLocale
+	if not ok then error(err, 0) end
+	local SAME = { CHATWIN_TAG_DEV = true, CHATWIN_MENU_GROUP = true }
+	for _, d in ipairs(ns.Nominees.DEPARTMENT_LIST) do
+		eq(en.L[d.label], d.name, d.label .. ": its English is the department's name")
+	end
+	for _, key in ipairs({ "CHATROOM_COUNCIL", "CHATROOM_MASTERS", "CHATROOM_ALLCENTURIONS", "CHATROOM_GCORR", "CHATROOM_GCORR_OF",
+		"CHATROOM_GCENT", "CHATROOM_GCENT_OF", "CHATROOM_GROUP_DEPARTMENTS", "CHATROOM_DEPT_TREASURY", "CHATROOM_DEPT_WAR",
+		"CHATROOM_DEPT_JUSTICE", "CHATROOM_DEPT_ARTISANRY", "CHATROOM_DEPT_HERITAGE", "CHATROOM_DEPT_CHURCH", "CHATROOM_NOT_REACHED",
+		"CHATROOM_NEEDS_LEADERS", "CHATWIN_TAG_DEV", "CHATWIN_MENU_GROUP", "CHATWIN_MENU_PREV", "CHATWIN_MENU_MORE",
+		"CHURCH_ROOM_APOSTLES", "CHURCH_ROOM_MISSIONARIES" }) do
+		local e, p = rawget(en.L, key), rawget(pt.L, key)
+		assert(type(e) == "string" and type(p) == "string", key)
+		if SAME[key] then eq(p, e, key) else assert(p ~= e, "pt-BR: " .. key) end
+		local a, b = {}, {}
+		for x in e:gmatch("%%%d*[sd]") do a[#a + 1] = x end
+		for x in p:gmatch("%%%d*[sd]") do b[#b + 1] = x end
+		eq(table.concat(b, ","), table.concat(a, ","), "the same placeholders: " .. key)
+	end
+	eq(pt.L.CHATROOM_COUNCIL, "Alto Conselho"); eq(en.L.CHATROOM_COUNCIL, "High Council")
+end)
