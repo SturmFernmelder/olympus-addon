@@ -961,7 +961,7 @@ test("1.2 the fights part: every art file the honours name ships in Olympus/medi
 		eq(want[name], true, "an honour's file: " .. name)
 	end
 	p:close()
-	eq(n, 154, "67 frames and 67 marks, and (1.2.1) the ten preview frames and their marks")
+	eq(n, 160, "67 frames and 67 marks, (1.2.1) the ten preview frames and their marks, and (1.2.3) the three crooks and theirs")
 end)
 
 test("1.2 the fights part: the words of fights and honours exist in English and pt-BR, the same keys (tables with the same entries); every title and letter the honours can name", function()

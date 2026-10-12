@@ -24,6 +24,7 @@ L.HONOR_TITLES = {
 	["level-race-20"] = "First to 20", ["level-race-40"] = "First to 40", ["level-race-60"] = "First to 60",
 	["guild-top-leader"] = "Wisest of Olympus",
 	["oracle-1"] = "Oracle", ["oracle-2"] = "Seer", ["oracle-3"] = "Soothsayer",
+	["missionary-1"] = "Good Shepherd", ["missionary-2"] = "Faithful Shepherd", ["missionary-3"] = "Shepherd",
 	["the-dev"] = "The Royal Dev",
 }
 L.HONOR_CLASS_TITLE = { "%s Champion", "%s Contender", "%s Challenger" }
@@ -49,6 +50,7 @@ L.HONOR_LETTER = {
 	level = "Adventurer,\n\nNobody in Olympus got there before you. The comet is yours, and with it the name %s: a record written for as long as Olympus stands.",
 	guild = "Lord,\n\nBy the levels of its members, your guild stands above every other in Olympus. You are named %s, and the owl watches over your banner while your guild leads. Keep them climbing.",
 	oracle = "Seer,\n\nLast month you read the arena better than anyone. You are named %s, and the raven is yours for this month. Olympus will be watching your next wager.",
+	missionary = "Missionary,\n\nThe flock of Olympus grows because of you: in the last thirty days few brought as many people into our guilds. You are named %s, and the shepherd's crook is yours while you stay among the three. May the flock keep growing.",
 }
 
 -- The rankings' switches (the owner's one compact view).
@@ -122,6 +124,7 @@ if GetLocale and GetLocale() == "ptBR" then
 		["level-race-20"] = "Primeiro ao 20", ["level-race-40"] = "Primeiro ao 40", ["level-race-60"] = "Primeiro ao 60",
 		["guild-top-leader"] = "O Mais Sábio do Olympus",
 		["oracle-1"] = "Oráculo", ["oracle-2"] = "Vidente", ["oracle-3"] = "Adivinho",
+		["missionary-1"] = "Bom Pastor", ["missionary-2"] = "Pastor Fiel", ["missionary-3"] = "Pastor",
 		["the-dev"] = "The Royal Dev",
 	}
 	L.HONOR_CLASS_TITLE = { "Campeão %s", "Desafiante %s", "Pretendente %s" }
@@ -144,6 +147,7 @@ if GetLocale and GetLocale() == "ptBR" then
 		level = "Aventureiro,\n\nNinguém no Olympus chegou lá antes de você. O cometa é seu, e com ele o nome %s: um recorde escrito enquanto o Olympus existir.",
 		guild = "Lorde,\n\nPelos níveis dos seus membros, a sua guilda está acima de todas as outras do Olympus. Você é chamado de %s, e a coruja guarda o seu estandarte enquanto a sua guilda liderar. Continue a fazê-los subir.",
 		oracle = "Vidente,\n\nNo último mês você leu a arena melhor que qualquer um. Você é chamado de %s, e o corvo é seu por este mês. O Olympus vai observar a sua próxima aposta.",
+		missionary = "Missionário,\n\nO rebanho do Olympus cresce por sua causa: nos últimos trinta dias, poucos trouxeram tanta gente para as nossas guildas. Você é chamado de %s, e o cajado é seu enquanto estiver entre os três. Que o rebanho continue a crescer.",
 	}
 	L.ARENA_PERIOD_TODAY = "Hoje"
 	L.ARENA_PERIOD_WEEK = "Esta semana"

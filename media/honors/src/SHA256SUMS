@@ -1,6 +1,6 @@
 # The honours' art (Olympus/media/honors): each file's SHA-256, the frame lab's file it was
 # copied from, and its name in the addon. Written by scripts/make-honors.py --from; checked by --check.
-# 1.2.1's new frames (a preview only) name their source as ~/Downloads/olympus-new-frames/<name>.
+# 1.2.1's new frames and 1.2.3's crook name their source as ~/Downloads/olympus-new-frames/<name>.
 224091778dfeefc15fbc4abcd51b0bbb3728b59149f707fa3e86126500ec6069  boar-bronze-mark.tga  boar-bronze-mark.tga
 c12f632b0c764480faf486ed1168a6562815b704add2b94771534a62a472c825  boar-bronze.tga  boar-bronze.tga
 7a7536fd7519c29f816a7a6dba82f6544a8cee689c74c697603b50f1c15581c6  boar-gold-mark.tga  boar-gold-mark.tga
@@ -25,6 +25,12 @@ d45481aeccf409b4c4c3d8158369bbb8c6303d1ef7c7ada22210f812350a8e04  comet.tga  com
 9048565edbf5d7b196ebc5498dd306c3b321881fef10c2babadc1922b0e3c085  cornucopia.tga  cornucopia-gold.tga
 c3b44974591cb9176185ed757f71b1755c19389c07f31b18a1b749b9d2a80c1b  cornucopia-silver-mark.tga  cornucopia-silver-mark.tga
 5cc5fde03fe50b3e9eb5832f6b603b0a622b0309a00ae81253ce01a3c0436986  cornucopia-silver.tga  cornucopia-silver.tga
+e3d21245ea902c15105f6b705d377f5abce9d3b27627c1feda990e687cfa8e83  ~/Downloads/olympus-new-frames/crook-bronze-mark.tga  crook-bronze-mark.tga
+787ac073c1feaabe6006b03c5c1d7cb753dd2cd208de705c5a69ec1d75b03064  ~/Downloads/olympus-new-frames/crook-bronze.tga  crook-bronze.tga
+398d66325ff9928bdde3e43698db802154372cd484e025bdf5a0668a8abbf7db  ~/Downloads/olympus-new-frames/crook-gold-mark.tga  crook-gold-mark.tga
+b4f720df07139e63561a79067dd9a0bb0f433577bb1f174e73392e850737b3ca  ~/Downloads/olympus-new-frames/crook-gold.tga  crook-gold.tga
+641cc56346bc483e443ce1ae02e7c249b34f57f9432b2b8312b88b1e72b60282  ~/Downloads/olympus-new-frames/crook-silver-mark.tga  crook-silver-mark.tga
+31ead8ce847259ff27e184c4152960149a34f6c31aa4b06d26c64fa7a137be64  ~/Downloads/olympus-new-frames/crook-silver.tga  crook-silver.tga
 98281111afab2cefff60cd08db211c44191cbdf981117e0d2e745dbfec3d9ebf  ~/Downloads/olympus-new-frames/cross-bronze-mark.tga  cross-bronze-mark.tga
 a6585d72bdbd413be58a600fd84b9fc216fa0bbdb303cbbe5502cec5f418aaa4  ~/Downloads/olympus-new-frames/cross-bronze.tga  cross-bronze.tga
 ab26b3d92bc0488aecd5588ae860fb2289d1f8032fc5fb92b35e92f20fefaa10  ~/Downloads/olympus-new-frames/cross-gold-mark.tga  cross-gold-mark.tga

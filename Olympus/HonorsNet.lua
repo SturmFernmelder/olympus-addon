@@ -9,7 +9,8 @@ local ADDON, ns = ...
 -- exemption of the weight rule: PLAYER_LEVEL_UP (acting at a multiple of 10) and one AP timer while
 -- the pick is not the default, through ns.On/ns.Every.
 -- API (the design): Verified(name) -> { frame, title, mark, chat }, Holdings(name), FrameTexture(key),
---   MarkTexture(key), ChatMark(key), TitleText(key), Levels(), Donors(), Oracle(), Podium(cat);
+--   MarkTexture(key), ChatMark(key), TitleText(key), Levels(), Donors(), Oracle(), Podium(cat),
+--   ChurchTop() (1.2.3: the Church's top 3 as ChurchCount.Top3 holds it, or nil);
 --   NewPortrait(parent, size) and DressPortrait(rig, key): the player's own portrait with a frame.
 -- The King's letter (the design) when an honour is earned: a popup of Olympus's own, queued.
 local HonorsNet = {}
@@ -43,7 +44,12 @@ ns.HonorsNet = HonorsNet
 --                                 rows by whisper: another bank's top 10 for it (name:profit:staked:
 --                                 markets:first;...). The newest word for a month wins.
 -- The podium (the belts' silver and bronze) is the clerk's AV 2 and 3 (ArenaLedger); the best guild
--- is the census's (Honors.GuildTop, its leader vouched by two senders).
+-- is the census's (Honors.GuildTop, its leader vouched by two senders). (1.2.3) The missionaries'
+-- top 3 (the crook) is the Church's: ChurchCount.Top3, the newest NR~1~t word of the Head's, the
+-- King's or the author's client (the server stamps its sender; ChurchCount.TakeTop refuses anyone
+-- else's), held while the Church's public ranking is open and the word no older than
+-- Honors.CHURCH_MAX_AGE. No word of its own here: the Church's comes on CHANNEL and GUILD, and
+-- CHURCH_TOP_CHANGED (or the ranking's switch, CHURCH_PUBLIC_CHANGED) looks at the honours again.
 --
 -- A newly earned honour switches on by itself (Honors.Update, unless the player locked his pick),
 -- and the King's letter tells him: a parchment in a window of Olympus's own naming the honour and
@@ -126,6 +132,10 @@ end
 H.Changed = Changed
 ns.On("DATA_CHANGED", function() gen = gen + 1 end)
 ns.On("HONORS_CHANGED", function() gen = gen + 1 end)
+-- (1.2.3) The Church's top 3 (a newer trusted word) or its public ranking's switch: the
+-- missionaries' crooks, everyone's frames and our own honours looked at again.
+ns.On("CHURCH_TOP_CHANGED", function() Changed() end)
+ns.On("CHURCH_PUBLIC_CHANGED", function() Changed() end)
 
 ---------------------------------------------------------------------------
 -- What a player holds, and what his pick shows
@@ -152,6 +162,17 @@ local function BestGuild()
 	return top
 end
 
+-- (1.2.3) The Church's top 3 as a trusted client published it (ChurchCount.Top3: nil while the
+-- public ranking is closed or none was heard), or nil.
+local function ChurchTop()
+	local C = ns.ChurchCount
+	if type(C) ~= "table" or C.missing or type(C.Top3) ~= "function" then return nil end
+	local ok, top = pcall(C.Top3)
+	if not ok or type(top) ~= "table" or type(top.missionaries) ~= "table" then return nil end
+	return top
+end
+H.ChurchTop = ChurchTop
+
 local inputs, inputsGen, inputsAt
 -- The facts every Holdings call takes (kept while nothing changed, a minute at most).
 function H.Inputs()
@@ -174,6 +195,7 @@ function H.Inputs()
 		local g = Arena.GuidOf(gk)
 		if g then tiers[g] = tier end
 	end
+	local church = ChurchTop()
 	inputs = {
 		belts = LG and LG.Holders and LG.Holders("L") or {},
 		podium = LG and LG.PodiumWords and LG.PodiumWords("L") or {},
@@ -182,6 +204,7 @@ function H.Inputs()
 		levels = store and store.levels or {},
 		guild = BestGuild(),
 		oracle = ow and { month = Places(ow.names), monthNo = lastMonth } or nil,
+		church = church and { missionaries = Places(church.missionaries), at = church.at } or nil,
 		now = now,
 	}
 	inputsGen, inputsAt = gen, math.floor(now / 60)
@@ -1121,6 +1144,9 @@ function H.Known()
 	for _, r in pairs(type(guilds) == "table" and guilds or {}) do
 		if type(r) == "table" and r.t and ns.Now() - r.t <= ns.Honors.GUILD_MAX_AGE then fresh = true break end
 	end
+	-- (1.2.3: the Church's top 3 while it is shown and fresh; closed, unheard or stale it is not
+	-- known, so a missionary's crook is remembered as it was: never "lost", nor "new" when it is back.)
+	local church = ChurchTop()
 	return {
 		belt = (titles and next(titles) ~= nil) or (words and next(words) ~= nil) or Arena.Heavy("L") ~= nil,
 		tier = Arena.Heavy("L") ~= nil,
@@ -1128,6 +1154,7 @@ function H.Known()
 		level = s ~= nil and s.levels ~= nil and next(s.levels) ~= nil,
 		guild = fresh,
 		oracle = s ~= nil and s.oracle ~= nil and next(s.oracle) ~= nil,
+		missionary = church ~= nil and ns.Honors.ChurchFresh(church, Now()),
 	}
 end
 
@@ -1179,7 +1206,8 @@ end
 -- a reload, a relog or an update, nor when an honour comes back after a gap in its source, or a
 -- place lost and won back): the profile's lettered = { [mark] = true }, the honours told. A
 -- month's honour (the month's donors, the Oracle: keys that name only the place) is told for its
--- month (H.LetterMark): won again another month, it is a new award, with its letter.
+-- month (H.LetterMark): won again another month, it is a new award, with its letter. (1.2.3: so is
+-- the missionaries' crook, told for the calendar month he reaches its place in.)
 -- The profiles 1.2.0 kept are read once, at the account's first login under 1.2.1 (ns.db's
 -- honorLetters, set then: every profile kept before it is 1.2.0's, one made after it starts with
 -- nothing told): every letter it queued (its letters, read or not) and every honour its pick
@@ -1275,6 +1303,7 @@ function H.LetterFamily(key)
 	if key:find("^level%-race%-") then return "level" end
 	if key:find("^oracle%-") then return "oracle" end
 	if key == "guild-top-leader" then return "guild" end
+	if key:find("^missionary%-") then return "missionary" end
 	return nil
 end
 -- The letter's words: the King's, naming the honour and its title (never a real name).
@@ -1466,7 +1495,9 @@ function H.CloseLetter(wear)
 			local held = H.Holdings(ns.me, ns.ArenaProfile.MyGk())
 			local frameKey, titleKey
 			for _, h in ipairs(held) do
-				if h.key == cur.key then frameKey, titleKey = h.frame, h.title end
+				-- (1.2.3: a frame this version does not wear yet, its title alone: Honors.Choose refused
+				-- the pair, and "Wear it" did nothing.)
+				if h.key == cur.key then frameKey, titleKey = ns.Honors.FrameShipped(h) and h.frame or nil, h.title end
 			end
 			if frameKey or titleKey then ns.ArenaProfile.SetPick(frameKey or ns.ArenaProfile.Pick().frame, titleKey) end
 		end
