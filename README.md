@@ -249,7 +249,8 @@ Layer"** with his crown. One click (or `/oly hop`) and the addon does the asking
   saved: a later group asks first again, after a `/reload` the window asks once more, and
   `/oly layerauto off` ends it at once.
 - The invite is accepted for you when that player is one the addon can vouch for (a member of
-  your own guild, or a Lord or Captain the census confirms); anyone else's, and every invite
+  your own guild, the King, his Steward or Hands, or, once the author's signed list is on, a Lord
+  or Captain of `<Olympus>` it names; never a census rank); anyone else's, and every invite
   while Blizzard's gamepad UI is on, waits for your click in the game's own invite window. The
   game moves you to the layer, and the addon takes you out of the group as soon as it sees the
   move (or offers a **Leave group** button if it can't tell).
@@ -364,24 +365,26 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
-`<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
-reach his own guild alone, as guild decrees; every client refuses one he sends the whole army.
-Everyone else gets a local preview when they press the buttons. Since 1.0.0
-the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
-server's word) names them: on every other client, where only the census could, they count as
-Captains, and the Crown of `<Olympus>` there is the King himself (by his character's name) and
-the Hands his list or a Steward's own list names, on their word alone: while a list names them,
-a Hand who is one of its officers has its Royal decrees, Tabard inspections and [Lords] lines
-on every client. The King can't take back a Hand his Steward named: that Steward does, or the
-author, by removing him. The
-King's Steward (1.0.0, [below](#the-kings-steward-100)) sends the Crown's decrees for
-`<Olympus>` on every client, whatever his rank, like the King.
+For decrees *the Crown* means the King, his Steward and the officers of the main `<Olympus>`
+guild (a Hand sends them as one of its officers). Since 1.2.3 any other guild master's Royal
+decree and Tabard inspection reach his own guild alone, as guild decrees, and so do his and his
+officers' Calls to Arms and Musters (the same alarm, sound and marker, for his guild's members
+alone): no guild master has a decree for the whole army, and every client refuses one of
+theirs sent to it, a 1.2.2 officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
+officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
+names them. On every other client its Crown is the King himself (by his character's name) and
+the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its
+officers has all its decrees and [Lords] lines there. A census officer of `<Olympus>` counts as
+a Captain there and, since 1.2.3, calls nobody to arms (one report can name anyone) until the
+author's signed list counts. The King can't take back a Hand his Steward named: that Steward
+does, or the author, by removing him. The King's Steward (1.0.0,
+[below](#the-kings-steward-100)) sends the Crown's decrees for `<Olympus>` on every client,
+whatever his rank, like the King.
 
 **Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
 Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:
@@ -936,7 +939,9 @@ right-clicks it; on a case's page in The Watch the same choices are lines of the
   guild below him, never on its guild master; it goes over guild, and every client of the guild
   checks him in its own roster. A **High Councillor**, the **King** and the **author** act on
   anyone in Olympus whose rank is lower, on the Olympus channel; each of them names up to 10
-  **Olympus moderators**, who act anywhere but never on a guild master or anyone above, and whose
+  **Olympus moderators**, who act anywhere but never on the guild master of `<Olympus>` or anyone
+  above (since 1.2.3 another guild's master is no higher than his members for them: no guild
+  master stands above anyone at the level of the whole army), and whose
   list lapses 20 minutes after its namer stops repeating it, or at once when he loses his title.
   Stewards and Hands are protected but act only if named. Every client checks every action by the
   name the server stamps on it, never by anything the message says. Other guilds learn of a
@@ -2261,12 +2266,13 @@ few characters working together can still reach is said plainly further down
     runner-up of each guild's election also reports every 10 minutes (and answers census
     requests), so a Lord or officer who is the elected reporter is still verified. (An officer
     who is the only one of their guild with the addon is not.)
-  - **The Crown** (any guild master) needs two senders naming them, and one of the two may be
-    that Lord himself (see below). The officers of `<Olympus>` are of the Crown only on
-    `<Olympus>` members' clients, from their roster (1.0.0), and the Hands the King's list or a
-    Steward's own list names (their word, never a vote; the King can't take back a Steward's
-    Hand: that Steward does, or the author by removing him): everywhere else they count as
-    Captains, so outsiders' reports can't add one to the Crown.
+  - **A Lord** (any guild master; since 1.2.3 only `<Olympus>`'s are of the Crown) needs two
+    senders naming them, and one of the two may be that Lord himself (see below). The officers
+    of `<Olympus>` are of the Crown only on `<Olympus>` members' clients, from their roster
+    (1.0.0), and the Hands the King's list or a Steward's own list names (their word, never a
+    vote; the King can't take back a Steward's Hand: that Steward does, or the author by
+    removing him): everywhere else they count as Captains, so outsiders' reports can't add one
+    to the Crown.
   - **The centurions of the King's guild** (1.1.5) count only from the King's character or a
     councillor on the signed list (the sender the server stamps), the newest list heard, and end
     when its sender is neither any more; their border shows only on a player the server puts in
@@ -2356,34 +2362,38 @@ code.
 
 - **Two characters make a Lord.** Two characters, even two alts of one account logged in one
   after the other (a report counts as a vote for 30 minutes), make one of them the Lord of a
-  made-up Olympus guild on every client. He gets [Lords] lines, and Calls to Arms and Musters as
-  raid warnings on every screen (since 1.2.3 never a Royal decree or a Tabard inspection: a guild
-  master's reach his own guild alone), for as long as their reports keep coming (15 minutes
-  after the last one). Anyone who really founds such a guild can do
+  made-up Olympus guild on every client. He gets [Lords] lines (since 1.2.3 never a decree on
+  another guild's screen: a guild master's and his officers' Calls to Arms, Musters, Royal decrees
+  and Tabard inspections reach his own guild alone), for as long as their reports keep coming (15
+  minutes after the last one). Anyone who really founds such a guild can do
   the same.
 - **One report makes Captains.** One character's report names others the officers of a
-  made-up guild. On every other client each of them is a Captain, with [Captains] lines, Calls
-  to Arms and Musters. Six of them fill the army's flood guard (6 decrees a minute) with raid
-  warnings, and every other decree that a census rank vouches for is dropped for that minute.
+  made-up guild. On every other client each of them is a Captain, with [Captains] lines (since
+  1.2.3 no Call to Arms or Muster: another guild's officers call their own guild alone). Nor
+  do census officers of `<Olympus>` since 1.2.3 (one report where none of its members reports,
+  three against its own: below): until then they called the whole army on other guilds'
+  clients, and six of them filled its flood guard (6 decrees a minute) with raid warnings.
 - **A real guild: two contest it, three take it.** A real guild is pictured by its reporter and
   runner-up, two votes at most. Two outsiders who send another picture leave it contested: its
-  Lord and officers lose their rank on every other client ([Lords], [Captains], their decrees)
-  while the two keep voting. Three make theirs its picture: their Lord is of the Crown, the
-  real one nobody. Two alts who join a real guild with names that sort first in its election
-  become its reporter and runner-up, and name whom they like.
+  Lord and officers lose their rank on every other client ([Lords], [Captains]) while the two
+  keep voting. Three make theirs its picture: their man is its Lord, the real one nobody. Two
+  alts who join a real guild with names that sort first in its election become its reporter
+  and runner-up, and name whom they like.
 - **`<Olympus>`.** Its King counts by his character's name: no count of votes makes anyone else
   King or silences him. Three outsiders can still add one of their own to its officers in the
   census. Before 1.0.0 that made him of the Crown on every client outside `<Olympus>`; since
   1.0.0 the officers of `<Olympus>` are of the Crown on its own members' clients only (their
-  roster), and a census officer of `<Olympus>` is a Captain everywhere else, unless the King's
-  list or a Steward's own list names him a Hand (their word, never a vote).
+  roster), and a census officer of `<Olympus>` is a Captain everywhere else (since 1.2.3 one who
+  calls nobody to arms), unless the King's list or a Steward's own list names him a Hand (their
+  word, never a vote).
 - **Numbers.** A guild's size and online count are not part of the picture. One outsider who
   copies a guild's leader and officers with other numbers shows his numbers on every screen
   until its reporter's next report (800 members as 1, the King offline). Each made-up guild
   adds up to 1,000 soldiers to every client's army total for a day, and one character can
   start a new one every 15 minutes.
-- **Trust elsewhere.** A made-up Captain who answers a layer-hop ask is a helper the addon
-  vouches for, so his party invite is accepted for the player (never with the gamepad UI). His
+- **Trust elsewhere.** A made-up Captain who answers a layer-hop ask is no helper the addon
+  vouches for (since 1.2.1 never on a census rank, and since 1.2.3 never another guild's officer,
+  signed or not): his party invite waits for the player's click. His
   report on a Royal Inspection can put an innocent player on the King's untabarded list, which
   the King's share sends to the army. A made-up Captain of a real guild (above: three
   outsiders take its picture) can ask the Treasurer's addon for that guild's dues list (1.1):

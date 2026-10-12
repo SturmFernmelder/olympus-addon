@@ -2,7 +2,10 @@ local ADDON, ns = ...
 local L = ns.L
 L.OFFICER_MUSTER_TITLE = "Officer musters"
 L.OFFICER_MUSTER_BACK = "< Back to the Realm"
-L.OFFICER_MUSTER_HINT = "The King, a Steward, a Hand or a verified Lord may post a title and zone for 20 minutes. Only this faction and linked realm group see it; unknown or unlinked realms are not combined. No coordinates, markers or invitations are sent."
+L.OFFICER_MUSTER_HINT = "The King, a Steward, a Hand or the master of <Olympus> may post a title and zone for 20 minutes for the whole army; another guild's master posts for his own guild alone. Only this faction and linked realm group see it; unknown or unlinked realms are not combined. No coordinates, markers or invitations are sent."
+-- (1.2.3) Another guild's master's musters: his own guild alone.
+L.OFFICER_MUSTER_GUILD_ONLY = "Your musters reach <%s> alone: the whole army's are the Crown's."
+L.OFFICER_MUSTER_BY_GUILD = "Posted by %s, for <%s> alone"
 L.OFFICER_MUSTER_COUNTS_NOTE = "Observed sharing players only: fresh existing location announcements, including you only while location sharing is on. These sampled observations are not a census or confirmed attendance."
 L.OFFICER_MUSTER_DRAFT = "Muster title"
 L.OFFICER_MUSTER_ZONE = "Zone: %s"
@@ -21,7 +24,9 @@ L.OFFICER_MUSTER_END_REPLACED = "replaced by its poster"
 if GetLocale and GetLocale() == "ptBR" then
 	L.OFFICER_MUSTER_TITLE = "Concentrações dos oficiais"
 	L.OFFICER_MUSTER_BACK = "< Voltar ao Reino"
-	L.OFFICER_MUSTER_HINT = "O Rei, um Steward, uma Mão ou um Lord verificado pode publicar título e zona por 20 minutos. Só esta facção e o grupo de reinos vinculados recebem; reinos desconhecidos ou não vinculados não são combinados. Não envia coordenadas, marcadores nem convites."
+	L.OFFICER_MUSTER_HINT = "O Rei, um Steward, uma Mão ou o líder da <Olympus> pode publicar título e zona por 20 minutos pra todo o exército; o líder de outra guilda publica só pra própria guilda. Só esta facção e o grupo de reinos vinculados recebem; reinos desconhecidos ou não vinculados não são combinados. Não envia coordenadas, marcadores nem convites."
+	L.OFFICER_MUSTER_GUILD_ONLY = "Suas concentrações chegam só à <%s>: as de todo o exército são da Coroa."
+	L.OFFICER_MUSTER_BY_GUILD = "Publicada por %s, só pra <%s>"
 	L.OFFICER_MUSTER_COUNTS_NOTE = "Somente jogadores observados que compartilham: anúncios de localização existentes e recentes, incluindo você só enquanto compartilha. Essa amostra não é um censo nem presença confirmada."
 	L.OFFICER_MUSTER_DRAFT = "Título da concentração"
 	L.OFFICER_MUSTER_ZONE = "Zona: %s"

@@ -210,7 +210,8 @@ Layer"** with his crown. One click (or `/oly hop`) and the addon does the asking
   saved: a later group asks first again, after a `/reload` the window asks once more, and
   `/oly layerauto off` ends it at once.
 - The invite is accepted for you when that player is one the addon can vouch for (a member of
-  your own guild, or a Lord or Captain the census confirms); anyone else's, and every invite
+  your own guild, the King, his Steward or Hands, or, once the author's signed list is on, a Lord
+  or Captain of `<Olympus>` it names; never a census rank); anyone else's, and every invite
   while Blizzard's gamepad UI is on, waits for your click in the game's own invite window. The
   game moves you to the layer, and the addon takes you out of the group as soon as it sees the
   move (or offers a **Leave group** button if it can't tell).
@@ -325,24 +326,25 @@ from it.
 ### Decrees
 | Decree | Who | What happens |
 |---|---|---|
-| **Call to arms!** | Captains | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
-| **Muster here** | Captains | Rally point: horn marker on the map for 30 min, soft alert |
+| **Call to arms!** | The Crown | Alarm for every Olympus guild: raid warning, sound, red marker at the caller's position for 5 min |
+| **Muster here** | The Crown | Rally point: horn marker on the map for 30 min, soft alert |
 | **Royal decree** | The Crown, the High Council | A proclamation with free text, as a raid warning to the whole army |
 | **Tabard inspection** | The Crown, the High Council | Announces an inspection at the caller's position: wear your colors |
 
-For decrees *the Crown* means the King, his Steward and Hands and the officers of the main
-`<Olympus>` guild. Since 1.2.3 any other guild master's Royal decree and Tabard inspection
-reach his own guild alone, as guild decrees; every client refuses one he sends the whole army.
-Everyone else gets a local preview when they press the buttons. Since 1.0.0
-the officers of `<Olympus>` are of the Crown for `<Olympus>`'s own members, whose roster (the
-server's word) names them: on every other client, where only the census could, they count as
-Captains, and the Crown of `<Olympus>` there is the King himself (by his character's name) and
-the Hands his list or a Steward's own list names, on their word alone: while a list names them,
-a Hand who is one of its officers has its Royal decrees, Tabard inspections and [Lords] lines
-on every client. The King can't take back a Hand his Steward named: that Steward does, or the
-author, by removing him. The
-King's Steward (1.0.0, below) sends the Crown's decrees for `<Olympus>` on every client,
-whatever his rank, like the King.
+For decrees *the Crown* means the King, his Steward and the officers of the main `<Olympus>`
+guild (a Hand sends them as one of its officers). Since 1.2.3 any other guild master's Royal
+decree and Tabard inspection reach his own guild alone, as guild decrees, and so do his and his
+officers' Calls to Arms and Musters (the same alarm, sound and marker, for his guild's members
+alone): no guild master has a decree for the whole army, and every client refuses one of
+theirs sent to it, a 1.2.2 officer's too. Everyone else gets a local preview when they press the buttons. Since 1.0.0 the
+officers of `<Olympus>` are of the Crown for its own members, whose roster (the server's word)
+names them. On every other client its Crown is the King himself (by his character's name) and
+the Hands his list or a Steward's own list names, on their word alone: a Hand who is one of its
+officers has all its decrees and [Lords] lines there. A census officer of `<Olympus>` counts as
+a Captain there and, since 1.2.3, calls nobody to arms (one report can name anyone) until the
+author's signed list counts. The King can't take back a Hand his Steward named: that Steward
+does, or the author, by removing him. The King's Steward (1.0.0, below) sends the Crown's
+decrees for `<Olympus>` on every client, whatever his rank, like the King.
 
 **Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
 Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:

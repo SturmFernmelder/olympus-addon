@@ -105,8 +105,8 @@ end
 
 function Channels.LevelOf(guild, rankIndex)
 	if not ns.IsFederation(guild) then return 0 end
-	-- To keep [Lords] for guild masters only, use rankIndex == 0 here instead of the Crown.
-	if rankIndex and ns.IsCrownRank(guild, rankIndex) then return 3 end
+	-- To keep [Lords] for guild masters only, use rankIndex == 0 here instead of the Lords.
+	if rankIndex and ns.IsLordRank(guild, rankIndex) then return 3 end
 	if rankIndex and rankIndex <= ns.CAPTAIN_RANK then return 2 end
 	return 1
 end

@@ -1402,7 +1402,7 @@ function ns.Holds(query, ...)
 	return false
 end
 
--- The Crown: guild masters of any Olympus guild, and the officers of the King's guild. Those
+-- The Lords: guild masters of any Olympus guild, and the officers of the King's guild. Those
 -- officers only on the clients of the King's guild's own members (1.0.0), where their rank is
 -- the server's word (our roster: Data.KnownRank and Channels.VerifiedLevel read our own guild
 -- from it, never from the census). Anywhere else the census alone could name them, and three
@@ -1411,13 +1411,27 @@ end
 -- the Hands his list or a Steward's own names (King.IsHandName: their word, never a vote), who
 -- speak for his guild with his Crown there (Decree.lua, Channels.VerifiedLevel) besides his
 -- tools (King.Authorized).
--- (1.2.3) The Royal decree and the Tabard inspection for the whole army take this for the King's
--- guild alone: another guild's master sends his to his own guild (Decree.Scope). [Lords] and the
--- King's writs to his Lords still count every guild master here.
-function ns.IsCrownRank(guild, rankIndex)
+-- (1.2.3) Their seats, not powers: [Lords] (Channels.LevelOf), the King's writs to his Lords
+-- (Acts.lua) and the census's two reports for them (Data.KnownRank). This was ns.IsCrownRank, and
+-- counted every guild master as the Crown; a feature that gives the Crown a power at the level of
+-- the whole army asks ns.IsCrownRank (below), the King's guild's alone.
+function ns.IsLordRank(guild, rankIndex)
 	if not guild or not rankIndex then return false end
 	if rankIndex == 0 then return true end
 	return ns.IsKingGuild(guild) and rankIndex <= ns.CAPTAIN_RANK and ns.IsKingGuild(GetGuildInfo("player"))
+end
+
+function ns.IsLord()
+	local guild, _, rankIndex = GetGuildInfo("player")
+	return ns.IsFederation(guild) and ns.IsLordRank(guild, rankIndex)
+end
+
+-- The Crown's own rank (1.2.3, Daniel: a guild master has nothing at the level of the whole army):
+-- the Lords of the King's guild alone (its master, and its officers on its own members' clients).
+-- Another guild's master is a Lord, never the Crown. The Royal decree and the Tabard inspection
+-- for the whole army ask this (Decree.lua); so may any later feature.
+function ns.IsCrownRank(guild, rankIndex)
+	return ns.IsKingGuild(guild) and ns.IsLordRank(guild, rankIndex)
 end
 
 function ns.IsCrown()

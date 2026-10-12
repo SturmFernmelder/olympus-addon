@@ -622,21 +622,24 @@ function Hop.SendAsk()
 end
 
 -- A player the addon can vouch for, and so may act for without a click: a guildmate (our roster),
--- the King's pinned character, his Steward and Hands, or a Lord or Captain of the author's signed
--- manifest (once signed enforcement is on). Their invite is accepted for the player, and "Always
--- invite" or "For Olympus!" invites them; anyone else's invite is left to the game's invite window
--- (one click), and anyone else's request to ours, so nobody pulls a player into a group just by
--- answering an ask read on the channel. 1.2.1: never a census rank: two cooperating characters can
--- forge an "officer" in one guild's reports, and the census rule still holds while enforcement is
--- off. A census officer of another guild still hops, by a click. (A layer announcement is the
--- sender's own word: it proves nothing here.)
+-- the King's pinned character, his Steward and Hands, or a Lord or Captain of the King's guild in
+-- the author's signed manifest (once signed enforcement is on). Their invite is accepted for the
+-- player, and "Always invite" or "For Olympus!" invites them; anyone else's invite is left to the
+-- game's invite window (one click), and anyone else's request to ours, so nobody pulls a player
+-- into a group just by answering an ask read on the channel. 1.2.1: never a census rank: two
+-- cooperating characters can forge an "officer" in one guild's reports, and the census rule still
+-- holds while enforcement is off. A census officer of another guild still hops, by a click.
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army) nor another guild's
+-- signed Lord or Captain: under enforcement any guild's would have been trusted by every Olympus
+-- client; he still helps with a hop, by the player's click. (A layer announcement is the sender's
+-- own word: it proves nothing here.)
 function Hop.Trusted(name)
 	name = ns.FullName(name)
 	if ns.Roster.RankOf(name) then return true end
 	if ns.IsKingCharacter(name) or (ns.King and (ns.King.IsStewardName(name) or ns.King.IsHandName(name))) then return true end
 	if not (ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced()) then return false end
 	local guild, rank = ns.Authority.Role(name)
-	return (guild and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild))) and true or false
+	return (guild and ns.IsKingGuild(guild) and rank <= ns.CAPTAIN_RANK and not (ns.Data.NetOff and ns.Data.NetOff(guild))) and true or false
 end
 
 function Hop.HandleOffer(dist, sender, text)

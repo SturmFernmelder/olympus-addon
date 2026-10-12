@@ -1,8 +1,11 @@
 local ns, test, eq, H = ...
 local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]officer%-muster%.lua$")) or "./"
 
+-- (1.2.3) w.kingGuild: the King's guild. The world's guild is it unless a test says otherwise:
+-- only the King's guild's master (with the King, his Steward and his Hands) posts for the whole
+-- army; another guild's master posts for his own guild alone, over GUILD.
 local function World(fn)
-	local w = { clock = 1800000000, now = 1000, guild = "Olympus Ember", map = 1429, member = true, logged = true,
+	local w = { clock = 1800000000, now = 1000, guild = "Olympus Ember", kingGuild = "Olympus Ember", map = 1429, member = true, logged = true,
 		roles = { ["Harbor Lord-Realm"] = "lord" }, sources = {}, links = {}, jobs = {}, handlers = {}, events = {}, hidden = {}, barred = {} }
 	local c = setmetatable({ me = "Harbor Lord-Realm", realm = "Realm", group = "Realm", faction = "Alliance", db = {},
 		rdb = { guilds = {} }, L = setmetatable({}, { __index = ns.L }), RealmPages = {} }, { __index = ns })
@@ -15,7 +18,7 @@ local function World(fn)
 	c.IsMember = function() return w.member end
 	c.IsFederation = function(guild) return type(guild) == "string" and guild:find("Olympus", 1, true) ~= nil end
 	c.IsKingCharacter = function(name) return w.roles[c.FullName(name)] == "king" end
-	c.IsKingGuild = function() return false end
+	c.IsKingGuild = function(guild) return guild ~= nil and guild == w.kingGuild end
 	c.ViewAs = { Previewing = function() return w.preview == true end }
 	c.King = { IsKing = function() return w.roles[c.me] == "king" end,
 		SharingLocation = function() return w.crownSharing == true end,
@@ -128,7 +131,7 @@ test("Officer muster: exact faction and linked realm group, logged channel, vali
 		eq(select(2, w.receive(by, w.word(by, 1, "Gather", 1429, w.clock, "Other"))), "scope")
 		eq(select(2, w.receive(by, w.word(by, 1, "Gather", 1429, w.clock, "Realm", "H"))), "scope")
 		eq(select(2, w.receive("River Lord-Unlinked", w.word("River Lord-Unlinked", 1))), "realm")
-		eq(select(2, w.receive(by, w.word(by, 1), "GUILD")), "shape")
+		eq(select(2, w.receive(by, w.word(by, 1), "WHISPER")), "shape")
 		w.logged = false; eq(select(2, w.receive(by, w.word(by, 1))), "unlogged"); w.logged = true
 		for _, title in ipairs({ "bad|title", "bad~title", "", string.rep("x", M.TITLE_MAX + 1) }) do
 			eq(select(2, w.receive(by, w.word(by, 1, title))), "shape")
@@ -298,6 +301,88 @@ test("Officer muster: actual Realm row renderer edits and clicks in mouse and ga
 			end)
 		end)
 	end
+end)
+
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) The master of any
+-- guild posted his muster on the channel, and every client whose roster or signed list named him
+-- rank 0 took it: today his own guild's alone (other guilds' clients refuse the census), and the
+-- whole army's once the author's signed enforcement is on, where every guild master in the signed
+-- list would have reached every Olympus client.
+test("Officer muster (1.2.3): another guild's master posts for his own guild alone, over GUILD, and is told so; on the channel nobody takes his, signed or not", function()
+	World(function(w, c)
+		w.kingGuild = "Olympus"
+		local M = c.OfficerMuster
+		local can, guild, dist = M.CanPost()
+		eq(can, true); eq(guild, "Olympus Ember"); eq(dist, "GUILD", "his guild alone")
+		eq(M.Post("Guild patrol", 1429), true)
+		local job = w.jobs[1]
+		eq(job.dist, "GUILD", "over GUILD, never the channel"); eq(job.logged, true); eq(job.opts.guard(), true)
+		eq(M.List()[1].dist, "GUILD")
+		-- His page says whom it reaches, and his row whose it is.
+		local texts = {}
+		for _, line in ipairs(M.Lines()) do texts[#texts + 1] = tostring(line.text) end
+		local all = table.concat(texts, "\n")
+		assert(all:find(c.L.OFFICER_MUSTER_GUILD_ONLY:format("Olympus Ember"), 1, true), all)
+		assert(all:find(c.L.OFFICER_MUSTER_BY_GUILD:format("Harbor Lord", "Olympus Ember"), 1, true), all)
+		-- Its repeat and its ending go over GUILD too.
+		w.advance(M.REPEAT); M.Tick()
+		eq(w.jobs[#w.jobs].dist, "GUILD", "its repeat")
+		eq(M.Withdraw(), true); eq(w.jobs[#w.jobs].dist, "GUILD", "its ending")
+		-- Another guild's master on the channel: refused, whatever source names him rank 0 (the
+		-- signed list once enforcement is on, our roster, the pinned King's guild's).
+		for _, source in ipairs({ "signed", "roster", "pinned" }) do
+			local by = "River " .. source .. "-Realm"
+			w.sources[by] = source
+			eq(select(2, w.receive(by, w.word(by, 1, "For the army"))), "role", source)
+		end
+		eq(#M.List(), 0, "none of them")
+		-- The Crown still posts for the whole army: the King, his Steward and Hands by name, and the
+		-- King's guild's own master.
+		for _, role in ipairs({ "king", "steward", "hand" }) do
+			local by = "Crown " .. role .. "-Realm"
+			w.roles[by] = role
+			eq(w.receive(by, w.word(by, 1)), true, role)
+		end
+		local by = "Throne Lord-Realm"
+		w.roles[by] = "lord"
+		eq(w.receive(by, ("OM~1~P~A~Realm~%d~%d~Olympus~1429~For the army"):format(w.clock, w.clock)), true, "the King's guild's master")
+		eq(#M.List(), 4)
+	end)
+end)
+
+test("Officer muster (1.2.3): over GUILD only our own guild's master naming our guild; an ending counts on its call's distribution", function()
+	World(function(w, c)
+		w.kingGuild = "Olympus"
+		local M, by = c.OfficerMuster, "Ember Lord-Realm"
+		-- Our guild's master (our roster): his guild muster.
+		eq(w.receive(by, w.word(by, 1, "Guild gathering"), "GUILD"), true)
+		local row = M.List()[1]
+		eq(row.dist, "GUILD"); eq(row.guild, "Olympus Ember")
+		-- Its ending on the channel is not its ending; over GUILD it is.
+		local ending = w.endWord(row.seq, row.at)
+		eq(select(2, w.receive(by, ending)), "unknown", "not on another distribution")
+		eq(#M.List(), 1)
+		eq(w.receive(by, ending, "GUILD"), true); eq(#M.List(), 0)
+		-- Nobody else over GUILD: an officer, a master as only the census or the signed list has him,
+		-- one naming another guild.
+		local captain = "Ember Captain-Realm"
+		w.roles[captain] = "captain"
+		eq(select(2, w.receive(captain, w.word(captain, 1), "GUILD")), "role", "an officer")
+		for _, source in ipairs({ "census", "signed" }) do
+			local other = "Ember " .. source .. "-Realm"
+			w.sources[other] = source
+			eq(select(2, w.receive(other, w.word(other, 1), "GUILD")), "role", source)
+		end
+		local stranger = "Willow Lord-Realm"
+		w.roles[stranger] = "lord"
+		eq(select(2, w.receive(stranger, ("OM~1~P~A~Realm~%d~%d~Olympus Willow~1429~Gather"):format(w.clock, w.clock), "GUILD")), "role",
+			"another guild's, over our GUILD")
+		-- A guild muster ends quietly once its poster is no longer our master.
+		w.advance(M.GAP)
+		eq(w.receive(by, w.word(by, w.clock, "Again"), "GUILD"), true)
+		w.roles[by] = "captain"; c.Fire("DATA_CHANGED")
+		eq(#M.List(), 0); eq(#c.Chronicle.Entries(), 1, "one ending, the withdrawal's")
+	end)
 end)
 
 test("Officer muster: English and pt-BR text preserve placeholders", function()

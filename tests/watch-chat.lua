@@ -934,7 +934,9 @@ test("watch: chat moderation: Olympus moderators: a councillor's list counts whi
 		eq(#w.Sent("MD~1~O~"), 1)
 		eq(w.As(D, D.WC.IsMod, Mo.name), true)
 		eq(w.As(Mo, Mo.WC.CanModerate, B.name), "O", "anywhere")
-		eq(w.As(Mo, Mo.WC.CanModerate, G.name), nil, "never on a guild master")
+		-- (1.2.3) On another guild's master too: no guild master stands above the Olympus moderators
+		-- now but the King's guild's (tested below).
+		eq(w.As(Mo, Mo.WC.CanModerate, G.name), "O", "on another guild's master")
 		eq(w.As(Mo, Mo.WC.CanModerate, Co.name), nil, "never on his namer")
 		-- A namer never changes another's list: Y1's word for Mo's list is not a namer's.
 		local _, why = w.Inject("CHANNEL", Y1.name, D, ("MD~1~O~%d~1~1~"):format(w.epoch + 5))
@@ -950,6 +952,54 @@ test("watch: chat moderation: Olympus moderators: a councillor's list counts whi
 		w.council[Fold(Co.name)] = nil
 		eq(w.As(D, D.WC.IsMod, Mo.name), false, "his title gone")
 	end)
+end)
+
+-- (1.2.3, Daniel: a guild master has nothing at the level of the whole army.) Every guild master
+-- the client could name, from its roster, the signed list or the census, stood with the Olympus
+-- moderators (WatchChat.ProtectLevel 3): no moderator could delete his lines or time him out
+-- anywhere, and two cooperating characters could make one of theirs the census guild master of an
+-- invented guild to shield him. Now only the King's guild's master stands there.
+test("watch: chat moderation: Olympus moderators act on another guild's master (our roster's, signed or a census one) since 1.2.3, never on the King's guild's master; his own guild's Watchers still never act on him", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		w.council[Fold("Councillor-Realm")] = true
+		local Co = w.Client("Councillor", Y, 3)
+		local Mo = w.Client("Modder", Y, 3)
+		local KM = w.Client("Throne Master", "Olympus", 0)
+		local KO = w.Client("Throne Knight", "Olympus", 3)
+		local Fake = w.Client("Madeup Master", "Olympus Madeup", 0)
+		w.census["Olympus Madeup"] = true -- (its rank is the census's word alone)
+		assert(w.As(Co, Co.WC.SetMod, Mo.name, true))
+		w.epoch = w.epoch + 3
+		w.Run()
+		eq(w.As(Mo, Mo.WC.IsMod, Mo.name), true)
+		local LEVEL = Mo.WC.LEVEL
+		-- Another guild's master: protected as his members are, on every client.
+		for _, cl in ipairs({ Mo, D, Y1, KO }) do
+			eq(w.As(cl, cl.WC.ProtectLevel, G.name), 0, "<" .. G.guild .. ">'s master on " .. cl.short)
+			eq(w.As(cl, cl.WC.ProtectLevel, Fake.name), 0, "a census guild master on " .. cl.short)
+		end
+		eq(w.As(G, G.WC.ProtectLevel, G.name), 0, "on his own client too")
+		eq(w.As(Mo, Mo.WC.CanModerate, G.name), "O", "a moderator acts on him")
+		eq(w.As(Mo, Mo.WC.CanModerate, Fake.name), "O", "and on a census guild master of an invented guild")
+		-- The King's guild's master: as before, on its own members' clients (our roster) and on
+		-- every other client.
+		eq(w.As(KO, KO.WC.ProtectLevel, KM.name), LEVEL.mod, "on <Olympus>'s own client")
+		eq(w.As(Mo, Mo.WC.ProtectLevel, KM.name), LEVEL.mod, "on another guild's client")
+		eq(w.As(Mo, Mo.WC.CanModerate, KM.name), nil, "a moderator never acts on him")
+		eq(w.As(Co, Co.WC.CanModerate, KM.name), "O", "a councillor does, as before")
+		-- His own guild's Watchers never act on another guild's master: its rank order.
+		eq(w.As(A, A.WC.CanModerate, G.name), nil, "a Watcher on the guild master")
+	end)
+	-- The moderators' list says so (English and pt-BR).
+	assert(ns.L.WATCHCHAT_MODS_TIP:find("another guild's master included", 1, true), ns.L.WATCHCHAT_MODS_TIP)
+	local pt = { L = setmetatable({}, { __index = ns.L }) }
+	local savedLocale = GetLocale
+	GetLocale = function() return "ptBR" end
+	local ok, err = pcall(function() assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", pt) end)
+	GetLocale = savedLocale
+	if not ok then error(err, 0) end
+	assert(rawget(pt.L, "WATCHCHAT_MODS_TIP"):find("no líder de outra guilda também", 1, true), rawget(pt.L, "WATCHCHAT_MODS_TIP"))
 end)
 
 ---------------------------------------------------------------------------
