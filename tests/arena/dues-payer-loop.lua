@@ -223,3 +223,24 @@ test("Dues payer loop: the same short name on another linked realm cannot retrie
 	assert(book.duesPayerProofs[p.ns.Dues.Week()][p.name:lower()])
 	eq(book.duesPayerProofs[p.ns.Dues.Week()][twin.name:lower()], nil)
 end)
+
+test("Dues payer loop: real Privacy choice is per character, local only, never pending or an automatic popup", function()
+	local w, p, t = Setup()
+	local C, key = p.ns.Consent, "dues-reminder"
+	eq(w:As(p, C.Answer, key), true, "local reminder default, not a new sharing default")
+	local item
+	for _, i in ipairs(w:As(p, C.Items)) do if i.key == key then item = i end end
+	assert(item); eq(item.perCharacter, true)
+	local pending, due = #w:As(p, C.Pending), w:As(p, C.NoticeDue)
+	for _, i in ipairs(w:As(p, C.Pending)) do eq(i.key == key, false) end
+	local calls, sends = #p.win.calls, #w.sent
+	assert(w:As(p, C.Choose, key, false)); eq(w:As(p, C.Answer, key), false)
+	eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), false)
+	assert(w:As(p, C.Choose, key, true)); eq(w:As(p, C.Answer, key), true)
+	eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), false, "reenabling does not reopen this reset's reminder")
+	eq(#w:As(p, C.Pending), pending); eq(w:As(p, C.NoticeDue), due)
+	eq(w:As(p, C.Frame), nil); eq(#p.win.calls, calls); eq(#w.sent, sends)
+	assert(w:As(p, C.Choose, key, false)); w:Logout(p); w:Login(p); p.ns.splitNames = true
+	eq(w:As(p, p.ns.Consent.Answer, key), false, "actual relog keeps the character's local opt-out")
+	for _, i in ipairs(w:As(t, t.ns.Consent.Items)) do eq(i.key == key, false, "keeper has no payer reminder line") end
+end)

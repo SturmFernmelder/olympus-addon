@@ -1920,6 +1920,18 @@ function Dues.PayerReminder(kind)
 	return true
 end
 
+-- Dues loads before Consent in the TOC. Register after all core modules exist, on Privacy's
+-- existing page. This local reminder preference is never an unanswered sharing permission.
+ns.On("INIT", function()
+	local C = ns.Consent
+	if not C or not C.Register then return end
+	C.Register({ key = "dues-reminder", label = "DUES_PAYER_PRIVACY_LABEL", text = "DUES_PAYER_PRIVACY_TEXT",
+		shown = function() return Dues.Pays() == true end, perCharacter = true,
+		get = function() local s = PayerStore(); return s ~= nil and s.reminderOff ~= true end,
+		set = function(on) Dues.DismissPayerReminder(not on) end,
+		pending = function() return false end })
+end)
+
 local function Shown(frame) return type(frame) == "table" and frame.IsShown and frame:IsShown() and true or false end
 
 -- The mail being written: the recipient, the note and the gold, sent as money (never cash on

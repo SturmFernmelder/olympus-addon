@@ -41,6 +41,8 @@ L.DUES_PAYER_REMINDER = "This week's contribution is %s. The Treasury's Send due
 L.DUES_PAYER_REMIND_ON = "Local contribution reminder: on (click to disable)"
 L.DUES_PAYER_REMIND_OFF = "Local contribution reminder: off (click to enable)"
 L.DUES_PAYER_DISMISS = "Dismiss this reset's local contribution reminder"
+L.DUES_PAYER_PRIVACY_LABEL = "Local contribution reminder"
+L.DUES_PAYER_PRIVACY_TEXT = "Show a local reminder once per weekly reset while no contribution proof is held. This switch only controls the reminder for this character. It never opens, fills or sends mail, accepts a trade, or contacts a Captain. You still use the Send dues button and confirm the game's Send or Trade yourself. Turning it back on dismisses this reset; the next reset may remind you."
 if GetLocale and GetLocale() == "ptBR" then
 	L.BRIEF_TITLE = "Resumo público desta semana"
 	L.BRIEF_NOTE = "Observações locais de fatos já públicos. Relatórios ausentes são desconhecidos, não zero; comparações exigem as mesmas guildas conhecidas. Nada aqui envia dados nem muda o compartilhamento."
@@ -83,4 +85,6 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.DUES_PAYER_REMIND_ON = "Lembrete local de contribuição: ligado (clique para desligar)"
 	L.DUES_PAYER_REMIND_OFF = "Lembrete local de contribuição: desligado (clique para ligar)"
 	L.DUES_PAYER_DISMISS = "Dispensar o lembrete local de contribuição desta semana"
+	L.DUES_PAYER_PRIVACY_LABEL = "Lembrete local de contribuição"
+	L.DUES_PAYER_PRIVACY_TEXT = "Mostrar um lembrete local uma vez por semana enquanto não houver prova de contribuição. Esta opção controla só o lembrete deste personagem. Nunca abre, preenche ou envia correio, aceita uma troca ou contata um Capitão. Você ainda usa o botão Enviar contribuição e confirma Enviar ou Trocar no jogo. Ao religar, o lembrete fica dispensado nesta semana; a próxima semana poderá lembrá-lo."
 end
