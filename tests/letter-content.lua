@@ -15,6 +15,25 @@ local function Language(locale)
 	return cns
 end
 
+test("1.2.4 letter content: both languages describe verified records and retain privacy, free-game and live-test limits", function()
+	local order
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = Language(locale)
+		local title, body = cns.Letters.Text("1.2.4")
+		assert(title and #body > 3500, locale .. ": detailed correction letter")
+		assert(body:find("1.2.4", 1, true), locale .. ": consolidated version")
+		local raw, marks = cns.L.LETTER_1_2_4, {}
+		for mark in raw:gmatch("{(%a+)}") do marks[#marks + 1] = mark end
+		local sequence = table.concat(marks, ",")
+		if order then eq(sequence, order, "same sections and icon order") else order = sequence end
+		assert(not body:find("{[%a]+}"), locale .. ": all icons have a supported text fallback")
+		for _, phrase in ipairs(locale == "enUS" and { "unknown keys", "not server-certified proof", "no bets", "Offline tests cannot", "not advertised as finished" }
+			or { "chaves desconhecidas", "não são prova certificada pelo servidor", "sem apostas", "Testes offline não", "não são anunciadas como rankings prontos" }) do
+			assert(raw:find(phrase, 1, true), locale .. ": " .. phrase)
+		end
+	end
+end)
+
 test("Version letter content: both languages explain the guild, 99 soldiers, Church and free games with supported role markers", function()
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local cns = Language(locale)
