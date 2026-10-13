@@ -262,7 +262,8 @@ test("1.1.6 Church: the chain's limits: ten per parent, five levels, three hundr
 	local w, c = Cast()
 	for i = 1, 10 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
 	eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Eleven"), false, "the eleventh")
-	eq(w:Printed(c.a1), ns.L.CHURCH_NO_QUOTA)
+	-- (1.2.4: the namer is told his own count and what frees a place, not "that person".)
+	eq(w:Printed(c.a1), ns.L.CHURCH_NO_QUOTA_SELF:format(10, 10))
 	-- Five levels below the Apostle, not six.
 	local parent = c.a2
 	local names = { "Lev One", "Lev Two", "Lev Three", "Lev Four", "Lev Five" }
