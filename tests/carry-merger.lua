@@ -294,3 +294,37 @@ test("carry-merger: unanswered drafts are bounded and expired pending policies r
 	w:As(dest, function() eq(#dest.ns.CarryMerger.Policies(), 1, "receiving new packets prunes expired pending slots too") end)
 	Errors(w)
 end)
+
+test("carry-merger: old unsigned private notes are visibly present witness quotes, never forged old authors or dates", function()
+	local w, king, member, dest, source = Setup()
+	source.ns.Loot = { Notes = function() return { { key = "old-note", n = { writer = "Previous Officer-Emberfall", to = member.name,
+		t = w.clock - 900, text = "OLDER UNSIGNED QUOTE" } } } end }
+	local id = Approved(w, king, dest, source); Consent(w, member, dest, id)
+	w:As(dest, function()
+		local all = dest.ns.CarryMerger.Archives(); eq(#all, 1)
+		local r = dest.ns.CarryHistory.Parse(all[1].text); eq(r.kind, "W"); eq(r.issuer, source.name); eq(r.fields.originalWriter, "Previous Officer-Emberfall")
+		assert(r.at > tonumber(r.fields.originalAt)); eq(r.fields.scope, "retained-copy-observed-now")
+		local text = {}; for _, line in ipairs(dest.ns.CarryMerger.Lines()) do text[#text + 1] = line.text end
+		text = table.concat(text, "\n"); assert(text:find("Witness quote only", 1, true)); assert(text:find("Previous Officer", 1, true)); assert(text:find(date("%Y-%m-%d %H:%M", r.at), 1, true))
+	end); Errors(w)
+end)
+
+test("carry-merger: reloading transport can resume already-consented exact pages with visible progress and no new authority", function()
+	local w, king, member, dest, source = Setup(); Notes(w, source, member)
+	local id = Approved(w, king, dest, source)
+	w:As(dest, function() assert(dest.ns.CarryMerger.RequestConsent(id, member.name)) end); w:Run(3)
+	w:Results(source, { 0, 0, 2 })
+	w:As(member, function() assert(member.ns.CarryMerger.Consent(id)); assert(member.ns.CarryMerger.Consent(id, member.question)) end); w:Run(15)
+	w:As(dest, function() eq(#dest.ns.CarryMerger.Archives(), 0) end)
+	-- A reload clears only the transport jobs/assemblers, preserving real saved mandates,
+	-- direct signatures, subject consents and imported cursor rows. No synthetic consent.
+	for _, timer in ipairs(w.timers) do if timer.c == source or timer.c == dest then timer.Cancel() end end
+	for _, c in ipairs({ source, dest }) do w:As(c, function() assert(loadfile(ROOT .. "Olympus/CarryMerger.lua"))("Olympus", c.ns) end) end
+	w:As(dest, function()
+		local resume
+		for _, line in ipairs(dest.ns.CarryMerger.Lines()) do if line.text:find("already-consented frozen archive", 1, true) then resume = line.onClick end end
+		assert(resume, "partial kept count exposes an explicit retry click"); assert(dest.ns.CarryMerger.Resume(id, member.name))
+	end); w:Run(20)
+	w:As(dest, function() eq(#dest.ns.CarryMerger.Archives(), 1); assert(dest.ns.CarryMerger.Resume(id, member.name)) end); w:Run(10)
+	w:As(dest, function() eq(#dest.ns.CarryMerger.Archives(), 1, "same frozen cursor stays idempotent") end); Errors(w)
+end)

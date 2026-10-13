@@ -96,7 +96,10 @@ ValidPolicy = function(p, id)
 	for _, request in pairs(p.requests) do if type(request) ~= "table" or not Whole(request.at) or not Hex(request.nonce, 16) then return false end end
 	if p.ownRequest and (type(p.ownRequest) ~= "table" or not Whole(p.ownRequest.at) or not Hex(p.ownRequest.nonce, 16)) then return false end
 	for _, token in pairs(p.consents) do if type(token) ~= "table" or not Name(token.name) or not Guid(token.guid) or not Hex(token.nonce, 16) then return false end end
-	for _, row in pairs(p.index) do if type(row) ~= "string" then return false end end
+	for _, row in pairs(p.index) do
+		local fields = type(row) == "string" and H().ReadPayload(row)
+		if not fields or Count(fields) ~= 2 or not Hex(fields.hash, 64) or not Name(fields.subject) then return false end
+	end
 	for _, name in pairs(p.subjects) do if not Name(name) then return false end end
 	for _, c in pairs(p.imported) do if type(c) ~= "table" or not H().Parse(c.text) then return false end end
 	return true
@@ -345,6 +348,16 @@ function M.RequestConsent(id, name)
 	return SendData(p.data.sourceMaster, id, "U", 1, Body({ subject = name, nonce = nonce }), guard, function(ok)
 		if ok and guard() then SendData(name, id, "Q", 1, payload, guard) end
 	end)
+end
+function M.Resume(id, name)
+	local s = Store(); local p = s and s.policies[id]; name = Name(name)
+	local token = name and p and p.consents[ns.Fold(name)]
+	local request = name and p and p.requests[ns.Fold(name)]
+	if not Target(p) or not token or not request or request.nonce ~= token.nonce then return false end
+	-- Reuse only the existing consent, and let the source independently require its
+	-- own firsthand token. Replaying full frozen pages is idempotent at their cursor.
+	return SendData(p.data.sourceMaster, id, "G", 1, Body({ subject = name, nonce = token.nonce }),
+		function() return Target(p) and p.consents[ns.Fold(name)] == token end)
 end
 function M.Consent(id, confirmation)
 	local s = Store(); local p = s and s.policies[id]; local request = p and p.ownRequest
@@ -636,7 +649,13 @@ function M.Lines()
 			end
 		end
 		if Target(p) then for _, name in pairs(p.subjects) do local who = name
-			if not p.consents[ns.Fold(name)] then lines[#lines + 1] = { text = L.MERGER_ASK:format(ns.DisplayName(name)), onClick = function() M.RequestConsent(id, who) end, indent = 1 } end
+			if not p.consents[ns.Fold(name)] then lines[#lines + 1] = { text = L.MERGER_ASK:format(ns.DisplayName(name)), onClick = function() M.RequestConsent(id, who) end, indent = 1 }
+			else
+				local expected, kept = 0, 0
+				for cursor, raw in ipairs(p.index) do if Same(H().ReadPayload(raw).subject, name) then expected = expected + 1; if p.imported[cursor] then kept = kept + 1 end end end
+				lines[#lines + 1] = { text = L.MERGER_PROGRESS:format(ns.DisplayName(name), kept, expected), indent = 1 }
+				if kept < expected then lines[#lines + 1] = { text = L.MERGER_RESUME:format(ns.DisplayName(name)), onClick = function() M.Resume(id, who) end, indent = 1 } end
+			end
 		end end
 		if p.ownRequest and not p.revoked then
 			if not p.ownRequest.withdrawn then
@@ -650,7 +669,10 @@ function M.Lines()
 	for _, c in ipairs(M.Archives()) do local r = H().Parse(c.text)
 		local words = r.fields.words or r.fields.expires or r.fields.copper or ""
 		if not (ns.Filter and ns.Filter.Hides and ns.Filter.Hides(words)) then
-			lines[#lines + 1] = { text = L.MERGER_RECORD:format(r.kind, ns.DisplayName(r.subject), ns.DisplayName(r.issuer), r.guild, words), indent = 1 }
+			lines[#lines + 1] = { text = L.MERGER_RECORD:format(r.kind, ns.DisplayName(r.subject), ns.DisplayName(r.issuer), r.guild, date("%Y-%m-%d %H:%M", r.at), words), indent = 1 }
+			if r.kind == "W" then
+				lines[#lines + 1] = { text = L.CARRY_HISTORY_WITNESS:format(r.fields.originalWriter or "?", tostring(r.fields.originalAt or "?")), indent = 1 }
+			end
 		end
 	end
 	return lines
