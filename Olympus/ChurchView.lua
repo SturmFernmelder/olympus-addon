@@ -286,6 +286,24 @@ function View.RankingLines()
 	local lines = { Nav("ranking"), Filters(true) }
 	local switch = SwitchLine()
 	if switch then lines[#lines + 1] = switch end
+	-- Correspondents keep a guild full; their old invitation score is not that metric.
+	-- Do not award an invented historical streak from a present-day census snapshot.
+	if View.list == "c" then
+		lines[#lines + 1] = { header = true, text = L.CHURCH_RANKING_C }
+		lines[#lines + 1] = { text = Grey(L.CHURCH_CAPACITY_PENDING), gapAfter = true }
+		local rows = {}
+		for _, c in pairs(Church.State().corr) do rows[#rows + 1] = c end
+		table.sort(rows, function(a, b) return tostring(a.g) < tostring(b.g) end)
+		for _, c in ipairs(rows) do
+			local g = ns.Data and ns.Data.Guild and ns.Data.Guild(c.g)
+			local n = type(g) == "table" and tonumber(g.total) or nil
+			local count = n and n == math.floor(n) and n >= 0 and n <= ns.Codec.GUILD_CAP and tostring(n) or L.CHURCH_CAPACITY_UNKNOWN
+			lines[#lines + 1] = { text = Plain(c.g), right = Name(c.n), player = ns.FullName(c.n), capacityGuild = c.g,
+				tooltip = Tip(Name(c.n), L.CHURCH_CAPACITY_SNAPSHOT:format(count)), indent = 1 }
+		end
+		if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
+		return lines, L.CHURCH_TITLE, L.CHURCH_RANKING_DETAIL
+	end
 	local rows, asOf, remote = Count.RankingView(View.list, View.window)
 	if remote and not PreviewRole() then Count.Ask(View.list, View.window) end
 	lines[#lines + 1] = AsOfLine(asOf, remote)

@@ -52,6 +52,29 @@ local function Build(w, cl, page)
 	return w:As(cl, cl.View.Build)
 end
 
+test("1.2.4 Church correspondence: guild representation replaces invitation points and does not invent a historical streak", function()
+	local w, c = Cast()
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Plain Member"), true)
+	c.author.View.list = "c"
+	c.author.c.Data = { Guild = function(guild) if guild == World.GUILD then return { total = 951 } end end }
+	local lines = Build(w, c.author, "ranking")
+	local row
+	for _, line in ipairs(lines) do if line.capacityGuild == World.GUILD then row = line end end
+	assert(row and row.player == "Plain Member-Realm", "the guild's actual appointed correspondent")
+	assert(row.text:find(World.GUILD, 1, true), "represents the guild, not invitation points")
+	eq(row.cols, nil, "no invitation score or invented streak column")
+	assert(Texts(lines):find(L.CHURCH_CAPACITY_PENDING, 1, true), "explicit pending policy, no pretend ranking")
+	local tip = {}
+	row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+	assert(table.concat(tip, "\n"):find("951", 1, true), "snapshot labelled as current evidence only")
+	-- With no census record, the same valid appointment remains visible without a fabricated count.
+	c.author.c.Data.Guild = function() return nil end
+	lines = Build(w, c.author, "ranking")
+	for _, line in ipairs(lines) do if line.capacityGuild == World.GUILD then row = line end end
+	tip = {}; row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+	assert(table.concat(tip, "\n"):find(L.CHURCH_CAPACITY_UNKNOWN, 1, true))
+end)
+
 test("Church discoverability: missionaries are the third visible group with existing appointment action", function()
 	local w, c = Cast()
 	local lines = Build(w, c.a1, "people")
