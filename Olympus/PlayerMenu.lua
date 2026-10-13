@@ -116,6 +116,9 @@ function PlayerMenu.Target(which, ctx, allowSelf)
 	end
 	if type(name) ~= "string" or name == "" then return nil end
 	local self = ns.me and ns.Fold(name) == ns.Fold(ns.me) or false
+	-- The native self flag must agree with the resolved character. A malformed context
+	-- must not turn the own-profile exception into actions against another player.
+	if ctx.isSelf and not self then return nil end
 	if self and not allowSelf then return nil end
 	return { name = name, which = which, unit = unit, locked = ns.ChatLocked(), self = self or nil }
 end

@@ -15,6 +15,9 @@ test("1.2.4 profile menu: own name offers only View profile; others open the mai
 		function root:CreateTitle() end
 		function root:CreateButton(text, click) self.buttons[#self.buttons + 1] = { text = text, click = click }; return {} end
 		eq(P.Target("FRIEND", { name = ns.me }), nil, "legacy callers still exclude self")
+		eq(P.Target("FRIEND", { name = "Other-Realm", isSelf = true }, true), nil, "self flag cannot authorize another character")
+		eq(P.Build("FRIEND", root, { name = "Other-Realm", isSelf = true }), 0)
+		eq(#root.buttons, 0, "inconsistent native self context adds no buttons")
 		eq(P.Build("FRIEND", root, { name = ns.me, isSelf = true }), 1)
 		eq(#root.buttons, 1, "no self challenge or version request")
 		eq(root.buttons[1].text, ns.L.ARENA_MENU_PROFILE)
