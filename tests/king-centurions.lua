@@ -327,3 +327,39 @@ test("1.2.4 King's centurions: in another Olympus guild the War Room's squads ar
 		eq(#leaders, 1); eq(leaders[1].name, VERA); eq(leaders[1].kind, "councillor")
 	end)
 end)
+
+-- (Review fix: the Throne numbered the councillors in the signed order, the War Room its squads' leaders
+-- alone. With a councillor of another guild signed first, while the King streams the Throne's "High
+-- Councillor 1" was that outsider and "High Councillor 2" the War Room's "High Councillor 1".)
+test("1.2.4 King's centurions: while the King streams, the Throne's High Councillor N is the War Room's: its squads' leaders first, in its order, then the others in the signed order; the same order with the names shown", function()
+	With(function(w)
+		-- The signed order: Olaf (of another guild) before Vera (of the King's guild).
+		ns.rdb.council.blob = "HS1~1~~Olaf Councillor,Vera Councillor~00"
+		local S = w.squads()
+		w.asKing()
+		eq(S.Assign(VERA, "Ada"), true)
+		ns.SetCouncilNamesShown(false)
+		eq(ns.CouncilMasked(), true)
+		local squad = Find(S.Lines(), L.SQUAD_COUNCILLOR:format(1))
+		assert(squad, "the War Room: her squad, High Councillor 1")
+		eq(squad.right, L.SQUAD_COUNT:format(1)); eq(Find(S.Lines(), L.SQUAD_COUNCILLOR:format(2)), nil, "its only one")
+		local lines = K.Build()
+		local first, at = Find(lines, L.SQUAD_COUNCILLOR:format(1))
+		local second, after = Find(lines, L.SQUAD_COUNCILLOR:format(2))
+		eq(first.right, L.SQUAD_COUNT:format(1), "the Throne's High Councillor 1 is the War Room's, her squad")
+		eq(second.right, ns.Views.Grey(L.NOMINEES_MAIN_OUTSIDE:format("Olympus")), "the councillor of another guild after her")
+		assert(at < after, "in that order")
+		-- Names shown: the same order, so nothing moves when he clicks the eye.
+		ns.SetCouncilNamesShown(true)
+		lines = K.Build()
+		local _, vera = Find(lines, "Vera Councillor")
+		local _, olaf = Find(lines, "Olaf Councillor")
+		assert(vera and olaf and vera < olaf, "her squad's line first, as the War Room has it")
+		-- A reader outside the King's guild (no squads to read): the signed order.
+		w.as(OLAF, "Olympus II", 3)
+		lines = K.Build()
+		_, olaf = Find(lines, "Olaf Councillor")
+		_, vera = Find(lines, "Vera Councillor")
+		assert(vera and olaf and olaf < vera, "the signed order")
+	end)
+end)

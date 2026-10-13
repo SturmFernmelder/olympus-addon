@@ -1008,8 +1008,9 @@ A tab with a crown that only the King sees: the guild master of the guild named 
 addon knows him by name, like the Treasurer. It opens on **the Throne Room**, with his Agenda,
 week and key rotation. Since 1.1.5 the Treasury has its own tab alone, and under the Throne Room
 are **the King's centurions**: since 1.2.4 the High Council, as its signed list names them (nobody
-is named in game), each councillor of his guild with his War Room squad; councillors, his Steward
-and Hands read the list. Each of his tools lives where it belongs:
+is named in game), each councillor of his guild with his War Room squad (those first, as the War
+Room numbers them while he streams); councillors read the list, his Steward and Hands a count until
+the council is shown to everyone. Each of his tools lives where it belongs:
 - **The King's Agenda** (a button on the Throne): minutes and an event ("30 Raid on
   Crossroads"). The whole army gets a popup with the appointment (what, in how long, where)
   and sees it on the Census, with reminders 10 minutes and 1 minute before. Since 1.1 it also

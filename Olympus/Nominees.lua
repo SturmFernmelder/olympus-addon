@@ -918,8 +918,9 @@ end
 -- The King's centurions (1.2.4), on the Throne's page: a title, a hint, then the signed High
 -- Council to read, in the signed order (nobody names one or takes a title back here). For a reader
 -- in the King's guild, its roster fresh, each councillor's War Room squad (its soldiers, WarSquads),
--- or that he is not of the guild. While the King streams (ns.CouncilMasked) each is "High Councillor
--- N", and for a reader the council is not shown to yet (ns.CouncilVisible) they are only counted.
+-- or that he is not of the guild, the squads' leaders first in the War Room's order. While the King
+-- streams (ns.CouncilMasked) each is "High Councillor N" (a squad's leader, the War Room's N), and
+-- for a reader the council is not shown to yet (ns.CouncilVisible) they are only counted.
 -- In the King's guild (and the author's preview of the King, inert there), a line to the War Room. Then the note.
 function Nominees.MainLines(lines)
 	local Line, INK, TITLE, Para = Ink()
@@ -933,7 +934,20 @@ function Nominees.MainLines(lines)
 	local ours = IsMain(mine) and type(R) == "table" and type(R.Fresh) == "function" and R.Fresh() ~= nil
 		and type(S) == "table" and not S.missing and type(S.Leaders) == "function" and type(S.Get) == "function"
 	local squads = {}
-	if ours then for _, e in ipairs(S.Leaders()) do squads[ns.ShortName(e.name):lower()] = e end end
+	if ours then
+		for _, e in ipairs(S.Leaders()) do squads[ns.ShortName(e.name):lower()] = e end
+		-- The War Room's squads' leaders first, in its order (e.index), then the rest in the signed
+		-- order: "High Councillor N" is the same councillor on both pages while the King streams.
+		local leading, rest = {}, {}
+		for _, name in ipairs(names) do
+			local e = squads[ns.ShortName(name):lower()]
+			if e then leading[#leading + 1] = { name = name, at = e.index } else rest[#rest + 1] = name end
+		end
+		table.sort(leading, function(a, b) return a.at < b.at end)
+		names = {}
+		for _, e in ipairs(leading) do names[#names + 1] = e.name end
+		for _, name in ipairs(rest) do names[#names + 1] = name end
+	end
 	if #names == 0 then
 		lines[#lines + 1] = Line(L.NOMINEES_MAIN_NONE, INK, { indent = 1 })
 	elseif ns.CouncilVisible() ~= true then
