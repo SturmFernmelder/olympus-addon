@@ -1657,6 +1657,7 @@ function Dues.SummaryLines(lines)
 		end
 	end
 	if not Dues.Sees() then return end
+	if ns.DuesGrace and not ns.DuesGrace.missing then ns.DuesGrace.SummaryLines(lines) end
 	lines[#lines + 1] = { text = Gold("> " .. L.DUES_LINK:format(Coins(Dues.Amount()))), gapAfter = true, onClick = function() Dues.Open() end,
 		tooltip = function(tt) tt:AddLine(L.DUES_LINK_TIP, 1, 1, 1, true) end }
 end
@@ -1816,7 +1817,11 @@ function Dues.PayerBooked(book, e, payer, observed)
 	local proofs, count = PayerProofs(book)
 	local key = to:lower() -- new private proof identity retains the realm, unlike legacy ledger keys
 	local rows = proofs[week] or {}
-	if not rows[key] and count >= Dues.PAYER_PROOFS_MAX then return false end
+	if not rows[key] and count >= Dues.PAYER_PROOFS_MAX then
+		book.duesProofsCut = type(book.duesProofsCut) == "table" and book.duesProofsCut or {}
+		book.duesProofsCut[week] = true -- absence in a capped proof book can never imply a missed week
+		return false
+	end
 	book.duesReceiptSeq = (tonumber(book.duesReceiptSeq) or 0) + 1
 	if not Whole(book.duesReceiptSeq, MAX_COPPER) then return false end
 	-- Staff ledger sums may include manual lines. They are never an observation proof: only
@@ -1826,6 +1831,12 @@ function Dues.PayerBooked(book, e, payer, observed)
 	proofs[week] = rows
 	e.duesPayerReceipt = book.duesReceiptSeq
 	rows[key] = { seq = book.duesReceiptSeq, amount = Dues.AmountOf(week), copper = math.min(MAX_COPPER, before + e.money), at = Clock(), guild = e.guild }
+	local carry = ns.CarryHistory
+	if carry and not carry.missing and carry.CaptureOriginal then
+		local proof = rows[key]
+		carry.CaptureOriginal("D", to, book.name .. ":" .. proof.seq, proof.at, proof.guild,
+			{ week = week, copper = proof.copper, amount = proof.amount, sequence = proof.seq, bookPin = pin, payer = to })
+	end
 	return QueuePayerReceipt(pin, to, rows[key], week)
 end
 function Dues.PumpPayerReceipts()
