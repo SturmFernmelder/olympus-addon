@@ -34,6 +34,60 @@ test("1.2.4 letter content: both languages describe verified records and retain 
 	end
 end)
 
+test("1.2.4 letter content: Wanted pagination, sightings, score migration and gated rules are explained in both languages", function()
+	local expected = {
+		enUS = {
+			"Wanted and Slayers lists start with their top five entries",
+			"Each list expands independently by ten at a time",
+			"Relayed rows carry no zone",
+			"stores no exact coordinates",
+			"the sighting is client evidence, not server-certified",
+			"one base point for every ten levels of the Horde target, rounded up",
+			"full current bounty",
+			"100 points for an eligible revenge",
+			"Migration replays only provable history",
+			"one personal explanation, once",
+			"guild Treasury, Church service and fullness, Arena, Bones, and realm level and race rankings",
+			"private crafting-fee collection order",
+			"not an honour ranking",
+			"Existing access gates still decide who may see each page",
+			"Lottery and safe limits",
+		},
+		ptBR = {
+			"As listas de Wanted e Slayers começam pelos cinco primeiros",
+			"Cada lista expande separadamente de dez em dez",
+			"Linhas repassadas não levam zona",
+			"não guarda coordenadas exatas",
+			"não certificada pelo servidor",
+			"um ponto base a cada dez níveis do alvo da Horda, arredondado para cima",
+			"recompensa atual inteira",
+			"100 pontos por uma vingança elegível",
+			"A migração refaz apenas o histórico comprovável",
+			"uma explicação pessoal uma única vez",
+			"Tesouro das guildas, serviço e lotação da Igreja, Arena, Bones e rankings de nível e raça do reino",
+			"ordem privada de cobrança de taxas de crafting",
+			"não é ranking de honraria",
+			"As permissões existentes continuam decidindo quem pode ver cada página",
+			"Loteria e limites seguros",
+		},
+	}
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local raw = Language(locale).L.LETTER_1_2_4
+		assert(not raw:find(locale == "enUS" and "Legate badge" or "distintivo próprio dos Legates", 1, true),
+			locale .. ": unapproved portrait-badge work is absent")
+		local previous
+		for _, phrase in ipairs(expected[locale]) do
+			local position = assert(raw:find(phrase, 1, true), locale .. ": " .. phrase)
+			assert(not previous or position > previous, locale .. ": release points stay in their intended order")
+			previous = position
+		end
+		assert(raw:find(locale == "enUS" and "entries with both zero points and zero counted kills remain hidden"
+			or "entradas com zero pontos e zero abates contados continuam ocultas", 1, true), locale .. ": zero entries stay hidden")
+		assert(raw:find(locale == "enUS" and "unresolved old totals are archived rather than guessed"
+			or "totais antigos sem resolução ficam arquivados, não estimados", 1, true), locale .. ": unresolved totals are not invented")
+	end
+end)
+
 test("1.2.4 Legate wording: current duty and letter replace the old council century rules in both locales", function()
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local c = Language(locale)
