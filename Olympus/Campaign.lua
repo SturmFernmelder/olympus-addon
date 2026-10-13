@@ -291,7 +291,7 @@ function Campaign.Report(force)
 			Campaign.Reconcile(actor)
 			local money, counts = Totals(r)
 			local rev, id = r.rev, r.id
-			local message = ("CJ~R~%d~%d~%s~%s~%d~%s"):format(id, rev, GetGuildInfo("player") or "", actor, money, ItemWord(counts))
+			local message = ("VG~R~%d~%d~%s~%s~%d~%s"):format(id, rev, GetGuildInfo("player") or "", actor, money, ItemWord(counts))
 			if Campaign.MaySet() and mine then Campaign.Handle("WHISPER", ns.me, message)
 			else
 				local king = ns.KingCharacter() and ns.FullName(ns.KingCharacter())
@@ -316,7 +316,7 @@ function Campaign.Publish(force)
 		end
 	end
 	local rev = s.rev
-	local message = ("CJ~S~%d~%d~%d~%d~%d~%d~%s~%s~%d~%s~%s~%s"):format(s.id, rev, s.start, s.finish, s.target, s.got,
+	local message = ("VG~S~%d~%d~%d~%d~%d~%d~%s~%s~%d~%s~%s~%s"):format(s.id, rev, s.start, s.finish, s.target, s.got,
 		ItemWord(s.goals), ItemWord(s.counts), s.closed and 1 or 0, s.purpose, s.note or "", ItemWord(s.baselines))
 	local options = { owner = Campaign, guard = function() return Campaign.MaySet() and Campaign.State() == s and s.rev == rev end }
 	if #message <= 250 then ns.Comm.Send("CHANNEL", message, "campaign", nil, nil, nil, options)
@@ -340,7 +340,7 @@ end
 function Campaign.Handle(dist, sender, message)
 	if type(message) ~= "string" or #message > 512 or not ns.IsMember() then return end
 	local f = Fields(message)
-	if not f or f[1] ~= "CJ" then return end
+	if not f or f[1] ~= "VG" then return end
 	if f[2] == "S" then
 		if dist ~= "CHANNEL" or not ns.IsKingCharacter(sender) or #f ~= 14 then return end
 		local id, rev, start, finish, target, got = Number(f[3]), Number(f[4]), Number(f[5]), Number(f[6]), Number(f[7]), Number(f[8])
@@ -387,7 +387,7 @@ function Campaign.Handle(dist, sender, message)
 		Revision(s); Campaign.Publish(true); Changed()
 	end
 end
-ns.Comm.Handle("CJ", Campaign.Handle)
+ns.Comm.Handle("VG", Campaign.Handle)
 
 local function ItemName(id) return (GetItemInfo and GetItemInfo(id)) or ("Item " .. id) end
 function Campaign.Lines(lines)

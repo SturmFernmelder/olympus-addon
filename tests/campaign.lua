@@ -39,6 +39,50 @@ local function NativeTrade(w, keeper, name, amount, item, count)
 	return lines[#lines]
 end
 
+test("Campaign: actual shared Comm dispatch delivers public campaign and private crafting chat after both modules load", function()
+	local w, king, keeper, member = Setup()
+	Start(w, king)
+	local wire = w:Sent({ from = king, dist = "CHANNEL" })
+	local message = wire[#wire].msg
+	local registered, campaignType = {}, nil
+	w:As(member, function()
+		member.ns.rdb.campaign = nil -- no previously delivered fake-transport state can mask a lost native packet
+		member.ns.ChatRooms = { RegisterProvider = function() end }
+		local on, login = member.ns.On
+		member.ns.On = function(event, fn) if event == "LOGIN" then login = fn else on(event, fn) end end
+		assert(loadfile(ROOT .. "Olympus/Comm.lua"))("Olympus", member.ns)
+		member.ns.On = on
+		assert(login); login() -- register the real native receive events, not the fixture's fake dispatcher
+		local handle = member.ns.Comm.Handle
+		member.ns.Comm.Handle = function(kind, fn)
+			registered[kind] = (registered[kind] or 0) + 1
+			handle(kind, fn)
+			if fn == member.ns.Campaign.Handle then campaignType = kind end
+		end
+		-- The real runtime load order: crafting must not replace Campaign's handler.
+		assert(loadfile(ROOT .. "Olympus/Campaign.lua"))("Olympus", member.ns)
+		assert(loadfile(ROOT .. "Olympus/CraftRequests.lua"))("Olympus", member.ns)
+		member.ns.rdb.craftRequests = { records = { proof1 = {
+			id = "proof1", requester = member.name, crafter = keeper.name, guild = member.guild, state = "accepted",
+		} }, invites = {} }
+	end)
+	eq(w:Fire(member, "CHAT_MSG_ADDON_LOGGED", member.ns.PREFIX, message, "CHANNEL", king.name), 1)
+	eq(#member.errors, 0, table.concat(member.errors, "\n"))
+	w:As(member, function()
+		local s = member.ns.Campaign.State()
+		assert(s and s.purpose == "Raid supplies", "native campaign announcement must arrive after crafting registers its private chat")
+	end)
+	eq(w:Fire(member, "CHAT_MSG_ADDON_LOGGED", member.ns.PREFIX, "CJ~1~proof1~1~Supplies ready", "WHISPER", keeper.name), 1)
+	eq(#member.errors, 0, table.concat(member.errors, "\n"))
+	w:As(member, function()
+		local r = member.ns.CraftRequests.Get("proof1")
+		eq(#r.chat, 1); eq(r.chat[1].text, "Supplies ready"); eq(r.chat[1].sender, keeper.name)
+		eq(member.ns.Campaign.State().purpose, "Raid supplies", "craft chat changes no campaign state")
+	end)
+	eq(registered.CJ, 1, "the original crafting chat namespace remains its own")
+	assert(campaignType ~= "CJ", "campaign has an independent top-level namespace")
+end)
+
 test("Campaign: only the real King defines one voluntary purpose with fixed fourteen-day gold/material goals; no preview or second dues", function()
 	local w, king, keeper, member, steward = Setup()
 	for _, c in ipairs({ keeper, member, steward }) do w:As(c, function() eq(c.ns.Campaign.Start("Supplies | 100"), false) end) end
@@ -222,7 +266,7 @@ test("Campaign: the pinned mail keeper outside an Olympus guild can assign actua
 	w:Run(1); eq(king.ns.Campaign.State().got, 0, "local attribution is not delivery")
 	w:As(keeper, function() assert(keeper.ns.Campaign.Report(true)) end)
 	w:Run(2); eq(king.ns.Campaign.State().got, 5000)
-	for _, packet in ipairs(w:Sent({ type = "CJ", dist = "WHISPER" })) do eq(packet.target, king.name) end
+	for _, packet in ipairs(w:Sent({ type = "VG", dist = "WHISPER" })) do eq(packet.target, king.name) end
 	assert(not w:ChannelText():find("Mail Account Giver", 1, true))
 end)
 
@@ -267,13 +311,13 @@ test("Campaign: allocation corrections reduce aggregates; sender, actor, replay,
 	local s = king.ns.Campaign.State()
 	w:As(king, function()
 		local C = king.ns.Campaign
-		C.Handle("WHISPER", member.name, ("CJ~R~%d~2000000000~%s~%s~999999~"):format(s.id, member.guild, member.name))
+		C.Handle("WHISPER", member.name, ("VG~R~%d~2000000000~%s~%s~999999~"):format(s.id, member.guild, member.name))
 		eq(C.State().got, 0, "a non-keeper's claim is not a receipt")
-		C.Handle("WHISPER", keeper.name, ("CJ~R~%d~2000000000~%s~%s~999999~"):format(s.id, keeper.guild, member.name))
+		C.Handle("WHISPER", keeper.name, ("VG~R~%d~2000000000~%s~%s~999999~"):format(s.id, keeper.guild, member.name))
 		eq(C.State().got, 0, "a keeper cannot impersonate another actor")
-		C.Handle("CHANNEL", keeper.name, ("CJ~R~%d~2000000000~%s~%s~999999~"):format(s.id, keeper.guild, keeper.name))
+		C.Handle("CHANNEL", keeper.name, ("VG~R~%d~2000000000~%s~%s~999999~"):format(s.id, keeper.guild, keeper.name))
 		eq(C.State().got, 0, "keeper aggregates are never accepted on the public lane")
-		C.Handle("WHISPER", keeper.name, ("CJ~R~%d~2000000000~%s~%s~-1~"):format(s.id, keeper.guild, keeper.name))
+		C.Handle("WHISPER", keeper.name, ("VG~R~%d~2000000000~%s~%s~-1~"):format(s.id, keeper.guild, keeper.name))
 		eq(C.State().got, 0, "negative and malformed totals grant nothing")
 	end)
 	w:As(keeper, function()
@@ -301,10 +345,10 @@ test("Campaign: fourteen days stops intake; one manual King purchase note closes
 		local rows = {}; C.Lines(rows); eq(#rows, 0, "the public campaign bar disappears")
 		eq(#member.ns.rdb.acts, 1)
 		local baselines = {}; for week, amount in pairs(s.baselines) do baselines[#baselines + 1] = week .. "=" .. amount end
-		C.Handle("CHANNEL", king.name, ("CJ~S~%d~%d~%d~%d~%d~0~1710=20~~0~Raid supplies~~%s"):format(s.id, s.rev + 1, s.start, s.finish, s.target, table.concat(baselines, ",")))
+		C.Handle("CHANNEL", king.name, ("VG~S~%d~%d~%d~%d~%d~0~1710=20~~0~Raid supplies~~%s"):format(s.id, s.rev + 1, s.start, s.finish, s.target, table.concat(baselines, ",")))
 		eq(C.State(), s, "an ended id cannot be reopened")
 		assert(loadfile(ROOT .. "Olympus/Campaign.lua"))("Olympus", member.ns)
-		member.ns.Campaign.Handle("CHANNEL", king.name, w:Sent({ from = king, type = "CJ" })[#w:Sent({ from = king, type = "CJ" })].msg)
+		member.ns.Campaign.Handle("CHANNEL", king.name, w:Sent({ from = king, type = "VG" })[#w:Sent({ from = king, type = "VG" })].msg)
 		eq(#member.ns.rdb.acts, 1, "closure repeats and reload keep one Chronicle entry")
 	end)
 end)
