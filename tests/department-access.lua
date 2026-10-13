@@ -155,14 +155,24 @@ test("1.2.4 Heraldry Agenda: the own guild's master and verified correspondent s
 		W.HandleSignup("WHISPER", "Outsider-Realm", ("Y2~%d~H~%s"):format(e.id, w.guild))
 		eq(W.Counts(e).H, 0); eq(W.Counts(e).others, 0, "outside signups never enter a guild sheet")
 		eq(W.SendSheet(true), true); eq(w.packets[#w.packets].dist, "GUILD")
+		K.HandleCommand("GUILD", "Guildmaster-Realm", ("T1~D~816~%s~1800~1~~Other setter's guild raid"):format(w.guild))
+		local other = W.Entry(816)
+		assert(other and other.by == "Guildmaster-Realm", "the other setter's event was genuinely admitted")
 		c.Roster.byName["Guildmaster-Realm"] = 1
 		eq(guarded(), false, "queued entry rechecks the current master and nomination")
 		eq(#W.Entries(), 0); eq(W.SendSheet(true), false); eq(W.MayEdit(e), false)
 		local count = #w.packets
 		w.now = w.now + 601; c.Roster.snapshotAt = w.now; W.Tick(w.now)
 		eq(#w.packets, count, "no resend after revocation")
+		eq(W.Cancel(other.id), false, "lost duty cannot cancel another admitted setter's event")
 		c.Roster.byName["Guildmaster-Realm"] = 0
+		eq(K.CanAgenda("guild"), false, "a restored native rank cannot resurrect the revoked appointment")
+		eq(W.SetEntry("30 No renewed appointment", "guild"), false, "a fresh roster alone cannot authorize another post")
+		-- Week.OwnCancel deliberately permits withdrawing one's own admitted word after lost duty;
+		-- that exception never grants editing/posting or cancellation of another setter's event.
 		eq(W.Cancel(e.id), true); eq(w.packets[#w.packets].dist, "GUILD")
+		w.name("Department of Heraldry") -- the returning master must authenticate a new appointment
+		eq(K.CanAgenda("guild"), true, "the fresh authenticated appointment restores posting authority")
 		w.now = w.now + 11
 		eq(W.SetEntry("tomorrow 20:00 Guild raid", "guild"), true)
 		eq(c.rdb.week[c.me][1].guildOnly, true, "saved entries keep the audience")
@@ -228,6 +238,12 @@ test("1.2.4 Heraldry Agenda reminders: a saved guild signup cannot nudge another
 		W.Remind(w.now)
 		eq(#lines, 0, "a revoked appointment cannot give a hidden event's reminder")
 		c.Roster.byName["Guildmaster-Realm"] = 0
+		W.Remind(w.now)
+		eq(#lines, 0, "restoring a native rank does not restore the revoked appointment")
+		w.name("Department of Heraldry") -- renew authority through the actual authenticated nomination path
+		eq(#lines, 1, "the new appointment has its own nomination notice, not an event reminder")
+		eq(sounds, 0)
+		lines = {} -- count the event reminder separately from the authenticated appointment notice
 		W.Remind(w.now)
 		eq(#lines, 1, "the admitted same-guild event still nudges once")
 		eq(sounds, 1)
