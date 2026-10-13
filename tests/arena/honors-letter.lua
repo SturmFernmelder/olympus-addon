@@ -101,6 +101,27 @@ test("1.2.4 honour letter previews: a real pending award is neither overwritten 
 end)
 
 -- The owner after the King's stream (1.2.1): the King got the King's letter about a frame he holds.
+test("1.2.4 honour letter previews: an award arriving during a sample waits unread and opens only after the sample closes", function()
+	local w = W3.New({ levelRace = false })
+	local author = Kept(w, w:Client(N.author))
+	H.WithUI(function()
+		PreviewFrames(author)
+		local hn = author.ns.HonorsNet
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), true)
+		local f = hn.LetterFrame()
+		Donors(w, author, w.clock, { author }); w:Run(3)
+		eq(f.preview, true); eq(f.key, "bones-1", "incoming award does not overwrite a sample")
+		eq(#hn.QueuedLetters(), 1); eq(hn.Letters()[1].read, nil)
+		w:As(author, hn.CloseLetter, true)
+		eq(f.preview, false); eq(f.key, "donor-top-1"); eq(f:IsShown(), true)
+		eq(f.wear:IsEnabled(), true, "real award restores the native Wear button")
+		eq(#hn.QueuedLetters(), 1); eq(hn.Letters()[1].read, nil, "closing sample is not answering the actual award")
+		w:As(author, hn.CloseLetter, false)
+		eq(hn.Letters()[1].read, true); eq(#hn.QueuedLetters(), 0)
+		W3.NoErrors(w)
+	end)
+end)
+
 test("1.2.1 the King's letter: never to the King himself: his honour switches on, no letter shows, none is kept or opens on a click; where no King is pinned, the guild master of the King's guild the same; everyone else gets his", function()
 	local w, cast = W3.New({ more = { { "gm", "Bryn Halloway", { guild = World.KING_GUILD, rank = 0 } } } })
 	local king, A, gm = Kept(w, cast.king), Kept(w, cast.A), Kept(w, cast.gm)
