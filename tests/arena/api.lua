@@ -103,10 +103,13 @@ local function Setup(opts)
 	local w, cast = W3.New({ world = opts.world, more = { { "treasurer", N.treasurer, { guild = World.KING_GUILD } } } })
 	local viewer = cast.spectator
 	local now = w.clock
-	rawset(cast.treasurer.ns, "Treasury", { DonationRecords = function()
+	-- Only donor presentation is synthetic. Keep the real Treasury behind this overlay:
+	-- the client's live Dues ticker still reads its DevView, Book and native pin methods.
+	local treasury = cast.treasurer.ns.Treasury
+	rawset(cast.treasurer.ns, "Treasury", setmetatable({ DonationRecords = function()
 		return { { name = "Torvin Hale", money = 500000, t = now - 40 * 86400 }, { name = "Selka Drummond", money = 300000, t = now - 40 * 86400 },
 			{ name = "Lida Fenn", money = 100000, t = now - 40 * 86400 } }
-	end, RankingShown = function() return false end })
+	end, RankingShown = function() return false end }, { __index = treasury }))
 	eq(W3.M(w, cast.treasurer, "HonorsNet").SendDonors(true), true)
 	w:Run(0)
 	local API = LoadAPI(w, viewer, opts.wanted)
@@ -121,6 +124,21 @@ local function Line(w, c, key)
 end
 
 print("The Olympus API (1.2.4)")
+
+test("1.2.4 the API: donor fixture overrides preserve the actual Treasury and native Dues tickers", function()
+	local w, cast = Setup()
+	w:Run(61)
+	W3.NoErrors(w)
+	w:As(cast.treasurer, function()
+		local T = cast.treasurer.ns.Treasury
+		eq(T.DonationRecords()[3].name, "Lida Fenn", "only the intended donor presentation is synthetic")
+		eq(T.RankingShown(), false)
+		local book = T.Book()
+		assert(book and book.duesNativeTracking, "the actual pinned character's ticker starts its native tracker")
+		eq(book.duesNativeTracking.issuer, cast.treasurer.name)
+		eq(book.duesNativeTracking.pin, T.TreasurerPin(cast.treasurer.name))
+	end)
+end)
 
 test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once a session, never Olympus's own name; an unregistered addon has no way in", function()
 	local w, cast, viewer, API = Setup()
