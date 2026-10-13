@@ -203,7 +203,7 @@ local BUTTONS = {
 	-- (1.1.5: each the Throne's people's alone: a guild master's Guild tab, or a councillor who is no
 	-- Hand, has none of them.)
 	throne = {
-		{ "THRONE_AGENDA", function() ns.King.AgendaPrompt() end, shown = function() return ns.King.ThroneShown() and ns.King.CanCall() end },
+		{ "THRONE_AGENDA", function() ns.King.AgendaPrompt("army") end, shown = function() return ns.King.ThroneShown() and ns.King.CanAgenda("army") end },
 		{ "COURT_BTN", function() ns.Court.Toggle() end, refresh = true, shown = function() return ns.King.IsKing() or ns.King.Preview() end,
 			label = function() return ns.Court.Holding() and L.COURT_BTN_CLOSE or L.COURT_BTN_OPEN end,
 			tooltip = function(tt)
@@ -301,7 +301,7 @@ local DETAIL_BUTTONS = {
 				tt:AddLine(L.KING_ARROW_GLOBAL_TIP, 1, 1, 1, true)
 			end },
 		{ "THRONE_CANCEL_AGENDA", function() ns.King.CancelAgendaButton() end,
-			shown = function() return ns.King.Agenda() ~= nil and ns.King.ThroneShown() and ns.King.CanCall() end },
+			shown = function() return ns.King.Agenda() ~= nil and ns.King.ThroneShown() and ns.King.CanAgenda("army") end },
 	},
 	-- The full roll call (0.9.9), right above Roll call: rounds on its own until nearly every addon
 	-- user answered; the same button stops it. Then the author's views, to see and try what only

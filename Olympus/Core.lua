@@ -1038,6 +1038,7 @@ function ns.CouncilTitle(name)
 		for _, m in ipairs(type(d) == "table" and type(d.members) == "table" and d.members or {}) do
 			if type(m) == "table" and type(m.name) == "string" and m.name:lower() == short then
 				local dept = type(d.name) == "string" and d.name ~= "" and d.name or nil
+				if dept and dept:lower() == "department of heritage" then dept = "Department of Heraldry" end
 				local title = type(m.title) == "string" and m.title ~= "" and m.title or nil
 				return { title = title, dept = dept, icon = dept and ns.CouncilIconValue(d.icon) or nil }
 			end

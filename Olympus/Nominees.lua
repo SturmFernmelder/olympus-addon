@@ -68,7 +68,7 @@ Nominees.DEPARTMENT_LIST = {
 	{ name = "Department of War", room = "dept:war", aliases = { "department of war", "war" }, label = "CHATROOM_DEPT_WAR" },
 	{ name = "Council of Justice", room = "dept:justice", aliases = { "council of justice", "justice" }, label = "CHATROOM_DEPT_JUSTICE" },
 	{ name = "Association of Artisanry", room = "dept:citizenry", aliases = { "association of artisanry", "association of citizenry", "artisanship" }, label = "CHATROOM_DEPT_ARTISANRY" },
-	{ name = "Department of Heritage", room = "dept:heritage", aliases = { "department of heritage", "heritage", "heraldry", "outreach" }, label = "CHATROOM_DEPT_HERITAGE" },
+	{ name = "Department of Heraldry", room = "dept:heritage", aliases = { "department of heraldry", "department of heritage", "heritage", "heraldry", "outreach" }, label = "CHATROOM_DEPT_HERITAGE" },
 	{ name = "The Missionary Church of Olympus", room = "dept:church", aliases = { "the missionary church of olympus" }, label = "CHATROOM_DEPT_CHURCH" },
 }
 ns.DEPARTMENT_LIST = Nominees.DEPARTMENT_LIST
@@ -165,8 +165,10 @@ local function DeptName(s)
 	s = Trim(tostring(s or ""):gsub("[%c|~;=]", ""))
 	if s == "" or #s > Nominees.DEPT_LEN then return nil end
 	if s:lower() == "association of citizenry" or s:lower() == "association of artisanry" then return "Association of Artisanry" end
+	if s:lower() == "department of heritage" or s:lower() == "department of heraldry" or s:lower() == "heraldry" or s:lower() == "heritage" then return "Department of Heraldry" end
 	return s
 end
+Nominees.DepartmentName = DeptName
 
 -- (Nominees.DEPARTMENTS, the departments' names, comes from Nominees.DEPARTMENT_LIST above. The
 -- signed titles list names only the departments that have councillors.)
@@ -192,6 +194,18 @@ end
 function Nominees.RoleLabel(role, dept)
 	if role == "correspondent" then return L.NOMINEE_ROLE_CORRESPONDENT:format(dept or "?") end
 	return L.NOMINEE_ROLE_CENTURION
+end
+local DEPT_DUTY = {
+	["Federal Treasury"] = "NOMINEES_DUTY_TREASURY",
+	["Department of War"] = "NOMINEES_DUTY_WAR",
+	["Council of Justice"] = "NOMINEES_DUTY_JUSTICE",
+	["Association of Artisanry"] = "NOMINEES_DUTY_ARTISANRY",
+	["Department of Heraldry"] = "NOMINEES_DUTY_HERALDRY",
+	["The Missionary Church of Olympus"] = "NOMINEES_DUTY_CHURCH",
+}
+function Nominees.DepartmentHelp(dept)
+	local key = DEPT_DUTY[DeptName(dept)]
+	return key and L[key] or nil
 end
 
 ---------------------------------------------------------------------------
@@ -462,12 +476,14 @@ end
 local function Wire(name)
 	return ns.RealmOf(name) == ns.realm and ns.ShortName(name) or name
 end
+-- The old label is the existing NM wire key; older clients must still read this department.
+local function WireDept(dept) return DeptName(dept) == "Department of Heraldry" and "Department of Heritage" or dept end
 function Nominees.Parts(guild, rev, entries)
 	local head = ("NM~%s~%s~%d~"):format(Nominees.WIRE, guild, rev)
 	local room = Nominees.PART - #head - #("16~16~")
 	local bodies, body = {}, ""
 	for _, e in ipairs(entries) do
-		local text = e.role == "centurion" and ("c=" .. Wire(e.name)) or ("d=" .. e.dept .. "=" .. Wire(e.name))
+		local text = e.role == "centurion" and ("c=" .. Wire(e.name)) or ("d=" .. WireDept(e.dept) .. "=" .. Wire(e.name))
 		if body ~= "" and #body + 1 + #text > room then
 			bodies[#bodies + 1], body = body, ""
 		end
@@ -759,7 +775,7 @@ function Nominees.Keep(key, l)
 	if type(store) ~= "table" then store = {}; r.nomineesHeard = store end
 	local body = {}
 	for _, e in ipairs(l.entries) do
-		body[#body + 1] = e.role == "centurion" and ("c=" .. e.name) or ("d=" .. tostring(e.dept) .. "=" .. e.name)
+		body[#body + 1] = e.role == "centurion" and ("c=" .. e.name) or ("d=" .. tostring(WireDept(e.dept)) .. "=" .. e.name)
 	end
 	local new = store[key] == nil
 	store[key] = { g = l.guild, by = l.by, rev = l.rev, at = l.at, main = l.main and true or nil, body = table.concat(body, ";") }
@@ -896,6 +912,8 @@ local function Row(e, text, editable, roster)
 		tooltip = function(tt)
 			tt:AddLine(name, 1, 0.82, 0)
 			tt:AddLine(Nominees.RoleLabel(e.role, e.dept), 1, 1, 1, true)
+			local duty = e.role == "correspondent" and Nominees.DepartmentHelp(e.dept)
+			if duty then tt:AddLine(duty, 1, 1, 1, true) end
 			if editable then tt:AddLine(L.NOMINEES_CLICK_REMOVE, 0.6, 0.6, 0.6, true) end
 		end,
 	})
@@ -957,6 +975,8 @@ function Nominees.PageLines(lines)
 				onClick = function() Nominees.Prompt("correspondent", d) end,
 				tooltip = function(tt)
 					tt:AddLine(Nominees.RoleLabel("correspondent", d), 1, 0.82, 0)
+					local duty = Nominees.DepartmentHelp(d)
+					if duty then tt:AddLine(duty, 1, 1, 1, true) end
 					tt:AddLine(L.NOMINEES_CLICK_NAME, 1, 1, 1, true)
 				end })
 		end
@@ -985,14 +1005,14 @@ function Nominees.GuildLines()
 	if master then Nominees.PageLines(lines) end
 	Para(lines, L.GUILD_DEPARTMENT_SCOPE:format(tostring(guild)), INK, { gapAfter = true })
 	local routes = { ["Federal Treasury"] = "treasury", ["Department of War"] = "war", ["Council of Justice"] = "watch",
-		["Association of Artisanry"] = "crafters", ["Department of Heritage"] = "decrees", ["The Missionary Church of Olympus"] = "church" }
+		["Association of Artisanry"] = "crafters", ["Department of Heraldry"] = "decrees", ["The Missionary Church of Olympus"] = "church" }
 	for _, department in ipairs(Nominees.Departments()) do
 		if master or preview or dept == department then
 			local name = not preview and Nominees.Correspondent(guild, department) or nil
 			lines[#lines + 1] = Line(department, TITLE)
 			lines[#lines + 1] = Line(name and L.GUILD_DEPARTMENT_NAMED:format(ns.DisplayName(name)) or L.GUILD_DEPARTMENT_EMPTY, INK, { indent = 1 })
 			local route = routes[department]
-			if department == "Association of Artisanry" or department == "Department of Heritage" then
+			if department == "Association of Artisanry" then
 				Para(lines, L.GUILD_DEPARTMENT_LIMITED, INK, { indent = 1 })
 			elseif department == "The Missionary Church of Olympus" then
 				Para(lines, L.GUILD_DEPARTMENT_CHURCH, INK, { indent = 1 })

@@ -8,6 +8,9 @@ local L = ns.L
 -- the Agenda button, a day and an hour then what ("Sat 20:00 Raid night"); their client repeats
 -- it for late logins, the way it repeats the Agenda. Every client keeps the week it heard across
 -- a /reload or a login (its setter may be offline), until each entry is over or taken off.
+-- 1.2.4: the signed Heraldry councillor and the author also schedule for the army. Our own
+-- guild's master and verified Heraldry correspondent schedule for their guild alone, over GUILD;
+-- the saved entry keeps that audience. No ordinary guild master gains a royal command.
 --   T1~D~<id>~<guild>~<seconds>~<fresh>~<zone>~<title>   an entry, <seconds> from now (1 minute
 --       to 7 days); fresh 1 on its first sending (a chat line where it arrives), 0 on repeats;
 --       seconds 0: taken off the week (by its setter, the King, his Steward or a Hand)
@@ -80,6 +83,22 @@ local function SelfOff()
 	local off = M.SelfOff and M.SelfOff()
 	if off then ns.Print(M.YouText(off)) end
 	return off
+end
+
+-- Guild entries never turn into army entries after a guild change or a reload. Every use
+-- rechecks the same current authority that admitted the setter's original word.
+function Week.Visible(e)
+	return e ~= nil and (e.preview or ns.King.AgendaAuthorized(e.by, e.setterGuild, e.guildOnly == true)) and not Off(e.by, e.setterGuild)
+end
+function Week.MayEdit(e)
+	return e ~= nil and (not e.guildOnly or e.setterGuild == GetGuildInfo("player")) and ns.King.CanAgenda(e.guildOnly and "guild" or "army")
+end
+-- A setter can still take back his own exact entry after a sanction or lost duty. This only
+-- removes an admitted word: it never posts, changes its audience, or cancels anyone else's.
+function Week.OwnCancel(sender, id, guild, guildOnly)
+	local e = entries[id]
+	return e ~= nil and e.by == ns.FullName(sender) and (e.guildOnly == true) == (guildOnly == true)
+		and (not guildOnly or (guild == e.setterGuild and guild == GetGuildInfo("player")))
 end
 
 ---------------------------------------------------------------------------
@@ -242,7 +261,8 @@ end
 local function Cap(crown) return crown and Week.MAX_MINE or Week.MAX_HAND end
 function Week.MyCap()
 	local K = ns.King
-	return Cap(K.Preview() or K.IsKing() or K.IsSteward())
+	local W = ns.Workshop
+	return Cap(K.Preview() or K.IsKing() or K.IsSteward() or (W and W.IsAuthorName and W.IsAuthorName(ns.me)))
 end
 
 -- An entry heard from its setter goes on the week if there is room: its setter's own cap, and
@@ -270,7 +290,8 @@ local function SaveMine()
 	local all = type(ns.rdb.week) == "table" and ns.rdb.week or {}
 	local list = {}
 	for _, e in pairs(entries) do
-		if e.mine and not e.preview then list[#list + 1] = { id = e.id, title = e.title, zone = e.zone, at = e.at } end
+		if e.mine and not e.preview then list[#list + 1] = { id = e.id, title = e.title, zone = e.zone, at = e.at,
+			guild = e.setterGuild, guildOnly = e.guildOnly or nil, crown = e.crown or nil } end
 	end
 	all[ns.me or "?"] = #list > 0 and list or nil
 	ns.rdb.week = next(all) and all or nil
@@ -286,7 +307,7 @@ local function SaveHeard()
 	for _, e in pairs(entries) do
 		if not e.mine then
 			list[#list + 1] = { id = e.id, by = e.by, title = e.title, zone = e.zone, at = e.at, crown = e.crown or nil, heardAt = e.heardAt,
-				guild = e.setterGuild }
+				guild = e.setterGuild, guildOnly = e.guildOnly or nil }
 		end
 	end
 	ns.rdb.weekHeard = #list > 0 and list or nil
@@ -301,7 +322,10 @@ function Week.Restore(now)
 	local list = type(all) == "table" and all[ns.me or "?"]
 	for _, e in ipairs(type(list) == "table" and list or {}) do
 		if type(e) == "table" and tonumber(e.id) and type(e.title) == "string" and tonumber(e.at) and e.at > now + 30 and not entries[e.id] then
-			entries[e.id] = { id = e.id, title = Clean(e.title, 60), zone = Clean(e.zone, 40), at = e.at, by = ns.me, mine = true }
+			local restored = { id = e.id, title = Clean(e.title, 60), zone = Clean(e.zone, 40), at = e.at, by = ns.me, mine = true,
+				setterGuild = type(e.guild) == "string" and ns.King.CleanGuild(e.guild) or nil, guildOnly = e.guildOnly == true or nil,
+				crown = e.crown == true or (Week.MyCap() == Week.MAX_MINE and true or nil) }
+			if not restored.guildOnly or restored.setterGuild == GetGuildInfo("player") then Keep(restored) end
 		end
 	end
 	-- The ones heard (an entry of ours that isn't in our own list was taken off).
@@ -309,8 +333,11 @@ function Week.Restore(now)
 	for _, e in ipairs(type(heard) == "table" and heard or {}) do
 		if type(e) == "table" and tonumber(e.id) and type(e.by) == "string" and e.by ~= ns.me and type(e.title) == "string" and tonumber(e.at)
 			and e.at + Week.KEEP_AFTER >= now and e.at <= now + Week.MAX_AHEAD + 60 and not entries[e.id] and Clean(e.title, 60) ~= "" then
-			Keep({ id = e.id, title = Clean(e.title, 60), zone = Clean(e.zone, 40), at = e.at, by = e.by, crown = e.crown == true or nil,
-				heardAt = tonumber(e.heardAt) or now, setterGuild = type(e.guild) == "string" and ns.King.CleanGuild(e.guild) or nil })
+			local restored = { id = e.id, title = Clean(e.title, 60), zone = Clean(e.zone, 40), at = e.at, by = e.by, crown = e.crown == true or nil,
+				heardAt = tonumber(e.heardAt) or now, setterGuild = type(e.guild) == "string" and ns.King.CleanGuild(e.guild) or nil, guildOnly = e.guildOnly == true or nil }
+			-- The roster may still be loading. Keep the scoped saved word, but Week.Visible
+			-- exposes nothing and sends nothing until the current roster confirms its issuer.
+			if not restored.guildOnly or restored.setterGuild == GetGuildInfo("player") then Keep(restored) end
 		end
 	end
 	RestoreSignups(now)
@@ -318,24 +345,31 @@ function Week.Restore(now)
 end
 
 local function Send(e, fresh)
+	if not Week.MayEdit(e) or not Week.Visible(e) then return false end
 	local left = math.floor(e.at - ns.Now())
 	if left < 30 then return end
 	e.sentAt = ns.Now()
-	ns.Comm.Send("CHANNEL", ("T1~D~%d~%s~%d~%d~%s~%s"):format(e.id, GetGuildInfo("player") or "", left, fresh and 1 or 0, e.zone or "", e.title),
-		"week" .. e.id)
+	ns.Comm.Send(e.guildOnly and "GUILD" or "CHANNEL", ("T1~D~%d~%s~%d~%d~%s~%s"):format(e.id, e.setterGuild or GetGuildInfo("player") or "", left, fresh and 1 or 0, e.zone or "", e.title),
+		"week" .. e.id, nil, nil, nil, { owner = Week, guard = function() return entries[e.id] == e and Week.MayEdit(e) and Week.Visible(e) end })
 end
 
 -- The King, his Steward or a Hand puts an entry on the week (Asmon's view: on his screen alone).
-function Week.SetEntry(input)
+function Week.SetEntry(input, scope)
+	scope = ns.King.AgendaScope(scope)
+	if not ns.King.Preview() and SelfOff() then return false end
+	if not scope or not ns.King.CanAgenda(scope) then return false end
 	local seconds, title = Week.Parse(input)
+	if not seconds and scope == "guild" then
+		local minutes
+		minutes, title = ns.King.ParseAgenda(input)
+		seconds = minutes and minutes * 60
+	end
 	if not seconds then
 		ns.Print(L.THRONE_AGENDA_USAGE)
 		return false
 	end
 	local K = ns.King
 	local preview = K.Preview()
-	if not preview and not K.CanCommand() then return false end
-	if not preview and SelfOff() then return false end
 	local now = ns.Now()
 	if now - lastSet < Week.SET_GAP then
 		ns.Print(L.THRONE_WAIT:format(math.ceil(Week.SET_GAP - (now - lastSet))))
@@ -346,16 +380,19 @@ function Week.SetEntry(input)
 		ns.Print(L.WEEK_FULL:format(cap))
 		return false
 	end
+	local W = ns.Workshop
+	local e = { id = K.NewId(), title = title, zone = "", at = now + seconds, by = ns.me, mine = true, preview = preview or nil,
+		setterGuild = GetGuildInfo("player"), guildOnly = scope == "guild" or nil,
+		crown = (K.IsKing() or K.IsSteward() or (W and W.IsAuthorName and W.IsAuthorName(ns.me))) and true or nil }
+	if not Keep(e) then ns.Print(L.WEEK_FULL:format(Week.MAX_KEPT)); return false end
 	lastSet = now
-	local e = { id = K.NewId(), title = title, zone = "", at = now + seconds, by = ns.me, mine = true, preview = preview or nil }
-	entries[e.id] = e
 	if preview then
 		ns.Print(L.THRONE_PREVIEW_NOTE)
 	else
 		Send(e, true)
 		SaveMine()
 	end
-	ns.Print(L.WEEK_SET:format(title, Week.DayLabel(e.at), Week.TimeLabel(e.at)))
+	ns.Print((e.guildOnly and L.WEEK_GUILD_SET or L.WEEK_SET):format(title, Week.DayLabel(e.at), Week.TimeLabel(e.at)))
 	Changed()
 	return true
 end
@@ -368,9 +405,11 @@ function Week.Cancel(id)
 	local e = entries[id]
 	if not e then return false end
 	local K = ns.King
-	if not e.preview and not K.Preview() and (e.mine or K.CanCommand()) then
-		if not e.mine and SelfOff() then return false end
-		ns.Comm.Send("CHANNEL", ("T1~D~%d~%s~0~0~~"):format(id, GetGuildInfo("player") or ""), "week" .. id)
+	if K.AgendaPreviewBlocked() then return false end
+	if not e.mine and not e.preview and not K.Preview() and SelfOff() then return false end
+	if not Week.MayEdit(e) and not (e.mine and Week.OwnCancel(ns.me, id, e.setterGuild, e.guildOnly == true)) then return false end
+	if not e.preview and not K.Preview() then
+		ns.Comm.Send(e.guildOnly and "GUILD" or "CHANNEL", ("T1~D~%d~%s~0~0~~"):format(id, GetGuildInfo("player") or ""), "week" .. id)
 	end
 	entries[id] = nil
 	Save()
@@ -394,13 +433,14 @@ local function HeardFrom(sender, now)
 	p.last = now
 end
 
-local function OnEntry(sender, id, rest, guild)
+local function OnEntry(sender, id, rest, guild, guildOnly)
 	local seconds, fresh, zone, title = tostring(rest or ""):match("^(%d+)~(%d)~([^~]*)~([^~]*)")
 	seconds = tonumber(seconds)
 	if not id or not seconds then return end
 	local now = ns.Now()
 	sender = ns.FullName(sender)
 	local e = entries[id]
+	if e and (e.guildOnly == true) ~= (guildOnly == true) then return end -- no cross-audience overwrite or cancel
 	-- 1.1 review: a setter the moderators took off (net-off) reaches here with a cancel alone
 	-- (King.HandleCommand): it takes his own entry down, nothing else (nor counts as hearing him).
 	if Off(sender, guild) then
@@ -432,7 +472,8 @@ local function OnEntry(sender, id, rest, guild)
 	end
 	local K = ns.King
 	e = { id = id, title = title, zone = Clean(zone, 40), at = now + seconds, by = sender, heardAt = now,
-		crown = (K.FromKing(sender, guild) or K.IsStewardName(sender)) and true or nil, setterGuild = K.CleanGuild(guild) or nil }
+		crown = (K.FromKing(sender, guild) or K.IsStewardName(sender) or (ns.Workshop and ns.Workshop.IsAuthorName and ns.Workshop.IsAuthorName(sender))) and true or nil,
+		setterGuild = K.CleanGuild(guild) or nil, guildOnly = guildOnly == true or nil }
 	if not Keep(e) then return end
 	SaveHeard()
 	-- A new entry: one quiet chat line (never a raid warning or a popup), and not on repeats.
@@ -463,7 +504,7 @@ function Week.Entries(now)
 	for id, e in pairs(entries) do
 		if e.at + Week.KEEP_AFTER < now then
 			entries[id] = nil
-		elseif e.mine or not Off(e.by, e.setterGuild) then
+		elseif Week.Visible(e) then
 			out[#out + 1] = e
 		end
 	end
@@ -586,7 +627,16 @@ function Week.Section(lines, q)
 		tooltip = function(tt) tt:AddLine(L.WEEK_TITLE, 1, 0.82, 0); tt:AddLine(L.WEEK_TIP, 1, 1, 1, true) end }
 	local shown, lastDay = 0, nil
 	local K = ns.King
-	local mayCancel = K.CanCommand() or K.Preview()
+	local mayCancel = K.CanAgenda("army") or K.CanAgenda("guild")
+	if not q then
+		for _, scope in ipairs({ "army", "guild" }) do
+			if K.CanAgenda(scope) then
+				local audience = scope
+				lines[#lines + 1] = { indent = 1, text = Gold("> " .. (scope == "guild" and L.WEEK_SET_GUILD or L.WEEK_SET_ARMY)),
+					onClick = function() K.AgendaPrompt(audience) end }
+			end
+		end
+	end
 	for _, e in ipairs(list) do
 		if not q or ns.Holds(q, e.title, e.zone, Week.DayLabel(e.at), not e.guild and not e.provided and Week.Setter(e) or nil) then
 			shown = shown + 1
@@ -598,7 +648,7 @@ function Week.Section(lines, q)
 			local where = e.zone and e.zone ~= "" and (" (" .. e.zone .. ")") or ""
 			local row = {
 				indent = 2,
-				text = Week.TimeLabel(e.at) .. "  " .. (e.guild and Green(e.title .. "  " .. L.WEEK_YOUR_GUILD) or Gold(e.title .. where)),
+				text = Week.TimeLabel(e.at) .. "  " .. ((e.guild or e.guildOnly) and Green(e.title .. "  " .. L.WEEK_YOUR_GUILD) or Gold(e.title .. where)),
 				right = Grey(Week.InLabel(e.at)),
 				tooltip = function(tt)
 					tt:AddLine(e.title, 1, 0.82, 0)
@@ -618,7 +668,7 @@ function Week.Section(lines, q)
 						onClick = function() Week.OpenCalendar(e) end,
 						tooltip = function(tt) tt:AddLine(L.WEEK_CAL_BTN, 1, 0.82, 0); tt:AddLine(L.WEEK_CAL_TIP, 1, 1, 1, true) end }
 				end
-				if mayCancel and not e.agenda then
+				if Week.MayEdit(e) and not e.agenda then
 					actions[#actions + 1] = { indent = 3, text = Grey("x " .. L.WEEK_CANCEL), onClick = function() Week.Cancel(e.id) end }
 				end
 				-- Its signup sheet (Fern's #27).
@@ -797,7 +847,8 @@ function Week.Sign(id, role)
 		mine[id] = nil
 		ns.Print(L.SIGN_WITHDRAWN:format(e.title))
 	else
-		mine[id] = { role = role, at = e.at, title = e.title, zone = e.zone, agenda = e.agenda or nil, by = e.by, guild = e.setterGuild }
+		mine[id] = { role = role, at = e.at, title = e.title, zone = e.zone, agenda = e.agenda or nil, by = e.by, guild = e.setterGuild,
+			guildOnly = e.guildOnly or nil }
 		ns.Print(L.SIGN_DONE:format(RoleLabel(role), e.title))
 	end
 	signOpen[id] = nil
@@ -842,8 +893,13 @@ function Week.HandleSignup(dist, sender, text)
 	local id, role, guild = tostring(text or ""):match("^Y2~(%d+)~([THDAW])~(.*)$")
 	local e = Week.Entry(tonumber(id))
 	if not e or not e.mine or e.preview or e.at <= ns.Now() then return end
+	if not Week.MayEdit(e) then return end
 	sender = ns.FullName(sender)
 	guild = ns.King.CleanGuild(guild)
+	if e.guildOnly then
+		local R = ns.Roster
+		if guild ~= e.setterGuild or not R or not R.Fresh or not R.Fresh() or not R.RankOf or R.RankOf(sender) == nil then return end
+	end
 	-- 1.1 (Konig's review): a name the moderators took off (net-off, Moderation.lua) signs nothing.
 	if Off(sender, guild) then return end
 	local s = signups[e.id]
@@ -881,34 +937,43 @@ ns.Comm.Handle("Y2", function(...) Week.HandleSignup(...) end)
 -- since the last one.
 function Week.SendSheet(soon)
 	local K = ns.King
-	if K.Preview() or not K.CanCommand() then return false end
+	if K.Preview() then return false end
 	-- (1.1, Konig's review: every client drops the sheet of a setter the moderators took off, and
 	-- a long one goes in pieces, past Comm.Send's backstop.)
 	local M = ns.Moderation
 	if M.SelfOff and M.SelfOff() then return false end
 	local now = ns.Now()
-	local parts, busy = {}, false
+	local parts, busy = { army = {}, guild = {} }, false
 	for _, e in ipairs(Week.Entries(now)) do
-		if e.mine and not e.preview and e.at > now then
+		if e.mine and not e.preview and e.at > now and Week.MayEdit(e) then
 			local c = Week.Counts(e)
-			parts[#parts + 1] = ("%d:%d:%d:%d:%d"):format(e.id, c.T, c.H, c.D, c.A)
+			local audience = parts[e.guildOnly and "guild" or "army"]
+			audience[#audience + 1] = ("%d:%d:%d:%d:%d"):format(e.id, c.T, c.H, c.D, c.A)
 			local s = signups[e.id]
 			if (s and s.n > 0) or e.at - now <= Week.SHEET_NEAR then busy = true end
 		end
 	end
-	if #parts == 0 then return false end
+	if #parts.army + #parts.guild == 0 then return false end
 	local every = busy and Week.SHEET_EVERY or Week.SHEET_IDLE
 	-- (Its pace changed: the army hears it now, or the last sheet's time would run out first.)
 	if not soon and every == lastEvery and now - lastSheet < every then return false end
 	lastSheet, lastEvery = now, every
-	local msg = ("T1~R~%d~%s~%s~%d"):format(K.NewId(), GetGuildInfo("player") or "", table.concat(parts, ","), every / 60)
-	if #msg <= 250 then ns.Comm.Send("CHANNEL", msg, "sheet") else ns.Comm.SendChunked(msg) end
+	for _, scope in ipairs({ "army", "guild" }) do
+		if #parts[scope] > 0 then
+			local guildOnly, guild = scope == "guild", GetGuildInfo("player")
+			local dist = guildOnly and "GUILD" or "CHANNEL"
+			local options = { owner = Week, guard = function() return K.AgendaAuthorized(ns.me, guild, guildOnly) end }
+			local msg = ("T1~R~%d~%s~%s~%d"):format(K.NewId(), guild or "", table.concat(parts[scope], ","), every / 60)
+			if #msg <= 250 then ns.Comm.Send(dist, msg, "sheet:" .. scope, nil, nil, nil, options)
+			else ns.Comm.SendChunked(msg, nil, dist, nil, options) end
+		end
+	end
 	return true
 end
 
 -- Another setter's sheet: taken for the entries that setter set, as they are, fresh for the
 -- time it gives (5 to 60 minutes; none given: 5).
-local function OnSheet(sender, _, rest)
+local function OnSheet(sender, _, rest, guild, guildOnly)
 	sender = ns.FullName(sender)
 	local now, any = ns.Now(), false
 	HeardFrom(sender, now)
@@ -917,7 +982,7 @@ local function OnSheet(sender, _, rest)
 	for part in (body or ""):gmatch("[^,]+") do
 		local id, t, h, d, a = part:match("^(%d+):(%d+):(%d+):(%d+):(%d+)$")
 		local e = id and Week.Entry(tonumber(id))
-		if e and not e.mine and e.by == sender then
+		if e and not e.mine and e.by == sender and (e.guildOnly == true) == (guildOnly == true) then
 			local cap = Week.MAX_SIGNUPS
 			sheets[e.id] = { T = math.min(tonumber(t), cap), H = math.min(tonumber(h), cap), D = math.min(tonumber(d), cap),
 				A = math.min(tonumber(a), cap), at = now, fresh = minutes * 60 + Week.SHEET_LATE }
@@ -1026,6 +1091,7 @@ function Week.Remind(now)
 		-- (1.1 review: nothing while its setter, or his guild, is off: net-off. Not marked reminded:
 		-- shown again before it begins, the nudge comes.)
 		if left and v.role and not v.reminded and type(v.title) == "string" and v.title ~= "" and left > 0 and left <= Week.REMIND
+			and (not v.guildOnly or ns.King.AgendaAuthorized(v.by, v.guild, true))
 			and not Off(SetterOf(id, v)) then
 			v.reminded = true
 			local zone = type(v.zone) == "string" and v.zone or ""
@@ -1056,7 +1122,7 @@ function Week.Tick(now)
 	-- (Only while this character still may: a Hand the King's list no longer names stops.)
 	local due = {}
 	for _, e in pairs(entries) do
-		if e.mine and not e.preview and e.at - now >= 30 and now - (e.sentAt or -math.huge) >= Week.Resend(e, now) and ns.King.CanCommand() then due[#due + 1] = e end
+		if e.mine and not e.preview and e.at - now >= 30 and now - (e.sentAt or -math.huge) >= Week.Resend(e, now) and Week.MayEdit(e) then due[#due + 1] = e end
 	end
 	table.sort(due, function(x, y) return (x.sentAt or 0) < (y.sentAt or 0) end)
 	for i = 1, math.min(#due, Week.RESEND_PER_TICK) do Send(due[i], false) end

@@ -340,7 +340,7 @@ test("chat rooms: restricted tabs and recipients come only from current shared a
 
 		local names = {
 			["Federal Treasury"] = "Federal Treasury", ["Department of War"] = "Department of War",
-			["Artisanship"] = "Association of Artisanry", ["Heraldry"] = "Department of Heritage",
+			["Artisanship"] = "Association of Artisanry", ["Heraldry"] = "Department of Heraldry",
 			["Justice"] = "Council of Justice",
 		}
 		for signed, canonical in pairs(names) do

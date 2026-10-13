@@ -344,6 +344,52 @@ function King.CanCommand()
 	return King.IsSteward() or King.IsHand()
 end
 
+-- 1.2.4: the Agenda is Heraldry's. A title or a Crown duty alone grants no posting power.
+-- Army: the existing verified King/Steward/Hand roots, the author, or a signed councillor of
+-- Heraldry (the old signed name remains readable). Guild: its own live-roster master or his
+-- verified Heraldry correspondent. A guild master alone never gains army authority.
+function King.AgendaAuthorized(name, guild, guildOnly)
+	if type(name) ~= "string" or not ns.IsMember() then return false end
+	local WC, M = ns.WatchChat, ns.Moderation
+	if M and M.Hides and M.Hides(name, guild) then return false end
+	if WC and not WC.missing and WC.Barred and WC.Barred("powers", name) then return false end
+	if guildOnly then
+		local mine, _, rank = GetGuildInfo("player")
+		if type(guild) ~= "string" or guild ~= mine then return false end
+		if ns.FullName(name) == ns.FullName(ns.me) and rank == 0 then return true end
+		local R = ns.Roster
+		local roster = R and R.Fresh and R.Fresh()
+		if roster and roster.guild == guild and R.RankOf and R.RankOf(ns.FullName(name)) == 0 then return true end
+		local N = ns.Nominees
+		return N and not N.missing and N.IsCorrespondent and N.IsCorrespondent(name, guild, "Department of Heraldry") == true or false
+	end
+	if ns.IsKingCharacter(name) then return true end
+	if King.Authorized("A", name, guild) then return true end
+	local W = ns.Workshop
+	if W and W.IsAuthorName and W.IsAuthorName(name) then return true end
+	if ns.IsHighCouncillor(name) ~= true then return false end
+	local title = ns.CouncilTitle and ns.CouncilTitle(name)
+	local dept = title and title.dept
+	local N = ns.Nominees
+	if N and N.DepartmentName then dept = N.DepartmentName(dept) end
+	return dept == "Department of Heraldry"
+end
+
+function King.AgendaScope(scope)
+	if scope ~= nil then return (scope == "guild" or scope == "army") and scope or nil end
+	if King.AgendaAuthorized(ns.me, GetGuildInfo("player"), false) or King.Preview() then return "army" end
+	return "guild"
+end
+function King.AgendaPreviewBlocked()
+	local V = ns.ViewAs
+	return V and V.Previewing and V.Previewing() and not King.Preview() or false
+end
+function King.CanAgenda(scope)
+	if King.AgendaPreviewBlocked() then return false end
+	scope = King.AgendaScope(scope)
+	return scope ~= nil and (King.Preview() or King.AgendaAuthorized(ns.me, GetGuildInfo("player"), scope == "guild"))
+end
+
 -- The King himself sent it (not a Hand): for how it is shown.
 function King.FromKing(sender, guild) return KingSender(sender, guild, true) end
 
@@ -939,7 +985,11 @@ function King.ParseAgenda(input)
 	return minutes, Clean(title, 60)
 end
 
-function King.SetAgenda(input)
+function King.SetAgenda(input, scope)
+	scope = King.AgendaScope(scope)
+	if not scope or not King.CanAgenda(scope) then return false end
+	-- Guild events use the existing dated week and its signup sheets, over guild chat alone.
+	if scope == "guild" then return ns.Week and ns.Week.SetEntry(input, scope) or false end
 	local minutes, title = King.ParseAgenda(input)
 	local W = ns.Week
 	-- 1.1: a day and an hour, then what: an entry of the King's week (Week.lua). After a number
@@ -947,7 +997,7 @@ function King.SetAgenda(input)
 	-- Agenda with its raid warning and popup for the whole army.
 	if W and W.LooksLikeEntry and W.LooksLikeEntry(minutes and title or input) then
 		local text = minutes and title or input
-		if W.Parse(text) then return W.SetEntry(text) end
+		if W.Parse(text) then return W.SetEntry(text, scope) end
 		ns.Print(L.THRONE_AGENDA_USAGE)
 		return false
 	end
@@ -961,13 +1011,12 @@ function King.SetAgenda(input)
 		return false
 	end
 	lastAgendaSent = now
-	local mine = { id = NewId(), title = title, at = now + minutes * 60, zone = Clean(ZoneName(), 40), by = ns.me, mine = true, fired = {} }
+	local mine = { id = NewId(), title = title, at = now + minutes * 60, zone = Clean(ZoneName(), 40), by = ns.me, guild = GetGuildInfo("player"), mine = true, fired = {} }
 	if King.Preview() then
 		agenda = mine
 		ns.Print(L.THRONE_PREVIEW_NOTE)
 		return Changed() or true
 	end
-	if not King.CanCommand() then return false end
 	agenda = mine
 	King.SendAgenda()
 	Warn(L.THRONE_AGENDA_SET:format(title, minutes, mine.zone), false, "agenda", { own = true })
@@ -977,17 +1026,22 @@ end
 
 function King.SendAgenda()
 	if not agenda or not agenda.mine or King.Preview() then return end
+	if not King.AgendaAuthorized(ns.me, agenda.guild, false) then return end
 	-- Seconds left, so a resend never moves the time (minutes rounded up did).
 	local left = math.floor(agenda.at - ns.Now())
 	if left < 30 then return end
-	ns.Comm.Send("CHANNEL", ("T1~A~%d~%s~%d~%s~%s"):format(agenda.id, GetGuildInfo("player") or "", left, agenda.zone, agenda.title), "agenda")
+	local a = agenda
+	ns.Comm.Send("CHANNEL", ("T1~A~%d~%s~%d~%s~%s"):format(a.id, GetGuildInfo("player") or "", left, a.zone, a.title), "agenda",
+		nil, nil, nil, { owner = King, guard = function() return agenda == a and King.AgendaAuthorized(ns.me, a.guild, false) end })
 end
 
 function King.CancelAgenda()
 	if not agenda then return end
+	if King.AgendaPreviewBlocked() then return false end
+	if not King.Preview() and not agenda.mine and not King.CanAgenda("army") then return false end
 	-- The King or a Hand cancels it for everyone, whoever set it (its setter's client stops
 	-- repeating it when the cancel reaches it).
-	if (agenda.mine or King.CanCommand()) and not King.Preview() then
+	if not King.Preview() then
 		ns.Comm.Send("CHANNEL", ("T1~X~%d~%s"):format(agenda.id, GetGuildInfo("player") or ""), "agenda")
 	end
 	if ns.Week and ns.Week.Forget then ns.Week.Forget(agenda.id) end -- (1.1: a signup for it, and its nudge)
@@ -997,6 +1051,7 @@ end
 
 function King.Agenda()
 	if agenda and agenda.at < ns.Now() - 600 then agenda = nil end -- over for 10 minutes
+	if agenda and not King.Preview() and not King.AgendaAuthorized(agenda.by, agenda.guild, false) then return nil end
 	return agenda
 end
 
@@ -1006,6 +1061,7 @@ local function OnAgenda(king, id, rest, guild)
 	if not seconds or seconds < 30 or seconds > 720 * 60 or title == "" then return end
 	local now = ns.Now()
 	if agenda and agenda.id == id then
+		if ns.FullName(agenda.by) ~= ns.FullName(king) then return end
 		-- A resend: keep our time unless it is really off (late login, clock drift).
 		if math.abs((now + seconds) - agenda.at) > 60 then agenda.at = now + seconds end
 		return Changed()
@@ -1023,7 +1079,8 @@ local function OnAgenda(king, id, rest, guild)
 			-- The King by the army's name for him; a Hand by theirs (as OnSummon).
 			local where = a.zone ~= "" and a.zone or "?"
 			local text = byKing and L.THRONE_AGENDA_POPUP:format(ns.KingName(king), a.title, minutes, where)
-				or L.THRONE_AGENDA_POPUP_HAND:format(ns.DisplayName(king), a.title, minutes, where)
+				or (King.IsHandName(king) or King.IsStewardName(king)) and L.THRONE_AGENDA_POPUP_HAND:format(ns.DisplayName(king), a.title, minutes, where)
+				or L.HERALDRY_AGENDA_POPUP:format(ns.DisplayName(king), a.title, minutes, where)
 			ns.ShowDialog("OLYMPUS_AGENDA_CALL", text)
 		end
 		Warn(L.THRONE_AGENDA_SET:format(a.title, math.ceil(seconds / 60), a.zone), false, "agenda", King.AgendaHeld(a, Popup))
@@ -1035,7 +1092,7 @@ end
 -- reminders, current until it is due (and while it is still the Agenda).
 function King.AgendaHeld(a, show)
 	return { what = L.HELD_AGENDA:format(a.title), key = "agenda" .. tostring(a.id), show = show,
-		open = function() return agenda == a and a.at > ns.Now() end }
+		open = function() return King.Agenda() == a and a.at > ns.Now() end }
 end
 
 StaticPopupDialogs["OLYMPUS_AGENDA_CALL"] = {
@@ -1194,10 +1251,16 @@ function King.Location()
 end
 
 function King.HandleCommand(dist, sender, text)
-	if dist ~= "CHANNEL" then return end
+	if dist ~= "CHANNEL" and dist ~= "GUILD" then return end
 	local kind, id, guild, rest = text:match("^T1~(%a)~(%d+)~([^~]*)~?(.*)$")
 	if not kind then return end
-	if not King.Authorized(kind, sender, guild) then
+	local guildOnly = dist == "GUILD"
+	local agendaKind = kind == "A" or kind == "D" or kind == "R" or kind == "X"
+	if guildOnly and kind ~= "D" and kind ~= "R" then return end
+	local ownCancel = kind == "D" and rest:find("^0~") and ns.Week and ns.Week.OwnCancel and ns.Week.OwnCancel(sender, tonumber(id), guild, guildOnly)
+		or kind == "X" and agenda and agenda.id == tonumber(id) and agenda.by == ns.FullName(sender)
+	local authorized = ownCancel or agendaKind and King.AgendaAuthorized(sender, guild, guildOnly) or (not agendaKind and King.Authorized(kind, sender, guild))
+	if not authorized then
 		-- Positions come every few seconds: not logged.
 		if kind ~= "P" then
 			ns.Log("throne %s from %s ignored: not the King of %s nor his Hand%s", kind, sender, tostring(guild),
@@ -1226,7 +1289,7 @@ function King.HandleCommand(dist, sender, text)
 	if kind == "S" then OnSummon(sender, id, guild)
 	elseif kind == "H" then OnHands(sender, rest)
 	elseif kind == "N" then OnStewardHands(sender, rest)
-	elseif kinds[kind] then kinds[kind](sender, id, rest, guild)
+	elseif kinds[kind] then kinds[kind](sender, id, rest, guild, guildOnly)
 	elseif kind == "I" then OnInspect(sender, id)
 	elseif kind == "U" then OnUntabarded(sender, rest)
 	elseif kind == "A" then OnAgenda(sender, id, rest, guild)
@@ -1305,7 +1368,7 @@ ns.On("LOGIN", function()
 end)
 
 StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
-	text = L.THRONE_AGENDA_PROMPT,
+	text = "%s",
 	button1 = OKAY or "OK",
 	button2 = CANCEL or "Cancel",
 	hasEditBox = true,
@@ -1317,12 +1380,14 @@ StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
 		local eb = self.editBox or self.EditBox
 		if eb then eb:SetText(""); eb:SetFocus() end
 	end,
-	OnAccept = function(self)
+	OnAccept = function(self, data)
 		local eb = self.editBox or self.EditBox
-		ns.SafeCall("agenda", King.SetAgenda, eb and eb:GetText())
+		data = data or self.data
+		ns.SafeCall("agenda", King.SetAgenda, eb and eb:GetText(), type(data) == "table" and data.scope or nil)
 	end,
 	EditBoxOnEnterPressed = function(self)
-		ns.SafeCall("agenda", King.SetAgenda, self:GetText())
+		local data = self:GetParent().data
+		ns.SafeCall("agenda", King.SetAgenda, self:GetText(), type(data) == "table" and data.scope or nil)
 		self:GetParent():Hide()
 	end,
 	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
@@ -1332,8 +1397,10 @@ StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
 	preferredIndex = 3,
 }
 
-function King.AgendaPrompt()
-	ns.ShowDialog("OLYMPUS_KING_AGENDA")
+function King.AgendaPrompt(scope)
+	scope = King.AgendaScope(scope)
+	if not scope or not King.CanAgenda(scope) then return false end
+	ns.ShowDialog("OLYMPUS_KING_AGENDA", scope == "guild" and L.WEEK_GUILD_PROMPT or L.THRONE_AGENDA_PROMPT, nil, { scope = scope })
 	Changed()
 end
 

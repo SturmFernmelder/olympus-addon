@@ -167,8 +167,9 @@ versions before 1.1 just get the whisper, as before.
   <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
-  guild master's nomination; neither title grants federal powers. Artisanry and Heritage link to
-  the existing boards and clearly say their dedicated workflows are not available yet. A Church
+  guild master's nomination; neither title grants federal powers. Artisanry links to its existing
+  board and says its dedicated workflow is not available yet. Heraldry runs its own guild's
+  Decrees, Agenda and musters; its current appointment grants no global Crown authority. A Church
   contact still needs a Church appointment for its private room and recruitment numbers.
 - **Level race**: the highest level players of the realm.
 - **Recruiting**: the guilds that still have free slots, so new players go where there is room
@@ -658,11 +659,19 @@ what each player chose to share, and the King's week.
   can't write into the game's calendar: an officer's click opens it on the right day's month and
   says which day to right-click for the guild event. Your client keeps the week across a
   `/reload` or a login, so it shows while the King is offline.
+  **Heraldry and guild agendas (1.2.4).** The signed High Council's Heraldry holders and the author
+  also schedule for Olympus, alongside the King's existing verified Steward and Hands. **Schedule
+  for your guild** belongs to its own master and verified Heraldry correspondent: a day and hour,
+  or `30 Guild gathering`. Entries and signup counts reach that guild alone. Saved entries keep
+  their audience, and a roster still loading keeps them hidden until it confirms the issuer.
+  Losing the duty stops new entries and repeats; setters may take back their own exact entries.
+  Older clients ignore guild Agenda messages; the army wire and old Heritage key stay compatible.
 - **The signup sheet**: Sign up on an Agenda entry with the role you claim; it goes to whoever set
-  it, alone, and the army sees the counts (4 tanks, 9 healers...), kept by his client across a
+  it, alone, and its audience sees the counts (4 tanks, 9 healers...), kept by his client across a
   `/reload`. Nothing checks the role and nothing invites you: whoever runs the event invites by
   hand. Five minutes before an entry you signed, your client alone prints one line with the usual
-  alert sound (nothing sent), after a `/reload` too.
+  alert sound (nothing sent), after a `/reload` too. A guild entry's saved nudge appears only in
+  that same guild while its setter still has that duty.
 - **Raise a flag** with one click: **Dungeon**, **Raid**, **PvP** or **Layer**, plus a short
   note if you want one (40 bytes at most). A box says first what goes out: your name, level,
   class and guild, the flag and the note, to every Olympus player of your realm and faction.
@@ -1662,8 +1671,9 @@ message (the game adds it). What goes where:
 | A pinned line (1.1): its words, your guild and, as on every message, your name | the King's, his Stewards' and Hands': everyone on the Olympus channel. A guild master's, and a higher rank's takedown of it: his guild alone (over guild chat) | when you pin one (only while your Olympus chats are on, never while the moderators have you off), again every 5 minutes while it lasts (2 hours at most, a `/reload` included), and when you take it down (`/oly pin off` with nothing pinned on your screen too, once a minute at most: a `/reload` on the Forever beta forgets your pin); a pin you took down (its number and your guild), when you take it down and again when its setter's addon repeats it, once a minute at most, never while the moderators have you off |
 | A flag on the Board (1.1): your guild, level and class, the flag (dungeon, raid, PvP or layer), your note (with the logged API), and your zone only while you share it | everyone on the Olympus channel, and whispered to a player whose Board asked for the flags up | when you raise it, then every 10 to 30 minutes for an hour at most, until you lower it |
 | The Board's ask (1.1): nothing but your name | everyone on the Olympus channel | once a session, the first time you open the Board |
-| A signup (1.1): the Agenda entry, the role you claim (or that you withdraw) and your guild | whoever set that entry (the King, his Steward or a Hand), alone (a whisper) | only when you click Sign up |
-| A signup sheet (1.1): the counts per role of each entry, no names, and when the next one comes | everyone on the Olympus channel | from the client of whoever set the entries, soon after a change, then every 5 minutes while one of them has signups or is within 2 days, every 15 otherwise |
+| A guild Agenda entry (1.2.4): its title, time, setter and guild | that guild alone (over guild chat), from its own master or verified Heraldry correspondent | when scheduled, then every 10 minutes while within a day, every 30 otherwise; the saved audience and current authority are checked again |
+| A signup (1.1): the Agenda entry, the role you claim (or that you withdraw) and your guild | whoever set that entry, alone (a whisper); a guild entry accepts only its own current roster members | only when you click Sign up |
+| A signup sheet (1.1): the counts per role of each entry, no names, and when the next one comes | the entry's audience: everyone on the Olympus channel for an army entry, its own guild alone for a guild entry | from the client of whoever set the entries, soon after a change, then every 5 minutes while one of them has signups or is within 2 days, every 15 otherwise |
 | A camp on the Board (1.1): your guild, level and class, the camp's zone (never your spot) and your note (with the logged API) | everyone on the Olympus channel, and whispered to a player whose Board asked | only with `/oly location on`, when you drop it, then every 10 minutes for its 30 minutes, until you take it down |
 | A net-off word (1.1): the character's name, hidden or shown again (or the guild's name, off or on again), the time, who gave it and the reason | everyone on the Olympus channel | when the King, his Steward, a Hand or a High Councillor gives one, then from the giver's own addon every few minutes for late logins |
 | The army's key (1.1, when the King or his Steward rotates it): the new key, the time it was made and the hashes of the keys it replaces | each Lord and Captain the census confirms online in the guilds the King picks whom his own /who saw in that guild (a whisper from the King each), then each one's guild over guild chat; never the Olympus channel. Each 1.1 addon that has it tells the King so (a whisper), and after login asks its guild whether a newer key exists | only when the King rotates it on the Throne; a guildmate's ask once a login |
@@ -2094,7 +2104,7 @@ Other limits:
 | `/oly discord show` · `status` · `forget` | the Olympus Link window (QR code and link) again; every character's request or proof; drop this character's |
 | `/oly hop` | ask for an invite to the King's layer (while he is online) |
 | `/oly lfg` · `/oly lfg dungeon\|raid\|pvp\|layer [note]` · `/oly lfg off` | the Board (1.1): who is looking for a group; raise your flag (a box with your note first) or lower it |
-| `/oly week` | the King's week on the Board (1.1): his Agenda for 7 days with your guild's calendar events; the King and his Hands add entries with the Agenda button ("Sat 20:00 Raid night") |
+| `/oly week` | the week on the Board and Decrees: army and own-guild Agenda entries for 7 days, alongside your guild's calendar; eligible schedulers see separate army and guild buttons ("Sat 20:00 Raid night") |
 | `/oly camp [note]` · `/oly camp off` · `/oly camps on\|off` | drop a camp in your zone (1.1: it needs `/oly location on`) or take yours down; the camps' badges on the world map |
 | `/oly vox off` · `/oly vox on` | Vox Populi questions in chat only, or in a window |
 | `/oly layerhelp on` · `/oly layerhelp off` | get (or not) requests to invite players to your layer (1.1: not until you say yes) |
