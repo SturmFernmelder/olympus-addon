@@ -45,7 +45,7 @@ local L = ns.L
 -- the member chose. Off until the member's Yes; never on the channel, never in an instance.
 --
 -- The bounty (1.2.3, Daniel's weights: the section "The bounty" below): a death adds the victim's
--- office and level to the Horde player's bounty, a kill pays twice his level and his whole bounty,
+-- office and level to the Horde player's bounty, a kill pays a small level base and his whole bounty,
 -- a member who kills his own killer gets more. Each own row freezes what it was worth where it
 -- was observed (the office, both levels) and carries it on the channel, and every client scores
 -- the same rows with the same function, so every client counts the same points. At each login
@@ -56,6 +56,10 @@ local Wanted = {}
 ns.Wanted = Wanted
 
 Wanted.VERSION = 1
+-- The facts on WK rows do not change with the scoring rule. Local derived Slayer totals and the
+-- signed WY board do: keep their version separate so a mixed-version realm never compares an old
+-- 2 x level total with the current, bounty-led total.
+Wanted.SCORE_VERSION = 2
 -- The Horde players held on the list (the most recently active: a full list makes room by itself,
 -- Share.MakeRoom, and never refuses one), and apart from them the ones a reviewer took off, kept
 -- off (the oldest removal goes first).
@@ -289,10 +293,14 @@ local function Store(create)
 	if type(s) ~= "table" or s.version ~= Wanted.VERSION or s.group ~= ns.group or s.faction ~= ns.faction then
 		if not create then return nil end
 		s = { version = Wanted.VERSION, group = ns.group, faction = ns.faction, targets = {}, aliases = {},
-		slayers = {}, slayerAliases = {}, baseSlayers = {}, evidence = {}, seen = {}, seenOrder = {}, recent = {}, audit = {},
+		scoreVersion = Wanted.SCORE_VERSION, slayers = {}, slayerAliases = {}, baseSlayers = {}, evidence = {}, seen = {}, seenOrder = {}, recent = {}, audit = {},
 		voids = {}, seq = 0 }
 		ns.rdb.wanted = s
 	end
+	-- A newer client may have changed the meaning of stored totals again. Never silently
+	-- downgrade, initialize or reinterpret that data with this build's migration.
+	local scoreVersion = Whole(s.scoreVersion, 1, 2147483647)
+	if scoreVersion and scoreVersion > Wanted.SCORE_VERSION then return nil end
 	-- (voids, 1.2.3: [sender#digest] = when a reviewer voided that shared row, so a copy heard later
 	-- is refused too. recapsRead, 1.2.3: [killer GUID@time] = when, each death recap this client
 	-- read, so it never counts twice; inside: this client's own times in an instance, { from, to }.
@@ -304,6 +312,7 @@ local function Store(create)
 		if type(s[key]) ~= "table" then s[key] = {} end
 	end
 	s.seq = Whole(s.seq, 0, 2147483647) or 0
+	if s.scoreVersion ~= Wanted.SCORE_VERSION and type(Wanted.MigrateScoring) == "function" then Wanted.MigrateScoring(s) end
 	return s
 end
 
@@ -552,10 +561,8 @@ local function ResolveTarget(s, ident, upgrade, wire)
 	return t, key
 end
 
-local function MonthNow()
-	local c = C_DateAndTime and C_DateAndTime.GetCurrentCalendarTime and C_DateAndTime.GetCurrentCalendarTime()
-	if type(c) == "table" and Whole(c.year, 1970, 9999) and Whole(c.month, 1, 12) then return c.year * 12 + c.month - 1 end
-	local now = Clock()
+function Bounty.RealmOffset(now)
+	now = now or Clock()
 	local offset = 0
 	if type(GetGameTime) == "function" then
 		local ok, h, m = pcall(GetGameTime)
@@ -565,11 +572,23 @@ local function MonthNow()
 			offset = math.floor(d / 15 + 0.5) * 900
 		end
 	end
-	if ns.Honors and ns.Honors.MonthOf then return ns.Honors.MonthOf(now, offset) end
+	return offset
+end
+
+function Bounty.MonthAt(at)
+	at = Whole(at, 0, 4294967295) or math.floor(Clock())
+	local offset = Bounty.RealmOffset(Clock())
+	if ns.Honors and ns.Honors.MonthOf then return ns.Honors.MonthOf(at, offset) end
 	local dateFn = date or (os and os.date)
-	if type(dateFn) ~= "function" then return math.floor(now / 2592000) end
-	local d = dateFn("!*t", now + offset)
+	if type(dateFn) ~= "function" then return math.floor(at / 2592000) end
+	local d = dateFn("!*t", at + offset)
 	return d.year * 12 + d.month - 1
+end
+
+local function MonthNow()
+	local c = C_DateAndTime and C_DateAndTime.GetCurrentCalendarTime and C_DateAndTime.GetCurrentCalendarTime()
+	if type(c) == "table" and Whole(c.year, 1970, 9999) and Whole(c.month, 1, 12) then return c.year * 12 + c.month - 1 end
+	return Bounty.MonthAt(math.floor(Clock()))
 end
 Wanted.MonthNow = MonthNow
 
@@ -625,7 +644,7 @@ local function ApplyEvidence(s, e)
 		if not again then t.lifetimeKills = t.lifetimeKills + 1 end
 		AddVictim(t, e)
 	elseif e.action == "claim" then
-		-- 1.2.3: what the kill pays (Bounty.Claim: twice his level, the whole bounty and the revenge;
+		-- 1.2.4: what the kill pays (Bounty.Claim: the small level base, the whole bounty and the revenge;
 		-- the bounty alone for a row without the fields), then a new cycle.
 		local points, level, revenge = Bounty.Claim(t, e)
 		local r
@@ -634,10 +653,10 @@ local function ApplyEvidence(s, e)
 			if not r then return false end
 		end
 		e.points, e.level, e.revenge = points, level, revenge or nil
-		local claim = { id = e.id, at = e.at, slayer = e.killerName, slayerGuid = e.killerGuid, points = points,
+		local claim = { id = e.id, at = e.at, month = e.month, slayer = e.killerName, slayerGuid = e.killerGuid, points = points,
 			evidence = e.kind, cycle = t.cycle, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), overflow = t.victimOverflow or 0,
 			killOverflow = t.victimKillOverflow or 0,
-			bounty = t.current, level = level, revenge = revenge or nil }
+			bounty = t.current, level = level, revenge = revenge or nil, scoreVersion = Wanted.SCORE_VERSION }
 		t.claims[#t.claims + 1] = claim
 		TrimList(t.claims, Wanted.MAX_CLAIMS)
 		t.current, t.victims, t.victimOverflow, t.victimKillOverflow = 0, {}, 0, 0
@@ -1704,7 +1723,7 @@ local function ParseSnapshot(sender, text, relay)
 		text:match("^WY~(%d+)~(%x+)~([^~]+)~(%d+)~(%d+)~(%d+)~(%d+)~([^~]+)~([^~]+)~([^~]+)$")
 	epoch, seq, issued, expires = tonumber(epoch), tonumber(seq), tonumber(issued), tonumber(expires)
 	issuer = CleanName(issuer)
-	if version ~= "1" or not issuer or not Whole(epoch, 1, Wanted.GLOBAL_MAX_EPOCH) or not Whole(seq, 1, Wanted.GLOBAL_MAX_SEQ)
+	if version ~= tostring(Wanted.SCORE_VERSION) or not issuer or not Whole(epoch, 1, Wanted.GLOBAL_MAX_EPOCH) or not Whole(seq, 1, Wanted.GLOBAL_MAX_SEQ)
 		or not Whole(issued, 0, 4294967295) or not Whole(expires, 0, 4294967295) then return nil, "shape" end
 	if scope ~= Scope() then return nil, "scope" end
 	if not Wanted.CanPublish(issuer) or not Wanted.CanPublish(sender) or (not relay and not SameName(sender, issuer)) then return nil, "authority" end
@@ -1714,7 +1733,7 @@ local function ParseSnapshot(sender, text, relay)
 	local pk = D and D.UnB64 and D.UnB64(pk64) or nil
 	local sig = D and D.UnB64 and D.UnB64(sig64) or nil
 	if not pk or #pk ~= 32 or not sig or #sig ~= 64 or not Ed or not Ed.ValidPublicKey or not Ed.ValidPublicKey(pk) then return nil, "signature" end
-	local signed = table.concat({ "OLYW1", scope, issuer, epoch, seq, issued, expires, rowsText }, "|")
+	local signed = table.concat({ "OLYW" .. Wanted.SCORE_VERSION, scope, issuer, epoch, seq, issued, expires, rowsText }, "|")
 	return { scope = scope, issuer = issuer, epoch = epoch, seq = seq, issued = issued, expires = expires,
 		rows = rows, rowsText = rowsText, pk = pk, pk64 = pk64, sig = sig, signed = signed, text = text, relay = relay and CleanName(sender) or nil }
 end
@@ -1759,7 +1778,7 @@ end
 -- The order (Order) of the word a WY body carries, read from its fields, or nil.
 local function BodyOrder(body)
 	if type(body) ~= "string" then return nil end
-	local issuer, epoch, seq, issued = body:match("^WY~%d+~%x+~([^~]+)~(%d+)~(%d+)~(%d+)~")
+	local issuer, epoch, seq, issued = body:match("^WY~" .. Wanted.SCORE_VERSION .. "~%x+~([^~]+)~(%d+)~(%d+)~(%d+)~")
 	if not issuer then return nil end
 	return Order({ issued = tonumber(issued), issuer = issuer, epoch = tonumber(epoch), seq = tonumber(seq) })
 end
@@ -1901,8 +1920,9 @@ function Wanted.HandleGlobalSnapshot(dist, sender, text, relay)
 end
 
 function Wanted.HandleGlobalRelay(dist, sender, text)
-	if type(text) ~= "string" or text:sub(1, 5) ~= "W5~1~" then return false, "shape" end
-	return Wanted.HandleGlobalSnapshot(dist, sender, text:sub(6), true)
+	local prefix = "W5~" .. Wanted.SCORE_VERSION .. "~"
+	if type(text) ~= "string" or text:sub(1, #prefix) ~= prefix then return false, "shape" end
+	return Wanted.HandleGlobalSnapshot(dist, sender, text:sub(#prefix + 1), true)
 end
 
 -- Public, unchanged signed rankings only. A reply does not publish this client's observations
@@ -1915,7 +1935,7 @@ function Wanted.AnswerGlobal(dist, sender, text)
 	if not held then return false, "none" end
 	if now - Wanted.globalCatch.replied < Wanted.GLOBAL_ASK_GAP then return false, "rate" end
 	if not C or not C.SendChunked then return false, "transport" end
-	local body = SameName(held.issuer, ns.me) and held.text or ("W5~1~" .. held.text)
+	local body = SameName(held.issuer, ns.me) and held.text or ("W5~" .. Wanted.SCORE_VERSION .. "~" .. held.text)
 	local sent, why = C.SendChunked(body, false, nil, nil, { owner = Wanted, guardKey = "wanted-global-relay", guard = function()
 		return Wanted.CanPublish(ns.me) and Wanted.CanPublish(held.issuer) and CurrentGlobal() == held and held.scope == Scope() and Fresh(held)
 	end })
@@ -1949,7 +1969,9 @@ function Wanted.PublicationGuard(p)
 	local body, expires, issuer, scope = p.body, p.expires, p.issuer, p.scope
 	local mine = BodyOrder(body)
 	local signedScope, signedIssuer, signedExpires
-	if type(body) == "string" then signedScope, signedIssuer, signedExpires = body:match("^WY~1~(%x+)~([^~]+)~%d+~%d+~%d+~(%d+)~") end
+	if type(body) == "string" then
+		signedScope, signedIssuer, signedExpires = body:match("^WY~" .. Wanted.SCORE_VERSION .. "~(%x+)~([^~]+)~%d+~%d+~%d+~(%d+)~")
+	end
 	local fresh = mine and { issued = mine[1], epoch = mine[4], expires = expires }
 	return function()
 		return mine ~= nil and publishedGlobal == p and not p.replaced and p.body == body
@@ -1986,12 +2008,12 @@ local function PublishRows(rows)
 	if seq > Wanted.GLOBAL_MAX_SEQ then return false, "sequence" end
 	local rowsText, issuer, scope = RowsText(rows), CleanName(ns.me), Scope()
 	local expires = now + Wanted.GLOBAL_LIFE
-	local signed = table.concat({ "OLYW1", scope, issuer, epoch, seq, now, expires, rowsText }, "|")
+	local signed = table.concat({ "OLYW" .. Wanted.SCORE_VERSION, scope, issuer, epoch, seq, now, expires, rowsText }, "|")
 	local sig = D.Sign(signed)
 	if type(sig) ~= "string" or #sig ~= 64 then return false, "key" end
 	p.epoch, p.seq, p.pk64 = epoch, seq, pk64
 	ns.db.wantedPublisher = p
-	local body = table.concat({ "WY", 1, scope, issuer, epoch, seq, now, expires, rowsText, pk64, D.B64(sig) }, "~")
+	local body = table.concat({ "WY", Wanted.SCORE_VERSION, scope, issuer, epoch, seq, now, expires, rowsText, pk64, D.B64(sig) }, "~")
 	publishedGlobal = { body = body, expires = expires, issuer = issuer, scope = scope }
 	local sent, why = C.SendChunked(body, true, nil, nil, { owner = Wanted, guardKey = "wanted-global", guard = Wanted.PublicationGuard(publishedGlobal) })
 	if sent then
@@ -2033,7 +2055,7 @@ function Wanted.LastPublished()
 		p = type(saved) == "table" and saved.scope == Scope() and SameName(saved.issuer, ns.me) and saved or nil
 	end
 	if not p or type(p.body) ~= "string" then return nil end
-	local issued, expires, rowsText = p.body:match("^WY~%d+~%x+~[^~]+~%d+~%d+~(%d+)~(%d+)~([^~]+)~")
+	local issued, expires, rowsText = p.body:match("^WY~" .. Wanted.SCORE_VERSION .. "~%x+~[^~]+~%d+~%d+~(%d+)~(%d+)~([^~]+)~")
 	local rows = rowsText and ReadRows(rowsText) or nil
 	return { issued = tonumber(issued), expires = tonumber(expires), rows = rows or {} }
 end
@@ -2511,7 +2533,7 @@ local function TargetLines()
 				tt:AddLine(L.WANTED_CLAIM_TIP:format(c.points or 0, c.cycle or 0, EvidenceLabel(c.evidence), ns.Ago(c.at)), 1, 1, 1, true)
 				-- (1.2.3: what it paid for: his level, his bounty, the revenge.)
 				local level = tonumber(c.level) or 0
-				tt:AddLine(L.WANTED_CLAIM_PARTS:format(level, Bounty.SCORE.HORDE_LEVEL * level, tonumber(c.bounty) or 0,
+				tt:AddLine(L.WANTED_CLAIM_PARTS:format(level, Bounty.BasePoints(level), tonumber(c.bounty) or 0,
 					c.revenge and Bounty.SCORE.REVENGE or 0), 0.8, 0.8, 0.8, true)
 			end }
 	end
@@ -4095,10 +4117,11 @@ end
 -- 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any other office
 -- 10, a member 0) and his level. The same member killed by the same Horde player counts once in
 -- REPEAT_GAP (corpse camping: the deaths in between stay, worth nothing), and one cycle's bounty
--- holds BOUNTY_MAX at most. A kill pays the killer twice the Horde player's level and his whole
--- open bounty, which then starts again at 0 (a new cycle); a kill with no bounty open pays the
--- level part alone. A member who kills the very Horde player who killed him within GRUDGE_DAYS
--- (his own death row and his own kill row, the same GUID) gets REVENGE more, once a claim: his
+-- holds BOUNTY_MAX at most. A kill pays the killer one base point per ten Horde levels (rounded
+-- up) and his whole open bounty, which then starts again at 0 (a new cycle); a kill with no bounty
+-- open pays the small level base alone. A member who kills the very Horde player who killed him
+-- within GRUDGE_DAYS (his own death row and his own kill row, the same GUID) gets REVENGE more,
+-- once a claim: his
 -- claim closes it, another member's kill or the bounty's reset does not. A Slayer holds MAX_POINTS
 -- at most. Only outside instances (a battleground, an arena, a dungeon, a raid), the death and the
 -- kill alike: the captures refuse one inside, and a member's client never shares it.
@@ -4153,12 +4176,12 @@ end
 Bounty.SCORE = {
 	OFFICE = { K = 100, H = 50, G = 30, C = 20, O = 10, M = 0 }, -- the victim's highest office (Bounty.OfficeOf)
 	VICTIM_LEVEL = 1,    -- times the victim's level, added to his office for each death
-	HORDE_LEVEL = 2,     -- times the Horde player's level, paid to whoever kills him
+	KILL_LEVEL_STEP = 10,-- one base point per this many Horde-player levels, rounded up
 	REVENGE = 100,       -- paid to a member who kills the very Horde player who killed him...
 	GRUDGE_DAYS = 14,    -- ...within this many days of that death, once a claim
 	REPEAT_GAP = 600,    -- one member killed by one Horde player counts once in this many seconds
-	-- (Proposed, for Daniel's OK: a kill pays twice the level even with no bounty open, so corpse
-	-- camping and a Horde friend killed in a loop must not pay it again and again.)
+	-- A kill pays its small level base even with no bounty open, so corpse camping and a Horde
+	-- friend killed in a loop must not pay it again and again.
 	KILL_GAP = 3600,     -- one member's kills of one Horde player pay his level once in this many seconds (the bounty always)
 	REVENGE_GAP = 86400, -- and the revenge on him once in this many seconds
 	BOUNTY_MAX = 2000,   -- the most one bounty cycle holds
@@ -4214,11 +4237,123 @@ function Bounty.ClaimLevel(hl, hf, cycle)
 	if hl > 0 and not hf then return hl end
 	return math.max(hl, Bounty.Level(cycle))
 end
--- ...and what a kill pays.
+-- ...the deliberately small level base for any qualifying Horde kill...
+function Bounty.BasePoints(level)
+	level = Bounty.Level(level)
+	return level > 0 and math.ceil(level / Bounty.SCORE.KILL_LEVEL_STEP) or 0
+end
+-- ...and what a kill pays. The bounty and revenge keep their existing weight.
 function Bounty.ClaimPoints(level, bounty, revenge)
 	local S = Bounty.SCORE
-	return math.min(S.MAX_POINTS, S.HORDE_LEVEL * Bounty.Level(level) + math.max(0, math.floor(tonumber(bounty) or 0))
+	return math.min(S.MAX_POINTS, Bounty.BasePoints(level) + math.max(0, math.floor(tonumber(bounty) or 0))
 		+ (revenge and S.REVENGE or 0))
+end
+
+-- Score-version 1's formula exists only for validating retained checkpoint claims during the
+-- one-way migration. It is never used for a new claim.
+function Bounty.LegacyClaimPoints(level, bounty, revenge)
+	local S = Bounty.SCORE
+	return math.min(S.MAX_POINTS, 2 * Bounty.Level(level) + math.max(0, math.floor(tonumber(bounty) or 0))
+		+ (revenge and S.REVENGE or 0))
+end
+
+-- Saved score-version 1 data has two sources. Live evidence still contains the frozen facts and
+-- Rebuild can score it exactly. A checkpoint has only its retained claims plus aggregate paid
+-- rows: each retained claim is recalculated only when its old points match the old formula and
+-- its Slayer/amount can be reconciled with that aggregate. Anything older or malformed is kept
+-- in scoreArchive, never guessed and never mixed into a version-2 ranking.
+function Wanted.MigrateScoring(s)
+	if type(s) ~= "table" or s.scoreVersion == Wanted.SCORE_VERSION then return false end
+	local savedVersion = Whole(s.scoreVersion, 1, 2147483647)
+	if savedVersion and savedVersion > Wanted.SCORE_VERSION then return false end
+	local from = Whole(savedVersion, 1, Wanted.SCORE_VERSION - 1) or 1
+	local archive = { from = from, to = Wanted.SCORE_VERSION, at = math.floor(Clock()), targets = {},
+		recalculatedClaims = 0, archivedClaims = 0, archivedPoints = 0 }
+	local bases = {}
+	for targetKey, t in pairs(type(s.targets) == "table" and s.targets or {}) do
+		if type(targetKey) == "string" and type(t) == "table" and type(t.base) == "table" then
+			local base = TargetDerived(t.base)
+			local oldPaid, remaining, newPaid = CopySlayers(base.paid), {}, {}
+			for _, p in pairs(oldPaid) do Share.AddPaid(s, remaining, p) end
+			local claims = CopyList(base.claims, Wanted.MAX_CLAIMS)
+			local invalid = 0
+			for _, claim in ipairs(claims) do
+				local ident = type(claim) == "table" and Identity(claim.slayer, claim.slayerGuid) or nil
+				local at = type(claim) == "table" and Whole(claim.at, 0, 4294967295) or nil
+				local level = type(claim) == "table" and Whole(claim.level, 0, 255) or nil
+				local bounty = type(claim) == "table" and Whole(claim.bounty, 0, Bounty.SCORE.BOUNTY_MAX) or nil
+				local oldPoints = type(claim) == "table" and Whole(claim.points, 0, Wanted.MAX_POINTS) or nil
+				local revengeShape = type(claim) == "table" and (claim.revenge == nil or claim.revenge == false or claim.revenge == true)
+				local revenge = type(claim) == "table" and claim.revenge == true or false
+				local expected = level and bounty and Bounty.LegacyClaimPoints(level, bounty, revenge) or nil
+				local key = ident and Share.SlayerKey(s, ident.guidKey or ident.nameKey) or nil
+				local paid = key and remaining[key] or nil
+				local reconciled = oldPoints == 0 or paid and (paid.claims or 0) >= 1 and (paid.total or 0) >= oldPoints
+				if ident and at and level and bounty and oldPoints == expected and revengeShape and reconciled then
+					local month = Whole(claim.month, 0, 200000) or Bounty.MonthAt(at)
+					local points = Bounty.ClaimPoints(level, bounty, revenge)
+					if oldPoints > 0 then
+						paid.total, paid.claims = paid.total - oldPoints, paid.claims - 1
+						local monthPoints = type(paid.months) == "table" and tonumber(paid.months[month]) or nil
+						if monthPoints then
+							monthPoints = math.max(0, monthPoints - oldPoints)
+							if monthPoints > 0 then
+								paid.months[month] = monthPoints
+								if type(paid.monthClaims) == "table" then
+									paid.monthClaims[month] = math.max(0, (tonumber(paid.monthClaims[month]) or 0) - 1)
+								end
+							else
+								paid.months[month] = nil
+								if type(paid.monthAt) == "table" then paid.monthAt[month] = nil end
+								if type(paid.monthClaims) == "table" then paid.monthClaims[month] = nil end
+							end
+						end
+					end
+					if oldPoints ~= points then claim.legacyPoints = oldPoints end
+					claim.points, claim.month, claim.scoreVersion, claim.unranked = points, month, Wanted.SCORE_VERSION, nil
+					if points > 0 then
+						local row = newPaid[key]
+						if not row then
+							row = { key = key, name = ident.name, guid = ident.guid, total = 0, claims = 0,
+								months = {}, monthAt = {}, monthClaims = {} }
+							newPaid[key] = row
+						end
+						Share.Pay(row, points, at, month)
+					end
+					archive.recalculatedClaims = archive.recalculatedClaims + 1
+				else
+					claim.scoreVersion, claim.unranked = from, true
+					archive.archivedClaims = archive.archivedClaims + 1
+					invalid = invalid + 1
+				end
+			end
+			local unresolved = {}
+			for key, row in pairs(remaining) do
+				if (row.total or 0) > 0 or (row.claims or 0) > 0 then
+					unresolved[key] = row
+					archive.archivedPoints = archive.archivedPoints + (row.total or 0)
+				end
+			end
+			if next(unresolved) or invalid > 0 then archive.targets[targetKey] = { paid = unresolved, invalidClaims = invalid } end
+			base.paid, base.claims = newPaid, claims
+			bases[targetKey] = base
+		end
+	end
+	for targetKey, base in pairs(bases) do s.targets[targetKey].base = base end
+	archive.baseSlayers = CopySlayers(s.baseSlayers)
+	for _, row in pairs(archive.baseSlayers) do
+		archive.archivedPoints = archive.archivedPoints + (row.total or 0)
+	end
+	s.baseSlayers, s.scoreArchive = {}, archive
+	-- A signed board contains derived totals, so a version-1 word cannot survive this migration.
+	s.global, s.globalHeads = nil, nil
+	local publisher = type(ns.db) == "table" and type(ns.db.wantedPublisher) == "table" and ns.db.wantedPublisher or nil
+	if publisher and type(publisher.last) == "table" and not tostring(publisher.last.body or ""):find("^WY~" .. Wanted.SCORE_VERSION .. "~") then
+		publisher.last = nil
+	end
+	s.scoreVersion = Wanted.SCORE_VERSION
+	Rebuild(s)
+	return true
 end
 
 -- What a row is worth, checked: { office, ml (the Olympian's level), hl (the Horde player's), hf
@@ -5329,7 +5464,7 @@ function Bounty.LetterKey(e, claim, name)
 		if type(v) == "table" and not v.again then kills = kills + 1 end
 	end
 	kills = math.min(Wanted.MAX_POINTS, kills)
-	return ("wanted@%s~%d~%d~%d~%d~%d~%d%s~%s"):format(digest, points, math.min(Wanted.MAX_POINTS, S.HORDE_LEVEL * paid),
+	return ("wanted@%s~%d~%d~%d~%d~%d~%d%s~%s"):format(digest, points, Bounty.BasePoints(paid),
 		Whole(claim.bounty, 0, Wanted.MAX_POINTS) or 0, e.revenge and S.REVENGE or 0, kills, level, floor and "+" or "", name)
 end
 -- Its parts, or nil.
@@ -5823,7 +5958,7 @@ function Wanted.StatusText()
 	Add("")
 	local S = Bounty.SCORE
 	Add(L.WANTED_STATUS_WEIGHTS:format(S.OFFICE.K, S.OFFICE.H, S.OFFICE.G, S.OFFICE.C, S.OFFICE.O, math.floor(S.REPEAT_GAP / 60), S.BOUNTY_MAX,
-		S.HORDE_LEVEL, S.REVENGE, S.GRUDGE_DAYS))
+		S.KILL_LEVEL_STEP, S.REVENGE, S.GRUDGE_DAYS))
 	Add(L.WANTED_STATUS_BOUNTIES)
 	local listed = 0
 	for _, t in ipairs(Wanted.Targets(true)) do
@@ -6027,9 +6162,12 @@ end
 -- faction's store (ns.CheckFaction). 1.2.3: this client's own rows the channel did not take go
 -- again SHARE_RESEND_FIRST after login, then every SHARE_RESEND_EVERY.
 function Wanted.Load()
-	Wanted.Prune()
+	-- Create the ordinary empty realm store at login, but fail closed without touching a store
+	-- written by a newer scoring version.
+	if not Store(true) or not Wanted.Prune() then return false end
 	local p = type(ns.db) == "table" and type(ns.db.wantedPublisher) == "table" and ns.db.wantedPublisher.last or nil
 	if not publishedGlobal and type(p) == "table" and type(p.body) == "string" and Whole(p.expires, 0, 4294967295)
+		and p.body:find("^WY~" .. Wanted.SCORE_VERSION .. "~")
 		and not p.replaced and p.expires >= math.floor(Clock()) and SameName(p.issuer, ns.me) and p.scope == Scope() then
 		local held = { body = p.body, expires = p.expires, issuer = p.issuer, scope = p.scope }
 		publishedGlobal = held

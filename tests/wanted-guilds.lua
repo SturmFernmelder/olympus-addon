@@ -350,7 +350,7 @@ for _, enforced in ipairs({ false, true }) do
 			for _, cl in ipairs({ sender, mate, author, third }) do
 				local t = world:Target(cl, victim)
 				assert(t, ns.ShortName(cl.name) .. " has his kill")
-				eq(t.claims[1].slayer, sender.name, ns.ShortName(cl.name)); eq(t.claims[1].points, 120, "twice the level-60 Horde player's level")
+				eq(t.claims[1].slayer, sender.name, ns.ShortName(cl.name)); eq(t.claims[1].points, 6, "one rounded base point per ten levels")
 			end
 			-- The author's /oly wanted status: counted, and the guild the row names.
 			local line = assert(world:Line(author, "Wgganker" .. tag), "a line about the death")

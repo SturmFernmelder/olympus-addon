@@ -1864,10 +1864,11 @@ level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a 
 other office 10, a member 0; one office only, the highest. The same member killed by the same
 Horde player counts once in 10 minutes (corpse camping), its kills too (1.2.4): a death in between
 adds no points and no kill, and stays on his page marked so. One bounty holds 2000 points at most.
-A killing blow pays twice the Horde player's level and his whole bounty, which then starts again
-at 0; a kill with no bounty open pays the level part alone. A member who kills the very Horde
-player who killed him within 14 days gets 100 more, once for each such kill. One member's kills of
-one Horde player pay his level once an hour and the 100 once a day (the open bounty always), so
+A killing blow pays one base point for every 10 levels of the Horde player, rounded up, and his
+whole bounty, which then starts again at 0; a kill with no bounty open pays that small level base
+alone. A member who kills the very Horde player who killed him within 14 days gets 100 more, once
+for each such kill. One member's kills of
+one Horde player pay the level base once an hour and the 100 once a day (the open bounty always), so
 camping a corpse or killing a friend's character over and over pays no more. A Slayer holds
 100000 points at most. Nothing counts in an instance (a battleground, an arena, a dungeon, a
 raid), the death nor the kill. An office counts only where every client verifies it the same way,
@@ -1883,7 +1884,11 @@ the open bounty saw. Each row carries what it is worth, frozen where it was obse
 client scores the same rows the same way and in the same order (by the time of each death, a
 death before a kill in the same second), never higher than it can verify (an office it cannot
 check, a level above one it sees). A row from a client before these fields counts as it did: 1 a
-death, a kill its open bounty.
+death, a kill its open bounty. When this scoring rule replaced the former `2 x level` base, every
+retained claim whose frozen level, bounty and revenge still prove its old total was recalculated;
+older folded aggregates without those facts remain preserved as legacy audit data but are not
+mixed into the new ranking. Signed top-three words use the same score version and old words are
+refused rather than compared with the new totals.
 
 **Earlier deaths (1.2.3).** Olympus kept no death before 1.2.3, and the game keeps no PvP history,
 but its death recaps of the current game session are still there (gone when the game closes).

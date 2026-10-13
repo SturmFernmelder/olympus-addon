@@ -662,7 +662,7 @@ test("wanted global: only a fresh directly signed authority snapshot awards GUID
 			{ guid = "Player-1-DA000002", points = 7, claims = 1, reachedAt = w.epoch },
 		}
 		local ok, why, message = w.publish(rows, 100)
-		eq(ok, true); eq(why, nil); assert(message and message:find("^WY~1~"))
+		eq(ok, true); eq(why, nil); assert(message and message:find("^WY~2~"))
 		eq(W.GlobalBorder("Anybody-Realm", "Player-1-DA000001"), nil, "another client's publishing shows nothing here before its word comes")
 		eq(w.pub.Wanted.GlobalBorder(nil, "Player-1-DA000001"), "wanted-slayer-1",
 			"the publisher's own client holds the word it sent, checked as everyone checks it (the channel never echoes it)")
@@ -746,10 +746,15 @@ test("wanted global: forgery, replay, rollback, stale words, key conflicts and r
 			local out = {} for part in (text .. "~"):gmatch("([^~]*)~") do out[#out + 1] = part end return out
 		end
 		local function Resign(fields)
-			local signed = table.concat({ "OLYW1", fields[3], fields[4], fields[5], fields[6], fields[7], fields[8], fields[9] }, "|")
+			local signed = table.concat({ "OLYW2", fields[3], fields[4], fields[5], fields[6], fields[7], fields[8], fields[9] }, "|")
 			fields[11] = c.Debts.B64(c.Debts.Sign(signed))
 			return table.concat(fields, "~")
 		end
+		local legacy = Fields(first); legacy[2] = "1"
+		local legacySigned = table.concat({ "OLYW1", legacy[3], legacy[4], legacy[5], legacy[6], legacy[7], legacy[8], legacy[9] }, "|")
+		legacy[11] = c.Debts.B64(c.Debts.Sign(legacySigned))
+		eq(select(2, W.HandleGlobalSnapshot("CHANNEL", council, table.concat(legacy, "~"))), "shape",
+			"a correctly signed score-v1 total cannot enter the score-v2 board")
 		local rollback = Fields(first); rollback[5], rollback[6] = "299", "99"; rollback = Resign(rollback)
 		eq(select(2, W.HandleGlobalSnapshot("CHANNEL", council, rollback)), "rollback")
 		local duplicate = Fields(first); duplicate[5], duplicate[6] = "301", "1"
@@ -1382,7 +1387,7 @@ test("wanted controls: Frames (Publish, Revoke), Take off, Void and Sightings to
 		assert(d.a:find("ControlsSlayer", 1, true), "the dialog names what will be signed")
 		StaticPopupDialogs.OLYMPUS_WANTED_PUBLISH.OnAccept({})
 		local published = w.sent[#w.sent]
-		eq(published.dist, "CHANNEL"); assert(published.text:find("^WY~1~"))
+		eq(published.dist, "CHANNEL"); assert(published.text:find("^WY~2~"))
 		-- (1.2.3: his 101 points, his revenge's with his death's point: above.)
 		assert(published.text:find("1.cf000003:" .. (1 + W.Bounty.SCORE.REVENGE) .. ":1:", 1, true), "his board's slayer, by GUID")
 		eq(w.prints[#w.prints], ns.L.WANTED_PUBLISHED)
@@ -2596,10 +2601,10 @@ test("wanted relay: a late independently anchored peer recovers an unchanged wor
 		eq(late.rdb.wanted.global.text, held, "original signature, issuer, timestamps and sequence are unchanged")
 		eq(late.rdb.wanted.global.relay, council.name)
 		eq(world:As(late, late.W.GlobalSnapshot).seq, old.seq + 1)
-		local accepted, why = world:As(late, late.W.HandleGlobalRelay, "CHANNEL", council.name, "W5~1~" .. held)
+		local accepted, why = world:As(late, late.W.HandleGlobalRelay, "CHANNEL", council.name, "W5~2~" .. held)
 		eq(accepted, false); eq(why, "replay")
 		local fresh = world:Client("Fresh-Realm", "Player-1-0A000004")
-		accepted, why = world:As(fresh, fresh.W.HandleGlobalRelay, "CHANNEL", council.name, "W5~1~" .. held)
+		accepted, why = world:As(fresh, fresh.W.HandleGlobalRelay, "CHANNEL", council.name, "W5~2~" .. held)
 		eq(accepted, false); eq(why, "unanchored", "a relay cannot introduce the original key")
 		eq(fresh.rdb.wanted and fresh.rdb.wanted.globalDirectPins, nil)
 		world:Load(late); world:Deliver()
@@ -2623,14 +2628,14 @@ test("wanted relay: authority, expiry, pin rotation and mixed versions fail clos
 		world:Offline(king); world:Load(late); world:Deliver()
 		local before = world:As(late, late.W.GlobalSnapshot).seq
 		local function Receive(sender, text)
-			return world:As(late, late.W.HandleGlobalRelay, "CHANNEL", sender, text or ("W5~1~" .. held))
+			return world:As(late, late.W.HandleGlobalRelay, "CHANNEL", sender, text or ("W5~2~" .. held))
 		end
 		local accepted, why = Receive("Ordinary-Realm")
 		eq(accepted, false); eq(why, "authority")
-		accepted, why = Receive(council.name, "W5~2~" .. held)
+		accepted, why = Receive(council.name, "W5~1~" .. held)
 		eq(accepted, false); eq(why, "shape")
 		accepted, why = world:As(late, late.W.HandleGlobalSnapshot, "CHANNEL", council.name, held)
-		eq(accepted, false); eq(why, "authority", "old WY does not permit forwarded sender identity")
+		eq(accepted, false); eq(why, "authority", "a direct WY does not permit forwarded sender identity")
 		assert(Receive(council.name))
 		world.authorities[ns.Fold(council.name)] = nil
 		world:Deliver()
@@ -2822,7 +2827,7 @@ test("wanted world: a saved word shows again only while it holds: edited rows, a
 		world:Deliver()
 		local good = alpha.rdb.wanted.global
 		local goodHeads = alpha.rdb.wanted.globalHeads
-		assert(good and good.text:find("^WY~1~") and goodHeads, "the word Alpha accepted is saved")
+		assert(good and good.text:find("^WY~2~") and goodHeads, "the word Alpha accepted is saved")
 		local function Saved(text, heads)
 			alpha.rdb.wanted.global = { text = text, issuer = good.issuer, at = good.at }
 			alpha.rdb.wanted.globalHeads = heads or goodHeads
@@ -2837,7 +2842,7 @@ test("wanted world: a saved word shows again only while it holds: edited rows, a
 		local fields = {}
 		for part in (good.text .. "~"):gmatch("([^~]*)~") do fields[#fields + 1] = part end
 		fields[9] = alpha.guid:gsub("^Player%-(%d+)%-(%x+)$", function(server, id) return server .. "." .. id:lower() end) .. ":99:9:" .. world.epoch
-		local signed = table.concat({ "OLYW1", fields[3], fields[4], fields[5], fields[6], fields[7], fields[8], fields[9] }, "|")
+		local signed = table.concat({ "OLYW2", fields[3], fields[4], fields[5], fields[6], fields[7], fields[8], fields[9] }, "|")
 		fields[10] = ns.Ed25519.ToB64(alpha.pk)
 		fields[11] = ns.Ed25519.ToB64(ns.Ed25519.Sign(alpha.seed, signed, alpha.pk))
 		Saved(table.concat(fields, "~"))
@@ -3006,7 +3011,7 @@ test("wanted world: a word replaced by a newer one is not repeated by its publis
 				local m = world.log[i]
 				-- A catch-up request or an unchanged relay of the newer word is not a repeat
 				-- of the old publisher's replaced word.
-				if m.from == king and m.dist == "CHANNEL" and (m.text == replacedWord or m.text == "W5~1~" .. replacedWord) then return true end
+				if m.from == king and m.dist == "CHANNEL" and (m.text == replacedWord or m.text == "W5~2~" .. replacedWord) then return true end
 			end
 			return false
 		end
@@ -3130,8 +3135,8 @@ test("wanted 1.2.4 world: a member of another guild whom this client cannot prov
 end)
 
 ---------------------------------------------------------------------------
--- 1.2.3, the bounty (Daniel's decisions of 2026-10-11): a death adds the victim's office and level
--- to the Horde player's bounty, a kill pays twice his level and his whole bounty, a member who
+-- 1.2.3/1.2.4, the bounty: a death adds the victim's office and level
+-- to the Horde player's bounty, a kill pays a small level base and his whole bounty, a member who
 -- kills his own killer 100 more, corpse camping counts once in 10 minutes and a cycle holds 2000;
 -- the same rows give the same points on every client; and the deaths the game's death recaps
 -- still hold count once at login, with one notice. Each of these fails on the build before it
@@ -3219,14 +3224,14 @@ test("wanted 1.2.4 owner gaps: linked Slayers share level and revenge cooldowns,
 		Row(main, "1.cc00f001", "S"); Row(alt, "1.cc00f002", "S")
 		BountyLink(w, c, main, alt, true)
 		local t, claim = Row(alt, "1.cc00f002", "P")
-		eq(claim.points, 222); eq(claim.revenge, true)
+		eq(claim.points, 108); eq(claim.revenge, true)
 		local stored = c.rdb.wanted.targets[t.key]
 		eq(stored.bounty.grudge[W.Bounty.Who(main)], nil, "the linked main's old grudge closes too")
 		eq(stored.bounty.grudge[W.Bounty.Who(alt)], nil)
 		-- Fold to the checkpoint and reload: stored keys remain per character, owner lookup joins them.
 		W.MAX_EVIDENCE = 1
 		t, claim = Row(main, "1.cc00f001", "P")
-		eq(claim.points, 0, "switching to the linked Slayer cannot mint another 120")
+		eq(claim.points, 0, "switching to the linked Slayer cannot mint another level base")
 		assert(W.Stats().checkpointed > 0)
 		eq(stored.base.bounty.kill[W.Bounty.Who(alt)] ~= nil, true, "the original character key is retained")
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c); W = c.Wanted; assert(W.Prune())
@@ -3234,16 +3239,16 @@ test("wanted 1.2.4 owner gaps: linked Slayers share level and revenge cooldowns,
 		eq(claim.points, 0, "the confirmed-owner gap survives a fold and reload")
 		eq(claim.revenge, nil)
 		t, claim = Row(other, "1.cc00f003", "P")
-		eq(claim.points, 120, "an independent Slayer still has its own approved interval")
+		eq(claim.points, 6, "an independent Slayer still has its own approved interval")
 		w.advance(W.Bounty.SCORE.KILL_GAP)
 		Row(main, "1.cc00f001", "S")
 		t, claim = Row(main, "1.cc00f001", "P")
-		eq(claim.points, 121, "the level is due again, the owner's same-day revenge is not")
+		eq(claim.points, 7, "the level base and open bounty are due again, the owner's same-day revenge is not")
 		eq(claim.revenge, nil)
 		w.advance(W.Bounty.SCORE.REVENGE_GAP)
 		Row(main, "1.cc00f001", "S")
 		t, claim = Row(alt, "1.cc00f002", "P")
-		eq(claim.points, 221); eq(claim.revenge, true, "the existing daily revenge interval is unchanged")
+		eq(claim.points, 107); eq(claim.revenge, true, "the existing daily revenge interval is unchanged")
 	end)
 end)
 
@@ -3273,7 +3278,7 @@ test("wanted 1.2.4 owner gaps: actual verified account keys and this account's c
 				kind = "P", horde = "1.0d00f003", own = ("1.cc00f01%d"):format(i), worth = "M~1~60", name = "Key Rogue-Realm" })))
 			local t = W.Target(nil, horde); points[i] = t.claims[#t.claims].points
 		end
-		eq(points[1], 120); eq(points[2], 0); eq(points[3], 120); eq(points[4], 120); eq(points[5], 0)
+		eq(points[1], 6); eq(points[2], 0); eq(points[3], 6); eq(points[4], 6); eq(points[5], 0)
 		-- Malformed/non-name old keys cannot acquire guessed ownership; lookup itself remains bounded.
 		local calls = 0
 		c.Debts.SameOwner = function() calls = calls + 1 return false end
@@ -3285,25 +3290,27 @@ test("wanted 1.2.4 owner gaps: actual verified account keys and this account's c
 	end)
 end)
 
-test("wanted 1.2.3 bounty: Daniel's weights in one table, and the scoring every client applies (a death: office and level; a kill: twice his level, the whole bounty, the revenge), the spec's worked examples", function()
+test("wanted 1.2.4 bounty: the rebalance keeps bounty and revenge weights while a kill pays one base point per ten target levels, rounded up", function()
 	WithWanted(function(_, W)
 		local B = W.Bounty
 		local S = assert(B and B.SCORE, "the constants table")
 		eq(S.OFFICE.K, 100); eq(S.OFFICE.H, 50); eq(S.OFFICE.G, 30); eq(S.OFFICE.C, 20); eq(S.OFFICE.O, 10); eq(S.OFFICE.M, 0)
-		eq(S.VICTIM_LEVEL, 1); eq(S.HORDE_LEVEL, 2); eq(S.REVENGE, 100); eq(S.GRUDGE_DAYS, 14); eq(S.REPEAT_GAP, 600)
+		eq(S.VICTIM_LEVEL, 1); eq(S.KILL_LEVEL_STEP, 10); eq(S.REVENGE, 100); eq(S.GRUDGE_DAYS, 14); eq(S.REPEAT_GAP, 600)
 		eq(S.BOUNTY_MAX, 2000); eq(S.HIDDEN_GAP, 10)
 		-- (1.2.3 repair, proposed for Daniel's OK: corpse camping and a friend killed in a loop.)
 		eq(S.KILL_GAP, 3600); eq(S.REVENGE_GAP, 86400)
 		assert(S.KILL_GAP >= S.REPEAT_GAP, "a kill's gap at least a death's")
 		eq(S.MAX_POINTS, 100000); eq(S.MAX_POINTS, W.MAX_POINTS, "what WY carries: 1.2.2's receivers refuse a word above it")
 		eq(B.DeathPoints("K", 60) + B.DeathPoints("M", 40) + B.DeathPoints("M", 40), 240, "the King (60) and two members (40, 40)")
-		eq(B.ClaimPoints(B.ClaimLevel(55, true, 60), 240, false), 360, "a '??' (55 at least) and the King's row's exact 60")
-		eq(B.ClaimPoints(B.ClaimLevel(55, true, nil), 240, false), 350, "no exact level seen in the cycle: the floor")
+		eq(B.ClaimPoints(B.ClaimLevel(55, true, 60), 240, false), 246, "a '??' (55 at least) and the King's row's exact 60")
+		eq(B.ClaimPoints(B.ClaimLevel(55, true, nil), 240, false), 246, "no exact level seen in the cycle: the rounded-up floor")
 		-- (Daniel's revenge is 100, the spec's table's 50 gave 410: one of the level-40 victims, who
 		-- sees him as 50 at least, kills him.)
-		eq(B.ClaimPoints(B.ClaimLevel(50, true, 60), 240, true), 460, "the revenge")
+		eq(B.ClaimPoints(B.ClaimLevel(50, true, 60), 240, true), 346, "the revenge")
 		eq(B.DeathPoints("H", 58), 108, "a level-58 guild master who is a High Councillor: his highest office alone")
-		eq(B.ClaimPoints(B.ClaimLevel(52, false, nil), 0, false), 104, "a level-52 Horde player nobody reported: twice his level")
+		eq(B.ClaimPoints(B.ClaimLevel(52, false, nil), 0, false), 6, "a level-52 Horde player nobody reported: ceil(52 / 10)")
+		eq(B.BasePoints(0), 0); eq(B.BasePoints(1), 1); eq(B.BasePoints(10), 1); eq(B.BasePoints(11), 2); eq(B.BasePoints(60), 6)
+		eq(B.LegacyClaimPoints(52, 0, false), 104, "the previous formula remains only as a migration validator")
 		eq(B.ClaimLevel(58, false, 60), 58, "a claim's own exact level is its own")
 		eq(B.ClaimLevel(0, false, 60), 60, "none seen: the cycle's highest exact one")
 		eq(B.ClaimLevel(0, false, nil), 0, "none known: 0")
@@ -3315,7 +3322,171 @@ test("wanted 1.2.3 bounty: Daniel's weights in one table, and the scoring every 
 	end)
 end)
 
-test("wanted 1.2.3 bounty: a kill with no bounty open pays twice the Horde player's level from his corpse (a '??' as this player's level + 10 at least, within the game's highest), none seen 0, and nothing inside an instance, the kill nor the death", function()
+test("wanted 1.2.4 scoring migration: retained live evidence is rebuilt under score v2, while old signed and publisher totals are discarded", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		local horde = "Player-1-0D00BA01"
+		w.hordePlayer("Migration Prey-Realm", horde)
+		w.units.target = { name = "Migration Prey-Realm", guid = horde, faction = "Horde", level = 60 }
+		local ok, claim = w.handlers.PARTY_KILL(w.units.player.guid, horde)
+		w.units.target = nil
+		assert(ok, tostring(claim)); eq(claim.points, 6)
+
+		-- Shape the derived cache exactly as score v1 would have left this same retained fact.
+		-- The evidence itself remains the authority and must deterministically rebuild it to six.
+		local s = c.rdb.wanted
+		local target = assert(s.targets["g:" .. horde])
+		local rank = assert(W.Rankings().all[1])
+		claim.points, s.evidence[1].points = 120, 120
+		target.claims[1].points, target.paid[rank.key].total = 120, 120
+		target.paid[rank.key].months[W.MonthNow()] = 120
+		s.slayers[rank.key].total, s.slayers[rank.key].months[W.MonthNow()] = 120, 120
+		s.scoreVersion = 1
+		s.global = { text = "WY~1~legacy", issuer = c.me }
+		s.globalHeads = { legacy = { epoch = 1, seq = 1, pk64 = "old" } }
+		c.db.wantedPublisher = { last = { body = "WY~1~legacy", expires = w.epoch + 1000, issuer = c.me, scope = "legacy" } }
+
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		s = c.rdb.wanted
+		eq(s.scoreVersion, 2); eq(s.evidence[1].points, 6)
+		target = assert(W.Target(nil, horde)); eq(target.claims[1].points, 6)
+		eq(W.Rankings().all[1].points, 6, "the old 120-point cache is not mixed with the rebuilt evidence")
+		eq(s.global, nil); eq(s.globalHeads, nil); eq(c.db.wantedPublisher.last, nil)
+		eq(s.scoreArchive.from, 1); eq(s.scoreArchive.recalculatedClaims, 0)
+	end)
+end)
+
+test("wanted 1.2.4 scoring migration: the retained production-shaped 534 and 332 leaders deterministically become 30 and 169", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		local hobo = w.participant("Hobo Heretics-Realm", "Player-1-CC00BC01")
+		local socio = w.participant("Socioeconomic Factors-Realm", "Player-1-CC00BC02")
+		local seq = 0
+		local function Row(sender, own, horde, level, kind, ml)
+			seq = seq + 1
+			w.advance()
+			w.hordePlayer("Snapshot Prey " .. seq .. "-Realm", horde)
+			assert(w.commHandlers.WK("CHANNEL", sender, BountyRow(c, W, {
+				digest = ("%016x"):format(0xbc010000 + seq), at = w.epoch, kind = kind or "P",
+				horde = horde:gsub("^Player%-(%d+)%-(%x+)$", "%1.%2"):lower(),
+				own = own:gsub("^Player%-(%d+)%-(%x+)$", "%1.%2"):lower(),
+				worth = ("M~%d~%d"):format(ml or 60, level), name = "Snapshot Prey " .. seq .. "-Realm",
+			})))
+		end
+
+		-- These five retained no-bounty claims are exactly the old 534-point Hobo row and
+		-- exactly 30 under score v2: 51, 51, 51, 54 and 60.
+		for i, level in ipairs({ 51, 51, 51, 54, 60 }) do
+			Row(hobo, "Player-1-CC00BC01", ("Player-1-0D00BC%02X"):format(i), level)
+		end
+		-- Socio's retained rows are an ordinary level-26 claim (52 -> 3) and a level-60
+		-- revenge carrying a 60-point bounty (280 -> 166): 332 -> 169 in all.
+		Row(socio, "Player-1-CC00BC02", "Player-1-0D00BC10", 26)
+		Row(socio, "Player-1-CC00BC02", "Player-1-0D00BC11", 60, "S", 60)
+		Row(socio, "Player-1-CC00BC02", "Player-1-0D00BC11", 60)
+		local before = W.Rankings().all
+		eq(before[1].name, socio); eq(before[1].points, 169)
+		eq(before[2].name, hobo); eq(before[2].points, 30)
+		local socioKey, hoboKey = before[1].key, before[2].key
+
+		-- Recreate the derived score-v1 caches around those same retained facts. The rows'
+		-- frozen level, bounty and revenge remain the source; no historic event is invented.
+		local s, oldById = c.rdb.wanted, {}
+		for _, t in pairs(s.targets) do
+			for _, claim in ipairs(t.claims or {}) do
+				local old = W.Bounty.LegacyClaimPoints(claim.level, claim.bounty, claim.revenge)
+				claim.points, claim.scoreVersion = old, nil
+				oldById[claim.id] = old
+				for _, paid in pairs(t.paid or {}) do
+					paid.total, paid.claims = old, 1
+					paid.months, paid.monthAt, paid.monthClaims = { [claim.month] = old }, { [claim.month] = claim.at }, { [claim.month] = 1 }
+				end
+			end
+		end
+		for _, e in ipairs(s.evidence) do if oldById[e.id] then e.points = oldById[e.id] end end
+		s.slayers[hoboKey].total, s.slayers[hoboKey].months[W.MonthNow()] = 534, 534
+		s.slayers[socioKey].total, s.slayers[socioKey].months[W.MonthNow()] = 332, 332
+		eq(s.slayers[hoboKey].total, 534); eq(s.slayers[socioKey].total, 332)
+		s.scoreVersion = 1
+
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		local after = W.Rankings().all
+		eq(after[1].name, socio); eq(after[1].points, 169)
+		eq(after[2].name, hobo); eq(after[2].points, 30)
+		eq(c.rdb.wanted.scoreVersion, 2)
+	end)
+end)
+
+test("wanted 1.2.4 scoring migration: proven checkpoint claims are recalculated, while tampered and undecomposable totals stay auditable but unranked", function()
+	WithWanted(function(w, W, c)
+		w.manager, w.dead = false, false
+		local horde = "Player-1-0D00BA02"
+		w.hordePlayer("Checkpoint Prey-Realm", horde)
+		w.units.target = { name = "Checkpoint Prey-Realm", guid = horde, faction = "Horde", level = 60 }
+		assert(w.handlers.PARTY_KILL(w.units.player.guid, horde))
+		w.units.target = nil
+		-- A second fact forces the first one into its immutable checkpoint.
+		W.MAX_EVIDENCE = 1
+		w.advance(W.DEATH_WINDOW + 1)
+		w.hordePlayer("Checkpoint Filler-Realm", "Player-1-0D00BA03")
+		w.die(w.forever("Checkpoint Filler-Realm", "Player-1-0D00BA03")); w.dead = false
+
+		local function Clone(value)
+			if type(value) ~= "table" then return value end
+			local out = {} for k, v in pairs(value) do out[Clone(k)] = Clone(v) end return out
+		end
+		local s = c.rdb.wanted
+		local validKey = "g:" .. horde
+		local valid = assert(s.targets[validKey]); assert(valid.base and valid.base.claims[1], "the claim was checkpointed")
+		local slayerKey, paid = next(valid.base.paid); paid = assert(paid)
+		local month = W.MonthNow()
+		valid.base.claims[1].points, valid.base.claims[1].scoreVersion = 120, nil
+		paid.total, paid.claims, paid.months, paid.monthAt, paid.monthClaims = 120, 1,
+			{ [month] = 120 }, { [month] = valid.base.claims[1].at }, { [month] = 1 }
+
+		-- The same retained history with a point value that score v1 could never have produced is
+		-- kept for audit, but cannot mint score-v2 points.
+		local badGuid, badKey = "Player-1-0D00BA04", "g:Player-1-0D00BA04"
+		local badBase = Clone(valid.base)
+		badBase.claims[1].id, badBase.claims[1].points = "tampered-legacy-claim", 999
+		s.targets[badKey] = { key = badKey, name = "Tampered Prey-Realm", guid = badGuid, active = true,
+			addedAt = w.epoch, source = "shared", base = badBase }
+		s.aliases[badKey] = badKey
+		s.baseSlayers["g:Player-1-CC00BA04"] = { key = "g:Player-1-CC00BA04", name = "Folded Slayer-Realm",
+			guid = "Player-1-CC00BA04", total = 77, claims = 1, reachedAt = w.epoch, lastAt = w.epoch,
+			months = { [month] = 77 }, monthAt = { [month] = w.epoch }, monthClaims = { [month] = 1 } }
+		s.scoreVersion = 1
+
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		s = c.rdb.wanted
+		local migrated = assert(W.Target(nil, horde)).claims[1]
+		eq(migrated.points, 6); eq(migrated.legacyPoints, 120); eq(migrated.scoreVersion, 2)
+		local bad = assert(W.Target(nil, badGuid)).claims[1]
+		eq(bad.points, 999, "the historical row is preserved"); eq(bad.unranked, true); eq(bad.scoreVersion, 1)
+		eq(#W.Rankings().all, 1); eq(W.Rankings().all[1].points, 6)
+		local archive = assert(s.scoreArchive)
+		eq(archive.recalculatedClaims, 1); eq(archive.archivedClaims, 1); eq(archive.archivedPoints, 197)
+		eq(archive.targets[badKey].paid[slayerKey].total, 120)
+		eq(archive.baseSlayers["g:Player-1-CC00BA04"].total, 77)
+	end)
+end)
+
+test("wanted 1.2.4 scoring migration: a future score version fails closed without changing its saved data", function()
+	WithWanted(function(_, W, c)
+		assert(W.AddTarget("Future Prey-Realm", "Player-1-0D00BA05"))
+		local s = c.rdb.wanted
+		s.scoreVersion, s.futureMarker = W.SCORE_VERSION + 1, { keep = true }
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted
+		eq(W.Load(), false); eq(s.scoreVersion, 3); eq(s.futureMarker.keep, true)
+		eq(W.MigrateScoring(s), false); eq(#W.Rankings().all, 0)
+	end)
+end)
+
+test("wanted 1.2.4 bounty: a kill with no bounty open pays the small rounded level base from his corpse, none seen pays 0, and nothing inside an instance", function()
 	WithWanted(function(w, W)
 		w.manager = false
 		local me = w.units.player.guid
@@ -3327,18 +3498,18 @@ test("wanted 1.2.3 bounty: a kill with no bounty open pays twice the Horde playe
 		Corpse("Unreported-Realm", "Player-1-0D00B001", 52)
 		local ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00B001")
 		assert(ok, tostring(e))
-		eq(e.hl, 52); eq(e.hf, nil); eq(e.points, 104, "(before: 0, a zero bounty minted nothing)")
-		eq(W.Rankings().all[1].points, 104)
+		eq(e.hl, 52); eq(e.hf, nil); eq(e.points, 6, "ceil(52 / 10), not the former 104")
+		eq(W.Rankings().all[1].points, 6)
 		w.advance(W.DEATH_WINDOW + 1)
 		Corpse("Skull-Realm", "Player-1-0D00B002", -1)
 		ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00B002")
-		assert(ok, tostring(e)); eq(e.hl, 55); eq(e.hf, true); eq(e.points, 110, "'??' to a level 45: 55 at least")
+		assert(ok, tostring(e)); eq(e.hl, 55); eq(e.hf, true); eq(e.points, 6, "'??' to a level 45: 55 at least")
 		assert(w.sent[#w.sent].text:find("^WK~2~.*~P~1%.0d00b002~1%.aa000001~M~45~55%+~Skull%-Realm$"), w.sent[#w.sent].text)
 		w.advance(W.DEATH_WINDOW + 1)
 		w.units.player.level = 58
 		Corpse("Top-Realm", "Player-1-0D00B003", -1)
 		ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00B003")
-		assert(ok, tostring(e)); eq(e.hl, 60, "58 + 10 is past the game's highest level, 60"); eq(e.points, 120)
+		assert(ok, tostring(e)); eq(e.hl, 60, "58 + 10 is past the game's highest level, 60"); eq(e.points, 6)
 		w.advance(W.DEATH_WINDOW + 1)
 		Corpse("Unseen-Realm", "Player-1-0D00B004", nil)
 		ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00B004")
@@ -3351,14 +3522,14 @@ test("wanted 1.2.3 bounty: a kill with no bounty open pays twice the Horde playe
 		w.die(w.forever("Battleground-Realm", "Player-1-0D00B005"))
 		w.inside, w.dead = false, false
 		eq(W.Target(nil, "Player-1-0D00B005"), nil, "neither the kill nor the death")
-		eq(W.Rankings().all[1].points, 104 + 110 + 120, "only the kills outside")
+		eq(W.Rankings().all[1].points, 18, "only the kills outside")
 		w.advance(W.DEATH_WINDOW + 1)
 		ok, e = w.handlers.PARTY_KILL(me, "Player-1-0D00B005")
-		assert(ok, tostring(e)); eq(e.points, 120, "outside again, he counts")
+		assert(ok, tostring(e)); eq(e.points, 6, "outside again, he counts")
 	end)
 end)
 
-test("wanted 1.2.3 bounty world: the King (60) and two members (40, 40) killed by a level-60 Horde player put 240 on him on every client; a level-45 member who sees him as '??' kills him for 360 everywhere (the King saw him exactly), then 0; with no exact sighting, 350", function()
+test("wanted 1.2.4 bounty world: a 240 bounty dominates the level-60 base on every client, including hidden-level claims", function()
 	WithWorld(function(world)
 		local king = world:Client("Varrick-Realm", "Player-1-0A0000C1", "king")
 		local first = world:Client("First-Realm", "Player-1-0A0000C2")
@@ -3400,16 +3571,16 @@ test("wanted 1.2.3 bounty world: the King (60) and two members (40, 40) killed b
 		for _, line in ipairs(world:As(watcher, watcher.W.Build)) do if line.id == "wanted:g:" .. horde then row = line end end
 		eq(row and row.right, ns.L.WANTED_ROW_COUNTS:format(240, 3))
 		local claim = Kill(slayer, horde, "Ganker-Realm", -1) -- 15 levels above him: "??"
-		eq(claim.hl, 55); eq(claim.hf, true); eq(claim.level, 60, "the King's row's exact 60"); eq(claim.points, 360)
+		eq(claim.hl, 55); eq(claim.hf, true); eq(claim.level, 60, "the King's row's exact 60"); eq(claim.points, 246)
 		for _, cl in ipairs(everyone) do
 			local t = world:As(cl, cl.W.Target, nil, horde)
-			eq(t.current, 0, cl.name .. ": a new cycle"); eq(t.claims[#t.claims].points, 360, cl.name)
+			eq(t.current, 0, cl.name .. ": a new cycle"); eq(t.claims[#t.claims].points, 246, cl.name)
 			local r = world:As(cl, cl.W.Rankings).all[1]
-			eq(r.guid, slayer.guid, cl.name); eq(r.points, 360, cl.name .. ": the same Slayers' points on every client")
+			eq(r.guid, slayer.guid, cl.name); eq(r.points, 246, cl.name .. ": the same Slayers' points on every client")
 		end
 		-- /oly wanted status, on a client that only heard it all: his bounty, the Slayer's points.
 		local status = world:As(watcher, watcher.W.StatusText)
-		assert(status:find(ns.L.WANTED_STATUS_SLAYER_ROW:format(1, ns.DisplayName(slayer.name), 360, 1), 1, true), status)
+		assert(status:find(ns.L.WANTED_STATUS_SLAYER_ROW:format(1, ns.DisplayName(slayer.name), 246, 1), 1, true), status)
 		-- No exact level in the cycle (the King saw him as "??" too, a floor): the claim's own floor.
 		local other = "Player-1-0B0000C2"
 		world.horde[other] = "Hidden-Realm"
@@ -3419,12 +3590,12 @@ test("wanted 1.2.3 bounty world: the King (60) and two members (40, 40) killed b
 		status = world:As(watcher, watcher.W.StatusText)
 		assert(status:find(ns.L.WANTED_STATUS_BOUNTY_ROW:format(ns.DisplayName("Hidden-Realm"), 240, 3), 1, true), status)
 		claim = Kill(slayer, other, "Hidden-Realm", -1)
-		eq(claim.points, 350)
-		for _, cl in ipairs(everyone) do eq(world:As(cl, cl.W.Rankings).all[1].points, 710, cl.name) end
+		eq(claim.points, 246)
+		for _, cl in ipairs(everyone) do eq(world:As(cl, cl.W.Rankings).all[1].points, 492, cl.name) end
 	end)
 end)
 
-test("wanted 1.2.3 bounty: the revenge, 100 once a claim, to a member who kills the very Horde player who killed him within 14 days; never for another member's kill, another GUID, an expired grudge or a kill before the death; another's claim and a reload leave it open", function()
+test("wanted 1.2.4 bounty: the revenge remains 100 once a claim while the kill level base is rebalanced", function()
 	WithWanted(function(w, W, c)
 		w.manager = false
 		local me = w.units.player.guid
@@ -3447,14 +3618,14 @@ test("wanted 1.2.3 bounty: the revenge, 100 once a claim, to a member who kills 
 		DieTo(grom, "Grom-Realm")
 		w.advance(2 * 3600)
 		local e = Kill(grom, "Grom-Realm", 50)
-		eq(e.revenge, true); eq(e.points, 100 + 40 + 100, "his level, our death's bounty and the revenge")
+		eq(e.revenge, true); eq(e.points, 5 + 40 + 100, "his small level base, our death's bounty and the revenge")
 		-- (1.2.3 repair, changed on purpose: our kills of one Horde player pay his level once in
 		-- KILL_GAP; before, 100 again a few seconds later.)
 		e = Kill(grom, "Grom-Realm", 50)
 		eq(e.revenge, nil, "once a claim: no new death of ours"); eq(e.points, 0, "his level paid already, within KILL_GAP")
 		w.advance(W.Bounty.SCORE.KILL_GAP)
 		e = Kill(grom, "Grom-Realm", 50)
-		eq(e.revenge, nil); eq(e.points, 100, "past KILL_GAP his level again")
+		eq(e.revenge, nil); eq(e.points, 5, "past KILL_GAP his level base again")
 		-- Another member's kill of him leaves our grudge open; then ours pays it, after a reload too.
 		local thrall = "Player-1-0D00C002"
 		w.hordePlayer("Thrall-Realm", thrall)
@@ -3469,28 +3640,28 @@ test("wanted 1.2.3 bounty: the revenge, 100 once a claim, to a member who kills 
 		W = c.Wanted
 		assert(W.Prune())
 		e = Kill(thrall, "Thrall-Realm", 40)
-		eq(e.revenge, true, "still ours after his claim and a reload"); eq(e.points, 80 + 100)
+		eq(e.revenge, true, "still ours after his claim and a reload"); eq(e.points, 4 + 100)
 		-- A death to one Horde player avenges nothing on another (another GUID).
 		local rexxar, zuljin = "Player-1-0D00C003", "Player-1-0D00C004"
 		w.hordePlayer("Rexxar-Realm", rexxar); w.hordePlayer("Zuljin-Realm", zuljin)
 		DieTo(rexxar, "Rexxar-Realm")
 		e = Kill(zuljin, "Zuljin-Realm", 40)
-		eq(e.revenge, nil); eq(e.points, 80)
+		eq(e.revenge, nil); eq(e.points, 4)
 		-- A grudge over 14 days old is over; his bounty still pays.
 		w.advance(14 * 86400 + 1)
 		e = Kill(rexxar, "Rexxar-Realm", 40)
-		eq(e.revenge, nil, "expired"); eq(e.points, 80 + 40)
+		eq(e.revenge, nil, "expired"); eq(e.points, 4 + 40)
 		-- A kill before the death: nothing to avenge yet; the death after it opens the grudge.
 		local voljin = "Player-1-0D00C005"
 		w.hordePlayer("Voljin-Realm", voljin)
 		e = Kill(voljin, "Voljin-Realm", 40)
-		eq(e.revenge, nil); eq(e.points, 80)
+		eq(e.revenge, nil); eq(e.points, 4)
 		-- (1.2.3 repair: past our kill's KILL_GAP, so that the revenge on him pays.)
 		w.advance(W.Bounty.SCORE.KILL_GAP)
 		DieTo(voljin, "Voljin-Realm")
 		eq(W.Target(nil, voljin).current, 40)
 		e = Kill(voljin, "Voljin-Realm", 40)
-		eq(e.revenge, true); eq(e.points, 80 + 40 + 100)
+		eq(e.revenge, true); eq(e.points, 4 + 40 + 100)
 	end)
 end)
 
@@ -3566,7 +3737,7 @@ test("wanted 1.2.3 bounty: an office comes only from what the client trusts (the
 		w.hordePlayer("Horde5-Realm", "Player-1-0D00D005")
 		w.units.nameplate2 = { name = "Horde5-Realm", guid = "Player-1-0D00D005", faction = "Horde", level = 50 }
 		local t, e = Row(crowned, "1.cc00d002", "K~60~60", "P")
-		eq(e.hl, 50); eq(t.claims[1].points, 100, "60 said, 50 seen: twice 50")
+		eq(e.hl, 50); eq(t.claims[1].points, 5, "60 said, 50 seen: ceil(50 / 10)")
 	end)
 end)
 
@@ -3604,7 +3775,7 @@ test("wanted 1.2.3 bounty: corpse camping counts once in 10 minutes (the deaths 
 		w.advance(W.DEATH_WINDOW + 1)
 		w.units.target = { name = "Camper-Realm", guid = camper, faction = "Horde", level = 60 }
 		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, camper)
-		assert(ok, tostring(e)); eq(e.points, 120 + 120 + 100, "his level, the bounty, the revenge")
+		assert(ok, tostring(e)); eq(e.points, 6 + 120 + 100, "his level base, the bounty, the revenge")
 		eq(W.Rankings().all[1].points, 200, "his Slayer's row holds 200")
 	end)
 end)
@@ -3705,17 +3876,17 @@ test("wanted 1.2.4 (the author's report: many on Most Wanted with 0 points and 0
 		w.units.target = { name = "Prey-Realm", guid = prey, faction = "Horde", level = 30 }
 		local ok, e = w.handlers.PARTY_KILL(me, prey)
 		w.units.target = nil
-		assert(ok, tostring(e)); eq(e.action, "claim"); eq(e.points, 60, "twice his level, for the Slayer")
+		assert(ok, tostring(e)); eq(e.action, "claim"); eq(e.points, 3, "one rounded base point per ten levels, for the Slayer")
 		local t = assert(W.Target(nil, prey), "his entry holds the claim")
 		eq(t.active, true); eq(#t.claims, 1); eq(t.current, 0); eq(t.lifetimeKills, 0)
-		eq(W.Rankings().all[1].points, 60, "the kill counts on the Slayers board")
+		eq(W.Rankings().all[1].points, 3, "the kill counts on the Slayers board")
 		eq(#w.wire("WK~2~"), 1, "and goes to every member")
 		-- Another member's killing blow on another Horde player, heard: the same.
 		local other = w.participant("Hunter-Realm", "Player-1-CC00E201")
 		w.hordePlayer("Other Prey-Realm", "Player-1-0D00E202")
 		assert(w.commHandlers.WK("CHANNEL", other, BountyRow(c, W, { digest = "00000000000e2001",
 			at = w.epoch, kind = "P", horde = "1.0d00e202", own = "1.cc00e201", worth = "M~50~25", name = "Other Prey-Realm" })))
-		eq(W.Target(nil, "Player-1-0D00E202").claims[1].points, 50)
+		eq(W.Target(nil, "Player-1-0D00E202").claims[1].points, 3)
 		eq(#W.Rankings().all, 2, "both Slayers")
 		-- Neither is on Most Wanted: 0 points and 0 kills.
 		eq(WantedRow(W, prey), nil, "not wanted: he killed none of ours")
@@ -4069,7 +4240,7 @@ test("wanted 1.2.3 repair: a death recap that is not this player's own (a party 
 		w.units.target = { name = "Partykiller1-Realm", guid = named, faction = "Horde", level = 50 }
 		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, named)
 		w.units.target = nil
-		assert(ok, tostring(e)); eq(e.revenge, nil); eq(e.points, 100)
+		assert(ok, tostring(e)); eq(e.revenge, nil); eq(e.points, 5)
 		-- A later reading in the session: still nothing of the mate's, and no second window.
 		assert(W.Load()); Fire("wanted earlier deaths")
 		eq(W.Target(nil, bare), nil); eq(#w.wire("WK~"), 3); eq(#shown, 1)
@@ -4171,7 +4342,7 @@ test("wanted 1.2.3 repair world: a death and a kill of one Horde player in the s
 			for _, cl in ipairs(everyone) do
 				local t = world:As(cl, cl.W.Target, nil, horde)
 				eq(t.current, 0, cl.name .. ", " .. what .. ": no bounty left open")
-				eq(t.claims[#t.claims].points, 100 + 40, cl.name .. ", " .. what .. ": the death's bounty in the claim")
+				eq(t.claims[#t.claims].points, 5 + 40, cl.name .. ", " .. what .. ": the death's bounty in the claim")
 			end
 		end
 		-- A (level 40) dies to him, and in the same second B kills him (level 50 on his corpse):
@@ -4188,7 +4359,7 @@ test("wanted 1.2.3 repair world: a death and a kill of one Horde player in the s
 		Kill(second); Death(second)
 		world:Deliver()
 		Same(second, "the claim heard first")
-		for _, cl in ipairs(everyone) do eq(world:As(cl, cl.W.Rankings).all[1].points, 280, cl.name .. ": the same Slayers' points") end
+		for _, cl in ipairs(everyone) do eq(world:As(cl, cl.W.Rankings).all[1].points, 90, cl.name .. ": the same Slayers' points") end
 	end)
 end)
 
@@ -4285,8 +4456,8 @@ test("wanted 1.2.3 repair: corpse camping and a Horde friend killed in a loop no
 			w.advance(i > 1 and 37 or 1)
 			total = total + Kill(camped, "Camped-Realm", 60).points
 		end
-		eq(total, 120, "one fair kill's points (before: 8 x 120 = 960)")
-		eq(Mine(), 120)
+		eq(total, 6, "one fair kill's base points (before: 8 x 120 = 960)")
+		eq(Mine(), 6)
 		-- (b) A friend's level-60 Horde alt and this member, every 10 minutes: the alt kills him (60
 		-- on the alt's bounty, a grudge), he kills the alt.
 		local alt = "Player-1-0D00B302"
@@ -4298,21 +4469,21 @@ test("wanted 1.2.3 repair: corpse camping and a Horde friend killed in a loop no
 			return Kill(alt, "Friendly-Realm", 60)
 		end
 		local e = Loop()
-		eq(e.points, 120 + 60 + 100, "the first: his level, the bounty of our death, the revenge"); eq(e.revenge, true)
+		eq(e.points, 6 + 60 + 100, "the first: his level base, the bounty of our death, the revenge"); eq(e.revenge, true)
 		for i = 2, 6 do
 			e = Loop()
 			eq(e.points, 60, "loop " .. i .. ": the bounty our death put on him alone, no level, no revenge (before: 280)"); eq(e.revenge, nil)
 		end
 		e = Loop(S.KILL_GAP)
-		eq(e.points, 120 + 60, "past KILL_GAP his level again; the revenge waits REVENGE_GAP"); eq(e.revenge, nil)
+		eq(e.points, 6 + 60, "past KILL_GAP his level base again; the revenge waits REVENGE_GAP"); eq(e.revenge, nil)
 		e = Loop(S.REVENGE_GAP)
-		eq(e.points, 120 + 60 + 100, "a day on, the revenge again"); eq(e.revenge, true)
+		eq(e.points, 6 + 60 + 100, "a day on, the revenge again"); eq(e.revenge, true)
 		-- Another member's kill of him has its own gap: his level.
 		local other = w.participant("Other-Realm", "Player-1-CC00B301")
 		w.advance(W.DEATH_WINDOW + 1)
 		assert(w.commHandlers.WK("CHANNEL", other, BountyRow(c, W, { digest = "00000000000b3001", at = w.epoch, kind = "P",
 			horde = "1.0d00b302", own = "1.cc00b301", worth = "M~60~60", name = "Friendly-Realm" })))
-		eq(W.Target(nil, alt).claims[#W.Target(nil, alt).claims].points, 120)
+		eq(W.Target(nil, alt).claims[#W.Target(nil, alt).claims].points, 6)
 		-- After a reload, built again from the rows: our gap holds.
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		W = c.Wanted
@@ -4340,13 +4511,13 @@ test("wanted 1.2.3 repair: a full Most Wanted keeps an open bounty, and a member
 		end
 		-- The oldest: he killed us, his bounty open.
 		local open = Horde(1); Die(open, 1)
-		-- Then one we killed (level 50 on his corpse: 100 points), nothing open.
+		-- Then one we killed (level 50 on his corpse: 5 points), nothing open.
 		local killed = Horde(2)
 		w.advance(W.DEATH_WINDOW + 1)
 		w.units.target = { name = "Full2-Realm", guid = killed, faction = "Horde", level = 50 }
 		assert(w.handlers.PARTY_KILL(me, killed))
 		w.units.target = nil
-		eq(Mine(), 100)
+		eq(Mine(), 5)
 		-- Then one who killed us and whom another member killed: nothing open, our grudge open.
 		local grudged = Horde(3); Die(grudged, 3)
 		local other = w.participant("Other-Realm", "Player-1-CC00B401")
@@ -4359,7 +4530,7 @@ test("wanted 1.2.3 repair: a full Most Wanted keeps an open bounty, and a member
 		assert(W.Target(nil, fourth))
 		eq(W.Target(nil, killed), nil, "the one only killed went (before: the open bounty, the oldest)")
 		eq(W.Target(nil, open).current, 40, "the open bounty stays"); assert(W.Target(nil, grudged), "and the grudge")
-		eq(Mine(), 100, "what our kill paid stays with us")
+		eq(Mine(), 5, "what our kill paid stays with us")
 		-- A fifth: the grudge goes before any open bounty.
 		local fifth = Horde(5); Die(fifth, 5)
 		eq(W.Target(nil, grudged), nil); eq(W.Target(nil, open).current, 40); assert(W.Target(nil, fourth))
@@ -4667,7 +4838,7 @@ test("wanted 1.2.4 notices: the Slayer letter, the King's letter at this member'
 		Corpse("Letter Ganker-Realm", ganker, 60)
 		local ok, e = w.handlers.PARTY_KILL(me, ganker)
 		assert(ok, tostring(e))
-		eq(e.points, 210)
+		eq(e.points, 96)
 		eq(#w.letters, 0, "in combat: it waits"); eq(#c.rdb.wanted.slayerLetters, 1, "saved")
 		-- Then an instance, a death, the privacy page, the update letter: still waiting.
 		for _, case in ipairs({ "inside", "dead", "consentWaiting", "consentShown", "updateLetter" }) do
@@ -4689,7 +4860,7 @@ test("wanted 1.2.4 notices: the Slayer letter, the King's letter at this member'
 		local key = w.letters[1]
 		eq(key:sub(1, 7), "wanted@")
 		local text, title = W.LetterText(key)
-		eq(text, ns.L.WANTED_LETTER:format(Name("Letter Ganker-Realm"), "60", 2, 90, ns.L.WANTED_LETTER_LEVEL:format(120), 210))
+		eq(text, ns.L.WANTED_LETTER:format(Name("Letter Ganker-Realm"), "60", 2, 90, ns.L.WANTED_LETTER_LEVEL:format(6), 96))
 		eq(title, ns.L.WANTED_LETTER_TITLE:format(Name("Letter Ganker-Realm"))); eq(W.LetterTitle(key), title)
 		-- His own revenge: the Horde player who killed him, killed by him.
 		w.advance(W.Bounty.SCORE.REPEAT_GAP + 1)
@@ -4700,23 +4871,23 @@ test("wanted 1.2.4 notices: the Slayer letter, the King's letter at this member'
 		w.advance(60)
 		Corpse("Revenge Ganker-Realm", avenger, 60)
 		ok, e = w.handlers.PARTY_KILL(me, avenger)
-		assert(ok, tostring(e)); eq(e.points, 120 + 45 + W.Bounty.SCORE.REVENGE)
+		assert(ok, tostring(e)); eq(e.points, 6 + 45 + W.Bounty.SCORE.REVENGE)
 		Settle()
 		eq(#w.letters, 2)
 		eq(W.LetterText(w.letters[2]), ns.L.WANTED_LETTER:format(Name("Revenge Ganker-Realm"), "60", 1, 45,
-			ns.L.WANTED_LETTER_LEVEL:format(120) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 265))
+			ns.L.WANTED_LETTER_LEVEL:format(6) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 151))
 		-- Nobody's killer: his level alone; a "??" as its floor.
 		w.advance(W.DEATH_WINDOW + 1)
 		Corpse("Fresh Ganker-Realm", "Player-1-0D00E303", 52)
 		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E303"))
 		Settle()
-		eq(W.LetterText(w.letters[3]), ns.L.WANTED_LETTER_FIRST:format(Name("Fresh Ganker-Realm"), "52", ns.L.WANTED_LETTER_LEVEL:format(104), 104))
+		eq(W.LetterText(w.letters[3]), ns.L.WANTED_LETTER_FIRST:format(Name("Fresh Ganker-Realm"), "52", ns.L.WANTED_LETTER_LEVEL:format(6), 6))
 		w.advance(W.DEATH_WINDOW + 1)
 		Corpse("Skull Ganker-Realm", "Player-1-0D00E304", -1)
 		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E304"))
 		Settle()
 		eq(W.LetterText(w.letters[4]), ns.L.WANTED_LETTER_FIRST:format(Name("Skull Ganker-Realm"), ns.L.WANTED_LEVEL_FLOOR:format(55),
-			ns.L.WANTED_LETTER_LEVEL:format(110), 110), "'??' to a level 45: 55 at least")
+			ns.L.WANTED_LETTER_LEVEL:format(6), 6), "'??' to a level 45: 55 at least")
 		-- A kill that paid nothing (no level seen, no bounty): no letter.
 		w.advance(W.DEATH_WINDOW + 1)
 		Corpse("Unseen Ganker-Realm", "Player-1-0D00E305", nil)
@@ -4731,7 +4902,7 @@ test("wanted 1.2.4 notices: the Slayer letter, the King's letter at this member'
 		assert(w.handlers.PARTY_KILL(me, "Player-1-0D00E306"))
 		Settle()
 		eq(#w.letters, 4, "the King: no letter")
-		eq(w.windows.OlympusWantedToast.text.text, ns.L.WANTED_LETTER_TOAST:format(Name("Royal Ganker-Realm"), 100))
+		eq(w.windows.OlympusWantedToast.text.text, ns.L.WANTED_LETTER_TOAST:format(Name("Royal Ganker-Realm"), 5))
 		w.kingLetter = nil
 		-- Once: a reload sends none again; the words still read from the key alone.
 		w.units.target = nil
@@ -4772,7 +4943,7 @@ test("wanted 1.2.4 notices world: the killer's client knows the whole bounty at 
 		slayer.units.target = { name = "Ganker-Realm", guid = horde, faction = "Horde", level = 60 }
 		local ok, claim = world:As(slayer, slayer.events.PARTY_KILL, slayer.guid, horde)
 		slayer.units.target = nil
-		assert(ok, tostring(claim)); eq(claim.points, 190)
+		assert(ok, tostring(claim)); eq(claim.points, 76)
 		world:Deliver()
 		-- (1.2.4 repair, changed on purpose: the letter goes LETTER_SETTLE after the kill, its
 		-- numbers settled; it is read below, once the world's clock ran past it. Before, at the kill.)
@@ -4797,7 +4968,7 @@ test("wanted 1.2.4 notices world: the killer's client knows the whole bounty at 
 		told[1].shown = false
 		-- The slayer's letter, its numbers settled: the whole bounty.
 		local key = assert(slayer.letters[1], "the slayer's letter")
-		eq(world:As(slayer, slayer.W.LetterText, key), ns.L.WANTED_LETTER:format(name, "60", 2, 70, ns.L.WANTED_LETTER_LEVEL:format(120), 190))
+		eq(world:As(slayer, slayer.W.LetterText, key), ns.L.WANTED_LETTER:format(name, "60", 2, 70, ns.L.WANTED_LETTER_LEVEL:format(6), 76))
 		-- Another login: nothing again.
 		world:Load(away)
 		world:Run(away.W.GLOBAL_ASK_FIRST + 30 + away.W.Bounty.NOTICE_LOGIN)
@@ -4851,7 +5022,7 @@ test("wanted 1.2.4 repair: a death heard after the kill that avenged it (its rec
 		local toast = assert(w.windows.OlympusWantedToast)
 		eq(toast.text.text, ns.L.WANTED_DEATH_TOAST_SLAIN:format(name), "slain already: never 'we will avenge you'")
 		local t = W.Target(nil, ganker)
-		eq(#t.claims, 1); eq(t.claims[1].bounty, 80, "both deaths in the claim that paid them"); eq(t.claims[1].points, 200)
+		eq(#t.claims, 1); eq(t.claims[1].bounty, 80, "both deaths in the claim that paid them"); eq(t.claims[1].points, 86)
 		eq(c.rdb.wanted.mine[ganker], nil, "nothing left open")
 		eq(#c.rdb.wanted.avenged, 1, "one notice"); eq(c.rdb.wanted.avenged[1].times, 2, "for both deaths")
 		-- Alive: the notice, the avenger his slayer.
@@ -4973,21 +5144,21 @@ test("wanted 1.2.4 repair: the Slayer letter says what the claim pays once its n
 		w.units.target = { name = "Quick Ganker-Realm", guid = ganker, faction = "Horde", level = 60 }
 		local ok, e = w.handlers.PARTY_KILL(me, ganker)
 		w.units.target = nil
-		assert(ok, tostring(e)); eq(e.points, 120, "at the kill: his level alone")
+		assert(ok, tostring(e)); eq(e.points, 6, "at the kill: his level base alone")
 		-- The fallen member's row a second after the kill, dated at his death.
 		w.advance(1)
 		assert(w.commHandlers.WK("CHANNEL", fallen, BountyRow(c, W, { digest = "00000000000e6001", at = diedAt, horde = "1.0d00e601",
 			own = "1.cc00e601", worth = "M~40~0", name = "Quick Ganker-Realm" })))
 		local claim = W.Target(nil, ganker).claims[1]
-		eq(claim.bounty, 40); eq(claim.points, 160, "the claim rebuilt with his death")
+		eq(claim.bounty, 40); eq(claim.points, 46, "the claim rebuilt with his death")
 		eq(#w.letters, 0, "settling")
 		w.advance(W.Bounty.LETTER_SETTLE)
 		Fire("wanted notices")
 		eq(#w.letters, 1)
 		local key = w.letters[1]
-		eq(W.LetterText(key), ns.L.WANTED_LETTER:format(name, "60", 1, 40, ns.L.WANTED_LETTER_LEVEL:format(120), 160), "the whole bounty")
+		eq(W.LetterText(key), ns.L.WANTED_LETTER:format(name, "60", 1, 40, ns.L.WANTED_LETTER_LEVEL:format(6), 46), "the whole bounty")
 		local ranked = W.Rankings().all
-		eq(ranked[1].name, c.me); eq(ranked[1].points, 160, "as the Slayers ranking says")
+		eq(ranked[1].name, c.me); eq(ranked[1].points, 46, "as the Slayers ranking says")
 		eq(W.Bounty.LetterOf(key).points, ranked[1].points)
 		eq(#c.rdb.wanted.slayerLetters, 0, "made once, gone")
 	end)
@@ -5013,12 +5184,12 @@ test("wanted 1.2.4 (the author's report: 3 kills, 18 points): the Slayer letter'
 		w.units.target = { name = "Letter Camper-Realm", guid = camper, faction = "Horde", level = 20 }
 		local ok, e = w.handlers.PARTY_KILL(me, camper)
 		w.units.target = nil
-		assert(ok, tostring(e)); eq(e.points, 40 + 18 + W.Bounty.SCORE.REVENGE, "his level, his bounty, the revenge")
+		assert(ok, tostring(e)); eq(e.points, 2 + 18 + W.Bounty.SCORE.REVENGE, "his level base, his bounty, the revenge")
 		w.advance(W.Bounty.LETTER_SETTLE)
 		while Fire("wanted notices") do end
 		eq(#w.letters, 1)
 		eq(W.LetterText(w.letters[1]), ns.L.WANTED_LETTER:format(c.DisplayName("Letter Camper-Realm"), "20", 1, 18,
-			ns.L.WANTED_LETTER_LEVEL:format(40) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 158), "1 of ours (before: 3)")
+			ns.L.WANTED_LETTER_LEVEL:format(2) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 120), "1 of ours (before: 3)")
 	end)
 end)
 
@@ -5045,7 +5216,7 @@ test("wanted 1.2.4 counted kills: repeated deaths trimmed from the victim histor
 		w.advance(W.DEATH_WINDOW + 1)
 		w.units.target = { name = "Overflow Camper-Realm", guid = camper, faction = "Horde", level = 20 }
 		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, camper)
-		assert(ok, tostring(e)); eq(e.points, 158)
+		assert(ok, tostring(e)); eq(e.points, 120)
 		local claim = W.Target(nil, camper).claims[1]
 		eq(claim.overflow, 2); eq(claim.killOverflow, 1)
 		local letter = W.Bounty.LetterOf(W.Bounty.LetterKey(e, claim, "Overflow Camper-Realm"))
