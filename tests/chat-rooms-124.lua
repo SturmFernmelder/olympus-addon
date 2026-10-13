@@ -123,7 +123,11 @@ test("chat rooms (1.2.4): each guild has its master's room with his corresponden
 		eq(R.Stats().dropped.audience, 1)
 		eq(R.Receive("WHISPER", cast.aOfficer, RoomMessage(bCent, 3, "wrong room"), 2002), false, "a room this character is not in")
 		eq(R.Receive("WHISPER", cast.aOfficer, RoomMessage("gcent:000000000000", 4, "no such room"), 2003), false)
-		eq(#R.History(aCent), 1); eq(R.History(aCent)[1].text, "on my way")
+		-- (Changed with the silent send's fix, the author: "Eu dou Enter para enviar a mensagem na igreja
+		-- e não aparece a mensagem": our own line is in the room at Enter, pending until its whispers
+		-- leave, before the line heard after it.)
+		local kept = R.History(aCent)
+		eq(#kept, 2); eq(kept[1].text, "patrol at eight"); eq(kept[1].mine, true); eq(kept[2].text, "on my way")
 		-- A 150-byte line in a guild's room still fits one whisper.
 		w.clearJobs(); w.advance(2)
 		local long = ("x"):rep(R.TEXT_MAX)

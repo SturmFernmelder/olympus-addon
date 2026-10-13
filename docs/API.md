@@ -154,7 +154,7 @@ King keeps to the staff is not there, whoever the player is. `amount` is in copp
 `donors` is there only while the King shows every member the Treasury's ranking (it is off until he
 does), whoever the player is: the King's and the Treasury keepers' own view never counts. `all` is
 the all-time top three, which head that ranking. `donors.month`, the month's top three, comes only
-in a build whose honour frames show them; 1.2.4's do not, so it is `nil` there: check for it.
+in a build whose honour frames show them (the koi; 1.2.4 shows it): still check for it.
 
 ### `handle:GetProfile()`
 

@@ -218,7 +218,7 @@ end
 --     the donors, and a portrait's frame tells of one donor at a time, to whoever looks at him.
 --   - all: the all-time top three, which head that ranking on the Treasury tab.
 --   - month: the month's three only in a build that wears their koi frame (Honors.FrameShipped);
---     1.2.4 does not (Honors.FRAMES_SHIPPED), and nothing else lists them: then month is nil.
+--     1.2.4 does (the borders lane released the koi); a build without it lists them nowhere: nil.
 local function Donors()
 	if not Has("HonorsNet", "Donors") then return nil end
 	if Call("Treasury", "PublicShows", "ranking") ~= true then return nil end

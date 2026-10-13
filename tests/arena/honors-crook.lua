@@ -74,6 +74,23 @@ local function Donors(w, c, t, names, month)
 	eq(w:As(c, c.ns.HonorsNet.TakeDonors, N.treasurer, body), true, "the Treasurer's word taken")
 end
 
+-- (1.2.4) The Oracle's ravens, a frame this version still does not wear (2.0's bets): the koi of the
+-- 1.2.3 tests below was that frame until 1.2.4 released it (the owner's call). A bank's IO word naming
+-- `names` the last month's best predictors, as client c takes it; the world needs a bank (Banked).
+local function Banked()
+	local w, cast = W3.New({ more = { { "bank", N.bank } } })
+	eq(cast.king.Roles.SetBanks({ N.bank }), true)
+	w:Run(0)
+	return w, cast
+end
+local function Ravens(w, c, names, t)
+	local B36 = c.ns.Arena.B36
+	local list = {}
+	for i, x in ipairs(names) do list[i] = Short(type(x) == "table" and x.name or x) end
+	local body = table.concat({ B36(c.ns.Honors.MonthOf(w.clock) - 1), B36(t or w.clock), #list > 0 and table.concat(list, ",") or "-" }, "~")
+	w:As(c, function() c.ns.Arena.Inject("CHANNEL", N.bank, "IO~L1~" .. body) end)
+end
+
 -- The game's unit frames on client c (their containers, as tests/arena/honors-net.lua stands them in)
 -- and Borders.lua loaded into it: what the player's and the target's portraits show.
 local function Frames(w, c)
@@ -209,13 +226,15 @@ end)
 
 -- The owner (1.2.3): "se a pessoa tem cornucopia e ganha koi pode até mudar quando ganha mas a pessoa
 -- pode escolher no perfil entre elas". 1.2.2 switched the pick to any frame newly earned: the koi, not
--- released, took the cornucopia's place and his rank's frame showed.
-test("1.2.3 honours: wearing the cornucopia, a frame not released yet (the koi) leaves it worn, and its King's letter's Wear it wears its title alone; a released one (the crook) switches on, the cornucopia can be picked back in the profile and stays picked; a pick 1.2.2 left on the koi wears the cornucopia again", function()
-	local w, cast = W3.New()
+-- released, took the cornucopia's place and his rank's frame showed. (1.2.4: the koi is released, the
+-- owner's call; the Oracle's raven, still not, stands in for it here: the same rule.)
+test("1.2.3 honours: wearing the cornucopia, a frame not released yet (1.2.4: the raven) leaves it worn, and its King's letter's Wear it wears its title alone; a released one (the crook) switches on, the cornucopia can be picked back in the profile and stays picked; a pick 1.2.2 left on a frame not released wears the cornucopia again", function()
+	local w, cast = Banked()
 	local A, viewer = cast.A, cast.arbiter
 	Ready(w, A); Ready(w, viewer)
 	local t = w.clock
-	local function Both(names, month) t = t + 1 for _, c in ipairs({ A, viewer }) do Donors(w, c, t, names, month) end w:Run(3) end
+	local function Both(names) t = t + 1 for _, c in ipairs({ A, viewer }) do Donors(w, c, t, names) end w:Run(3) end
+	local function Raven(names) t = t + 1 for _, c in ipairs({ A, viewer }) do Ravens(w, c, names, t) end w:Run(3) end
 	local function Seen() return w:As(viewer, viewer.ns.HonorsNet.Verified, A.name, A.guid) end
 	-- (A profile's word saying something new is taken a minute after the last: ArenaProfile.RATE_CHANGED.)
 	local function Later() w:Run(A.ns.ArenaProfile.RATE_CHANGED + 1) end
@@ -226,21 +245,21 @@ test("1.2.3 honours: wearing the cornucopia, a frame not released yet (the koi) 
 	eq(A.ns.ArenaProfile.Pick().frame, "donor-top-1")
 	w:As(A, A.ns.HonorsNet.CloseLetter, false)
 	eq(rA.Shown("player"), MEDIA .. "cornucopia-gold")
-	-- The month's koi (not released): the cornucopia stays worn; the koi's title switches on.
+	-- The month's raven (not released): the cornucopia stays worn; the raven's title switches on.
 	Later()
-	Both({ A }, Short(A.name))
+	Raven({ A })
 	local pick = A.ns.ArenaProfile.Pick()
-	eq(pick.frame, "donor-top-1", "the cornucopia stays: the koi is not released")
-	eq(pick.title, "donor-month-1", "its title switches on")
+	eq(pick.frame, "donor-top-1", "the cornucopia stays: the raven is not released")
+	eq(pick.title, "oracle-1", "its title switches on")
 	eq(rA.Shown("player"), MEDIA .. "cornucopia-gold", "round his own portrait")
 	eq(Seen().frame, "donor-top-1"); eq(rv.Shown("target"), MEDIA .. "cornucopia-gold", "and as others see him")
-	-- The koi's letter, "Wear it": its title, never the frame not worn (1.2.2: the pair was refused,
+	-- The raven's letter, "Wear it": its title, never the frame not worn (1.2.2: the pair was refused,
 	-- and nothing changed). (His title put back to none first, so the click shows.)
-	eq(A.ns.HonorsNet.LetterFrame().key, "donor-month-1")
+	eq(A.ns.HonorsNet.LetterFrame().key, "oracle-1")
 	eq(w:As(A, A.ns.ProfileEdit.PickTitle, "none"), true)
 	eq(A.ns.ArenaProfile.Pick().title, nil)
 	w:As(A, A.ns.HonorsNet.CloseLetter, true)
-	eq(A.ns.ArenaProfile.Pick().frame, "donor-top-1", "Wear it keeps the cornucopia"); eq(A.ns.ArenaProfile.Pick().title, "donor-month-1")
+	eq(A.ns.ArenaProfile.Pick().frame, "donor-top-1", "Wear it keeps the cornucopia"); eq(A.ns.ArenaProfile.Pick().title, "oracle-1")
 	-- The crook (released): switches on by itself.
 	Later()
 	Top(w, { A, viewer }, N.king, { A })
@@ -255,18 +274,20 @@ test("1.2.3 honours: wearing the cornucopia, a frame not released yet (the koi) 
 	eq(rA.Shown("player"), MEDIA .. "cornucopia-gold")
 	w:Run(3)
 	eq(rv.Shown("target"), MEDIA .. "cornucopia-gold", "others see his pick")
-	Both({ A }, Short(A.name))
+	Both({ A })
+	Raven({ A })
 	Top(w, { A, viewer }, N.king, { A }, w.clock + 10)
 	w:Run(3)
 	eq(A.ns.ArenaProfile.Pick().frame, "donor-top-1", "his pick sticks")
 	Ready(w, A)
-	Donors(w, A, t + 5, { A }, Short(A.name))
+	Donors(w, A, t + 5, { A })
+	Ravens(w, A, { A }, t + 6)
 	Top(w, { A }, N.king, { A }, w.clock + 20)
 	w:Run(A.ns.HonorsNet.REFRESH_DELAY + 5)
 	eq(A.ns.ArenaProfile.Pick().frame, "donor-top-1", "after a relog too")
-	-- A pick 1.2.2 left on the koi (it switched it on by itself): the cornucopia again.
+	-- A pick 1.2.2 left on a frame not released (it switched it on by itself): the cornucopia again.
 	local m = A.ns.ArenaProfile.Mine(true)
-	m.frame = "donor-month-1"
+	m.frame = "oracle-1"
 	w:As(A, A.ns.Fire, "HONORS_CHANGED", A.name)
 	eq(w:As(A, A.ns.HonorsNet.Verified, A.name).frame, "rank", "(1.2.2's case: his rank's frame showed)")
 	w:As(A, A.ns.HonorsNet.Refresh)
@@ -275,20 +296,21 @@ test("1.2.3 honours: wearing the cornucopia, a frame not released yet (the koi) 
 	W3.NoErrors(w)
 end)
 
--- 1.2.4 ("My profile", the frame rows of its Look): the koi is listed now, grey and unpickable,
--- "comes in a later version" (the view model's shipped = false), where 1.2.3 left it out; the
--- frames picked are the released ones as before. The panel's "next frame" (ProfileEdit.Cycle)
--- went with the panel: a click on each released frame's row, the same check that it shows.
-test("1.2.3 the profile's Edit: its frame rows pick only the released frames held (the cornucopia, the crook), never one not released yet (the koi, 1.2.4: listed grey); its title still is; each click moves to a frame that shows", function()
-	local w, cast = W3.New()
+-- 1.2.4 ("My profile", the frame rows of its Look; the koi released by the borders lane, the raven not
+-- yet): the released frames held pick by a click on their row, the same check that it shows; a frame
+-- held but not released (the raven) is never offered. The panel's "next frame" (ProfileEdit.Cycle)
+-- went with the panel.
+test("1.2.3 the profile's Edit: its frame rows and its icon picker offer only the released frames held (the cornucopia, the crook; 1.2.4: the koi), never one not released yet (1.2.4: the raven); its title still is; each click moves to a frame that shows", function()
+	local w, cast = Banked()
 	local A = cast.A
 	Ready(w, A)
 	Donors(w, A, w.clock, { A }, Short(A.name))
+	Ravens(w, A, { A })
 	Top(w, { A }, N.king, { A })
 	w:Run(3)
 	local held = {}
 	for _, h in ipairs(A.ns.HonorsNet.Holdings(A.name)) do held[#held + 1] = h.key end
-	eq(table.concat(held, ","), "donor-top-1,missionary-1,donor-month-1", "the cornucopia, the crook and the koi held")
+	eq(table.concat(held, ","), "donor-top-1,missionary-1,oracle-1,donor-month-1", "the cornucopia, the crook, the raven and the koi held")
 	local PE = W3.M(w, A, "ProfileEdit")
 	local vm = PE.ViewModel()
 	local pickable, later = {}, {}
@@ -298,26 +320,27 @@ test("1.2.3 the profile's Edit: its frame rows pick only the released frames hel
 			list[#list + 1] = x.key
 		end
 	end
-	eq(table.concat(pickable, ","), "rank,none,donor-top-1,missionary-1", "the released frames alone pick")
-	eq(table.concat(later, ","), "donor-month-1", "the koi listed, not pickable (1.2.4)")
+	eq(table.concat(pickable, ","), "rank,none,donor-top-1,missionary-1,donor-month-1", "the released frames alone pick (1.2.4: the koi)")
+	for _, key in ipairs(later) do assert(key ~= "donor-month-1", "the koi is released") end
 	local titles = {}
 	for _, x in ipairs(vm.titles) do titles[#titles + 1] = x.key end
-	eq(table.concat(titles, ","), "none,donor-top-1,missionary-1,donor-month-1", "every title held")
+	eq(table.concat(titles, ","), "none,donor-top-1,missionary-1,oracle-1,donor-month-1", "every title held")
+	local koiMark = false
 	for _, x in ipairs(PE.IconList("icon")) do
-		assert(x.key ~= "koi-gold", "no mark of a frame not released")
+		assert(x.key ~= "raven-gold", "no mark of a frame not released")
+		if x.key == "koi-gold" then koiMark = true end
 	end
-	eq(PE.HonourOfMark("koi-gold"), nil)
-	-- Each click on a frame's row of the page's Look: that frame, and it is the one shown; the
-	-- koi's row takes no click.
+	eq(koiMark, true, "(1.2.4) the koi's mark, released")
+	eq(PE.HonourOfMark("raven-gold"), nil)
+	-- Each click on a frame's row of the page's Look: that frame, and it is the one shown.
 	local function Row(label)
 		local lines = PE.Page({ full = A.name }, {})
 		for _, l in ipairs(lines) do
 			if type(l.text) == "string" and (l.text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("^> ", "")) == label then return l end
 		end
 	end
-	eq(Row(A.ns.HonorsNet.TitleText("donor-month-1")).onClick, nil, "the koi: no click")
 	local seen = {}
-	for _, key in ipairs({ "missionary-1", "rank", "none", "donor-top-1" }) do
+	for _, key in ipairs({ "missionary-1", "donor-month-1", "rank", "none", "donor-top-1" }) do
 		local label
 		for _, x in ipairs(vm.frames) do if x.key == key then label = x.label end end
 		w:As(A, assert(Row(label), key).onClick)
@@ -326,7 +349,7 @@ test("1.2.3 the profile's Edit: its frame rows pick only the released frames hel
 		local shown = w:As(A, A.ns.HonorsNet.Verified, A.name).frame
 		eq(shown, pick, pick .. ": shown as picked")
 	end
-	eq(table.concat(seen, ","), "missionary-1,rank,none,donor-top-1")
+	eq(table.concat(seen, ","), "missionary-1,donor-month-1,rank,none,donor-top-1")
 	W3.NoErrors(w)
 end)
 
@@ -466,29 +489,32 @@ end)
 
 -- 1.2.2 switched a frame not released on by itself; the first 1.2.3 mend took only one held now, on an
 -- unlocked pick. And the title's click, or the King's letter's Wear it, on such a pick did nothing
--- (Choose refused the frame kept).
-test("1.2.3 honours: a pick 1.2.2 left on a frame not released, locked or not held now (the owl after his guild lost first), wears the cornucopia; the koi's Wear it on a locked koi pick wears its title; the title's click with a crook not held now takes", function()
-	local w, cast = W3.New()
+-- (Choose refused the frame kept). (1.2.4: the owl and the koi are released now; the comet he never
+-- won and the raven, not released, stand in for them.)
+test("1.2.3 honours: a pick 1.2.2 left on a frame not released, locked or not held now (1.2.4: a comet he never won), wears the cornucopia; the Wear it of a frame not released (1.2.4: the raven) on a locked pick of it wears its title; the title's click with a crook not held now takes", function()
+	local w, cast = Banked()
 	local x = Crook(w, cast)
 	local A, PE = x.A, W3.M(w, x.A, "ProfileEdit")
-	x.Donors(Short(A.name))
+	x.Donors()
+	Ravens(w, A, { A }, x.t + 1)
+	w:Run(3)
 	local held = {}
 	for _, h in ipairs(A.ns.HonorsNet.Holdings(A.name)) do held[#held + 1] = h.key end
-	eq(table.concat(held, ","), "donor-top-1,donor-month-1", "the cornucopia and the koi")
+	eq(table.concat(held, ","), "donor-top-1,oracle-1", "the cornucopia and the raven")
 	eq(#A.ns.HonorsNet.QueuedLetters(), 2, "their letters")
-	-- The owl, not held (his guild lost first before he ran 1.2.3): the cornucopia.
+	-- The comet, not held (1.2.2 can't have put it there, but any frame not released is mended): the cornucopia.
 	local m = A.ns.ArenaProfile.Mine(true)
-	m.frame = "guild-top-leader"
+	m.frame = "level-race-60"
 	w:As(A, A.ns.Fire, "HONORS_CHANGED", A.name)
 	eq(x.Own().frame, "rank", "(1.2.2's case: his rank's frame)")
 	w:As(A, A.ns.HonorsNet.Refresh)
-	eq(x.Pick().frame, "donor-top-1", "the owl not held: the cornucopia")
-	-- Locked on the koi, his title none, and the koi's letter answered Wear it before any refresh.
-	m.frame, m.title, m.locked = "donor-month-1", nil, true
+	eq(x.Pick().frame, "donor-top-1", "the comet not held: the cornucopia")
+	-- Locked on the raven, his title none, and the raven's letter answered Wear it before any refresh.
+	m.frame, m.title, m.locked = "oracle-1", nil, true
 	w:As(A, A.ns.HonorsNet.CloseLetter, false) -- (the cornucopia's letter, Later)
-	eq(A.ns.HonorsNet.LetterFrame().key, "donor-month-1")
+	eq(A.ns.HonorsNet.LetterFrame().key, "oracle-1")
 	w:As(A, A.ns.HonorsNet.CloseLetter, true)
-	eq(x.Pick().title, "donor-month-1", "Wear it wears its title")
+	eq(x.Pick().title, "oracle-1", "Wear it wears its title")
 	w:Run(3)
 	eq(x.Pick().frame, "donor-top-1", "and the cornucopia shows: locked, mended") eq(x.Pick().locked, true)
 	eq(x.rA.Shown("player"), MEDIA .. "cornucopia-gold")

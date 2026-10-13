@@ -25527,26 +25527,27 @@ do
 			local head, rows = Section()
 			-- (1.0.0, the nameplate marks: a row for the marks' own member star, after the borders; it was
 			-- one row per border tier. 1.1.5: five tiers. 1.2: honours add five representative Workshop
-			-- previews between the rank borders and the member star.)
-			eq(#rows, 12, "rank and honour previews, then the member star at the foot of the tab")
+			-- previews between the rank borders and the member star. 1.2.4: four more, the crook, the
+			-- cross, the charm and the slayers' horse, worn now.)
+			eq(#rows, 16, "rank and honour previews, then the member star at the foot of the tab")
 			assert(head.right:find(ns.L.BORDERS_PREVIEW_NONE, 1, true), "off")
 			for i, t in ipairs(w.B.TIERS) do
 				assert(rows[i].text:find(t.name, 1, true), t.name)
 				assert(rows[i].text:find(ns.L["BORDERS_WHO_" .. t.name:upper():gsub("%-", "_")], 1, true), t.name .. ": who holds it")
 				eq(type(rows[i].onClick), "function"); eq(type(rows[i].tooltip), "function"); eq(rows[i].right, nil)
 			end
-			assert(rows[12].text:find("member", 1, true) and rows[12].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[12].text)
+			assert(rows[16].text:find("member", 1, true) and rows[16].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[16].text)
 			local tip = {}
-			rows[12].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+			rows[16].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
 			eq(tip[2], ns.L.BORDERS_PREVIEW_TIP_MEMBER, "the star's own tooltip")
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member"); eq(w.shown("player"), nil, "the star: no border round his portrait")
 			eq(w.printed[#w.printed], ns.L.BORDERS_PREVIEW_ON_MEMBER)
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member", "the lines were built before the click: a fresh click shows it again")
 			head, rows = Section()
-			assert(rows[12].right and rows[12].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
-			rows[12].onClick()
+			assert(rows[16].right and rows[16].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
+			rows[16].onClick()
 			eq(w.B.Preview(), nil, "clicked again: off")
 			head, rows = Section()
 			rows[5].onClick()
@@ -55368,7 +55369,12 @@ test("watch: chat moderation: the Chat tab: a deleted line keeps its greyed name
 			"CHATS_TAB_ADD_TIP", "CHATS_TAB_STEPS", "CHATTAB_POINTER_TITLE", "CHATTAB_POINTER", "CHATS_TAB_AWAY", "CHATS_TAB_AWAY_TIP",
 			"CHATWIN_NEW_IN", "CHATSET_TITLE", "CHATSET_TIP", "CHATSET_SWITCH_TIP", "CHATSET_BACK", "CHATSET_CHATS_ON", "CHATSET_CHATS_OFF",
 			"CHATSET_SHOWN", "CHATSET_MUTED", "CHATSET_MUTE_TIP", "CHATSET_WHERE", "CHATSET_WHERE_NEXT", "CHATSET_WHERE_TIP", "CHATSET_TAB",
-			"CHATSET_GUILDS_SHOWN", "CHATSET_GUILDS_HIDDEN", "CHATSET_GUILDS_TIP" }) do
+			"CHATSET_GUILDS_SHOWN", "CHATSET_GUILDS_HIDDEN", "CHATSET_GUILDS_TIP",
+			-- (1.2.4: a room's line refused or lost, and why; one of ours still sending.)
+			"CHATWIN_WHY_ALONE", "CHATWIN_WHY_FAST", "CHATWIN_WHY_BUSY", "CHATWIN_WHY_QUEUE", "CHATWIN_WHY_CANCELLED",
+			"CHATWIN_WHY_REVOKED", "CHATWIN_WHY_ACCESS", "CHATWIN_WHY_OFF", "CHATWIN_WHY_NETOFF", "CHATWIN_WHY_TIMEOUT",
+			"CHATWIN_WHY_SEVERE", "CHATWIN_WHY_LOCKDOWN", "CHATWIN_WHY_GUILD", "CHATWIN_WHY_EMPTY", "CHATWIN_WHY_SIZE",
+			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING" }) do
 			assert(type(rawget(ns.L, k)) == "string" and rawget(ns.L, k) ~= "", "English: " .. k)
 			assert(type(rawget(pt.L, k)) == "string" and rawget(pt.L, k) ~= rawget(ns.L, k), "pt-BR: " .. k)
 			eq(Codes(rawget(pt.L, k)), Codes(rawget(ns.L, k)), "codes: " .. k)

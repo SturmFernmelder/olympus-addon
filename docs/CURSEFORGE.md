@@ -564,6 +564,12 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   each channel still waits for the privacy warning's **Send**. A line of yours that did not leave
   shows a note in its channel, and a click puts it back in the box when the box is empty (what you
   are writing is never replaced: the note waits).
+- In Guild and the Roles rooms (1.2.4), a line Olympus cannot send stays in the box, and the room
+  says why on one line: too fast, nobody else in this room online right now, the game has not
+  told your guild yet, chat rooms off, and so on. A Roles room's line shows at once, marked
+  **(sending...)**, until its whispers have left (one every 1.2 seconds, so a full room takes a
+  while); if none of them leaves, it goes from the room and the note says why. Nobody is added
+  to a room to make a line go.
 - **Add an Olympus tab to the game chat**: while your game chat has no Olympus tab (see Channels
   above), a line over the lines offers one. Olympus cannot make that tab itself, so a click
   shows you where: a small Olympus pointer by your main chat tab says right-click it, Create New

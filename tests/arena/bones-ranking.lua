@@ -642,3 +642,54 @@ test("1.2.3 Bones ranking: a repeat that did not go out is not spent; a relayed 
 	eq(#Best(w, c), 2, "only the real game")
 	NoErrors(w)
 end)
+
+-- 1.2.4: the Bones' charm is the closed month's top 3 (HonorsNet.BonesTop), held through the month
+-- after it, while this client's store keeps HALVES_MAX games and prunes its oldest past them. The
+-- month's list reads more than its own games: the pair cap (PAIR_MAX in PAIR_DAYS) counts the days
+-- before it too, so pruning the month before's last games makes a game of the closed month count
+-- that the cap had left out, and its top 3 changed partway through the month it is held in. Best's
+-- second value counts what a month's list reads; fewer of them held than when HonorsNet kept the
+-- list, the list kept stands. (The cap lowered here: the same code, fewer games.)
+test("1.2.4 Bones ranking: Best's second value counts the games a month's list reads (its own and the PAIR_DAYS before it, whoever played); the charm's closed month, worked out again for a game heard late, then pruned past HALVES_MAX (the month before's games first, so a game the pair cap left out would count), stays as it stood: HonorsNet keeps it", function()
+	local w, a, b, c = Setup()
+	local d, e = w:Player(P3), w:Player(P4)
+	-- (smaller real caps on the member's client: ArenaLedger's own, which Best reads)
+	c.ns.ArenaLedger.PAIR_MAX = 2
+	local Hs, HN = c.ns.Honors, c.ns.HonorsNet
+	local closed = w:As(c, Hs.MonthOf, w.clock) - 1
+	local start = w.clock - w.clock % 86400
+	while w:As(c, Hs.MonthOf, start - 1) >= closed do start = start - 86400 end
+	eq(w:As(c, Hs.MonthOf, start), closed, "the closed month's first second")
+	-- The month before's last two days: a beats b twice (the pair's cap here). The closed month: a
+	-- beats b again an hour in (the pair's third in PAIR_DAYS: left out), then d beats e.
+	Game(w, { id = "Kw1", p1 = a, p2 = b, w = "1", t = start - 2 * 86400 + 3600 })
+	Game(w, { id = "Kw2", p1 = a, p2 = b, w = "1", t = start - 86400 + 3600 })
+	Game(w, { id = "Kw3", p1 = a, p2 = b, w = "1", t = start + 3600 })
+	Game(w, { id = "Kw4", p1 = d, p2 = e, w = "1", t = start + 7200 })
+	local rows, read = Best(w, c, { month = closed })
+	eq(Order(rows), "Lida Fenn, Parric Stowe", "the pair's third left out")
+	local function Top() return Order(w:As(c, HN.BonesTop, closed).month) end
+	eq(Top(), "Lida Fenn", "a win at least")
+	-- A game of that month heard late: more games read, worked out again and kept.
+	Game(w, { id = "Kw5", p1 = e, p2 = b, w = "1", t = start + 10800 })
+	local late = select(2, Best(w, c, { month = closed }))
+	eq(Top(), "Lida Fenn, Parric Stowe")
+	-- Past the cap (4 here: down to 3, FarkleTable.Prune as at a login): the month before's two go.
+	c.ns.FarkleTable.HALVES_MAX = 4
+	Do(w, c, "Prune")
+	local pruned
+	rows, pruned = Best(w, c, { month = closed })
+	eq(Order(rows), "Torvin Hale, Lida Fenn, Parric Stowe, Selka Drummond", "recounted from what is left: the game left out counts")
+	eq(Top(), "Lida Fenn, Parric Stowe", "the closed month's list as it stood")
+	w:Run(61)
+	local function Charm(p)
+		for _, h in ipairs(w:As(c, HN.Holdings, p.name)) do if h.family == "bones" then return h.key end end
+		return "-"
+	end
+	eq(Charm(d), "bones-1", "the gold charm stays his") eq(Charm(e), "bones-2")
+	eq(Charm(a), "-", "never a's partway through the month")
+	-- (Best's second value each time: the month's games and the two of the PAIR_DAYS before it; then
+	-- the late one; then the two before it pruned.)
+	eq(read, 4) eq(late, 5) eq(pruned, 3)
+	NoErrors(w)
+end)

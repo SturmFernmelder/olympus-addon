@@ -609,6 +609,36 @@ test("wanted global: only a fresh directly signed authority snapshot awards GUID
 	end)
 end)
 
+-- 1.2.4: the slayers' frame is an honour (Honors' wanted-slayer: the skeletal horse), and a player's
+-- pick decides it. Where this client knows his pick (HonorsNet.PickKnown: his own, or his profile
+-- heard), GlobalBorder gives nothing and the honours show what that pick shows ("none", another frame
+-- he holds, the horse he picked); only a slayer whose pick is unknown here still wears his place's by
+-- GUID. (Until 1.2.4 the frame, the orc's wolf then, went over "none" and the cornucopia.)
+test("1.2.4 wanted global: a slayer whose pick this client knows gets no frame from Wanted (his pick decides it, HonorsNet.Verified); one whose pick is unknown still gets his place's by GUID; never by a name; the skeletal horse's art", function()
+	WithWanted(function(w, W, c)
+		local council = w.authority("Council-Realm", "council")
+		c.me = council
+		local rows = {
+			{ guid = "Player-1-DA000001", points = 9, claims = 3, reachedAt = w.epoch },
+			{ guid = "Player-1-DA000002", points = 7, claims = 1, reachedAt = w.epoch },
+		}
+		local ok, _, message = w.publish(rows, 100)
+		assert(ok and message)
+		assert(W.HandleGlobalSnapshot("CHANNEL", council, message))
+		local known = {}
+		rawset(c, "HonorsNet", { PickKnown = function(name) return known[name] == true end })
+		eq(W.GlobalBorder("Slayer-Realm", "Player-1-DA000001"), "wanted-slayer-1", "his pick unknown here: by his GUID, as before")
+		known["Slayer-Realm"] = true
+		eq(W.GlobalBorder("Slayer-Realm", "Player-1-DA000001"), nil, "his pick known: the honours show what it shows")
+		eq(W.GlobalBorder("Second-Realm", "Player-1-DA000002"), "wanted-slayer-2")
+		eq(W.GlobalBorder("Second-Realm"), nil, "never by a name")
+		local hs = {}
+		assert(loadfile(ROOT .. "Olympus/Honors.lua"))("Olympus", hs)
+		eq(hs.Honors.ArtOf("wanted-slayer-1"), "skeletal-horse-gold", "the skeletal horse (the orc's wolf until 1.2.4)")
+		eq(hs.Honors.ArtOf("wanted-slayer-3"), "skeletal-horse-bronze")
+	end)
+end)
+
 test("wanted global: forgery, replay, rollback, stale words, key conflicts and row bounds fail closed", function()
 	WithWanted(function(w, W, c)
 		local council = w.authority("Council-Realm", "council")

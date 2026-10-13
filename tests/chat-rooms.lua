@@ -479,3 +479,119 @@ test("chat rooms: a provider's private rooms answer for themselves, never ride M
 		-- (1.2.3: no request status to ask any more: the outsider requests went with the race and class rooms.)
 	end)
 end)
+
+-- 1.2.4 (the author, in the Church's room: "Eu dou Enter para enviar a mensagem na igreja e não
+-- aparece a mensagem. No histórico, não aparece nada e não me avisa por que não foi"): the line
+-- showed in its sender's history only once the last of its whispers had left (Comm sends one every
+-- 1.2 s: eight members online, ten seconds; behind a census transfer, over a minute), with the box
+-- already empty; and nobody else of the room online kept it on his screen alone, without a word.
+-- Now the line shows at Enter, marked as sending, and settles once its whispers left; a line that
+-- cannot go is refused with its reason (the Chat page's note). The audience is the room's own: the
+-- room registered as Church.lua registers the Church's.
+local function ChurchLike(w, R, c, count)
+	local audience, online = { [c.me:lower()] = true }, {}
+	for i = 1, count do
+		local name = "Brother " .. string.char(96 + i) .. "-Realm"
+		audience[name:lower()], online[#online + 1] = true, name
+	end
+	assert(R.RegisterAudience("church", { label = "Church",
+		CanAccess = function(name) return audience[c.FullName(name or c.me):lower()] == true end,
+		Recipients = function() return online end }))
+	return audience, online
+end
+local function Fired(w, name)
+	local out = {}
+	for _, e in ipairs(w.events) do if e[1] == name then out[#out + 1] = e end end
+	return out
+end
+
+test("chat rooms (1.2.4): a role room's line shows in its sender's history at Enter, marked sending, and settles once every whisper left", function()
+	WithRooms(function(w, R, c)
+		local audience, online = ChurchLike(w, R, c, 8)
+		local ok, why = R.Send("church", "hello brothers")
+		eq(ok, true); eq(why, "ok")
+		eq(#w.jobs, 8, "one whisper to each audience member online")
+		local to = {}
+		for _, job in ipairs(w.jobs) do
+			eq(job.dist, "WHISPER"); eq(job.logged, true); eq(audience[job.target:lower()], true, "only the room's audience")
+			to[job.target] = true
+		end
+		for _, name in ipairs(online) do eq(to[name], true, name) end
+		local history = R.History("church")
+		eq(#history, 1, "the sender's own line shows at Enter")
+		eq(history[1].text, "hello brothers"); eq(history[1].mine, true)
+		eq(history[1].pending, true, "marked as still sending")
+		for i = 1, 7 do w.finish(w.jobs[i], true) end
+		eq(#R.History("church"), 1); eq(R.History("church")[1].pending, true, "still sending while one whisper waits")
+		w.finish(w.jobs[8], true)
+		eq(#R.History("church"), 1, "one line, not a second echo")
+		eq(R.History("church")[1].pending, nil, "settled once every whisper left")
+		eq(#Fired(w, "CHAT_ROOM_SEND_FAILED"), 0, "nothing failed")
+		for _, e in ipairs(Fired(w, "CHAT_ROOM_LINE")) do assert(e[2] ~= "church", "a local echo makes no unread count") end
+	end)
+end)
+
+test("chat rooms (1.2.4): a line none of whose whispers left goes from the sender's history and the page is told; one that reached some stays", function()
+	WithRooms(function(w, R, c)
+		local audience = ChurchLike(w, R, c, 3)
+		assert(R.Send("church", "nobody will hear"))
+		eq(#R.History("church"), 1, "shown at Enter"); eq(R.History("church")[1].pending, true)
+		-- Every recipient left the audience while the line waited: each permit refuses it.
+		for _, job in ipairs(w.jobs) do audience[job.target:lower()] = nil end
+		for _, job in ipairs(w.jobs) do eq((w.finish(job, true)), false, "the permit refuses " .. job.target) end
+		eq(#R.History("church"), 0, "nothing reached anyone: not shown as said")
+		local failed = Fired(w, "CHAT_ROOM_SEND_FAILED")
+		eq(#failed, 1); eq(failed[1][2], "church"); eq(failed[1][3], "revoked", "the reason the page shows")
+		eq(failed[1][4], "nobody will hear", "the words, to put back"); eq(failed[1][5], 0, "reached nobody")
+
+		w.clearJobs(); w.events = {}; w.advance(2)
+		for i = 1, 3 do audience[("brother " .. string.char(96 + i) .. "-realm")] = true end
+		assert(R.Send("church", "two of three"))
+		w.finish(w.jobs[1], true); w.finish(w.jobs[2], false, "failed"); w.finish(w.jobs[3], true)
+		eq(#R.History("church"), 1, "reached two: shown")
+		eq(R.History("church")[1].pending, nil)
+		failed = Fired(w, "CHAT_ROOM_SEND_FAILED")
+		eq(#failed, 1); eq(failed[1][3], "failed"); eq(failed[1][5], 2)
+	end)
+end)
+
+test("chat rooms (1.2.4): with nobody else of the room online the line is refused as alone: nothing sent, nothing kept, and the next try is not too fast", function()
+	WithRooms(function(w, R, c)
+		local audience, online = ChurchLike(w, R, c, 0)
+		audience["brother a-realm"] = true -- in the room, not online yet
+		local ok, why = R.Send("church", "anyone?")
+		eq(ok, false); eq(why, "alone", "the reason the page shows")
+		eq(#w.jobs, 0, "no whisper"); eq(w.attempts, 0)
+		eq(#R.History("church"), 0, "not kept as if said")
+		online[1] = "Brother a-Realm"
+		ok, why = R.Send("church", "anyone now?")
+		eq(ok, true, "a refused line does not count against the send gap"); eq(why, "ok")
+		eq(#w.jobs, 1)
+	end)
+end)
+
+test("chat rooms (1.2.4): a refusal returns its reason before any whisper, and an admission refused part way leaves no line and no late note", function()
+	WithRooms(function(w, R, c)
+		ChurchLike(w, R, c, 3)
+		assert(R.Send("church", "first"))
+		local ok, why = R.Send("church", "at once again")
+		eq(ok, false); eq(why, "fast")
+		w.advance(2)
+		w.guild = nil
+		ok, why = R.Send("church", "no guild yet")
+		eq(ok, false); eq(why, "guild")
+		w.guild = "Olympus II"
+		ok, why = R.Send("church", ("x"):rep(R.TEXT_MAX + 40))
+		eq(ok, true, "a long line is cut to the room's length, not refused")
+		eq(#R.History("church"), 2, "both lines shown at Enter"); eq(#R.History("church")[2].text, R.TEXT_MAX)
+		w.clearJobs(); w.events = {}; w.advance(2)
+		w.rejectAt = 2
+		ok, why = R.Send("church", "must be whole")
+		eq(ok, false); eq(why, "busy")
+		eq(#w.jobs, 0, "the admitted prefix cancelled")
+		eq(#R.History("church"), 2, "no line for a refused send")
+		eq(#Fired(w, "CHAT_ROOM_SEND_FAILED"), 0, "refused at Enter: the page says it there, once, and the words stay in the box")
+		eq(R.Own("church"), true); eq(R.Own("guild"), true); eq(R.Own("council"), true); eq(R.Own("dept:war"), true)
+		eq(R.Own("no such room"), false)
+	end)
+end)
