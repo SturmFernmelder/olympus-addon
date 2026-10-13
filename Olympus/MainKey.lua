@@ -60,6 +60,13 @@ end
 function Key.Press(_, _, down) -- gp:main-key
 	if not ns.Gate.Allowed("main-key") then return end
 	if down == false or not Key.Enabled() or not ns.IsMember() or not held or not Available(held) then return end
+	local W, V = ns.Watch, ns.ViewAs
+	local preview = V and V.Previewing and V.Previewing()
+	-- The Council's borrowed guild shortcut opens its real, permission-scoped desk. A
+	-- preview or unavailable desk retains the ordinary toggle and grants no reading power.
+	if not preview and ns.IsHighCouncillor and ns.IsHighCouncillor(ns.me) == true
+		and W and not W.missing and W.CouncilDeskShown and W.CouncilDeskShown() == true
+		and ns.UI and ns.UI.SelectTab then ns.UI.SelectTab("watch"); return end
 	if ns.UI and ns.UI.Toggle then ns.UI.Toggle() end
 end
 

@@ -71,8 +71,9 @@ end
 local function Gold(s) return "|cffffd200" .. tostring(s) .. "|r" end
 local function Grey(s) return "|cff9d9d9d" .. tostring(s) .. "|r" end
 -- The Games on this character, the gate of the person card's Arena rows (ArenaProfile.PersonRows):
--- the profile's word (AP) goes out on the Games' channel, so none of its pickers shows while they
--- are off. A councillor's chat icon is the council's (Workshop.lua), whatever the Games.
+-- the profile's word (AP) goes out on the Games' channel. Frame/title/nickname pickers wait
+-- while it is off; a member's local portrait fallback icon remains available. A councillor's
+-- chat icon is the council's (Workshop.lua), whatever the Games.
 local function GamesOn() return not Arena.Off() and Arena.companionRefused ~= "version" end
 local function Councillor() return ns.IsHighCouncillor(ns.me) == true end
 
@@ -193,6 +194,7 @@ function PE.NickStep(which, delta)
 	return PE.Nick(a, n)
 end
 function PE.Emblem(icon)
+	if not ns.IsMember() then return false, "guild" end
 	local ok, why = P().SetEmblem(icon)
 	PE.Refresh()
 	return ok, why
@@ -356,12 +358,12 @@ function PE.Section() return section, iconKind end
 local function SetSection(key, kind)
 	if not SECTION[key] then return false end
 	if key == "icons" then
+		if not ns.IsMember() then return false end
 		kind = kind or iconKind
-		-- (A councillor's chat icon for a councillor alone; with the Games off, his only one.)
+		-- A councillor's chat icon remains Council-only. Every member may choose the
+		-- personal fallback, including with Games off; that choice never turns sharing on.
 		if kind == "icon" and not Councillor() then kind = "emblem" end
-		if kind == "emblem" and not GamesOn() and Councillor() then kind = "icon" end
-		if (kind == "icon" or GamesOn()) and not (icons and icons.kind == kind) then OpenIcons(kind) end
-		if kind == "emblem" and not GamesOn() then icons = nil end
+		if not (icons and icons.kind == kind) then OpenIcons(kind) end
 		iconKind = kind
 	else
 		icons = nil
@@ -426,6 +428,7 @@ end
 -- mark picks its honour and drops his own icon, a game icon is his own icon, none the mark alone).
 -- The page goes back to Look.
 function PE.UseIcon()
+	if not ns.IsMember() then return false, "guild" end
 	if not icons then return false end
 	local choice, ok, why = icons.choice, false, nil
 	if icons.kind == "icon" then
@@ -493,6 +496,9 @@ end
 local function LookLines(lines, vm)
 	if not GamesOn() then
 		Words(lines, L.MYPROFILE_GAMES_OFF)
+		lines[#lines + 1] = { text = L.MYPROFILE_EMBLEM_HEAD, header = true,
+			right = vm.emblem and Texture(ns.CouncilIconTexture(vm.emblem)) or L.MYPROFILE_NONE_WORD }
+		lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.MYPROFILE_CHOOSE_EMBLEM), onClick = function() PE.SetSection("icons", "emblem") end }
 		if vm.councillor then CouncilIconLines(lines) end
 	else
 		local shows
@@ -602,7 +608,7 @@ end
 -- sample, the filter, the slots (Grid: as many as the window's room holds), the pager.
 local function IconsLines(lines, vm)
 	local first = #lines + 1
-	if vm.councillor and GamesOn() then
+	if vm.councillor then
 		lines[#lines + 1] = { nav = {
 			{ text = L.MYPROFILE_EMBLEM_HEAD, selected = iconKind == "emblem", onClick = function() PE.SetSection("icons", "emblem") end },
 			{ text = L.MYPROFILE_ICON_HEAD, selected = iconKind == "icon", onClick = function() PE.SetSection("icons", "icon") end },

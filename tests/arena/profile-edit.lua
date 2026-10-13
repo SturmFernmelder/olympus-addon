@@ -742,9 +742,27 @@ test("1.2.4 /oly profile with no name (or his own) is My profile, on Look; anoth
 	W3.NoErrors(w)
 end)
 
+test("1.2.4 follow-up: every actual member may choose a personal portrait icon with Games off, Council icons remain restricted", function()
+	local w, cast = W3.New(); local A = cast.A
+	MacroIcons(A)
+	W3.PageUI(w, A); A.ns.db.arenaOff = true
+	eq(PE(w, A).Open("emblem"), true)
+	local icons = PE(w, A).Icons(); assert(icons and #icons.list > 0, "personal icon list survives Games opt-out")
+	eq(icons.kind, "emblem"); eq(Line(Page(w, A), A.ns.L.MYPROFILE_ICON_HEAD), nil)
+	local before = #w:Sent{ from = A, type = "AP" }; local choice = icons.list[1]
+	eq(PE(w, A).ChooseIcon(choice), true); eq(PE(w, A).UseIcon(), true); w:Run(0)
+	eq(A.ns.ArenaProfile.Mine().emblem, choice); eq(#w:Sent{ from = A, type = "AP" }, before, "Games sharing remains off")
+	eq(A.ns.db.arenaOff, true); eq(A.ns.db.councilIcons, nil, "no Council icon written")
+	eq(PE(w, A).PickIcon(choice), false, "personal icon is no Council capability")
+	local member = A.ns.IsMember; A.ns.IsMember = function() return false end
+	eq(PE(w, A).Open("emblem"), false); eq(PE(w, A).SetSection("icons", "emblem"), false)
+	eq(PE(w, A).Emblem(nil), false); eq(A.ns.ArenaProfile.Mine().emblem, choice, "leaving the guild blocks a stale setter")
+	A.ns.IsMember = member; W3.NoErrors(w)
+end)
+
 -- A failure case: with the Games off on this character (or an older companion refused) the profile's
--- word (AP) does not travel, so the page offers none of its pickers.
-test("1.2.4 My profile with the Games off: no picker in Look but one grey line saying why; no Games profile button; Icons says the same to anyone but a councillor", function()
+-- word (AP) does not travel. Frames/titles stay gated, while a personal fallback icon remains local.
+test("1.2.4 My profile with the Games off: frame/title pickers explain why; personal Icons stay available without Games sharing", function()
 	local w, cast = W3.New()
 	local A = cast.A
 	MacroIcons(A)
@@ -760,9 +778,10 @@ test("1.2.4 My profile with the Games off: no picker in Look but one grey line s
 	assert(table.concat(words, " "):find(A.ns.L.MYPROFILE_GAMES_OFF, 1, true), "the grey line: " .. table.concat(words, " | "))
 	eq(#buttons, 1, "Back alone")
 	eq(PE(w, A).Open("emblem"), true)
-	eq(PE(w, A).Icons(), nil, "no emblem's list")
+	assert(PE(w, A).Icons(), "personal emblem list remains available")
 	lines = Page(w, A)
-	for _, l in ipairs(lines) do eq(l.items, nil, "no slots") end
+	local slots = false; for _, l in ipairs(lines) do if l.items then slots = true end end
+	eq(slots, true, "personal icon slots are available")
 	-- Who sees what says the same: nothing of his look goes out (Arena.Send refuses AP: a nickname
 	-- set sends none), never "every member's addon shows them". (Fails on the branch's first page:
 	-- that line was MYPROFILE_LOOK_PUBLIC whatever the Games.)
