@@ -653,7 +653,7 @@ function Lottery.IsCaller(name, mode)
 	if R and R.IsKing(name) then return true end
 	if R and type(R.Barred) == "function" and R.Barred(name) then return false end
 	local W = ns.Workshop
-	if type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(name) == true then return true end
+	if type(W) == "table" and type(W.IsPracticeOperator) == "function" and W.IsPracticeOperator(name) == true then return true end
 	if type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true then return true end
 	if mode == "T" and R and type(R.standIn) == "function" then
 		local ok, yes = pcall(R.standIn, ns.FullName(name), "k", "T")
@@ -674,9 +674,8 @@ function Lottery.Callers(mode)
 	Add(king)
 	local R = Roles()
 	for _, name in ipairs(R and type(R.Councillors) == "function" and R.Councillors() or {}) do Add(name) end
-	if type(ns.AUTHOR) == "string" then Add(ns.FullName(ns.AUTHOR, ns.AUTHOR_REALM)) end
 	local W = ns.Workshop
-	if type(W) == "table" and type(W.AuthorName) == "function" then Add(W.AuthorName()) end
+	for _, name in ipairs(type(W) == "table" and type(W.PracticeOperators) == "function" and W.PracticeOperators() or {}) do Add(name) end
 	Add(ns.me)
 	if mode == "T" and R and type(R.standIns) == "function" then
 		local ok, list = pcall(R.standIns, "k", "T")

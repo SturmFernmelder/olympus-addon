@@ -105,6 +105,14 @@ end
 function Workshop.IsAuthor() return IsAuthorName(ns.me) end
 Workshop.IsAuthorName = IsAuthorName
 
+-- Practice tools delegate their pinned operator identity to the core. This grants
+-- no guild rank, payment authority or control of another player's result.
+function Workshop.IsPracticeOperator(name) return IsAuthorName(name) end
+function Workshop.PracticeOperators()
+	if type(ns.AUTHOR) ~= "string" or ns.AUTHOR == "" then return {} end
+	return { ns.FullName(ns.AUTHOR, ns.AUTHOR_REALM) }
+end
+
 -- The author's test characters (Dev.lua, never published) see the tab too: nothing it sends
 -- goes anywhere but the test bench's log (DevTest.lua), or is ignored by everyone.
 function Workshop.Preview()

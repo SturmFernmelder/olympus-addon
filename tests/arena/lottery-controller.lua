@@ -307,6 +307,12 @@ end)
 test("Lottery authority 1.2.4: only the pinned King, signed High Council and author can call and roll a real draw; a bank, guild master or claimed council rank cannot", function()
 	local w, cast, lottery = Setup()
 	local author = w:Cast("author")
+	-- The arena asks the real core Workshop for a pinned operator; a supplied title/name is
+	-- never enough, and callers remain discoverable without an observed presence announcement.
+	eq(w:As(cast.king, cast.king.ns.Workshop.IsPracticeOperator, author.name), true)
+	local operators = w:As(cast.king, cast.king.ns.Workshop.PracticeOperators)
+	eq(#operators, 1); eq(operators[1], author.name)
+	eq(w:As(cast.king, cast.king.ns.Workshop.IsPracticeOperator, author.short .. "-Foreign Realm"), false, "same short name outside the pinned realm group grants no authority")
 	local gm = w:Player("Master Claim", { rank = 0 })
 	gm.rankName = "High Councillor" -- a guild's rank label grants no signed council authority
 	for _, c in ipairs({ cast.hc, author, cast.king }) do
