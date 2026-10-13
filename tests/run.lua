@@ -46864,7 +46864,7 @@ do
 		end)
 	end)
 
-	test("1.2.4 Guild treasuries (review): a Hand's saved treasuries wait, unseen, while the King's list is not heard (he logged off) and come back with it; once his list is heard without him, what came as a Hand goes, the save too; a councillor keeps his own, and a 1.1 'only the King's' snapshot never shows to him in a later session while he is no Hand", function()
+	test("1.2.4 Guild treasuries (review): accepted Hand authority and snapshots survive the King's offline duration and reload; explicit removal still revokes Hand-only data while councillor data remains", function()
 		WithDirectory(function(w, K, Run)
 			local T, B = ns.Treasury, ns.Bank
 			KeepLogin(function()
@@ -46885,16 +46885,16 @@ do
 				eq(K.IsHand(), true); eq(B.SeesSisters(), true)
 				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
 				eq(#B.Sisters(), 1); eq(Stored(HELPER), 1)
-				-- The King logs off: his list lapses. Unseen, kept (before: dropped from the save at once).
+				-- Silence is not revocation: the accepted appointment and snapshots stay available.
 				Lapse()
-				eq(K.IsHand(), false)
-				eq(#B.Sisters(), 0, "no Hand here now: not shown"); eq(Stored(HELPER), 1, "kept")
+				eq(K.IsHand(), true, "the King's absence does not erase his accepted appointment")
+				eq(#B.Sisters(), 1, "retained appointment remains readable"); eq(Stored(HELPER), 1, "kept")
 				w.clock = w.clock + B.ROLE_SETTLE + 1
 				Census(w)
 				B.Holding(); eq(Stored(HELPER), 1, "however long the King is away")
 				-- A /reload while he is still away, then his list again: back as it was.
 				B.Reload()
-				eq(#B.Sisters(), 0)
+				eq(#B.Sisters(), 1, "offline appointment survives the viewer's reload")
 				Heard(KingSends())
 				local s = B.Sisters()
 				eq(#s, 1, "back with the King's list"); eq(s[1].money, 424242)
@@ -46910,13 +46910,20 @@ do
 				eq(K.IsHand(), true)
 				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
 				Lapse()
-				eq(K.IsHand(), false); eq(B.SeesSisters(), true)
+				eq(K.IsHand(), true); eq(B.SeesSisters(), true)
+				-- To receive a council-only snapshot he must actually cease to be a Hand;
+				-- silence cannot manufacture that different audience anymore.
+				Heard(KingSends(nil, HELPER))
+				eq(K.IsHand(), false); eq(#B.Sisters(), 0, "explicit removal clears Hand-only Zeus")
 				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(#B.Sisters(), 1, "Hera was received under council authority alone")
+				Heard(KingSends("Helper"))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
 				eq(#B.Sisters(), 2, "this session: both, as 1.2.3 showed them")
-				-- His next session, the King away: what came to him as a Hand stays unseen, saved.
+				-- His next session, the King away: both still held with the accepted appointment.
 				B.Reload()
 				s = B.Sisters()
-				eq(#s, 1, "only what came to him as a councillor (before: both)"); eq(s[1].guild, "Olympus Hera")
+				eq(#s, 2, "both accepted audiences persist until an explicit change")
 				eq(Stored(HELPER), 2)
 				-- The King's list names him again: shown.
 				Heard(KingSends())
@@ -46936,7 +46943,7 @@ do
 				eq(Stored(HELPER), 2)
 				Lapse()
 				B.Reload()
-				eq(#B.Sisters(), 1)
+				eq(#B.Sisters(), 2, "silence leaves both retained snapshots readable")
 				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
 				local _, mine = Stored(HELPER)
 				eq(mine["olympus zeus"], nil, "his no, unseen as it was"); assert(mine["olympus hera"], "Hera's stays")
@@ -61813,7 +61820,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
 		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
-		"campaign", "chat-channel-links", "perf", "roster", "census-avg-level", "profile-menu", "history-carry" }
+		"campaign", "justice-tasks", "chat-channel-links", "perf", "roster", "census-avg-level", "profile-menu", "history-carry" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)

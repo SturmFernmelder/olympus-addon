@@ -10,8 +10,8 @@ local L = ns.L
 -- silver, Raiders bronze wings, Veterans bronze) are gone: new borders are to come, and one that
 -- nearly everybody has is worth nothing. Any other member: the nameplate star alone, no border.
 -- Then two without wings (1.1.5, the author's asks after the High Council's yes): Max's plain
--- bronze for the people a guild master names (Nominees.lua: up to 10 centurions and a
--- correspondent per council department, while they are of his guild), with a guild master's bronze
+-- bronze for a correspondent per council department, while they are of his guild; appointed
+-- Legates keep their identity mark, but no extra portrait frame until their badge is chosen. The bronze
 -- mark on nameplates and in the game's chat; and the game's plain silver for the dev's own
 -- character (ns.AUTHOR on his realm group), on the unit frames alone: no mark of its own.
 --
@@ -121,12 +121,13 @@ ns.Borders = Borders
 --   leader   the guild master of an Olympus guild, as its census names him (Data.KnownRank, as
 --            the Crown asks it: two senders naming him, one of them someone else; our own
 --            guild's: the rank the server gives, or our roster's)
---   nominee  a centurion or correspondent his guild master named (Nominees.RoleOf: the list his
+--   nominee  a correspondent his guild master named for portraits; Legates also for identity marks
+--            (Nominees.RoleOf: the list his
 --            master's client sends, taken only from that guild's master as Facts proves a guild
 --            master, and dropped when he stops being it), while the server gives the unit that
---            very guild (GetGuildInfo): nobody outside it can borrow it. None in the King's guild
---            (1.2.4, the author's rule: the King's centurions are the High Council, in their silver;
---            1.1.5's list of its centurions counts for nothing since, Nominees.ListOf)
+--            very guild (GetGuildInfo): nobody outside it can borrow it. In the King's guild,
+--            Legates are explicitly appointed, not derived from the council; a separate actual
+--            council title still has its own precedence and portrait frame.
 -- The supplied primary federal Treasurer dragon is portrait-only (TreasurerPin == 1, never
 -- the mail alternate); the King takes precedence. Existing chat/nameplate marks stay unchanged.
 -- Portrait order: the King, the primary Treasurer, the High Council, the dev, a guild master, a nominee

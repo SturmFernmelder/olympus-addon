@@ -21,7 +21,9 @@ tickets stay disabled.
   attendance at events, raids and wars. Naming explains this purpose; the appointed character gets
   a quiet local notice. Existing officer oversight remains. Legacy oversized saved groups remain
   read-only until an authorized confirmed review archives the old membership and replaces it.
-  Historical command/role/room identifiers remain compatible. No automatic invites or kicks.
+  Historical command/role/room identifiers remain compatible. These are optional, fluid groups,
+  not exclusive partitions or a restriction on following another leader. Their online counts use
+  the fresh native roster and label unknown status. No automatic invites or kicks.
 - Approved role rooms show delivery failures and partial delivery. Class and race rooms remain
   removed. Games lists live Arena/Bones conversations; after a Bones game ends, participants
   can continue its conversation while spectators retain read-only history, within retention
@@ -90,10 +92,20 @@ tickets stay disabled.
 
 ## Open limitations and acceptance gates
 
-- Justice's alignment, execution and reporting-quality scoring rubric is not implemented as
-  a completed private leaderboard. No public Justice ranking is introduced.
+- The Watch's private Justice requests record explicit King/High Council assignments to a
+  currently verified Justice correspondent. Receipt is acknowledged by the actual assignee;
+  delivery while offline does not start the timer. The existing removal dialog remains a manual
+  native action, with no new kick permission. A later complete fresh roster absence is recorded
+  separately; it never proves who caused the removal. The original issuer must explicitly review
+  completion, labeled human-confirmed. Cancellation/decision delivery has bounded retries and
+  acknowledgement. Staff see local held details; correspondents see only their own requests.
+  Reports are a separate count of locally retained accepted reporter/subject pairs, not all-time
+  work or quality. This is not a synchronized army-wide ranking, composite score or new honour.
 - Cross enlargement is implemented; consistent normalization of the other honour families
   against the rank dragons is still open. Approved artwork needs visual acceptance in game.
+- Plain bronze role portraits now belong to correspondents, not Legates. Their existing
+  verified chat/nameplate identity marks remain. A separate Legate badge has not been supplied;
+  this candidate does not invent its art or replace the native PvP badge.
 - Level Race ships explicitly off: no collection, level-claim send/receive, effective standings
   or live level honours. Old evidence stays retained and the author's art/letter previews still
   work. A future release must deliberately define and open its launch; ordinary settings and

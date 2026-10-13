@@ -258,6 +258,17 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
   old membership privately before replacing it. Check the same actions with another client and
   gamepad mode. No automatic invitations, removals or native promotions may happen. Lottery
   draws remain King/author/HC-only, with no public Lottery ranking and no paid tickets.
+- **Private Justice requests:** as the actual King/HC, open The Watch > Justice requests and
+  issue a deliberate request to the verified correspondent's full name and own guild. Keep the
+  assignee offline initially: no received time or speed should be invented. Overlap online and
+  compare the first receipt; repeat it without resetting the timer. Review the existing native
+  removal dialog: cancel performs nothing; only the player's confirmed click invokes it, with
+  current native permissions. Promote the subject or revoke the correspondent before accepting
+  to check that the stale dialog refuses. A partial/stale roster or ordinary departure must not
+  complete the request. Observe later absence, then have the original issuer explicitly review
+  human-confirmed completion. Disconnect during the decision, recover and compare exactly once.
+  Check local retained-report counts, unknown coverage, own-only views and inert role previews.
+  There must be no public task/name list, automatic removal, global quality score or new honour.
 - **Records:** compare the participants' retained game/duel results and closed-month ranking
   after reload, later join and recovery from another holder. Exercise more than one day/month
   page where records actually exist; a full rotating page should not label older coverage
