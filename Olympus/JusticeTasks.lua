@@ -324,7 +324,7 @@ local function Shown(name)
 end
 function J.Lines()
 	if not J.Visible() then return {} end
-	local lines = { { header = true, text = Word("JUSTICE_TASKS_TITLE", "Justice requests — private activity") },
+	local lines = { { header = true, text = Word("JUSTICE_TASKS_TITLE", "Justice requests - private activity") },
 		{ text = Word("JUSTICE_TASKS_EVIDENCE", "Native action attempted and later roster absence are separate observations, not proof of who caused the removal. Completion needs the issuer's explicit human review."), wrap = true },
 		{ text = Word("JUSTICE_TASKS_COVERAGE", "Only tasks retained on this client: at most 60, for 30 days. Unknown or offline delivery is not time spent by the correspondent."), wrap = true } }
 	if not J.Staff() then lines[#lines + 1] = { text = Word("JUSTICE_TASKS_OWN", "Only your assigned requests and own activity are shown."), wrap = true } end
@@ -337,11 +337,11 @@ function J.Lines()
 		local state = t.cancelledAt and Word("JUSTICE_TASKS_CANCELLED", "Cancelled") or t.confirmedAt and Word("JUSTICE_TASKS_CONFIRMED", "Human-confirmed completion")
 			or t.absentAt and Word("JUSTICE_TASKS_ABSENT", "Observed absent; completion pending") or t.attemptedAt and Word("JUSTICE_TASKS_ATTEMPTED", "Native removal attempted; completion pending")
 			or t.receivedAt and Word("JUSTICE_TASKS_RECEIVED", "Received; action pending") or Word("JUSTICE_TASKS_WAITING", "Delivery not acknowledged")
-		lines[#lines + 1] = { header = true, text = Shown(t.subject) .. " — " .. state }
-		lines[#lines + 1] = { text = ("%s · %s → %s"):format(ns.Codec.Plain(t.guild), Shown(t.issuer), Shown(t.assignee)), indent = 1 }
-		if t.receivedAt then lines[#lines + 1] = { text = Word("JUSTICE_TASKS_ELAPSED", "Receipt → manual attempt: %s"):format(t.attemptedAt and ((t.attemptedAt - t.receivedAt) .. "s") or Word("JUSTICE_TASKS_PENDING", "pending")), indent = 1 } end
+		lines[#lines + 1] = { header = true, text = Shown(t.subject) .. " - " .. state }
+		lines[#lines + 1] = { text = ("%s · %s -> %s"):format(ns.Codec.Plain(t.guild), Shown(t.issuer), Shown(t.assignee)), indent = 1 }
+		if t.receivedAt then lines[#lines + 1] = { text = Word("JUSTICE_TASKS_ELAPSED", "Receipt -> manual attempt: %s"):format(t.attemptedAt and ((t.attemptedAt - t.receivedAt) .. "s") or Word("JUSTICE_TASKS_PENDING", "pending")), indent = 1 } end
 		if J.CanIssue() and Same(t.issuer, ns.me) and (t.cancelledAt or t.confirmedAt) and not t.terminalAck then
-			lines[#lines + 1] = { text = Word("JUSTICE_TASKS_RETRY", "Terminal decision delivery unacknowledged — retry privately"), indent = 1, onClick = function() J.Retry(key) end }
+			lines[#lines + 1] = { text = Word("JUSTICE_TASKS_RETRY", "Terminal decision delivery unacknowledged - retry privately"), indent = 1, onClick = function() J.Retry(key) end }
 		end
 		if OwnTask(t) and not t.attemptedAt then lines[#lines + 1] = { text = Word("JUSTICE_TASKS_REMOVE", "Review this member in the existing removal dialog"), indent = 1, onClick = function() return J.AskRemoval(key) end } end
 		if J.CanIssue() and Live(t) and Same(t.issuer, ns.me) then
@@ -352,7 +352,7 @@ function J.Lines()
 	end
 	if #tasks == 0 then lines[#lines + 1] = { text = Word("JUSTICE_TASKS_EMPTY", "No retained requests visible to you.") } end
 	local metric = J.ReportMetric()
-	lines[#lines + 1] = { header = true, text = Word("JUSTICE_TASKS_REPORTS", "Reports — separate retained activity") }
+	lines[#lines + 1] = { header = true, text = Word("JUSTICE_TASKS_REPORTS", "Reports - separate retained activity") }
 	lines[#lines + 1] = { text = Word("JUSTICE_TASKS_REPORT_COVERAGE", "Only latest accepted reporter/subject pairs held here, at most 200 for 30 days. Partial coverage, not total sent, quality, or lifetime work."), wrap = true }
 	if metric then
 		lines[#lines + 1] = { text = Word("JUSTICE_TASKS_REPORT_COUNT", "Locally retained accepted report pairs: %d (partial coverage)."):format(metric.retained), wrap = true }

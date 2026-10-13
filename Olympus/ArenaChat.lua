@@ -803,7 +803,7 @@ function ArenaChat.ChatRoom(id)
 	local ev = Event(id)
 	if not ev or ev.kind ~= "farkle" or not ArenaChat.MayRead(id) then return nil end
 	local audience = ev.everyone and (L.BONES_CHAT_EVERYONE or "Everyone") or (L.BONES_CHAT_PLAYERS or "Players")
-	local title = (L.BONES_CHAT_TITLE or "Bones — %s: %s & %s"):format(audience,
+	local title = (L.BONES_CHAT_TITLE or "Bones - %s: %s & %s"):format(audience,
 		ns.DisplayName(ev.fighters.A) or "?", ns.DisplayName(ev.fighters.B) or "?")
 	return { key = "arena:" .. id, id = id, kind = "bones", eventKind = "farkle", title = title,
 		audience = ev.everyone and "event" or "duel", access = ev.everyone and "members" or "participants",

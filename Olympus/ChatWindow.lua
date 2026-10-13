@@ -1342,14 +1342,14 @@ function ChatWindow.ArenaOptions(includeEmpty)
 		local room = rooms[i]
 		local title = room.spec and room.spec.title or room.id or "?"
 		local bones = room.spec and room.spec.kind == "bones"
-		if not bones then title = "Arena — " .. title end
+		if not bones then title = "Arena - " .. title end
 		if room.pinned then title = ChatWindow.Localized("ARENA_CHAT_MENU_PINNED", "Pinned: %s"):format(title) end
 		if room.spec and room.spec.active then
-			title = "|cff33dd66•|r " .. ChatWindow.Localized("ARENA_CHAT_MENU_ACTIVE", "Live: %s"):format(title)
+			title = "|cff33dd66·|r " .. ChatWindow.Localized("ARENA_CHAT_MENU_ACTIVE", "Live: %s"):format(title)
 		end
 		local note = room.spec and room.spec.active and ChatWindow.Localized("GAMES_CHAT_LIVE", "Live game")
 			or ChatWindow.Localized("GAMES_CHAT_HISTORY", "Retained game history")
-		if room.spec and room.spec.readOnly then note = note .. " — " .. ChatWindow.Localized("GAMES_CHAT_READ_ONLY", "Read only") end
+		if room.spec and room.spec.readOnly then note = note .. " - " .. ChatWindow.Localized("GAMES_CHAT_READ_ONLY", "Read only") end
 		out[#out + 1] = { id = room.key, label = title, dynamic = true, note = note,
 			gameKind = bones and "Bones" or "Arena", live = room.spec and room.spec.active == true }
 	end

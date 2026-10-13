@@ -3219,7 +3219,7 @@ function Watch.Build()
 	if Section() == "justice" and ns.JusticeTasks and ns.JusticeTasks.Visible() then
 		local lines = { Nav() }
 		for _, row in ipairs(ns.JusticeTasks.Lines()) do lines[#lines + 1] = row end
-		return lines, L.TAB_WATCH, rawget(L, "JUSTICE_TASKS_TITLE") or "Justice requests — private activity"
+		return lines, L.TAB_WATCH, rawget(L, "JUSTICE_TASKS_TITLE") or "Justice requests - private activity"
 	end
 	-- 1.2: the Tabards (Views.lua's own lines, search box and detail) under the same navigation.
 	if OnTabards() then
