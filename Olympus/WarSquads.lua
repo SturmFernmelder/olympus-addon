@@ -18,6 +18,7 @@ local incoming, outgoing, chatRate = {}, {}, {}
 local heardOfficers, asks, answered = {}, 0, false
 local roomCache, roomCacheCount = {}, 0
 local memberIndex, indexedRoster, indexedNames, indexedGeneration, indexedAt = {}, nil, nil, nil, nil
+local onlineIndex, onlineRoster, onlineRows, onlineGeneration, onlineAt = {}, nil, nil, nil, nil
 local lastRequest = -math.huge
 local function Now() return GetServerTime and GetServerTime() or ns.Now() end
 local function Clock() return GetTime and GetTime() or ns.Now() end
@@ -185,6 +186,27 @@ local function Changed(now)
 	told = now or Signature()
 	ns.Fire("SQUADS_CHANGED"); ns.Fire("CHAT_ROOMS_CHANGED")
 end
+-- Reuse the native member rows, once per snapshot rather than rescanning the guild per group.
+-- A missing/nonboolean status stays unknown; the same member may support more than one group.
+local function OnlineCounts(leader, soldiers)
+	local R = ns.Roster
+	if onlineRoster ~= R or onlineRows ~= R.members or onlineGeneration ~= R.generation or onlineAt ~= R.snapshotAt then
+		onlineIndex = {}
+		for _, row in ipairs(R.members or {}) do
+			local name = Full(row.full or row.raw or row.name)
+			if name and type(row.online) == "boolean" then onlineIndex[Fold(name)] = row.online end
+		end
+		onlineRoster, onlineRows, onlineGeneration, onlineAt = R, R.members, R.generation, R.snapshotAt
+	end
+	local online, unknown = 0, 0
+	local function Count(name)
+		local value = onlineIndex[Fold(name)]
+		if value == true then online = online + 1 elseif value == nil then unknown = unknown + 1 end
+	end
+	Count(leader)
+	for _, name in ipairs(soldiers) do Count(name) end
+	return online, unknown
+end
 -- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
 local function Squad(leader)
 	local s = Store(false)
@@ -197,6 +219,7 @@ local function Squad(leader)
 	end
 	leader.count, leader.rev, leader.by = #leader.soldiers, row and row.rev, row and row.by
 	leader.total = leader.count + 1
+	leader.online, leader.onlineUnknown = OnlineCounts(leader.name, leader.soldiers)
 	leader.overflow = row ~= nil and #row.members > Squads.MAX_SOLDIERS
 	return leader
 end
@@ -332,11 +355,15 @@ local function Reads(leader, full)
 	for _, soldier in ipairs(current.soldiers) do if Fold(soldier) == Fold(full) then return true end end
 	return false
 end
-function Squads.CanAccess(room, name)
+function Squads.CanReadHistory(room, name)
 	if Preview() or not Member(ns.me) then return false end
 	local leader, full = LeaderRoom(room), Member(name or ns.me)
 	if not leader or not full then return false end
 	return Reads(leader, full)
+end
+function Squads.CanAccess(room, name)
+	if not Squads.CanReadHistory(room, name) then return false end
+	return Squad(LeaderRoom(room)).overflow ~= true
 end
 local function ChatOn() return ns.db and ns.db.chatRooms == true and not (ns.ChatLocked and ns.ChatLocked()) or false end
 local function Chat(room, make)
@@ -375,11 +402,11 @@ local function Keep(room, e)
 end
 function Squads.ChatHistory(room)
 	local out = {}
-	if not ChatOn() or not Squads.CanAccess(room) then return out end
+	if not ChatOn() or not Squads.CanReadHistory(room) then return out end
 	local chat = Chat(room, false)
 	local moderation = ns.Moderation
 	for _, line in ipairs(chat and chat.lines or {}) do
-		if Squads.CanAccess(room, line.sender) and not (moderation and moderation.Hides and moderation.Hides(line.sender, Guild())) then out[#out + 1] = line end
+		if Squads.CanReadHistory(room, line.sender) and not (moderation and moderation.Hides and moderation.Hides(line.sender, Guild())) then out[#out + 1] = line end
 	end
 	return out
 end
@@ -443,7 +470,7 @@ function Squads.ChatInfo(room)
 	return RoomInfo(leader)
 end
 local provider = { Info = Squads.ChatInfo, CanAccess = Squads.CanAccess, History = Squads.ChatHistory,
-	Send = Squads.ChatSend, ChatOn = ChatOn, IsOpen = function(room) return LeaderRoom(room) ~= nil end,
+	Send = Squads.ChatSend, ChatOn = ChatOn, IsOpen = function(room) return Squads.CanAccess(room) end,
 	Select = function(room) return Squads.CanAccess(room) end,
 	-- (1.2.3: the leaders read once, each room's access and description from its own entry: CanAccess
 	-- and ChatInfo read them all again for each room, three times, and the Chat page asks every era.)
@@ -451,12 +478,20 @@ local provider = { Info = Squads.ChatInfo, CanAccess = Squads.CanAccess, History
 		local out = {}; if kind ~= "role" then return out end
 		local me = not Preview() and Member(ns.me)
 		if not me then return out end
-		for _, e in ipairs(Squads.Leaders()) do if Reads(e, me) then out[#out + 1] = RoomInfo(e) end end
+		for _, e in ipairs(Squads.Leaders()) do if Reads(e, me) and not Squad(e).overflow then out[#out + 1] = RoomInfo(e) end end
 		return out
 	end,
 }
 Squads.ChatProvider = provider
 local function Label(key, fallback) return ns.L and rawget(ns.L, key) or fallback end
+function Squads.ShowHistory(room)
+	if not Squads.CanReadHistory(room) then return false end
+	local lines = Squads.ChatHistory(room)
+	if #lines == 0 or not ns.UI or type(ns.UI.ShowCopy) ~= "function" then return false end
+	local text = {}
+	for _, line in ipairs(lines) do text[#text + 1] = ns.Codec.Plain(ns.DisplayName(line.sender)) .. ": " .. line.text end
+	return ns.UI.ShowCopy(Label("SQUAD_HISTORY_READONLY", "Saved group conversation (read-only)"), table.concat(text, "\n"))
+end
 function Squads.ConfirmReplacement(data)
 	if type(data) ~= "table" or data.guild ~= Guild() then return false end
 	local s = Store(false)
@@ -519,8 +554,17 @@ function Squads.Lines(query, baseIndent, manage)
 				right = Label("SQUAD_TOTAL", "%d/40 members"):format(squad.total) }
 			if not masked then
 				local edit = officer and CanEdit(e.name)
+				local online = squad.onlineUnknown > 0
+					and Label("SQUAD_ONLINE_PARTIAL", "%d confirmed online / %d members · %d unknown"):format(squad.online, squad.total, squad.onlineUnknown)
+					or Label("SQUAD_ONLINE_COUNT", "%d online / %d members"):format(squad.online, squad.total)
+				lines[#lines + 1] = { indent = indent + 1, text = online, squadOnline = e.name }
 				if squad.overflow then
 					lines[#lines + 1] = { indent = indent + 1, text = Label("SQUAD_OVERFLOW", "Legacy group: %d/40 members; read-only until reviewed."):format(squad.total) }
+					if Squads.CanReadHistory(e.room) and #Squads.ChatHistory(e.room) > 0 then
+						local room = e.room
+						lines[#lines + 1] = { indent = indent + 1, text = Label("SQUAD_HISTORY_READONLY", "Saved group conversation (read-only)"),
+							readonlyHistory = room, onClick = function() return Squads.ShowHistory(room) end }
+					end
 					if edit then
 						local name = e.name
 						lines[#lines + 1] = { indent = indent + 1, text = Label("SQUAD_REVIEW", "Review legacy group"), onClick = function() return Squads.Review(name) end }

@@ -251,10 +251,13 @@ local function IsDev(who)
 end
 Borders.IsDevName = IsDev -- (1.2.3: HonorsNet's The Royal Dev title asks the core, never naming the author)
 
--- Named by that guild's master (1.1.5, Nominees.lua): a centurion or a correspondent.
-local function Nominee(who, guild)
+-- Existing nominee identity marks remain; only correspondents wear the supplied plain bronze.
+-- A Legate's distinct badge has not been supplied, so never guess another role's portrait art.
+local function Nominee(who, guild, portrait)
 	local N = ns.Nominees
-	return type(N) == "table" and type(N.RoleOf) == "function" and N.RoleOf(who, guild) ~= nil
+	if type(N) ~= "table" or type(N.RoleOf) ~= "function" then return false end
+	local role = N.RoleOf(who, guild)
+	return portrait and role == "correspondent" or not portrait and role ~= nil
 end
 
 -- What decides a unit's border, or nil for anyone no border is for: not a player, of the other
@@ -309,7 +312,7 @@ local function Match(f, marked)
 	if not f or f.off then return nil end
 	for _, t in ipairs(Borders.TIERS) do
 		if ((t.king and f.king) or (t.council and f.council) or (t.dev and f.dev) or (t.leader and f.leader)
-			or (t.nominee and f.nominee) or (t.treasurer and f.treasurer)) and not (marked and not Borders.MARK_OF[t.name]) then
+			or (t.nominee and f.nominee and (marked or Nominee(f.who, f.guild, true))) or (t.treasurer and f.treasurer)) and not (marked and not Borders.MARK_OF[t.name]) then
 			return t
 		end
 	end

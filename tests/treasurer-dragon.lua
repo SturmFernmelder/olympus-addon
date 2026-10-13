@@ -1,4 +1,42 @@
 local ns, test, eq, WithBorders, BorderUnit, king = ...
+test("Legate portrait: manual Legate has no supplied rank frame, correspondent and guild-master frames stay, identity marks stay", function()
+	WithBorders(function(w)
+		local roles = { ["Legate-Realm"] = "centurion", ["Correspondent-Realm"] = "correspondent" }
+		w.ns.Nominees = { RoleOf = function(name, guild) if guild == "Olympus II" then return roles[name] end end }
+		w.ns.Roster = { RankOf = function(name) if roles[name] then return 3 end end }
+		w.internal("LOGIN")
+		w.target(BorderUnit("Legate", "Olympus II", "Member", 3))
+		eq(w.B.TierOf("target"), nil, "Legate badge is unprovided, never guessed as wingless bronze")
+		eq(w.shown("target"), nil)
+		eq(w.B.TierOfName("Legate-Realm", "Olympus II"), nil, "Olympus portraits use the same rule")
+		eq(w.B.MarkOf("target"), "bronze", "existing nameplate identity retained separately")
+		eq(w.B.MarkOfName("Legate-Realm", "Olympus II"), "bronze", "existing chat identity retained separately")
+		w.target(BorderUnit("Correspondent", "Olympus II", "Member", 3))
+		eq(w.B.TierOf("target"), "bronze"); eq(w.shown("target"), "bronze")
+		w.target(BorderUnit("Guildmaster", "Olympus II", "Master", 0))
+		eq(w.B.TierOf("target"), "bronze-elite", "guild-master wings unchanged")
+		w.ns.HonorsNet = { Verified = function(name) if name == "Legate-Realm" then return { frame = "retained-honour", metal = "bronze" } end end,
+			FrameTexture = function() return "Interface\\AddOns\\Olympus\\media\\borders\\bronze-plain", "plain" end }
+		w.target(BorderUnit("Legate", "Olympus II", "Member", 3))
+		eq(w.B.TierOf("target"), nil)
+		eq(w.shownTexture("target").file, "Interface\\AddOns\\Olympus\\media\\borders\\bronze-plain", "a verified earned frame is not removed with the role frame")
+	end)
+end)
+
+test("Legate portrait: missing client art falls back only for correspondents, never installs a stand-in Legate badge", function()
+	WithBorders(function(w)
+		w.ns.Nominees = { RoleOf = function(name) return name == "Legate-Realm" and "centurion" or name == "Correspondent-Realm" and "correspondent" end }
+		w.noFile["Interface\\AddOns\\Olympus\\media\\borders\\bronze-plain"] = true
+		w.internal("LOGIN")
+		w.target(BorderUnit("Legate", "Olympus II", "Member", 3)); eq(w.shown("target"), nil)
+		w.target(BorderUnit("Correspondent", "Olympus II", "Member", 3)); eq(w.shown("target"), "bronze")
+		eq(w.shownTexture("target").atlas, "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Gold", "existing correspondent fallback retained")
+		w.style = 1; w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 1, 0); eq(w.shown("target"), nil)
+		w.style = 0; w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 0, 1)
+		w.target(BorderUnit("Legate", "Olympus II", "Member", 3)); eq(w.shown("target"), nil)
+	end)
+end)
+
 test("Treasurer dragon: verified primary pin owns one supplied portrait overlay, never the mail alt or namesake", function()
 	local saved = { ns.TREASURER, ns.TREASURER_CHARACTERS, ns.TREASURER_REALM }
 	local primary, mail = "Test Treasurer-Realm", "Test Mail-Realm"

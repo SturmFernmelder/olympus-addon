@@ -82,6 +82,29 @@ local function RealTransport(w)
 	return events
 end
 
+test("Legates: native online count includes the leader, leaves unknown honest, and allows fluid shared membership", function()
+	World(function(w, s)
+		local R = w.c.Roster
+		R.generation, R.snapshotAt = 1, w.now
+		R.members = { { full = "Leader-Realm", online = true }, { full = "OtherLeader-Realm", online = false },
+			{ full = "Soldier1-Realm", online = true }, { full = "Soldier2-Realm", online = false } }
+		eq(s.Replace("Leader", { "Soldier1", "Soldier2", "Soldier3" }), true)
+		eq(s.Replace("OtherLeader", { "Soldier1" }), true, "not an exclusive partition of the guild")
+		local group = s.Get("Leader")
+		eq(group.total, 4); eq(group.online, 2); eq(group.onlineUnknown, 1, "missing row is not silently offline")
+		eq(s.Get("OtherLeader").online, 1); eq(s.Get("OtherLeader").total, 2)
+		local row
+		for _, line in ipairs(s.Lines("Leader")) do if line.squadOnline == "Leader-Realm" then row = line end end
+		assert(row and row.text:find("1 unknown", 1, true), "unknown coverage is visible")
+		R.members[1].online = false; R.members[2].online = true; R.members[3].online = false
+		R.members[#R.members + 1] = { full = "Soldier3-Realm", online = true }
+		R.generation, R.snapshotAt = 2, w.now + 1
+		group = s.Get("Leader"); eq(group.online, 1); eq(group.onlineUnknown, 0)
+		eq(s.Get("OtherLeader").online, 1)
+		w.fresh = false; eq(s.Get("Leader"), nil, "stale or incomplete roster cannot claim a current group count")
+	end)
+end)
+
 test("Legates: a group is its manually appointed leader and at most thirty-nine current guildmates", function()
 	World(function(w, s)
 		eq(s.MAX_SOLDIERS, 39); eq(s.MAX_MEMBERS, 40)
@@ -177,6 +200,31 @@ test("Legates: twenty-five manually appointed own-guild leaders are available, n
 		for i = 1, 26 do w.list.entries[i] = { name = "Soldier" .. i .. "-Realm", role = "centurion" } end
 		eq(s.MAX_LEADERS, 25); eq(#s.Leaders(), 25); eq(s.Get("Soldier25").total, 1)
 		eq(s.Get("Soldier26"), nil); eq(s.Assign("Soldier26", "Soldier50"), false)
+	end)
+end)
+
+test("Legate live overflow: provider access, options and queued writes close while the old transcript stays privately read-only", function()
+	World(function(w, s)
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		local room = s.Get("Leader").room; local store = w.c.rdb.warSquads[w.c.Fold(w.guild)]
+		w.c.me = "Leader-Realm"; eq(s.ChatSend(room, "queued before overflow"), true)
+		local guard = w.jobs[#w.jobs].options.guard
+		local members = {}; for i = 1, 99 do members[i] = "Soldier" .. i .. "-Realm" end
+		store.rows["leader-realm"] = { leader = "Leader-Realm", members = members, rev = w.now + 1, by = "Officer-Realm" }
+		store.chats[room] = { seq = 0, seen = {}, lines = { { sender = "Soldier1-Realm", text = "already received", id = 1, t = w.now } } }
+		eq(s.CanAccess(room), false, "old room is not a live capability")
+		eq(w.provider.CanAccess(room), false); eq(w.provider.Select(room), false); eq(w.provider.IsOpen(room), false)
+		for _, option in ipairs(w.provider.Options("role")) do eq(option.id == room, false) end
+		eq(guard(), false, "queued pre-overflow message cannot be delivered later")
+		eq(s.ChatSend(room, "no live send"), false)
+		eq(s.ReceiveChat("WHISPER", "Soldier1-Realm", "SC~1~" .. room:sub(7) .. "~2~no live receive"), false)
+		eq(#s.ChatHistory(room), 1, "already-held transcript is not deleted")
+		w.c.UI = { ShowCopy = function(title, body) w.copy = { title, body }; return true end }
+		local read
+		for _, line in ipairs(s.Lines("Leader")) do if line.readonlyHistory == room then read = line.onClick end end
+		assert(read); eq(read(), true); assert(w.copy[2]:find("already received", 1, true))
+		w.c.me = "Outsider-Realm"; eq(#s.ChatHistory(room), 0); eq(read(), false, "stale history button rechecks private membership")
+		w.c.me = "Leader-Realm"; w.guild = "Olympus"; eq(read(), false, "another guild cannot read the old transcript")
 	end)
 end)
 
