@@ -39,6 +39,24 @@ test("1.2.4 ranking rules: the reusable link and native page recheck access, kee
 	eq(Rules.Lines("test-dynamic", function() end), nil, "authority is checked again on the page")
 end)
 
+test("1.2.4 ranking rules: long prose is split into native renderer rows instead of clipping", function()
+	local paragraph = "This deliberately long explanation has enough ordinary words to cross the native list width more than once while preserving every word in its original order for the reader."
+	assert(Rules.Register("test-wrapping", {
+		title = "Wrapped ranking",
+		sections = function() return { { topic = "score", text = paragraph } } end,
+	}))
+	local lines = Rules.Lines("test-wrapping", function() end)
+	local rows = {}
+	for _, line in ipairs(lines) do
+		if line.indent == 1 then
+			rows[#rows + 1] = line.text
+			assert(#line.text <= Rules.WRAP, "renderer row exceeds the shared prose width: " .. line.text)
+		end
+	end
+	assert(#rows >= 3, "the renderer received one clipping row instead of several native rows")
+	eq(table.concat(rows, " "), paragraph, "wrapping preserves the explanation")
+end)
+
 test("1.2.4 ranking rules: real integrations register only actual rankings and Realm Back restores the exact prior page", function()
 	for _, key in ipairs({ "treasury-donors", "treasury-guilds", "realm-level", "craft-debtors" }) do
 		assert(Rules.Spec(key), "missing ranking rules: " .. key)

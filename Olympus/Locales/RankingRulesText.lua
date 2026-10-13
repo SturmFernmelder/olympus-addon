@@ -16,7 +16,7 @@ L.RANK_RULE_DONORS_SCORE = "Qualifying incoming gifts are added in copper. Retur
 L.RANK_RULE_DONORS_DUES = "When the Treasurer's book is shared outside its private view, the possible weekly dues portion is removed. Other keeper books show qualifying gifts as recorded."
 L.RANK_RULE_DONORS_ORDER = "Higher qualifying copper comes first; equal totals are ordered by name."
 L.RANK_RULE_DONORS_EVIDENCE = "This client ranks the books it currently holds. A missing or older book is missing or older evidence, not zero."
-L.RANK_RULE_DONORS_VISIBILITY = "The King and keepers can see it. Other members see it only while the King's ranking switch is open."
+L.RANK_RULE_DONORS_VISIBILITY = "The King, his Stewards and the keepers can see it. Other members see it only while the King's ranking switch is open."
 
 L.RANK_RULE_GUILD_TREASURY_TITLE = "Guild treasury ranking"
 L.RANK_RULE_GUILD_TREASURY_SCORE = "Each guild's total is the gold in its authorized bank snapshot plus each item's known configured or vendor value. Unpriced items are not invented into the value."
@@ -35,7 +35,7 @@ L.RANK_RULE_CHURCH_FULLNESS_ORDER = "More completed qualifying days come first. 
 L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY = "This is private to the Church audience; it is not part of the public Church ranking."
 
 L.RANK_RULE_ARENA_TITLE = "Arena rating"
-L.RANK_RULE_ARENA_SCORE = "Everyone starts at %d. Rating changes use K=%d for the first %d rated fights, K=%d after that, and K=%d from rating %d. Each level of difference counts as %d rating points; the total expected-score gap is capped at %d."
+L.RANK_RULE_ARENA_SCORE = "A fighter with no carried rating starts at %d. Between seasons, a retained rating moves halfway back toward %d. K=%d applies only while the fighter is unsettled and has fewer than %d rated fights; a settled fighter can therefore start outside %d and uses K=%d, or K=%d from rating %d. Each level of difference counts as %d rating points; the total expected-score gap is capped at %d."
 L.RANK_RULE_ARENA_REPEAT = "Repeated fights between the same pair within %d hours progressively count at 1, 1/2, 1/4 and so on."
 L.RANK_RULE_ARENA_LIMITS = "A rated fight needs at least %d seconds per round on average. At most %d fights per player per server day and %d fights against the same opponent in %d days count. Rehearsals and unconfirmed fights do not count."
 L.RANK_RULE_ARENA_ORDER = "All-time ranks use higher rating, then more rated fights, then name; equal ratings share a place. Period views use rating gained, wins, fewer losses, current rating, then name."
@@ -77,7 +77,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.RANK_RULE_DONORS_DUES = "Quando o livro do Tesoureiro sai da visao privada, a possivel parcela da contribuicao semanal e removida. Outros livros mostram os presentes qualificados como registrados."
 	L.RANK_RULE_DONORS_ORDER = "Mais cobre qualificado vem primeiro; totais iguais sao ordenados pelo nome."
 	L.RANK_RULE_DONORS_EVIDENCE = "Este cliente ordena os livros que possui agora. Um livro ausente ou antigo e evidencia ausente ou antiga, nao zero."
-	L.RANK_RULE_DONORS_VISIBILITY = "O Rei e os guardioes dos livros sempre veem. Outros membros veem apenas enquanto a chave do ranking do Rei estiver aberta."
+	L.RANK_RULE_DONORS_VISIBILITY = "O Rei, seus Regentes e os guardioes dos livros sempre veem. Outros membros veem apenas enquanto a chave do ranking do Rei estiver aberta."
 
 	L.RANK_RULE_GUILD_TREASURY_TITLE = "Ranking dos tesouros das guildas"
 	L.RANK_RULE_GUILD_TREASURY_SCORE = "O total de cada guilda e o ouro do snapshot autorizado do banco mais o valor configurado ou de venda conhecido de cada item. Itens sem preco nao recebem um valor inventado."
@@ -96,7 +96,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY = "Este ranking e privado para o publico da Igreja; ele nao faz parte do ranking publico da Igreja."
 
 	L.RANK_RULE_ARENA_TITLE = "Rating da Arena"
-	L.RANK_RULE_ARENA_SCORE = "Todos comecam em %d. A mudanca usa K=%d nas primeiras %d lutas validas, K=%d depois e K=%d a partir do rating %d. Cada nivel de diferenca vale %d pontos de rating; a diferenca total da expectativa e limitada a %d."
+	L.RANK_RULE_ARENA_SCORE = "Um lutador sem rating anterior comeca em %d. Entre temporadas, o rating mantido recua pela metade em direcao a %d. K=%d vale somente enquanto o lutador nao estiver estabelecido e tiver menos de %d lutas validas; um lutador estabelecido pode comecar fora de %d e usa K=%d, ou K=%d a partir do rating %d. Cada nivel de diferenca vale %d pontos de rating; a diferenca total da expectativa e limitada a %d."
 	L.RANK_RULE_ARENA_REPEAT = "Lutas repetidas entre a mesma dupla em %d horas passam a valer 1, 1/2, 1/4 e assim por diante."
 	L.RANK_RULE_ARENA_LIMITS = "Uma luta valida precisa de media minima de %d segundos por round. Contam no maximo %d lutas por jogador por dia do servidor e %d contra o mesmo oponente em %d dias. Treinos e lutas nao confirmadas nao contam."
 	L.RANK_RULE_ARENA_ORDER = "O historico ordena por maior rating, mais lutas validas e nome; ratings iguais dividem a colocacao. Periodos usam rating ganho, vitorias, menos derrotas, rating atual e nome."

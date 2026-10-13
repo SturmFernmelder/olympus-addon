@@ -1131,8 +1131,9 @@ if ns.RankingRules then
 			local R, G = ns.ArenaRating or {}, ns.ArenaLedger or {}
 			return {
 				{ topic = "score", text = {
-					L.RANK_RULE_ARENA_SCORE:format(R.START or 1500, R.K_NEW or 40, R.NEW_FIGHTS or 10, R.K or 24,
-						R.K_HIGH or 16, R.HIGH_RATING or 2000, R.LEVEL_POINTS or 50, R.GAP_CAP or 800),
+					L.RANK_RULE_ARENA_SCORE:format(R.START or 1500, R.START or 1500, R.K_NEW or 40,
+						R.NEW_FIGHTS or 10, R.START or 1500, R.K or 24, R.K_HIGH or 16,
+						R.HIGH_RATING or 2000, R.LEVEL_POINTS or 50, R.GAP_CAP or 800),
 					L.RANK_RULE_ARENA_REPEAT:format(math.floor((R.PAIR_WINDOW or 86400) / 3600)),
 				} },
 				{ topic = "limits", text = L.RANK_RULE_ARENA_LIMITS:format(G.MIN_RATED_DUR or 15, G.DAY_MAX or 10, G.PAIR_MAX or 3, G.PAIR_DAYS or 7) },

@@ -64,11 +64,44 @@ test("1.2.4 Church ranking rules: the highlighted in-window page preserves the e
 	eq(c.View.page, "rules")
 	lines = Build(w, c)
 	eq(lines[1].id, "ranking-rules-back")
-	assert(Texts(lines):find(L.RANK_RULE_CHURCH_SCORE:format(c.Count.POINTS_JOIN, c.Count.STAY_DAYS, c.Count.POINTS_STAY, 25, 10, 5), 1, true), Texts(lines))
+	assert(Texts(lines):gsub("\n", " "):find(L.RANK_RULE_CHURCH_SCORE:format(c.Count.POINTS_JOIN, c.Count.STAY_DAYS, c.Count.POINTS_STAY, 25, 10, 5), 1, true), Texts(lines))
 	w:As(c, lines[1].onClick)
 	eq(c.View.page, "ranking")
 	eq(c.View.list, "m")
 	eq(c.View.window, "w")
+end)
+
+test("1.2.4 Church fullness ranking rules: the private link opens in place and Back restores the fullness list", function()
+	local w = World.New()
+	local c = w:Client(World.AUTHOR, { view = true })
+	c.View.page, c.View.list, c.View.window = "ranking", "c", "a"
+	local lines = Build(w, c)
+	local link
+	for _, line in ipairs(lines) do if line.id == "ranking-rules:church-fullness" then link = line break end end
+	assert(link and link.onClick, Texts(lines))
+	w:As(c, link.onClick)
+	eq(c.View.page, "rules")
+	lines = Build(w, c)
+	eq(lines[1].id, "ranking-rules-back")
+	local prose = Texts(lines):gsub("\n", " ")
+	assert(prose:find(L.CHURCH_FULLNESS_RULE, 1, true), prose)
+	assert(prose:find(L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY, 1, true), prose)
+	w:As(c, lines[1].onClick)
+	eq(c.View.page, "ranking")
+	eq(c.View.list, "c")
+	eq(c.View.window, "a")
+	lines = Build(w, c)
+	w:As(c, assert((function()
+		for _, line in ipairs(lines) do if line.id == "ranking-rules:church-fullness" then return line.onClick end end
+	end)()))
+	local inAudience = c.Church.InAudience
+	c.Church.InAudience = function() return false end
+	lines = Build(w, c)
+	eq(c.View.page, "people", "loss of the private Church audience closes the rules page")
+	for _, line in ipairs(lines) do
+		assert(line.id ~= "ranking-rules-back" and line.id ~= "ranking-rules:church-fullness", "private rules remained discoverable")
+	end
+	c.Church.InAudience = inAudience
 end)
 
 test("1.2.4 Church correspondence: guild representation uses observed days and never invents historical fullness from census", function()

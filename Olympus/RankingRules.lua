@@ -9,6 +9,7 @@ ns.RankingRules = Rules
 
 local specs = {}
 local BOOK = "Interface\\Icons\\INV_Misc_Book_09"
+Rules.WRAP = 58
 local function Gold(s) return "|cffffd200" .. tostring(s or "") .. "|r" end
 local function Grey(s) return "|cff9d9d9d" .. tostring(s or "") .. "|r" end
 local function Value(v, spec)
@@ -62,6 +63,23 @@ local TOPIC_LABEL = {
 	limits = "RANK_RULES_LIMITS",
 }
 
+-- The main list renderer does not wrap a row. Split prose into the same short native rows used by
+-- Treasury instead of relying on a FontString to clip or escape the window. Colour each row after
+-- measuring it so the escape codes do not consume the prose width.
+local function Paragraph(lines, text, colour, indent)
+	local row, first = "", #lines + 1
+	for word in tostring(text or ""):gmatch("%S+") do
+		if row ~= "" and #row + 1 + #word > Rules.WRAP then
+			lines[#lines + 1] = { indent = indent, text = colour and colour(row) or row }
+			row = word
+		else
+			row = row == "" and word or (row .. " " .. word)
+		end
+	end
+	if row ~= "" then lines[#lines + 1] = { indent = indent, text = colour and colour(row) or row } end
+	return #lines >= first
+end
+
 function Rules.Lines(key, onBack)
 	local spec = specs[key]
 	if not spec or not Rules.Allowed(key) or type(onBack) ~= "function" then return nil end
@@ -70,7 +88,8 @@ function Rules.Lines(key, onBack)
 	}
 	local icon = Value(spec.icon, spec) or BOOK
 	lines[#lines + 1] = { header = true, text = (icon and ("|T" .. icon .. ":18:18:0:0|t  ") or "") .. tostring(Value(spec.title, spec) or L.RANK_RULES_LINK) }
-	lines[#lines + 1] = { text = Grey(Value(spec.note, spec) or L.RANK_RULES_NOTE), gapAfter = true }
+	Paragraph(lines, Value(spec.note, spec) or L.RANK_RULES_NOTE, Grey)
+	lines[#lines].gapAfter = true
 	local sections = Value(spec.sections, spec) or {}
 	for _, section in ipairs(sections) do
 		local body = Value(section.text, spec)
@@ -80,10 +99,11 @@ function Rules.Lines(key, onBack)
 			local label = Value(section.title, spec) or L[TOPIC_LABEL[topic] or "RANK_RULES_EVIDENCE"]
 			lines[#lines + 1] = { text = Gold("|T" .. sectionIcon .. ":14:14:0:0|t  " .. tostring(label)) }
 			if type(body) ~= "table" then body = { body } end
+			local first = #lines + 1
 			for _, paragraph in ipairs(body) do
-				lines[#lines + 1] = { indent = 1, text = tostring(paragraph) }
+				Paragraph(lines, paragraph, nil, 1)
 			end
-			lines[#lines].gapAfter = true
+			if #lines >= first then lines[#lines].gapAfter = true end
 		end
 	end
 	return lines
