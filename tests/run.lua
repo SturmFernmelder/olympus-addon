@@ -31204,7 +31204,7 @@ do
 		end)
 	end)
 
-	test("1.0.0 the Hands: the author removes a Steward:the Hands he named end at once on every client, the King's too, and leave its page; his client sends them no more; the King's list and the other Steward's stand", function()
+	test("1.0.0 the Hands: the author removes a Steward: the Hands he named end at once on every client, the King's too, and leave its page; his client sends them no more; the King's list and the other Steward's stand", function()
 		WithThrone(function(w, K)
 			WithStewardList(STEWARD_E, function()
 				local KING, L = ns.KingCharacter() .. "-Realm", ns.L
