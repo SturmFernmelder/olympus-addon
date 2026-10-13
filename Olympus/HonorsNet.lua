@@ -1703,6 +1703,10 @@ function H.ShowLetter(key, prompted)
 	frame = frame or Build()
 	local text = H.LetterText(nextLetter.key)
 	frame.key = nextLetter.key
+	frame.preview = false
+	frame.head:SetText(L.HONOR_LETTER_HEAD)
+	frame.wear:SetEnabled(true)
+	frame.later:SetText(L.HONOR_LETTER_LATER)
 	frame.body:SetText(text or "")
 	Place(frame)
 	-- (1.2.4 repair: a Slayer letter has no honour to wear: its first button opens the Slayers, the
@@ -1716,6 +1720,13 @@ end
 -- "Wear it" (its frame and title picked) or "Later"; the next letter after it. (1.2.4: a Slayer
 -- letter's first button, Slayers: the Olympus window on the Wanted tab, the player's own click.)
 function H.CloseLetter(wear)
+	-- A development preview is not an award, nor an answer to a real waiting letter.
+	if frame and frame.preview == true then
+		frame.key, frame.preview = nil, false
+		frame:Hide()
+		if letters[1] then H.ShowLetter(nil, true) end
+		return true
+	end
 	local cur = table.remove(letters, 1)
 	if frame then
 		frame.key = nil
@@ -1743,6 +1754,67 @@ function H.CloseLetter(wear)
 end
 function H.LetterFrame() return frame end
 function H.QueuedLetters() return letters end
+
+-- All existing letter families on the same real framed parchment. The Workshop gate is
+-- actual author/dev access, never View as. Nothing is queued, awarded, worn or broadcast.
+function H.PreviewKeys()
+	local W = ns.Workshop
+	if not (W and W.Visible and W.Visible() == true) then return {} end
+	local out = { "arena-champion", "arena-champion-2", "arena-champion-3", "guild-top-leader" }
+	for _, family in ipairs({ "donor-top", "donor-month", "oracle", "missionary", "apostle", "bones", "wanted-slayer" }) do
+		for i = 1, 3 do out[#out + 1] = family .. "-" .. i end
+	end
+	for _, milestone in ipairs(ns.Honors.MILESTONES) do out[#out + 1] = "level-race-" .. milestone end
+	for _, pair in ipairs({ { "class", ns.Honors.CLASS_ART }, { "race", ns.Honors.RACE_ART } }) do
+		local words = {}; for word in pairs(pair[2]) do words[#words + 1] = word end; table.sort(words)
+		for _, word in ipairs(words) do
+			local key = "arena-" .. pair[1] .. "-" .. word
+			out[#out + 1], out[#out + 2], out[#out + 3] = key, key .. "-2", key .. "-3"
+		end
+	end
+	-- A fictional example of the separately retained Slayer receipt letter; not a Wanted entry.
+	out[#out + 1] = "wanted@0123456789abcdef~238~120~18~100~1~60~Horde Wanderer"
+	return out
+end
+function H.PreviewLetter(key)
+	local valid = false
+	for _, k in ipairs(H.PreviewKeys()) do if k == key then valid = true; break end end
+	if not valid or (InCombatLockdown and InCombatLockdown()) or (frame and frame:IsShown() and frame.preview ~= true) then return false end
+	local text = H.LetterText(key)
+	if not text then return false end
+	frame = frame or Build()
+	frame.preview, frame.key = true, key
+	frame.head:SetText(L.HONOR_LETTER_PREVIEW_HEAD)
+	frame.body:SetText(text)
+	frame.wear:SetEnabled(false)
+	frame.wear:SetText(L.HONOR_LETTER_PREVIEW_ONLY)
+	frame.later:SetText(CLOSE or L.HONOR_LETTER_LATER)
+	Place(frame)
+	H.DressPortrait(frame.rig, H.LetterFamily(key) == "wanted" and "rank" or key)
+	frame:Show()
+	return true
+end
+function H.PreviewLines()
+	local keys = H.PreviewKeys()
+	if #keys == 0 then return {} end
+	local lines = { { header = true, text = L.HONOR_LETTER_PREVIEW_HEAD }, { text = L.HONOR_LETTER_PREVIEW_NOTE, gapAfter = true } }
+	for _, key in ipairs(keys) do
+		local k = key
+		lines[#lines + 1] = { text = "> " .. (H.TitleText(k) or k), onClick = function() H.PreviewLetter(k) end }
+	end
+	return lines
+end
+function H.PreviewSlash(rest)
+	if #H.PreviewKeys() == 0 then return false end
+	local key = tostring(rest or ""):gsub("^%s*preview%s*", ""):gsub("%s+$", "")
+	if key ~= "" then return H.PreviewLetter(key) end
+	ns.UI.SelectTab("realm")
+	ns.Views.ShowPage("honorletters")
+	return true
+end
+ns.RealmPages = ns.RealmPages or {}
+table.insert(ns.RealmPages, { key = "honorletters", parchment = true, Lines = H.PreviewLines,
+	Link = function() if #H.PreviewKeys() > 0 then return { text = "> " .. L.HONOR_LETTER_PREVIEW_HEAD, onClick = function() H.PreviewSlash("") end } end end })
 
 ---------------------------------------------------------------------------
 -- (1.2.4) The places told: the King's letter the first time, a notice after

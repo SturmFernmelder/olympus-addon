@@ -28,7 +28,76 @@ local function Kept(w, c)
 	return c
 end
 
+local function PreviewFrames(c)
+	local make = CreateFrame
+	c.globals.CreateFrame = function(...)
+		local f = make(...)
+		if f:GetObjectType() == "Button" then
+			-- The Forever fixture exposes both methods; WithUI normally makes SetEnabled
+			-- a no-op, which cannot assert the preview's disabled Wear button.
+			f.SetEnabled = function(self, on) self.enabled = on == true end
+			f.IsEnabled = function(self) return self.enabled ~= false end
+		end
+		return f
+	end
+end
+
 print("HonorsNet: the King's letter (1.2.1)")
+
+test("1.2.4 honour letter previews: every family uses the real framed letter without awarding, consuming or transmitting anything", function()
+	local w, cast = W3.New()
+	local author = w:Client(N.author)
+	H.WithUI(function()
+		-- Use the same native-template fixture as the existing framed-letter geometry cases.
+		PreviewFrames(author)
+		-- This older fights-only world does not load the newer core Wanted adapter.
+		w:As(author, function() assert(loadfile(H.ADDON_DIR .. "Wanted.lua"))("Olympus", author.ns) end)
+		local hn = author.ns.HonorsNet
+		assert(type(hn.PreviewLetter) == "function", "all-family preview is exposed")
+		eq(w:As(cast.A, cast.A.ns.HonorsNet.PreviewLetter, "bones-1"), false, "ordinary members cannot enter the Workshop preview")
+		local before = #w.sent
+		local keys, families = w:As(author, hn.PreviewKeys), {}
+		assert(#keys > 30)
+		local profile = author.ns.db.arenaProfile
+		local picked = author.ns.ArenaProfile.Pick().frame
+		local queued, saved = #hn.QueuedLetters(), #hn.Letters()
+		for _, key in ipairs(keys) do
+			families[hn.LetterFamily(key)] = true
+			eq(w:As(author, hn.PreviewLetter, key), true, key)
+			local f = hn.LetterFrame()
+			eq(f.preview, true); eq(f.key, key); eq(f.metal, true)
+			eq(f.body:GetText(), w:As(author, hn.LetterText, key))
+			eq(f.wear:IsEnabled(), false, "sample cannot be worn")
+			w:As(author, hn.CloseLetter, true) -- even a direct caller cannot award the sample
+		end
+		for _, family in ipairs({ "arena", "class", "race", "donor-top", "donor-month", "oracle", "level", "guild", "missionary", "apostle", "bones", "wanted-slayer", "wanted" }) do
+			assert(families[family], "preview family: " .. family)
+		end
+		eq(#w.sent, before); eq(#hn.QueuedLetters(), queued); eq(#hn.Letters(), saved)
+		eq(author.ns.ArenaProfile.Pick().frame, picked); eq(author.ns.db.arenaProfile, profile, "an idle read must not create saved profiles")
+		eq(w:As(author, hn.PreviewLetter, "unapproved-key"), false)
+		W3.NoErrors(w)
+	end)
+end)
+
+test("1.2.4 honour letter previews: a real pending award is neither overwritten nor marked read by a preview", function()
+	local w, cast = W3.New()
+	local author = Kept(w, w:Client(N.author))
+	H.WithUI(function()
+		PreviewFrames(author)
+		local hn = author.ns.HonorsNet
+		Donors(w, author, w.clock, { author }); w:Run(3)
+		assert(Shown(author), "real award is visible")
+		local f = hn.LetterFrame(); eq(f.preview, false)
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), false)
+		eq(f.key, "donor-top-1"); eq(#hn.QueuedLetters(), 1)
+		w:As(author, hn.CloseLetter, false)
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), true)
+		w:As(author, hn.CloseLetter, false)
+		eq(#hn.QueuedLetters(), 0); eq(hn.Letters()[1].read, true)
+		W3.NoErrors(w)
+	end)
+end)
 
 -- The owner after the King's stream (1.2.1): the King got the King's letter about a frame he holds.
 test("1.2.1 the King's letter: never to the King himself: his honour switches on, no letter shows, none is kept or opens on a click; where no King is pinned, the guild master of the King's guild the same; everyone else gets his", function()

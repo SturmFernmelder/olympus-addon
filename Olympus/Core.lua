@@ -2275,6 +2275,8 @@ local function Slash(input)
 			-- The marks left of the names on friendly players' nameplates (Nameplates.lua), alone: on or off.
 			local on = rest:lower()
 			if on == "on" or on == "off" then ns.Nameplates.SetEnabled(on == "on") else ns.Nameplates.Report() end
+		elseif cmd == "honours" or cmd == "honors" then
+			if ns.HonorsNet and ns.HonorsNet.PreviewSlash then ns.HonorsNet.PreviewSlash(rest) end
 		elseif cmd == "borders" then
 			-- The elite borders on the target, focus and your own portrait (Borders.lua), and the
 			-- nameplate marks with them (Nameplates.lua): on or off.
