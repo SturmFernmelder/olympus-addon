@@ -3968,6 +3968,43 @@ end
 -- name the server stamps; this client's own rows, its player's).
 function Bounty.Who(name) return NameKey(name) or "?" end
 
+-- Keep the persisted per-character keys, but compare only proved owners: reciprocal alt links,
+-- this account's known characters or a verified account key (Debts.SameOwner). A missing helper
+-- may still use Alts.Linked's confirmed group; a one-sided offer never joins it. Unknown players
+-- stay independent. No new identity is inferred from a Horde character or from a claimed name.
+function Bounty.SameWho(a, b)
+	if a == b then return true end
+	local an = type(a) == "string" and a:match("^n:(.+)$")
+	local bn = type(b) == "string" and b:match("^n:(.+)$")
+	if not an or not bn then return false end
+	local D = ns.Debts
+	if D and type(D.SameOwner) == "function" and D.SameOwner(an, bn) == true then return true end
+	local A = ns.Alts
+	if A and type(A.Linked) == "function" then
+		for _, name in ipairs(A.Linked(an)) do if Bounty.Who(name) == b then return true end end
+	end
+	return false
+end
+
+-- Look through at most STATE_MAX retained keys. This also applies an old character's persisted
+-- gap to its now-confirmed alt; closing a grudge clears all matching characters, not just the
+-- one that delivered the killing blow. The original timestamps and expiry rules are unchanged.
+function Bounty.OwnerAt(map, who, close)
+	local at, checked = map[who], map[who] ~= nil and 1 or 0
+	if close then map[who] = nil end
+	for key, held in pairs(map) do
+		if key ~= who then
+			checked = checked + 1
+			if checked > Bounty.STATE_MAX then break end
+			if Bounty.SameWho(who, key) then
+				if not at or held > at then at = held end
+				if close then map[key] = nil end
+			end
+		end
+	end
+	return at
+end
+
 -- One of an entry's account's maps kept to STATE_MAX members: the oldest go (then by key).
 function Bounty.Trim(map)
 	local keys = {}
@@ -4031,7 +4068,7 @@ function Bounty.Death(t, e)
 		return Bounty.SCORE.LEGACY_DEATH
 	end
 	if not e.hf and Bounty.Level(e.hl) > (st.hl or 0) then st.hl = Bounty.Level(e.hl) end
-	if st.gap[who] then return 0, true end
+	if Bounty.OwnerAt(st.gap, who) then return 0, true end
 	st.gap[who], st.grudge[who] = at, at
 	Bounty.Trim(st.gap)
 	Bounty.Trim(st.grudge)
@@ -4047,10 +4084,10 @@ function Bounty.Claim(t, e)
 	local st = Bounty.Due(t, at)
 	if not Bounty.Scored(e) then return t.current, 0, false end
 	local who = Bounty.Who(e.killerName)
-	if st.kill[who] then return Bounty.ClaimPoints(0, t.current, false), 0, false end
-	local grudge = st.grudge[who]
+	if Bounty.OwnerAt(st.kill, who) then return Bounty.ClaimPoints(0, t.current, false), 0, false end
+	local grudge = Bounty.OwnerAt(st.grudge, who)
 	local level = Bounty.ClaimLevel(e.hl, e.hf, st.hl)
-	local revenge = grudge ~= nil and grudge <= at and st.revenged[who] == nil
+	local revenge = grudge ~= nil and grudge <= at and Bounty.OwnerAt(st.revenged, who) == nil
 	return Bounty.ClaimPoints(level, t.current, revenge), level, revenge
 end
 
@@ -4060,7 +4097,7 @@ function Bounty.Closed(t, e)
 	local at = Whole(e.at, 0, 4294967295) or 0
 	local st = Bounty.Due(t, at)
 	local who = Bounty.Who(e.killerName)
-	st.grudge[who] = nil
+	Bounty.OwnerAt(st.grudge, who, true)
 	if Bounty.Scored(e) and Bounty.Level(e.level) > 0 then st.kill[who] = at Bounty.Trim(st.kill) end
 	if e.revenge then st.revenged[who] = at Bounty.Trim(st.revenged) end
 	st.hl = nil

@@ -3069,6 +3069,147 @@ local function BountyRow(c, W, o)
 		o.horde, o.own, o.worth or "M~40~0", o.name }, "~")
 end
 
+-- The real confirmed-alt and verified-owner readers, isolated from the arena's other actions.
+-- All scoring below still enters through the actual shared WK handler, never through a copy of it.
+local function BountyOwnerReaders(c)
+	assert(loadfile(ROOT .. "Olympus/Alts.lua"))("Olympus", c)
+	c.Arena = setmetatable({ Action = function() end }, { __index = ns.Arena })
+	c.ArenaMoney = setmetatable({ Subscribe = function() end }, { __index = ns.ArenaMoney })
+	c.Backup, c.Wallet = { arenaChecks = {} }, { KnownKey = function() return nil end }
+	assert(loadfile(ROOT .. "Olympus/Debts.lua"))("Olympus", c)
+end
+local function BountyLink(w, c, main, alt, yes)
+	c.Alts.Handle("CHANNEL", main, ("AL~%d~M~Olympus II~%s"):format(w.epoch, alt))
+	if yes then c.Alts.Handle("CHANNEL", alt, ("AL~%d~A~Olympus II~%s"):format(w.epoch, main)) end
+end
+
+test("wanted 1.2.4 owner gaps: reciprocal links join death cooldowns at Rebuild, one-sided offers and independent victims do not", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		BountyOwnerReaders(c)
+		local main = w.participant("Owner Main-Realm", "Player-1-AA00F001")
+		local alt = w.participant("Owner Alt-Realm", "Player-1-AA00F002")
+		local other = w.participant("Other Owner-Realm", "Player-1-AA00F003")
+		local horde = "Player-1-0D00F001"
+		w.hordePlayer("Owner Rogue-Realm", horde)
+		local seq = 0
+		local function Death(name, own, ml)
+			seq = seq + 1; w.advance()
+			assert(w.commHandlers.WK("CHANNEL", name, BountyRow(c, W, { digest = ("%016x"):format(0xf0010000 + seq), at = w.epoch,
+				horde = "1.0d00f001", own = own, worth = "M~" .. ml .. "~60", name = "Owner Rogue-Realm" })))
+		end
+		BountyLink(w, c, main, alt, false)
+		eq(c.Debts.SameOwner(main, alt), false, "a one-sided main claim proves nothing")
+		Death(main, "1.aa00f001", 60); Death(alt, "1.aa00f002", 1)
+		eq(W.Target(nil, horde).current, 61)
+		BountyLink(w, c, main, alt, true)
+		eq(c.Debts.SameOwner(main, alt), true, "both characters confirmed")
+		W.Rebuild()
+		local t = W.Target(nil, horde)
+		eq(t.current, 60, "the retained second row is inside its confirmed owner's gap")
+		eq(t.lifetimeKills, 1)
+		Death(other, "1.aa00f003", 1)
+		t = W.Target(nil, horde)
+		eq(t.current, 61); eq(t.lifetimeKills, 2, "an unrelated level-1 victim still counts")
+		w.advance(W.Bounty.SCORE.REPEAT_GAP)
+		Death(alt, "1.aa00f002", 1)
+		t = W.Target(nil, horde)
+		eq(t.current, 62); eq(t.lifetimeKills, 3, "the approved 600-second interval is unchanged")
+		-- The confirmed-alt fallback also works if the optional verified-key helper is unavailable.
+		c.Debts.SameOwner = nil
+		Death(main, "1.aa00f001", 60)
+		t = W.Target(nil, horde)
+		eq(t.current, 62); eq(t.lifetimeKills, 3)
+	end)
+end)
+
+test("wanted 1.2.4 owner gaps: linked Slayers share level and revenge cooldowns, clear all owner grudges, and keep persisted character gaps", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		BountyOwnerReaders(c)
+		local main = w.participant("Slayer Main-Realm", "Player-1-CC00F001")
+		local alt = w.participant("Slayer Alt-Realm", "Player-1-CC00F002")
+		local other = w.participant("Independent Slayer-Realm", "Player-1-CC00F003")
+		local horde = "Player-1-0D00F002"
+		w.hordePlayer("Slayer Rogue-Realm", horde)
+		local seq = 0
+		local function Row(name, own, kind)
+			seq = seq + 1; w.advance()
+			assert(w.commHandlers.WK("CHANNEL", name, BountyRow(c, W, { digest = ("%016x"):format(0xf0020000 + seq), at = w.epoch,
+				kind = kind, horde = "1.0d00f002", own = own, worth = "M~1~60", name = "Slayer Rogue-Realm" })))
+			local t = W.Target(nil, horde)
+			return t, t.claims[#t.claims]
+		end
+		-- Separate old character grudges, then their reciprocal link becomes known.
+		Row(main, "1.cc00f001", "S"); Row(alt, "1.cc00f002", "S")
+		BountyLink(w, c, main, alt, true)
+		local t, claim = Row(alt, "1.cc00f002", "P")
+		eq(claim.points, 222); eq(claim.revenge, true)
+		local stored = c.rdb.wanted.targets[t.key]
+		eq(stored.bounty.grudge[W.Bounty.Who(main)], nil, "the linked main's old grudge closes too")
+		eq(stored.bounty.grudge[W.Bounty.Who(alt)], nil)
+		-- Fold to the checkpoint and reload: stored keys remain per character, owner lookup joins them.
+		W.MAX_EVIDENCE = 1
+		t, claim = Row(main, "1.cc00f001", "P")
+		eq(claim.points, 0, "switching to the linked Slayer cannot mint another 120")
+		assert(W.Stats().checkpointed > 0)
+		eq(stored.base.bounty.kill[W.Bounty.Who(alt)] ~= nil, true, "the original character key is retained")
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c); W = c.Wanted; assert(W.Prune())
+		t, claim = Row(main, "1.cc00f001", "P")
+		eq(claim.points, 0, "the confirmed-owner gap survives a fold and reload")
+		eq(claim.revenge, nil)
+		t, claim = Row(other, "1.cc00f003", "P")
+		eq(claim.points, 120, "an independent Slayer still has its own approved interval")
+		w.advance(W.Bounty.SCORE.KILL_GAP)
+		Row(main, "1.cc00f001", "S")
+		t, claim = Row(main, "1.cc00f001", "P")
+		eq(claim.points, 121, "the level is due again, the owner's same-day revenge is not")
+		eq(claim.revenge, nil)
+		w.advance(W.Bounty.SCORE.REVENGE_GAP)
+		Row(main, "1.cc00f001", "S")
+		t, claim = Row(alt, "1.cc00f002", "P")
+		eq(claim.points, 221); eq(claim.revenge, true, "the existing daily revenge interval is unchanged")
+	end)
+end)
+
+test("wanted 1.2.4 owner gaps: actual verified account keys and this account's characters join cooldowns without guessing other accounts", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		BountyOwnerReaders(c)
+		local names = { w.participant("Key Main-Realm", "Player-1-CC00F011"), w.participant("Key Alt-Realm", "Player-1-CC00F012"),
+			w.participant("Different Key-Realm", "Player-1-CC00F013"), w.participant("Local One-Realm", "Player-1-CC00F014"),
+			w.participant("Local Two-Realm", "Player-1-CC00F015") }
+		c.Wallet.KnownKey = function(name)
+			for i = 1, 3 do
+				if c.Fold(c.FullName(name)) == c.Fold(names[i]) then
+					return { name = names[i], gk = ("1.cc00f01%d"):format(i), pk = string.rep(i < 3 and "A" or "B", 32), fp = i < 3 and "same" or "different" }
+				end
+			end
+		end
+		c.db.myCharacters = { [names[4]:lower()] = {}, [names[5]:lower()] = {} }
+		eq(c.Debts.SameOwner(names[1], names[2]), true); eq(c.Debts.SameOwner(names[1], names[3]), false)
+		eq(c.Debts.SameOwner(names[4], names[5]), true)
+		local horde = "Player-1-0D00F003"
+		w.hordePlayer("Key Rogue-Realm", horde)
+		local points = {}
+		for i, name in ipairs(names) do
+			w.advance()
+			assert(w.commHandlers.WK("CHANNEL", name, BountyRow(c, W, { digest = ("%016x"):format(0xf0030000 + i), at = w.epoch,
+				kind = "P", horde = "1.0d00f003", own = ("1.cc00f01%d"):format(i), worth = "M~1~60", name = "Key Rogue-Realm" })))
+			local t = W.Target(nil, horde); points[i] = t.claims[#t.claims].points
+		end
+		eq(points[1], 120); eq(points[2], 0); eq(points[3], 120); eq(points[4], 120); eq(points[5], 0)
+		-- Malformed/non-name old keys cannot acquire guessed ownership; lookup itself remains bounded.
+		local calls = 0
+		c.Debts.SameOwner = function() calls = calls + 1 return false end
+		local map = {}
+		for i = 1, 100 do map["n:unknown" .. i .. "-realm"] = w.epoch end
+		eq(W.Bounty.OwnerAt(map, "n:unrelated-realm"), nil)
+		eq(calls, W.Bounty.STATE_MAX)
+		eq(W.Bounty.SameWho("?", "n:unknown-realm"), false)
+	end)
+end)
+
 test("wanted 1.2.3 bounty: Daniel's weights in one table, and the scoring every client applies (a death: office and level; a kill: twice his level, the whole bounty, the revenge), the spec's worked examples", function()
 	WithWanted(function(_, W)
 		local B = W.Bounty
