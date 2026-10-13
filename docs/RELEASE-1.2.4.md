@@ -73,6 +73,12 @@ tickets stay disabled.
 
 - Authorized Treasury views retain affiliated guild snapshots after their sharers go offline,
   showing the last observation's age. Restricted details do not become public donor lists.
+- Guild income and event spending have explicit, one-time native copper attribution. Only a
+  current keeper can allocate a recorded source to a recognized guild purpose. Its current
+  verified guild master sees own-guild aggregates; Crown readers keep their existing scope.
+  Mail expenses mean sent, not arrived. Ambiguous returns, corrections, missing sources and
+  incomplete snapshots are labelled rather than guessed. No item-to-gold values, bank moves,
+  automatic mail, trade or game pots are added.
 - The current character's dues page distinguishes unknown, sent, partial receipt and confirmed
   receipt. A successful send alone proves no receipt. Confirmations use observed native
   mail/trade intake from the pinned Treasurer; manually edited or old ledger money does not
@@ -84,11 +90,18 @@ tickets stay disabled.
   verified current-week dues remain reserved. Only aggregate progress is reported to the King
   and published by him. A receipt cannot be assigned twice, and closing records the King's
   purchases note. The jar moves no money and grants no rank, payment exemption or privilege.
-- `/oly carry` offers a bounded, explicitly unverified quote copy for the same character moving
-  manually between sister guilds. Preparation sends nothing; the exact verified destination
-  guild master must accept privately. Revocation cancels queued data and hides the recipient's
-  copy once delivered. Loot notes, own Court messages, pardon observations and own retained
-  receipt facts remain quotes, never authoritative imports. See [history carry](history-carry.md).
+- The pinned primary Treasurer's private recorded-week history preserves a first covered
+  week without a sufficient native receipt; a second may privately notify the player, then the
+  current native guild master. Unknown coverage pauses the local run. This initial negative
+  coverage is for the Treasurer's own guild with contemporaneous native membership checkpoints;
+  it does not infer sister-guild membership or nonpayment from an absent receipt. No sanction,
+  feature restriction or automatic native action follows.
+- `/oly carry` retains the older unverified quote route and adds a separate, paginated original
+  signature archive for the same character moving manually between sister guilds. Both sides
+  explicitly consent. Unknown original keys require direct confirmation; a forwarded key does
+  not become trusted. Private Loot passes between consenting guild masters, never through the
+  member. Moderator records remain excluded. No archive applies payment, pardon, office or
+  key authority. See [history carry](history-carry.md).
 
 ## Open limitations and acceptance gates
 
@@ -98,9 +111,13 @@ tickets stay disabled.
   native action, with no new kick permission. A later complete fresh roster absence is recorded
   separately; it never proves who caused the removal. The original issuer must explicitly review
   completion, labeled human-confirmed. Cancellation/decision delivery has bounded retries and
-  acknowledgement. Staff see local held details; correspondents see only their own requests.
+  acknowledgement. Actual King/Council and the verified author can privately recover original
+  issuer/assignee proofs from other staff, including after the originals go offline. Author
+  read access creates no request, decision or removal power. Correspondents see only their
+  own requests. Response ranking uses signed receipt-to-manual-attempt medians with sample
+  counts, unknown delivery and incomplete proof coverage; legacy/local-only rows are not ranked.
   Reports are a separate count of locally retained accepted reporter/subject pairs, not all-time
-  work or quality. This is not a synchronized army-wide ranking, composite score or new honour.
+  work or quality. This is not a composite quality score or new honour.
 - Cross enlargement is implemented; consistent normalization of the other honour families
   against the rank dragons is still open. Approved artwork needs visual acceptance in game.
 - Plain bronze role portraits now belong to correspondents, not Legates. Their existing
@@ -112,9 +129,12 @@ tickets stay disabled.
   role previews cannot start it. Future tournament honours are not rewards for qualifier ranking.
 - Unlinked Horde characters and unrelated accounts cannot be proved to share an owner through
   the current anti-farming path. The reported two-account farming scenario remains a live check.
-- History carry supplies no full signed continuity, named guild-merger inheritance, transferred
-  payment status or original royal pardon deadline. Withdrawal to an offline master is not
-  guaranteed. No new dues grace-period policy is implemented.
+- History carry cannot certify an old office merely from a current title or reconstruct lost
+  records. New original pardon declarations preserve their declared original deadline without
+  applying a pardon at the destination. Named guild-merger inheritance requires a separate
+  historical three-party mandate; it is not activated by an unsigned present-day consent.
+  Withdrawal to an offline master still depends on subsequent delivery. Cross-guild negative
+  dues coverage requires source-native membership checkpoints, not a census guess.
 - Church correspondent streaks count completed UTC days with observed membership strictly above
   950 during that exact person's appointment. Each new management starts with no inherited days;
   a same-appointment heartbeat does not reset it. Unknown/capped days pause, observed days at or

@@ -1,24 +1,31 @@
-# Partial history carry for 1.2.4 testing
+# Private history carry for 1.2.4 testing
 
-This is a bounded, opt-in quote copy for the **same character** moving manually between
-Olympus sister guilds. It is not the full historical continuity or named merger inheritance
-requested in F26-14. No quoted row enters Loot, Court, pardons, Dues, ranks, keys or any other
-authoritative ledger. No guild invitation, kick, punishment or payment action is performed.
+This is a bounded, opt-in archive for the **same character** moving manually between
+Olympus sister guilds. Older quotes remain unverified. A separate XC2 path preserves
+original signatures after independent first-hand key confirmation. It does not certify
+historical office or implement named merger inheritance. No row enters Loot, Court,
+pardons, Dues, ranks, keys or another authoritative ledger; no invitation, kick,
+punishment or payment action is performed.
 
 ## Player flow
 
-1. While still in the original guild, with a current complete roster, run
+1. Before preparing, collect available original declarations with
+   `/oly carry history collect <original author-Realm>`. The original must answer
+   directly, and the key must bind to that server-stamped character through native GUID
+   evidence. A relayed self-signed name/key cannot establish first-use identity.
+   Ordinary collection excludes private Loot and moderator records.
+2. While still in the original guild, with a current complete roster, run
    `/oly carry prepare <destination guild master-Realm>` and confirm the question.
    The destination guild master must have a current signed role or pinned King identity
    accepted by `Data.AuthorizedRank`; an ordinary census claim is insufficient. If this
    authority is unavailable, preparing is refused. Nothing is sent at preparation.
-2. Arrange the guild move with the officers and accept the game's manual invitation.
-3. Once the destination's roster confirms this character and its same verified master,
+3. Arrange the guild move with the officers and accept the game's manual invitation.
+4. Once the destination's roster confirms this character and its same verified master,
    open `/oly carry`, then choose **Offer prepared quotes** (or `/oly carry offer`).
-4. That master opens `/oly carry`, reviews the warning and explicitly accepts the quote
+5. That master opens `/oly carry`, reviews the warning and explicitly accepts the
    copy. Offers expire after three minutes. Queued messages recheck guild, identity,
    complete roster, authority and revocation before every native send.
-5. The moved character can choose **Revoke this transfer** or `/oly carry cancel`.
+6. The moved character can choose **Revoke this transfer** or `/oly carry cancel`.
    Revocation cancels pending data and sends a private withdrawal to the same recipient.
    The receiving client hides its copy and retains a replay floor when it hears withdrawal.
    This is an ordinary addon whisper: delivery to an offline recipient is not guaranteed.
@@ -30,9 +37,12 @@ There is no automatic transfer between characters, even a confirmed alt.
 
 ## What can be quoted
 
-- Current source-guild Loot notes naming this exact character: original writer, original
-  time, note reference, revision, item, recipient, words and existing relay provenance.
-  Unsigned notes remain **quoted/unverified**, including their claimed original source.
+- Private Loot is never collected, quoted or exported through the member. After the
+  member's consent token, the current source guild master confirms direct transfer and
+  the current destination guild master separately accepts. Original signed notes retain
+  their signatures. Older unsigned notes become an explicit present-day source-master
+  witness, not a signature impersonating their alleged original author. Moderator
+  material is excluded even when the UI could have hidden the actor's name.
 - This character's retained Court messages only, read through `Court.Messages()`;
   other people's Chronicle entries never enter the snapshot. The retained reference
   preserves the original server timestamp and the row also keeps its observation time.
@@ -45,18 +55,33 @@ There is no automatic transfer between characters, even a confirmed alt.
   sequence, week, original time, copper and amount remain quoted provenance. Relaying
   those facts does not authenticate the relay or create a new payment confirmation.
 
-The copy holds at most 24 rows and 4,096 encoded bytes, split into at most 24 private
+The older XC1 quote copy holds at most 24 rows and 4,096 encoded bytes, split into at most 24 private
 180-byte fragments, each with its own bounded `XC~1` envelope. An oversized snapshot
 is refused, not silently imported partially. Pending offers (8), saved imports (32) and
 durable replay/revocation floors (128, including pending reservations) are bounded.
 Reaching a retention limit refuses new work. No public or outsider chunk assembler is
 extended; existing Comm member admission, server-stamped sender and queue guards apply.
 
-The sender's source-guild claim and original quotes cannot be reverified after a move.
-All UI text says they are unverified. Faction and realm-group scope are checked, as are
-the current destination guild and exact roster identities. This partial path supplies no
-signed continuity, lost-record reconstruction, guild merger, Crown deadline, payment
-inheritance, points recalculation or authoritative original-author fact.
+XC2 retains at most 256 bounded declarations and 64 enrolled original keys per scoped
+character. Archives use per-record fragments and receiver acknowledgements; they do not
+silently truncate a batch at the transport's 34-chunk limit. A final acknowledgement is
+separate from enqueueing. Expired offers are pruned, and early withdrawal creates a
+durable floor before a delayed offer can arrive. Limits also apply per sender.
+
+Original Court, native receipt, Loot write/removal and royal pardon declarations are
+captured at their actor-owned source event. A new pardon declaration preserves its
+original declared expiry; older ordinary-reader caches remain observations, never a
+reconstructed royal deadline. A signature verifies the signing identity and its exact
+declaration, not historical office or the truth of an unobserved event. Unknown original
+keys remain visible in the archive with a direct-key confirmation action. A fresh witness
+does not upgrade an old quote to original authorship. Scope/current-reader consent is
+rechecked after cryptographic work and before sending.
+
+Named merger inheritance still needs a frozen three-party mandate from the actual King,
+source GM and destination GM while the source guild exists. The human approved those
+three confirmations; current-role claims after dissolution cannot prove old GM authority.
+No implicit alt inheritance, lost-record reconstruction, payment status, pardon status,
+points recalculation or native guild action is supplied by either archive route.
 
 ## Validation and remaining live checks
 
@@ -68,6 +93,13 @@ bounded state, stale rosters, role/guild changes and cancellation before native 
 The original WIP's binary SHA256 digest failed transport tests; encoding its binary digest
 as hexadecimal restores successful bounded packets. A signed destination role also now
 keeps the multiple return values that the WIP's Lua `and` expression discarded.
+
+`OLYMPUS_TEST_FILTER='carry-history:' luajit tests/run.lua` adds actual Ed25519 account
+signing and native GUID binding, source-event captures, 12-record archives larger than
+34 transport messages, direct-key recovery, loss/retry/ACK, scope/cancellation after
+crypto, private staff-only Loot and consent-only members. A regression against the
+pre-fix Carry source proves that a retained private Loot note could previously enter
+the member's quote export; the new path refuses that leak.
 
 Run the consolidated `bash scripts/check.sh` after integration. The gamepad session pass
 loads the TOC and exercises all Olympus dialog definitions through existing dialog flows;
@@ -82,9 +114,12 @@ Still needed in the real Forever client, with two players and retained source re
 3. Offer and cancel the master's question: no records should arrive. Offer again and
    explicitly accept; only the exact current destination master should see unverified
    quotes. Other members, Lords of another guild and replacement masters see none.
-4. Check original Loot writer/relay and Court timestamps against the retained originals;
-   verify a quoted receipt changes no payment status and pardon observations create no
-   pardon or deadline. Loot books and the destination Chronicle remain unchanged.
+4. Compare original Court/receipt declarations and their timestamps against source records;
+   an unknown original key stays unverified until directly confirmed. For private Loot, the
+   member initiates consent but receives no notes; source and destination masters separately
+   confirm their direct staff route. Compare original/witness attribution on the destination
+   master only. A receipt changes no payment status; a declared pardon expiry creates no
+   active pardon. Loot books and the destination Chronicle remain unchanged.
 5. Revoke during a longer queued copy, then revoke a completed copy. Data stops, the
    accepted view disappears once the withdrawal arrives, and replay cannot restore it.
    Check what happens with an offline master; no guaranteed delivery is claimed.

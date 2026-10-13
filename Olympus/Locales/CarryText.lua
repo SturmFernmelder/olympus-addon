@@ -1,7 +1,31 @@
 local _, ns = ...
 local L = ns.L
-L.CARRY_TITLE = "Carried history (quotes)"
-L.CARRY_NOTE = "Partial history carry: quoted, unverified records only. It never changes loot decisions, payment status, pardons, ranks or keys. Original authors and times remain as reported by the sender, not newly verified facts."
+L.CARRY_HISTORY_TITLE = "Portable signed history"
+L.CARRY_HISTORY_NOTE = "Original signatures preserve the declared author, subject and time. They do not prove historical office, apply payment, pardon or permissions. Unknown original keys stay unverified; private loot travels between consenting guild masters only."
+L.CARRY_HISTORY_COLLECT = "Before moving: /oly carry history collect <original author-Realm>. Then /oly carry prepare <destination guild master-Realm>; join manually and offer the archive."
+L.CARRY_HISTORY_PROGRESS = "Receiving archive: %d of %d declarations"
+L.CARRY_HISTORY_PENDING_KEY = "Original key for %s not verified here — click to request direct confirmation"
+L.CARRY_HISTORY_VERIFIED = "Original signature verified; historical declaration only, no status imported."
+L.CARRY_HISTORY_EMPTY = "No original declarations collected. Earlier unsigned quotes are not converted into originals."
+L.CARRY_HISTORY_ARCHIVED = "[%s] %s · %s · <%s>: %s"
+L.CARRY_HISTORY_STAFF = "Send private Loot history for %s directly to guild master %s? The member receives no notes. Original signatures stay original; older unsigned notes are labelled as your new witness observations. Moderator records are not exported."
+L.CARRY_HISTORY_WITNESS = "Witness quote only: reported original writer %s, reported original time %s. This signature proves the present witness, not that earlier author."
+L.CARRY_HISTORY_INVALID = "Original signature is invalid. This declaration remains unverified and changes no status."
+if GetLocale and GetLocale() == "ptBR" then
+	L.CARRY_HISTORY_TITLE = "Histórico assinado portátil"
+	L.CARRY_HISTORY_NOTE = "Assinaturas originais preservam autor declarado, destinatário e data. Não provam cargo histórico nem aplicam pagamento, perdão ou permissões. Chaves originais desconhecidas ficam sem verificação; loot privado passa só entre Guild Masters que consentiram."
+	L.CARRY_HISTORY_COLLECT = "Antes de mudar: /oly carry history collect <autor original-Reino>. Depois /oly carry prepare <Guild Master de destino-Reino>; entre manualmente e ofereça o arquivo."
+	L.CARRY_HISTORY_PROGRESS = "Recebendo arquivo: %d de %d declarações"
+	L.CARRY_HISTORY_PENDING_KEY = "Chave original de %s não verificada aqui — clique para pedir confirmação direta"
+	L.CARRY_HISTORY_VERIFIED = "Assinatura original verificada; somente declaração histórica, sem importar status."
+	L.CARRY_HISTORY_EMPTY = "Nenhuma declaração original coletada. Citações antigas sem assinatura não viram originais."
+	L.CARRY_HISTORY_ARCHIVED = "[%s] %s · %s · <%s>: %s"
+	L.CARRY_HISTORY_STAFF = "Enviar o histórico privado de Loot de %s diretamente ao Guild Master %s? O membro não recebe as notas. Assinaturas originais são preservadas; notas antigas sem assinatura ficam como observações atuais feitas por você. Registros de moderadores não são exportados."
+	L.CARRY_HISTORY_WITNESS = "Somente citação de testemunha: autor original informado %s, data original informada %s. A assinatura prova a testemunha atual, não aquele autor anterior."
+	L.CARRY_HISTORY_INVALID = "Assinatura original inválida. Esta declaração continua não verificada e não altera status."
+end
+L.CARRY_TITLE = "Carried history"
+L.CARRY_NOTE = "Older quote copies remain unverified. Signed originals have separate origin checks; neither route imports loot decisions, payment status, pardons, ranks or keys. Private loot never passes through the member."
 L.CARRY_PREPARE = "Before moving, use /oly carry prepare <destination guild master-Realm>. Join that sister guild manually, then offer this snapshot here."
 L.CARRY_CONFIRM = "Prepare %d quoted records from <%s> for %s of <%s>? No history is sent yet. After your manual move, only that guild's verified master can receive it, and must accept."
 L.CARRY_ACCEPT = "Accept %d unverified quoted records from %s, formerly reported in <%s>? This copy is private to your current guild-master view and changes no game status."
@@ -19,8 +43,8 @@ L.CARRY_REFUSED = "History carry is unavailable (%s). A current own roster or si
 L.CARRY_QUOTE = "Quote"
 L.CARRY_UNKNOWN = "unknown"
 if GetLocale and GetLocale() == "ptBR" then
-	L.CARRY_TITLE = "Histórico transportado (citações)"
-	L.CARRY_NOTE = "Transporte parcial de histórico: apenas registros citados, não verificados. Não muda decisões de loot, pagamentos, perdões, cargos ou chaves. Autores e datas originais são os relatados pelo remetente, não fatos verificados de novo."
+	L.CARRY_TITLE = "Histórico transportado"
+	L.CARRY_NOTE = "Cópias antigas de citações continuam não verificadas. Originais assinados têm verificação de origem separada; nenhuma via importa decisões de loot, pagamentos, perdões, cargos ou chaves. Loot privado nunca passa pelo membro."
 	L.CARRY_PREPARE = "Antes de mudar, use /oly carry prepare <mestre da guilda de destino-Reino>. Entre nessa guilda irmã manualmente e depois ofereça o snapshot aqui."
 	L.CARRY_CONFIRM = "Preparar %d registros citados de <%s> para %s de <%s>? Nenhum histórico será enviado agora. Após sua mudança manual, somente o mestre verificado dessa guilda pode recebê-lo, e deve aceitar."
 	L.CARRY_ACCEPT = "Aceitar %d registros citados não verificados de %s, relatados antes em <%s>? A cópia é privada na sua visão atual de mestre da guilda e não altera nenhum estado do jogo."
@@ -40,8 +64,8 @@ if GetLocale and GetLocale() == "ptBR" then
 end
 local translated = {
 	deDE = {
-		CARRY_TITLE = "Übertragene Geschichte (Zitate)",
-		CARRY_NOTE = "Teilweise Übertragung: nur zitierte, ungeprüfte Einträge. Ändert keine Beuteentscheidungen, Zahlungen, Begnadigungen, Ränge oder Schlüssel. Autoren und Zeiten bleiben Angaben des Absenders, keine neu bestätigten Fakten.",
+		CARRY_TITLE = "Übertragene Geschichte",
+		CARRY_NOTE = "Ältere Zitatkopien bleiben ungeprüft. Signierte Originale haben eigene Herkunftsprüfungen; kein Weg übernimmt Beuteentscheidungen, Zahlungen, Begnadigungen, Ränge oder Schlüssel. Private Beutenotizen gehen nie durch das Mitglied.",
 		CARRY_PREPARE = "Vor dem Wechsel: /oly carry prepare <Zielgildenmeister-Realm>. Tritt der Schwestergilde manuell bei und biete die Kopie hier an.",
 		CARRY_CONFIRM = "%d zitierte Einträge aus <%s> für %s von <%s> vorbereiten? Noch wird nichts gesendet. Nach deinem manuellen Wechsel muss der geprüfte Gildenmeister zustimmen.",
 		CARRY_ACCEPT = "%d ungeprüfte Zitate von %s, zuvor in <%s> gemeldet, annehmen? Diese Kopie bleibt in deiner aktuellen Gildenmeisteransicht privat und ändert keinen Spielstatus.",
@@ -59,8 +83,8 @@ local translated = {
 		CARRY_QUOTE = "Zitat", CARRY_UNKNOWN = "unbekannt",
 	},
 	esES = {
-		CARRY_TITLE = "Historial trasladado (citas)",
-		CARRY_NOTE = "Traslado parcial: solo registros citados y sin verificar. No cambia decisiones de botín, pagos, indultos, rangos ni claves. Autores y fechas siguen siendo datos del remitente, no hechos verificados de nuevo.",
+		CARRY_TITLE = "Historial trasladado",
+		CARRY_NOTE = "Las citas antiguas siguen sin verificar. Los originales firmados tienen controles de origen separados; ninguna vía importa decisiones de botín, pagos, indultos, rangos ni claves. Las notas privadas de botín nunca pasan por el miembro.",
 		CARRY_PREPARE = "Antes de cambiar: /oly carry prepare <maestro de la hermandad destino-Reino>. Únete manualmente a esa hermandad hermana y ofrece la copia aquí.",
 		CARRY_CONFIRM = "¿Preparar %d registros citados de <%s> para %s de <%s>? Aún no se envía nada. Tras tu cambio manual, el maestro verificado debe aceptar.",
 		CARRY_ACCEPT = "¿Aceptar %d citas sin verificar de %s, antes informadas en <%s>? La copia es privada en tu vista actual de maestro y no cambia ningún estado del juego.",
@@ -78,8 +102,8 @@ local translated = {
 		CARRY_QUOTE = "Cita", CARRY_UNKNOWN = "desconocido",
 	},
 	frFR = {
-		CARRY_TITLE = "Historique transféré (citations)",
-		CARRY_NOTE = "Transfert partiel : seulement des entrées citées, non vérifiées. Ne change ni butin, paiements, pardons, grades ni clés. Les auteurs et dates restent les indications de l'expéditeur, sans nouvelle vérification.",
+		CARRY_TITLE = "Historique transféré",
+		CARRY_NOTE = "Les anciennes citations restent non vérifiées. Les originaux signés ont des contrôles de provenance séparés ; aucune voie n'importe les décisions de butin, paiements, pardons, grades ou clés. Le butin privé ne passe jamais par le membre.",
 		CARRY_PREPARE = "Avant de changer : /oly carry prepare <maître de guilde cible-Royaume>. Rejoins manuellement cette guilde soeur, puis propose la copie ici.",
 		CARRY_CONFIRM = "Préparer %d entrées citées de <%s> pour %s de <%s> ? Rien n'est encore envoyé. Après ton changement manuel, le maître vérifié doit accepter.",
 		CARRY_ACCEPT = "Accepter %d citations non vérifiées de %s, auparavant rapportées dans <%s> ? Cette copie reste privée dans ta vue actuelle de maître et ne change aucun état du jeu.",

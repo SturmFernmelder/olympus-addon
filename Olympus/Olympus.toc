@@ -36,8 +36,11 @@ Locales\MainKeyText.lua
 Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
+Locales\DuesGraceText.lua
+Locales\JusticeResponseText.lua
 Locales\CarryText.lua
 Locales\CampaignText.lua
+Locales\GuildFinanceText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Core.lua
@@ -72,11 +75,13 @@ Week.lua
 Treasury.lua
 Dues.lua
 DuesHistory.lua
+DuesGrace.lua
 Bank.lua
 Backup.lua
 Acts.lua
 Chronicle.lua
 Campaign.lua
+GuildFinance.lua
 Moderation.lua
 Alts.lua
 Keys.lua
@@ -135,6 +140,7 @@ ArenaNet.lua
 ArenaRoles.lua
 ArenaMoney.lua
 Debts.lua
+CarryHistory.lua
 Records.lua
 Wallet.lua
 Stakes.lua

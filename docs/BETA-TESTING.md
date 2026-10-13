@@ -269,6 +269,11 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
   human-confirmed completion. Disconnect during the decision, recover and compare exactly once.
   Check local retained-report counts, unknown coverage, own-only views and inert role previews.
   There must be no public task/name list, automatic removal, global quality score or new honour.
+  Have a second actual councillor recover the original issuer/assignee signatures, then take
+  both originals offline and let a third authorized staff reader recover from that councillor.
+  Missing first-hand original keys must remain visibly pending, not trust a relayed key. Compare
+  medians and sample counts; a legacy JT1 row is local-only and cannot enter that ranking. The
+  verified author may read/relay but cannot issue, confirm, cancel or remove through this role.
 - **Records:** compare the participants' retained game/duel results and closed-month ranking
   after reload, later join and recovery from another holder. Exercise more than one day/month
   page where records actually exist; a full rotating page should not label older coverage
@@ -292,11 +297,26 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
    states after actual native mail/trade intake. A manual ledger entry must not authenticate an
    unrelated later receipt. Request a retained missing receipt through the page and reload.
    Dismissing the local reminder leaves sharing choices intact and keeps reminders quiet in
-   combat/instances. No automatic payment, sanction or new grace-period policy is expected.
+   combat/instances. No automatic payment or sanction is expected. The pinned primary
+   Treasurer's own native guild has a bounded private recorded-week flow: observe real start/end
+   membership and complete pinned books, then compare paid, first-week tolerance and a second
+   covered week below the native confirmed amount. The private notice must go to the player
+   before their current native GM. Absent/capped/offline history remains unknown; a manually
+   entered line or an old current roster must not create historical confirmation or a miss.
+   Changing confirmed alt links, duplicate pinned books and malformed saved rows must not
+   create a false notice. Other guilds are not negatively judged through census-only coverage.
 2. As authorized staff, inspect affiliated Treasury snapshots, let the sharer go offline and
    reload. Retained gold/items show their observation age; absent data stays unknown. Check an
    unauthorized client cannot read restricted details. Public numeric summaries must not
    disclose private donor names or item histories.
+   Open Guild income and event spending as a current keeper. Explicitly attribute a completed
+   native expense or receipt once; an offered/cancelled trade or failed mail sends nothing and
+   adds no proof. A mail expense is sent, not delivered. Assign an actual outgoing purchase to
+   a recognized guild event, then inspect that guild's aggregate as its current verified GM.
+   Two ordinary census claims cannot grant this private view. Withhold sharing/revoke a role
+   during a queued transfer; every piece must stop, and the authenticated withdrawal hides the
+   retained aggregate. Unknown-guild income and ambiguous returned mail remain unknown, not
+   guessed refunds or guild balances. No auto bank, mail, Trade or AcceptTrade is called.
 3. As the actual King, start a voluntary campaign through its Treasury controls. Check purpose,
    gold/material goals and the 14-day window. As a real keeper, explicitly assign an eligible
    newly received voluntary gift. Current-week dues remain reserved; old/manual money, sales,
@@ -307,6 +327,7 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
 4. For a deliberately arranged same-character guild move, retain source records and run:
 
    ```text
+   /oly carry history collect <original author-Realm>
    /oly carry prepare <destination guild master-Realm>
    /oly carry
    /oly carry offer
@@ -324,6 +345,8 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
    alt and replacement master grant no inherited copy. Offline withdrawal delivery is not
    guaranteed. See [history-carry.md](history-carry.md) for bounds and remaining limitations.
 
-Justice scoring, other-honour normalization, unlinked Horde/account anti-farming, full signed
-history continuity, named merger inheritance and a new dues grace policy remain open. Keep
-those distinct from the implemented controls and from every unobserved live gate above.
+Justice quality/composite scoring, other-honour normalization, unlinked Horde/account
+anti-farming, universally portable historical office proof, named merger inheritance and
+sister-guild negative dues coverage remain separate from the implemented original-signature
+archives, response metrics and own-guild private grace. Keep these limits distinct from
+every unobserved live gate above.

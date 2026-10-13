@@ -396,7 +396,7 @@ end
 --   answers, a case's decision told to its player; logged, over GUILD or the channel).
 --   1.1.6, the War Room's squads: WarSquads WU (a guild's squad assignments, over GUILD) SC (a squad's chat, logged whispers).
 --   1.2.4, voluntary Campaign VG (the King's public aggregate and keepers' private reports).
---   1.2.4, JusticeTasks JT (original issuer and assignee only, logged private task receipts and review).
+--   1.2.4, JusticeTasks JT (original signatures; private recovery by actual King, Council and verified author).
 --   1.2.4, Carry XC (bounded consented historical quotes to the destination guild master, private only).
 --   1.2.4, Dues FP FR (a payer's private receipt ask and the pinned Treasurer's observed receipt).
 --   1.2.4, ChurchFullness NF (private coverage recovery between a current nominee and the guild desk).
