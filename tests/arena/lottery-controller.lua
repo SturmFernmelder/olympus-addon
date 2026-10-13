@@ -313,6 +313,15 @@ test("Lottery authority 1.2.4: only the pinned King, signed High Council and aut
 	local operators = w:As(cast.king, cast.king.ns.Workshop.PracticeOperators)
 	eq(#operators, 1); eq(operators[1], author.name)
 	eq(w:As(cast.king, cast.king.ns.Workshop.IsPracticeOperator, author.short .. "-Foreign Realm"), false, "same short name outside the pinned realm group grants no authority")
+	w:As(cast.king, function()
+		local linked = author.short .. "-" .. H.World.REALMS[2]
+		cast.king.ns.Workshop.HandlePresence("CHANNEL", linked, "V4~1.2.4")
+		eq(cast.king.ns.Workshop.AuthorName(), linked, "actual guarded presence remembers the server-stamped linked realm")
+		eq(cast.king.ns.Lottery.IsCaller(linked, "L"), true)
+		local eid = "L000" .. cast.king.ns.Arena.Hash36(linked:lower(), 2)
+		local event = cast.king.ns.Lottery.EventOf(eid)
+		eq(event and event.opener, linked, "receiver resolves the accepted linked-realm caller's event")
+	end)
 	local gm = w:Player("Master Claim", { rank = 0 })
 	gm.rankName = "High Councillor" -- a guild's rank label grants no signed council authority
 	for _, c in ipairs({ cast.hc, author, cast.king }) do

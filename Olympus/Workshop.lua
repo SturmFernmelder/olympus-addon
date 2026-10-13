@@ -110,7 +110,12 @@ Workshop.IsAuthorName = IsAuthorName
 function Workshop.IsPracticeOperator(name) return IsAuthorName(name) end
 function Workshop.PracticeOperators()
 	if type(ns.AUTHOR) ~= "string" or ns.AUTHOR == "" then return {} end
-	return { ns.FullName(ns.AUTHOR, ns.AUTHOR_REALM) }
+	local pinned = ns.FullName(ns.AUTHOR, ns.AUTHOR_REALM)
+	local names = { pinned }
+	-- Linked realms stamp their own suffix. Retain only a guarded presence identity;
+	-- an accepted caller's event writer mark must resolve on the receiving client too.
+	if authorName and IsAuthorName(authorName) and authorName:lower() ~= pinned:lower() then names[#names + 1] = authorName end
+	return names
 end
 
 -- The author's test characters (Dev.lua, never published) see the tab too: nothing it sends
