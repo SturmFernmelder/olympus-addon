@@ -13,8 +13,12 @@ the established keys. Conflicting records stay for review and count in neither r
 unsigned or incorrectly signed allegation cannot invalidate an accepted result. Duel GUIDs still
 need the game's existing name/GUID proof before a result becomes rated.
 
-About three holders send digests every ten minutes, regardless of network size. Missing results
-travel on the existing paced low lane. Large days are requested in successive hash buckets, with
+About three holders send digests every ten minutes, regardless of network size. Each bounded
+digest names the newest three record-days and rotates through older unsealed record-days in its
+remaining slots. Sealed months likewise keep the newest month visible and rotate through older
+ones, so years-old retained summaries remain discoverable. Reading a digest does not advance
+either rotation; only an admitted send does, so a full queue does not skip a historical page.
+Missing results travel on the existing paced low lane. Large days are requested in successive hash buckets, with
 at most 350 64-bit SHA-256 fingerprints per request, below the transport's assembly size.
 Verification has 20 records in flight and 200 waiting; pending keys hold at most 500 records,
 and each relayer has separate attempt and accepted-result budgets. Receiving a digest does not

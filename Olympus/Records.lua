@@ -32,8 +32,8 @@ local L = ns.L
 --
 -- Anti-entropy. About RELAYS clients of the army (as the signed authority's answers draw:
 -- King.AddonsOnline), every DIGEST_EVERY, send for each type a digest of what they hold: each
--- day's count and the sum of its ids' short hashes, the newest DIGEST_DAYS days, and each sealed
--- month's totals' hash. A client whose day differs asks for it (RA, with the PREFIX-character
+-- day's count and the sum of its ids' short hashes, the newest days plus rotating older days,
+-- and rotating sealed months' totals hashes. A client whose day differs asks for it (RA, with the PREFIX-character
 -- prefixes of the ids it holds of that day), ASK_DAYS days a digest at most, the newest first; a
 -- client that holds what the digest lacks sends its own digest (PUSH_GAP apart at most). Any
 -- holder drawn answers with what the asker lacks, ANSWER_MIN to ANSWER_MIN + ANSWER_SPREAD later,
@@ -63,7 +63,8 @@ local R = Records
 R.TYPES = {}             -- [letter] = the type's spec (Register)
 R.DIGEST_EVERY = 600     -- a drawn holder's digest, this often
 R.RELAYS = 3             -- ...about this many holders each time, whatever the army's size
-R.DIGEST_DAYS = 70       -- the newest days a digest names
+R.DIGEST_DAYS = 70       -- record-days per digest, bounded on the wire
+R.DIGEST_RECENT = 3      -- newest days always; older unsealed days rotate through the remaining slots
 R.DIGEST_MONTHS = 24     -- ...and the newest sealed months
 R.ASK_DAYS = 3           -- days asked for from one digest at most
 R.ASK_GAP = 300          -- a day asked for again from here this long after at the soonest
@@ -746,25 +747,54 @@ function R.DigestBody(letter)
 	local days = {}
 	for d in pairs(x.dig) do days[#days + 1] = d end
 	table.sort(days, function(a, b) return a > b end)
+	local selected, nextPage = {}, 0
+	local head = min(#days, R.DIGEST_RECENT, R.DIGEST_DAYS)
+	for i = 1, head do selected[#selected + 1] = days[i] end
+	local older = #days - head
+	local room = min(older, R.DIGEST_DAYS - head)
+	if room > 0 then
+		local page = (x.digestPage or 0) % older
+		for i = 0, room - 1 do selected[#selected + 1] = days[head + 1 + (page + i) % older] end
+		if older > room then nextPage = (page + room) % older end
+	end
+	table.sort(selected, function(a, b) return a > b end)
 	local parts = {}
-	for i = 1, min(#days, R.DIGEST_DAYS) do
-		local g = x.dig[days[i]]
-		parts[#parts + 1] = B36(days[i]) .. "." .. B36(g.n) .. "." .. B36(g.x)
+	for _, day in ipairs(selected) do
+		local g = x.dig[day]
+		parts[#parts + 1] = B36(day) .. "." .. B36(g.n) .. "." .. B36(g.x)
 	end
 	local months = {}
 	for m, seal in pairs(s.seals) do if type(m) == "number" and Adopted(seal) then months[#months + 1] = m end end
 	table.sort(months, function(a, b) return a > b end)
-	local mparts = {}
-	for i = 1, min(#months, R.DIGEST_MONTHS) do mparts[#mparts + 1] = B36(months[i]) .. "." .. s.seals[months[i]].h:sub(1, 8) end
+	local mparts, nextMonthPage = {}, 0
+	if months[1] then
+		mparts[1] = B36(months[1]) .. "." .. s.seals[months[1]].h:sub(1, 8)
+		local olderMonths = #months - 1
+		local slots = min(olderMonths, R.DIGEST_MONTHS - 1)
+		if slots > 0 then
+			local page = (x.digestMonthPage or 0) % olderMonths
+			for i = 0, slots - 1 do
+				local month = months[2 + (page + i) % olderMonths]
+				mparts[#mparts + 1] = B36(month) .. "." .. s.seals[month].h:sub(1, 8)
+			end
+			if olderMonths > slots then nextMonthPage = (page + slots) % olderMonths end
+		end
+	end
 	if not parts[1] and not mparts[1] then return nil end
-	return letter .. "~" .. table.concat(parts, ",") .. "~" .. table.concat(mparts, ",")
+	return letter .. "~" .. table.concat(parts, ",") .. "~" .. table.concat(mparts, ","), nextPage, nextMonthPage
 end
 function R.SendDigest(letter)
-	local body = R.DigestBody(letter)
+	local body, nextPage, nextMonthPage = R.DigestBody(letter)
 	if not body then return false end
 	lastDigest[letter] = Now()
 	stats.digests = stats.digests + 1
-	return A().Send("RD", "L", body, { dist = "CHANNEL", key = "records digest " .. letter, low = true }) == true
+	local sent = A().Send("RD", "L", body, { dist = "CHANNEL", key = "records digest " .. letter, low = true }) == true
+	-- A full transport queue must not silently skip a historical page.
+	if sent then
+		local x = Index(letter)
+		x.digestPage, x.digestMonthPage = nextPage, nextMonthPage
+	end
+	return sent
 end
 
 -- An ask for one day's records: the prefixes of the ids this client holds of it.

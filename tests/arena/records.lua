@@ -38,12 +38,81 @@ test("1.2.4 records: both original signatures and firsthand keys admit one Bones
 	Errors(w)
 end)
 
+test("1.2.4 records history: bounded digests rotate every old unsealed day without dropping the newest days or advancing on a refused send", function()
+	local w, a, b, c = Setup()
+	local R = c.ns.Records
+	local total, days = R.DIGEST_DAYS + 10, {}
+	local store = Do(w, c, "Store", "b", true)
+	for i = 0, total - 1 do
+		local at = w.clock - i * 86400
+		local body = Pair(w, a, b, "Krpage" .. i, "1", at)
+		local rec = w:As(c, R.TYPES.b.Read, body)
+		assert(rec, "valid original result fixture")
+		local day = math.floor(at / 86400)
+		store.days[day] = { [rec.id] = body }
+		days[#days + 1] = day
+	end
+	local seen = {}
+	local send = c.ns.Arena.Send
+	c.ns.Arena.Send = function() return false end
+	local first = Do(w, c, "DigestBody", "b")
+	eq(Do(w, c, "SendDigest", "b"), false)
+	eq(Do(w, c, "DigestBody", "b"), first, "full queue keeps the same historical page")
+	c.ns.Arena.Send = function(kind, mode, body)
+		eq(kind, "RD"); eq(mode, "L")
+		local list = body:match("^b~([^~]*)~")
+		local page, count = {}, 0
+		for day in list:gmatch("([0-9a-z]+)%.[0-9a-z]+%.[0-9a-z]+") do
+			day = c.ns.Arena.N(day, 0, 400000)
+			page[day], seen[day] = true, true
+			count = count + 1
+		end
+		assert(count <= R.DIGEST_DAYS, "wire stays bounded")
+		for i = 1, 3 do assert(page[days[i]], "newest day remains visible") end
+		return true
+	end
+	for _ = 1, 3 do assert(Do(w, c, "SendDigest", "b")) end
+	c.ns.Arena.Send = send
+	for _, day in ipairs(days) do assert(seen[day], "old unsealed day reachable by a later login: " .. day) end
+	Errors(w)
+end)
+
 test("1.2.4 records regression: an unsigned conflicting body cannot invalidate a legitimate record or its ranking", function()
 	local w, a, b, c = Setup() local body = Pair(w, a, b, "Kr2") Keys(w, a, b) Take(w, c, body)
 	local fake = Pair(w, a, b, "Kr2", "2"):gsub("~[%w%-_]+$", "~" .. string.rep("A", 86))
 	Take(w, c, fake)
 	eq(#Do(w, c, "Clashes", "b"), 0, "no conflict before signature verification")
 	eq(Do(w, c, "Count", "b"), 1) eq(#w:As(c, c.ns.FarkleTable.Best, "L"), 2)
+	Errors(w)
+end)
+
+test("1.2.4 records history: sealed monthly summaries beyond the newest twenty-four remain discoverable", function()
+	local w, _, _, c = Setup()
+	local R, store = c.ns.Records, Do(w, c, "Store", "b", true)
+	local latest = Do(w, c, "MonthOf", w.clock) - 1
+	local total = R.DIGEST_MONTHS + 5
+	-- Already-adopted summary fixtures: signature/hash adoption is exercised by the separate
+	-- RSA round trip. This test exercises the real bounded relay's discovery inventory.
+	for i = 0, total - 1 do store.seals[latest - i] = { r = "", h = string.rep("a", 64) } end
+	local original, seen = c.ns.Arena.Send, {}
+	c.ns.Arena.Send = function() return false end
+	local first = Do(w, c, "DigestBody", "b")
+	eq(Do(w, c, "SendDigest", "b"), false)
+	eq(Do(w, c, "DigestBody", "b"), first)
+	c.ns.Arena.Send = function(_, _, body)
+		local list = body:match("^b~[^~]*~([^~]*)$")
+		local page, count = {}, 0
+		for month in list:gmatch("([0-9a-z]+)%.%x+") do
+			month = c.ns.Arena.N(month, 0, 100000)
+			page[month], seen[month], count = true, true, count + 1
+		end
+		assert(count <= R.DIGEST_MONTHS)
+		assert(page[latest], "newest completed month is on every page")
+		return true
+	end
+	for _ = 1, 3 do assert(Do(w, c, "SendDigest", "b")) end
+	c.ns.Arena.Send = original
+	for i = 0, total - 1 do assert(seen[latest - i], "older sealed month remains reachable") end
 	Errors(w)
 end)
 
