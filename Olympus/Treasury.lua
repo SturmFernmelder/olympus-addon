@@ -688,6 +688,7 @@ function Treasury.Record(name, copper, how, out, o)
 		if type(A) == "table" and type(A.KeeperLine) == "function" then A.KeeperLine(name, copper, how, out) end
 	end
 	Touch(b)
+	if ns.Dues.PayerBooked then ns.Dues.PayerBooked(b, e, name, o.observed == true) end
 	-- 1.1: an item given (a counted payment) to a player who asked the treasury for it closes his
 	-- request once he got its count (Bank.lua).
 	if item and out and not e.excluded and kind ~= "transfer" and ns.Bank and ns.Bank.Paid then ns.Bank.Paid(name, item, count) end
@@ -867,7 +868,7 @@ function Treasury.Info(a, b)
 	local net = done.got - done.gave
 	if net > 0 then
 		Treasury.Record(done.name, net, "trade", nil, { book = book, excluded = done.gaveItems or nil, kind = done.gaveItems and "sale" or nil,
-			guild = done.guild })
+			guild = done.guild, observed = true })
 	elseif net < 0 then
 		Treasury.Record(done.name, -net, "trade", true, { book = book, excluded = done.gotItems or nil, kind = done.gotItems and "purchase" or nil })
 	end
@@ -889,6 +890,7 @@ end
 -- Mail sent with gold or items: counted once the game says it went. Items sent cash on
 -- delivery are sold (not counted).
 function Treasury.MailSending(to, subject)
+	if ns.Dues.PayerMailSending then ns.Dues.PayerMailSending(to, subject) end
 	if not Treasury.IsKeeper() then return end
 	Treasury.OpenBook()
 	local money = GetSendMailMoney and tonumber(GetSendMailMoney()) or 0
@@ -908,6 +910,7 @@ function Treasury.MailSending(to, subject)
 		subject = type(subject) == "string" and subject or nil } or nil
 end
 function Treasury.MailSent()
+	if ns.Dues.PayerMailSent then ns.Dues.PayerMailSent() end
 	local m = mailOut
 	mailOut = nil
 	if not m then return end
@@ -995,10 +998,10 @@ local function Returned(b, sender, money, item, count)
 end
 
 local function MailClock() return GetTime and GetTime() or ns.Now() end
-local function Settle(p)
+local function Settle(p, observed)
 	if p.returned then return Returned(p.book, p.sender, p.money) end
 	-- (1.1: the mail's subject, the dues' note: its week and guild, Dues.lua.)
-	Treasury.Record(p.sender, p.money, "mail", nil, { book = p.book, note = p.note })
+	Treasury.Record(p.sender, p.money, "mail", nil, { book = p.book, note = p.note, observed = observed == true })
 end
 local function SettleItem(p)
 	if p.returned then return Returned(p.book, p.sender, 0, p.id, p.n) end
@@ -1044,14 +1047,14 @@ function Treasury.MoneyChanged()
 	for i, p in ipairs(pending) do
 		if p.money == gained then
 			table.remove(pending, i)
-			return Settle(p)
+			return Settle(p, true)
 		end
 	end
 	local i = 1
 	while pending[i] do
 		if pending[i].money <= gained then
 			gained = gained - pending[i].money
-			Settle(table.remove(pending, i))
+			Settle(table.remove(pending, i), true)
 		else
 			i = i + 1
 		end
@@ -3031,7 +3034,10 @@ ns.On("LOGIN", function()
 	end
 	ns.RegisterEvent("MAIL_SEND_SUCCESS", function() ns.SafeCall("treasury mail", Treasury.MailSent) end)
 	ns.RegisterEvent("MAIL_FAILED", function(itemID)
-		if not itemID then mailOut = nil end
+		if not itemID then
+			mailOut = nil
+			if ns.Dues.PayerMailFailed then ns.Dues.PayerMailFailed() end
+		end
 		Treasury.MailFailed(itemID)
 	end)
 	ns.RegisterEvent("PLAYER_MONEY", function() ns.SafeCall("treasury mail", Treasury.MoneyChanged) end)
