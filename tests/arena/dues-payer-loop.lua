@@ -179,7 +179,7 @@ test("Dues payer loop: instance and combat suppress the actual local reminder wi
 		eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), false, busy)
 		w:Fire(p, "MAIL_INBOX_UPDATE")
 		eq(#p.printed, before); eq(#p.win.calls, calls); eq(#w.sent, sends)
-		local saved = p.rdb.duesPayer[p.name]
+		local saved = p.rdb.duesPayer and p.rdb.duesPayer[p.name]
 		eq(saved and saved.reminded, nil, "busy context does not consume the once-reset reminder")
 		-- The explicit click is unchanged: neither a reminder guard nor its context authorizes
 		-- an automatic send/accept, or silently blocks the existing manual preparation button.
