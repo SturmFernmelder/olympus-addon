@@ -373,8 +373,8 @@ end)
 
 -- WarSquads.lua loaded beside the tab as in the game: its listeners hear what the tab hears
 -- (w.fire) and what it tells reaches the tab's listeners (the game's one ns.Fire; ns.Fire is none in
--- this harness), in the King's guild with a fresh roster and the High Council's signed list naming
--- two of the writers, its squads' leaders. (Its rooms are not given to ChatRooms here, nor its
+-- this harness), in the King's guild with a fresh roster and two manually appointed writers as
+-- its group leaders. A High Council seat alone is no appointment. (Its rooms are not given to ChatRooms here, nor its
 -- messages to Comm: neither outlives the test.) Returns WarSquads, what it told, and the undo.
 local function WithSquads(w)
 	local R = ns.Roster
@@ -387,7 +387,13 @@ local function WithSquads(w)
 	for i = 1, 30 do R.byName["Writer" .. i .. "-Realm"] = 3 end
 	R.complete, R.generation, R.guild, R.group, R.faction, R.snapshotAt = true, 1, "Olympus", ns.group, ns.faction, ns.Now()
 	local told = {}
-	local sns = setmetatable({ ChatRooms = false, Comm = { Handle = function() end, Send = function() return true end } }, { __index = ns })
+	w.groupAppointments = {
+		{ role = "centurion", name = "Writer3-Realm" }, { role = "centurion", name = "Writer7-Realm" },
+	}
+	local nominees = { ListOf = function() return { by = ns.me, entries = w.groupAppointments } end, Proven = function(name) return name == ns.me end,
+		RoleOf = function(name) for _, entry in ipairs(w.groupAppointments) do if name == entry.name then return "centurion" end end end,
+		IsCorrespondent = function() return false end }
+	local sns = setmetatable({ Nominees = nominees, ChatRooms = false, Comm = { Handle = function() end, Send = function() return true end } }, { __index = ns })
 	sns.On = function(name, f) w.on[name] = w.on[name] or {}; table.insert(w.on[name], f) end
 	sns.Fire = function(name, ...) told[#told + 1] = name; w.fire(name, ...) end
 	assert(loadfile(h.ADDON_DIR .. "WarSquads.lua"))("Olympus", sns)
@@ -409,7 +415,7 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 		local renders = 0
 		CW.Render = function(...) renders = renders + 1; return real(...) end
 		local ok, err = pcall(function()
-			eq(#s.Leaders(), 2, "the council's two writers lead squads")
+			eq(#s.Leaders(), 2, "the two explicitly appointed writers lead groups")
 			-- The first notice it hears tells (what the squads were it never told), and the census's
 			-- redraw comes DATA_GAP after the last.
 			w.fire("DATA_CHANGED"); w.tick(CW.ERA_MAX + 0.1)
@@ -438,8 +444,8 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 			w.tick(0.2); w.tick(0.2)
 			eq(renders, 1, "the census's own redraw, at DATA_GAP")
 			assert(CW.era ~= era, "in a new era")
-			-- A squad that changed (a leader off the council's list: one squad fewer) is drawn at once,
-			-- in a new era: his name has the council's colour no more.
+			-- A manual appointment ending changes the groups at once. His council seat can also end,
+			-- but is not itself an appointment: the group changes only with its separate list.
 			local function Header(sender)
 				for _, b in ipairs(w.f.bubbles) do
 					if b:IsShown() and b.entry and b.entry.sender == sender and b.header:IsShown() then return b.who:GetText() end
@@ -450,6 +456,8 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 			renders, era = 0, CW.era
 			for k = 1, #told do told[k] = nil end
 			ns.rdb.council.names.writer7 = nil
+			eq(#s.Leaders(), 2, "ending a council seat alone does not end the manual appointment")
+			table.remove(w.groupAppointments, 2)
 			w.fire("DATA_CHANGED")
 			eq(table.concat(told, " "), "SQUADS_CHANGED CHAT_ROOMS_CHANGED", "told")
 			w.tick(0.2)
