@@ -1743,8 +1743,9 @@ publish the request to the board.
 
 ### The Missionary Church of Olympus (1.1.6)
 
-**Guild fullness (1.2.4).** The correspondents' ranking is the guild's proved streak, shown with
-its current Church correspondent, not invitation points. Only completed server UTC days score:
+**Guild fullness (1.2.4).** The correspondents' ranking counts the current correspondent's own
+management of that guild, not invitation points. Every new appointment starts afresh, including
+the same person returning after another correspondent. Only completed server UTC days score:
 all admitted native-roster observations must be **above 950**; any observed 950 or fewer breaks
 the streak. An unobserved or budget-capped day is **unknown**: no point and no erasure of the
 proved streak. Each qualifying day's observations are averaged first, then those daily means
@@ -1758,11 +1759,12 @@ appointments and retrospective correspondent claims cannot establish a day elsew
 Authorized keepers privately relay only retained admitted observations, in requested batches
 of at most 150, rotating through the bounded cache. Contiguous same-count observations are
 coalesced without changing their count or mean. Seven days of relay evidence, 128 guilds and
-20,000 runs at most are retained; older days fold into this client's durable streak checkpoint.
+20,000 runs at most are retained; older days fold into this client's durable checkpoint for
+that exact person and appointment, with at most 32 management checkpoints per guild.
 Checkpoints are never accepted from another client: a fresh client without older evidence keeps
-that history unknown. This is provisionally the **guild's observed history**, inherited when its
-representative changes, not a claim about that person's tenure. No new honour, gold rule or
-public/general-channel feed is added.
+that history unknown. A predecessor's proof, a person's former appointment and an old unscoped
+guild aggregate cannot score the new management. Ordinary presence with an unchanged appointment
+does not reset its own proven streak. No new honour, gold rule or public/general-channel feed is added.
 
 The Church brings new players into Olympus. **Asmongold is its Head**, using the addon's canonical
 King identity. This position cannot be nominated; a legacy signed Head marker grants no Head powers.

@@ -76,7 +76,62 @@ test("Church fullness: only the authenticated current non-census correspondent s
 	NextDay(w); eq(w:As(c.keeper, F.Receive, "WHISPER", c.corr.name, msg), false, "no offline yesterday claims")
 	assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Master", World.GUILD))
 	eq(w:As(c.keeper, F.Receive, "WHISPER", c.corr.name, Wire(w, c, 1000)), false)
-	eq(Row(w, c.keeper).name, "Guild Master-Realm"); eq(Row(w, c.keeper).days, 1, "guild evidence stays with current representative")
+	eq(Row(w, c.keeper).name, "Guild Master-Realm"); eq(Row(w, c.keeper).days, nil, "a new management tenure never inherits the predecessor's evidence")
+end)
+
+test("Church management: A to B and returning A under a new appointment start fresh; unchanged appointment heartbeat preserves its own streak", function()
+	local w, c = Setup(); Observe(w, c, 980); NextDay(w)
+	eq(Row(w, c.corr).days, 1)
+	local original = w:As(c.author, c.author.Church.State).corr[ns.Fold(World.GUILD)].at
+	w:Presence(); w:Flush(); eq(Row(w, c.corr).days, 1, "ordinary presence never changes appointment or streak")
+	eq(w:As(c.author, c.author.Church.State).corr[ns.Fold(World.GUILD)].at, original)
+	assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Master", World.GUILD))
+	eq(Row(w, c.keeper).days, nil, "B has no inherited completed day")
+	Fill(w, c.gm, 990); assert(w:As(c.gm, c.gm.c.ChurchFullness.Observe)); w:Flush(); NextDay(w)
+	eq(Row(w, c.gm).days, 1); eq(Row(w, c.gm).average, 990)
+	w.clock = w.clock + 1; assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Corr", World.GUILD))
+	eq(Row(w, c.corr).days, nil, "returning A receives a new tenure, not A's former or B's streak")
+	Observe(w, c, 960); NextDay(w); eq(Row(w, c.corr).days, 1); eq(Row(w, c.corr).average, 960)
+	NextDay(w); eq(Row(w, c.corr).days, 1); eq(Row(w, c.corr).state, "unknown", "missing day pauses only current management")
+end)
+
+test("Church management: compacted old checkpoint and same-day old low observation cannot bleed into the new manager", function()
+	local w, c = Setup(); Observe(w, c, 975); NextDay(w); Observe(w, c, 985); NextDay(w)
+	w.clock = w.clock + 10 * DAY; eq(Row(w, c.corr).days, 2, "A's compacted proof survives its unknown days")
+	Observe(w, c, 950)
+	w.clock = w.clock + 1; assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Master", World.GUILD))
+	eq(Row(w, c.gm).days, nil, "B inherits neither compacted A points nor A's low observation")
+	eq(Row(w, c.keeper).days, nil, "keeper's old compacted A checkpoint is also excluded")
+	eq(w:As(c.gm, c.gm.c.ChurchFullness.Observe), false, "cached native capture predates B's actual appointment")
+	Fill(w, c.gm, 995); assert(w:As(c.gm, c.gm.c.ChurchFullness.Observe)); w:Flush(); NextDay(w)
+	eq(Row(w, c.gm).days, 1); eq(Row(w, c.gm).average, 995)
+	eq(Row(w, c.keeper).days, 1); eq(Row(w, c.keeper).average, 995, "A's same-day low observation cannot break B's new management")
+	w.clock = w.clock + 10 * DAY; eq(Row(w, c.gm).days, 1, "only B's own checkpoint remains credited")
+	w:As(c.gm, function() assert(loadfile(ROOT .. "Olympus/ChurchFullness.lua"))("Olympus", c.gm.c) end)
+	eq(Row(w, c.gm).days, 1, "reload preserves the exact current tenure")
+	w.clock = w.clock + 1; assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Corr", World.GUILD))
+	eq(Row(w, c.corr).days, nil, "new appointment cannot recover A's former compacted checkpoint")
+end)
+
+test("Church management: an old unscoped checkpoint is preserved but never assigned to a named person's management", function()
+	local w, c = Setup()
+	local old = { days = 50, sum = 49000, known = true, last = math.floor(w.clock / DAY) - 10 }
+	c.corr.c.rdb.churchFullness = { guilds = { [ns.Fold(World.GUILD)] = { name = World.GUILD, days = {}, base = old } }, seq = 0 }
+	eq(Row(w, c.corr).days, nil)
+	local g = c.corr.c.ChurchFullness.Book().guilds[ns.Fold(World.GUILD)]
+	eq(g.unscopedBase, old, "old aggregate retained without inventing a personal appointment")
+	Observe(w, c, 970); NextDay(w); eq(Row(w, c.corr).days, 1); eq(Row(w, c.corr).average, 970)
+end)
+
+test("Church management: private keeper cap and break markers belong only to the original appointment", function()
+	local w, c = Setup(); c.keeper.c.ChurchFullness.DAY_MAX = 1
+	Observe(w, c, 1000); w.clock = w.clock + 1; Observe(w, c, 950)
+	w.clock = w.clock + 1; assert(w:Act(c.author, c.author.Church.NameCorrespondent, "Guild Master", World.GUILD))
+	c.keeper.c.ChurchFullness.DAY_MAX = 4096
+	Fill(w, c.gm, 995); assert(w:As(c.gm, c.gm.c.ChurchFullness.Observe)); w:Flush(); NextDay(w)
+	w:Presence(); w:Flush(); assert(w:As(c.author, c.author.c.ChurchFullness.Ask)); w:Flush()
+	local row = Row(w, c.author); eq(row.name, "Guild Master-Realm"); eq(row.days, 1); eq(row.average, 995)
+	eq(row.state, "full", "A's admitted capped low-day marker cannot break or pause B's management")
 end)
 
 test("Church fullness: bounded solicited keeper relay survives reload and never accepts unsolicited or non-keeper historical claims", function()
