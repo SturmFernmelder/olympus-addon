@@ -37,8 +37,10 @@ Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
 Locales\DuesGraceText.lua
+Locales\DuesRosterText.lua
 Locales\JusticeResponseText.lua
 Locales\CarryText.lua
+Locales\CarryMergerText.lua
 Locales\CampaignText.lua
 Locales\GuildFinanceText.lua
 Locales\PerfText.lua
@@ -140,7 +142,9 @@ ArenaNet.lua
 ArenaRoles.lua
 ArenaMoney.lua
 Debts.lua
+DuesRosterCheckpoints.lua
 CarryHistory.lua
+CarryMerger.lua
 Records.lua
 Wallet.lua
 Stakes.lua

@@ -441,6 +441,28 @@ test("guild departments: each correspondent sees their own panel with inert prev
 	end)
 end)
 
+test("guild reset sharing UI: only the actual guild master sees the opt-in, never a preview or correspondent", function()
+	World(function(w, c)
+		local called, marker = 0, "reset-sharing-control"
+		c.DuesRosterCheckpoints = { GuildLines = function(lines)
+			called = called + 1
+			lines[#lines + 1] = { text = marker, onClick = function() end }
+		end }
+		w.rank, c.me = 0, "Guildmaster-Realm"
+		local found = false
+		for _, row in ipairs(c.Nominees.GuildLines()) do if row.text == marker then found = true end end
+		eq(called, 1); eq(found, true, "the real Guild page exposes the guarded opt-in")
+		c.ViewAs = { Available = function() return true end, Role = function() return "gm" end, Previewing = function() return true end }
+		for _, row in ipairs(c.Nominees.GuildLines()) do eq(row.onClick, nil, "all preview controls remain inert") end
+		eq(called, 1, "a preview does not even expose this real consent flow")
+		c.ViewAs = { Available = function() return false end }
+		w.rank, c.me = 3, "Envoy-Realm"
+		w.name("Federal Treasury")
+		eq(c.Nominees.GuildAccess(), true, "an actual correspondent still has their existing page")
+		c.Nominees.GuildLines(); eq(called, 1, "the correspondent cannot opt in for their guild master")
+	end)
+end)
+
 test("guild departments: guild master uses Artisanry throughout and canonical nominations preserve legacy lookup", function()
 	World(function(w, c)
 		local N = c.Nominees

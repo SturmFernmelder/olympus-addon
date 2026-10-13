@@ -2,8 +2,9 @@
 
 This is a bounded, opt-in archive for the **same character** moving manually between
 Olympus sister guilds. Older quotes remain unverified. A separate XC2 path preserves
-original signatures after independent first-hand key confirmation. It does not certify
-historical office or implement named merger inheritance. No row enters Loot, Court,
+original signatures after independent first-hand key confirmation. The separate XC3 named
+merger route is described below; neither route certifies an old office merely from a current
+title. No row enters Loot, Court,
 pardons, Dues, ranks, keys or another authoritative ledger; no invitation, kick,
 punishment or payment action is performed.
 
@@ -77,11 +78,29 @@ keys remain visible in the archive with a direct-key confirmation action. A fres
 does not upgrade an old quote to original authorship. Scope/current-reader consent is
 rechecked after cryptographic work and before sending.
 
-Named merger inheritance still needs a frozen three-party mandate from the actual King,
-source GM and destination GM while the source guild exists. The human approved those
-three confirmations; current-role claims after dissolution cannot prove old GM authority.
-No implicit alt inheritance, lost-record reconstruction, payment status, pardon status,
-points recalculation or native guild action is supplied by either archive route.
+## Named guild merger: a separate frozen archive
+
+Before the source guild folds, its actual current native GM opens `/oly carry merger prepare
+<exact heir guild master-Realm>`. The actual King, the source GM and that exact current heir
+GM each review and sign the same frozen record index (OLYCM1), source/destination guilds and
+private reader. This requires current signed role material and firsthand native character/key
+binding. A census claim or a key forwarded in a packet cannot establish authority. The King
+must be the pinned actual King of the connected realm group, not someone whose title looks
+similar. `/oly carry` displays the mandate, three approvals and per-character progress.
+
+Each subject separately consents to that exact source/destination archive. The subject receives
+no private Loot; keepers send only retained records included in the frozen index to the exact
+approving heir GM. Per-record hashes, original signatures and dates are retained. An older
+unsigned note stays a visibly labelled present-day witness declaration, never a signature
+impersonating its alleged author. The approving heir GM can resume stored partial progress
+after reload; a retry retains the same root, subject consent and reader scope. A replacement
+master receives no inherited permission. Revocation cancels queued work and hides received
+records when delivered, with durable replay floors.
+
+After the source folds, its source keeper must still manually remain/join Olympus to use the
+ordinary private transport; no outsider exception is added. The historical mandate proves only
+what was approved before dissolution. It imports no office, key, active pardon, payment status
+or points and reconstructs no lost record. Alts and moderator material are still excluded.
 
 ## Validation and remaining live checks
 
@@ -100,6 +119,12 @@ signing and native GUID binding, source-event captures, 12-record archives large
 crypto, private staff-only Loot and consent-only members. A regression against the
 pre-fix Carry source proves that a retained private Loot note could previously enter
 the member's quote export; the new path refuses that leak.
+
+`OLYMPUS_TEST_FILTER='carry-merger:' luajit tests/run.lua` exercises the actual mandate,
+original Ed25519 declarations and signed role proofs, native identity binding, private Comm
+sanitization, frozen index and hashes, each subject's separate consent, pages/ACK/retry, saved
+progress, cancellation, scope changes and admission after a source guild folds. Mutation
+regressions cover stale native GM rank, historical source admission and missing resume action.
 
 Run the consolidated `bash scripts/check.sh` after integration. The gamepad session pass
 loads the TOC and exercises all Olympus dialog definitions through existing dialog flows;
@@ -125,6 +150,12 @@ Still needed in the real Forever client, with two players and retained source re
    Check what happens with an offline master; no guaranteed delivery is claimed.
 6. Reload each client, switch guild/role, and use mouse/gamepad input modes. The saved
    copy keeps the same private reader boundary and both consent windows fit/read well.
+7. For an intentionally arranged merger, prepare before the source folds. Cancel any one of
+   the three approvals: nothing may be inherited. Compare the frozen index on all approvers,
+   then approve all three. Cancel one subject's consent: that person's records must not arrive.
+   Transfer another consenting subject, reload halfway and resume. Compare timestamps,
+   signatures and witness labels, then revoke. An excluded member, alt, successor GM or
+   outsider must see no private Loot or inherited records. No guild, status or ledger changes.
 
 No Windows install, live multiplayer acceptance, publication or release is implied by
 offline checks or this implementation.

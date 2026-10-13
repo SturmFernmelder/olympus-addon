@@ -92,16 +92,32 @@ tickets stay disabled.
   purchases note. The jar moves no money and grants no rank, payment exemption or privilege.
 - The pinned primary Treasurer's private recorded-week history preserves a first covered
   week without a sufficient native receipt; a second may privately notify the player, then the
-  current native guild master. Unknown coverage pauses the local run. This initial negative
-  coverage is for the Treasurer's own guild with contemporaneous native membership checkpoints;
-  it does not infer sister-guild membership or nonpayment from an absent receipt. No sanction,
-  feature restriction or automatic native action follows.
+  current verified guild master. Unknown coverage pauses the local run. Own-guild membership
+  uses native reset checkpoints. A sister guild's actual native master can explicitly opt in,
+  off by default for 31 days, to privately share complete signed reset checkpoints with the
+  federal Treasurer. Full membership and confirmed alt groups at both boundaries, the amount
+  captured at the real reset, and the original verified role/key proofs are required. Nothing
+  goes to public OlympusNet. Turning sharing off withdraws retained coverage; a changed or
+  revoked master, an absent boundary, unknown key or capped source remains unknown. A census
+  claim is never negative coverage.
+  Book coverage separately requires the pinned actors' own complete native proof tracker,
+  started before the week; an old opening date or a generic restored/remote ledger is not proof
+  of missing receipts. Positive receipts remain lower bounds. This does not promise complete
+  federation-wide coverage, infer nonpayment or impose a sanction, restriction or native action.
 - `/oly carry` retains the older unverified quote route and adds a separate, paginated original
   signature archive for the same character moving manually between sister guilds. Both sides
   explicitly consent. Unknown original keys require direct confirmation; a forwarded key does
   not become trusted. Private Loot passes between consenting guild masters, never through the
   member. Moderator records remain excluded. No archive applies payment, pardon, office or
   key authority. See [history carry](history-carry.md).
+- A named guild merger adds a separate frozen archive mandate: the actual King, source guild
+  master and exact heir guild master each approve the same record index before the source
+  folds. Each subject separately consents; private Loot passes only between keepers and only
+  to that approving heir GM. Retained per-record hashes and original signatures remain
+  inspectable, including original dates and explicitly labelled present-day witnesses. A
+  reload can resume an already-consented partial archive. This does not invite anyone or
+  transfer offices, keys, payments, points, active pardons or moderator records. A successor
+  master or alt inherits no permission. Both staff clients still need ordinary Olympus access.
 
 ## Open limitations and acceptance gates
 
@@ -131,10 +147,12 @@ tickets stay disabled.
   the current anti-farming path. The reported two-account farming scenario remains a live check.
 - History carry cannot certify an old office merely from a current title or reconstruct lost
   records. New original pardon declarations preserve their declared original deadline without
-  applying a pardon at the destination. Named guild-merger inheritance requires a separate
-  historical three-party mandate; it is not activated by an unsigned present-day consent.
-  Withdrawal to an offline master still depends on subsequent delivery. Cross-guild negative
-  dues coverage requires source-native membership checkpoints, not a census guess.
+  applying a pardon at the destination. Named guild-merger inheritance uses the separate
+  historical three-party mandate above; unsigned present-day consent cannot reconstruct one.
+  Alt inheritance and staff moderator-history transport remain excluded. Withdrawal to an
+  offline master still depends on subsequent delivery. Cross-guild negative dues coverage
+  requires complete source-native checkpoints and original native book continuity, not a
+  census guess. Missing evidence remains unknown.
 - Church correspondent streaks count completed UTC days with observed membership strictly above
   950 during that exact person's appointment. Each new management starts with no inherited days;
   a same-appointment heartbeat does not reset it. Unknown/capped days pause, observed days at or

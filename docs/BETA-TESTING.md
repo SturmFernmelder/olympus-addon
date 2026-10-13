@@ -305,6 +305,14 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
    entered line or an old current roster must not create historical confirmation or a miss.
    Changing confirmed alt links, duplicate pinned books and malformed saved rows must not
    create a false notice. Other guilds are not negatively judged through census-only coverage.
+   For a sister guild, its actual current signed native GM explicitly enables reset sharing
+   on their guild page; default off, 31-day expiry. Compare complete native membership/confirmed
+   alt groups near both real resets and the amount captured then by the primary Treasurer.
+   The private checkpoint must reach only the federal Treasurer. Test withheld sharing,
+   missing original keys, a changed/demoted GM, partial roster, cap, conflict, reload, retry and
+   withdrawal: these must yield unknown, not a missed-payment notice. An old book opening or
+   a generic restored/remote book cannot provide negative native receipt coverage. Individual
+   received proofs remain positive lower bounds; no public list or automatic native action.
 2. As authorized staff, inspect affiliated Treasury snapshots, let the sharer go offline and
    reload. Retained gold/items show their observation age; absent data stays unknown. Check an
    unauthorized client cannot read restricted details. Public numeric summaries must not

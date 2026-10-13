@@ -1155,6 +1155,9 @@ function Nominees.GuildLines()
 	local dept = not preview and Nominees.OwnDepartment() or nil
 	local lines = { Line(L.GUILD_TAB_TITLE:format(tostring(guild)), TITLE, { gapAfter = true }) }
 	if master then Nominees.PageLines(lines) end
+	-- Sharing a complete reset observation is the actual guild master's own opt-in,
+	-- never a preview or a correspondent's power. The helper rechecks again on click.
+	if not preview and master and ns.DuesRosterCheckpoints then ns.DuesRosterCheckpoints.GuildLines(lines) end
 	Para(lines, L.GUILD_DEPARTMENT_SCOPE:format(tostring(guild)), INK, { gapAfter = true })
 	local routes = { ["Federal Treasury"] = "treasury", ["Department of War"] = "war", ["Council of Justice"] = "watch",
 		["Association of Artisanry"] = "crafters", ["Department of Heraldry"] = "decrees", ["The Missionary Church of Olympus"] = "church" }
