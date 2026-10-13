@@ -1,4 +1,5 @@
-local ns, test, eq, WithWindow = ...
+local ns, test, eq, WithWindow, WithGamepadUI = ...
+local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]chat%-role%-window%.lua$") or "./"
 
 test("watch chat context menu: actions are opt-in and recheck permission and target", function()
 	WithWindow(function(w)
@@ -191,5 +192,434 @@ test("chat: an ordinary member right-clicks another player's Olympus line, its w
 		C.History = saved.history
 		rawset(ns, "Watch", saved.watch); rawset(ns, "WatchChat", saved.wc)
 		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4, the author ("mandar mensagem como desenvolvedor"): "The Royal Dev" after his name on each
+-- of his lines of the Chat tab, a tag (no mark before a name since 1.1.5); nobody else's.
+test("Chat tab (1.2.4): the author's lines carry The Royal Dev after his name, nobody else's", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = { history = C.History, borders = ns.Borders }
+		local dev, other = "Quill Wright-Realm", "Plain Writer-Realm"
+		C.History = function(t)
+			if t ~= "A" then return {} end
+			return { { t = 100, sender = dev, guild = "Olympus II", text = "a word from the dev" },
+				{ t = 400, sender = other, guild = "Olympus II", text = "thanks" } }
+		end
+		ns.Borders = setmetatable({ IsDevName = function(name) return ns.FullName(name) == dev end }, { __index = saved.borders })
+		local ok, err = pcall(function()
+			local f = w.CW.Open("A")
+			local heads = {}
+			for _, b in ipairs(f.bubbles) do
+				if b:IsShown() and b.entry and b.header:IsShown() then heads[b.entry.sender] = b.who:GetText() end
+			end
+			assert(heads[dev] and heads[dev]:find("The Royal Dev", 1, true), tostring(heads[dev]))
+			assert(heads[dev]:find("Quill Wright", 1, true) < heads[dev]:find("The Royal Dev", 1, true), "after his name")
+			assert(heads[other] and not heads[other]:find("The Royal Dev", 1, true), tostring(heads[other]))
+			eq(ns.L.CHATWIN_TAG_DEV, "The Royal Dev")
+		end)
+		C.History, ns.Borders = saved.history, saved.borders
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4 (the author: "para mim, que estou em 200 rows, ou para quem está no rankals, que também tem
+-- um monte, pode não ficar atualizando o tempo todo, talvez. Tem uma atualização mais lenta, de 1
+-- minuto em 1 minuto"): a line in a room not shown is only counted; the destinations' rooms are
+-- listed again when the tab opens, and else at most once a minute (never at the census's redraw);
+-- the room shown stays live.
+test("Chat tab (1.2.4): a line in a room not shown is only counted, no redraw; the rooms are listed at the opening and at most once a minute after; the room shown stays live", function()
+	WithWindow(function(w)
+		local council, savedTime = ns.IsHighCouncillor, GetTime
+		local real = w.CW.Render
+		local clock = 1000
+		local ok, err = pcall(function()
+			GetTime = function() return clock end
+			ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+			ns.db.chatRooms = true
+			local renders = 0
+			w.CW.Render = function(...) renders = renders + 1; return real(...) end
+			local f = w.CW.Open("A")
+			local function Tick(s) clock = clock + s; f:Fire("OnUpdate", s) end
+			local function Roles()
+				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then return b end end
+			end
+			Tick(0.3)
+			local builds = w.CW.navBuilds
+			renders = 0
+			for i = 1, 20 do w.fire("CHAT_ROOM_LINE", "council", "Peer-Realm", "line " .. i); Tick(0.3) end
+			eq(renders, 0, "twenty lines in a room not shown: no redraw")
+			eq(w.CW.navBuilds, builds, "nor a listing of the rooms")
+			-- The census's notices redraw the tab (DATA_GAP) and list no room.
+			for _ = 1, 10 do w.fire("DATA_CHANGED"); Tick(5.1) end
+			assert(renders > 0, "the census's redraws")
+			eq(w.CW.navBuilds, builds, "the census's redraws list no room")
+			assert(Roles().label:GetText():find("(20)", 1, true), "the count drawn at a redraw: " .. Roles().label:GetText())
+			Tick(w.CW.NAV_EVERY - 51 + 0.3)
+			eq(w.CW.navBuilds, builds + 1, "listed again once the minute went by")
+			Tick(30); eq(w.CW.navBuilds, builds + 1, "not before the next minute")
+			-- The room shown is live.
+			assert(w.CW.SelectLogical("council"))
+			renders = 0
+			w.fire("CHAT_ROOM_LINE", "council", "Peer-Realm", "in the room shown")
+			Tick(0.3)
+			eq(renders, 1, "a line in the room shown: drawn at the next look")
+			-- Opening the tab lists them at once.
+			builds = w.CW.navBuilds
+			w.CW.Window():Hide()
+			w.CW.Open("A")
+			eq(w.CW.navBuilds, builds + 1, "listed at the opening")
+		end)
+		w.CW.Render, GetTime, ns.IsHighCouncillor = real, savedTime, council
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4: the Roles list had ten rows, made with the tab, and every option wrote to one: an eleventh
+-- room stopped it from opening (the King's preview already filled the ten; the author's own view,
+-- in every room but the High Council's, has dozens). Any number of rooms now: a long list folds
+-- each group into one row whose click opens its own list beside it, a list still longer pages, and
+-- every room is a click or a few away, with the mouse and with the gamepad UI (the cursor clicks
+-- Olympus's own buttons; no game menu, no key).
+local function AuthorsRoles(w, gamepad)
+	local saved = { isAuthor = ns.Workshop.IsAuthorName, approved = ns.ApprovedGuilds, guilds = ns.rdb.guilds }
+	local ok, err = pcall(function()
+		local R = ns.ChatRooms
+		ns.db.chatRooms = true
+		ns.Workshop.IsAuthorName = function(name) return ns.FullName(name) == ns.me end
+		ns.ApprovedGuilds = function() return {} end
+		ns.rdb.guilds = {}
+		local base = #R.Options("role")
+		local k = 0
+		while base + 2 * k < 34 do
+			k = k + 1
+			ns.rdb.guilds[("Olympus Guild %02d"):format(k)] = { t = 1 }
+		end
+		local options = R.Options("role")
+		assert(#options >= 34, "the author's rooms: " .. #options)
+		local f = w.CW.Open("A")
+		local function Roles()
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then return b end end
+		end
+		local function Rows(menu)
+			local out = {}
+			for _, r in ipairs(menu.rows) do if r:IsShown() then out[#out + 1] = r end end
+			return out
+		end
+		local function Labels(menu)
+			local out = {}
+			for _, r in ipairs(Rows(menu)) do out[#out + 1] = r.text:GetText() end
+			return table.concat(out, " | ")
+		end
+		assert(Roles(), "Roles"):Click()
+		eq(f.subMenu:IsShown(), true, "the list opens")
+		local top = Rows(f.subMenu)
+		assert(#top <= 10, "ten rows at most: " .. Labels(f.subMenu))
+		eq(top[1].roomId, "masters"); eq(top[2].roomId, "allcenturions")
+		assert(top[3].text:GetText():find("^Departments %(6%) >"), top[3].text:GetText())
+		local groups = 0
+		for _, r in ipairs(top) do if r.groupItem then groups = groups + 1 end end
+		assert(groups >= 3, "the departments' and each kind of guild room folded: " .. Labels(f.subMenu))
+		-- A group's own list: beside the first, paged past ten; a census redraw leaves both open.
+		local cent
+		for _, r in ipairs(top) do if r.groupItem and r.groupItem.group == "gcent" then cent = r end end
+		assert(cent, "the guilds' masters and centurions: " .. Labels(f.subMenu))
+		cent:Click()
+		eq(f.subMenu:IsShown(), true); eq(f.subMenu2:IsShown(), true, "its own list")
+		local rows = Rows(f.subMenu2)
+		eq(#rows, 9, "eight rooms and More"); assert(rows[9].text:GetText():find("^More %(%d+%)"), rows[9].text:GetText())
+		-- Beside the first list, on its left where the tab has the room, and inside the tab always.
+		local child, menu = f.subMenu2, f.subMenu
+		assert(child:GetLeft() >= f:GetLeft() and child:GetRight() <= f:GetRight(), "inside the tab")
+		assert(child:GetRight() <= menu:GetLeft() - 2 or child:GetLeft() == f:GetLeft() + 12,
+			("on the first list's left, or at the tab's left edge: %s-%s, %s-%s"):format(child:GetLeft(), child:GetRight(), menu:GetLeft(), menu:GetRight()))
+		w.fire("DATA_CHANGED"); w.CW.Render()
+		eq(f.subMenu2:IsShown(), true, "a census redraw keeps it"); eq(f.subMenu:IsShown(), true)
+		rows[9]:Click()
+		rows = Rows(f.subMenu2)
+		eq(rows[1].text:GetText(), "Previous"); eq(f.subMenu:IsShown(), true)
+		rows[1]:Click(); eq(#Rows(f.subMenu2), 9, "back to the first page")
+		f.subCatcher:Click()
+		eq(f.subMenu:IsShown(), false); eq(f.subMenu2:IsShown(), false, "a click outside closes both")
+		-- Every room reached by clicks alone: the list, a group's list, its pages.
+		local function Reach(id)
+			Roles():Click()
+			local function Pick(menu)
+				for _ = 1, 20 do
+					local more
+					for _, r in ipairs(Rows(menu)) do
+						if r.roomId == id then r:Click() return true end
+						if r.pageTo and r.text:GetText():find("^More") then more = r end
+					end
+					if not more then return false end
+					more:Click()
+				end
+				return false
+			end
+			if Pick(f.subMenu) then return true end
+			for i = 1, 20 do
+				local parents = {}
+				for _, r in ipairs(Rows(f.subMenu)) do if r.groupItem then parents[#parents + 1] = r end end
+				for _, r in ipairs(parents) do
+					r:Click()
+					if Pick(f.subMenu2) then return true end
+				end
+				local more
+				for _, r in ipairs(Rows(f.subMenu)) do if r.pageTo and r.text:GetText():find("^More") then more = r end end
+				if not more then return false end
+				more:Click()
+			end
+			return false
+		end
+		for _, option in ipairs(options) do
+			assert(Reach(option.id), (gamepad and "gamepad: " or "") .. "reached: " .. option.id)
+			eq(f.subMenu:IsShown(), false, option.id); eq(f.subMenu2:IsShown(), false, option.id .. ": both lists close")
+			eq(w.CW.Tier(), option.id, option.id)
+		end
+	end)
+	ns.Workshop.IsAuthorName, ns.ApprovedGuilds, ns.rdb.guilds = saved.isAuthor, saved.approved, saved.guilds
+	if not ok then error(err, 0) end
+end
+
+test("Chat tab (1.2.4): thirty-four rooms in the Roles list (the author's): grouped and paged, each room a click or a few away, both lists closing", function()
+	WithWindow(function(w) AuthorsRoles(w, false) end)
+end)
+
+test("Chat tab (1.2.4): thirty-four rooms in the Roles list with the gamepad UI: the same lists, Olympus's own buttons, every room reached", function()
+	WithGamepadUI(true, function()
+		WithWindow(function(w) AuthorsRoles(w, true) end)
+	end)
+end)
+
+-- A list of ten or fewer stays as it was: one row an option, in order.
+test("Chat tab (1.2.4): ten rooms or fewer show as they come, without groups or pages", function()
+	WithWindow(function(w)
+		local R = ns.ChatRooms
+		local saved = R.Options
+		local ok, err = pcall(function()
+			local list = {}
+			for i = 1, 10 do list[i] = { id = "dept:war", label = "Room " .. i, group = "dept", groupLabel = "Departments" } end
+			R.Options = function(kind) if kind == "role" then return list end return saved(kind) end
+			ns.db.chatRooms = true
+			local f = w.CW.Open("A")
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then b:Click() end end
+			eq(f.subMenu:IsShown(), true)
+			for i = 1, 10 do eq(f.subMenu.rows[i].text:GetText(), "Room " .. i); eq(f.subMenu.rows[i].groupItem, nil) end
+			f.subCatcher:Click()
+			list[11] = { id = "council", label = "Room 11" }
+			for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == "role" then b:Click() end end
+			eq(f.subMenu.rows[1].text:GetText(), "Departments (10) >"); eq(f.subMenu.rows[2].text:GetText(), "Room 11")
+			eq(f.subMenu.rows[3]:IsShown(), false)
+		end)
+		R.Options = saved
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4: until the author's signed leadership list counts, a room reaching other guilds (a
+-- department's, the masters') says over its lines that it reaches this guild and the signed people
+-- alone (ChatRooms.StatusText); the High Council's says nothing.
+test("Chat tab (1.2.4): a department's room says over its lines that other guilds wait for the signed leadership list; the High Council's does not", function()
+	WithWindow(function(w)
+		local saved = { council = ns.IsHighCouncillor, title = ns.CouncilTitle, enforced = ns.Authority.Enforced }
+		local ok, err = pcall(function()
+			ns.IsHighCouncillor = function(name) return name == nil or name == ns.me end
+			ns.CouncilTitle = function(name) if name == nil or name == ns.me then return { dept = "Department of War" } end end
+			ns.Authority.Enforced = function() return false end
+			ns.db.chatRooms = true
+			local f = w.CW.Open("A")
+			assert(w.CW.SelectLogical("dept:war"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), true)
+			assert(f.topicStatus.text:GetText():find(ns.L.CHATROOM_NEEDS_LEADERS, 1, true), tostring(f.topicStatus.text:GetText()))
+			assert(w.CW.SelectLogical("council"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), false, "the High Council's: signed people alone")
+			ns.Authority.Enforced = function() return true end
+			assert(w.CW.SelectLogical("dept:war"))
+			w.CW.Render()
+			eq(f.topicStatus:IsShown(), false, "once it counts")
+		end)
+		ns.IsHighCouncillor, ns.CouncilTitle, ns.Authority.Enforced = saved.council, saved.title, saved.enforced
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4 (the author, in the Church's room: "Eu dou Enter para enviar a mensagem na igreja e não
+-- aparece a mensagem. No histórico, não aparece nada e não me avisa por que não foi"): the real
+-- Chat page over the real rooms (ChatRooms.lua loaded fresh for the page, its events the page's),
+-- with the Church's room registered as Church.lua registers it, its audience and its members
+-- online stood in for, and a send queue whose whispers leave when the test says.
+local function WithChurchRoom(w, fn)
+	local saved = { rooms = ns.ChatRooms, getTime = GetTime, guildInfo = GetGuildInfo }
+	local room = { clock = 5000, audience = {}, online = {}, jobs = {} }
+	local ok, err = pcall(function()
+		GetTime = function() return room.clock end
+		ns.db.chatRooms = true
+		room.audience[ns.me:lower()] = true
+		for i = 1, 3 do
+			local name = "Brother " .. string.char(96 + i) .. "-Realm"
+			room.audience[name:lower()], room.online[#room.online + 1] = true, name
+		end
+		local rns = setmetatable({}, { __index = ns })
+		rns.On, rns.RegisterEvent = function() end, function() end
+		rns.Fire = function(name, ...) w.fire(name, ...) end
+		rns.Consent = { Register = function() end, Ask = function() end }
+		rns.Comm = setmetatable({
+			Handle = function() end,
+			QueueRoom = function() return 60 end,
+			Whisper = function(target, msg, _, _, logged, done, options)
+				room.jobs[#room.jobs + 1] = { target = target, msg = msg, logged = logged, done = done, options = options }
+				return true
+			end,
+		}, { __index = ns.Comm })
+		assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", rns)
+		local R = rns.ChatRooms
+		R.Reset()
+		assert(R.RegisterAudience("church", { label = function() return ns.L.CHURCH_ROOM end,
+			CanAccess = function(name) return room.audience[ns.FullName(name or ns.me):lower()] == true end,
+			Recipients = function() return room.online, room.left end }))
+		ns.ChatRooms = R
+		room.R = R
+		-- A queued whisper's last check, then its send: as Comm does when its turn comes.
+		function room.Finish(job)
+			local o = job.options
+			local permitted, why = o.permit(o.owner, o.key, "WHISPER", job.target, job.msg)
+			job.done(permitted, why)
+			return permitted, why
+		end
+		function room.Shown(list)
+			local out = {}
+			for _, x in ipairs(list) do if x:IsShown() then out[#out + 1] = x end end
+			return out
+		end
+		function room.RowWith(f, text)
+			for _, r in ipairs(room.Shown(f.rows)) do if (r.text:GetText() or ""):find(text, 1, true) then return r end end
+		end
+		function room.BubbleWith(f, text)
+			for _, b in ipairs(room.Shown(f.bubbles)) do if (b.body:GetText() or ""):find(text, 1, true) then return b end end
+		end
+		fn(room, R)
+	end)
+	ns.ChatRooms, GetTime, GetGuildInfo = saved.rooms, saved.getTime, saved.guildInfo
+	if not ok then error(err, 0) end
+end
+
+test("Chat tab (1.2.4): a line written in the Church's room shows at once, marked sending, and a line that cannot go says why in the room", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L, jobs = ns.L, room.jobs
+			local RowWith, BubbleWith = room.RowWith, room.BubbleWith
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true, "the Church's room, his own")
+			f.input:SetText("hello brothers")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "", "the box empties")
+			eq(#jobs, 3, "one logged whisper to each of the room's members online")
+			for _, job in ipairs(jobs) do eq(job.logged, true); eq(room.audience[job.target:lower()], true, job.target) end
+			local b = BubbleWith(f, "hello brothers")
+			assert(b, "his line shows at Enter")
+			assert(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), "marked as sending: " .. b.body:GetText())
+			room.Finish(jobs[1]); room.Finish(jobs[2])
+			w.CW.Render()
+			assert(BubbleWith(f, L.CHATWIN_SENDING), "still sending while a whisper waits")
+			room.Finish(jobs[3])
+			w.CW.Render()
+			b = BubbleWith(f, "hello brothers")
+			assert(b, "still shown once sent")
+			eq(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), nil, "no longer marked once every whisper left")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format("")), nil, "no note")
+
+			-- Enter again at once: too fast, told in the room, the words kept in the box.
+			f.input:SetText("again")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "again", "kept in the box")
+			eq(#jobs, 3, "nothing sent")
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_FAST)), "the reason, in the room")
+			eq(RowWith(f, L.CHATWIN_PUT_BACK), nil, "no put-back: the words never left the box")
+
+			-- Nobody else of the room online: told so; one note, the latest refusal's.
+			room.clock = room.clock + 2
+			for i = #room.online, 1, -1 do room.online[i] = nil end
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), "again"); eq(#jobs, 3)
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_ALONE)), "nobody else online, said in the room")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_FAST)), nil, "the older refusal's note gone")
+			eq(BubbleWith(f, "again"), nil, "not shown as said")
+
+			-- The game has not said his guild yet (a loading screen): told so.
+			room.online[1] = "Brother a-Realm"
+			local guildInfo = GetGuildInfo
+			GetGuildInfo = function() return nil end
+			f.input:Fire("OnEnterPressed")
+			GetGuildInfo = guildInfo
+			w.CW.Render()
+			assert(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_GUILD)), "no guild yet, said in the room")
+
+			-- Sent again: the line shows, the refusal's note goes.
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), ""); eq(#jobs, 4)
+			assert(BubbleWith(f, "again"), "shown at Enter")
+			eq(RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_GUILD)), nil, "the note gone with a line sent")
+		end)
+	end)
+end)
+
+-- 1.2.4: a role room's line every whisper of which failed after it showed: it leaves the room, and
+-- the room's note names the reason (here the audience changed while it waited), its words to put
+-- back in the box.
+test("Chat tab (1.2.4): a role room's line none of whose whispers left goes from the room, and its note says why and puts it back", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L, jobs = ns.L, room.jobs
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			f.input:SetText("lost on the way")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			assert(room.BubbleWith(f, "lost on the way"), "shown at Enter")
+			eq(#jobs, 3)
+			for k in pairs(room.audience) do if k ~= ns.me:lower() then room.audience[k] = nil end end
+			for _, job in ipairs(jobs) do eq((room.Finish(job)), false, "the permit refuses " .. job.target) end
+			w.CW.Render()
+			eq(room.BubbleWith(f, "lost on the way"), nil, "gone: it reached nobody")
+			local note = room.RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_REVOKED))
+			assert(note, "the reason, in the room")
+			assert(room.RowWith(f, L.CHATWIN_PUT_BACK), "its words can go back in the box")
+			note:Click()
+			eq(f.input:GetText(), "lost on the way")
+		end)
+	end)
+end)
+
+-- 1.2.4: a role room's line goes to its share of the members online at most (ChatRooms.FANOUT, the
+-- Church's rooms 30): how many it missed is said in the room, under the line, and not only in the
+-- game's chat frame under the Olympus window (the silent send's lesson); the next line takes it away.
+test("Chat tab (1.2.4): a line that went to its room's share of members says in the room how many it missed", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room, R)
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			room.left = 4
+			f.input:SetText("to the brothers")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), ""); eq(#room.jobs, 3)
+			local said = R.NotReachedText("church", 4)
+			eq(said, ns.L.CHATROOM_NOT_REACHED:format(4, R.FANOUT))
+			assert(room.RowWith(f, said), "said in the room")
+			eq(room.RowWith(f, ns.L.CHATWIN_PUT_BACK), nil, "it went: nothing to put back")
+			room.left, room.clock = nil, room.clock + 2
+			f.input:SetText("to all of them")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(#room.jobs, 6)
+			eq(room.RowWith(f, said), nil, "the next line takes it away")
+		end)
 	end)
 end)

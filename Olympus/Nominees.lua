@@ -54,8 +54,26 @@ local L = ns.L
 local Nominees = {}
 ns.Nominees = Nominees
 
+-- The High Council's departments (the author's names, 1.1.5): the correspondents' roles, one each
+-- per guild, and (1.2.4) the Chat page's department rooms (ChatRooms.lua builds them from this list:
+-- each one's room id, the names the signed titles list has given it, and its label's locale key, in
+-- English until translated). A department added here is one line: its correspondents, its room
+-- and its place on the guild master's page follow. (ns.DEPARTMENT_LIST is the same list: a test's
+-- stand-in for this file keeps ChatRooms.lua's rooms.)
+Nominees.DEPARTMENT_LIST = {
+	{ name = "Federal Treasury", room = "dept:treasury", aliases = { "federal treasury", "treasury" }, label = "CHATROOM_DEPT_TREASURY" },
+	{ name = "Department of War", room = "dept:war", aliases = { "department of war", "war" }, label = "CHATROOM_DEPT_WAR" },
+	{ name = "Council of Justice", room = "dept:justice", aliases = { "council of justice", "justice" }, label = "CHATROOM_DEPT_JUSTICE" },
+	{ name = "Association of Artisanry", room = "dept:citizenry", aliases = { "association of artisanry", "association of citizenry", "artisanship" }, label = "CHATROOM_DEPT_ARTISANRY" },
+	{ name = "Department of Heritage", room = "dept:heritage", aliases = { "department of heritage", "heritage", "heraldry", "outreach" }, label = "CHATROOM_DEPT_HERITAGE" },
+	{ name = "The Missionary Church of Olympus", room = "dept:church", aliases = { "the missionary church of olympus" }, label = "CHATROOM_DEPT_CHURCH" },
+}
+ns.DEPARTMENT_LIST = Nominees.DEPARTMENT_LIST
+Nominees.DEPARTMENTS = {}
+for i, d in ipairs(Nominees.DEPARTMENT_LIST) do Nominees.DEPARTMENTS[i] = d.name end
+
 Nominees.MAX_CENTURIONS = 10
-Nominees.MAX_DEPTS = 6
+Nominees.MAX_DEPTS = #Nominees.DEPARTMENTS
 Nominees.MAX = Nominees.MAX_CENTURIONS + Nominees.MAX_DEPTS
 Nominees.EVERY = 300          -- his client repeats the list for late logins
 Nominees.FRESH = 6 * 60 * 60  -- a list he stopped repeating (he logged off) counts this long after
@@ -138,10 +156,8 @@ local function DeptName(s)
 	return s
 end
 
--- The High Council's six departments (the author's names, 1.1.5): the correspondents' roles, one
--- each per guild. (The signed titles list names only the departments that have councillors.)
-Nominees.DEPARTMENTS = { "Federal Treasury", "Department of War", "Council of Justice", "Association of Artisanry",
-	"Department of Heritage", "The Missionary Church of Olympus" }
+-- (Nominees.DEPARTMENTS, the departments' names, comes from Nominees.DEPARTMENT_LIST above. The
+-- signed titles list names only the departments that have councillors.)
 Nominees.SHIPPED_DEPARTMENTS = Nominees.DEPARTMENTS
 function Nominees.Departments()
 	local out = {}

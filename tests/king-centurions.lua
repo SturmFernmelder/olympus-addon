@@ -159,26 +159,26 @@ test("1.2.4 King's centurions: the chat rooms: in the King's guild its councillo
 	With(function(w)
 		local Rooms = ns.ChatRooms
 		w.as(PIP, "Olympus", 1)
-		eq(Rooms.CanAccess("centurions", VERA), true, "a councillor of the King's guild: one of the King's centurions")
-		eq(Rooms.CanAccess("centurions", PIP), true, "an officer, by his rank")
-		eq(Rooms.CanAccess("centurions", "Ada-Realm"), false, "a soldier")
-		eq(Rooms.CanAccess("centurions", OLAF), false, "a councillor of another guild: not this guild's room")
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), VERA), true, "a councillor of the King's guild: one of the King's centurions")
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), PIP), true, "an officer, by his rank")
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), "Ada-Realm"), false, "a soldier")
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), OLAF), false, "a councillor of another guild: not this guild's room")
 		eq(Rooms.CanAccess("allcenturions", VERA), true)
 		eq(Rooms.CanAccess("allcenturions", OLAF), true, "every councillor is one of the King's centurions")
-		local reached = table.concat(Rooms.Recipients("centurions"), ",")
+		local reached = table.concat(Rooms.Recipients(Rooms.GuildRoom("gcent", GetGuildInfo("player"))), ",")
 		assert(reached:find(VERA, 1, true), "she is reached in Guild Centurions: " .. reached)
 		assert(table.concat(Rooms.Recipients("allcenturions"), ","):find(OLAF, 1, true), "he is reached in All Centurions")
 		-- 1.1.5's list, from the King's older client, names Bea: no room for her.
 		N.Handle("CHANNEL", KING, Msg("Olympus", w.clock, "c=Bea"))
-		eq(Rooms.CanAccess("centurions", "Bea-Realm"), false); eq(Rooms.CanAccess("allcenturions", "Bea-Realm"), false)
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), "Bea-Realm"), false); eq(Rooms.CanAccess("allcenturions", "Bea-Realm"), false)
 		-- Signed off the council: in neither (the signed list alone says who).
 		ns.rdb.council.names["vera councillor"] = nil
-		eq(Rooms.CanAccess("centurions", VERA), false); eq(Rooms.CanAccess("allcenturions", VERA), false)
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), VERA), false); eq(Rooms.CanAccess("allcenturions", VERA), false)
 		-- From another Olympus guild: All Centurions has every councillor, Guild Centurions is that guild's own.
 		ns.rdb.council.names["vera councillor"] = "Vera Councillor"
 		w.as("Nemo-Realm", "Olympus II", 1)
 		eq(Rooms.CanAccess("allcenturions", VERA), true); eq(Rooms.CanAccess("allcenturions", OLAF), true)
-		eq(Rooms.CanAccess("centurions", VERA), false, "the King's guild's councillor, not this guild's")
+		eq(Rooms.CanAccess(Rooms.GuildRoom("gcent", GetGuildInfo("player")), VERA), false, "the King's guild's councillor, not this guild's")
 	end)
 end)
 

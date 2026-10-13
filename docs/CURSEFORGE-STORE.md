@@ -343,6 +343,11 @@ bottom-to-top always gives the same tab order; changing role or debug view never
 
 *Continued in the README: [The Chat tab (1.1.1)](https://github.com/dnl-gentile/olympus-addon#the-chat-tab-111).*
 
+#### Role rooms (1.2.4)
+**Roles**, after Guild: the rooms of the roles you hold, each line a logged whisper to each member.
+
+*Continued in the README: [Role rooms (1.2.4)](https://github.com/dnl-gentile/olympus-addon#role-rooms-124).*
+
 ### The Board: who is looking for a group, and where (1.1)
 The Realm tab links **the Board** (or `/oly lfg`): who in Olympus wants a group right now, from
 what each player chose to share, and the King's week.
@@ -868,7 +873,6 @@ code.
 | `/oly realm` · `/oly decrees` · `/oly tabard` | open a tab |
 | `/oly loot` | your guild's loot notes and points on the Realm tab (its officers write them; not a bid window) |
 | `/oly craft [item or name]` · `/oly crafter on\|off` | who can make it (the top-level Crafters tab: shift-click an item after `/oly craft`); list your professions read so far, or take them off |
-| `/oly approved` · `/oly approved paste` | the guilds of Asmon's Olympus the author's signed list makes Olympus guilds (their names don't say Olympus), and whether yours is one; paste that signed list (the first member of such a guild: his addon then passes it to the guild) |
 | `/ol <text>` · `/olc <text>` · `/oll <text>` | write in [Olympus], [Captains] or [Lords]; alone (`/ol`, `/olc`, `/oll`): open the Chat tab on that channel (1.1.1) |
 | `/oly mute olympus` · `/oly mute captains` · `/oly mute lords` | hide or show a channel in chat |
 | `/oly chatwindow tab` · `/oly chatwindow <number or name> [olympus\|captains\|lords]` · `/oly chatwindow main` | the Olympus chats in a chat tab named Olympus (without the channel's name; it says how to make the tab), in another chat window (with Chattynator, one of its tabs, by name), or back in the main one |

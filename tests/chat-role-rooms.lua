@@ -14,12 +14,11 @@ test("role chat navigation: one dropdown follows actual restricted audiences", f
 		local tabs = R.Tabs()
 		-- (1.2.3: Guild, then Roles; the Race and Class tabs are gone.)
 		eq(#tabs, 2); eq(tabs[2].kind, "role"); eq(tabs[2].dropdown, true)
-		-- (1.2.4, the author's rule: the High Council are the King's centurions, so a councillor is in All
-		-- Centurions too, wherever his own guild is; Guild Centurions is the King's guild's own, by its
-		-- roster: tests/king-centurions.lua. Was "council,secretariat,dept:war,departments,church".)
-		eq(Ids(R.Options("role")), "council,secretariat,dept:war,departments,allcenturions,church")
+		-- (Changed in 1.2.4, the author's approved set: "Sobre as salas, eu concordo com todas as que
+		-- você colocou": the room of all the departments together is gone.)
+		eq(Ids(R.Options("role")), "council,secretariat,allcenturions,dept:war,church")
 		w.church, w.stewards[me] = false, nil
-		eq(Ids(R.Options("role")), "council,dept:war,departments,allcenturions", "audience removals reflected immediately")
+		eq(Ids(R.Options("role")), "council,allcenturions,dept:war", "audience removals reflected immediately")
 		w.council[me] = nil
 		eq(#R.Options("role"), 0); eq(#R.Tabs(), 1)
 	end)
@@ -29,10 +28,18 @@ test("role chat navigation: preview changes destinations but never authority or 
 	WithRooms(function(w, R, c)
 		local role = "member"
 		c.ViewAs = { Previewing = function() return role ~= "my" end, Role = function() return role end }
-		assert(R.RegisterAudience("church", { label = "Church", CanAccess = function() return false end, Recipients = function() return {} end }))
+		-- (1.2.4: an audience names the previews that list it, as Church.lua's does.)
+		assert(R.RegisterAudience("church", { label = "Church", CanAccess = function() return false end, Recipients = function() return {} end,
+			preview = { king = true, councillor = true } }))
 		eq(#R.Options("role"), 0)
+		-- (Changed in 1.2.4, the author's approved set of rooms, "Sobre as salas, eu concordo com todas as
+		-- que você colocou. Só que a gente precisa também de uma só dos Guild Masters": each role's
+		-- preview lists the rooms that role has. The King's: the High Council, his Secretariat, the
+		-- guild masters', every guild's masters and centurions, his guild's master and centurions, the
+		-- Church; the departments' rooms are their councillors' and correspondents'.)
+		local cent, corr = R.GuildRoom("gcent", w.guild), R.GuildRoom("gcorr", w.guild)
 		role = "king"
-		eq(Ids(R.Options("role")), "council,secretariat,dept:treasury,dept:war,dept:citizenry,dept:heritage,dept:justice,dept:church,departments,church")
+		eq(Ids(R.Options("role")), "council,secretariat,masters,allcenturions," .. cent .. ",church")
 		for _, option in ipairs(R.Options("role")) do
 			eq(option.disabled, true, "preview destinations are inert")
 			eq(R.CanAccess(option.id), false); eq(R.Select(option.id), false)
@@ -41,12 +48,13 @@ test("role chat navigation: preview changes destinations but never authority or 
 		end
 		eq(#w.jobs, 0); eq(w.attempts, 0, "no restricted transport attempted")
 		eq(R.Receive("WHISPER", "Aldric Vane-Realm", RoomMessage("council", 1, "private")), false)
+		local depts = "dept:treasury,dept:war,dept:justice,dept:citizenry,dept:heritage,dept:church"
 		role = "councillor"
-		eq(Ids(R.Options("role")), "council,dept:treasury,dept:war,dept:citizenry,dept:heritage,dept:justice,dept:church,departments,church")
-		role = "treasurer"; eq(Ids(R.Options("role")), "council,dept:treasury,treasurers")
-		role = "gm"; eq(Ids(R.Options("role")), "masters")
-		role = "officer"; eq(Ids(R.Options("role")), "centurions,allcenturions")
-		role = "correspondent"; eq(Ids(R.Options("role")), "dept:treasury,dept:war,dept:citizenry,dept:heritage,dept:justice,dept:church,departments")
+		eq(Ids(R.Options("role")), "council," .. depts .. ",church")
+		role = "treasurer"; eq(Ids(R.Options("role")), "council,dept:treasury")
+		role = "gm"; eq(Ids(R.Options("role")), "masters,allcenturions," .. corr .. "," .. cent)
+		role = "officer"; eq(Ids(R.Options("role")), "allcenturions," .. cent)
+		role = "correspondent"; eq(Ids(R.Options("role")), depts .. "," .. corr)
 		for _, r in ipairs({ "member", "outsider", "my" }) do
 			role = r; eq(#R.Options("role"), 0, r .. " is not federal authority")
 		end
@@ -99,8 +107,13 @@ test("role chat navigation (1.2.3): one listing reads the census's guilds once a
 		}
 		local federation, isFederation = 0, c.IsFederation
 		c.IsFederation = function(guild) federation = federation + 1; return isFederation(guild) end
-		local IDS = { "council", "secretariat", "dept:treasury", "dept:war", "dept:citizenry", "dept:heritage", "dept:justice", "dept:church",
-			"masters", "treasurers", "departments", "centurions", "allcenturions" }
+		-- (Changed in 1.2.4, the author's approved set: "Sobre as salas, eu concordo com todas as que
+		-- você colocou": the treasurers', all the departments' and one guild's centurions' rooms are gone;
+		-- a guild master sits with his centurions, and each guild has its master's rooms with his
+		-- correspondents and with his centurions. The same single read for each listing.)
+		local cent, corr = R.GuildRoom("gcent", w.guild), R.GuildRoom("gcorr", w.guild)
+		local IDS = { "council", "secretariat", "masters", "allcenturions", "dept:treasury", "dept:war", "dept:justice", "dept:citizenry",
+			"dept:heritage", "dept:church", corr, cent }
 		local function Check(me, want)
 			c.me = me
 			local each = {}
@@ -114,12 +127,12 @@ test("role chat navigation (1.2.3): one listing reads the census's guilds once a
 			assert(federation <= 30 + 4, me .. ": the census's guilds read once a listing, not once a room (" .. federation .. ")")
 		end
 		Check("Member-Realm", "")
-		Check("Master-Realm", "masters")
-		Check("Officer-Realm", "centurions,allcenturions")
-		Check("Scribe-Realm", "dept:war,departments")
-		Check("Clerk-Realm", "dept:treasury,treasurers,departments")
+		Check("Master-Realm", "masters,allcenturions," .. corr .. "," .. cent)
+		Check("Officer-Realm", "allcenturions," .. cent)
+		Check("Scribe-Realm", "dept:war," .. corr)
+		Check("Clerk-Realm", "dept:treasury," .. corr)
 		w.enforced = true
-		Check("Abroad-Realm", "dept:war,masters,departments")
+		Check("Abroad-Realm", "masters,allcenturions,dept:war")
 		Check("Member-Realm", "")
 		-- The Tabs and every kind's rooms in one listing: the guilds still read once.
 		c.me, w.enforced = "Scribe-Realm", nil

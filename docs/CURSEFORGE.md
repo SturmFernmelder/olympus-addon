@@ -540,7 +540,8 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   up; then the line you are reading stays in its place while new lines come in and the oldest go,
   and **N new** at the bottom takes you down to them.
 - By each name, the name in its colour (the High Council's for a councillor, the writer's class
-  for anyone else), the Treasurer's coin, and **Steward** or **Hand** after the King's. No mark
+  for anyone else), the Treasurer's coin, **Steward** or **Hand** after the King's, and (1.2.4)
+  **The Royal Dev** after the author's, on every line of his on the page. No mark
   before a name since 1.1.5: Olympus's marks show in the game's own chat instead, where players
   outside Olympus are ([Channels](#channels), `/oly chatmarks`). A click on a name whispers that
   player, in Olympus's whisper window.
@@ -563,6 +564,12 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   each channel still waits for the privacy warning's **Send**. A line of yours that did not leave
   shows a note in its channel, and a click puts it back in the box when the box is empty (what you
   are writing is never replaced: the note waits).
+- In Guild and the Roles rooms (1.2.4), a line Olympus cannot send stays in the box, and the room
+  says why on one line: too fast, nobody else in this room online right now, the game has not
+  told your guild yet, chat rooms off, and so on. A Roles room's line shows at once, marked
+  **(sending...)**, until its whispers have left (one every 1.2 seconds, so a full room takes a
+  while); if none of them leaves, it goes from the room and the note says why. Nobody is added
+  to a room to make a line go.
 - **Add an Olympus tab to the game chat**: while your game chat has no Olympus tab (see Channels
   above), a line over the lines offers one. Olympus cannot make that tab itself, so a click
   shows you where: a small Olympus pointer by your main chat tab says right-click it, Create New
@@ -597,6 +604,50 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   gamepad cursor to write. The Olympus window stays off the
   Escape list there (its X closes it), and the tab opens no game popup: the whisper, a pinned
   line's takedown and the settings' pin use Olympus's own windows.
+
+#### Role rooms (1.2.4)
+**Roles**, after Guild: the rooms of the roles you hold, each line a logged whisper to each member.
+
+Each line goes as one logged whisper to each member of the room your addon verifies, never
+broadcast; the room is checked again on both ends before each whisper leaves and when it
+arrives. The rooms, in the list's order (none of yours: no Roles tab):
+
+| Room | Its members |
+|---|---|
+| **High Council** | the signed councillors, the King and the Federal Treasurer |
+| **Secretariat** | the King and his Stewards |
+| **Guild Masters** | the guild master of every Olympus guild, the King |
+| **Masters & Centurions** | every guild's master and centurions (its officers and those its master names), the King |
+| One room a department (**Federal Treasury**, **Department of War**, **Council of Justice**, **Association of Artisanry**, **Department of Heritage**, **The Missionary Church of Olympus**) | its councillors by the signed titles list, and each guild's correspondent of it; the Federal Treasury's also the Federal Treasurer |
+| **Master & Correspondents** (one a guild) | that guild's master and his correspondents (the King's guild has none) |
+| **Master & Centurions** (one a guild) | that guild's master and his centurions; the King's guild's: the King and the centurions he and the High Council name |
+| **Apostles** | the author, the King, the Head and the signed Apostles |
+| **Apostles & Missionaries** | the Apostles' room and the missionaries |
+| **Church** | the whole Church, as in 1.1.6 |
+| **The Watch** | the author, the King, every councillor and the Olympus moderators they name (a guild's own Watchers act on their guild alone and are not in it) |
+
+- The author's character is in every room but the High Council's and the Secretariat's: his
+  lines carry **The Royal Dev** after his name, and another member's line reaches him only while
+  his presence is heard (it repeats every 5 minutes). His list holds each guild's own rooms.
+- A guild's own rooms hold its own people: a member of one guild is in no other guild's room.
+- Another guild's guild masters and officers are known only from the author's signed leadership
+  list. Until it is out (`/oly status`, **signed leadership**), the rooms that reach other guilds
+  (the masters', the masters' and centurions', the departments') reach your own guild and the
+  signed people (the King, the councillors, the author) alone, and say so over their lines.
+- A line goes to 40 members of a room at most (the Church's rooms 30, those heard online), the
+  author, the King, the High Council and the guild masters first, then those who wrote in the room
+  in the last ten minutes, then the others by name; the room says how many it missed. The whispers
+  leave 1.2 seconds apart: 40 take about 48 seconds.
+- No limit on rooms: a session keeps the last 100 lines of each and 1,200 of them all together, the
+  oldest going first (each room keeps its newest), and nothing after a `/reload`.
+- The page lists the rooms when it opens, when they change, and else once a minute at most; a line
+  in a room not shown only adds to its count, and the room shown is live.
+- A list of more than ten rooms folds each group (the departments, each kind of guild room, the
+  Church's) into one row, **Departments (6) >**, whose click opens its own list beside it, eight a
+  page with **Previous** and **More (n)**. It is Olympus's own, with the mouse and the gamepad UI.
+- A line from an older client to 1.2.3's treasurers', all departments' or one guild's centurions'
+  room is dropped quietly; 1.2.3 clients do not know the new rooms, and drop a guild master's line
+  in the masters' and centurions' room and the Treasurer's in the Federal Treasury's.
 
 ### The Board: who is looking for a group, and where (1.1)
 The Realm tab links **the Board** (or `/oly lfg`): who in Olympus wants a group right now, from
@@ -1633,6 +1684,7 @@ message (the game adds it). What goes where:
 | Your crafting request's card (1.2): its id, the item, its name and quantity, crafting or gathering and the profession, open, taken, cancelled or expired, who brings the materials, your guild, a price reference and its time, a cost floor and your details | everyone on the Olympus channel | when you publish it, every 20 minutes while it is open, when it is taken (and once more 20 minutes later) or cancelled; 8 cards each 10 minutes at most |
 | A claim on a request, and the two parties' words after it (1.2): your guild, the terms (the price, the rail, how it is paid), the start, the delivery (quantity, price and how), the confirmation, a cancel, a dispute | the other party alone (logged whispers) | when you claim, propose or confirm terms, start, deliver, confirm, cancel or dispute |
 | A request's private chat (1.2): your lines | the other party alone (logged whispers) | when you write in it |
+| A line in a role room (1.2.4): your words, your guild | one logged whisper to each member of that room your addon verifies (40 at most; the Church's rooms 30, heard online), and the author's character in every room but the High Council's and the Secretariat's while his presence is heard | when you write one, with the rooms' consent on |
 | The guild-mediated rail and a dispute's review (1.2): the parties, the item, quantity and price, what reached the custodian, a dispute's reason and its verdict | the custodian (the treasury keeper who holds the goods and the gold), the reviewer the parties put the dispute to, and the parties (logged whispers) | while that deal or its dispute is open |
 | Your word of a direct sale to the guild's fee desk (1.2): the request, the buyer's and the seller's names, the price, the item and quantity, the seller's guild | the Treasurer's characters alone (logged whispers), from the buyer's addon and the seller's | when the buyer confirms the sale, when it completes, or 3 days after a sale the buyer never confirmed; again each 30 minutes while the seller's fee is open; only while a Treasurer's character's addon is heard online |
 | The fee desk's answer (1.2): the fee, what was paid, its deadline, and whether it is due, paid or waived | that party alone (a whisper from the Treasurer's character) | once for each word of a sale |

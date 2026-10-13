@@ -8,6 +8,9 @@ local L = ns.L
 L.TAB_CHURCH = "Church"
 L.CHURCH_TITLE = "The Missionary Church of Olympus"
 L.CHURCH_ROOM = "Church"
+-- (1.2.4: the Chat tab's Apostles' room, and the Apostles' and missionaries'.)
+L.CHURCH_ROOM_APOSTLES = "Apostles"
+L.CHURCH_ROOM_MISSIONARIES = "Apostles & Missionaries"
 L.CHURCH_ROOM_NOT_REACHED = "Church chat: %d members online were not reached (a line goes to 30 at most: your network and the Church first, the High Council last)."
 L.CHURCH_HEAD = "Head of the Church"
 L.CHURCH_APOSTLE = "Apostle"
@@ -221,6 +224,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.TAB_CHURCH = "Igreja"
 	L.CHURCH_TITLE = "A Igreja Missionária de Olympus"
 	L.CHURCH_ROOM = "Igreja"
+	L.CHURCH_ROOM_APOSTLES = "Apóstolos"
+	L.CHURCH_ROOM_MISSIONARIES = "Apóstolos e missionários"
 	L.CHURCH_ROOM_NOT_REACHED = "Chat da Igreja: %d membros online não foram alcançados (uma linha vai a 30 no máximo: sua rede e a Igreja primeiro, o Alto Conselho por último)."
 	L.CHURCH_HEAD = "Chefe da Igreja"
 	L.CHURCH_APOSTLE = "Apóstolo"

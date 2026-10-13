@@ -45,6 +45,10 @@ local function WithRoles(fn)
 			end
 		end,
 	}
+	-- (1.2.4: another guild's signed ranks exist only once the author's signed leadership list counts,
+	-- Data.AuthorizedRank; before, its ranks are the census's, which the rooms no longer even ask. This
+	-- world's other guild is signed unless a test marks it census-only: the world before the list.)
+	c.Authority = { Enforced = function() return next(w.census) == nil end }
 	c.ViewAs = { Previewing = function() return w.role ~= nil end, Role = function() return w.role end }
 	c.Comm = { Handle = function() end, Whisper = function(target, msg, _, _, _, _, options)
 		w.jobs[#w.jobs + 1] = { target = target, msg = msg, options = options }; return true
@@ -104,52 +108,89 @@ test("Role audiences: real nomination messages require the current master and ex
 	end)
 end)
 
-test("Role audiences: department correspondents and heads follow current verified nominations", function()
+-- (Changed in 1.2.4, the author's approved set of rooms, "Sobre as salas, eu concordo com todas as que
+-- você colocou": the treasurers' room, the Federal Treasury's with the pinned Treasurer, is folded
+-- into the Federal Treasury's own room, and the room of all the departments together is gone.)
+test("Role audiences: department correspondents and heads follow current verified nominations; the Federal Treasury's room holds the pinned Treasurer", function()
 	WithRoles(function(R, c, w, Rank, List, own, foreign)
 		Rank("Sage Owl", own, 3)
 		List(own, "Head Owl", { { name = "Sage Owl", role = "correspondent", dept = "Department of War" } })
 		List(foreign, "Head Wren", { { name = "Wren Thistle", role = "correspondent", dept = "Department of War" } })
-		eq(R.CanAccess("dept:war"), true); eq(R.CanAccess("departments"), true)
-		eq(R.CanAccess("dept:treasury"), false); eq(R.CanAccess("treasurers"), false)
+		eq(R.CanAccess("dept:war"), true)
+		eq(R.CanAccess("dept:treasury"), false)
+		eq(R.Info("departments"), nil, "gone"); eq(R.Info("treasurers"), nil, "gone")
 		eq(R.CanAccess("dept:war", "Wren Thistle"), true)
+		eq(R.CanAccess("dept:treasury", "Ledger Owl"), true, "the pinned Federal Treasurer")
+		eq(R.CanAccess("dept:war", "Ledger Owl"), false, "only his own department")
 		w.titles["Council Owl-Realm"] = { dept = "Department of War" }
 		eq(R.CanAccess("dept:war", "Council Owl"), true)
 		eq(R.CanAccess("dept:church", "Sage Owl"), false)
 		w.lists[own].entries[1].dept = "The Missionary Church of Olympus"
 		eq(R.CanAccess("dept:church"), true); eq(R.CanAccess("dept:war"), false)
 		w.lists[own].entries[1].dept = "Federal Treasury"
-		eq(R.CanAccess("treasurers"), true)
-		eq(R.CanAccess("treasurers", "Head Owl"), false, "guild master is not automatically a treasurer")
+		eq(R.CanAccess("dept:treasury"), true)
+		eq(R.CanAccess("dept:treasury", "Head Owl"), false, "guild master is not automatically a treasurer")
+		local recipients = table.concat(R.Recipients("dept:treasury"), ",")
+		assert(recipients:find("Ledger Owl-Realm", 1, true), "the Treasurer hears the Federal Treasury's room: " .. recipients)
+		eq(R.Send("dept:treasury", "the week's ledger"), true)
+		local heard = {}
+		for _, job in ipairs(w.jobs) do heard[job.target] = true end
+		eq(heard["Ledger Owl-Realm"], true, "one logged whisper to him")
 		w.ranks[foreign]["Head Wren-Realm"] = 1
 		eq(R.CanAccess("dept:war", "Wren Thistle"), false, "revoked master cannot authorize nominees")
 		w.fresh = false; eq(R.CanAccess("dept:treasury"), false)
 	end)
 end)
 
-test("Role audiences: guild and global centurions stay separate from guild masters and previews", function()
+-- (Changed in 1.2.4, the author's approved set: "um com todos os guild masters e os seus, que são tipo
+-- officers, os centuriões; um com o guild master e os correspondentes ... um só com centuriões" and
+-- "Só que a gente precisa também de uma só dos Guild Masters": every guild's masters and centurions
+-- together, each guild's master with his own centurions, and the masters' room of their own. Before,
+-- one guild's centurions' room and the centurions of all guilds' room left the masters out.)
+test("Role audiences (1.2.4): a guild master sits with his centurions, in his guild's room and with every guild's; the masters' room stays the masters'; previews stay inert", function()
 	WithRoles(function(R, c, w, Rank, List, own, foreign)
 		Rank("Sage Owl", own, 1); Rank("Ordinary Owl", own, 3)
 		List(own, "Head Owl", {})
 		List(foreign, "Head Wren", { { name = "Wren Thistle", role = "centurion" } })
-		eq(R.CanAccess("centurions"), true); eq(R.CanAccess("allcenturions"), true)
+		local mine, corr = R.GuildRoom("gcent", own), R.GuildRoom("gcorr", own)
+		eq(R.CanAccess(mine), true); eq(R.CanAccess("allcenturions"), true)
+		eq(R.CanAccess(corr), false, "a centurion is no correspondent")
 		eq(R.CanAccess("masters"), false); eq(R.CanAccess("masters", "Head Owl"), true)
-		eq(R.CanAccess("centurions", "Wren Thistle"), false)
+		eq(R.CanAccess(mine, "Head Owl"), true, "his guild's master")
+		eq(R.CanAccess(corr, "Head Owl"), true)
+		eq(R.CanAccess("allcenturions", "Head Owl"), true, "every guild's masters")
+		eq(R.CanAccess("allcenturions", "Head Wren"), true)
+		eq(R.CanAccess("allcenturions", c.KingCharacter()), true, "the King")
+		eq(R.CanAccess(mine, "Wren Thistle"), false, "another guild's centurion")
+		eq(R.CanAccess(mine, "Head Wren"), false, "another guild's master")
 		eq(R.CanAccess("allcenturions", "Wren Thistle"), true)
-		for _, id in ipairs({ "masters", "centurions", "allcenturions", "departments", "treasurers" }) do
+		for _, id in ipairs({ "masters", mine, corr, "allcenturions" }) do
 			eq(R.CanAccess(id, "Ordinary Owl"), false)
 		end
-		eq(R.Send("allcenturions", "role message"), true); eq(#w.jobs, 1)
-		eq(w.jobs[1].target, "Wren Thistle-Realm")
+		eq(R.Info("centurions"), nil, "gone")
+		eq(R.Send("allcenturions", "role message"), true)
+		local jobs = {}
+		for _, job in ipairs(w.jobs) do jobs[job.target] = job end
+		eq(#w.jobs, 4)
+		for _, who in ipairs({ "Crown Owl-Realm", "Head Owl-Realm", "Head Wren-Realm", "Wren Thistle-Realm" }) do assert(jobs[who], who) end
 		w.lists[foreign].entries = {}
-		eq(w.jobs[1].options.permit(nil, nil, "WHISPER", w.jobs[1].target), false, "queued whisper rechecks recipient role")
+		local job = jobs["Wren Thistle-Realm"]
+		eq(job.options.permit(nil, nil, "WHISPER", job.target), false, "queued whisper rechecks recipient role")
+		w.jobs = {}
+		w.time = w.time + 2 -- (past SEND_GAP)
+		eq(R.Send(mine, "our guild"), true)
+		local targets = {}
+		for _, j in ipairs(w.jobs) do targets[#targets + 1] = j.target end
+		table.sort(targets)
+		eq(table.concat(targets, ","), "Head Owl-Realm", "his guild's room: its master alone besides me")
 		w.role = "officer"
 		local ids = {}
 		for _, option in ipairs(R.Options("role")) do
 			ids[option.id] = true; eq(option.disabled, true); eq(R.Select(option.id), false)
 		end
-		eq(ids.centurions, true); eq(ids.allcenturions, true); eq(ids.masters, nil)
+		eq(ids[mine], true); eq(ids.allcenturions, true); eq(ids.masters, nil)
 		w.role = "gm"; local options = R.Options("role")
-		eq(#options, 1); eq(options[1].id, "masters"); eq(R.Send("masters", "preview"), false)
+		eq(#options, 4); eq(options[1].id, "masters"); eq(R.Send("masters", "preview"), false)
 		eq(#R.History("masters"), 0)
 	end)
 end)
@@ -163,7 +204,13 @@ test("Role audiences: a guild known only from census reports opens no private ro
 		eq(R.CanAccess("allcenturions", "Fake Officer"), false, "a census officer")
 		local recipients = table.concat(R.Recipients("allcenturions"), ",")
 		assert(not recipients:find("Fake", 1, true), recipients)
+		-- (1.2.4: nor its own rooms, the master's with his correspondents and with his centurions.)
+		local corr, cent = R.GuildRoom("gcorr", foreign), R.GuildRoom("gcent", foreign)
+		eq(R.CanAccess(corr, "Fake Master"), false); eq(R.CanAccess(cent, "Fake Master"), false)
+		eq(R.CanAccess(cent, "Fake Officer"), false)
+		eq(#R.Recipients(cent), 0)
 		w.census[foreign] = nil
 		eq(R.CanAccess("masters", "Fake Master"), true, "the same rank from the signed list")
+		eq(R.CanAccess(corr, "Fake Master"), true); eq(R.CanAccess(cent, "Fake Officer"), true)
 	end)
 end)

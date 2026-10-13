@@ -83,7 +83,15 @@ local MAX_NOTES = 5
 local LOOK_GAP = 1                                    -- the Olympus tab awaited: the game's chat windows read this often
 local GREY = "|cff9d9d9d"
 local LINK_TIPS = { item = true, spell = true, enchant = true, quest = true } -- (the links Codec lets through)
-local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "CHATWIN_WHY_FAILED", left = "CHATWIN_WHY_LEFT" }
+local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "CHATWIN_WHY_FAILED", left = "CHATWIN_WHY_LEFT",
+	-- 1.2.4: a room's line refused at Enter (ChatRooms.Send's reasons), or every whisper of it lost
+	-- on its way (Comm's and the room's permit's reasons): each its own words, not "the game refused it".
+	alone = "CHATWIN_WHY_ALONE", fast = "CHATWIN_WHY_FAST", busy = "CHATWIN_WHY_BUSY", full = "CHATWIN_WHY_QUEUE",
+	dropped = "CHATWIN_WHY_QUEUE", cancelled = "CHATWIN_WHY_CANCELLED", revoked = "CHATWIN_WHY_REVOKED",
+	access = "CHATWIN_WHY_ACCESS", off = "CHATWIN_WHY_OFF", netoff = "CHATWIN_WHY_NETOFF", held = "CHATWIN_WHY_NETOFF",
+	timeout = "CHATWIN_WHY_TIMEOUT", severe = "CHATWIN_WHY_SEVERE", lockdown = "CHATWIN_WHY_LOCKDOWN",
+	guild = "CHATWIN_WHY_GUILD", empty = "CHATWIN_WHY_EMPTY", size = "CHATWIN_WHY_SIZE", preview = "CHATWIN_WHY_PREVIEW",
+	gamepad = "CHATWIN_WHY_GAMEPAD" }
 -- The pointer's arrow: the game's tutorial arrow (Blizzard_TutorialTemplates), else the chat
 -- frame's own scroll-down arrow (Blizzard_SharedXML's dropdown and store templates use it).
 local ARROW_ATLAS, ARROW_FILE = "NPE_ArrowDown", "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up"
@@ -154,7 +162,22 @@ function ChatWindow.NewEra()
 	ChatWindow.Wipe(ChatWindow.offMemo)
 	ChatWindow.Wipe(ChatWindow.logicalOf)
 	if ChatWindow.nameOf then ChatWindow.Wipe(ChatWindow.nameOf); ChatWindow.Wipe(ChatWindow.tellOf) end
-	ChatWindow.navCache = nil
+	-- (1.2.4: not the destinations' rooms, ChatWindow.NavItems: they are listed again on their own.)
+end
+-- 1.2.4 (the author: "para mim, que estou em 200 rows ... pode não ficar atualizando o tempo todo,
+-- talvez. Tem uma atualização mais lenta, de 1 minuto em 1 minuto"): the destinations' rooms (each
+-- room's access read again, ChatRooms.Listing) are listed again when the tab opens, at a change of
+-- the rooms, of a room picked, of the consents or of the role previewed, when a list of them opens,
+-- and else at most every NAV_EVERY seconds while the tab shows; never for a line that came, nor at
+-- the census's redraw. (A redraw of the player's doing, ChatWindow.Render, lists them too.) A line
+-- in a room not shown only adds to its count (no redraw for it); the room shown stays live.
+ChatWindow.NAV_EVERY = 60
+function ChatWindow.NavStale() ChatWindow.navCache = nil end
+-- What the rooms listed rest on besides their own access: the role previewed (View as).
+function ChatWindow.NavKey()
+	local V = ns.ViewAs
+	return tostring(type(V) == "table" and type(V.Previewing) == "function" and V.Previewing()
+		and type(V.Role) == "function" and V.Role() or false)
 end
 -- The era a redraw draws in: a new one when ERA_MAX went by (or the clock went back).
 function ChatWindow.Era()
@@ -319,8 +342,9 @@ local function PutTabLineAway()
 end
 
 local function MarkDirty() dirty = true end
--- (1.2.3) A change the lines' looks may rest on: a new era (ChatWindow.era), and a redraw.
-function ChatWindow.Changed() ChatWindow.NewEra(); dirty = true end
+-- (1.2.3) A change the lines' looks may rest on: a new era (ChatWindow.era), and a redraw. (1.2.4:
+-- each such change, a room's, a consent's, a room picked, opened or gone, lists the rooms again too.)
+function ChatWindow.Changed() ChatWindow.NewEra(); ChatWindow.NavStale(); dirty = true end
 
 function ChatWindow.SaveDraft()
 	if not frame or not tier or not frame.input then return end
@@ -497,6 +521,12 @@ local function NameText(e)
 		elseif type(K.IsHandName) == "function" and K.IsHandName(who) then
 			tag = " " .. Gold(L.CHATWIN_TAG_HAND)
 		end
+	end
+	-- 1.2.4, the author ("mandar mensagem como desenvolvedor"): his title after his name, on all his
+	-- lines of the page (Borders.IsDevName, his name on his realm group). A tag, no mark before it.
+	local B = ns.Borders
+	if type(B) == "table" and type(B.IsDevName) == "function" and B.IsDevName(who) == true then
+		tag = tag .. " |cffc8c8d2" .. ChatWindow.Localized("CHATWIN_TAG_DEV", "The Royal Dev") .. "|r"
 	end
 	local guildLabel = ns.Channels.ShowGuildNames() and (" " .. Grey("<" .. ns.Codec.Plain(guild or "?") .. ">")) or ""
 	return lead .. name .. tag .. guildLabel
@@ -705,10 +735,11 @@ function ChatWindow.ViewOf(e, hides)
 	local views = ChatWindow.views
 	local v = views[e]
 	if not v or v.text ~= e.text or v.sender ~= e.sender or v.guild ~= e.guild or v.class ~= e.class or v.t ~= e.t
-		or v.mine ~= e.mine then
+		or v.mine ~= e.mine or v.pending ~= e.pending then
 		v = v or {}
 		views[e] = v
 		v.text, v.sender, v.guild, v.class, v.t, v.mine = e.text, e.sender, e.guild, e.class, e.t, e.mine
+		v.pending = e.pending -- (1.2.4: a room's line of ours whose whispers have not all left: ChatRooms' echo)
 		local t = tonumber(e.t) or 0
 		v.at, v.when, v.day = t, Grey(date("%H:%M", t)), date("%Y-%m-%d", t)
 		v.dayRow, v.full = Grey(v.day), ns.FullName(e.sender)
@@ -719,7 +750,7 @@ function ChatWindow.ViewOf(e, hides)
 		v.era, v.hides, v.del = ChatWindow.era, hides, e.del
 		v.own = Own(e)
 		v.veiled = not v.own and hides ~= nil and hides(e.text or "") or false
-		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. v.body
+		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. (v.pending and (Grey(L.CHATWIN_SENDING) .. " ") or "") .. v.body
 		v.headed = false
 	end
 	return v
@@ -1117,11 +1148,19 @@ local function DrawLines(all)
 	end
 	-- The lines of ours that were not sent: a grey note each, a click puts one back in the box.
 	local t = tier
+	-- (1.2.4: one refused at Enter has its words still in the box: its reason alone, nothing to put back.)
 	for _, note in ipairs(notes[t] or {}) do
 		local key = WHY[note.why] or WHY.failed
 		nr = nr + 1
 		y = y + GAP_OUT
-		y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
+		if note.said then
+			-- (1.2.4: a line that went, and the members of its room online it could not reach: ChatWindow.Missed.)
+			y = y + Row(nr, Grey(note.said), y, width)
+		elseif note.kept then
+			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key])), y, width)
+		else
+			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
+		end
 	end
 	y = y + 8
 	for i = nb + 1, #frame.bubbles do frame.bubbles[i]:Hide(); frame.bubbles[i].entry, frame.bubbles[i].y = nil, nil end
@@ -1312,8 +1351,10 @@ end
 function ChatWindow.CloseSubMenu()
 	if not frame or not frame.subMenu then return end
 	frame.subMenu:Hide()
+	if frame.subMenu2 then frame.subMenu2:Hide() end
 	frame.subCatcher:Hide()
-	frame.subEntry, frame.subSignature = nil, nil
+	frame.subEntry, frame.subSignature, frame.subOwner = nil, nil, nil
+	frame.subPage, frame.subGroup, frame.subGroupItem, frame.subGroupRow, frame.subGroupPage = nil, nil, nil, nil, nil
 end
 
 function ChatWindow.SubMenuOptions(entry)
@@ -1325,7 +1366,9 @@ function ChatWindow.SubMenuOptions(entry)
 end
 function ChatWindow.SubMenuSignature(entry, options)
 	local V = ns.ViewAs
-	local out = { entry.kind, tostring(V and V.Previewing and V.Previewing() and V.Role and V.Role() or false) }
+	local out = { entry.kind, tostring(V and V.Previewing and V.Previewing() and V.Role and V.Role() or false),
+		-- (1.2.4: the page shown and the group open: a redraw that changed neither keeps them open.)
+		tostring(frame and frame.subPage), tostring(frame and frame.subGroup), tostring(frame and frame.subGroupPage) }
 	for _, option in ipairs(options) do
 		out[#out + 1] = table.concat({ tostring(option.id), tostring(option.label), tostring(option.disabled), tostring(option.dynamic) }, "\031")
 	end
@@ -1385,11 +1428,14 @@ end
 -- (All of them in one listing of the rooms, ChatRooms.Listing: each room's access read once.)
 function ChatWindow.NavItems()
 	local items = ChatWindow.navCache
+	local key = ChatWindow.NavKey()
+	if items and ChatWindow.navKey ~= key then items = nil end
 	if not items then
 		local R = ns.ChatRooms
 		if type(R) == "table" and type(R.Listing) == "function" then items = R.Listing(ChatWindow.BuildNav)
 		else items = ChatWindow.BuildNav() end
-		ChatWindow.navCache = items
+		ChatWindow.navCache, ChatWindow.navKey, ChatWindow.navAt = items, key, GetTime and GetTime() or 0
+		ChatWindow.navBuilds = (ChatWindow.navBuilds or 0) + 1 -- (tests: how often they were listed)
 		return items
 	end
 	for _, item in ipairs(items) do ChatWindow.PaintSubtab(item) end
@@ -1416,37 +1462,152 @@ function ChatWindow.ClickSubtab(entry, button)
 	end
 end
 
-function ChatWindow.OpenSubMenu(entry, owner)
-	if not frame then return end
-	local options = ChatWindow.SubMenuOptions(entry)
-	if #options == 0 then return end
-	CloseMenu()
-	local menu, y, width = frame.subMenu, -MENU_PAD, 80
-	for i, option in ipairs(options) do
-		local row = menu.rows[i]
-		row.roomId, row.dynamic, row.onClick, row.previewOnly = option.id, option.dynamic == true, option.onClick, option.disabled == true
-		row.text:SetText(option.label)
-		row.mark:SetShown(tier == option.id)
-		row.text:SetTextColor(tier == option.id and 1 or 0.82, tier == option.id and 0.82 or 0.82, tier == option.id and 0 or 0.82)
-		row:SetAlpha(row.previewOnly and 0.5 or 1)
+-- 1.2.4: a list of rooms of any length (before, ten rows were made with the tab, every option wrote
+-- to one, and an eleventh room stopped the list from opening: the author's Roles menu). Up to
+-- MENU_VISIBLE options show as they come. More: the options of one group (the departments, each
+-- guild's rooms, the Church's) fold into one row at the first one's place, "Departments (6) >",
+-- whose click opens their own list beside it; a list still longer shows MENU_PAGE rows a page with
+-- Previous and More (n). Rows are made as a list needs them. Olympus's own frames and buttons alone,
+-- in both input modes: no game menu, no key.
+ChatWindow.MENU_VISIBLE, ChatWindow.MENU_PAGE = 10, 8
+
+-- The rows a list shows: its options, folded by group when there are more than MENU_VISIBLE.
+function ChatWindow.MenuItems(options, page)
+	local items = options
+	if #options > ChatWindow.MENU_VISIBLE then
+		local count, byGroup = {}, {}
+		items = {}
+		for _, o in ipairs(options) do if o.group then count[o.group] = (count[o.group] or 0) + 1 end end
+		for _, o in ipairs(options) do
+			local g = o.group
+			if g and count[g] > 1 then
+				local parent = byGroup[g]
+				if not parent then
+					parent = { group = g, children = {}, groupLabel = o.groupLabel or tostring(g) }
+					byGroup[g], items[#items + 1] = parent, parent
+				end
+				parent.children[#parent.children + 1] = o
+			else
+				items[#items + 1] = o
+			end
+		end
+		for _, item in ipairs(items) do
+			if item.children then
+				item.label = ChatWindow.Localized("CHATWIN_MENU_GROUP", "%s (%d) >"):format(item.groupLabel, #item.children)
+			end
+		end
+	end
+	return ChatWindow.MenuPage(items, page)
+end
+
+-- Page `page` of a list's rows: all of them up to MENU_VISIBLE, else MENU_PAGE with Previous and More.
+function ChatWindow.MenuPage(items, page)
+	local per = ChatWindow.MENU_PAGE
+	if #items <= ChatWindow.MENU_VISIBLE then return items, 1 end
+	local pages = math.ceil(#items / per)
+	page = math.max(1, math.min(math.floor(tonumber(page) or 1), pages))
+	local out = {}
+	if page > 1 then out[1] = { pageTo = page - 1, label = ChatWindow.Localized("CHATWIN_MENU_PREV", "Previous") } end
+	for i = (page - 1) * per + 1, math.min(#items, page * per) do out[#out + 1] = items[i] end
+	local rest = #items - page * per
+	if rest > 0 then out[#out + 1] = { pageTo = page + 1, label = ChatWindow.Localized("CHATWIN_MENU_MORE", "More (%d)"):format(rest) } end
+	return out, page
+end
+
+-- Row i of a list (made the first time a list needs it).
+function ChatWindow.MenuRow(menu, i)
+	local row = menu.rows[i]
+	if row then return row end
+	row = CreateFrame("Button", nil, menu)
+	row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	row.text:SetPoint("LEFT", row, "LEFT", 10, 0)
+	row.mark = row:CreateTexture(nil, "ARTWORK")
+	row.mark:SetWidth(2)
+	row.mark:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -4)
+	row.mark:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 4)
+	row.mark:SetColorTexture(1, 0.82, 0, 1)
+	row:SetScript("OnEnter", function(self)
+		Tip(self, function(tt)
+			tt:AddLine(self.text:GetText(), 1, 1, 1, true)
+			if self.note then tt:AddLine(self.note, 0.7, 0.7, 0.7, true) end -- (1.2.4: ChatRooms' word on the room)
+		end)
+	end)
+	row:SetScript("OnLeave", function(self) Untip(self) end)
+	row:SetScript("OnClick", function(self) ns.SafeCall("chat room menu", ChatWindow.ClickMenuRow, self) end)
+	row.menu = menu
+	menu.rows[i] = row
+	return row
+end
+
+-- A row clicked: another page of its list, a group's own list, or the room (both lists close).
+function ChatWindow.ClickMenuRow(row)
+	if row.previewOnly then
+		ns.Print(ChatWindow.Localized("CHATROOM_ROLE_PREVIEW", "Preview only - switch back to your own view to use role chats."))
+		return
+	end
+	if row.pageTo then
+		if row.menu == frame.subMenu2 then return ChatWindow.OpenChildMenu(frame.subGroupItem, frame.subGroupRow, row.pageTo) end
+		return ChatWindow.OpenSubMenu(frame.subEntry, frame.subOwner, row.pageTo)
+	end
+	if row.groupItem then return ChatWindow.OpenChildMenu(row.groupItem, row, 1) end
+	local id, dynamic, onClick = row.roomId, row.dynamic, row.onClick
+	ChatWindow.CloseSubMenu()
+	if type(onClick) == "function" then ns.SafeCall("chat room choice", onClick)
+	elseif dynamic and id then ns.SafeCall("chat arena choice", ChatWindow.SelectDynamicRoom, id)
+	elseif id then ns.SafeCall("chat room choice", ChatWindow.SelectLogical, id) end
+end
+
+-- A list's rows drawn in `menu`, as wide as its longest at most `maxWidth`: that width.
+function ChatWindow.FillMenu(menu, items, maxWidth)
+	local y, width = -MENU_PAD, 80
+	for i, item in ipairs(items) do
+		local row = ChatWindow.MenuRow(menu, i)
+		local on = item.id ~= nil and tier == item.id
+		if item.children then
+			for _, child in ipairs(item.children) do if child.id ~= nil and child.id == tier then on = true end end
+		end
+		row.roomId, row.dynamic, row.onClick = item.id, item.dynamic == true, item.onClick
+		row.pageTo, row.groupItem = item.pageTo, item.children and item or nil
+		row.previewOnly = item.disabled == true and not item.children and not item.pageTo
+		row.note = item.note
+		row.text:SetText(item.label)
+		row.mark:SetShown(on)
+		row.text:SetTextColor(on and 1 or 0.82, 0.82, on and 0 or 0.82)
+		row:SetAlpha(row.previewOnly and 0.5 or item.dim and 0.6 or 1)
 		row:ClearAllPoints()
 		row:SetPoint("TOPLEFT", menu, "TOPLEFT", MENU_PAD, y)
 		row:SetPoint("TOPRIGHT", menu, "TOPRIGHT", -MENU_PAD, y)
 		row:SetHeight(MENU_ROW)
+		row.y = y
 		row:Show()
 		y = y - MENU_ROW
 		width = math.max(width, math.ceil(TextWidth(row.text)) + 22)
 	end
-	for i = #options + 1, #menu.rows do
-		menu.rows[i].roomId, menu.rows[i].dynamic, menu.rows[i].onClick = nil, nil, nil
-		menu.rows[i]:Hide()
+	for i = #items + 1, #menu.rows do
+		local row = menu.rows[i]
+		row.roomId, row.dynamic, row.onClick, row.pageTo, row.groupItem, row.note = nil, nil, nil, nil, nil, nil
+		row:Hide()
 	end
-	local menuWidth = math.min(width + MENU_PAD * 2, math.max(80, frame:GetWidth() - 24))
+	local menuWidth = math.min(width + MENU_PAD * 2, maxWidth)
 	menu:SetSize(menuWidth, -y + MENU_PAD)
-	for i = 1, #options do
+	for i = 1, #items do
 		menu.rows[i].text:SetWidth(math.max(1, menuWidth - MENU_PAD * 2 - 22))
 		menu.rows[i].text:SetWordWrap(false)
 	end
+	return menuWidth
+end
+
+function ChatWindow.OpenSubMenu(entry, owner, page)
+	if not frame then return end
+	ChatWindow.NavStale() -- (1.2.4: a list opened: the destinations' rooms and counts at the next redraw)
+	local options = ChatWindow.SubMenuOptions(entry)
+	if #options == 0 then return end
+	CloseMenu()
+	if frame.subMenu2 then frame.subMenu2:Hide() end
+	local items, shown = ChatWindow.MenuItems(options, page)
+	frame.subPage, frame.subGroup, frame.subGroupItem, frame.subGroupRow, frame.subGroupPage = shown, nil, nil, nil, nil
+	local menu = frame.subMenu
+	local menuWidth = ChatWindow.FillMenu(menu, items, math.max(80, frame:GetWidth() - 24))
 	menu:ClearAllPoints()
 	if entry.kind == "moderation" or entry.kind == "report" then
 		menu:SetPoint("TOPLEFT", owner, "BOTTOMLEFT", 0, -2)
@@ -1462,8 +1623,36 @@ function ChatWindow.OpenSubMenu(entry, owner)
 	end
 	end
 	frame.subCatcher:Show()
-	frame.subEntry, frame.subSignature = entry, ChatWindow.SubMenuSignature(entry, options)
+	frame.subEntry, frame.subOwner = entry, owner
+	frame.subSignature = ChatWindow.SubMenuSignature(entry, options)
 	menu:Show()
+end
+
+-- A group's own list (frame.subMenu2), beside the list it folds into: on its left (the Roles list
+-- sits at the tab's right edge), kept inside the tab.
+function ChatWindow.OpenChildMenu(item, parentRow, page)
+	if not frame or not frame.subMenu2 or type(item) ~= "table" or type(item.children) ~= "table" then return end
+	local child, menu = frame.subMenu2, frame.subMenu
+	local items, shown = ChatWindow.MenuPage(item.children, page)
+	frame.subGroup, frame.subGroupItem, frame.subGroupRow, frame.subGroupPage = item.group, item, parentRow, shown
+	local menuWidth = ChatWindow.FillMenu(child, items, math.max(80, frame:GetWidth() - 24))
+	child:ClearAllPoints()
+	local dy = (parentRow and parentRow.y or -MENU_PAD) + MENU_PAD
+	local mLeft, fLeft, mTop, fTop = menu:GetLeft(), frame:GetLeft(), menu:GetTop(), frame:GetTop()
+	local fBottom = frame:GetBottom()
+	if mTop and fBottom then
+		-- (Not below the tab's bottom: moved up as far as needed.)
+		local h = child:GetHeight() or 0
+		local over = (fBottom + 4) - (mTop + dy - h)
+		if over > 0 then dy = dy + over end
+	end
+	if mLeft and fLeft and mLeft - fLeft - 12 < menuWidth + 2 and mTop and fTop then
+		child:SetPoint("TOPLEFT", frame, "TOPLEFT", 12, mTop - fTop + dy)
+	else
+		child:SetPoint("TOPRIGHT", menu, "TOPLEFT", -2, dy)
+	end
+	if frame.subEntry then frame.subSignature = ChatWindow.SubMenuSignature(frame.subEntry, ChatWindow.SubMenuOptions(frame.subEntry)) end
+	child:Show()
 end
 
 -- The destinations, drawn by the Realm's own in-page tabs (Views.DrawNav) where the Realm draws
@@ -1604,7 +1793,9 @@ function ChatWindow.DrawTopicStatus(y)
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local s = frame.topicStatus
-	local text = logical and logical.scope == "topic" and type(R) == "table" and type(R.StatusText) == "function" and R.StatusText(tier) or nil
+	-- (1.2.4: any room's, ChatRooms.StatusText: a role room's people of other guilds waiting for the
+	-- author's signed leadership list.)
+	local text = logical and type(R) == "table" and type(R.StatusText) == "function" and R.StatusText(tier) or nil
 	if not text then s:Hide(); return 0 end
 	s.text:SetText(Gold(text))
 	local width = StripWidth()
@@ -2501,7 +2692,9 @@ end
 function ChatWindow.Render(keep)
 	dirty = false
 	ChatWindow.sinceDraw = 0
-	if keep then ChatWindow.Era() else ChatWindow.NewEra() end
+	-- (1.2.4: a redraw of the player's doing, a click, a room picked, lists the rooms again too; the
+	-- throttled one, for lines that came, never: ChatWindow.NAV_EVERY.)
+	if keep then ChatWindow.Era() else ChatWindow.NewEra(); ChatWindow.NavStale() end
 	local started = ChatWindow.Clock()
 	Draw()
 	local finished = started and ChatWindow.Clock()
@@ -2623,6 +2816,33 @@ local function NextTier()
 	SelectChoice(choices[at % #choices + 1].key)
 end
 
+-- 1.2.4 (the author, in the Church's room: "não me avisa por que não foi"): a line one of ChatRooms'
+-- own rooms refused at Enter (ChatRooms.Own: Guild and the role rooms; a provider's room answers for
+-- itself) gets its reason in that room, one note, the latest refusal's (an older one goes); its
+-- words stay in the box, and a line sent takes the note away (Submit). Before, the reason went to
+-- the game's chat frame at best, under the Olympus window.
+function ChatWindow.Refused(t, why)
+	local list = notes[t] or {}
+	notes[t] = list
+	for i = #list, 1, -1 do if list[i].kept or list[i].said then table.remove(list, i) end end
+	list[#list + 1] = { why = WHY[why] and why or "failed", kept = true }
+	while #list > MAX_NOTES do table.remove(list, 1) end
+	MarkDirty()
+end
+
+-- 1.2.4: a role room's line that went, to FANOUT of its members at most (ChatRooms.FANOUT; the
+-- Church's rooms 30, heard online): how many online it missed, said in the room under the line (the
+-- next line sent or refused takes it away), not only in the game's chat frame under the window.
+function ChatWindow.Missed(t, text)
+	if type(t) ~= "string" or type(text) ~= "string" or text == "" then return end
+	local list = notes[t] or {}
+	notes[t] = list
+	for i = #list, 1, -1 do if list[i].said then table.remove(list, i) end end
+	list[#list + 1] = { said = text }
+	while #list > MAX_NOTES do table.remove(list, 1) end
+	MarkDirty()
+end
+
 local function Submit()
 	if not frame or not tier then return end
 	local eb = frame.input
@@ -2648,13 +2868,14 @@ local function Submit()
 		-- channels retain their old keepMute behaviour.
 		local room = Dynamic(tier)
 		local logical = ChatWindow.Logical(tier)
-		local ok, why
+		local ok, why, left
 		if room then
 			local A = ns.ArenaChat
 			if type(A) == "table" and type(A.Send) == "function" then ok, why = A.Send(room.id, text) else ok, why = false, "room" end
 		elseif logical then
 			local R = ns.ChatRooms
-			if type(R) == "table" and type(R.Send) == "function" then ok, why = R.Send(tier, text) else ok, why = false, "room" end
+			if type(R) == "table" and type(R.Send) == "function" then ok, why, left = R.Send(tier, text) else ok, why = false, "room" end
+			if not ok and type(R) == "table" and type(R.Own) == "function" and R.Own(tier) then ChatWindow.Refused(tier, why) end
 		else
 			ok, why = ns.Channels.Send(tier, text, nil, true)
 		end
@@ -2663,6 +2884,10 @@ local function Submit()
 		if ok or why == "confirm" then
 			eb:SetText("")
 			if ok and not room then notes[tier] = nil end
+			local R = ns.ChatRooms
+			if ok and logical and (tonumber(left) or 0) > 0 and type(R) == "table" and type(R.NotReachedText) == "function" then
+				ChatWindow.Missed(tier, R.NotReachedText(tier, left))
+			end
 			ScrollToBottom()
 			MarkDirty()
 		end
@@ -2707,11 +2932,15 @@ local function OnUpdate(_, elapsed)
 		ChatWindow.NewEra()
 	end
 	ChatWindow.Era()
+	-- (1.2.4: the destinations' rooms listed again at most every NAV_EVERY, while the tab shows.)
+	if ChatWindow.navCache and (GetTime() - (ChatWindow.navAt or 0) >= ChatWindow.NAV_EVERY or GetTime() < (ChatWindow.navAt or 0)) then
+		ChatWindow.NavStale(); dirty = true
+	end
 	-- A rank that no longer reads this channel (a demotion, out of the guild), or a room whose
 	-- retention ended: drawn again at once.
 	if ChatWindow.PruneDynamicRooms and GetTime() - lastRoomPrune >= LOOK_GAP then ChatWindow.PruneDynamicRooms() end
 	local lost = tier ~= nil and not Choice(tier)
-	if lost then dirty = true; ChatWindow.NewEra() end
+	if lost then dirty = true; ChatWindow.NewEra(); ChatWindow.NavStale() end
 	local R = ns.ChatRooms
 	local logical = ChatWindow.Logical(tier)
 	local status = logical and logical.scope == "topic" and type(R) == "table" and type(R.RequestStatus) == "function" and R.RequestStatus(tier) or nil
@@ -3036,34 +3265,19 @@ function ChatWindow.MakeSubtabs(p)
 	menu:SetFrameStrata("DIALOG")
 	menu:EnableMouse(true)
 	menu.rows = {}
-	for i = 1, 10 do
-		local row = CreateFrame("Button", nil, menu)
-		row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-		row.text:SetPoint("LEFT", row, "LEFT", 10, 0)
-		row.mark = row:CreateTexture(nil, "ARTWORK")
-		row.mark:SetWidth(2)
-		row.mark:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -4)
-		row.mark:SetPoint("BOTTOMLEFT", row, "BOTTOMLEFT", 2, 4)
-		row.mark:SetColorTexture(1, 0.82, 0, 1)
-		row:SetScript("OnEnter", function(self)
-			Tip(self, function(tt) tt:AddLine(self.text:GetText(), 1, 1, 1, true) end)
-		end)
-		row:SetScript("OnLeave", function(self) Untip(self) end)
-		row:SetScript("OnClick", function(self)
-			if self.previewOnly then
-				ns.Print(ChatWindow.Localized("CHATROOM_ROLE_PREVIEW", "Preview only - switch back to your own view to use role chats."))
-				return
-			end
-			local id, dynamic, onClick = self.roomId, self.dynamic, self.onClick
-			ChatWindow.CloseSubMenu()
-			if type(onClick) == "function" then ns.SafeCall("chat room choice", onClick)
-			elseif dynamic and id then ns.SafeCall("chat arena choice", ChatWindow.SelectDynamicRoom, id)
-			elseif id then ns.SafeCall("chat room choice", ChatWindow.SelectLogical, id) end
-		end)
-		menu.rows[i] = row
-	end
+	-- (1.2.4: ChatWindow.MenuRow's, the ten a page shows at most made now, any other as a list needs it.)
+	for i = 1, ChatWindow.MENU_VISIBLE do ChatWindow.MenuRow(menu, i) end
 	menu:Hide()
 	p.subMenu = menu
+	-- (1.2.4) A group's own list (ChatWindow.OpenChildMenu), over the first.
+	local child = Framed("Frame", p)
+	child:SetFrameLevel((p:GetFrameLevel() or 1) + 45)
+	child:SetFrameStrata("DIALOG")
+	child:EnableMouse(true)
+	child.rows = {}
+	for i = 1, ChatWindow.MENU_VISIBLE do ChatWindow.MenuRow(child, i) end
+	child:Hide()
+	p.subMenu2 = child
 end
 
 -- A strip over the lines (the pinned line, the Olympus tab's line, the count of the hidden lines): a
@@ -3720,6 +3934,7 @@ function ChatWindow.Attach(h, places)
 	Place(p, places)
 	if not p:IsShown() then
 		ChatWindow.NewEra() -- (1.2.3: opened, nothing kept from before is read: Pick's rooms neither)
+		ChatWindow.NavStale() -- (1.2.4: and the destinations' rooms listed anew)
 		tier = Pick()
 		if tier and ns.Channels.TIERS[tier] then ChatWindow.globalTier = tier; Remember(tier) end
 		unread = {}
@@ -3813,6 +4028,7 @@ function ChatWindow.Reset()
 	pointer = nil
 	keyButton, boundKeys, keysLater, toldLater, syncing = nil, nil, false, false, false
 	ChatWindow.NewEra() -- (1.2.3: nothing kept from before)
+	ChatWindow.NavStale()
 end
 
 ---------------------------------------------------------------------------
@@ -3833,10 +4049,13 @@ ns.On("CHAT_LINE", function(t)
 	end
 	MarkDirty()
 end)
+-- (1.2.4: a line in a room not shown only adds to its count, drawn at the next redraw: no redraw of
+-- its own, ChatWindow.NAV_EVERY. The room shown stays live.)
 ns.On("CHAT_ROOM_LINE", function(id)
 	if not Shown() or not ChatWindow.Logical(id) then return end
 	if id ~= tier then
 		unread[id] = (unread[id] or 0) + 1
+		return
 	elseif not stick then
 		newCount = newCount + 1
 	end
@@ -3856,6 +4075,7 @@ ns.On("ARENA_CHAT", function(id)
 	if not dynamicRooms[key] or not Shown() then return end
 	if key ~= tier then
 		unread[key] = (unread[key] or 0) + 1
+		return -- (1.2.4: counted, drawn at the next redraw, as a role room's: CHAT_ROOM_LINE)
 	elseif not stick then
 		newCount = newCount + 1
 	end

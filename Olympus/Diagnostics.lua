@@ -536,6 +536,8 @@ function ns.StatusText()
 	add("chat marks: %s", ns.Borders and ns.Borders.ChatStatusLine and ns.Borders.ChatStatusLine() or "not loaded")
 	-- 1.1.5: the guild masters' centurions and correspondents (Nominees.lua): his own, and the lists held.
 	add("nominees: %s", ns.Nominees and ns.Nominees.StatusLine and ns.Nominees.StatusLine() or "not loaded")
+	-- 1.2.4: the author's signed leadership list (Authority.lua), which other guilds' leaders need in the role rooms.
+	add("signed leadership: %s", ns.Authority and type(ns.Authority.StatusLine) == "function" and ns.Authority.StatusLine() or "not loaded")
 	add("letters: %s", ns.Letters and ns.Letters.StatusLine and ns.Letters.StatusLine() or "not loaded")
 	-- The gamepad UI and what the game refused us this session; what its code reads, as now.
 	local refused = type(ns.db.actionsBlocked) == "table" and ns.db.actionsBlocked or {}
