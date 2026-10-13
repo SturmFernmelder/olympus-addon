@@ -154,6 +154,10 @@ local stats = { accepted = 0, replay = 0, refused = 0, corrected = 0, checkpoint
 	sightRefused = 0, sightReplay = 0, sightExpired = 0, sightWithdrawn = 0, leases = 0 }
 local rate = {}
 local mode, opened = "list", nil
+-- RankingRules belongs to this exact addon namespace. `rawget` deliberately ignores an inherited
+-- test/client namespace: loading Wanted for a second simulated client must not replace the real
+-- client's rule specification with callbacks closed over the other client.
+Wanted.Rules = rawget(ns, "RankingRules")
 -- The word shown now. After a reload it comes back only through RestoreGlobal, which checks the
 -- saved copy again; the copy alone (or any other saved field) never shows a frame.
 local authenticatedGlobal
@@ -2341,8 +2345,33 @@ function Wanted.OpenReview()
 	return true
 end
 
+function Wanted.RulesAllowed()
+	return ns.IsMember ~= nil and ns.IsMember() == true
+end
+
+function Wanted.OpenRules()
+	if not (Wanted.Rules and Wanted.RulesAllowed()) then return false end
+	Wanted.rulesReturn = { mode = mode, opened = opened }
+	mode, opened = "rules", nil
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+	return true
+end
+
+function Wanted.CloseRules()
+	local back = Wanted.rulesReturn
+	Wanted.rulesReturn = nil
+	if Wanted.RulesAllowed() and type(back) == "table" then
+		mode, opened = back.mode or "list", back.opened
+	else
+		mode, opened = "list", nil
+	end
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+	return true
+end
+
 function Wanted.Back()
 	if mode == "list" then return false end
+	if mode == "rules" then return Wanted.CloseRules() end
 	mode, opened = "list", nil
 	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
 	return true
@@ -2350,6 +2379,7 @@ end
 
 function Wanted.PageId()
 	if mode == "target" then return "target:" .. tostring(opened) end
+	if mode == "rules" then return "rules" end
 	return mode == "review" and "review" or "list"
 end
 
@@ -2439,6 +2469,8 @@ end
 local function ListLines()
 	local lines, targets = {}, Wanted.Targets("listed")
 	lines[#lines + 1] = { header = true, text = L.WANTED_TARGETS, right = Grey(tostring(#targets)) }
+	local rules = Wanted.Rules and Wanted.Rules.Link("wanted-slayers", Wanted.OpenRules)
+	if rules then lines[#lines + 1] = rules end
 	if #targets == 0 then lines[#lines + 1] = { text = Grey(L.WANTED_EMPTY) } end
 	for i = 1, Wanted.VisibleRows("wanted", #targets) do
 		local t = targets[i]
@@ -2564,6 +2596,13 @@ local function FramesLines()
 end
 
 function Wanted.Build()
+	if mode == "rules" then
+		local lines = Wanted.Rules and Wanted.Rules.Lines("wanted-slayers", Wanted.CloseRules)
+		if lines then return lines, L.WANTED_TITLE, L.WANTED_ABOUT end
+		Wanted.rulesReturn = nil
+		mode, opened = "list", nil
+		return {}, L.WANTED_TITLE, L.WANTED_ABOUT
+	end
 	if mode == "review" then
 		local lines = FramesLines()
 		if mode == "review" then return lines, L.WANTED_REVIEW_TITLE, L.WANTED_REVIEW_ABOUT end
@@ -6356,6 +6395,7 @@ function Wanted.ResetForTests()
 	deathSerial = deathSerial + 1
 	knownHorde = {}
 	rate, mode, opened = {}, "list", nil
+	Wanted.rulesReturn = nil
 	Wanted.listShown = { wanted = Wanted.LIST_FIRST, month = Wanted.LIST_FIRST, all = Wanted.LIST_FIRST }
 	authenticatedGlobal, globalFloor, publisherHeads = nil, nil, {}
 	pendingGlobal, pendingGlobalCount = {}, 0
@@ -6376,6 +6416,29 @@ function Wanted.ResetForTests()
 	Share.catchReplied, Share.catchHeard = -math.huge, -math.huge
 	Share.resendGen = (Share.resendGen or 0) + 1
 	Bounty.session = { gen = (Bounty.session.gen or 0) + 1 }
+end
+
+if Wanted.Rules then
+	Wanted.Rules.Register("wanted-slayers", {
+		title = function() return L.RANK_RULE_WANTED_TITLE end,
+		icon = Wanted.Icon,
+		allowed = Wanted.RulesAllowed,
+		sections = function()
+			return {
+				{ topic = "score", text = {
+					L.RANK_RULE_WANTED_BOUNTY:format(Bounty.SCORE.BOUNTY_MAX,
+						math.floor(Bounty.SCORE.REPEAT_GAP / 60)),
+					L.RANK_RULE_WANTED_SLAYER:format(Bounty.SCORE.KILL_LEVEL_STEP,
+						Bounty.SCORE.REVENGE, Bounty.SCORE.GRUDGE_DAYS),
+				} },
+				{ topic = "limits", text = L.RANK_RULE_WANTED_LIMITS:format(
+					math.floor(Bounty.SCORE.KILL_GAP / 60), math.floor(Bounty.SCORE.REVENGE_GAP / 3600)) },
+				{ topic = "order", text = L.RANK_RULE_WANTED_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_WANTED_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_WANTED_VISIBILITY },
+			}
+		end,
+	})
 end
 
 if ns.UI and ns.UI.AddTab then

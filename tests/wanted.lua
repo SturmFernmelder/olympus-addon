@@ -214,6 +214,8 @@ local function WithWanted(fn)
 			p.Comm = { Handle = quiet, Whisper = c.Comm.Whisper, SendChunked = c.Comm.SendChunked }
 			p.On, p.RegisterEvent, p.Fire = quiet, quiet, quiet
 			p.UI = { AddTab = quiet, Refresh = quiet, RefreshSoon = quiet, FirstTexture = c.UI.FirstTexture, ShowPerson = quiet }
+			p.RealmPages = {}
+			assert(loadfile(ROOT .. "Olympus/RankingRules.lua"))("Olympus", p)
 			local mine = {}
 			for _, which in ipairs(DIALOGS) do mine[which] = StaticPopupDialogs[which] end
 			assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", p)
@@ -287,6 +289,8 @@ local function WithWanted(fn)
 			return out
 		end
 
+		c.RealmPages = {}
+		assert(loadfile(ROOT .. "Olympus/RankingRules.lua"))("Olympus", c)
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		w.ns, w.Wanted = c, c.Wanted
 		c.Wanted.ResetForTests()
@@ -424,6 +428,42 @@ test("wanted 1.2.4 page: Wanted and both local Slayers boards start at five and 
 		state = State(W.Build())
 		eq(state.all, 16); eq(state.more["slayers-all-more"], nil)
 		assert(w.refreshed >= 6, "each click refreshes the visible page")
+	end)
+end)
+
+test("wanted 1.2.4 ranking rules: the native link uses live scoring, Back keeps list state and access loss fails closed", function()
+	WithWanted(function(w, W, c)
+		W.listShown.wanted = 15
+		local link
+		for _, line in ipairs(W.Build()) do
+			if line.id == "ranking-rules:wanted-slayers" then link = line end
+		end
+		assert(link and link.onClick, "the prominent in-window Wanted rules link")
+		assert(link.onClick())
+		eq(W.PageId(), "rules")
+
+		local lines = W.Build()
+		eq(lines[1].id, "ranking-rules-back")
+		local spec = assert(c.RankingRules.Spec("wanted-slayers"))
+		local sections = spec.sections()
+		eq(sections[1].text[1], c.L.RANK_RULE_WANTED_BOUNTY:format(2000, 10))
+		eq(sections[1].text[2], c.L.RANK_RULE_WANTED_SLAYER:format(10, 100, 14))
+		eq(sections[2].text, c.L.RANK_RULE_WANTED_LIMITS:format(60, 24))
+		assert(sections[1].text[1]:find("one historical kill and up to 1 bounty point below the same cap", 1, true))
+		assert(sections[1].text[2]:find("pays only the open bounty", 1, true))
+		assert(lines[1].onClick())
+		eq(W.PageId(), "list")
+		eq(W.listShown.wanted, 15, "Back returns to the exact list pagination state")
+
+		for _, line in ipairs(W.Build()) do
+			if line.id == "ranking-rules:wanted-slayers" then assert(line.onClick()) end
+		end
+		w.member = false
+		eq(#W.Build(), 0, "a stale rules page discloses nothing after membership is lost")
+		eq(W.PageId(), "list")
+		for _, line in ipairs(W.Build()) do
+			assert(line.id ~= "ranking-rules:wanted-slayers", "the link is also access-gated")
+		end
 	end)
 end)
 
