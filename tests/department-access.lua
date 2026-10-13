@@ -349,6 +349,7 @@ test("guild departments: exact own-guild correspondent authority comes from a fr
 		c.Roster.byName["Guildmaster-Realm"] = 1
 		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "deposed before pruning")
 		c.Roster.byName["Guildmaster-Realm"] = 0
+		w.name(dept) -- the verified authority change ended the old accepted list; a new one is required
 		c.Roster.byName[c.me] = nil
 		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "left the guild")
 		c.Roster.byName[c.me] = 3
@@ -359,7 +360,7 @@ test("guild departments: exact own-guild correspondent authority comes from a fr
 		c.Roster.snapshotAt = w.now
 		eq(N.IsCorrespondent(c.me, w.guild, dept), true)
 		w.now = w.now + N.FRESH + 1; c.Roster.snapshotAt = w.now
-		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "expired nomination")
+		eq(N.IsCorrespondent(c.me, w.guild, dept), true, "offline time does not revoke a current master's accepted nomination")
 	end)
 end)
 
@@ -385,9 +386,19 @@ test("guild departments (1.2.4): a correspondent keeps his department while the 
 		c.Roster.byName["Guildmaster-Realm"] = 1
 		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "deposed")
 		c.Roster.byName["Guildmaster-Realm"] = 0
-		-- Thirty days without a word from him: it ends.
+		w.name(dept) -- returning as GM does not resurrect the former appointment without his word
+		-- More than thirty days without a word does not end an accepted appointment.
 		w.now = heardAt + N.FRESH + 1; c.Roster.snapshotAt = w.now
-		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "expired nomination")
+		eq(N.IsCorrespondent(c.me, w.guild, dept), true, "kept past thirty days")
+		eq((N.GuildAccess()), true)
+		assert(loadfile(ROOT .. "Olympus/Nominees.lua"))("Olympus", c)
+		N = c.Nominees
+		eq(N.IsCorrespondent(c.me, w.guild, dept), true, "old accepted list restored")
+		c.Roster.complete = false
+		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "history never substitutes for a current roster")
+		c.Roster.complete = true
+		N.Handle("CHANNEL", "Guildmaster-Realm", ("NM~1~%s~%d~1~1~"):format(w.guild, w.now + 1))
+		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "explicit current-master revocation")
 		eq((N.GuildAccess()), false)
 	end)
 end)

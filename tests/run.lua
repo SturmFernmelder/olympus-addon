@@ -26576,7 +26576,8 @@ do
 	local N = ns.Nominees
 	local OURS, THEIRS = "Olympus II", "Olympus Zeus"
 	local MASTER = "Boss Hammer-Realm" -- our guild's master, as our roster gives him
-	local CENTURIONS = { "Ada", "Bea", "Cid", "Dax", "Eve", "Fay", "Gus", "Hal", "Ivy", "Jon", "Kit" } -- (eleven)
+	-- 25 manually named Legates plus one overflow candidate; legacy centurion ids remain on the wire.
+	local CENTURIONS = { "Ada", "Bea", "Cid", "Dax", "Eve", "Fay", "Gus", "Hal", "Ivy", "Jon", "Kit", "Lars", "Moss", "Nash", "Orrin", "Penn", "Quin", "Rell", "Seth", "Tate", "Ulric", "Venn", "Wade", "Xara", "Yara", "Zane" }
 	local OTHERS = { "Lux", "Mia", "Ned", "Ora", "Pam", "Nemo" } -- (more members of our guild)
 	local MEDIA = "Interface\\AddOns\\Olympus\\media\\borders\\"
 	-- The High Council's signed titles list: its unnamed part, then seven named departments (one more
@@ -26645,20 +26646,20 @@ do
 		if not ok then error(err, 0) end
 	end
 
-	test("1.1.5 nominees: a guild master names up to 10 centurions and one correspondent per High Council department (6 at most), members of his own guild alone; the 11th centurion, a second correspondent for a department, one name twice, himself and anyone outside his roster refused, each with its reason", function()
+	test("1.2.4 nominees: a guild master manually names up to 25 Legates and six department correspondents; the 26th, duplicate, outside member or second department correspondent is refused", function()
 		WithNominees(function(w)
 			local L = ns.L
 			w.as(MASTER, 0)
 			eq(N.IsMaster(), true)
-			eq(N.MAX_CENTURIONS, 10); eq(N.MAX_DEPTS, 6); eq(N.MAX, 16)
+			eq(N.MAX_CENTURIONS, 25); eq(N.MAX_LEGATES, 25); eq(N.MAX_DEPTS, 6); eq(N.MAX, 31)
 			-- The correspondents' departments: the signed list's named ones, in its order, six at most.
 			eq(table.concat(N.Departments(), ","), "Events,Lore,Trade,War,Craft,Watch")
-			for i = 1, 10 do eq(N.Name("centurion", CENTURIONS[i]), true, CENTURIONS[i]) end
-			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Jon", L.NOMINEE_ROLE_CENTURION))
-			-- The 11th: refused, saying why; nothing kept.
-			eq(N.Name("centurion", "Kit"), false, "an 11th centurion")
-			eq(w.printed[#w.printed], L.NOMINEES_FULL:format(10))
-			eq(N.RoleOf("Kit-Realm", OURS), nil)
+			for i = 1, 25 do eq(N.Name("legate", CENTURIONS[i]), true, CENTURIONS[i]) end
+			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Yara", L.NOMINEE_ROLE_CENTURION))
+			-- The 26th: refused, saying why; nothing kept.
+			eq(N.Name("centurion", "Zane"), false, "a 26th Legate")
+			eq(w.printed[#w.printed], L.NOMINEES_FULL:format(25))
+			eq(N.RoleOf("Zane-Realm", OURS), nil)
 			-- Anyone outside his roster, himself, someone named already (whatever the case), a name that
 			-- can't be a character's: refused.
 			eq(N.Name("correspondent", "Stranger", "Events"), false, "not of his guild")
@@ -26668,19 +26669,19 @@ do
 			eq(w.printed[#w.printed], L.NOMINEES_ALREADY:format("Ada", L.NOMINEE_ROLE_CENTURION))
 			eq(N.Name("centurion", "Bad|cffff0000Name"), false, "no free text for a name"); eq(w.printed[#w.printed], L.NOMINEES_WHO)
 			-- One correspondent per department (its name whatever the case); none past the six.
-			eq(N.Name("correspondent", "Kit", "events"), true)
-			local role, dept = N.RoleOf("Kit-Realm", OURS)
+			eq(N.Name("correspondent", "Zane", "events"), true)
+			local role, dept = N.RoleOf("Zane-Realm", OURS)
 			eq(role, "correspondent"); eq(dept, "Events")
-			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Kit", L.NOMINEE_ROLE_CORRESPONDENT:format("Events")))
+			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Zane", L.NOMINEE_ROLE_CORRESPONDENT:format("Events")))
 			eq(N.Name("correspondent", "Nemo", "Events"), false, "a second for a department")
-			eq(w.printed[#w.printed], L.NOMINEES_DEPT_TAKEN:format("Events", "Kit"))
+			eq(w.printed[#w.printed], L.NOMINEES_DEPT_TAKEN:format("Events", "Zane"))
 			eq(N.Name("correspondent", "Nemo", "Seventh"), false, "a seventh department")
 			eq(w.printed[#w.printed], L.NOMINEES_NO_DEPT:format("Seventh"))
 			local depts = N.Departments()
 			for i = 2, 6 do eq(N.Name("correspondent", OTHERS[i - 1], depts[i]), true, depts[i]) end
-			eq(N.Count(), 16, "16 at most: 10 and 6")
+			eq(N.Count(), 31, "25 Legates and six correspondents")
 			-- Kept across sessions, under his character, for the guild he leads.
-			eq(ns.rdb.nominees[MASTER].guild, OURS); eq(#ns.rdb.nominees[MASTER].list, 16)
+			eq(ns.rdb.nominees[MASTER].guild, OURS); eq(#ns.rdb.nominees[MASTER].list, 31)
 			-- He takes a title back (by name, any case): the 11th fits then.
 			eq(N.Remove("ada"), true)
 			eq(w.printed[#w.printed], L.NOMINEES_REMOVED:format("Ada", L.NOMINEE_ROLE_CENTURION))
@@ -26870,21 +26871,21 @@ do
 			-- What a proven list may name: 10 centurions and 6 departments at most (the first ones), each
 			-- name once, an older list never over a newer one.
 			local c, d = {}, {}
-			for i = 1, 11 do c[i] = "c=" .. CENTURIONS[i] end
+			for i = 1, 26 do c[i] = "c=" .. CENTURIONS[i] end
 			c[#c + 1] = "c=Ada"
 			for i = 1, 7 do d[i] = ("d=Dept%s=%s"):format(("abcdefg"):sub(i, i), OTHERS[i] or "Zed") end
 			N.Handle("CHANNEL", MASTER, Msg(OURS, rev + 10, table.concat(c, ";"), 1, 2))
 			N.Handle("CHANNEL", MASTER, Msg(OURS, rev + 10, table.concat(d, ";"), 2, 2))
 			local l = N.ListOf(OURS)
-			eq(#l.entries, 16, "10 and 6")
-			eq(N.RoleOf("Kit-Realm", OURS), nil, "the 11th centurion left out")
+			eq(#l.entries, 31, "25 and 6")
+			eq(N.RoleOf("Zane-Realm", OURS), nil, "the 26th Legate left out")
 			eq(N.RoleOf("Zed-Realm", OURS), nil, "the 7th department left out")
 			N.Handle("CHANNEL", MASTER, parts[1])
-			eq(#N.ListOf(OURS).entries, 16, "his older list, late: not taken")
+			eq(#N.ListOf(OURS).entries, 31, "his older list, late: not taken")
 		end)
 	end)
 
-	test("1.1.5 nominees: a list ends when its sender is no longer that guild's master (our roster; another guild's census proving another), when he stops repeating it, or when it names nobody; the new guild master's is taken", function()
+	test("1.2.4 nominees: an accepted list ends on an authoritative master change or explicit removal, never merely because its master is offline", function()
 		WithNominees(function(w)
 			local L = ns.L
 			w.as("Ada-Realm", 3)
@@ -26909,11 +26910,11 @@ do
 				"W1-Realm", "W2-Realm")
 			eq(N.Prune(), true)
 			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "dropped")
-			-- He stopped repeating it (logged off): it lasts FRESH (1.2.4: 30 days, 6 hours before), then ends.
+			-- He stopped repeating it (logged off): no age-only loss.
 			w.clock = w.clock + N.FRESH
 			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "still fresh")
 			w.clock = w.clock + 1
-			eq(N.RoleOf("Bea-Realm", OURS), nil, "gone quiet")
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "offline silence is not removal")
 			-- A new list naming nobody: dropped at once; the one no longer named is told.
 			N.Handle("CHANNEL", "Nemo-Realm", Msg(OURS, w.clock, "c=Ada"))
 			eq(w.printed[#w.printed], L.NOMINEES_YOU:format("Nemo", L.NOMINEE_ROLE_CENTURION, OURS))
@@ -26932,7 +26933,7 @@ do
 	-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept".) Fails before: a list heard
 	-- lived in memory 6 hours, so a guild master offline since the evening, or any /reload, left his guild
 	-- with no centurion, no correspondent and no bronze until he logged in again.
-	test("1.2.4 nominees: a list heard is kept while its guild master is offline, saved across a /reload, 30 days after it was last heard; another master proven, an empty list or 30 days without a word end it; nothing else comes back from the saved lists", function()
+	test("1.2.4 nominees: accepted offline lists persist beyond thirty days and reload, with bounded validated restoration and explicit authoritative revocation", function()
 		WithNominees(function(w)
 			w.as("Ada-Realm", 3)
 			N.Handle("CHANNEL", MASTER, Msg(OURS, w.clock, "c=Ada;c=Bea;d=Lore=Cid"))
@@ -26958,9 +26959,9 @@ do
 			N.Reset(true)
 			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion", "29 days and some")
 			w.clock = heardAt + N.FRESH + 1
-			eq(N.Prune(), true)
-			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "30 days without a word: gone")
-			eq(ns.rdb.nomineesHeard[THEIRS:lower()], nil, "and from the saved lists")
+			eq(N.Prune(), false)
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion", "silence is not removal")
+			assert(ns.rdb.nomineesHeard[THEIRS:lower()], "accepted historical snapshot remains saved")
 			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "his repeat counts")
 			-- Another master proven, after a reload: the restored list ends at once.
 			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Zeusy", officers = { { name = "Capt" } }, realm = "Realm", t = w.clock },
@@ -26978,7 +26979,7 @@ do
 			eq(N.ListOf(OURS), nil)
 			eq(ns.rdb.nomineesHeard[OURS:lower()], nil)
 			-- The saved lists are read as lists that came: a bad name, another guild than its key, a guild
-			-- that is not Olympus, a time ahead, past FRESH or of no number: none comes back, each let go.
+			-- that is not Olympus, a time ahead or of no number: none comes back. An old valid list does.
 			local now = w.clock
 			ns.rdb.nomineesHeard = {
 				[OURS:lower()] = { g = OURS, by = "Bad|Name-Realm", rev = 1, at = now, body = "c=Ada" },
@@ -26990,14 +26991,16 @@ do
 				["olympus six"] = { g = "Olympus Six", by = "Six Boss-Realm", rev = 1, at = now, body = "c=Ada;c=Ada;c=" .. table.concat(CENTURIONS, ";c=") },
 			}
 			N.Reset(true)
-			for _, g in ipairs({ OURS, THEIRS, "Stormwind Traders", "Olympus Three", "Olympus Four", "Olympus Five" }) do
+			for _, g in ipairs({ OURS, THEIRS, "Stormwind Traders", "Olympus Three", "Olympus Five" }) do
 				eq(N.ListOf(g), nil, g)
 			end
-			eq(#N.ListOf("Olympus Six").entries, N.MAX_CENTURIONS, "its caps held: ten centurions, each name once")
-			eq(N.RoleOf("Ada-Realm", "Olympus Six"), "centurion"); eq(N.RoleOf("Kit-Realm", "Olympus Six"), nil, "the eleventh left out")
+			eq(N.RoleOf("Ada-Realm", "Olympus Four"), "centurion", "age alone does not invalidate an accepted save")
+			eq(#N.ListOf("Olympus Six").entries, N.MAX_CENTURIONS, "25 Legates, each name once")
+			eq(N.RoleOf("Ada-Realm", "Olympus Six"), "centurion"); eq(N.RoleOf("Zane-Realm", "Olympus Six"), nil, "the 26th left out")
 			local left = {}
 			for k in pairs(ns.rdb.nomineesHeard) do left[#left + 1] = k end
-			eq(table.concat(left, ","), "olympus six", "the rest let go")
+			table.sort(left)
+			eq(table.concat(left, ","), "olympus four,olympus six", "only bounded valid snapshots remain")
 			-- SAVED_MAX at most, the one heard longest ago let go.
 			for i = 1, N.SAVED_MAX + 1 do
 				ns.rdb.guilds["Olympus G" .. i] = Vouched({ guild = "Olympus G" .. i, leader = "Boss" .. i, officers = {}, realm = "Realm", t = w.clock },
@@ -27073,7 +27076,7 @@ do
 		assert(comm:find("Nominees NM", 1, true), "in Comm.lua's list")
 	end)
 
-	test("1.1.5 nominees' border: Max's bronze without wings round a nominee's portrait (target, focus, the party, your own) while the server gives him the guild whose master named him; the bronze mark on his nameplate and in the game's chat; nobody can borrow it; gone with his title", function()
+	test("1.2.4 nominees' border: a Legate keeps native rank and earned honours, with no extra portrait; a guild-verified correspondent retains the bronze, removed with its title", function()
 		local savedRoster = ns.Roster.byName
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
@@ -27084,8 +27087,8 @@ do
 			w.party()
 			w.units.party1 = BorderUnit("Ada", THEIRS, "Member", 4)
 			w.internal("LOGIN")
-			eq(w.shown("party1"), "bronze", "a centurion in the party")
-			eq(w.shown("player"), "bronze", "your own: your guild master named you")
+			eq(w.shown("party1"), nil, "a manual Legate has no added portrait border")
+			eq(w.shown("player"), nil, "the appointment itself does not change your portrait")
 			w.target(BorderUnit("Bea", THEIRS, "Member", 4))
 			eq(w.shown("target"), "bronze", "a correspondent")
 			local tex = w.shownTexture("target")
@@ -27096,7 +27099,8 @@ do
 			eq(w.shown("focus"), "bronze")
 			eq(w.B.MarkOf("target"), "bronze", "the nameplate's bronze, a guild master's mark")
 			eq(w.B.MarkOfName("Bea-Realm", THEIRS), "bronze", "the game's chat: the bronze")
-			eq(w.B.MarkOfName("Ada-Realm", OURS), "bronze", "named in our guild, in our roster")
+			eq(N.RoleOf("Ada-Realm", OURS), "centurion", "the legitimate manual appointment is actually accepted")
+			eq(w.B.MarkOfName("Ada-Realm", OURS), "bronze", "existing nomination identity mark is not a portrait border")
 			-- Nobody can borrow it: the same name in another guild, guildless, on another realm.
 			w.target(BorderUnit("Bea", OURS, "Member", 4))
 			eq(w.shown("target"), nil, "in another guild"); eq(w.B.MarkOf("target"), "member", "the star")
@@ -27122,7 +27126,7 @@ do
 			N.Prune()
 			w.internal("DATA_CHANGED")
 			eq(w.shown("focus"), nil, "her master's list ended")
-			eq(w.shown("player"), "bronze", "ours still")
+			eq(w.shown("player"), nil, "still no appointment-specific Legate portrait")
 			local status = ns.StatusText()
 			assert(status:find("\nnominees: <Olympus II> 2 by Boss Hammer (heard ", 1, true), status)
 		end)
@@ -27131,7 +27135,7 @@ do
 		if not ok then error(err, 0) end
 		-- Max's plain bronze not loaded: the game's plain gold it was drawn over, without colour.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
 			w.noFile[MEDIA .. "bronze-plain"] = true
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
@@ -27143,7 +27147,7 @@ do
 		if not ok then error(err, 0) end
 		-- The gamepad UI: none, as every border.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
 			w.style = 1
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
@@ -27257,13 +27261,15 @@ do
 				eq(lines[1].text, L.GUILD_TAB_TITLE:format(OURS)); eq(lines[1].font, K.TITLE)
 				local head, at = Find(lines, L.NOMINEES_TITLE)
 				eq(head.font, K.TITLE, "the title")
-				-- (One row of the parchment's, King.WRAP letters: shortened to stay one line there.)
-				assert(#L.NOMINEES_HINT <= K.WRAP, "one row")
-				eq(lines[at + 1].text, L.NOMINEES_HINT, "a one-line hint"); eq(lines[at + 1].font, K.INK); eq(lines[at + 1].gapAfter, true)
-				local add = lines[at + 2]
-				eq(add.text, "+ " .. L.NOMINEES_ADD_CENTURION); eq(add.right, "0/10")
-				eq(lines[at + 3].text, L.NOMINEES_NONE)
-				eq(L.NOMINEES_ADD_CENTURION, "Name a centurion (your target, or type a name)")
+				-- The current duty explanation is a real wrapped paragraph, no longer the old short hint.
+				local add, addAt = Find(lines, "+ " .. L.NOMINEES_ADD_CENTURION)
+				local hint = {}
+				for i = at + 1, addAt - 1 do hint[#hint + 1] = lines[i].text; eq(lines[i].font, K.INK) end
+				eq(table.concat(hint, " "), L.NOMINEES_HINT, "complete purpose, not truncated")
+				eq(lines[addAt - 1].gapAfter, true)
+				eq(add.text, "+ " .. L.NOMINEES_ADD_CENTURION); eq(add.right, "0/25")
+				eq(lines[addAt + 1].text, L.NOMINEES_NONE)
+				eq(L.NOMINEES_ADD_CENTURION, "Name a legate (your target, or type a name)")
 				for _, d in ipairs(N.Departments()) do
 					local row = Find(lines, d .. ": ")
 					assert(row and row.onClick, d .. ": its line")
@@ -27271,11 +27277,10 @@ do
 				end
 				eq(Find(lines, "Seventh: "), nil, "six departments")
 				-- Naming guidance is retained before the guild's department panels.
-				local note = L.NOMINEES_NOTE:format(N.FRESH / 86400)
+				local note = L.NOMINEES_NOTE
 				local words = {}; for _, line in ipairs(lines) do words[#words + 1] = line.text or "" end
 				assert(table.concat(words, " "):find(note, 1, true), "the complete naming guidance remains")
-				-- (1.2.4: kept 30 days, saved, while he is offline; 6 hours in memory before.)
-				assert(note:find("30 days", 1, true), note)
+				assert(not note:find("30 days", 1, true), "no invented thirty-day removal")
 				-- None of the Throne's: no Throne Room, no King's guild's centurions.
 				eq(Find(lines, L.THRONE_ROOM), nil); eq(Find(lines, L.NOMINEES_MAIN_TITLE), nil)
 				-- Naming: + asks for a name (his target in the box), the box names.
@@ -27309,10 +27314,10 @@ do
 				for _, name in ipairs(CENTURIONS) do N.Name("centurion", name) end
 				lines = K.Build()
 				add = Find(lines, L.NOMINEES_ADD_CENTURION)
-				eq(add.text, ns.Views.Grey("+ " .. L.NOMINEES_ADD_CENTURION)); eq(add.right, "10/10")
+				eq(add.text, ns.Views.Grey("+ " .. L.NOMINEES_ADD_CENTURION)); eq(add.right, "25/25")
 				local n = #w.popups
 				add.onClick()
-				eq(#w.popups, n, "no box"); eq(w.printed[#w.printed], L.NOMINEES_FULL:format(10))
+				eq(#w.popups, n, "no box"); eq(w.printed[#w.printed], L.NOMINEES_FULL:format(25))
 				-- Someone who left the guild since: said so on his line.
 				ns.Roster.byName["Jon-Realm"] = nil
 				for _, l in ipairs(K.Build()) do if l.key == "Jon" then eq(l.right, ns.Views.Grey(L.NOMINEES_NOT_IN_ROSTER)) end end
@@ -27405,18 +27410,17 @@ do
 	-- the Throne's + line, the click that took a title back, their dialogs with the gamepad UI. All of
 	-- it is gone: tests/king-centurions.lua has what stands in its place, the older clients' list ended
 	-- included. The guild master's own dialogs with the gamepad UI keep their test below.)
-	test("1.1.5 /oly nominees opens the Throne for the King's people; 1.2.4: its centurion and remove name nobody there (the High Council are the King's centurions), nothing sent", function()
+	test("1.2.4 /oly nominees opens the Throne and manually names or removes Legates for the King's authorized council; legacy centurion command remains compatible", function()
 		WithNominees(function(w)
 			local L, K = ns.L, ns.King
 			w.asIn("Vera Councillor-Realm", OURS, 3)
 			SlashCmdList.OLYMPUS("nominees")
 			eq(w.tab, "throne"); eq(K.TabLabel(), "TAB_THRONE")
-			SlashCmdList.OLYMPUS("nominees centurion Bea")
-			eq(w.printed[#w.printed], L.NOMINEES_MAIN_NOBODY)
+			SlashCmdList.OLYMPUS("nominees legate Bea")
+			eq(N.RoleOf("Bea-Realm", "Olympus"), "centurion", "manual appointment, not automatic HC")
 			SlashCmdList.OLYMPUS("nominees remove Bea")
-			eq(w.printed[#w.printed], L.NOMINEES_MAIN_NOBODY)
 			w.flush()
-			eq(N.RoleOf("Bea-Realm", "Olympus"), nil); eq(#w.parts(), 0)
+			eq(N.RoleOf("Bea-Realm", "Olympus"), nil); eq(#w.parts(), 1, "the explicit empty revocation goes out")
 		end)
 	end)
 
@@ -27442,11 +27446,10 @@ do
 				-- (1.2.4: was "his preview's to name", on his screen alone. The High Council are the
 				-- King's centurions: nobody named, in the preview neither.)
 				SlashCmdList.OLYMPUS("nominees centurion Ada")
-				eq(w.printed[#w.printed], L.NOMINEES_MAIN_NOBODY)
-				eq(N.RoleOf("Ada-Realm", "Olympus"), nil, "nobody on his screen")
+				eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "preview sample only")
 				w.flush()
 				eq(#w.parts(), 0, "nothing sent")
-				eq(ns.rdb.mainNominees, nil, "no real list"); eq(ns.db.previewMainNominees, nil, "nor the preview's")
+				eq(ns.rdb.mainNominees, nil, "no real list"); assert(ns.db.previewMainNominees, "local sample only")
 				eq(V.Set("my"), true)
 				-- An author who is a High Councillor: his Guild Master view is a guild master's Guild tab alone.
 				w.as("Vera Councillor-Realm", 3)
@@ -27548,7 +27551,10 @@ do
 			if type(key) == "string" and (key:find("^NOMINEE") or key == "HELP_NOMINEES") then
 				n = n + 1
 				local br = rawget(pt.L, key)
-				assert(type(br) == "string" and br ~= en, "pt-BR: " .. key)
+				-- "Legate" is the human's exact public rank name in both languages; the prose is translated.
+				assert(type(br) == "string" and (br ~= en
+					or (key == "NOMINEE_ROLE_CENTURION" and br:lower() == "legate")
+					or (key == "NOMINEES_MAIN_COUNT" and br == "Legates: %d")), "pt-BR: " .. key)
 				local function Codes(s) local out = {} for c in s:gmatch("%%[sd]") do out[#out + 1] = c end return table.concat(out) end
 				eq(Codes(br), Codes(en), key .. ": the same format codes")
 			end
@@ -46725,7 +46731,7 @@ do
 				end
 				-- Nothing of it was sent anywhere (sharing it is for later).
 				eq(#w.sent, 0); eq(#w.whispered, 0)
-				-- His guild master offline longer than his list counts: the correspondent last named still shows,
+				-- His guild master offline beyond thirty days: the accepted correspondent still shows,
 				-- with the save, after a reload too.
 				w.clock = w.clock + N.FRESH + 60
 				Census(w)
@@ -46736,7 +46742,7 @@ do
 				tip = { lines = {} }
 				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
 				lines[zeus].tooltip(tip)
-				assert(table.concat(tip.lines, "\n"):find(L.TREASURY_RANK_CORR_KEPT:format(ns.DisplayName("Zcorr-Realm")), 1, true), table.concat(tip.lines, "\n"))
+				assert(table.concat(tip.lines, "\n"):find(L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), 1, true), table.concat(tip.lines, "\n"))
 				B.Reload()
 				eq(T.Ranking().rows[4].correspondent, "Zcorr-Realm", "kept with the snapshot")
 				-- Olympus's own table, where it names an item, over its vendor price (empty as shipped).
@@ -46978,11 +46984,11 @@ do
 				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
 				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, Bank1()), "Zed-Realm")
 				eq(B.Correspondent("Olympus Zeus"), "Zcorr-Realm")
-				-- Zed logs off: his list no longer counts; the name he gave stays with the snapshot.
+				-- Zed logs off: his accepted list still counts, not merely the bank's historical fallback.
 				w.clock = w.clock + N.FRESH + 60
 				Census(w)
 				local name, kept = B.Correspondent("Olympus Zeus")
-				eq(name, "Zcorr-Realm"); eq(kept, true)
+				eq(name, "Zcorr-Realm"); eq(kept, false, "still the accepted nomination")
 				B.Reload()
 				eq(T.Ranking().rows[1].correspondent, "Zcorr-Realm", "kept across a reload")
 				-- Zora leads Olympus Zeus now, as the census says: the name Zed gave goes, the save too
@@ -61806,7 +61812,7 @@ end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
 		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
-		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
+		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
 		"campaign", "chat-channel-links", "perf", "roster", "census-avg-level", "profile-menu", "history-carry" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")

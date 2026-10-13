@@ -7,9 +7,8 @@ local L = ns.L
 -- titles list, MAX_DEPTS at most): MAX people in all, members of his own guild. The addon holds the
 -- caps (an eleventh centurion, a second correspondent for a department, someone named twice, a
 -- name outside his roster: each refused with its reason), so nobody has to count them by hand.
--- Each wears Max's bronze border without wings (Borders.lua's "bronze"), and the bronze mark of a
--- guild master on nameplates and in the game's chat, only while the server gives him that guild
--- (GetGuildInfo): nobody outside it can borrow it.
+-- Correspondents retain their guild-verified border. A Legate appointment itself grants no
+-- special portrait border: the native guild rank and separately earned honours still apply.
 --
 -- Where (1.1.5, the author's call on seeing the page): a tab of its own, in the Throne's place
 -- (King.lua's Build; UI.lua's "throne" key). A guild master of an Olympus guild (not the King's)
@@ -20,12 +19,10 @@ local L = ns.L
 -- note on how the army learns his list. And
 -- `/oly nominees [centurion <name> | correspondent <n> <name> | remove <name>]` (alone: the tab).
 --
--- The King's own guild: no guild master's Guild tab (its master is the King), no correspondents, and
--- (1.2.4, the author's rule) no centurions named: each High Councillor is a centurion for the King.
--- The signed council list says who (appointment only); the Throne's page lists them to read
--- (Nominees.MainLines), and they lead the King's guild's squads in the War Room (WarSquads.Leaders).
--- 1.1.5's list of the King's guild's centurions, named on the Throne by the King or a councillor,
--- counts for nothing since: what older clients still hold of it is ended from here (Retire, below).
+-- The current manual rank is Legate. Existing centurion/c wire and save keys are compatibility
+-- aliases, not a different role. The King's guild has manual appointments too, by the actual
+-- King or a signed High Councillor; a council seat alone never appoints its holder. No automatic
+-- retirement or deletion of the earlier manual lists. No correspondents in the King's guild.
 --
 -- How it travels, as the King's list of Hands (King.lua): the guild master's own client keeps his
 -- list (ns.rdb.nominees, under his character) and sends it on the Olympus channel a few seconds
@@ -35,10 +32,10 @@ local L = ns.L
 -- another guild's from its census report, two senders naming him guild master, one of them
 -- someone else (Data.KnownRank). The sender is the name the server stamps, so nobody can send it
 -- for him. A list from anyone else is refused, and never takes the place of the real one. Each
--- client keeps the last list it heard from each guild's master for FRESH after his client stopped
--- repeating it, and drops it at once when the census or our roster shows he is no longer that
+-- client keeps the last accepted list even after its master stopped repeating it, and drops it
+-- when the census or our roster authoritatively shows he is no longer that
 -- guild's master (another one proven, or his own rank below it), or when his new list names nobody.
--- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept": FRESH is 30 days, and the
+-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept": no age-only expiry; the
 -- lists heard are saved, ns.rdb.nomineesHeard, SAVED_MAX at most, put back after a logout or a
 -- /reload (Restore). Until 1.2.3 they were kept in memory, 6 hours: a guild master offline
 -- since the evening, or a /reload, left his guild with no centurion, no correspondent, no department.)
@@ -75,11 +72,12 @@ ns.DEPARTMENT_LIST = Nominees.DEPARTMENT_LIST
 Nominees.DEPARTMENTS = {}
 for i, d in ipairs(Nominees.DEPARTMENT_LIST) do Nominees.DEPARTMENTS[i] = d.name end
 
-Nominees.MAX_CENTURIONS = 10
+Nominees.MAX_CENTURIONS = 25 -- current Legates cap; old public name/wire retained for compatibility
+Nominees.MAX_LEGATES = Nominees.MAX_CENTURIONS
 Nominees.MAX_DEPTS = #Nominees.DEPARTMENTS
 Nominees.MAX = Nominees.MAX_CENTURIONS + Nominees.MAX_DEPTS
 Nominees.EVERY = 300          -- his client repeats the list for late logins
-Nominees.FRESH = 30 * 86400   -- a list he stopped repeating (he logged off) counts this long after (1.2.4; 6 hours before)
+Nominees.FRESH = 30 * 86400   -- finite legacy compatibility constant, NOT accepted-list expiry
 Nominees.SAVED_MAX = 300      -- (1.2.4) the lists heard the saved variables keep (the census's guilds, Data.MAX_GUILDS), the newest heard; our own guild's always
 Nominees.REV_QUIET = 6 * 60 * 60 -- (1.2.4) a master's list of an older revision is his word again once the one held went this long unheard
 Nominees.SEND_AFTER = 3       -- several changes in a row go out as one list
@@ -101,13 +99,8 @@ local pending = {} -- [sender] = { guild, rev, n, parts = { [i] = body }, got, t
 local version = 0  -- one more at each change of what any list counts for (Borders.Changed)
 local lastSent, sendPending = -math.huge, false
 local sentOnce = false -- his list went out this session (then an empty one goes out too)
--- 1.2.4: ending 1.1.5's list of the King's guild's centurions where older clients hold it (Retire):
--- the newest rev heard of one that names anyone, whether one heard waits for an answer (no empty one
--- newer than every named one came after it), when this client last sent one, and whether one is on
--- its way. (An end heard or sent earlier answers nothing heard after it: a 1.2.3 client that logged
--- in since never heard it, and takes the named one, older than that end, as the newest.)
-local retireNamed, retireWanted, retiredAt, retirePending = 0, false, -math.huge, false
-Nominees.RETIRE_GAP = 60 -- an answer to an older client's list, once a minute at most
+-- Main manual-list repeat pacing. An editor's accepted newer copy is adopted, not auto-retired.
+local lastMainSent, mainHeardAt, mainSendPending = -math.huge, -math.huge, false
 
 function Nominees.Version() return version end
 local function Bump() version = version + 1 end
@@ -117,6 +110,10 @@ local function Bump() version = version + 1 end
 ---------------------------------------------------------------------------
 
 local function Trim(s) return (tostring(s or ""):gsub("^%s+", ""):gsub("%s+$", "")) end
+local function Revision(v)
+	v = tonumber(v)
+	return v and v == v and v >= 0 and v <= 4294967295 and v == math.floor(v) and v or nil
+end
 
 -- A character's name as the server writes it ("First Surname-Realm"; a name without a realm is
 -- `realm`'s, ours when none), or nil if it can't be one: letters only (Forever's first name and
@@ -277,6 +274,11 @@ Nominees.Proven = Proven
 -- another rank or names another guild master; another guild's census proves another one, or gives
 -- him another rank. Nothing known (a census gone quiet): not that.
 local function Deposed(l)
+	if l.main then
+		if ns.IsKingCharacter(l.by) or ns.IsHighCouncillor(l.by) then return false end
+		local c = ns.rdb and ns.rdb.council
+		return type(c) == "table" and type(c.names) == "table" -- missing council: unknown, not removal
+	end
 	local mine = GetGuildInfo("player")
 	if mine and l.guild:lower() == mine:lower() then
 		local rank = ns.Roster.RankOf(l.by)
@@ -342,26 +344,48 @@ local function OwnEntries(s)
 end
 
 ---------------------------------------------------------------------------
--- The King's centurions (1.2.4, the author's rule): the High Council
+-- The King's manual Legates (legacy centurion save/wire identifiers)
 ---------------------------------------------------------------------------
 
--- In the King's guild each High Councillor is a centurion for the King: the signed council list says
--- who, and nobody names one in game. They lead its squads in the War Room (WarSquads.Leaders), sit
--- in the centurions' chat rooms (ChatRooms.lua) and wear their own silver (Borders.lua), above a
--- centurion's bronze. 1.1.5's list of the King's guild's centurions, named on the Throne, counts
--- for nothing here (ListOf: none for the King's guild). Clients of 1.2.3 or older still take it from
--- the King's or a councillor's client (NM) and keep the newest one heard, its holders as their own
--- (repeated every EVERY seconds): the King's and the councillors' clients end it there with one
--- empty list newer than it (Retire). Once, at their first minute, while this client still keeps its
--- own old copy (ns.rdb.mainNominees, forgotten then: Nominees.Minute), and soon after hearing an
--- older client's list that names anyone (RETIRE_GAP apart at most). The bronze it gave ends with it.
--- (Read only for that: to be dropped once no client of 1.2.3 or older is left.)
+-- Council authority permits manual naming; it does not itself appoint the councillor. A preview
+-- edits only its own local sample. Earlier manual saves and the unchanged c= wire are retained.
 
 -- The King's character, or a signed High Councillor: the clients older ones take that list from.
-local function Retirer()
+function Nominees.MainEditor()
 	if ns.IsMember() ~= true then return false end
 	local K = ns.King
-	return type(K) == "table" and type(K.IsKing) == "function" and K.IsKing() == true or ns.IsHighCouncillor(ns.me) == true
+	local V = ns.ViewAs
+	if not K or (K.Preview and K.Preview()) or (V and V.Previewing and V.Previewing())
+		or (V and V.Available and V.Available() and V.Role and V.Role() ~= "my") then return false end
+	return (type(K.IsKing) == "function" and K.IsKing() == true) or ns.IsHighCouncillor(ns.me) == true
+end
+function Nominees.MainPreview()
+	local K = ns.King
+	return K and K.Preview and K.Preview() == true and ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() == true or false
+end
+function Nominees.MainNames() return Nominees.MainEditor() or Nominees.MainPreview() end
+
+local function MainStore(make)
+	local preview = Nominees.MainPreview()
+	local db = preview and ns.db or (Nominees.MainEditor() and ns.rdb) or nil
+	if not db then return nil end
+	local field = preview and "previewMainNominees" or "mainNominees"
+	local s = db[field]
+	if type(s) ~= "table" or type(s.list) ~= "table" then
+		if not make then return nil end
+		s = { rev = 0, list = {} }; db[field] = s
+	end
+	return s, preview
+end
+local function MainEntries(s)
+	local out, seen = {}, {}
+	for _, e in ipairs(s and s.list or {}) do
+		local name = type(e) == "table" and e.r == "c" and Person(e.n) or nil
+		if name and not seen[name:lower()] and #out < Nominees.MAX_CENTURIONS then
+			seen[name:lower()] = true; out[#out + 1] = { role = "centurion", name = name }
+		end
+	end
+	return out
 end
 
 -- Whom the Throne shows them to as the King's centurions, and /oly nominees names nobody for: the
@@ -369,39 +393,33 @@ end
 local function KingsSide()
 	local K = ns.King
 	if type(K) == "table" and type(K.Preview) == "function" and K.Preview() == true then return true end
-	return Retirer()
+	return Nominees.MainEditor()
 end
 
--- The King's centurions: the signed High Council's names (as signed, without a realm), in the
--- signed order (the held blob's, as WarSquads.Leaders reads it), then any other on its names list,
--- by name. Each once, and only while the signed list names it (ns.IsHighCouncillor).
+-- Legacy API name; only the manually appointed names, in appointment order.
 function Nominees.KingsCenturions()
-	local c = ns.rdb and ns.rdb.council
-	if type(c) ~= "table" or type(c.names) ~= "table" then return {} end
-	local out, seen = {}, {}
-	local function Add(name)
-		name = Trim(name)
-		local key = ns.ShortName(name):lower()
-		if name == "" or seen[key] or ns.IsHighCouncillor(name) ~= true then return end
-		seen[key], out[#out + 1] = true, name
-	end
-	local blob = type(c.blob) == "string" and c.blob:match("^HS1~%d+~[^~]*~([^~]*)~%x+$")
-	for name in tostring(blob or ""):gmatch("[^,]+") do Add(name) end
-	local rest = {}
-	for key, display in pairs(c.names) do
-		local name = type(display) == "string" and display or key
-		if type(name) == "string" then rest[#rest + 1] = name end
-	end
-	table.sort(rest, function(a, b) return a:lower() < b:lower() end)
-	for _, name in ipairs(rest) do Add(name) end
+	local out = {}
+	local l = Nominees.ListOf(Nominees.MainGuild())
+	for _, e in ipairs(l and l.entries or {}) do if e.role == "centurion" then out[#out + 1] = e.name end end
 	return out
 end
+Nominees.KingsLegates = Nominees.KingsCenturions
 
 -- The list that counts for `guild` here: his own on the guild master's client; else the one
--- heard from its master, while fresh. nil for none, and for the King's guild (1.2.4: its centurions
--- are the High Council, nobody's list).
+-- heard from its master. Silence is not revocation. Main appointments have the same getter, but
+-- their actual pinned King/signed council issuer is checked independently of the census.
 local function ListOf(guild)
-	if type(guild) ~= "string" or guild == "" or IsMain(guild) then return nil end
+	if type(guild) ~= "string" or guild == "" then return nil end
+	if IsMain(guild) then
+		local s, preview = MainStore(false)
+		if not s and ns.rdb and type(ns.rdb.mainNominees) == "table" then s = ns.rdb.mainNominees end
+		local by = s and (s.by or (Nominees.MainEditor() and ns.me))
+		if s and Revision(s.rev) and (preview or (type(by) == "string" and Proven(by, guild))) then
+			local entries, set = MainEntries(s), {}
+			for _, e in ipairs(entries) do set[e.name:lower()] = e end
+			return { guild = guild, by = by or ns.me, rev = s.rev, at = s.at, entries = entries, set = set, own = true, main = true }
+		end
+	end
 	local master, mine = Nominees.IsMaster()
 	if master and mine == guild then
 		local entries = OwnEntries(Saved(false))
@@ -409,8 +427,19 @@ local function ListOf(guild)
 		for _, e in ipairs(entries) do set[e.name:lower()] = e end
 		return { guild = guild, by = ns.me, entries = entries, set = set, own = true }
 	end
-	local l = Lists()[guild:lower()]
-	if not l or ns.Now() - l.at > Nominees.FRESH then return nil end
+	local key = guild:lower()
+	local l = Lists()[key]
+	if not l then return nil end
+	if Deposed(l) then
+		-- A positively observed issuer change is a revocation, not a temporary hidden view. Drop
+		-- the accepted snapshot too, or an older master returning could resurrect his old list.
+		lists[key] = nil; Nominees.Keep(key, nil); Bump()
+		local notices = ns.db and ns.db.legateNotices
+		local notice = type(notices) == "table" and ns.me and notices[ns.FullName(ns.me):lower()]
+		if type(notice) == "table" and notice.guild == guild then notice.active = false end
+		return nil
+	end
+	if l.main and not Proven(l.by, guild) then return nil end
 	return l
 end
 Nominees.ListOf = ListOf
@@ -479,10 +508,14 @@ end
 -- The old label is the existing NM wire key; older clients must still read this department.
 local function WireDept(dept) return DeptName(dept) == "Department of Heraldry" and "Department of Heritage" or dept end
 function Nominees.Parts(guild, rev, entries)
+	rev = Revision(rev)
+	if not GuildName(guild) or not rev then return {} end
 	local head = ("NM~%s~%s~%d~"):format(Nominees.WIRE, guild, rev)
-	local room = Nominees.PART - #head - #("16~16~")
+	local countText = tostring(Nominees.MAX_PARTS)
+	local room = Nominees.PART - #head - #(countText .. "~" .. countText .. "~")
 	local bodies, body = {}, ""
-	for _, e in ipairs(entries) do
+	for i, e in ipairs(entries) do
+		if i > Nominees.MAX then break end
 		local text = e.role == "centurion" and ("c=" .. Wire(e.name)) or ("d=" .. WireDept(e.dept) .. "=" .. Wire(e.name))
 		if body ~= "" and #body + 1 + #text > room then
 			bodies[#bodies + 1], body = body, ""
@@ -526,9 +559,49 @@ local function Changed()
 	ns.Fire("DATA_CHANGED")
 end
 
+-- Quiet, local duty notice for this character's accepted appointment. Never opens a window or
+-- invites anyone. Missing/incomplete roster proof waits for the existing minute tick. One current
+-- stamp per character, 50 characters at most; heartbeat/reload cannot repeat the same revision.
+Nominees.NOTICES_MAX = 50
+function Nominees.AppointmentNotice(l)
+	local V, K = ns.ViewAs, ns.King
+	if Nominees.DevView() or (K and K.Preview and K.Preview()) or (V and V.Previewing and V.Previewing())
+		or (V and V.Available and V.Available() and V.Role and V.Role() ~= "my") then return false end
+	if type(l) ~= "table" or not ns.db or not ns.me or not Revision(l.rev) then return false end
+	local guild = GetGuildInfo("player")
+	if guild ~= l.guild or not ns.IsMember() or not Proven(l.by, guild) then return false end
+	local key = ns.FullName(ns.me):lower()
+	local all = ns.db.legateNotices
+	local old = type(all) == "table" and all[key] or nil
+	local e = l.set and l.set[key]
+	if not e or e.role ~= "centurion" then
+		if type(old) == "table" and old.guild == guild then old.active = false end
+		return false
+	end
+	-- A different player's appointment or an authorized relay of the same roster is not a new
+	-- appointment of us. Only our actual removal/reappointment re-arms this notice.
+	if type(old) == "table" and old.guild == guild and old.active == true then return false end
+	local R = ns.Roster
+	if not R or not R.Fresh or not R.Fresh() or not R.RankOf
+		or R.RankOf(ns.FullName(ns.me)) == nil or (ns.ChatLocked and ns.ChatLocked())
+		or (ns.Quiet and ns.Quiet()) then return false end
+	if type(all) ~= "table" then all = {}; ns.db.legateNotices = all end
+	all[key] = { guild = guild, by = l.by, rev = l.rev, at = ns.Now(), active = true }
+	local keys = {}
+	for name, x in pairs(all) do keys[#keys + 1] = { name = name, at = type(x) == "table" and tonumber(x.at) or 0 } end
+	table.sort(keys, function(a, b)
+		if (a.name == key) ~= (b.name == key) then return a.name == key end
+		return (a.at or 0) > (b.at or 0)
+	end)
+	for i = Nominees.NOTICES_MAX + 1, #keys do all[keys[i].name] = nil end
+	ns.Print(L.NOMINEES_LEGATE_APPOINTED:format(ns.DisplayName(l.by) or l.by, guild, L.NOMINEES_LEGATE_DUTY))
+	return true
+end
+
 -- The guild master names someone: role "centurion", or "correspondent" with a department.
 -- Refused, with its reason, past the caps, outside his roster, twice, or for himself.
 function Nominees.Name(role, input, dept)
+	if role == "legate" or role == "legatus" or role == "legado" then role = "centurion" end
 	local s = Saved(false)
 	local master, guild = Nominees.IsMaster()
 	if not master then return false, ns.Print(L.NOMINEES_ONLY_MASTER) end
@@ -613,32 +686,78 @@ function Nominees.Remove(input)
 	return true
 end
 
--- 1.2.4: one empty list of the King's guild's centurions, newer than `rev` and than now, from the
--- King's or a councillor's client alone. An older client takes it as the newest (its holder as its
--- own), and the bronze 1.1.5's list gave ends there.
-function Nominees.Retire(rev)
-	if not Retirer() then return false end
-	rev = math.max(ns.Now(), (tonumber(rev) or 0) + 1)
-	for i, part in ipairs(Nominees.Parts(Nominees.MainGuild(), rev, {})) do
+-- Kept as an inert compatibility entry point: installing this build never retires manual data.
+function Nominees.Retire() return false end
+
+function Nominees.SendMain(force)
+	if not Nominees.MainEditor() then return false end
+	local s = MainStore(false)
+	local rev = s and Revision(s.rev)
+	if not rev or rev <= 0 or not Proven(s.by or ns.me, Nominees.MainGuild()) then return false end
+	local now = ns.Now()
+	if not force and now - math.max(lastMainSent, mainHeardAt) < Nominees.EVERY then return false end
+	local entries = MainEntries(s)
+	-- An explicit empty snapshot is a revocation too; keep repeating it for late clients.
+	lastMainSent = now
+	for i, part in ipairs(Nominees.Parts(Nominees.MainGuild(), rev, entries)) do
 		ns.Comm.Send("CHANNEL", part, "mainnominees" .. i)
 	end
-	retiredAt = ns.Now()
-	if rev > retireNamed then retireWanted = false end
-	ns.Log("nominees: <%s>'s old list of centurions ended for older clients (rev %d)", Nominees.MainGuild(), rev)
 	return true
 end
-
--- An answer a few seconds after an older client's list (one for several heard together), RETIRE_GAP
--- after the last one at the soonest, unless an empty list newer than it came after it meanwhile.
-local function RetireSoon()
-	if retirePending or not Retirer() then return end
-	retirePending = true
-	ns.After(math.max(Nominees.SEND_AFTER, Nominees.RETIRE_GAP - (ns.Now() - retiredAt)), "main nominees end", function()
-		retirePending = false
-		if not retireWanted then return end
-		if ns.Now() - retiredAt < Nominees.RETIRE_GAP then return RetireSoon() end
-		Nominees.Retire(retireNamed)
+local function SendMainSoon()
+	if mainSendPending then return end
+	mainSendPending = true
+	ns.After(Nominees.SEND_AFTER, "main nominees send", function()
+		mainSendPending = false; Nominees.SendMain(true)
 	end)
+end
+function Nominees.NameMain(input)
+	if not Nominees.MainNames() then return false, ns.Print(L.NOMINEES_ONLY_MAIN) end
+	local guild, raw = Nominees.MainGuild(), Trim(input)
+	if raw == "" and UnitIsPlayer and UnitIsPlayer("target") then raw = ns.UnitFullName("target") or "" end
+	local name = Person(raw)
+	if not name then return false, ns.Print(L.NOMINEES_WHO) end
+	if IsMain(ns.Roster.guild) then
+		local member = RosterName(name, not ns.RealmOf(Trim(ns.Normal(raw))))
+		if not member then return false, ns.Print(L.NOMINEES_MAIN_NOT_MEMBER:format(ns.DisplayName(name), guild)) end
+		name = member
+	end
+	if name:lower() == tostring(ns.me):lower() then return false, ns.Print(L.NOMINEES_MAIN_SELF) end
+	local entries = MainEntries(MainStore(false))
+	for _, e in ipairs(entries) do
+		if e.name:lower() == name:lower() then return false, ns.Print(L.NOMINEES_MAIN_ALREADY:format(ns.DisplayName(name), guild)) end
+	end
+	if #entries >= Nominees.MAX_CENTURIONS then return false, ns.Print(L.NOMINEES_MAIN_FULL:format(guild, Nominees.MAX_CENTURIONS)) end
+	local s, preview = MainStore(true)
+	local kept = {}
+	for _, e in ipairs(entries) do kept[#kept + 1] = { r = "c", n = e.name } end
+	kept[#kept + 1] = { r = "c", n = name }
+	s.list, s.by, s.at = kept, ns.me, ns.Now()
+	s.rev = math.max(ns.Now(), (Revision(s.rev) or 0) + 1)
+	ns.Print(L.NOMINEES_MAIN_ADDED:format(ns.DisplayName(name), guild))
+	if not preview then SendMainSoon() end
+	Changed()
+	return true
+end
+function Nominees.RemoveMain(input)
+	if not Nominees.MainNames() then return false, ns.Print(L.NOMINEES_ONLY_MAIN) end
+	local s, preview = MainStore(false)
+	local raw, name = Trim(input), Person(input)
+	local entries, at, others = MainEntries(s), nil, {}
+	for i, e in ipairs(entries) do
+		if name and e.name:lower() == name:lower() then at = i; break end
+		if name and ns.ShortName(e.name):lower() == ns.ShortName(name):lower() then others[#others + 1] = i end
+	end
+	if not at and #others == 1 and not ns.RealmOf(Trim(ns.Normal(raw))) then at = others[1] end
+	if not at then return false, ns.Print(L.NOMINEES_MAIN_NOT_NAMED:format(ns.DisplayName(name) or raw, Nominees.MainGuild())) end
+	local gone, kept = entries[at].name, {}
+	for i, e in ipairs(entries) do if i ~= at then kept[#kept + 1] = { r = "c", n = e.name } end end
+	s.list, s.by, s.at = kept, ns.me, ns.Now()
+	s.rev = math.max(ns.Now(), (Revision(s.rev) or 0) + 1)
+	ns.Print(L.NOMINEES_MAIN_REMOVED:format(ns.DisplayName(gone), Nominees.MainGuild()))
+	if not preview then SendMainSoon() end
+	Changed()
+	return true
 end
 
 ---------------------------------------------------------------------------
@@ -688,7 +807,6 @@ end
 local function Take(sender, guild, rev, entries, set)
 	local key = guild:lower()
 	local old = Lists()[key]
-	if old and ns.Now() - old.at > Nominees.FRESH then old = nil end -- (gone quiet: as if none)
 	-- (An older one, late. 1.2.4, the review: only while the one held is still being repeated, as when it
 	-- lasted 6 hours: a master on another computer, its saved copy of his list older, is his word again,
 	-- not refused for the 30 days a list is now kept.)
@@ -702,6 +820,7 @@ local function Take(sender, guild, rev, entries, set)
 		lists[key] = l
 	end
 	Nominees.Keep(key, #entries > 0 and l or nil)
+	Nominees.AppointmentNotice(l)
 	local now = #entries > 0 and set[tostring(ns.me):lower()] or nil
 	if mine and guild == mine then
 		if now and not (was and was.role == now.role and was.dept == now.dept) then
@@ -716,18 +835,27 @@ local function Take(sender, guild, rev, entries, set)
 	end
 end
 
--- 1.1.5's list of the King's guild's centurions, from an older client of the King's or a councillor's
--- (1.2.4): nothing of it is kept or counts here. One that names anyone is answered from the King's or
--- a councillor's client (Retire), whatever its rev: an end sent before it never reached a client that
--- logged in since. An empty one newer than every named one heard, after them, is that answer already.
-local function Retired(sender, rev, entries)
-	if #entries == 0 then
-		if rev > retireNamed then retireWanted = false end
+-- An explicit empty main snapshot is retained too, so an older appointment cannot resurrect it.
+local function TakeMain(sender, guild, rev, entries, set)
+	local key = guild:lower()
+	local old = ListOf(guild) or Lists()[key]
+	if old and rev < (Revision(old.rev) or 0) then
+		if Nominees.MainEditor() then SendMainSoon() end
 		return
 	end
-	ns.Log("nominees: <%s>'s list from %s ignored: the High Council are the King's centurions", Nominees.MainGuild(), sender)
-	retireNamed, retireWanted = math.max(retireNamed, rev), true
-	RetireSoon()
+	local l = { guild = guild, by = sender, rev = rev, at = ns.Now(), entries = entries, set = set, main = true }
+	if old and rev == old.rev and Signature(old) ~= Signature(l) then return end
+	local changed = not old or Signature(old) ~= Signature(l)
+	lists[key] = l
+	Nominees.Keep(key, l)
+	Nominees.AppointmentNotice(l)
+	if Nominees.MainEditor() then
+		local saved = {}
+		for _, e in ipairs(entries) do saved[#saved + 1] = { r = "c", n = e.name } end
+		ns.rdb.mainNominees = { rev = rev, by = sender, at = l.at, list = saved }
+		mainHeardAt = ns.Now()
+	end
+	if changed then Changed() end
 end
 
 -- A part of a list, from the channel: only from that guild's master (Proven), put together with
@@ -736,7 +864,7 @@ function Nominees.Handle(dist, sender, text)
 	if dist ~= "CHANNEL" or type(sender) ~= "string" or type(text) ~= "string" or #text > 255 then return end
 	local wire, guild, rev, i, n, body = text:match("^NM~(%d+)~([^~]*)~(%d+)~(%d+)~(%d+)~([^~]*)$")
 	if wire ~= Nominees.WIRE then return end -- (another version's: not ours to read)
-	guild, rev, i, n = GuildName(guild), tonumber(rev), tonumber(i), tonumber(n)
+	guild, rev, i, n = GuildName(guild), Revision(rev), tonumber(i), tonumber(n)
 	if not guild or not rev or not i or not n or i < 1 or n < 1 or i > n or n > Nominees.MAX_PARTS then return end
 	sender = ns.FullName(sender)
 	if not Proven(sender, guild) then
@@ -755,7 +883,7 @@ function Nominees.Handle(dist, sender, text)
 	pending[sender] = nil
 	local main = IsMain(guild)
 	local entries, set = Read(p.parts, n, ns.RealmOf(sender), main)
-	if main then return Retired(sender, rev, entries) end
+	if main then return TakeMain(sender, guild, rev, entries, set) end
 	Take(sender, guild, rev, entries, set)
 end
 ns.Comm.Handle("NM", function(...) Nominees.Handle(...) end)
@@ -789,11 +917,11 @@ function Nominees.Keep(key, l)
 		local at = type(s) == "table" and tonumber(s.at) or -math.huge
 		if k ~= mine and (not oldAt or at < oldAt) then oldest, oldAt = k, at end
 	end
-	if n > Nominees.SAVED_MAX and oldest then store[oldest] = nil end
+	if n > Nominees.SAVED_MAX and oldest then store[oldest], lists[oldest] = nil, nil end
 end
 
 -- (1.2.4) The lists heard before this login or /reload, put back from the saved variables, each one
--- read again as a list that came (Read: the same caps, names and departments), no older than FRESH and
+-- read again as a list that came (Read: the same caps, names and departments), regardless of age and
 -- its guild still an Olympus guild; anything else there is let go. Each was taken from its guild's master
 -- when it came; Nominees.Prune drops one whose master the census or our roster deposes, as any list.
 Restore = function()
@@ -805,9 +933,9 @@ Restore = function()
 		local l
 		if type(key) == "string" and type(s) == "table" and type(s.g) == "string" and type(s.by) == "string"
 			and type(s.body) == "string" and #s.body <= Nominees.MAX_PARTS * Nominees.PART and not lists[key] then
-			local guild, by, rev, at = GuildName(s.g), Person(s.by), tonumber(s.rev), tonumber(s.at)
+			local guild, by, rev, at = GuildName(s.g), Person(s.by), Revision(s.rev), tonumber(s.at)
 			local main = guild ~= nil and IsMain(guild)
-			if guild and guild:lower() == key and by and rev and at and at <= now + 60 and now - at <= Nominees.FRESH
+			if guild and guild:lower() == key and by and rev and at and at == at and at >= 0 and at <= now + 60
 				and (s.main == true) == main then
 				local entries, set = Read({ s.body }, 1, ns.RealmOf(by), main)
 				if #entries > 0 or main then
@@ -821,6 +949,16 @@ Restore = function()
 			store[key] = nil
 		end
 	end
+	-- The live and restored cache share the same finite capacity; keep our own guild first.
+	local keys, mine = {}, GetGuildInfo("player")
+	mine = type(mine) == "string" and mine:lower() or nil
+	for key, l in pairs(lists) do keys[#keys + 1] = { key = key, at = l.at or 0 } end
+	table.sort(keys, function(a, b)
+		if (a.key == mine) ~= (b.key == mine) then return a.key == mine end
+		if a.at ~= b.at then return a.at > b.at end
+		return a.key < b.key
+	end)
+	for i = Nominees.SAVED_MAX + 1, #keys do lists[keys[i].key], store[keys[i].key] = nil, nil end
 	if any then Bump() end
 end
 
@@ -828,6 +966,10 @@ end
 -- stands (its time and votes, as Borders.Changed reads them). Asked again only when these change
 -- (DATA_CHANGED comes with every census report heard).
 local function DeposedInputs(l)
+	if l.main then
+		local c = ns.rdb and ns.rdb.council
+		return c, type(c) == "table" and c.names or nil, ns.KingCharacter()
+	end
 	local mine = GetGuildInfo("player")
 	if mine and l.guild:lower() == mine:lower() then return ns.Roster.byName, ns.Roster.lastStats, mine end
 	local guilds = ns.rdb and ns.rdb.guilds
@@ -835,7 +977,7 @@ local function DeposedInputs(l)
 	return g, type(g) == "table" and g.t or nil, type(g) == "table" and g.vouch or nil
 end
 
--- Lists whose master is no longer that guild's master, or that went quiet past FRESH, and parts
+-- Lists whose master is no longer that guild's master, and incomplete parts
 -- left waiting: dropped. Returns whether a list went.
 function Nominees.Prune()
 	local now, gone = ns.Now(), false
@@ -843,10 +985,7 @@ function Nominees.Prune()
 		local a, b, c = DeposedInputs(l)
 		local fresh = l.ia ~= a or l.ib ~= b or l.ic ~= c or not l.asked
 		if fresh then l.ia, l.ib, l.ic, l.asked = a, b, c, true end
-		if now - l.at > Nominees.FRESH then
-			lists[key], gone = nil, true
-			Nominees.Keep(key, nil)
-		elseif fresh and Deposed(l) then
+		if fresh and Deposed(l) then
 			lists[key], gone = nil, true
 			Nominees.Keep(key, nil)
 			ns.Log("nominees: <%s>'s list dropped: %s is no longer its guild master", l.guild, l.by)
@@ -879,22 +1018,33 @@ function Nominees.Count()
 end
 
 -- The name box: a centurion or a department's correspondent of his guild.
-function Nominees.Prompt(role, dept)
+function Nominees.Prompt(role, dept, main)
+	if main then
+		if not Nominees.MainNames() then return ns.Print(L.NOMINEES_ONLY_MAIN) end
+		return ns.ShowDialog("OLYMPUS_NOMINEE", L.NOMINEE_ROLE_CENTURION, Nominees.MainGuild(), { role = "centurion", main = true })
+	end
 	local master, guild = Nominees.IsMaster()
 	if not master then return ns.Print(L.NOMINEES_ONLY_MASTER) end
 	return ns.ShowDialog("OLYMPUS_NOMINEE", Nominees.RoleLabel(role, dept), guild, { role = role, dept = dept })
 end
 -- Asked before a title is taken back (the box's data: his own's name).
-function Nominees.AskRemove(e)
-	if type(e) ~= "table" or not Nominees.IsMaster() then return nil end
+function Nominees.AskRemove(e, main)
+	if type(e) ~= "table" then return nil end
+	if main then
+		if not Nominees.MainNames() then return nil end
+		return ns.ShowDialog("OLYMPUS_NOMINEE_REMOVE", ns.DisplayName(e.name), L.NOMINEES_MAIN_ROLE:format(Nominees.MainGuild()), { name = e.name, main = true })
+	end
+	if not Nominees.IsMaster() then return nil end
 	return ns.ShowDialog("OLYMPUS_NOMINEE_REMOVE", ns.DisplayName(e.name), Nominees.RoleLabel(e.role, e.dept), e.name)
 end
 local function Taken(data, text)
 	data = type(data) == "table" and data or {}
+	if data.main then return Nominees.NameMain(text) end
 	return Nominees.Name(data.role, text, data.dept)
 end
 local function TakenBack(data)
-	if type(data) ~= "string" then return false end -- (1.1.5's King's guild's box gave a table: 1.2.4 names nobody there)
+	if type(data) == "table" and data.main then return Nominees.RemoveMain(data.name) end
+	if type(data) ~= "string" then return false end
 	return Nominees.Remove(data)
 end
 
@@ -902,16 +1052,17 @@ end
 local function Ink() local K = ns.King return K.Line, K.INK, K.TITLE, K.Para end
 
 -- A named one's line: a click takes the title back (asked first), when this client may.
-local function Row(e, text, editable, roster)
+local function Row(e, text, editable, roster, main)
 	local Line, INK = Ink()
 	local name = ns.DisplayName(e.name)
 	return Line(text or name, INK, {
 		key = name, indent = 1,
 		right = roster and ns.Roster.RankOf(e.name) == nil and ns.Views.Grey(L.NOMINEES_NOT_IN_ROSTER) or nil,
-		onClick = editable and function() Nominees.AskRemove(e) end or nil,
+		onClick = editable and function() Nominees.AskRemove(e, main) end or nil,
 		tooltip = function(tt)
 			tt:AddLine(name, 1, 0.82, 0)
 			tt:AddLine(Nominees.RoleLabel(e.role, e.dept), 1, 1, 1, true)
+			if e.role == "centurion" and L.NOMINEES_LEGATE_DUTY then tt:AddLine(L.NOMINEES_LEGATE_DUTY, 1, 1, 1, true) end
 			local duty = e.role == "correspondent" and Nominees.DepartmentHelp(e.dept)
 			if duty then tt:AddLine(duty, 1, 1, 1, true) end
 			if editable then tt:AddLine(L.NOMINEES_CLICK_REMOVE, 0.6, 0.6, 0.6, true) end
@@ -920,20 +1071,21 @@ local function Row(e, text, editable, roster)
 end
 
 -- "+ Name a centurion (your target, or type a name)", its count; greyed when full (its click says why).
-local function AddLine(count)
+local function AddLine(count, main)
 	local Line, _, TITLE = Ink()
 	local full = count >= Nominees.MAX_CENTURIONS
 	local add = "+ " .. L.NOMINEES_ADD_CENTURION
-	local function Full() return L.NOMINEES_FULL:format(Nominees.MAX_CENTURIONS) end
+	local function Full() return main and L.NOMINEES_MAIN_FULL:format(Nominees.MainGuild(), Nominees.MAX_CENTURIONS) or L.NOMINEES_FULL:format(Nominees.MAX_CENTURIONS) end
 	return Line(full and ns.Views.Grey(add) or add, TITLE, {
 		right = ("%d/%d"):format(count, Nominees.MAX_CENTURIONS),
 		onClick = function()
 			if full then return ns.Print(Full()) end
-			Nominees.Prompt("centurion", nil)
+			Nominees.Prompt("centurion", nil, main)
 		end,
 		tooltip = function(tt)
 			tt:AddLine(L.NOMINEES_ADD_CENTURION, 1, 0.82, 0)
 			tt:AddLine(full and Full() or L.NOMINEES_CLICK_NAME, 1, 1, 1, true)
+			if L.NOMINEES_LEGATE_DUTY then tt:AddLine(L.NOMINEES_LEGATE_DUTY, 1, 1, 1, true) end
 		end,
 	})
 end
@@ -989,7 +1141,7 @@ function Nominees.PageLines(lines)
 	end
 	if #depts == 0 then lines[#lines + 1] = Line(L.NOMINEES_NO_DEPTS, INK, { indent = 1 }) end
 	lines[#lines].gapAfter = true
-	return Para(lines, L.NOMINEES_NOTE:format(math.floor(Nominees.FRESH / 86400)), INK)
+	return Para(lines, L.NOMINEES_NOTE, INK)
 end
 
 -- A guild master's Guild tab (1.1.5): the tab in the Throne's place, his guild's page (King.Build).
@@ -1033,55 +1185,34 @@ function Nominees.GuildLines()
 	return lines
 end
 
--- The King's centurions (1.2.4), on the Throne's page: a title, a hint, then the signed High
--- Council to read, in the signed order (nobody names one or takes a title back here). For a reader
--- in the King's guild, its roster fresh, each councillor's War Room squad (its soldiers, WarSquads),
--- or that he is not of the guild, the squads' leaders first in the War Room's order. While the King
--- streams (ns.CouncilMasked) each is "High Councillor N" (a squad's leader, the War Room's N), and
--- for a reader the council is not shown to yet (ns.CouncilVisible) they are only counted.
--- In the King's guild (and the author's preview of the King, inert there), a line to the War Room. Then the note.
+-- Manual main appointments are public nominations, not an automatically exposed council roster.
 function Nominees.MainLines(lines)
 	local Line, INK, TITLE, Para = Ink()
 	local guild, mine = Nominees.MainGuild(), GetGuildInfo("player")
-	local K = ns.King
-	local preview = type(K) == "table" and type(K.Preview) == "function" and K.Preview() == true
-	lines[#lines + 1] = Line(L.NOMINEES_MAIN_TITLE, TITLE)
+	local preview, editable = Nominees.MainPreview(), Nominees.MainNames()
+	lines[#lines + 1] = Line(L.NOMINEES_MAIN_TITLE:format(guild), TITLE)
 	Para(lines, L.NOMINEES_MAIN_HINT, INK, { gapAfter = true })
-	local names = Nominees.KingsCenturions()
+	local l = ListOf(guild)
+	local entries = l and l.entries or {}
+	if editable then lines[#lines + 1] = AddLine(#entries, true) end
 	local S, R = ns.WarSquads, ns.Roster
 	local ours = IsMain(mine) and type(R) == "table" and type(R.Fresh) == "function" and R.Fresh() ~= nil
 		and type(S) == "table" and not S.missing and type(S.Leaders) == "function" and type(S.Get) == "function"
 	local squads = {}
 	if ours then
 		for _, e in ipairs(S.Leaders()) do squads[ns.ShortName(e.name):lower()] = e end
-		-- The War Room's squads' leaders first, in its order (e.index), then the rest in the signed
-		-- order: "High Councillor N" is the same councillor on both pages while the King streams.
-		local leading, rest = {}, {}
-		for _, name in ipairs(names) do
-			local e = squads[ns.ShortName(name):lower()]
-			if e then leading[#leading + 1] = { name = name, at = e.index } else rest[#rest + 1] = name end
-		end
-		table.sort(leading, function(a, b) return a.at < b.at end)
-		names = {}
-		for _, e in ipairs(leading) do names[#names + 1] = e.name end
-		for _, name in ipairs(rest) do names[#names + 1] = name end
 	end
-	if #names == 0 then
+	if #entries == 0 then
 		lines[#lines + 1] = Line(L.NOMINEES_MAIN_NONE, INK, { indent = 1 })
-	elseif ns.CouncilVisible() ~= true then
-		lines[#lines + 1] = Line(L.NOMINEES_MAIN_COUNT:format(#names), INK, { indent = 1 })
 	else
-		local masked = ns.CouncilMasked() == true
-		for i, name in ipairs(names) do
-			local right
+		for _, e in ipairs(entries) do
+			local row = Row(e, nil, editable, IsMain(R.guild), true)
 			if ours then
-				local e = squads[ns.ShortName(name):lower()]
-				local squad = e and S.Get(e.name)
-				if squad then right = L.SQUAD_COUNT:format(squad.count or 0)
-				elseif not RosterName(ns.FullName(name), true) then right = ns.Views.Grey(L.NOMINEES_MAIN_OUTSIDE:format(guild)) end
+				local leader = squads[ns.ShortName(e.name):lower()]
+				local squad = leader and S.Get(leader.name)
+				if squad then row.right = L.SQUAD_COUNT:format(squad.count or 0) end
 			end
-			lines[#lines + 1] = Line(masked and L.SQUAD_COUNCILLOR:format(i) or ns.DisplayName(ns.FullName(name)), INK,
-				{ key = "kingscenturion" .. i, indent = 1, right = right })
+			lines[#lines + 1] = row
 		end
 	end
 	if IsMain(mine) or preview then
@@ -1089,17 +1220,19 @@ function Nominees.MainLines(lines)
 			onClick = not preview and function() if ns.War and ns.War.Show then ns.War.Show() end end or nil })
 	end
 	lines[#lines].gapAfter = true
-	return Para(lines, L.NOMINEES_MAIN_NOTE:format(guild, type(S) == "table" and S.MAX_SOLDIERS or 99), INK)
+	Para(lines, L.NOMINEES_MAIN_NOTE:format(guild, type(S) == "table" and S.MAX_SOLDIERS or 39), INK)
+	if preview then for _, row in ipairs(lines) do row.onClick = nil end end
+	return lines
 end
 
 -- /oly status: a guild master's own list, and the lists this client holds, each its master's
 -- (five named, the rest counted).
 function Nominees.StatusLine()
-	local out, held, now = {}, {}, ns.Now()
+	local out, held = {}, {}
 	local o = Nominees.Ours()
 	if o then out[1] = ("yours %d of %d"):format(#o.entries, Nominees.MAX) end
 	for _, l in pairs(Lists()) do
-		if now - l.at <= Nominees.FRESH then held[#held + 1] = l end
+		held[#held + 1] = l
 	end
 	table.sort(held, function(a, b) return a.guild < b.guild end)
 	for i, l in ipairs(held) do
@@ -1131,9 +1264,10 @@ function Nominees.Slash(rest)
 		if ns.UI and ns.UI.SelectTab then ns.UI.SelectTab("throne") end
 		return
 	end
-	local centurion = verb == "centurion" or verb == "centuriao" or verb == "centurião"
+	local centurion = verb == "legate" or verb == "legatus" or verb == "legado" or verb == "centurion" or verb == "centuriao" or verb == "centurião"
 	local remove = verb == "remove" or verb == "remover"
-	if kings and (centurion or remove) then return ns.Print(L.NOMINEES_MAIN_NOBODY) end
+	if kings and centurion then return Nominees.NameMain(arg) end
+	if kings and remove then return Nominees.RemoveMain(arg) end
 	if centurion then return Nominees.Name("centurion", arg) end
 	if (verb == "correspondent" or verb == "correspondente") and (master or not kings) then
 		local n, name = arg:match("^(%d+)%s*(.-)$")
@@ -1195,19 +1329,14 @@ StaticPopupDialogs["OLYMPUS_NOMINEE_REMOVE"] = {
 -- deposed by the census or roster just heard is gone when they work their borders out again.
 ns.On("DATA_CHANGED", function() Nominees.Prune() end)
 
--- Once a minute from the login: his list out again (a guild master's, once EVERY); 1.1.5's old copy
--- of the King's guild's list ended and forgotten (1.2.4: once; on the King's or a councillor's client
--- one empty, newer list first, when it named anyone; the King preview's copy forgotten too); the lists
--- gone quiet or deposed dropped.
+-- Existing minute tick: eligible manual lists repeat, verified deposed issuers are pruned, and
+-- a duty notice held for quiet/roster conditions gets another local opportunity. Silence drops none.
 function Nominees.Minute()
 	Nominees.Send()
-	if ns.db and ns.db.previewMainNominees ~= nil then ns.db.previewMainNominees = nil end
-	local old = ns.rdb and ns.rdb.mainNominees
-	if old ~= nil and ns.IsMember() == true then
-		if type(old) == "table" and type(old.list) == "table" and #old.list > 0 and Retirer() then Nominees.Retire(old.rev) end
-		ns.rdb.mainNominees = nil
-	end
+	Nominees.SendMain()
 	if Nominees.Prune() then ns.Fire("DATA_CHANGED") end
+	local guild = GetGuildInfo("player")
+	Nominees.AppointmentNotice(ListOf(guild))
 end
 ns.On("LOGIN", function() ns.Every(60, "nominees", Nominees.Minute) end)
 
@@ -1218,6 +1347,6 @@ function Nominees.Reset(reload)
 	restoredFrom = nil
 	if not reload and type(ns.rdb) == "table" then ns.rdb.nomineesHeard = nil end
 	lastSent, sendPending, sentOnce = -math.huge, false, false
-	retireNamed, retireWanted, retiredAt, retirePending = 0, false, -math.huge, false
+	lastMainSent, mainHeardAt, mainSendPending = -math.huge, -math.huge, false
 	Bump()
 end
