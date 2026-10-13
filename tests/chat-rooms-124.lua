@@ -353,9 +353,12 @@ test("chat rooms (1.2.4): a line goes to FANOUT members at most, the author, the
 		names[#names + 1] = w.authorName
 		list = R.Recipients("testers")
 		eq(list[1], w.authorName); eq(list[2], w.king)
-		eq(R.Send("testers", "to all"), true)
+		local ok, why, missed = R.Send("testers", "to all")
+		eq(ok, true); eq(why, "ok")
 		eq(#w.jobs, 40, "40 whispers")
 		eq(w.printed, ns.L.CHATROOM_NOT_REACHED:format(12 + left, 40), "the sender is told")
+		-- (And the Chat page, which says it in the room: how many, and the words, ChatWindow.Missed.)
+		eq(missed, 12 + left); eq(R.NotReachedText("testers", missed), w.printed)
 		-- Nothing said under the share.
 		w.clearJobs(); w.advance(2); w.printed = nil
 		for i = #names, 30, -1 do names[i] = nil end

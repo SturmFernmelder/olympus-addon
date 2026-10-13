@@ -1153,7 +1153,10 @@ local function DrawLines(all)
 		local key = WHY[note.why] or WHY.failed
 		nr = nr + 1
 		y = y + GAP_OUT
-		if note.kept then
+		if note.said then
+			-- (1.2.4: a line that went, and the members of its room online it could not reach: ChatWindow.Missed.)
+			y = y + Row(nr, Grey(note.said), y, width)
+		elseif note.kept then
 			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key])), y, width)
 		else
 			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
@@ -2821,8 +2824,21 @@ end
 function ChatWindow.Refused(t, why)
 	local list = notes[t] or {}
 	notes[t] = list
-	for i = #list, 1, -1 do if list[i].kept then table.remove(list, i) end end
+	for i = #list, 1, -1 do if list[i].kept or list[i].said then table.remove(list, i) end end
 	list[#list + 1] = { why = WHY[why] and why or "failed", kept = true }
+	while #list > MAX_NOTES do table.remove(list, 1) end
+	MarkDirty()
+end
+
+-- 1.2.4: a role room's line that went, to FANOUT of its members at most (ChatRooms.FANOUT; the
+-- Church's rooms 30, heard online): how many online it missed, said in the room under the line (the
+-- next line sent or refused takes it away), not only in the game's chat frame under the window.
+function ChatWindow.Missed(t, text)
+	if type(t) ~= "string" or type(text) ~= "string" or text == "" then return end
+	local list = notes[t] or {}
+	notes[t] = list
+	for i = #list, 1, -1 do if list[i].said then table.remove(list, i) end end
+	list[#list + 1] = { said = text }
 	while #list > MAX_NOTES do table.remove(list, 1) end
 	MarkDirty()
 end
@@ -2852,13 +2868,13 @@ local function Submit()
 		-- channels retain their old keepMute behaviour.
 		local room = Dynamic(tier)
 		local logical = ChatWindow.Logical(tier)
-		local ok, why
+		local ok, why, left
 		if room then
 			local A = ns.ArenaChat
 			if type(A) == "table" and type(A.Send) == "function" then ok, why = A.Send(room.id, text) else ok, why = false, "room" end
 		elseif logical then
 			local R = ns.ChatRooms
-			if type(R) == "table" and type(R.Send) == "function" then ok, why = R.Send(tier, text) else ok, why = false, "room" end
+			if type(R) == "table" and type(R.Send) == "function" then ok, why, left = R.Send(tier, text) else ok, why = false, "room" end
 			if not ok and type(R) == "table" and type(R.Own) == "function" and R.Own(tier) then ChatWindow.Refused(tier, why) end
 		else
 			ok, why = ns.Channels.Send(tier, text, nil, true)
@@ -2868,6 +2884,10 @@ local function Submit()
 		if ok or why == "confirm" then
 			eb:SetText("")
 			if ok and not room then notes[tier] = nil end
+			local R = ns.ChatRooms
+			if ok and logical and (tonumber(left) or 0) > 0 and type(R) == "table" and type(R.NotReachedText) == "function" then
+				ChatWindow.Missed(tier, R.NotReachedText(tier, left))
+			end
 			ScrollToBottom()
 			MarkDirty()
 		end

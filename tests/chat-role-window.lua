@@ -479,7 +479,7 @@ local function WithChurchRoom(w, fn)
 		R.Reset()
 		assert(R.RegisterAudience("church", { label = function() return ns.L.CHURCH_ROOM end,
 			CanAccess = function(name) return room.audience[ns.FullName(name or ns.me):lower()] == true end,
-			Recipients = function() return room.online end }))
+			Recipients = function() return room.online, room.left end }))
 		ns.ChatRooms = R
 		room.R = R
 		-- A queued whisper's last check, then its send: as Comm does when its turn comes.
@@ -593,6 +593,33 @@ test("Chat tab (1.2.4): a role room's line none of whose whispers left goes from
 			assert(room.RowWith(f, L.CHATWIN_PUT_BACK), "its words can go back in the box")
 			note:Click()
 			eq(f.input:GetText(), "lost on the way")
+		end)
+	end)
+end)
+
+-- 1.2.4: a role room's line goes to its share of the members online at most (ChatRooms.FANOUT, the
+-- Church's rooms 30): how many it missed is said in the room, under the line, and not only in the
+-- game's chat frame under the Olympus window (the silent send's lesson); the next line takes it away.
+test("Chat tab (1.2.4): a line that went to its room's share of members says in the room how many it missed", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room, R)
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			room.left = 4
+			f.input:SetText("to the brothers")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(f.input:GetText(), ""); eq(#room.jobs, 3)
+			local said = R.NotReachedText("church", 4)
+			eq(said, ns.L.CHATROOM_NOT_REACHED:format(4, R.FANOUT))
+			assert(room.RowWith(f, said), "said in the room")
+			eq(room.RowWith(f, ns.L.CHATWIN_PUT_BACK), nil, "it went: nothing to put back")
+			room.left, room.clock = nil, room.clock + 2
+			f.input:SetText("to all of them")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(#room.jobs, 6)
+			eq(room.RowWith(f, said), nil, "the next line takes it away")
 		end)
 	end)
 end)

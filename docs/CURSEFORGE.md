@@ -636,7 +636,7 @@ arrives. The rooms, in the list's order (none of yours: no Roles tab):
   signed people (the King, the councillors, the author) alone, and say so over their lines.
 - A line goes to 40 members of a room at most (the Church's rooms 30, those heard online), the
   author, the King, the High Council and the guild masters first, then those who wrote in the room
-  in the last ten minutes, then the others by name; you are told how many it missed. The whispers
+  in the last ten minutes, then the others by name; the room says how many it missed. The whispers
   leave 1.2 seconds apart: 40 take about 48 seconds.
 - No limit on rooms: a session keeps the last 100 lines of each and 1,200 of them all together, the
   oldest going first (each room keeps its newest), and nothing after a `/reload`.

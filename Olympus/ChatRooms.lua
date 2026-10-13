@@ -1230,11 +1230,15 @@ local function Send(id, text)
 	if pending == 0 then Settle() end
 	lastSend = now
 	sentTimes[#sentTimes + 1] = now
+	-- (How many it missed, also returned: the Chat page says it in the room, as a refusal's reason.)
 	if left > 0 then ns.Print(NotReached(id, left)) end
-	return true, "ok"
+	return true, "ok", left
 end
 
+-- ok, why, and (1.2.4) for a line sent to one of this file's rooms, how many members online it left
+-- out (Rooms.FANOUT, an audience's own limit): the words for it are Rooms.NotReachedText's.
 function Rooms.Send(id, text) return Send(id, text) end
+function Rooms.NotReachedText(id, left) return NotReached(id, tonumber(left) or 0) end
 -- 1.2.4: a room this file carries (Guild and the M2 rooms), whose refusals the Chat page shows in
 -- the room; a provider's room (a crafting deal's, a squad's) answers for itself.
 function Rooms.Own(id)
