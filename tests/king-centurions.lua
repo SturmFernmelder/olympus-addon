@@ -18,6 +18,25 @@ local function Find(lines, text)
 	for i, l in ipairs(lines) do if type(l.text) == "string" and l.text:find(text, 1, true) then return l, i end end
 end
 
+test("1.2.4 King's centurions: final EN/PT locale assignments do not restore the retired manual appointment instructions", function()
+	local saved = GetLocale
+	local ok, why = pcall(function()
+		for _, language in ipairs({ "enUS", "ptBR" }) do
+			GetLocale = function() return language end
+			local words = { L = {} }
+			assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", words)
+			assert(words.L.NOMINEES_MAIN_TITLE:find("High Council", 1, true), language .. ": signed council replaces the manual title")
+			assert(not words.L.NOMINEES_MAIN_TITLE:find("%s", 1, true))
+			assert(words.L.NOMINEES_MAIN_HINT:find(language == "ptBR" and "ninguém é indicado" or "nobody is named", 1, true))
+			local note = words.L.NOMINEES_MAIN_NOTE:format("Olympus", 99)
+			assert(note:find("99", 1, true), "leader plus ninety-nine soldiers")
+			assert(not note:find("1.1.6", 1, true), "no obsolete appointment expiry instructions")
+		end
+	end)
+	GetLocale = saved
+	if not ok then error(why, 0) end
+end)
+
 -- The King's guild, its roster fresh (the server's word): the King, an officer, Vera (a councillor),
 -- two soldiers. Olaf, the other councillor, is of another guild. The signed list's order: Vera, Olaf.
 local function With(fn)

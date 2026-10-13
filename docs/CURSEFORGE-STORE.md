@@ -182,8 +182,9 @@ versions before 1.1 just get the whisper, as before.
   <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
-  guild master's nomination; neither title grants federal powers. Artisanry and Heritage link to
-  the existing boards and clearly say their dedicated workflows are not available yet. A Church
+  guild master's nomination; neither title grants federal powers. Artisanry links to its existing
+  board and says its dedicated workflow is not available yet. Heraldry runs its own guild's
+  Decrees, Agenda and musters; its current appointment grants no global Crown authority. A Church
   contact still needs a Church appointment for its private room and recruitment numbers.
 - **Level race**: the highest level players of the realm.
 - **Recruiting**: the guilds that still have free slots, so new players go where there is room
@@ -359,11 +360,19 @@ what each player chose to share, and the King's week.
   can't write into the game's calendar: an officer's click opens it on the right day's month and
   says which day to right-click for the guild event. Your client keeps the week across a
   `/reload` or a login, so it shows while the King is offline.
+  **Heraldry and guild agendas (1.2.4).** The signed High Council's Heraldry holders and the author
+  also schedule for Olympus, alongside the King's existing verified Steward and Hands. **Schedule
+  for your guild** belongs to its own master and verified Heraldry correspondent: a day and hour,
+  or `30 Guild gathering`. Entries and signup counts reach that guild alone. Saved entries keep
+  their audience, and a roster still loading keeps them hidden until it confirms the issuer.
+  Losing the duty stops new entries and repeats; setters may take back their own exact entries.
+  Older clients ignore guild Agenda messages; the army wire and old Heritage key stay compatible.
 - **The signup sheet**: Sign up on an Agenda entry with the role you claim; it goes to whoever set
-  it, alone, and the army sees the counts (4 tanks, 9 healers...), kept by his client across a
+  it, alone, and its audience sees the counts (4 tanks, 9 healers...), kept by his client across a
   `/reload`. Nothing checks the role and nothing invites you: whoever runs the event invites by
   hand. Five minutes before an entry you signed, your client alone prints one line with the usual
-  alert sound (nothing sent), after a `/reload` too.
+  alert sound (nothing sent), after a `/reload` too. A guild entry's saved nudge appears only in
+  that same guild while its setter still has that duty.
 - **Raise a flag** with one click: **Dungeon**, **Raid**, **PvP** or **Layer**, plus a short
   note if you want one (40 bytes at most). A box says first what goes out: your name, level,
   class and guild, the flag and the note, to every Olympus player of your realm and faction.
@@ -889,7 +898,7 @@ code.
 | `/oly discord <code>` · `/oly discord` | Olympus Link: link this character to your Discord account with the bot's code (or paste it in a box) |
 | `/oly hop` | ask for an invite to the King's layer (while he is online) |
 | `/oly lfg` · `/oly lfg dungeon\|raid\|pvp\|layer [note]` · `/oly lfg off` | the Board (1.1): who is looking for a group; raise your flag (a box with your note first) or lower it |
-| `/oly week` | the King's week on the Board (1.1): his Agenda for 7 days with your guild's calendar events; the King and his Hands add entries with the Agenda button ("Sat 20:00 Raid night") |
+| `/oly week` | the week on the Board and Decrees: army and own-guild Agenda entries for 7 days, alongside your guild's calendar; eligible schedulers see separate army and guild buttons ("Sat 20:00 Raid night") |
 | `/oly location on` · `/oly location off` | share (or not) your zone and layer on the Olympus channel |
 | `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the centurions and correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
 | `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V), like an elite creature's dragon: the game's gold elite mark for the King, its silver for the High Council, bronze for guild masters and the people they name, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
