@@ -4,15 +4,29 @@ local L = ns.L
 -- A public guild card, written only by its current master. GC is the master's own logged
 -- channel word. QC/QD are bounded recruitment whispers; two queried members must report the
 -- exact same card before it affects Join. A reported card grants no rank or contact authority.
+-- (1.2.4, the author's ask: lists are not erased.) The cards heard are kept in the saved data
+-- (rdb.guildCards), no longer this session's memory alone; the master's client renews his card's
+-- revision as it repeats it (RENEW), so a card lasts LIFE after its master last played, not after
+-- his last edit; and an edit keeps the card's other fields whatever its age.
 local Charter = {}
 ns.GuildCharter = Charter
 Charter.LIFE = 7 * 86400
+Charter.RENEW = 86400
 Charter.EVERY = 300
 Charter.PURPOSE_MAX, Charter.NIGHTS_MAX = 48, 24
 Charter.MAX, Charter.ANSWER_MAX = 150, 3
 Charter.ASK_WAIT, Charter.REPORT_LIFE = 60, 600
 Charter.ANSWER_EACH, Charter.ANSWERS_PER_MINUTE = 60, 10
 local held, reports, asked, answered, answerTimes = {}, {}, {}, {}, {}
+local heldFor -- the saved data `held` is (1.2.4: rdb.guildCards)
+local function Held()
+	local rdb = ns.rdb
+	if type(rdb) == "table" and heldFor ~= rdb then
+		if type(rdb.guildCards) ~= "table" then rdb.guildCards = {} end
+		held, heldFor = rdb.guildCards, rdb
+	end
+	return held
+end
 local lastSent, sending = -math.huge, false
 local LANGUAGES = { enUS = true, enGB = true, ptBR = true, deDE = true, frFR = true,
 	esES = true, esMX = true, ruRU = true, koKR = true, zhCN = true, zhTW = true }
@@ -84,17 +98,37 @@ function Charter.Parse(text, sender)
 		wanted = wanted, nights = nights, purpose = purpose }
 	return Valid(c) and c or nil
 end
-function Charter.Ours()
+-- The master's own card as he saved it, whatever its age (1.2.4: an edit starts from it).
+local function OwnSaved()
 	local master, guild = Charter.IsMaster()
 	local c = ns.rdb and ns.rdb.guildCharterOwn and ns.rdb.guildCharterOwn[ns.me]
-	return master and Valid(c) and c.guild == guild and c.by == ns.me and c or nil
+	return master and type(c) == "table" and c.guild == guild and c.by == ns.me and c or nil
+end
+function Charter.Ours()
+	local c = OwnSaved()
+	return Valid(c) and c or nil
+end
+-- (1.2.4) The master's card renewed as his client repeats it: a revision older than RENEW, or one
+-- past LIFE (he was away), stamped now, the card itself unchanged; never a withdrawn one. Every
+-- client, an older build's too, then keeps it LIFE from now. True when renewed.
+function Charter.Renew()
+	local c = OwnSaved()
+	if not c or c.purpose == "" or type(c.rev) ~= "number" then return false end
+	local now = Clock()
+	if now - c.rev < Charter.RENEW then return false end
+	local renewed = {}
+	for k, v in pairs(c) do renewed[k] = v end
+	renewed.rev = math.max(now, c.rev + 1)
+	if not Valid(renewed) then return false end
+	ns.rdb.guildCharterOwn[ns.me] = renewed
+	return true
 end
 local function Known(guild)
 	local mine = Charter.Ours()
 	if mine and mine.guild == guild then return mine end
-	local c = type(guild) == "string" and held[guild:lower()]
+	local c = type(guild) == "string" and Held()[guild:lower()]
 	if c and Valid(c) and Authorized(c.by, c.guild) then return c end
-	if guild then held[guild:lower()] = nil end
+	if guild then Held()[guild:lower()] = nil end
 end
 function Charter.Get(guild)
 	local c = Known(guild)
@@ -105,18 +139,19 @@ function Charter.Handle(dist, sender, text)
 	local c = Charter.Parse(text, sender)
 	if not c or not Authorized(c.by, c.guild) then return false end
 	if C_ChatInfo and C_ChatInfo.SendAddonMessageLogged and ns.Comm.DeliveredLogged and not ns.Comm.DeliveredLogged() then return false end
-	local key, old = c.guild:lower(), held[c.guild:lower()]
+	local key, old = c.guild:lower(), Held()[c.guild:lower()]
 	if old and old.by == c.by and old.rev >= c.rev then return false end
 	if not old then
 		local n = 0
-		for g in pairs(held) do if Known(g) then n = n + 1 end end
+		for g in pairs(Held()) do if Known(g) then n = n + 1 end end
 		if n >= Charter.MAX then return false end
 	end
-	held[key] = c
+	Held()[key] = c
 	Changed()
 	return true
 end
 function Charter.Send(force)
+	Charter.Renew()
 	local c, now = Charter.Ours(), ns.Now()
 	if not c or now - lastSent < 10 or (not force and now - lastSent < Charter.EVERY) then return false end
 	local msg = Charter.Encode(c)
@@ -137,7 +172,9 @@ end
 function Charter.SetField(field, input, expectedGuild)
 	local master, guild = Charter.IsMaster()
 	if not master or (expectedGuild and expectedGuild ~= guild) then return false end
-	local old = Charter.Ours()
+	-- (1.2.4: the saved card whatever its age: an edit of a card past LIFE kept its other fields
+	-- empty before, Ours() being nil then)
+	local old = OwnSaved()
 	local c = { guild = guild, by = ns.me, faction = Faction(), rev = math.max(Clock(), (old and old.rev or 0) + 1),
 		language = old and old.language or (LANGUAGES[GetLocale()] and GetLocale() or "enUS"),
 		wanted = old and old.wanted or "", nights = old and old.nights or "", purpose = old and old.purpose or "" }
@@ -173,7 +210,7 @@ function Charter.HandleAsk(dist, sender, text)
 	answered[source], answerTimes[#answerTimes + 1] = now, now
 	local cards, own = {}, Charter.Ours()
 	if own then cards[#cards + 1] = own end
-	for guild in pairs(held) do
+	for guild in pairs(Held()) do
 		local c = Known(guild)
 		if c and (not own or c.guild ~= own.guild) then cards[#cards + 1] = c end
 	end
@@ -330,7 +367,7 @@ function Charter.Lines()
 		lines[#lines + 1] = { text = "> " .. L.CHARTER_WITHDRAW, onClick = function() Charter.SetField("purpose", "", guild) end }
 	end
 	local others = {}
-	for key in pairs(held) do
+	for key in pairs(Held()) do
 		local c = Charter.Get(key)
 		if c and c.guild ~= guild then others[#others + 1] = c end
 	end
@@ -345,7 +382,8 @@ function Charter.Lines()
 	return lines
 end
 function Charter.ResetForTests()
-	held, reports, asked, answered, answerTimes = {}, {}, {}, {}, {}
+	if type(ns.rdb) == "table" then ns.rdb.guildCards = nil end
+	held, heldFor, reports, asked, answered, answerTimes = {}, nil, {}, {}, {}, {}
 	lastSent, sending = -math.huge, false
 end
 ns.RealmPages = ns.RealmPages or {}

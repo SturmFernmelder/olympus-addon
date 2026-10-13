@@ -52,7 +52,11 @@ King.MAX_SHOWN = 30          -- violators listed on the page
 
 King.MAX_HANDS = 40          -- Hands of the King (the list goes out in pieces when long)
 King.HANDS_EVERY = 300       -- the King's client repeats the list for late logins
-King.HANDS_FRESH = 20 * 60   -- a list the King stopped repeating (he left) ends
+-- (1.2.4, the author's ask: lists of people are not erased; provisional, his to confirm) A list the
+-- King (or a Steward) gave stands until his newer one, kept in the saved data across a /reload:
+-- before, it ended this long after his client stopped repeating it (he logged out), so his Hands
+-- lost the Throne's tools on every client 20 minutes after he left. Kept for the older builds' word.
+King.HANDS_FRESH = 20 * 60
 
 King.mode = nil              -- what the tab shows: home or hands (nil: home, the Throne Room)
 local summon, inspect        -- the King's own roll call / inspection in progress
@@ -188,15 +192,17 @@ local function NewId() return math.random(1, 99999) end
 -- The Hands of the King: the players he names use the Throne's tools in his name (HAND_MAY:
 -- the roll call, the inspection, the agenda, Vox Populi, the gates), never what is his alone
 -- (the Hands, writs, the court, pardons, his position). Each client keeps the list of the
--- King it trusts, as he last sent it; a list he stopped repeating ends (HANDS_FRESH).
+-- King it trusts, as he last sent it (1.2.4: in its saved data, until his newer list, while he is
+-- the King; a list he stopped repeating ended after HANDS_FRESH before).
 -- 1.0.0: each of his Stewards names Hands too, in a list of his own that only his client sends
 -- (T1~N, STEWARD_MAY; clients before 1.0.0 know no such kind and leave it out):
 --   T1~N~<id>~<guild>~<Name-Realm,...>     a Steward's Hands (his alone; resent every 5 min)
 -- The Hands are the King's list and every Steward's together, each list its owner's alone:
 -- nobody changes anyone else's. The King's list is the same message as before 1.0.0, from his
 -- client alone. Each client keeps the list it last heard from each Steward (by his name, which
--- the server stamps); it ends HANDS_FRESH after his client stopped repeating it, and at once, on
--- every client, when the author's signed titles list no longer names him (for good: named again,
+-- the server stamps) until his newer list (1.2.4; it ended HANDS_FRESH after his client stopped
+-- repeating it before), and at once, on every client, when the author's signed titles list no
+-- longer names him (for good: named again,
 -- he starts from none, King.StewardsChanged). A Hand's powers are the same whoever named him.
 -- The King never removes a Steward's Hand: that Steward does, or the author, by removing him
 -- (the Hands page shows the others' lists, to read only).
@@ -230,6 +236,8 @@ local lastHandsSent = -math.huge
 local handsSendPending = false
 -- 1.0.0: each Steward's list as this client last heard it from him:
 -- [his Name-Realm] = { names = { "Name-Realm", ... }, set = { [name-realm, lower case] = true }, at = when }
+-- (1.2.4: the King's list heard and each Steward's are kept in the saved data too, rdb.handsHeard =
+-- { names, at, king } and rdb.stewardHandsHeard[his Name-Realm] = { names, at }: King.LoadHands.)
 local stewardHands = {}
 -- A Steward's own list, on his client, in order (saved: rdb.stewardHands[his Name-Realm]: the
 -- characters of one account on a realm group share what they save).
@@ -237,10 +245,10 @@ local myStewardHands = {}
 local lastStewardSent = -math.huge
 
 -- A Steward's list as heard here, while it counts: he is still a Steward (the signed titles
--- list names him) and his client kept repeating it.
+-- list names him). (1.2.4: until his newer list, whether his client still repeats it or not.)
 local function StewardList(steward)
 	local s = stewardHands[steward]
-	if not s or not King.IsStewardName(steward) or ns.Now() - s.at > King.HANDS_FRESH then return nil end
+	if not s or not King.IsStewardName(steward) then return nil end
 	return s
 end
 
@@ -254,13 +262,16 @@ local function Named(list, key)
 	for _, n in ipairs(list) do if type(n) == "string" and n:lower() == key then return true end end
 	return false
 end
+-- (1.2.4) The King's list as heard here counts while its sender is the King: kept until his
+-- newer list, never past his reign (an update naming another King).
+local function HeardKing() return type(handsKing) == "string" and ns.IsKingCharacter(handsKing) end
 local function Hand(name)
 	local full = ns.FullName(name)
 	if type(full) ~= "string" then return false end
 	local key = full:lower()
 	if King.IsKing() then
 		if Named(myHands, key) then return true end
-	elseif ns.Now() - handsAt <= King.HANDS_FRESH and hands[key] == true then
+	elseif hands[key] == true and HeardKing() then
 		return true
 	end
 	if King.IsSteward() and Named(myStewardHands, key) then return true end
@@ -302,7 +313,7 @@ King.StewardLabel = StewardLabel
 -- { { steward = <Name-Realm, nil for the King's>, names = { ... } }, ... }
 function King.OthersHands()
 	local out = {}
-	if not King.IsKing() and ns.Now() - handsAt <= King.HANDS_FRESH and #handsOrder > 0 then
+	if not King.IsKing() and #handsOrder > 0 and HeardKing() then
 		out[1] = { names = handsOrder }
 	end
 	local names = {}
@@ -364,7 +375,9 @@ function King.SendHands(force)
 	if not King.IsKing() then return end
 	local now = ns.Now()
 	if not force and now - lastHandsSent < King.HANDS_EVERY then return end
-	if #myHands == 0 and lastHandsSent == -math.huge then return end -- nobody named yet
+	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, at his later sessions:
+	-- every client keeps the list it heard until his newer one, SaveHands' rdb.kingHands)
+	if #myHands == 0 and lastHandsSent == -math.huge and type(ns.rdb and ns.rdb.kingHands) ~= "table" then return end
 	lastHandsSent = now
 	local msg = ("T1~H~%d~%s~%s"):format(NewId(), GetGuildInfo("player") or "", table.concat(myHands, ","))
 	if #msg <= 250 then ns.Comm.Send("CHANNEL", msg, "hands") else ns.Comm.SendChunked(msg) end
@@ -375,7 +388,9 @@ function King.SendStewardHands(force)
 	if King.IsKing() or not King.IsSteward() then return end
 	local now = ns.Now()
 	if not force and now - lastStewardSent < King.HANDS_EVERY then return end
-	if #myStewardHands == 0 and lastStewardSent == -math.huge then return end -- nobody named yet
+	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, the King's way)
+	local saved = ns.rdb and type(ns.rdb.stewardHands) == "table" and ns.rdb.stewardHands[ns.FullName(ns.me)]
+	if #myStewardHands == 0 and lastStewardSent == -math.huge and type(saved) ~= "table" then return end
 	lastStewardSent = now
 	local msg = ("T1~N~%d~%s~%s"):format(NewId(), GetGuildInfo("player") or "", table.concat(myStewardHands, ","))
 	if #msg <= 250 then ns.Comm.Send("CHANNEL", msg, "stewardhands") else ns.Comm.SendChunked(msg) end
@@ -450,6 +465,8 @@ local function OnHands(king, rest)
 	end
 	local was = King.IsHand()
 	hands, handsOrder, handsAt, handsKing = list, order, ns.Now(), ns.FullName(king)
+	-- (1.2.4) Kept until his newer list (King.LoadHands).
+	if ns.rdb then ns.rdb.handsHeard = { names = order, at = handsAt, king = handsKing } end
 	HandChanged(was, function() return L.HANDS_YOU:format(ns.KingName(king)) end)
 end
 
@@ -471,6 +488,11 @@ local function OnStewardHands(sender, rest)
 	end
 	local was = King.IsHand()
 	stewardHands[steward] = { names = names, set = set, at = ns.Now() }
+	-- (1.2.4) Kept until his newer list (King.LoadHands).
+	if ns.rdb then
+		if type(ns.rdb.stewardHandsHeard) ~= "table" then ns.rdb.stewardHandsHeard = {} end
+		ns.rdb.stewardHandsHeard[steward] = { names = names, at = ns.Now() }
+	end
 	HandChanged(was, function() return L.HANDS_YOU_STEWARD:format(ns.DisplayName(steward) or "?") end)
 end
 
@@ -485,6 +507,28 @@ function King.LoadHands()
 	Load(myHands, ns.rdb and ns.rdb.kingHands)
 	local stewards = ns.rdb and ns.rdb.stewardHands
 	Load(myStewardHands, type(stewards) == "table" and stewards[ns.FullName(ns.me)])
+	-- (1.2.4) The lists heard from the King and each Steward, standing until their newer word.
+	local function Names(list)
+		local names, set = {}, {}
+		for _, n in ipairs(type(list) == "table" and list or {}) do
+			local short = type(n) == "string" and CleanName(n)
+			local full = short and ns.FullName(short, ns.RealmOf(n))
+			if full and not set[full:lower()] and #names < King.MAX_HANDS then set[full:lower()], names[#names + 1] = true, full end
+		end
+		return names, set
+	end
+	local heard = ns.rdb and ns.rdb.handsHeard
+	if type(heard) == "table" and type(heard.king) == "string" then
+		local names, set = Names(heard.names)
+		hands, handsOrder, handsAt, handsKing = set, names, tonumber(heard.at) or ns.Now(), heard.king
+	end
+	wipe(stewardHands)
+	for steward, x in pairs(ns.rdb and type(ns.rdb.stewardHandsHeard) == "table" and ns.rdb.stewardHandsHeard or {}) do
+		if type(steward) == "string" and type(x) == "table" then
+			local names, set = Names(x.names)
+			stewardHands[steward] = { names = names, set = set, at = tonumber(x.at) or ns.Now() }
+		end
+	end
 end
 
 -- A signed titles list was taken (Workshop.TakeTitles, 1.0.0): the list of each Steward it no
@@ -504,6 +548,13 @@ function King.StewardsChanged()
 			if not King.IsStewardName(owner) then saved[owner] = nil end
 		end
 		if next(saved) == nil then ns.rdb.stewardHands = nil end
+	end
+	local heard = ns.rdb and ns.rdb.stewardHandsHeard
+	if type(heard) == "table" then
+		for owner in pairs(heard) do
+			if not King.IsStewardName(owner) then heard[owner] = nil end
+		end
+		if next(heard) == nil then ns.rdb.stewardHandsHeard = nil end
 	end
 	if not King.IsSteward() and (#myStewardHands > 0 or lastStewardSent ~= -math.huge) then
 		wipe(myStewardHands)
@@ -1616,10 +1667,11 @@ function King.StewardStatusLine()
 		for i, n in ipairs(ns.Stewards()) do shown[i] = StewardLabel(n) end
 		who = #shown > 0 and table.concat(shown, ", ") or "none named"
 	end
-	local function Heard(at) return ns.Now() - at <= King.HANDS_FRESH and ("heard " .. ns.Ago(at)) or "lapsed here" end
+	-- (1.2.4: a list stands until its owner's newer one, whenever it was heard)
+	local function Heard(at) return "heard " .. ns.Ago(at) end
 	local held = {}
 	if King.IsKing() then held[1] = ("the King's %d (yours)"):format(#myHands)
-	elseif handsAt ~= -math.huge then held[1] = ("the King's %d (%s)"):format(#handsOrder, Heard(handsAt)) end
+	elseif handsAt ~= -math.huge and HeardKing() then held[1] = ("the King's %d (%s)"):format(#handsOrder, Heard(handsAt)) end
 	if King.IsSteward() then held[#held + 1] = ("yours %d"):format(#myStewardHands) end
 	local stewards = {}
 	for steward in pairs(stewardHands) do stewards[#stewards + 1] = steward end

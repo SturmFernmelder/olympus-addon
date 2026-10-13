@@ -94,10 +94,12 @@ versions before 1.1 just get the whisper, as before.
 
 **A guild's public charter.** On the Realm, **Your guild's public charter** lets its current
 guild master publish a short purpose (48 bytes), client language, raid nights (24 bytes), and
-wanted classes. Each edit renews the card for seven days; withdrawing it publishes an empty
-card. Receiving members accept it only from the current guild master under the same roster or
-census/signed-authority checks as other guild-master powers. Losing that authority or letting
-the card expire removes it. Public words use the game's logged addon messages.
+wanted classes. Each edit renews the card for seven days, and (1.2.4) so does his addon's repeat
+while he plays, so it lasts seven days after he last played; an edit keeps the card's other fields
+whatever its age; members keep the cards they heard across a `/reload`. Withdrawing it publishes
+an empty card. Receiving members accept it only from the current guild master under the same
+roster or census/signed-authority checks as other guild-master powers. Losing that authority or
+letting the card expire removes it. Public words use the game's logged addon messages.
 The same Realm page lists known sister-guild cards. **Write to this guild's Lord...** opens
 an editable letter for the member to send; a transfer remains a conversation and the destination
 officer's manual invitation, with no automatic removal from the member's current guild.
@@ -177,7 +179,9 @@ channels; the same charter and Join controls work for each side.
 
 ### The Realm: the hierarchy
 - **War Room**: every Olympus member can read their guild's operations, Centuries and after-action
-  records, declare their own accepted roles, post an LFG card and answer an operation's invitation.
+  records (1.2.4: a record stays its 90 days after its operation goes, 30 days after it closed,
+  listed under the earlier operations' reports), declare their own accepted roles, post an LFG
+  card and answer an operation's invitation.
   The guild master, Captains, its confirmed War correspondent and signed War councillors who are
   in that same guild manage its operations and records. A councillor of another guild gets no
   cross-guild writing power. Its military squads (up to 10, each a leader and up to 99 soldiers
@@ -1066,6 +1070,8 @@ alts and the census counts people:
 - While any linked name is hidden by the moderators (net-off), the links freeze: your addon adds
   and removes none, and every addon keeps the links it knew (it takes new names, drops none), so
   nobody drops the punished character to walk back in on an alt.
+- Other addons keep a link 180 days after its characters were last heard (1.2.4; it was 30), so
+  a player away for a month is not counted twice when he comes back.
 - The same faction and realm group only (one census). Up to 8 alts per player. On the Forever
   beta, which forgets addon data at every login, the offer can't reach the alt yet.
 
@@ -1109,7 +1115,9 @@ the council is shown to everyone. Each of his tools lives where it belongs:
   of the voters when each picked several). `/oly vox off` keeps the questions in chat.
 - **Royal Writs** (in the Decrees tab): a letter from the King on parchment, to the Lords alone,
   to every Lord and Captain, or to the whole army. Lords and Captains can answer "As you
-  command"; the King sees how many did. (The audience is who the addon shows it to: like
+  command"; the King sees how many did. (1.2.4) His addon says each writ of the last seven days
+  again, one every 15 minutes, and a member's addon asks for them once a login, so a member who
+  was offline when it went still gets it, once. (The audience is who the addon shows it to: like
   everything on the channel, anyone on it can read the bytes.)
 - **Open the Gates** (in the Realm tab, Recruiting): the King picks the guild new recruits
   should join for the next two hours; everyone sees it on top of Recruiting.
@@ -1146,8 +1154,12 @@ the council is shown to everyone. Each of his tools lives where it belongs:
   `/oly key` is dated, and wins for his guild, as ever.
 - **Hands of the King** (a button next to his map button): players he names use the roll
   call, the inspection, the agenda, Vox Populi and the gates in his name. Never the court,
-  writs, pardons or his crown on the map. Their addons learn the list from his, and it ends
-  when he stops sending it. A Hand who is an officer of `<Olympus>` keeps its Crown (Royal
+  writs, pardons or his crown on the map. Their addons learn the list from his, keep it across a
+  `/reload`, and (1.2.4, until the author says otherwise) it stands until his newer list, also
+  while he is offline; it ended 20 minutes after he stopped sending it before. His addon says an
+  emptied list again too, so a member who was away drops those names, and a list from a King an
+  update no longer names counts nowhere. A Hand who is an
+  officer of `<Olympus>` keeps its Crown (Royal
   decrees, Tabard inspections, [Lords]) on every client, not only on its members' (1.0.0).
   Each Steward names Hands of his own beside his, in a list of his own, with the same tools and
   the same Crown, which the King can't change (1.0.0, [below](#the-kings-steward-100)).
@@ -1202,11 +1214,13 @@ shows his own list, to change, and each Steward's, to read, under that Steward's
 Steward's page shows his own list, to change, and the King's and the other Stewards', to read.
 **The King can't take back a Hand his Steward named**: that Steward does, or the author, by
 removing him as Steward (both pages say so). The King's list is the same message as before
-1.0.0, from his client alone, and ends 20 minutes after his client stopped repeating it, as
-before. A Steward's list goes out from his own client alone, in a message of its own; every
-client keeps the last one it heard from him (by his name, which the server stamps), and it ends
-20 minutes after his client stopped repeating it, or at once, on every client, when a newer
-signed list no longer names him: named again later, he starts from no Hands, as long as his
+1.0.0, from his client alone, and (1.2.4) stands until his newer list (it ended 20 minutes after
+his client stopped repeating it before; each owner's addon says an emptied list again, at his
+later sessions too). A Steward's list goes out from his own client alone, in
+a message of its own; every client keeps the last one it heard from him (by his name, which the
+server stamps), in its saved data, until his newer list (1.2.4; it ended 20 minutes after his
+client stopped repeating it), or at once, on every client, when a newer signed list no longer
+names him: named again later, he starts from no Hands, as long as his
 addon saw the list without him (on any of his characters there). Clients before 1.0.0 follow
 the King's list alone, as they
 always did, and leave a Steward's out: a Hand only a Steward named has his tools on 1.0.0
@@ -1660,6 +1674,8 @@ whisper to a named crafter (`/oly craft`).
 - Each profession is one group under its English name, whatever language its crafters' clients
   list it in (1.1.5): Cooking, Cocina and Culinária are all Cooking. A search finds a crafter by
   either name.
+- The board keeps a crafter a week after his addon last listed him, across your `/reload` too
+  (1.2.4; it was 100 minutes, this session alone).
 - It stays light on the Olympus channel and on your own messages: your listing goes once at login,
   every 45 minutes, and after a change (a profession listed or taken off 2 minutes after the last
   at the soonest, a skill up 10 minutes), so about 1.3 an hour while you play and 6 at most while
@@ -1963,8 +1979,12 @@ the game is removed at login, with one line saying so.
   week's amount with them; on the Treasurer's characters his mail
   character's book too), the King's switches and keepers on his client or a Steward's, and your
   settings (sound, map, minimap, borders, nameplates, Vox, your chat windows and mutes, the
-  players you blocked). Keep it in a text file: when the beta wipes the saved variables, `/oly
-  restore` opens a box to paste it back, says what it restores and waits for your yes. Clipboard
+  players you blocked), and (1.2.4) your own signed halves of the Bones games and duels that count
+  (this month's and last month's Bones games, the newest 400, and your newest 200 duels; never
+  the other player's: a Bones game's comes back when your addon asks him, a duel's from his
+  repeats or the clerk's carousel). Keep it in a text file: when the beta wipes the saved
+  variables, `/oly restore` opens a box to paste it back, says what it restores and waits for
+  your yes. Clipboard
   only: nothing is uploaded or sent anywhere (a keeper's book goes out afterwards as it always
   does). A book goes back only into that character's (merged with what it wrote since, nothing
   counted twice), a text that was cut or changed is refused, and it never holds your yeses to
@@ -2212,6 +2232,10 @@ message (the game adds it). What goes where:
 | A reviewer's removal or void (WV, 1.2.3): a Horde player's GUID, or a member's name and his row's digest, and when | everyone on the Olympus channel | when the King, a High Councillor or the author takes an abusive entry off or voids a row, and in his catch-up answer |
 | The signed Slayers top three (WY): GUIDs, scores, claims and tie times, with the issuer, signature and expiry | everyone on the Olympus channel | from the King's, a High Councillor's or the author's client, from his own Slayers board (1.2.3: no review); an unchanged verified word may also be relayed by one of these roles (W5) |
 | Slayers catch-up (W4): a request for the current signed ranking | everyone on the Olympus channel | up to three login attempts, starting after 45 seconds and then 5 minutes apart; a role holder answers at most once every 5 minutes, with the signed ranking and (1.2.3) the newest shared rows |
+| The games' rankings ask (AU, 1.2.4): the letters of the games whose publish word your addon lacks, nothing else | everyone on the Olympus channel, and your guild when it spans the realm group's realms | once a session, when you open the Games tab without one of them (never the King's, the High Council's or the author's, who see the rankings anyway) |
+| A games' rankings publish word you hold (AU, 1.2.4): the game, shown or hidden, when, and who gave it (the King or a councillor he named) | the lane the ask came on: the Olympus channel, or your guild | only in answer to an ask, a few seconds after it, from about three holders whatever the army's size, unless the same word went out meanwhile; once every 30 seconds at most |
+| A Bones game's ask for its other half (KN, 1.2.4): the game's id, its two players and its target, nothing else; and the answer, your own signed half of that game (the one your addon said on the channel when it ended) | the ask: the game's other player, alone (a whisper); the answer: the player who asked, alone (a whisper) | the ask only when your client holds your own half of a counted game of this month or the last and never got his: at a later login, an hour apart at least, 8 times at most; the answer only to that game's other player's ask, once a session per game |
+| The Royal Writs' ask (T7, 1.2.4): nothing but your name | everyone on the Olympus channel | once a login, a minute and a half after it; only the King's addon answers, with his writs of the last seven days, once every 5 minutes at most |
 | A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you chose (**Sightings to** on the Most Wanted page; 1.2.2: the one you sent evidence to), alone (whispers), three a minute at most | only after your own Yes on its privacy line (**Accept all** does not turn it on), only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 
@@ -2770,6 +2794,34 @@ there pairs each fighter's name with his GUID (a unit in view, or `GetPlayerInfo
 then it is in the history alone, and it goes if the game names another character
 (`Olympus/ArenaLedger.lua`, `tests/arena/duels-count.lua`). A free duel counts whatever the King's
 live switch says: that switch is the bets' alone.
+**What the duels' rankings keep** (1.2.4, `Olympus/ArenaLedger.lua`): the ledger is in the core's
+saved data, no longer the companion's alone, so a member who never opens the Arena window keeps
+every duel whose two halves he heard, ranks it (the Games tab's Arena ranking too) and keeps it
+across a `/reload`. A half waiting for its other half is kept as well (62 days at most) and
+matched when the other comes later; at login a fighter's own half of each duel he confirmed waits
+again for the other's when his ledger lost the duel; and the clerk's carousel carries the season's
+eight weeks of duels (it was the last two weeks with duels). The ledger the companion kept before
+is taken in when it loads (`tests/arena/duels-keep.lua`).
+**The games' rankings stay shown** (1.2.4, `Olympus/ArenaRoles.lua`): the King's word that shows
+a game's ranking to everyone on the Games tab (or a councillor's he named for that game) is kept
+for the whole realm group, not under its giver's realm, so a member on another realm of the group
+sees it too. Any client that holds a word tells it: a member who opens the Games tab holding no
+word for a game asks once a session, and about three holders answer with the word and its
+giver's name; where the guild spans the group's realms the ask and the answers go over the guild
+too. Nothing goes unasked. A told copy carries no signature of the giver's, so it never replaces
+a word a client heard from its giver, a word heard from its giver replaces any copy (whoever the
+copy names, whatever its time), and a copy naming someone who may not publish that game counts
+nowhere (`tests/arena/rankings-word.lua`).
+**What the Bones ranking keeps** (1.2.4, `Olympus/FarkleTable.lua`): a game counts once both
+players' signed halves agree. A game with one half is kept as long as its month's games (62 days;
+it was 7), and a player whose client never got the other's half asks him for it at his later
+logins (a whisper with the game's id, seats and target alone); the other's client answers with its
+own signed half. Each player says his games again at 8 later logins over about two weeks (it was
+three within a day). Each closed month's list, every player's games and wins and its champion, is
+kept for good, also once its games go after 62 days; the Games tab shows last month's podium under
+this month's list, and a player's profile shows the games and wins the rankings counted for him.
+A free table's record for a /reload stays in the live realm's store, so `test clear` in the middle
+of a game no longer loses it (`tests/arena/bones-keep.lua`).
 **Find a player** (`Olympus/ArenaMatch.lua`, the Find in the Arena and in the Bones window): each
 game has its own Find, a duel's or a Bones game's, so the game is the one it was opened from; a
 duel filters by level (Any, within 5 or within 10 of the player's own); both filter by distance (Nearby: the

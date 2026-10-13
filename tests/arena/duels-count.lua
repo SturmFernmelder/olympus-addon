@@ -294,18 +294,22 @@ test("1.2.3 two halves: a member who was offline gets them from a clerk (a High 
 	local sig = w:As(clerk, clerk.ns.Debts.Sign, "OLYH1|" .. core)
 	local _, pk = w:As(clerk, clerk.ns.Debts.MyKey)
 	local forged = core .. "~" .. clerk.ns.Debts.B64(pk) .. "~" .. clerk.ns.Debts.B64(sig)
-	-- (The review: a key is pinned only once its own half's signature checked, so on a client with
-	-- the companion, where the halves are matched and checked. A client without it still refuses
-	-- the forged one: its fighter's own half holds that side, "conflict".)
+	-- (The review: a key is pinned only once its own half's signature checked. 1.2.4, the author's
+	-- ask: the ledger is the core's, so a client without the companion matches and checks the halves
+	-- too: the spectator, who never opened the Arena window, holds the duel and its fighters' keys
+	-- already, and the forged one is refused for its key at once, "pin". It was "conflict" before:
+	-- his side held, unchecked, until the companion loaded.)
 	w:As(clerk, clerk.ns.Arena.Send, "AX", "L", forged, { to = cast.spectator.name })
 	w:Run(0)
-	eq((cast.spectator.ns.ArenaLedger.Stats().refused.conflict or 0) >= 1, true, "no companion: its fighter's own half holds his side")
+	eq((cast.spectator.ns.ArenaLedger.Stats().refused.pin or 0) >= 1, true, "no companion: the real key, heard first-hand")
+	eq(#Ledger(w, cast.spectator).Entries(), 1, "the duel, matched without the companion")
 	W3.Companion(w, cast.spectator)
 	w:Run(0)
-	eq(#Ledger(w, cast.spectator).Entries(), 1, "the halves that waited, checked")
+	eq(#Ledger(w, cast.spectator).Entries(), 1, "the same once it loads")
+	local pins = cast.spectator.ns.ArenaLedger.Stats().refused.pin or 0
 	w:As(clerk, clerk.ns.Arena.Send, "AX", "L", forged, { to = cast.spectator.name })
 	w:Run(0)
-	eq((cast.spectator.ns.ArenaLedger.Stats().refused.pin or 0) >= 1, true, "the spectator heard the real key first-hand")
+	eq((cast.spectator.ns.ArenaLedger.Stats().refused.pin or 0) > pins, true, "the spectator heard the real key first-hand")
 	W3.NoErrors(w)
 end)
 

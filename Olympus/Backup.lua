@@ -71,8 +71,12 @@ Backup.NOES = { wantedSightings = { module = "Wanted", set = "SetSightings" },
 -- accounts and 5,000 entries, never leaves the key or the copper lines out); its owner may set
 -- Backup.arenaChecks[part] = fn(v) -> v or nil for a closer look. The key and the copper lines are
 -- the account's: they come back on any realm; the others are the realm's the backup was made on.
--- A part the text holds that fails is named in the confirm.
-Backup.ARENA_PARTS = { "key", "copper", "bank", "mine", "stakes", "tickets" }
+-- A part the text holds that fails is named in the confirm. (1.2.4, the author's ask: rankings are
+-- not lost) halves: this character's own signed halves of the games and duels that count
+-- (FarkleTable.OwnBackup, ArenaLedger.OwnBackup), so after a wipe his client still says his games
+-- again and asks for the other halves; each taken back as his own word (FarkleTable.RestoreOwn,
+-- ArenaLedger.RestoreOwn), never the other player's.
+Backup.ARENA_PARTS = { "key", "copper", "bank", "mine", "stakes", "tickets", "halves" }
 Backup.ARENA_ACCOUNT = { key = true, copper = true }
 Backup.arenaChecks = {}
 Backup.PLAIN_STRING = 600 -- bytes of one string in an arena part
@@ -246,6 +250,15 @@ local function ArenaData()
 	if r and me and type(r.mine) == "table" and type(r.mine[me]) == "table" then out.mine = Copy(r.mine[me]) end
 	if r and type(r.stakes) == "table" then out.stakes = Copy(r.stakes) end
 	if r and me and type(r.tickets) == "table" and type(r.tickets[me]) == "table" then out.tickets = Copy(r.tickets[me]) end
+	-- (1.2.4) this character's own halves (the Bones ranking's and the duels')
+	local function Own(mod)
+		local m = ns[mod]
+		if type(m) ~= "table" or type(m.OwnBackup) ~= "function" then return nil end
+		local ok, v = pcall(m.OwnBackup)
+		return ok and type(v) == "table" and Copy(v) or nil
+	end
+	local bones, duels = Own("FarkleTable"), Own("ArenaLedger")
+	if bones or duels then out.halves = { bones = bones, duels = duels } end
 	if not next(out) then return nil end
 	out.realm = ns.realm
 	return out
@@ -697,6 +710,18 @@ function Backup.ApplyArena(a)
 			r[part] = type(r[part]) == "table" and r[part] or {}
 			if type(r[part][me]) ~= "table" then r[part][me], done[#done + 1] = a[part], part end
 		end
+	end
+	-- (1.2.4) this character's own halves, each as his own word, where none is held
+	if type(a.halves) == "table" then
+		local n = 0
+		for mod, list in pairs({ FarkleTable = a.halves.bones, ArenaLedger = a.halves.duels }) do
+			local m = ns[mod]
+			if type(list) == "table" and type(m) == "table" and type(m.RestoreOwn) == "function" then
+				local ok, k = pcall(m.RestoreOwn, list)
+				if ok and type(k) == "number" then n = n + k end
+			end
+		end
+		if n > 0 then done[#done + 1] = "halves" end
 	end
 	return done
 end

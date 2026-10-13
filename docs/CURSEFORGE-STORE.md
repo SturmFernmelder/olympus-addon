@@ -648,8 +648,12 @@ account, `/oly discord forget` drops this character's request and proof.
   week's amount with them; on the Treasurer's characters his mail
   character's book too), the King's switches and keepers on his client or a Steward's, and your
   settings (sound, map, minimap, borders, nameplates, Vox, your chat windows and mutes, the
-  players you blocked). Keep it in a text file: when the beta wipes the saved variables, `/oly
-  restore` opens a box to paste it back, says what it restores and waits for your yes. Clipboard
+  players you blocked), and (1.2.4) your own signed halves of the Bones games and duels that count
+  (this month's and last month's Bones games, the newest 400, and your newest 200 duels; never
+  the other player's: a Bones game's comes back when your addon asks him, a duel's from his
+  repeats or the clerk's carousel). Keep it in a text file: when the beta wipes the saved
+  variables, `/oly restore` opens a box to paste it back, says what it restores and waits for
+  your yes. Clipboard
   only: nothing is uploaded or sent anywhere (a keeper's book goes out afterwards as it always
   does). A book goes back only into that character's (merged with what it wrote since, nothing
   counted twice), a text that was cut or changed is refused, and it never holds your yeses to

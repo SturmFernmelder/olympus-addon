@@ -109,8 +109,10 @@ Arena.FREE_TYPES = {
 -- The types a sender may mark as his own obligation (o.obligation: ZX about himself, a staked AW,
 -- the Wallet's hello): taken in L whatever the switch, their handlers check the rest.
 Arena.MAY_OBLIGE = { ZX = true, ZQ = true, AW = true }
--- Only ID rides GUILD (the Treasurer's own client, the design); nothing else is relayed there.
-Arena.GUILD_TYPES = { ID = true }
+-- Only ID rides GUILD (the Treasurer's own client, the design), and (1.2.4) AU, the rankings'
+-- publish word a holder tells his guild where it spans the group's realms (ArenaRoles); nothing
+-- else is relayed there.
+Arena.GUILD_TYPES = { ID = true, AU = true }
 -- The letters of Arena.NewId: a fight, a card (Fight Night), a tournament, a Farkle table, a
 -- Lottery day (the design), a match (matchmaking, the design), a game played alone in the
 -- games' ledger (the House, the Lottery's practice: ArenaLedger.SoloId, 1.1.6).
@@ -1081,7 +1083,7 @@ end
 
 -- Arena.Send(kind, mode, body, o): builds kind~<mode>1~body and sends it (the design).
 --   o.to       a whisper to this character (else the public lane: o.dist, or Arena.Lane)
---   o.dist     "CHANNEL", "RAID", "PARTY" (or "GUILD" for ID alone)
+--   o.dist     "CHANNEL", "RAID", "PARTY" (or "GUILD" for ID and AU alone)
 --   o.key      Comm's dedupe key (a newer message replaces the one waiting, whose done says "replaced")
 --   o.urgent   ahead of what waits (8 arena items at most: the rest wait here)
 --   o.logged   the logged API (a player's own words)

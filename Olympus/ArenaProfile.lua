@@ -485,6 +485,11 @@ function P.Card(x)
 		end
 	end
 	card.following = gk and P.Following(gk) or false
+	-- (1.2.4) His Bones, as the rankings here count them (FarkleTable.PlayerStats): the profile
+	-- page's stats.bones, which nothing but the sim's sample filled before.
+	local FT = ns.FarkleTable
+	local bones = name and type(FT) == "table" and type(FT.PlayerStats) == "function" and FT.PlayerStats(name) or nil
+	if bones then card.stats = V({ bones = bones }, "ledger") end
 	return card
 end
 
