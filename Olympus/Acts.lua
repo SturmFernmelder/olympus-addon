@@ -557,7 +557,12 @@ function Acts.Pardon(name)
 	if not short then return ns.Print(L.PARDON_BAD_NAME) end
 	if not preview then
 		ns.rdb.pardonsGiven = ns.rdb.pardonsGiven or {}
-		ns.rdb.pardonsGiven[short] = ns.Now()
+		local originalAt = ns.Now()
+		ns.rdb.pardonsGiven[short] = originalAt
+		local subject = ns.FullName(ns.Normal(name))
+		if ns.CarryHistory and ns.CarryHistory.CaptureOriginal then ns.CarryHistory.CaptureOriginal("P", subject,
+			short .. ":" .. originalAt, originalAt, GetGuildInfo("player"),
+			{ to = subject, expires = originalAt + Acts.PARDON_DAYS * 86400 }) end
 		SendPardons()
 		-- 1.1 (#12): our own act never comes back to us: in our log as we send it.
 		ns.Chronicle.Add("pardon", ns.me, L.ACTS_PARDON:format(short))

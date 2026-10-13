@@ -78,12 +78,8 @@ function Carry.Gather()
 		if #out < Carry.ROWS and #row.id <= 160 and #row.by <= 64 and #row.guild <= 72 and #row.words <= 160 and #row.via <= 64
 			and Number(row.at) and #row.a <= 32 and #row.b <= 32 and #row.c <= 64 then out[#out + 1] = row end
 	end
-	for _, e in ipairs(ns.Loot and ns.Loot.Notes and ns.Loot.Notes() or {}) do
-		local n = e.n
-		if type(n) == "table" and Same(n.to, ns.me) then
-			Add(Row("L", e.key, Full(n.writer) or n.writer, n.t, guild, n.text, Full(n.via) or n.via, n.rev, n.item, Full(n.to)))
-		end
-	end
+	-- Being named by a private loot note is not permission to export its author's book.
+	-- Such records travel only over CarryHistory's separately consented staff route.
 	for _, e in ipairs(ns.Court and ns.Court.Messages and ns.Court.Messages() or {}) do
 		if Same(e.to, ns.me) then
 			-- Court's retained id preserves the original server time; Chronicle's st is when
@@ -127,7 +123,7 @@ function Carry.Decode(body, count)
 		local f = Fields(text, "~")
 		if #f ~= 10 then return nil end
 		for i = 1, 10 do f[i] = Unescape(f[i]); if f[i] == nil or f[i]:find("[|%c]") then return nil end end
-		if not ({ L = true, C = true, P = true, D = true })[f[1]] or #f[2] > 160 or #f[3] > 64 or #f[5] > 72
+		if not ({ C = true, P = true, D = true })[f[1]] or #f[2] > 160 or #f[3] > 64 or #f[5] > 72
 			or #f[6] > 160 or #f[7] > 64 or #f[8] > 32 or #f[9] > 32 or #f[10] > 64 or not Number(tonumber(f[4])) then return nil end
 		rows[#rows + 1] = Row(f[1], f[2], f[3], tonumber(f[4]), f[5], f[6], f[7], f[8], f[9], f[10])
 		if #rows > Carry.ROWS then return nil end
@@ -142,6 +138,8 @@ local function Ready(d)
 	return Source(d) and GetGuildInfo("player") == d.guild and Member(ns.me) and Master(d.to, d.guild)
 end
 function Carry.Prepare(to)
+	local H = ns.CarryHistory
+	if H and H.Prepare and (#H.Archive() > 0 or #Carry.Gather() == 0) then return H.Prepare(to) end
 	local source, guild = GetGuildInfo("player"), Destination(to)
 	if not Fresh() or not guild or not Guild(source) or guild == source then return false, "destination" end
 	local rows = Carry.Gather()
@@ -153,6 +151,7 @@ function Carry.Prepare(to)
 	return true
 end
 function Carry.Confirm(d)
+	if type(d) == "table" and d.version == 2 then return ns.CarryHistory and ns.CarryHistory.Confirm(d) end
 	local s = Store()
 	if not s or not Source(d) or GetGuildInfo("player") ~= d.sourceGuild or not Fresh() or Destination(d.to) ~= d.guild
 		or not Carry.Decode(d.body, #d.rows) or Digest(d.body) ~= d.digest then return false end
@@ -163,6 +162,7 @@ function Carry.Confirm(d)
 	Changed(); return true
 end
 function Carry.Offer()
+	if ns.CarryHistory and ns.CarryHistory.HasDraft and ns.CarryHistory.HasDraft() then return ns.CarryHistory.Offer() end
 	local s = Store(); local d = s and s.draft
 	if not Ready(d) then return false, "join-destination-first" end
 	d.offeredAt = Clock()
@@ -179,6 +179,7 @@ local function Current(o)
 end
 local function Key(subject, id) return ns.Fold(subject) .. ":" .. id end
 function Carry.Accept(key, confirmed)
+	if ns.CarryHistory and ns.CarryHistory.HasOffer and ns.CarryHistory.HasOffer(key) then return ns.CarryHistory.Accept(key, confirmed) end
 	local o = offers[key]
 	if not Current(o) then return false end
 	if not confirmed then
@@ -192,6 +193,7 @@ function Carry.Accept(key, confirmed)
 		{ owner = Carry, guard = function() return offers[key] == o and o.accepted and Current(o) end }) == true
 end
 function Carry.Revoke()
+	if ns.CarryHistory and ns.CarryHistory.HasDraft and ns.CarryHistory.HasDraft() then return ns.CarryHistory.Revoke() end
 	local s = Store(); local d = s and s.draft
 	if not d or not Same(d.subject, ns.me) or d.scope ~= Scope() then return false end
 	d.revoked = true
@@ -201,6 +203,9 @@ function Carry.Revoke()
 	Changed(); return true
 end
 function Carry.Handle(dist, sender, text)
+	if type(text) == "string" and text:sub(1, 5) == "XC~2~" then
+		return ns.CarryHistory and ns.CarryHistory.Handle(dist, sender, text) or false
+	end
 	if dist ~= "WHISPER" or not Full(sender) or type(text) ~= "string" or #text > 255 then return false end
 	sender = Full(sender)
 	local f = Fields(text, "~")
@@ -285,6 +290,9 @@ end
 local function When(at) return type(at) == "number" and at > 0 and date("%Y-%m-%d %H:%M", at) or L.CARRY_UNKNOWN end
 function Carry.Lines()
 	local lines = { { header = true, text = L.CARRY_TITLE }, { text = L.CARRY_NOTE, gapAfter = true }, { text = L.CARRY_PREPARE, gapAfter = true } }
+	if ns.CarryHistory and ns.CarryHistory.Lines then
+		for _, line in ipairs(ns.CarryHistory.Lines()) do lines[#lines + 1] = line end
+	end
 	local s = Store(); local d = s and s.draft
 	if Source(d) then
 		lines[#lines + 1] = { text = L.CARRY_READY:format(d.sourceGuild, d.guild, ns.DisplayName(d.to), #d.rows) }
@@ -318,7 +326,13 @@ end
 function Carry.Slash(rest)
 	local cmd, tail = (rest or ""):match("^(%S*)%s*(.-)$")
 	local ok, why
-	if cmd == "prepare" then ok, why = Carry.Prepare(tail)
+	if cmd == "history" then
+		local action, name = tail:match("^(%S*)%s*(.-)$")
+		if action == "collect" then ok, why = ns.CarryHistory and ns.CarryHistory.Collect(name)
+		elseif action == "key" then ok, why = ns.CarryHistory and ns.CarryHistory.RequestKey(name)
+		elseif action == "staff" then ok, why = ns.CarryHistory and ns.CarryHistory.StaffConsent(name)
+		else if ns.Views then ns.Views.ShowPage("carry") end; return end
+	elseif cmd == "prepare" then ok, why = Carry.Prepare(tail)
 	elseif cmd == "offer" then ok, why = Carry.Offer()
 	elseif cmd == "cancel" then ok = Carry.Revoke()
 	else if ns.Views then ns.Views.ShowPage("carry") end; return end

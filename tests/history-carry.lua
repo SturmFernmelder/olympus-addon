@@ -98,12 +98,13 @@ local function Data(m, g, acceptance)
 	return pieces
 end
 
-test("carry: gathers only own real Loot/Court records and preserves original author, relay and server time", function()
+test("carry: member export excludes private Loot even when named as recipient and preserves own Court server time", function()
 	local m, g = Setup(); local rows = m.ns.Carry.Gather()
-	eq(#rows, 2); eq(rows[1].by, "Writer-Realm"); eq(rows[1].via, "Relay-Realm"); eq(rows[1].at, m.now - 100)
-	eq(rows[2].kind, "C"); eq(rows[2].at, m.now - 80); eq(tonumber(rows[2].a), m.now)
+	eq(#rows, 1, "private Loot is not subject-readable/exportable material")
+	eq(rows[1].kind, "C"); eq(rows[1].at, m.now - 80); eq(tonumber(rows[1].a), m.now)
+	eq(rows[1].by, "King-Realm")
 	m.ns.rdb.pardons = { migrant = m.now - 20 }; m.pardoned = true
-	rows = m.ns.Carry.Gather(); eq(#rows, 3); eq(rows[3].kind, "P"); eq(rows[3].a, "", "no fabricated King's deadline")
+	rows = m.ns.Carry.Gather(); eq(#rows, 2); eq(rows[2].kind, "P"); eq(rows[2].a, "", "no fabricated King's deadline")
 	eq(#m.sent, 0); eq(m.ns.Carry.Prepare("Unknown-Realm"), false)
 	m.roles[base.Fold(g.name)].source = "census"; eq(m.ns.Carry.Prepare(g.name), false, "census rank is no authority")
 	m.roles[base.Fold(g.name)].source = "signed"; m.fresh = false; eq(m.ns.Carry.Prepare(g.name), false)
@@ -119,10 +120,10 @@ test("carry: two explicit consents, manual guild move, private real transport, a
 	local pieces = Data(m, g, Accept(g, key)); assert(#pieces > 0)
 	for _, msg in ipairs(pieces) do assert(#msg <= 255); g.receive(m.name, msg) end
 	local entries = g.ns.Carry.List(); eq(#entries, 1); eq(entries[1].entry.unverified, true)
-	eq(entries[1].entry.recipient, g.name); eq(#entries[1].entry.rows, 2)
+	eq(entries[1].entry.recipient, g.name); eq(#entries[1].entry.rows, 1)
 	local text = {}; for _, line in ipairs(g.ns.Carry.Lines()) do text[#text + 1] = line.text end
-	text = table.concat(text, "\n"); assert(text:find("Unverified quote", 1, true)); assert(text:find("Writer-Realm", 1, true))
-	assert(text:find("Relay-Realm", 1, true)); assert(text:find("Passed the gloves", 1, true))
+	text = table.concat(text, "\n"); assert(text:find("Unverified quote", 1, true)); assert(text:find("King-Realm", 1, true))
+	assert(text:find("Keep your word", 1, true)); assert(not text:find("Passed the gloves", 1, true), "member cannot expose the private Loot book")
 	eq(next(g.ns.Loot.Book().notes), nil); eq(#g.ns.Court.Messages(), 0); eq(g.ns.rdb.pardons, nil); eq(g.ns.rdb.dues, nil)
 	for _, msg in ipairs(m.sent) do eq(msg.dist, "WHISPER"); eq(msg.target, base.TellName(g.name)) end
 	for _, msg in ipairs(g.sent) do eq(msg.dist, "WHISPER"); eq(msg.target, base.TellName(m.name)) end
@@ -170,7 +171,12 @@ test("carry: revocation before completion and conflicting duplicate offer/fragme
 	eq(#g.ns.Carry.List(), 0); g.receive(m.name, offer); eq(g.ns.Carry.Accept(key), false)
 	local a, b = Setup(); local _, k, o = Offered(a, b)
 	b.receive(a.name, o:sub(1, -2) .. (o:sub(-1) == "0" and "1" or "0")); eq(b.ns.Carry.Accept(k), false)
-	local x, y = Setup(); local _, z = Offered(x, y); local p = Data(x, y, Accept(y, z))
+	local x, y = Setup()
+	-- Removing the private Loot row makes the fixture shorter than one packet. Keep this
+	-- assembler regression genuinely multipart with an allowed own Court quote instead.
+	local gather = x.ns.Carry.Gather
+	x.ns.Carry.Gather = function() local rows = gather(); rows[1].words = string.rep("x", 160); return rows end
+	local _, z = Offered(x, y); local p = Data(x, y, Accept(y, z)); assert(#p > 1)
 	y.receive(x.name, p[1]); y.receive(x.name, p[1]:sub(1, -2) .. "Z")
 	for _, msg in ipairs(p) do y.receive(x.name, msg) end
 	eq(#y.ns.Carry.List(), 0); eq(y.ns.Carry.Accept(z), false)
@@ -204,13 +210,12 @@ test("carry: expiry and explicit sender cancellation stop real queued transfer d
 	for _, msg in ipairs(a.sent) do assert(msg.text:sub(1, 7) ~= "XC~1~D~", "cancelled data never reaches native whisper") end
 end)
 
-test("carry: a forged other-character loot subject and a full import store never become visible quotes", function()
+test("carry: legacy private Loot rows and a full import store never become visible quotes", function()
 	local m, g = Setup()
-	local gather = m.ns.Carry.Gather
-	m.ns.Carry.Gather = function() local rows = gather(); rows[1].c = "Other-Realm"; return rows end
-	local d, key = Offered(m, g); local parts = Data(m, g, Accept(g, key))
-	for _, msg in ipairs(parts) do g.receive(m.name, msg) end
-	eq(#g.ns.Carry.List(), 0); eq(g.ns.rdb.historyCarry.floors[key], "subject")
+	local private = m.ns.Carry.Encode({ { kind = "L", id = "private", by = "Writer-Realm", at = m.now,
+		guild = m.guild, words = "Secret officer note", via = "", a = "1", b = "item", c = m.name } })
+	assert(private); eq(g.ns.Carry.Decode(private, 1), nil, "old XC1 Loot claims are refused even for the exact named member")
+	eq(#g.ns.Carry.List(), 0)
 	local a, b = Setup(); local _, k = Offered(a, b); local p = Data(a, b, Accept(b, k))
 	for i = 1, b.ns.Carry.IMPORTS do b.ns.rdb.historyCarry.imported["retained" .. i] = {} end
 	for _, msg in ipairs(p) do b.receive(a.name, msg) end
@@ -239,8 +244,8 @@ test("carry: optional payer receipt quotes remain own-character observations and
 				bookPin = 1, sequence = 10, week = week, copper = 1000, amount = 1000 },
 		}
 	end }
-	local rows = m.ns.Carry.Gather(); eq(#rows, 3); eq(rows[3].kind, "D"); eq(rows[3].by, "Pyralis-Realm")
-	eq(rows[3].at, m.now - 50); eq(rows[3].words, "pinned-treasurer-whisper"); eq(rows[3].a, "400")
+	local rows = m.ns.Carry.Gather(); eq(#rows, 2); eq(rows[2].kind, "D"); eq(rows[2].by, "Pyralis-Realm")
+	eq(rows[2].at, m.now - 50); eq(rows[2].words, "pinned-treasurer-whisper"); eq(rows[2].a, "400")
 	local _, key = Offered(m, g); local pieces = Data(m, g, Accept(g, key))
 	for _, msg in ipairs(pieces) do g.receive(m.name, msg) end
 	eq(#g.ns.Carry.List(), 1); eq(g.ns.rdb.dues, nil); eq(g.ns.rdb.payerReceipts, nil)
