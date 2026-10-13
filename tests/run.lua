@@ -55374,7 +55374,7 @@ test("watch: chat moderation: the Chat tab: a deleted line keeps its greyed name
 			"CHATWIN_WHY_ALONE", "CHATWIN_WHY_FAST", "CHATWIN_WHY_BUSY", "CHATWIN_WHY_QUEUE", "CHATWIN_WHY_CANCELLED",
 			"CHATWIN_WHY_REVOKED", "CHATWIN_WHY_ACCESS", "CHATWIN_WHY_OFF", "CHATWIN_WHY_NETOFF", "CHATWIN_WHY_TIMEOUT",
 			"CHATWIN_WHY_SEVERE", "CHATWIN_WHY_LOCKDOWN", "CHATWIN_WHY_GUILD", "CHATWIN_WHY_EMPTY", "CHATWIN_WHY_SIZE",
-			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING" }) do
+			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING", "CHATWIN_PART_SENT" }) do
 			assert(type(rawget(ns.L, k)) == "string" and rawget(ns.L, k) ~= "", "English: " .. k)
 			assert(type(rawget(pt.L, k)) == "string" and rawget(pt.L, k) ~= rawget(ns.L, k), "pt-BR: " .. k)
 			eq(Codes(rawget(pt.L, k)), Codes(rawget(ns.L, k)), "codes: " .. k)

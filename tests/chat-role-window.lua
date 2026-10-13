@@ -249,6 +249,8 @@ local function WithChurchRoom(w, fn)
 		function room.BubbleWith(f, text)
 			for _, b in ipairs(room.Shown(f.bubbles)) do if (b.body:GetText() or ""):find(text, 1, true) then return b end end
 		end
+		-- (The review: "Not sent:" alone, the start every such note shares, whatever its reason.)
+		room.NOT_SENT = assert(ns.L.CHATWIN_NOT_SENT:match("^(.-)%%s"))
 		fn(room, R)
 	end)
 	ns.ChatRooms, GetTime, GetGuildInfo = saved.rooms, saved.getTime, saved.guildInfo
@@ -279,7 +281,7 @@ test("Chat tab (1.2.4): a line written in the Church's room shows at once, marke
 			b = BubbleWith(f, "hello brothers")
 			assert(b, "still shown once sent")
 			eq(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), nil, "no longer marked once every whisper left")
-			eq(RowWith(f, L.CHATWIN_NOT_SENT:format("")), nil, "no note")
+			eq(RowWith(f, room.NOT_SENT), nil, "no note")
 
 			-- Enter again at once: too fast, told in the room, the words kept in the box.
 			f.input:SetText("again")
@@ -342,6 +344,89 @@ test("Chat tab (1.2.4): a role room's line none of whose whispers left goes from
 			assert(room.RowWith(f, L.CHATWIN_PUT_BACK), "its words can go back in the box")
 			note:Click()
 			eq(f.input:GetText(), "lost on the way")
+		end)
+	end)
+end)
+
+-- 1.2.4 (the review): a role room's line that reached some of the room but not all stays in the room
+-- as said, and its note says not everyone got it, and why; nothing to put back: sent again, it would
+-- reach twice those who had it. Before, it read "Not sent: ... Click to put it back in the box."
+test("Chat tab (1.2.4): a role room's line some of the room got stays, and its note says not everyone got it, with nothing to put back", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L, jobs = ns.L, room.jobs
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			f.input:SetText("two of three")
+			f.input:Fire("OnEnterPressed")
+			eq(#jobs, 3)
+			room.Finish(jobs[1]); room.Finish(jobs[2])
+			jobs[3].done(false, "dropped") -- (Comm: its queue made room for newer work)
+			w.CW.Render()
+			local b = room.BubbleWith(f, "two of three")
+			assert(b, "it reached two: shown as said")
+			eq(b.body:GetText():find(L.CHATWIN_SENDING, 1, true), nil, "settled")
+			assert(room.RowWith(f, L.CHATWIN_PART_SENT:format(L.CHATWIN_WHY_QUEUE)), "not everyone got it, and why")
+			eq(room.RowWith(f, room.NOT_SENT), nil, "not told as not sent")
+			eq(room.RowWith(f, L.CHATWIN_PUT_BACK), nil, "nothing to put back")
+			eq(f.input:GetText(), "", "the box stays empty")
+		end)
+	end)
+end)
+
+-- 1.2.4 (the review): a refusal's note lives as long as its words in the box: emptied (or only spaces
+-- left), the note goes; the words changed, it stays. (The game's SetText fires OnTextChanged too,
+-- userInput false; the test's box fires it by hand.)
+test("Chat tab (1.2.4): a room's refusal note goes once its words are cleared from the box, and stays while they are there", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room)
+			local L = ns.L
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("church"), true)
+			for i = #room.online, 1, -1 do room.online[i] = nil end
+			f.input:SetText("anyone?")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			local alone = L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_ALONE)
+			assert(room.RowWith(f, alone), "refused, said in the room")
+			f.input:SetText("anyone at all?"); f.input:Fire("OnTextChanged", true)
+			w.CW.Render()
+			assert(room.RowWith(f, alone), "the words still in the box: the note stays")
+			f.input:SetText(""); f.input:Fire("OnTextChanged", true)
+			w.CW.Render()
+			eq(room.RowWith(f, room.NOT_SENT), nil, "the box emptied: the note goes")
+
+			f.input:SetText("anyone?")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			assert(room.RowWith(f, alone), "refused again: said again")
+			f.input:SetText("   "); f.input:Fire("OnTextChanged", true)
+			w.CW.Render()
+			eq(room.RowWith(f, room.NOT_SENT), nil, "only spaces left (Enter sends nothing): the note goes")
+		end)
+	end)
+end)
+
+-- 1.2.4 (the review): a provider's room (a crafting deal's, a squad's) answers for its own refusals;
+-- the Chat page puts no "not sent" note of its own in it (ChatRooms.Own).
+test("Chat tab (1.2.4): a provider's room refusing a line gets no note from the page", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room, R)
+			local sent = 0
+			eq(R.RegisterProvider({
+				Info = function(id) if id == "craft:abc1" then return { id = id, kind = id, label = "Mooncloth", scope = "private" } end end,
+				CanAccess = function(id) return id == "craft:abc1" end,
+				History = function() return {} end,
+				Send = function() sent = sent + 1 return false, "closed" end,
+			}), true)
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("craft:abc1"), true)
+			f.input:SetText("a fellow-member price?")
+			f.input:Fire("OnEnterPressed")
+			w.CW.Render()
+			eq(sent, 1, "the provider was asked")
+			eq(f.input:GetText(), "a fellow-member price?", "refused: kept in the box")
+			eq(room.RowWith(f, room.NOT_SENT), nil, "no note from the page: the provider answers for itself")
 		end)
 	end)
 end)

@@ -659,10 +659,13 @@ end
 
 -- Returns true once the complete, fixed audience was admitted to the queue. 1.2.4 (the author: in
 -- the Church's room his line showed nowhere at Enter, nothing in the history and no reason): the
--- line shows in its sender's history at once, marked pending, until its whispers left; it settles
--- when one at least left, and goes when none did (the Chat page's note says why, and puts it back).
+-- line shows in its sender's history at once, marked pending. Once every one of its whispers has
+-- finished it settles: it stays (unmarked) if one at least left, and goes if none did; either way
+-- a whisper lost is told to the Chat page with the reason of the last one lost (CHAT_ROOM_SEND_FAILED:
+-- reached nobody, a note to put it back; reached some, a note that not everyone got it).
 -- A line refused here returns its reason, which the Chat page shows in the room (Rooms.Own: this
--- file's rooms); nobody else of the room reachable is "alone": nothing sent, nothing kept.
+-- file's rooms); nobody else of the room reachable is "alone": nothing sent, nothing kept; a
+-- whisper Comm refused at once (Refuse: it calls done before it returns) gives its own reason.
 -- Completion never reroutes a line: its audience is the one fixed at Enter.
 local function Send(id, text)
 	if Rooms.PreviewOnly(id) then return false, "preview" end
@@ -718,6 +721,8 @@ local function Send(id, text)
 
 	local guardKey = id .. "#" .. lineId
 	local pending, successes, failures = count, 0, 0
+	-- (admitting: Comm calls done at once for a whisper it refuses, Refuse or a full queue: nothing
+	-- settles, and no late note goes, before every whisper was handed over.)
 	local admitting, finished, echo, failedWhy = true, false, nil, nil
 	local function Settle()
 		finished = true
@@ -750,7 +755,7 @@ local function Send(id, text)
 		-- (Refused at Enter: the words stay in the box and the page says why, once: no late note.)
 		finished = true
 		if ns.Comm.CancelQueued then ns.Comm.CancelQueued(Rooms, guardKey, "cancelled") end
-		return false, "busy"
+		return false, failedWhy or "busy"
 	end
 	echo = Echo(id, lineId, guild, text, true)
 	if pending == 0 then Settle() end

@@ -542,11 +542,13 @@ test("chat rooms (1.2.4): a line none of whose whispers left goes from the sende
 		w.clearJobs(); w.events = {}; w.advance(2)
 		for i = 1, 3 do audience[("brother " .. string.char(96 + i) .. "-realm")] = true end
 		assert(R.Send("church", "two of three"))
-		w.finish(w.jobs[1], true); w.finish(w.jobs[2], false, "failed"); w.finish(w.jobs[3], true)
+		-- (The review: the lost whisper's own reason, Comm's "dropped" (its queue made room), not the
+		-- last whisper to finish's: that one left, and "failed" alone could not tell the two apart.)
+		w.finish(w.jobs[1], true); w.finish(w.jobs[2], false, "dropped"); w.finish(w.jobs[3], true)
 		eq(#R.History("church"), 1, "reached two: shown")
 		eq(R.History("church")[1].pending, nil)
 		failed = Fired(w, "CHAT_ROOM_SEND_FAILED")
-		eq(#failed, 1); eq(failed[1][3], "failed"); eq(failed[1][5], 2)
+		eq(#failed, 1); eq(failed[1][3], "dropped", "the lost whisper's reason"); eq(failed[1][5], 2, "reached two")
 	end)
 end)
 
@@ -582,11 +584,41 @@ test("chat rooms (1.2.4): a refusal returns its reason before any whisper, and a
 		w.clearJobs(); w.events = {}; w.advance(2)
 		w.rejectAt = 2
 		ok, why = R.Send("church", "must be whole")
-		eq(ok, false); eq(why, "busy")
+		-- (The review: Comm's own reason for the whisper it refused at once, its queue full here, as
+		-- Comm's Enqueue says it; no longer "busy" for any refusal at all.)
+		eq(ok, false); eq(why, "full")
 		eq(#w.jobs, 0, "the admitted prefix cancelled")
 		eq(#R.History("church"), 2, "no line for a refused send")
 		eq(#Fired(w, "CHAT_ROOM_SEND_FAILED"), 0, "refused at Enter: the page says it there, once, and the words stay in the box")
 		eq(R.Own("church"), true); eq(R.Own("guild"), true); eq(R.Own("council"), true); eq(R.Own("dept:war"), true)
 		eq(R.Own("no such room"), false)
+	end)
+end)
+
+-- 1.2.4 (the review): Comm refuses a whisper at once by calling its done before it returns (Refuse:
+-- "left", "held", "guard"; a full queue). The room's only member online refused so: the line is
+-- refused with that reason, nothing kept, and no late "not sent" note on top of the page's own (the
+-- send settles only once every whisper was handed over). A provider's room is not this file's own.
+test("chat rooms (1.2.4): a whisper refused at once, the room's only one, gives Comm's reason and leaves no line and no late note; a provider's room is not this file's", function()
+	WithRooms(function(w, R, c)
+		ChurchLike(w, R, c, 1)
+		w.rejectAt = 1
+		local ok, why = R.Send("church", "only one to hear")
+		eq(ok, false); eq(why, "full", "Comm's reason")
+		eq(#w.jobs, 0); eq(#R.History("church"), 0, "nothing kept as if said")
+		eq(#Fired(w, "CHAT_ROOM_SEND_FAILED"), 0, "refused at Enter: no late note on top of the page's")
+		w.clearJobs()
+		ok, why = R.Send("church", "only one to hear")
+		eq(ok, true, "a refused line does not count against the send gap"); eq(why, "ok")
+		eq(#w.jobs, 1); eq(#R.History("church"), 1)
+
+		eq(R.RegisterProvider({
+			Info = function(id) if id == "craft:abc1" then return { id = id, kind = id, label = "Mooncloth", scope = "private" } end end,
+			CanAccess = function(id) return id == "craft:abc1" end,
+			History = function() return {} end,
+			Send = function() return false, "closed" end,
+		}), true)
+		eq(R.Own("craft:abc1"), false, "a provider's room answers for itself")
+		eq(R.Own("church"), true, "the Church's room is this file's")
 	end)
 end)
