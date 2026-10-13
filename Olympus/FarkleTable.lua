@@ -4663,19 +4663,29 @@ ns.On("LOGIN", function() ns.SafeCall("farkle load", FT.Load) end)
 
 -- (1.2.4) This character's own halves of the games that count, for /oly backup (Backup.lua): [key]
 -- = { t, mode, mine }, his own signed half alone (the other's comes back from its player: HV.AskHalves),
--- HALVES_DAYS at most; nil when none.
+-- of this month and the last (the games his client says again and asks for), the newest
+-- OWN_BACKUP_MAX (the review: a text past Backup.MAX is refused whole at the restore, and his games
+-- of 62 days had no bound); nil when none.
+FT.OWN_BACKUP_MAX = 400
 function FT.OwnBackup()
 	local b = RankStore(false)
 	if not b then return nil end
-	local out, cut, me = {}, Now() - FT.HALVES_DAYS * 86400, Low(Me())
+	local list, cut, me, month = {}, Now() - FT.HALVES_DAYS * 86400, Low(Me()), MonthOf(Now())
 	for key, o in pairs(b.own) do
 		local f = type(o) == "table" and type(o.mine) == "string" and Split(o.mine) or nil
 		local seat = f and tonumber(f[16] or "")
 		local mine = f and (seat == 1 and f[2] or (seat == 2 and f[3])) or nil
-		if mine and Low(mine) == me and (tonumber(o.t) or 0) >= cut then
-			out[key] = { t = tonumber(o.t) or 0, mode = o.mode == "L" and "L" or "T", mine = o.mine }
+		local t = tonumber(type(o) == "table" and o.t) or 0
+		if mine and Low(mine) == me and t >= cut and MonthOf(t) >= month - 1 then
+			list[#list + 1] = { key = key, t = t, x = { t = t, mode = o.mode == "L" and "L" or "T", mine = o.mine } }
 		end
 	end
+	table.sort(list, function(x, y)
+		if x.t ~= y.t then return x.t > y.t end
+		return x.key > y.key
+	end)
+	local out = {}
+	for i = 1, math.min(#list, FT.OWN_BACKUP_MAX) do out[list[i].key] = list[i].x end
 	return next(out) and out or nil
 end
 -- (1.2.4) Those taken back after a wiped saved data (Backup.ApplyArena): each this player's own

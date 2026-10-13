@@ -1146,17 +1146,25 @@ local function OnHalf(dist, sender, mode, body)
 end
 ns.Comm.Handle("AX", ns.Arena.Handle("AX", OnHalf))
 -- (1.2.4) This fighter's own halves of the duels he confirmed (his fights' f.half), for /oly backup
--- (Backup.lua): [fid] = body, HALF_KEEP at most; nil when none.
+-- (Backup.lua): [fid] = body, HALF_KEEP at most, the newest OWN_BACKUP_MAX (the review: a text past
+-- Backup.MAX is refused whole at the restore); nil when none.
+LG.OWN_BACKUP_MAX = 200
 function LG.OwnBackup()
 	local Fi = F()
 	if type(Fi) ~= "table" or type(Fi.All) ~= "function" then return nil end
-	local out, now = {}, Now()
+	local list, now = {}, Now()
 	for _, f in ipairs(Fi.All("fights")) do
 		if type(f) == "table" and type(f.half) == "string" and f.mode == "L" and Fi.SideOf(f, ns.me) then
 			local h = LG.ReadHalf(f.half)
-			if h and Me(h.signer) and now - h.t <= LG.HALF_KEEP then out[h.fid] = f.half end
+			if h and Me(h.signer) and now - h.t <= LG.HALF_KEEP then list[#list + 1] = { fid = h.fid, t = h.t, body = f.half } end
 		end
 	end
+	table.sort(list, function(x, y)
+		if x.t ~= y.t then return x.t > y.t end
+		return x.fid > y.fid
+	end)
+	local out = {}
+	for i = 1, math.min(#list, LG.OWN_BACKUP_MAX) do out[list[i].fid] = list[i].body end
 	return next(out) and out or nil
 end
 -- (1.2.4) Those taken back after a wiped saved data (Backup.ApplyArena): each this fighter's own,

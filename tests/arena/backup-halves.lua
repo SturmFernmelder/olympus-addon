@@ -115,3 +115,101 @@ test("1.2.4 backup: a fighter's own duel halves: in /oly backup; restored after 
 	eq(#list, 1, "matched again"); eq(list[1] and list[1].fid, oid)
 	W3.NoErrors(w)
 end)
+
+-- (The review) A backup past Backup.MAX is refused whole at the restore (the treasury's books, the
+-- settings, the blocked list with it), and a player's own halves had no bound: every game of 62
+-- days. The part carries the ones his client says again and asks for, this month's and last
+-- month's Bones games, the newest FarkleTable.OWN_BACKUP_MAX, and the newest ArenaLedger.OWN_BACKUP_MAX
+-- duel halves.
+test("1.2.4 backup: the halves part is bounded: this month's and last month's own Bones halves, the newest", function()
+	local w = FW.New({ compliance = "shipped", clock = 1795176000 }) -- (2026-11-20 12:00 UTC)
+	local a, b = w:Player(N.fighterA), w:Player(N.fighterB)
+	w:Group({ a, b })
+	local function Do(c, fn, ...) return w:As(c, c.ns.FarkleTable[fn], ...) end
+	local id = assert(Do(a, "Create", { guest = b.name, target = 2000 }))
+	w:Run(0)
+	assert(Do(b, "Answer", id, true, nil, {}))
+	w:Run(0)
+	w:QueueRoll(a.name, 90); w:QueueRoll(b.name, 10)
+	Do(a, "Roll", id); Do(b, "Roll", id)
+	w:Run(20)
+	assert(Do(a, "Concede", id))
+	w:Run(0)
+	local FT = a.ns.FarkleTable
+	local MAX = FT.OWN_BACKUP_MAX or 400
+	local own = a.rdb.bonesRank[a.faction].own
+	local real = own[id .. ":" .. (a.name .. ":" .. b.name):lower()]
+	assert(real and real.mine, "his own half")
+	-- (his games of the last weeks, as his client kept them: the same half under other ids)
+	local tail = real.mine:sub(#id + 1)
+	local now = w.clock
+	local month = w:As(a, a.ns.Honors.MonthOf, now)
+	local n = MAX + 50
+	for i = 1, n do
+		local gid = ("K%05d"):format(i)
+		own[gid .. ":" .. (a.name .. ":" .. b.name):lower()] = { t = now - i * 3000, mode = "T", n = 8, mine = gid .. tail }
+	end
+	-- and older ones, two months back (within the 62 days kept)
+	local old = 1790337600 -- (2026-09-25 12:00 UTC)
+	eq(w:As(a, a.ns.Honors.MonthOf, old), month - 2)
+	for i = 1, 20 do
+		local gid = ("Kold%02d"):format(i)
+		own[gid .. ":" .. (a.name .. ":" .. b.name):lower()] = { t = old + i * 60, mode = "T", n = 8, mine = gid .. tail }
+	end
+	local B = LoadBackup(w, a)
+	local bones = w:As(a, B.Data).arena.halves.bones
+	local count, newest, months = 0, 0, true
+	for key, x in pairs(bones) do
+		count = count + 1
+		if key:find("^Kold") then months = false end
+		if key:find("^K00001:") then newest = newest + 1 end
+		if w:As(a, a.ns.Honors.MonthOf, x.t) < month - 1 then months = false end
+	end
+	eq(count, MAX, "the newest, at most")
+	eq(newest, 1, "the newest game in it")
+	eq(months, true, "this month's and last month's alone")
+	local text = w:As(a, B.Export)
+	assert(#text < a.ns.Backup.MAX, "the text stays restorable: " .. #text)
+	NoErrors(w)
+end)
+
+test("1.2.4 backup: the halves part is bounded: the newest duel halves", function()
+	local w, cast = W3.New({ live = false, world = { compliance = "shipped" } })
+	cast.A.target, cast.B.target = cast.B.name, cast.A.name
+	for _, c in ipairs({ cast.A, cast.B }) do c.globals.UnitRace = function() return "Human", "Human", 1 end end
+	local F = function(c) return W3.M(w, c, "ArenaFights") end
+	local oid = assert(F(cast.A).Challenge(cast.B.name, { bo = 1 }))
+	w:Run(0)
+	assert(F(cast.B).Answer(oid, true))
+	w:Run(0)
+	w:Combat(cast.A, true); w:Combat(cast.B, true)
+	w:Run(20)
+	W3.Duel(w, { cast.A, cast.B }, cast.A, cast.B)
+	w:Fire(cast.A, "DUEL_FINISHED"); w:Fire(cast.B, "DUEL_FINISHED")
+	w:Run(0)
+	w:Combat(cast.A, false); w:Combat(cast.B, false)
+	w:Run(0)
+	local A = cast.A
+	local LG = A.ns.ArenaLedger
+	local MAX = LG.OWN_BACKUP_MAX or 200
+	local fights = A.ns.Arena.Store("L").fights
+	local f = fights[oid]
+	assert(f and f.half, "his fight and his own half")
+	-- (his duels of the last weeks, as his client kept them: the same half under other ids)
+	local tail = f.half:sub(#oid + 1)
+	for i = 1, MAX + 30 do
+		local fid = ("F%05d"):format(i)
+		local copy = {}
+		for k, v in pairs(f) do copy[k] = v end
+		copy.id, copy.half = fid, fid .. tail
+		fights[fid] = copy
+	end
+	local B = LoadBackup(w, A)
+	local duels = w:As(A, B.Data).arena.halves.duels
+	local count = 0
+	for _ in pairs(duels) do count = count + 1 end
+	eq(count, MAX, "the newest, at most")
+	local text = w:As(A, B.Export)
+	assert(#text < A.ns.Backup.MAX, "the text stays restorable: " .. #text)
+	W3.NoErrors(w)
+end)
