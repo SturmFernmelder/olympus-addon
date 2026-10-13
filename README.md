@@ -1610,12 +1610,13 @@ master (or the Head, the King or the author), who keeps that guild full and answ
   until 30 days after it last proved him, at once when it shows another master or another rank for him,
   or when he takes it back. From 1.2.1 to 1.2.3 only his own guild's addons took it (another guild's
   master needed the signed leadership, which no release enforces): the author's, the King's and every
-  other guild's Church page said "none". A correspondent named in the **Guild** tab's department line
-  is not a Church appointment: the guild master names his Church correspondent on the Church's
-  **Name** page.
+  other guild's Church page said "none". The keepers outside his guild dropped such a naming, so it
+  may not come back by itself: once updated, the guild master names him again (the same person is fine).
+  A correspondent named in the **Guild** tab's department line is not a Church appointment: the guild
+  master names his Church correspondent on the Church's **Name** page.
 - **One click to name.** On the **Church** tab's **Name** page, or with a right-click on a player
-  (**Name as missionary**), an Apostle or a missionary names a missionary of his network: at most 10
-  under one person, 5 levels below the Apostle, 300 in all. Whoever named someone, anyone above him,
+  (**Name as missionary**), an Apostle or a missionary names a missionary of his network: at most 12
+  under one person, 5 levels below the Apostle, 5,000 in all (1.2.4). Whoever named someone, anyone above him,
   the Head, the King and the author may remove him; the people he named keep their places, marked
   for the Head's review.
 - **Counting is automatic.** The Church's addons read their own guild's log: an invite by a Church
@@ -2064,7 +2065,7 @@ message (the game adds it). What goes where:
 | The shared block terms (1.1): each word, whether it was added or removed, and when; for 15 minutes after an edit, the editor's own client adds his name to it (never to anyone else's) | everyone on the Olympus channel | only from the client of the King, his Steward, a Hand or a High Councillor: at once when they edit it, and every 10 minutes while they play (not when another client just sent the same list). Your own filter is never sent |
 | Your position as a dot on the map | your guild | only with `/oly share` (off by default) |
 | A Lord's mentor pair (1.1): the recruit's name to the Captain, the Captain's name to the recruit, as whispers in his words | those two players | only when the Lord clicks **Send both** |
-| A guild master's centurions and correspondents (1.1.5): their names, and each correspondent's department | everyone on the Olympus channel; since 1.2.4 each addon that takes it saves it (its guild, his name, the names and departments, when it last heard it), 64 guilds at most, until 30 days after it last heard him or he is no longer guild master | only from that guild master's client: a few seconds after he names someone or takes a title back, and every 5 minutes while he plays |
+| A guild master's centurions and correspondents (1.1.5): their names, and each correspondent's department | everyone on the Olympus channel; since 1.2.4 each addon that takes it saves it (its guild, his name, the names and departments, when it last heard it), 300 guilds at most and always your own guild's, until 30 days after it last heard him or he is no longer guild master | only from that guild master's client: a few seconds after he names someone or takes a title back, and every 5 minutes while he plays |
 | The centurions of the King's guild (1.1.5): their names | everyone on the Olympus channel | only from the King's or a High Councillor's client: a few seconds after one of them names someone or takes a title back, and every 5 minutes from one of them while they play |
 | Join Olympus (1.1, outside an Olympus guild): "which guild should I ask?" (J1), and your request (J3: the guild you ask, your level and class) | the one member the screen asks: one found with `/who` at a search, and the one you are about to whisper | J1 at a search (one member every 15 seconds at most, none while a recent answer is known; while only one answer names the gates, one more member at once, three in 10 minutes at most) and just before a whisper (again if that member never answered); J3 with each whisper you send |
 | The answer (J2): whether you take recruit whispers, the King's gates, and up to 8 guilds with room the census confirms, each with its free slots and up to 2 of its Lords and Captains online that two reports name (never the King) | the recruit who asked, alone | when a recruit's addon asks you, once a minute per recruit and 10 a minute at most (with do not contact on, a bare "no" to the rest) |
@@ -2419,9 +2420,13 @@ code.
   (above) can name that guild's Church correspondent: every client shows him in the Church with its
   room, its People page and his recruits' reports, kept 30 days after their reports stop unless a
   census proves another master. His word as a witness has the census's smaller budget, and a
-  recruit still needs a witness this keeper verifies. Before 1.2.4 nothing but the author's signed
-  leadership named another guild's master in the Church (no release enforces it): then nobody's
-  correspondent showed outside his own guild.
+  recruit still needs a witness this keeper verifies. The three outsiders who take a real guild
+  (above) can name its correspondent in place of its master's, or take him back, on every client
+  outside it; the master's naming does not come back when they stop, until he names again. Each
+  book keeps 128 correspondents: past that, made-up guilds' namings push out other guilds' masters'
+  (the one confirmed longest ago first), never one the Head, the King or the author named, nor your
+  own guild's. Before 1.2.4 nothing but the author's signed leadership named another guild's master
+  in the Church (no release enforces it): then nobody's correspondent showed outside his own guild.
 - **Numbers.** A guild's size and online count are not part of the picture. One outsider who
   copies a guild's leader and officers with other numbers shows his numbers on every screen
   until its reporter's next report (800 members as 1, the King offline). Each made-up guild

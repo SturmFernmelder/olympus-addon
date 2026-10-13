@@ -69,14 +69,14 @@ test("Church discoverability: missionaries are the third visible group with exis
 	local state = w:As(c.a1, c.a1.Church.State)
 	for _, line in ipairs(lines) do if line.key and state.apostle[line.key] then signed[#signed + 1] = line.key end end
 	eq(table.concat(signed, ","), table.concat(state.order, ","), "original signed ordering unchanged")
-	local name = Find(lines, L.CHURCH_NAME_MISSIONARY:format(9, 10))
+	local name = Find(lines, L.CHURCH_NAME_MISSIONARY:format(11, 12))
 	assert(name and name.onClick, "existing authorized naming duty surfaced beside group")
 	name.onClick(); local dialog = c.a1.dialogs[#c.a1.dialogs]
 	eq(dialog.which, "OLYMPUS_CHURCH_NAME"); eq(dialog.data.kind, "missionary")
 	eq(w:Act(c.a1, c.a1.View.Submit, dialog.data, "Fresh Face"), true)
 	eq(w:As(c.member, c.member.Church.Role, "Fresh Face-Realm"), "M")
 	lines = Build(w, c.member, "people")
-	eq(Find(lines, L.CHURCH_NAME_MISSIONARY:format(8, 10)), nil, "ordinary member gets no appointment action")
+	eq(Find(lines, L.CHURCH_NAME_MISSIONARY:format(10, 12)), nil, "ordinary member gets no appointment action")
 end)
 
 test("Church publication authority UI: actual King/council switches, no preview action", function()
@@ -230,7 +230,7 @@ test("1.1.6 Church: Mine, People, Name and Review: each one's numbers, the tree 
 	eq(Find(people, L.CHURCH_ACT_REMOVE:format("Aldric Vane")), nil, "a missionary removes no Apostle")
 	-- Name: the quotas; the root's guild list; a guild master's own line.
 	local name = Build(w, c.a1, "name")
-	assert(Find(name, L.CHURCH_NAME_MISSIONARY:format(9, 10)), Texts(name))
+	assert(Find(name, L.CHURCH_NAME_MISSIONARY:format(11, 12)), Texts(name))
 	name = Build(w, c.author, "name")
 	assert(Find(name, L.CHURCH_NAME_APOSTLE:format(9, 12)), Texts(name)) -- (two and the Head)
 	assert(Find(name, World.GUILD2), "every Olympus guild, each with its correspondent")

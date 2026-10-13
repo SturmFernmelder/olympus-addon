@@ -26865,6 +26865,47 @@ do
 		end)
 	end)
 
+	-- (1.2.4, the review.) Fails before: a list now lasts 30 days, and one from the same master of an older
+	-- revision was refused that long, so a master back on another computer, its saved copy of his list
+	-- older, was ignored everywhere until he changed it (6 hours before 1.2.4). And the saved lists kept
+	-- the 64 heard last, our own guild's among those let go: after a /reload, with more guilds heard since,
+	-- its members had no centurion, correspondent or department until he repeated it.
+	test("1.2.4 nominees: an older revision from the same master is his word again once the list held went 6 hours unheard; the saved lists keep as many guilds as the census, our own guild's always", function()
+		WithNominees(function(w)
+			w.as("Ada-Realm", 3)
+			N.Handle("CHANNEL", MASTER, Msg(OURS, w.clock, "c=Ada;c=Bea"))
+			local newer = w.clock
+			-- While he plays, a late part of an older revision: refused.
+			w.clock = w.clock + 60
+			N.Handle("CHANNEL", MASTER, Msg(OURS, newer - 600, "c=Cid"))
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion")
+			eq(N.RoleOf("Cid-Realm", OURS), nil, "an older one, late: refused")
+			-- Back the next day from another computer, whose copy of his list is older: his word now.
+			w.clock = newer + N.REV_QUIET + 1
+			N.Handle("CHANNEL", MASTER, Msg(OURS, newer - 600, "c=Cid"))
+			eq(N.RoleOf("Cid-Realm", OURS), "centurion", "the list his client sends now")
+			eq(N.RoleOf("Bea-Realm", OURS), nil)
+			eq(N.ListOf(OURS).rev, newer - 600)
+			-- As many lists heard after ours as the saved lists keep, each from a guild its census proves:
+			-- ours, heard longest ago, stays; the oldest of the others goes.
+			eq(N.SAVED_MAX >= ns.Data.MAX_GUILDS, true, "as many guilds as the census keeps")
+			for i = 1, N.SAVED_MAX do
+				local g = "Olympus H" .. i
+				ns.rdb.guilds[g] = Vouched({ guild = g, leader = "Boss" .. i, officers = {}, realm = "Realm", t = w.clock }, "W1-Realm", "W2-Realm")
+				w.clock = w.clock + 1
+				N.Handle("CHANNEL", "Boss" .. i .. "-Realm", Msg(g, w.clock, "c=Ada"))
+			end
+			local n = 0
+			for _ in pairs(ns.rdb.nomineesHeard) do n = n + 1 end
+			eq(n, N.SAVED_MAX)
+			assert(ns.rdb.nomineesHeard[OURS:lower()], "our own guild's kept")
+			eq(ns.rdb.nomineesHeard["olympus h1"], nil, "the oldest of the others let go")
+			assert(ns.rdb.nomineesHeard["olympus h2"] and ns.rdb.nomineesHeard["olympus h" .. N.SAVED_MAX], "the rest kept")
+			N.Reset(true)
+			eq(N.RoleOf("Cid-Realm", OURS), "centurion", "after a /reload")
+		end)
+	end)
+
 	test("1.1.5 nominees: clients before 1.1.5 leave NM unread (no handler: nothing counted bad, nothing logged); NM is Nominees.lua's alone", function()
 		local ci = C_ChatInfo
 		local ok, err = pcall(function()

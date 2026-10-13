@@ -68,7 +68,8 @@ Nominees.MAX_DEPTS = 6
 Nominees.MAX = Nominees.MAX_CENTURIONS + Nominees.MAX_DEPTS
 Nominees.EVERY = 300          -- his client repeats the list for late logins
 Nominees.FRESH = 30 * 86400   -- a list he stopped repeating (he logged off) counts this long after (1.2.4; 6 hours before)
-Nominees.SAVED_MAX = 64       -- (1.2.4) the lists heard the saved variables keep, the newest heard
+Nominees.SAVED_MAX = 300      -- (1.2.4) the lists heard the saved variables keep (the census's guilds, Data.MAX_GUILDS), the newest heard; our own guild's always
+Nominees.REV_QUIET = 6 * 60 * 60 -- (1.2.4) a master's list of an older revision is his word again once the one held went this long unheard
 Nominees.SEND_AFTER = 3       -- several changes in a row go out as one list
 Nominees.PART = 250           -- bytes in one part (one addon message)
 Nominees.MAX_PARTS = Nominees.MAX
@@ -716,7 +717,10 @@ local function Take(sender, guild, rev, entries, set)
 	local key = guild:lower()
 	local old = Lists()[key]
 	if old and ns.Now() - old.at > Nominees.FRESH then old = nil end -- (gone quiet: as if none)
-	if old and old.by == sender and rev < (old.rev or 0) then return end -- (an older one, late)
+	-- (An older one, late. 1.2.4, the review: only while the one held is still being repeated, as when it
+	-- lasted 6 hours: a master on another computer, its saved copy of his list older, is his word again,
+	-- not refused for the 30 days a list is now kept.)
+	if old and old.by == sender and rev < (old.rev or 0) and ns.Now() - old.at <= Nominees.REV_QUIET then return end
 	local mine = GetGuildInfo("player")
 	local was = old and old.set[tostring(ns.me):lower()]
 	local l = { guild = guild, by = sender, rev = rev, at = ns.Now(), entries = entries, set = set }
@@ -811,7 +815,8 @@ ns.Comm.Handle("NM", function(...) Nominees.Handle(...) end)
 
 -- (1.2.4) A list heard, as the saved variables keep it (ns.rdb.nomineesHeard, by guild in lower case:
 -- { g = guild, by = its master, rev, at = when last heard, main, body = its entries as a part carries
--- them, each name with its realm }), or none (l nil). SAVED_MAX at most: the one heard longest ago goes.
+-- them, each name with its realm }), or none (l nil). SAVED_MAX at most: the one heard longest ago goes,
+-- never our own guild's.
 function Nominees.Keep(key, l)
 	local r = ns.rdb
 	if type(r) ~= "table" or type(key) ~= "string" then return end
@@ -828,11 +833,14 @@ function Nominees.Keep(key, l)
 	local new = store[key] == nil
 	store[key] = { g = l.guild, by = l.by, rev = l.rev, at = l.at, main = l.main and true or nil, body = table.concat(body, ";") }
 	if not new then return end
+	-- (The review: our own guild's list is never the one let go, for its members' Guild tab and bronze.)
+	local mine = GetGuildInfo("player")
+	mine = type(mine) == "string" and mine:lower() or nil
 	local n, oldest, oldAt = 0, nil, nil
 	for k, s in pairs(store) do
 		n = n + 1
 		local at = type(s) == "table" and tonumber(s.at) or -math.huge
-		if not oldAt or at < oldAt then oldest, oldAt = k, at end
+		if k ~= mine and (not oldAt or at < oldAt) then oldest, oldAt = k, at end
 	end
 	if n > Nominees.SAVED_MAX and oldest then store[oldest] = nil end
 end

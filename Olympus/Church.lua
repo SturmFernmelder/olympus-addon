@@ -79,10 +79,10 @@ ns.Church = Church
 
 Church.PROTOCOL = 1
 Church.APOSTLES_MAX = 12
-Church.MISSIONARIES_MAX = 300
-Church.NAMES_PER = 10          -- direct nominees of one parent (adopted ones not counted)
+Church.MISSIONARIES_MAX = 5000 -- (1.2.4) the author's limit for the whole Church
+Church.NAMES_PER = 12          -- direct nominees of one parent (adopted ones not counted)
 Church.DEPTH_MAX = 5           -- missionary levels below the Apostle
-Church.CORRESPONDENTS_MAX = 64
+Church.CORRESPONDENTS_MAX = 128 -- (1.2.4) as many guilds as the author's signed leadership names (Authority.MAX_GUILDS); 64 before (Church.Prune)
 Church.CORR_KEEP = 30 * 86400  -- (1.2.4) a guild master's correspondent, this long after this client last confirmed him its master
 Church.MASTER_MEMO = 30        -- (1.2.4) another guild's master, as its census or the signed list tells it, asked again after this long
 Church.TOMBS_MAX = 200
@@ -125,7 +125,7 @@ local actSeen = {}       -- sender|message -> t (an act heard on both lanes)
 local actRate = {}       -- sender key -> { minute = {t...}, day, dayN }
 local pending = {}       -- acts this client could not check yet
 local asked = {}         -- keeper key -> when we asked him for pages
-local answered = {}      -- asker key -> when we last answered him
+local answered = {}      -- asker key -> { at, next }: when answered, next entry of the differing pages
 local outgoing           -- the page entries on their way to one asker: { target, list, i }
 local lastPresence, lastAsk, loginAt, lastSwitch = -math.huge, -math.huge, nil, -math.huge
 local lastPrune = -math.huge
@@ -1239,11 +1239,14 @@ function Church.TakeEntry(sender, text)
 	if kind == "C" and not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true) then return Drop("issuer") end
 	-- (1.2.1: a correspondent's removal too, by whom the act could come from, Church.MayAct: a root, the
 	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.
-	-- 1.2.4: or the one who named the correspondent this book holds.)
+	-- 1.2.4: or the one who named the correspondent this book holds. Both only while that naming holds
+	-- here, as Church.MayAct asks of the same removal live: a keeper that could not tell took a deposed
+	-- master's late removal, and its time then refused the new master's earlier naming on every client.)
 	if kind == "Y" then
 		local held = (Book() or { c = {} }).c[slot]
+		local holds = held ~= nil and Church.State().corr[slot] == held
 		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true
-			or (held ~= nil and (Same(held.n, e.ac) or Same(held.ac, e.ac)))) then
+			or (holds and (Same(held.n, e.ac) or Same(held.ac, e.ac)))) then
 			return Drop("issuer")
 		end
 	end
@@ -1289,21 +1292,32 @@ function Church.AnswerAsk(sender, text)
 	if not Church.InAudience(sender) then return Drop("asker") end
 	local now = Now()
 	local k = Key(sender)
-	if answered[k] and now - answered[k] < Church.ANSWER_GAP then return Drop("gap") end
+	local previous = answered[k]
+	if previous and now - previous.at < Church.ANSWER_GAP then return Drop("gap") end
 	if not answered[k] then Capped(answered, Church.HEARD_MAX) end
 	if outgoing then return Drop("busy") end
 	local theirs = {}
 	for d in list:gmatch("[^,]+") do theirs[#theirs + 1] = d end
 	if #theirs ~= #PAGES then return Drop("shape") end
-	local mine, out = Church.Digests(), {}
+	local mine, entries, out = Church.Digests(), {}, {}
 	for i, page in ipairs(PAGES) do
 		if theirs[i] ~= mine[i] then
 			for _, line in ipairs(Church.PageLines(page)) do
-				if #out < Church.TRANSFER_MAX then out[#out + 1] = "NB~1~p~" .. line end
+				entries[#entries + 1] = line
 			end
 		end
 	end
-	answered[k] = now
+	-- (1.2.4) A page can contain more than one answer's budget. Always taking its first
+	-- TRANSFER_MAX entries left a late client stuck there forever. Rotate through the differing
+	-- pages, wrapping so a refused or lost send is offered again; the protocol and budget stay the
+	-- same. A completed page drops out of the next ask's list, so clamp the remembered position.
+	local nextEntry = previous and previous.next or 1
+	if nextEntry > #entries then nextEntry = 1 end
+	for _ = 1, math.min(Church.TRANSFER_MAX, #entries) do
+		out[#out + 1] = "NB~1~p~" .. entries[nextEntry]
+		nextEntry = nextEntry % #entries + 1
+	end
+	answered[k] = { at = now, next = nextEntry }
 	if #out == 0 then return true end
 	outgoing = { target = sender, list = out, i = 1 }
 	Pump()
@@ -1529,14 +1543,44 @@ function Church.Prune()
 	for slot, p in pairs(b.p) do places[#places + 1] = { slot = slot, at = p.at } end
 	local cap = Church.MISSIONARIES_MAX + Church.APOSTLES_MAX * 2
 	if #places > cap then
-		table.sort(places, function(a, c) return a.at > c.at end)
+		-- Keep every accepted place before invalid entries: newer surplus entries must never
+		-- displace an older Apostle or missionary, and taking a parent away would break its tree.
+		local S = Church.State()
+		for _, p in ipairs(places) do
+			p.valid = S.apostle[p.slot] ~= nil or (S.miss[p.slot] and S.miss[p.slot].valid) == true
+		end
+		table.sort(places, function(a, c)
+			if a.valid ~= c.valid then return a.valid end
+			if a.at ~= c.at then return a.at > c.at end
+			return a.slot < c.slot
+		end)
 		for i = cap + 1, #places do b.p[places[i].slot] = nil end
 	end
+	-- Correspondents past CORRESPONDENTS_MAX. (1.2.4, the review: since a guild master is known by his
+	-- census, two characters can name a made-up guild's correspondent, and the newest naming alone kept
+	-- them: 64 made-up guilds pushed the Crown's namings out of every book, the keepers' too, never to come
+	-- back.) Now the ones that no longer hold here go first (the oldest naming first), then those only
+	-- another guild's census stands behind (the one this client confirmed longest ago first, then the
+	-- oldest naming), and a root's, a roster's or the signed list's only after all of them (the oldest
+	-- naming first). The cap is the signed leadership's own, every guild it can name fitting; not the
+	-- census's 300, as Church.State checks each correspondent held (Church.CorrespondentHolds).
 	local corr = {}
-	for slot, c in pairs(b.c) do corr[#corr + 1] = { slot = slot, at = c.at } end
+	for slot in pairs(b.c) do corr[#corr + 1] = slot end
 	if #corr > Church.CORRESPONDENTS_MAX then
-		table.sort(corr, function(a, c) return a.at > c.at end)
-		for i = Church.CORRESPONDENTS_MAX + 1, #corr do b.c[corr[i].slot] = nil end
+		local enforced, tier, when = Church.Enforced(), {}, {}
+		for _, slot in ipairs(corr) do
+			local c = b.c[slot]
+			local holds, census = Church.CorrespondentHolds(c, now, enforced)
+			tier[slot] = not holds and 3 or (census and 2 or 1)
+			when[slot] = tier[slot] == 2 and (tonumber(c.ok) or c.at) or c.at
+		end
+		table.sort(corr, function(a, c)
+			if tier[a] ~= tier[c] then return tier[a] < tier[c] end
+			if when[a] ~= when[c] then return when[a] > when[c] end
+			if b.c[a].at ~= b.c[c].at then return b.c[a].at > b.c[c].at end
+			return a < c
+		end)
+		for i = Church.CORRESPONDENTS_MAX + 1, #corr do b.c[corr[i]] = nil end
 	end
 	Changed()
 end
