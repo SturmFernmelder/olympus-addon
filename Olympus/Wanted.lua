@@ -132,6 +132,8 @@ Wanted.SIGHT_TICK = 15           -- pins expire (and follow the interface style)
 Wanted.SIGHT_QUIET = 5           -- the server's "No player named" for a sighting whisper, kept out of chat this long
 Wanted.SIGHT_BADGE = 16          -- the world map's badge
 Wanted.SIGHT_MINI = 12           -- the minimap's
+Wanted.HISTORY_BADGE = 22        -- a dated zone-only marker, deliberately unlike a fresh nearby pin
+Wanted.HISTORY_TIP_MAX = 8       -- names on one zone marker before its summary line
 Wanted.REVIEWER_FIRST = 45       -- a reviewer says he takes sightings this long after login...
 Wanted.REVIEWER_EVERY = 5 * 60   -- ...then this often...
 Wanted.REVIEWER_FOR = 11 * 60    -- ...and is sent them for this long after the last time
@@ -177,7 +179,7 @@ local ScheduleGlobalRepeat
 -- the reviewers they reached (a No takes them back), the reviewers whose "No player named" it
 -- keeps out of chat for a moment, each sender's count and everyone's (a reviewer's intake), and
 -- the reviewers heard taking them.
-local pins, pinFrames, spareFrames = {}, {}, {}
+local pins, pinFrames, spareFrames, historyFocus = {}, {}, {}, nil
 local sightSeen, sightSeenOrder = {}, {}
 local ownSeen, ownSeenCount = {}, 0
 local sightSends = {}
@@ -2120,6 +2122,135 @@ function Wanted.Icon()
 	return UI and UI.FirstTexture and UI.FirstTexture(Wanted.ICON_PATHS) or Wanted.ICON_PATHS[#Wanted.ICON_PATHS]
 end
 
+-- A location sanction hides every Wanted location too. Historical combat evidence is still held
+-- in the scoped ledger, but it is not rendered while this client may not see locations.
+function Wanted.CanSeeLocations()
+	if not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" then return false end
+	local WC = ns.WatchChat
+	if type(WC) == "table" and not WC.missing and type(WC.Barred) == "function" then
+		local ok, barred = pcall(WC.Barred, "locations")
+		if not ok or barred then return false end
+	end
+	return true
+end
+
+-- A stored sighting deliberately has a zone, not coordinates. Resolve that localised zone through
+-- Zones; a fresh native observation already has the map the game supplied. Only zone/micro maps
+-- are focusable, never a guessed continent or world map.
+function Wanted.SightingMapID(sighting)
+	if type(sighting) ~= "table" then return nil end
+	local mapID = tonumber(sighting.mapID)
+	if not mapID and type(sighting.zone) == "string" then
+		local Z = ns.Zones
+		if type(Z) == "table" and type(Z.KeyForName) == "function" and type(Z.MapID) == "function" then
+			local okKey, key = pcall(Z.KeyForName, sighting.zone)
+			local okMap, resolved = false, nil
+			if okKey then okMap, resolved = pcall(Z.MapID, key) end
+			if okMap then mapID = tonumber(resolved) end
+		end
+	end
+	if not mapID or mapID < 1 or mapID ~= math.floor(mapID) or type(C_Map) ~= "table"
+		or type(C_Map.GetMapInfo) ~= "function" then return nil end
+	local ok, info = pcall(C_Map.GetMapInfo, mapID)
+	if not ok or type(info) ~= "table" or Secret(info.mapType) then return nil end
+	local T = type(Enum) == "table" and type(Enum.UIMapType) == "table" and Enum.UIMapType or {}
+	if info.mapType ~= (T.Zone or 3) and info.mapType ~= (T.Micro or 5) then return nil end
+	return mapID
+end
+
+-- Exact date plus age: an old sighting remains useful and is never silently hidden as "stale".
+-- A live sighting's server time is translated to this client's clock only for ns.Ago.
+function Wanted.SightingWhen(at, live)
+	at = math.floor(tonumber(at) or 0)
+	local dateFn = date or (os and os.date)
+	local stamp = type(dateFn) == "function" and dateFn("%Y-%m-%d %H:%M", at) or tostring(at)
+	local agoAt = live and (ns.Now() - math.max(0, math.floor(Clock()) - at)) or at
+	return L.WANTED_SEEN_WHEN:format(stamp, ns.Ago(agoAt))
+end
+
+-- A separate, genuine in-game observation for this session. It is never inferred from an old
+-- ledger row or an external service and expires with the existing 15-minute nearby pin.
+function Wanted.LiveSighting(t)
+	if not Wanted.CanSeeLocations() or type(t) ~= "table" or not Wanted.IsWanted(t) then return nil end
+	local e = t.guid and pins[t.guid] or nil
+	if not e and t.name then
+		for _, candidate in pairs(pins) do if SameName(candidate.name, t.name) then e = candidate break end end
+	end
+	local now = math.floor(Clock())
+	if type(e) ~= "table" or type(e.at) ~= "number" or e.at > now + Wanted.GLOBAL_SKEW
+		or now - e.at > Wanted.SIGHT_TTL then return nil end
+	return e
+end
+
+-- Newest truthful source: a native nearby observation while it is live, otherwise the permanent
+-- zone/time carried by combat evidence. Neither path manufactures the Horde player's coordinates.
+function Wanted.LastSeen(t)
+	if not Wanted.CanSeeLocations() or type(t) ~= "table" then return nil end
+	local old, live = t.lastSighting, Wanted.LiveSighting(t)
+	-- A live entry is necessarily the current observation (and expires after 15 minutes). Prefer it
+	-- over the carried ledger row so one target never gets both a nearby pin and a zone marker.
+	if live then
+		local zone
+		if type(C_Map) == "table" and type(C_Map.GetMapInfo) == "function" then
+			local ok, info = pcall(C_Map.GetMapInfo, live.mapID)
+			zone = ok and type(info) == "table" and not Secret(info.name) and info.name or nil
+		end
+		return { source = "native", at = live.at, zone = zone or (old and old.zone) or L.WANTED_UNKNOWN,
+			mapID = live.mapID, x = live.x, y = live.y, observer = live.observer, nearby = true }
+	end
+	if type(old) ~= "table" or type(old.at) ~= "number" then return nil end
+	return { source = "ledger", at = old.at, zone = old.zone, precision = old.precision, evidence = old.evidence }
+end
+
+function Wanted.CanOpenSighting(sighting)
+	if not Wanted.CanSeeLocations() or InInstance() or ns.db and ns.db.showWanted == false then return nil end
+	local G = ns.Gate
+	if type(G) == "table" and type(G.Allowed) == "function" then
+		local ok, allowed = pcall(G.Allowed, "worldmap-icons")
+		if not ok or allowed ~= true then return nil end
+	end
+	if type(WorldMapFrame) ~= "table" or type(WorldMapFrame.SetMapID) ~= "function"
+		or type(ShowUIPanel) ~= "function" then return nil end
+	return Wanted.SightingMapID(sighting)
+end
+
+function Wanted.OpenSightingMap(sighting)
+	local mapID = Wanted.CanOpenSighting(sighting)
+	if not mapID then return false end
+	local shown = pcall(ShowUIPanel, WorldMapFrame)
+	local focused = shown and pcall(WorldMapFrame.SetMapID, WorldMapFrame, mapID)
+	if not focused then return false end
+	historyFocus = mapID
+	Wanted.RefreshPins()
+	return true
+end
+
+function Wanted.LocationTip(tt, t, seen)
+	if type(tt) ~= "table" or type(seen) ~= "table" then return false end
+	local shown = t.name and ((ns.DisplayName and ns.DisplayName(t.name)) or ns.ShortName(t.name) or t.name) or L.WANTED_UNKNOWN
+	tt:AddLine(shown, 1, 0.82, 0)
+	tt:AddLine(L.WANTED_LAST_SEEN_TIP:format(seen.zone or L.WANTED_UNKNOWN,
+		Wanted.SightingWhen(seen.at, seen.source == "native")), 1, 1, 1, true)
+	if seen.source == "native" then tt:AddLine(L.WANTED_SIGHT_NEARBY, 0.65, 0.65, 0.65, true)
+	else tt:AddLine(L.WANTED_ZONE_ONLY, 0.65, 0.65, 0.65, true) end
+	if Wanted.CanOpenSighting(seen) then tt:AddLine(L.WANTED_SHOW_ON_MAP_TIP, 1, 0.82, 0, true) end
+	return true
+end
+
+function Wanted.LocationLine(t, indent)
+	local seen = Wanted.LastSeen(t)
+	if not seen then return nil end
+	local precision = seen.nearby and L.WANTED_NEARBY
+		or (seen.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE)
+	local canOpen = Wanted.CanOpenSighting(seen) ~= nil
+	return { id = "wanted-location:" .. tostring(t.key), indent = indent or 1,
+		text = "|cff9d9d9d" .. L.WANTED_LAST_SIGHTING:format(seen.zone or L.WANTED_UNKNOWN, precision,
+			Wanted.SightingWhen(seen.at, seen.source == "native")) .. "|r",
+		right = canOpen and ("|cffffd200" .. L.WANTED_SHOW_ON_MAP .. "|r") or nil,
+		onClick = canOpen and function() return Wanted.OpenSightingMap(seen) end or nil,
+		tooltip = function(tt) return Wanted.LocationTip(tt, t, seen) end }
+end
+
 local function Grey(s) return "|cff9d9d9d" .. tostring(s or "") .. "|r" end
 local function Gold(s) return "|cffffd200" .. tostring(s or "") .. "|r" end
 local function Green(s) return "|cff40ff40" .. tostring(s or "") .. "|r" end
@@ -2151,9 +2282,12 @@ local function TargetTip(t)
 		tt:AddLine(L.WANTED_LIFETIME:format(t.lifetimeKills), 0.8, 0.8, 0.8)
 		local repeats = Repeats(t)
 		if repeats then tt:AddLine(repeats, 0.8, 0.8, 0.8, true) end
-		if t.lastSighting then
-			local precision = t.lastSighting.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE
-			tt:AddLine(L.WANTED_LAST_SIGHTING:format(t.lastSighting.zone or L.WANTED_UNKNOWN, precision, ns.Ago(t.lastSighting.at)), 0.8, 0.8, 0.8, true)
+		local seen = Wanted.LastSeen(t)
+		if seen then
+			local precision = seen.nearby and L.WANTED_NEARBY
+				or (seen.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE)
+			tt:AddLine(L.WANTED_LAST_SIGHTING:format(seen.zone or L.WANTED_UNKNOWN, precision,
+				Wanted.SightingWhen(seen.at, seen.source == "native")), 0.8, 0.8, 0.8, true)
 		end
 		for _, v in ipairs(t.victims) do
 			local line = L.WANTED_VICTIM_TIP:format(v.name and (ns.DisplayName(v.name) or v.name) or L.WANTED_UNKNOWN,
@@ -2287,6 +2421,8 @@ local function ListLines()
 		lines[#lines + 1] = { id = "wanted:" .. t.key, key = t.key, text = Display(t),
 			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills), onClick = function() return Wanted.OpenTarget(t) end,
 			tooltip = TargetTip(t) }
+		local location = Wanted.LocationLine(t, 1)
+		if location then lines[#lines + 1] = location end
 	end
 	Wanted.MoreLine(lines, "wanted", "wanted-more", #targets)
 	lines[#lines].gapAfter = true
@@ -2333,10 +2469,16 @@ local function TargetLines()
 	if not t.active and t.removedBy then
 		lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_TAKEN_OFF:format(IssuerName(t.removedBy), t.removedAt and ns.Ago(t.removedAt) or L.WANTED_UNKNOWN)) }
 	end
-	if t.lastSighting then
-		local precision = t.lastSighting.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE
-		lines[#lines + 1] = { indent = 1, text = L.WANTED_LAST_SIGHTING:format(t.lastSighting.zone or L.WANTED_UNKNOWN, precision,
-			ns.Ago(t.lastSighting.at)) }
+	local location = Wanted.LocationLine(t, 1)
+	if location then lines[#lines + 1] = location end
+	local observed = Wanted.LiveSighting(t)
+	if observed then
+		lines[#lines + 1] = { id = "wanted-observed:" .. tostring(t.key), indent = 1,
+			text = Grey(L.WANTED_LAST_OBSERVED:format(Wanted.SightingWhen(observed.at, true))),
+			tooltip = function(tt)
+				tt:AddLine(L.WANTED_LAST_OBSERVED_LABEL, 1, 0.82, 0)
+				tt:AddLine(L.WANTED_LAST_OBSERVED_TIP, 0.8, 0.8, 0.8, true)
+			end }
 	end
 	lines[#lines + 1] = { header = true, text = L.WANTED_OPEN_CYCLE }
 	if #t.victims == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_VICTIMS) } end
@@ -2600,6 +2742,7 @@ local function SightingsOn() return type(ns.db) == "table" and ns.db.wantedSight
 Wanted.SightingsOn = SightingsOn
 -- (The section's helpers: Wanted.lua's main chunk is near Lua's 200 locals.)
 local Sight = {}
+Sight.historyFrames, Sight.historySpare = {}, {}
 
 -- The moderators took this client off (net-off): it sends none of this.
 local function NetOff()
@@ -3207,6 +3350,66 @@ function Wanted.SightingTip(tt, e)
 	return true
 end
 
+function Wanted.SightingShortAge(at)
+	local seconds = math.max(0, math.floor(Clock()) - math.floor(tonumber(at) or 0))
+	if seconds < 3600 then return math.floor(seconds / 60) .. "m" end
+	if seconds < 86400 then return math.floor(seconds / 3600) .. "h" end
+	if seconds < 31536000 then return math.floor(seconds / 86400) .. "d" end
+	return math.floor(seconds / 31536000) .. "y"
+end
+
+-- Permanent, zone-only history for the world map. A fresh native nearby pin replaces the old
+-- zone marker while it is alive; after 15 minutes the dated zone marker remains.
+function Wanted.HistoricalSightings(mapFilter)
+	local grouped = {}
+	if not Wanted.CanSeeLocations() then return grouped end
+	for _, t in ipairs(Wanted.Targets("listed")) do
+		local old, live = t.lastSighting, Wanted.LiveSighting(t)
+		if type(old) == "table" and type(old.at) == "number" and not live then
+			local mapID = Wanted.SightingMapID(old)
+			if mapID and (not mapFilter or mapID == mapFilter) then
+				local group = grouped[mapID]
+				if not group then
+					group = { mapID = mapID, zone = old.zone, newest = old.at, rows = {} }
+					grouped[mapID] = group
+				end
+				group.newest = math.max(group.newest, old.at)
+				group.rows[#group.rows + 1] = { key = t.key, name = t.name, at = old.at,
+					zone = old.zone, precision = old.precision }
+			end
+		end
+	end
+	for _, group in pairs(grouped) do
+		table.sort(group.rows, function(a, b)
+			if a.at ~= b.at then return a.at > b.at end
+			return tostring(a.key) < tostring(b.key)
+		end)
+	end
+	return grouped
+end
+
+function Wanted.HistoryTip(tt, group)
+	if type(tt) ~= "table" or type(group) ~= "table" then return false end
+	tt:AddLine(L.WANTED_MAP_HISTORY:format(group.zone or L.WANTED_UNKNOWN), 1, 0.82, 0)
+	for i = 1, math.min(Wanted.HISTORY_TIP_MAX, #(group.rows or {})) do
+		local row = group.rows[i]
+		tt:AddLine(L.WANTED_MAP_HISTORY_ROW:format(Display(row), Wanted.SightingWhen(row.at, false)), 1, 1, 1, true)
+	end
+	if #(group.rows or {}) > Wanted.HISTORY_TIP_MAX then
+		tt:AddLine(L.WANTED_MAP_HISTORY_MORE:format(#group.rows - Wanted.HISTORY_TIP_MAX), 0.7, 0.7, 0.7)
+	end
+	tt:AddLine(L.WANTED_ZONE_ONLY, 0.6, 0.6, 0.6, true)
+	return true
+end
+
+function Sight.HistoryEnter(self)
+	local group = self and self.history
+	if not group or type(GameTooltip) ~= "table" then return end
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	Wanted.HistoryTip(GameTooltip, group)
+	GameTooltip:Show()
+end
+
 local function PinEnter(self)
 	local e = self and self.sighting and pins[self.sighting]
 	if not e or type(GameTooltip) ~= "table" then return end
@@ -3238,6 +3441,19 @@ local function MakeFrames()
 	return { world = world, mini = mini }
 end
 
+function Sight.MakeHistoryFrame()
+	local M = ns.Map
+	if type(M) ~= "table" or M.missing or type(M.Badge) ~= "function" or type(M.SetBadge) ~= "function" then return nil end
+	local frame = M.Badge(Wanted.HISTORY_BADGE, true)
+	M.SetBadge(frame, Wanted.Icon(), 0.62, 0.36, 0.18)
+	frame.badge.age = frame.badge:CreateFontString(nil, "OVERLAY", "NumberFontNormalSmall")
+	frame.badge.age:SetPoint("BOTTOM", frame.badge, "BOTTOM", 0, -7)
+	frame.badge:SetScript("OnEnter", Sight.HistoryEnter)
+	frame.badge:SetScript("OnLeave", PinLeave)
+	frame.onWorld = false
+	return frame
+end
+
 local SIGHT_SHOW = HBD_PINS_WORLDMAP_SHOW_PARENT or 1
 
 local function RefreshPinsNow()
@@ -3245,20 +3461,20 @@ local function RefreshPinsNow()
 	for guid, e in pairs(pins) do
 		if not SightLive(e, now) then pins[guid] = nil stats.sightExpired = stats.sightExpired + 1 end
 	end
-	if next(pins) == nil and next(pinFrames) == nil then return true end -- (nothing to draw or take off)
 	local P = ns.Pins and ns.Pins()
 	if not P then return false end
 	local world = ns.WorldMapIcons(P, Wanted)
+	local showWorld = world and not (ns.db and ns.db.showWanted == false)
 	-- This map-menu choice hides only world-map artwork, not consent or minimap sightings.
-	if ns.db and ns.db.showWanted == false then
+	if not showWorld then
 		for _, f in pairs(pinFrames) do
 			if world and f.onWorld then P:RemoveWorldMapIcon(Wanted, f.world) end
+			f.world:Hide()
 			f.onWorld = nil
 		end
-		world = false
 	end
-	-- Members only, never in an instance.
-	local allowed = ns.IsMember ~= nil and ns.IsMember() == true and not InInstance()
+	-- Alliance members who may see locations only, never in an instance.
+	local allowed = Wanted.CanSeeLocations() and not InInstance()
 	for guid, f in pairs(pinFrames) do
 		if not (allowed and pins[guid] and Sight.Wanted(guid, pins[guid].name)) then
 			if world and f.onWorld then P:RemoveWorldMapIcon(Wanted, f.world) end
@@ -3270,26 +3486,61 @@ local function RefreshPinsNow()
 			spareFrames[#spareFrames + 1] = f
 		end
 	end
-	if not allowed then return true end
-	for guid, e in pairs(pins) do
-		if Sight.Wanted(guid, e.name) then
-			local f = pinFrames[guid]
-			if not f then
-				f = table.remove(spareFrames) or MakeFrames()
-				if not f then return false end
-				pinFrames[guid] = f
-			end
-			f.world.badge.sighting, f.mini.sighting, f.world.since = guid, guid, e.at
-			-- (With the gamepad UI ns.WorldMapIcons took this module's world icons off already.)
-			if not world then f.onWorld = nil end
-			if f.drawn ~= e or (world and not f.onWorld) then
-				if world then
-					P:AddWorldMapIconMap(Wanted, f.world, e.mapID, e.x / 1000, e.y / 1000, SIGHT_SHOW)
-					f.onWorld = true
+	if allowed then
+		for guid, e in pairs(pins) do
+			if Sight.Wanted(guid, e.name) then
+				local f = pinFrames[guid]
+				if not f then
+					f = table.remove(spareFrames) or MakeFrames()
+					if not f then return false end
+					pinFrames[guid] = f
 				end
-				if f.drawn ~= e then P:AddMinimapIconMap(Wanted, f.mini, e.mapID, e.x / 1000, e.y / 1000, false, false) end
-				f.drawn = e
+				f.world.badge.sighting, f.mini.sighting, f.world.since = guid, guid, e.at
+				-- (With the gamepad UI ns.WorldMapIcons took this module's world icons off already.)
+				if not showWorld then f.onWorld = nil end
+				if f.drawn ~= e or (showWorld and not f.onWorld) then
+					if showWorld then
+						P:AddWorldMapIconMap(Wanted, f.world, e.mapID, e.x / 1000, e.y / 1000, SIGHT_SHOW)
+						f.onWorld = true
+					end
+					if f.drawn ~= e then P:AddMinimapIconMap(Wanted, f.mini, e.mapID, e.x / 1000, e.y / 1000, false, false) end
+					f.drawn = e
+				end
 			end
+		end
+	end
+
+	-- Historical markers are relevant to the map currently being viewed. Restricting them to that
+	-- zone also keeps unrelated old sightings from competing with a fresh nearby marker.
+	local historyMap = historyFocus
+	if type(WorldMapFrame) == "table" and type(WorldMapFrame.IsShown) == "function"
+		and WorldMapFrame:IsShown() and type(WorldMapFrame.GetMapID) == "function" then
+		local ok, current = pcall(WorldMapFrame.GetMapID, WorldMapFrame)
+		if ok and tonumber(current) then historyMap = tonumber(current) end
+	end
+	local wantedHistory = showWorld and allowed and historyMap and Wanted.HistoricalSightings(historyMap) or {}
+	for mapID, frame in pairs(Sight.historyFrames) do
+		if not wantedHistory[mapID] then
+			if world and frame.onWorld then P:RemoveWorldMapIcon(Wanted, frame) end
+			frame:Hide()
+			frame.onWorld, frame.badge.history = false, nil
+			Sight.historyFrames[mapID] = nil
+			Sight.historySpare[#Sight.historySpare + 1] = frame
+		end
+	end
+	for mapID, group in pairs(wantedHistory) do
+		local frame = Sight.historyFrames[mapID]
+		if not frame then
+			frame = table.remove(Sight.historySpare) or Sight.MakeHistoryFrame()
+			if not frame then return false end
+			Sight.historyFrames[mapID] = frame
+		end
+		frame.badge.history, frame.since = group, group.newest
+		frame.badge.age:SetText(Wanted.SightingShortAge(group.newest))
+		frame:SetAlpha(now - group.newest > Wanted.SIGHT_TTL and 0.58 or 0.82)
+		if not frame.onWorld then
+			P:AddWorldMapIconMap(Wanted, frame, mapID, 0.5, 0.5, SIGHT_SHOW)
+			frame.onWorld = true
 		end
 	end
 	return true
@@ -3302,6 +3553,7 @@ end
 
 -- (Tests: the frames each pin has now.)
 function Wanted.PinFrames() return pinFrames end
+function Wanted.HistoryFrames() return Sight.historyFrames end
 
 -- A reviewer's lease is due: he takes sightings and has not said so for a beat (a few seconds'
 -- slack: the timer's beat and the role's arrival may come close together).
@@ -5822,7 +6074,8 @@ function Wanted.ResetForTests()
 	Wanted.globalCatch.asked, Wanted.globalCatch.replied = -math.huge, -math.huge
 	Wanted.globalCatch.generation = Wanted.globalCatch.generation + 1
 	restoring, restoreChecked = nil, {}
-	pins, pinFrames, spareFrames = {}, {}, {}
+	pins, pinFrames, spareFrames, historyFocus = {}, {}, {}, nil
+	Sight.historyFrames, Sight.historySpare = {}, {}
 	sightSeen, sightSeenOrder, ownSeen, ownSeenCount, sightSends = {}, {}, {}, 0, {}
 	sightJobs, sightJobCount, sightFrom, sightFromCount, sightIntake = {}, 0, {}, 0, { at = 0, n = 0 }
 	told.by, told.quiet = {}, {}
