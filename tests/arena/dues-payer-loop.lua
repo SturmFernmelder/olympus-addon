@@ -171,6 +171,26 @@ test("Dues payer loop: local reminders are once per reset, dismissible and opt-o
 	eq(t.ns.Dues.Outbox()[1], nil, "no private player/Captain escalation was invented")
 end)
 
+test("Dues payer loop: instance and combat suppress the actual local reminder without consuming its reset or changing manual payment", function()
+	for _, busy in ipairs({ "instance", "combat" }) do
+		local w, p = Setup()
+		p[busy] = true
+		local before, calls, sends = #p.printed, #p.win.calls, #w.sent
+		eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), false, busy)
+		w:Fire(p, "MAIL_INBOX_UPDATE")
+		eq(#p.printed, before); eq(#p.win.calls, calls); eq(#w.sent, sends)
+		local saved = p.rdb.duesPayer[p.name]
+		eq(saved and saved.reminded, nil, "busy context does not consume the once-reset reminder")
+		-- The explicit click is unchanged: neither a reminder guard nor its context authorizes
+		-- an automatic send/accept, or silently blocks the existing manual preparation button.
+		Intent(w, p)
+		eq(Status(w, p), "unknown"); eq(#w.sent, sends)
+		p[busy] = nil
+		eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), true, "eligible after leaving the busy context")
+		eq(w:As(p, p.ns.Dues.PayerReminder, "mail"), false, "still once this reset")
+	end
+end)
+
 test("Dues payer loop: an offline payer recovers only his observed receipt after both clients reload, not another name or manual totals", function()
 	local w, p, _, mail = Setup()
 	local i = w:Mail(p, mail, 10000, Intent(w, p))

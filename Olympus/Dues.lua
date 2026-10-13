@@ -1908,6 +1908,9 @@ function Dues.DismissPayerReminder(off)
 	return true
 end
 function Dues.PayerReminder(kind)
+	-- F26-10 explicitly keeps this unsolicited reminder out of instances. As with the nearby
+	-- Treasury/Consent/Letters notices, combat also waits; neither consumes this reset's reminder.
+	if (IsInInstance and IsInInstance()) or (InCombatLockdown and InCombatLockdown()) then return false end
 	local s = PayerStore()
 	if not s or not Dues.Pays() or s.reminderOff or s.dismissed == Dues.Week() or s.reminded == Dues.Week()
 		or Dues.PayerStatus() ~= "unknown" then return false end
