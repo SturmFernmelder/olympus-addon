@@ -352,6 +352,81 @@ test("wanted: top-level page, stock Orc icon, authority gate, normalized identit
 	end)
 end)
 
+test("wanted 1.2.4 page: Wanted and both local Slayers boards start at five and expand independently by ten, while zero-zero entries stay hidden", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		local never = "Player-1-E1000000"
+		assert(w.add("Never Counted-Realm", never), "a legacy zero-zero entry exists behind the page")
+		for i = 1, 16 do
+			local horde = ("Player-1-E1%06X"):format(i)
+			local wanted = w.hordePlayer(("Wanted%02d-Realm"):format(i), horde)
+			assert(w.add(wanted, horde), "the combat-log adapter starts from the known Horde side")
+			local victim = w.olympian(("PageVictim%02d-Realm"):format(i))
+			assert(w.kill(10000 + i, wanted, horde, victim,
+				("Player-1-E2%06X"):format(i)))
+			w.advance()
+		end
+		local originalName, originalGuid = c.me, w.units.player.guid
+		for i = 1, 16 do
+			local slayerGuid = ("Player-1-E3%06X"):format(i)
+			local slayer = w.participant(("PageSlayer%02d-Realm"):format(i), slayerGuid)
+			local preyGuid = ("Player-1-E4%06X"):format(i)
+			local prey = w.hordePlayer(("PagePrey%02d-Realm"):format(i), preyGuid)
+			c.me, w.units.player.name, w.units.player.guid = slayer, slayer, slayerGuid
+			w.units.target = { name = prey, guid = preyGuid, faction = "Horde", level = i }
+			assert(w.handlers.PARTY_KILL(slayerGuid, preyGuid))
+			w.units.target = nil
+			w.advance()
+		end
+		c.me, w.units.player.name, w.units.player.guid = originalName, originalName, originalGuid
+
+		local function State(lines)
+			local out = { wanted = 0, month = 0, all = 0, more = {} }
+			local section
+			for _, line in ipairs(lines) do
+				if line.header then
+					if line.text == c.L.WANTED_TARGETS then section = "wanted"
+					elseif line.text == c.L.WANTED_LOCAL_ALL then section = "all"
+					elseif type(line.text) == "string" and line.text:find(c.L.WANTED_MONTHLY:match("^[^%%]+"), 1, true) then section = "month"
+					else section = nil end
+				elseif line.id and line.id:find("%-more$") then out.more[line.id] = line
+				elseif section == "wanted" and line.id and line.id:find("^wanted:") then out.wanted = out.wanted + 1
+				elseif (section == "month" or section == "all") and line.player then out[section] = out[section] + 1 end
+			end
+			return out
+		end
+		local state = State(W.Build())
+		eq(state.wanted, 5, "the Slayers boards are reachable after five Wanted rows")
+		eq(state.month, 5); eq(state.all, 5)
+		assert(state.more["wanted-more"] and state.more["wanted-more"].text:find(c.L.SHOW_MORE:format(10, 5, 16), 1, true))
+		assert(state.more["slayers-month-more"] and state.more["slayers-month-more"].text:find(c.L.SHOW_MORE:format(10, 5, 16), 1, true))
+		assert(state.more["slayers-all-more"] and state.more["slayers-all-more"].text:find(c.L.SHOW_MORE:format(10, 5, 16), 1, true))
+		for _, line in ipairs(W.Build()) do assert(line.id ~= "wanted:g:" .. never, "zero points and zero kills stays hidden") end
+
+		state.more["wanted-more"].onClick()
+		state = State(W.Build())
+		eq(state.wanted, 15); eq(state.month, 5); eq(state.all, 5, "Wanted expansion does not move either Slayers limit")
+		state.more["wanted-more"].onClick()
+		state = State(W.Build())
+		eq(state.wanted, 16); eq(state.more["wanted-more"], nil)
+
+		state.more["slayers-month-more"].onClick()
+		state = State(W.Build())
+		eq(state.wanted, 16); eq(state.month, 15); eq(state.all, 5, "monthly expansion is independent")
+		state.more["slayers-month-more"].onClick()
+		state = State(W.Build())
+		eq(state.month, 16); eq(state.more["slayers-month-more"], nil)
+
+		state.more["slayers-all-more"].onClick()
+		state = State(W.Build())
+		eq(state.all, 15); eq(state.month, 16, "all-time expansion is independent")
+		state.more["slayers-all-more"].onClick()
+		state = State(W.Build())
+		eq(state.all, 16); eq(state.more["slayers-all-more"], nil)
+		assert(w.refreshed >= 6, "each click refreshes the visible page")
+	end)
+end)
+
 test("wanted: rejected combat rows cannot learn identity; distinct verified kills accrue and one claim pays atomically", function()
 	WithWanted(function(w, W, c)
 		assert(w.add("Grom-Realm"))

@@ -69,6 +69,8 @@ Wanted.MAX_CLAIMS = 30
 Wanted.MAX_AUDIT = 100
 Wanted.MAX_MONTHS = 24
 Wanted.MAX_POINTS = 100000
+Wanted.LIST_FIRST = 5
+Wanted.LIST_PAGE = 10
 Wanted.RATE_MAX = 20
 Wanted.RATE_WINDOW = 60
 Wanted.GLOBAL_BORDERS_ACTIVE = true
@@ -156,6 +158,7 @@ local pendingGlobal, pendingGlobalCount = {}, 0
 local restoring, restoreChecked = nil, {}
 local publishedGlobal
 Wanted.globalCatch = { asked = -math.huge, replied = -math.huge, generation = 0 }
+Wanted.listShown = { wanted = Wanted.LIST_FIRST, month = Wanted.LIST_FIRST, all = Wanted.LIST_FIRST }
 local watchingNotFound = false
 -- 1.2.3: the shared kills and deaths' helpers and this session's state (the section "Shared kills
 -- and deaths" below; a table, as Wanted.lua's main chunk is at Lua's 200 locals): the senders'
@@ -2220,10 +2223,31 @@ end
 
 local function IssuerName(name) return ns.DisplayName and ns.DisplayName(name) or name end
 
-local function RankingLines(lines, title, rows)
+-- Each of the page's three long lists starts small enough that the next section remains visible in
+-- the ordinary window. They open independently, ten more at a time; this is session UI state only
+-- and never changes the ledger, its order or the signed board.
+function Wanted.VisibleRows(kind, total)
+	local shown = math.floor(tonumber(Wanted.listShown[kind]) or Wanted.LIST_FIRST)
+	return math.min(math.max(0, tonumber(total) or 0), math.max(Wanted.LIST_FIRST, shown))
+end
+
+function Wanted.MoreLine(lines, kind, id, total)
+	local shown = Wanted.VisibleRows(kind, total)
+	if shown >= total then return false end
+	lines[#lines + 1] = { id = id, indent = 1,
+		text = Grey(L.SHOW_MORE:format(math.min(Wanted.LIST_PAGE, total - shown), shown, total)),
+		onClick = function()
+			Wanted.listShown[kind] = shown + Wanted.LIST_PAGE
+			if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+		end }
+	return true
+end
+
+local function RankingLines(lines, title, rows, kind)
 	lines[#lines + 1] = { header = true, text = title }
 	if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_SLAYERS) } return end
-	for i, r in ipairs(rows) do
+	for i = 1, Wanted.VisibleRows(kind, #rows) do
+		local r = rows[i]
 		lines[#lines + 1] = { indent = 1, key = r.key, player = r.name,
 			text = (PLACE[i] or ("#" .. i)) .. "  " .. (r.name and (ns.DisplayName(r.name) or r.name) or L.WANTED_UNKNOWN),
 			right = L.WANTED_POINTS:format(r.points), onClick = r.name and function() return OpenSlayer(r) end or nil,
@@ -2232,6 +2256,7 @@ local function RankingLines(lines, title, rows)
 				tt:AddLine(L.WANTED_SLAYER_TIP:format(r.points, r.claims), 1, 1, 1, true)
 			end }
 	end
+	Wanted.MoreLine(lines, kind, "slayers-" .. kind .. "-more", #rows)
 end
 
 -- The signed all-time top three this client holds (the one that sets the frames), if any.
@@ -2257,20 +2282,22 @@ local function ListLines()
 	local lines, targets = {}, Wanted.Targets("listed")
 	lines[#lines + 1] = { header = true, text = L.WANTED_TARGETS, right = Grey(tostring(#targets)) }
 	if #targets == 0 then lines[#lines + 1] = { text = Grey(L.WANTED_EMPTY) } end
-	for _, t in ipairs(targets) do
+	for i = 1, Wanted.VisibleRows("wanted", #targets) do
+		local t = targets[i]
 		lines[#lines + 1] = { id = "wanted:" .. t.key, key = t.key, text = Display(t),
 			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills), onClick = function() return Wanted.OpenTarget(t) end,
 			tooltip = TargetTip(t) }
 	end
+	Wanted.MoreLine(lines, "wanted", "wanted-more", #targets)
 	lines[#lines].gapAfter = true
 	local signed = SignedLines(lines)
 	-- This client's own two boards: what it observed, never everyone's ranking (only the signed
 	-- top three above is that).
 	local rank = Wanted.Rankings()
 	local year, month = math.floor(rank.monthNo / 12), rank.monthNo % 12 + 1
-	RankingLines(lines, L.WANTED_MONTHLY:format(year, month), rank.month)
+	RankingLines(lines, L.WANTED_MONTHLY:format(year, month), rank.month, "month")
 	lines[#lines].gapAfter = true
-	RankingLines(lines, L.WANTED_LOCAL_ALL, rank.all)
+	RankingLines(lines, L.WANTED_LOCAL_ALL, rank.all, "all")
 	if not signed then lines[#lines + 1] = { text = Grey(L.WANTED_AUTHORITY_OFF), gapAfter = true } end
 	return lines
 end
@@ -5788,6 +5815,7 @@ function Wanted.ResetForTests()
 	deathSerial = deathSerial + 1
 	knownHorde = {}
 	rate, mode, opened = {}, "list", nil
+	Wanted.listShown = { wanted = Wanted.LIST_FIRST, month = Wanted.LIST_FIRST, all = Wanted.LIST_FIRST }
 	authenticatedGlobal, globalFloor, publisherHeads = nil, nil, {}
 	pendingGlobal, pendingGlobalCount = {}, 0
 	publishedGlobal = nil
