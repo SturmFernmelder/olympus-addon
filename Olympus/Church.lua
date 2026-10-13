@@ -932,6 +932,7 @@ function Church.SendAct(op, role, target, under, guild)
 	if not ok then
 		-- (1.2.4) A naming past a parent's ten says whose ten it is and his count (Church.QuotaText).
 		if why == "quota" and role == "M" and op == "+" then ns.Print(Church.QuotaText(Church.RootCode(ns.me) and under or ns.me))
+		elseif why == "full" and role == "M" then ns.Print(Church.FullText()) -- (1.2.4: the Church's total, its number)
 		else ns.Print(rawget(L, "CHURCH_NO_" .. tostring(why):upper()) or L.CHURCH_NO_RIGHTS) end
 		return false, why
 	end
@@ -992,15 +993,32 @@ end
 -- as Church.MayAct counts them: the ones a root put there, and the ones that never played.
 function Church.QuotaText(parent)
 	local S, pk = Church.State(), Key(parent)
-	local n = pk and S.named[pk] or 0
+	local n = pk and Church.NamedShown(pk) or 0
 	if pk and pk == Key(ns.me) then return L.CHURCH_NO_QUOTA_SELF:format(n, Church.NAMES_PER) end
 	local e = pk and (S.apostle[pk] or S.miss[pk])
 	local shown = ns.DisplayName(ns.FullName(e and e.n or parent)) or tostring(parent)
 	return L.CHURCH_NO_QUOTA_UNDER:format(ns.Codec.Plain(shown), n, Church.NAMES_PER)
 end
 
+-- (1.2.4, the review of that report) A parent's count as the words show it: the quota's own (every
+-- entry naming him, as Church.MayAct counts them), never past NAMES_PER. Two namings under him at
+-- once (his own and a root's) both reach the book through the keepers' pages, which take an entry
+-- without the quota: the later holds no place (Derive: "quota") and takes the next one freed. "11 of
+-- 10" would be no place he holds: the People page shows his ten.
+function Church.NamedShown(key)
+	return math.min(Church.State().named[key] or 0, Church.NAMES_PER)
+end
+
+-- (1.2.4, the review) The Church's total (MISSIONARIES_MAX) refuses every naming of a missionary,
+-- whoever names and under whom, whatever the parent's own count (Church.MayAct checks that ten
+-- first): its number, and what frees a place.
+function Church.FullText()
+	return L.CHURCH_FULL_LINE:format(Church.MISSIONARIES_MAX) .. " " .. L.CHURCH_FULL_HOW
+end
+
 -- What this player may name now (the Name page, the player menus): { apostle, missionary (left),
--- named (his own places used, with missionary), correspondent (a guild), register }.
+-- named (his own places used, with missionary), full (the Church's total reached, with missionary),
+-- correspondent (a guild), register }.
 function Church.Rights()
 	local S = Church.State()
 	local me, k = ns.me, Key(ns.me)
@@ -1009,8 +1027,10 @@ function Church.Rights()
 	if Church.MayNameApostle(me) then out.apostle = Church.APOSTLES_MAX - S.apostles end
 	local m = S.miss[k]
 	if S.apostle[k] or (m and m.valid and m.depth < Church.DEPTH_MAX) then
-		out.named = S.named[k] or 0 -- (1.2.4: shown with the reason once none is left)
+		out.named = Church.NamedShown(k) -- (1.2.4: shown with the reason once none is left)
 		out.missionary = math.max(0, Church.NAMES_PER - out.named)
+		-- (1.2.4) Places of his own left, none in the Church's total: Church.MayAct refuses that too.
+		if S.valid >= Church.MISSIONARIES_MAX then out.full = true end
 	end
 	local guild = OwnGuild()
 	if guild and ns.IsFederation(guild) and (root or Church.IsGuildMaster(me, guild) == true) then out.correspondent = guild end
@@ -1569,9 +1589,14 @@ function Church.StatusLines()
 		("acts %d (applied %d), page entries %d, sent %d (kept for keepers %d, handed later %d), public %s"):format(st.acts, st.applied,
 			st.pages, st.sent, #(OwnActs() or {}), st.delivered, tostring((Church.Public()))),
 	}
-	-- (1.2.4) This player's own ten: the places under him, as the quota counts them.
+	-- (1.2.4) This player's own ten: the entries naming him, as the quota counts them (one more than
+	-- his ten after two namings at once, Church.NamedShown), and how many of them hold a place.
 	local r = Church.Rights()
-	if r.named then table.insert(lines, 3, ("named %d of %d (%d left)"):format(r.named, Church.NAMES_PER, r.missionary)) end
+	if r.named then
+		local mine, holding = Key(ns.me), 0
+		for _, info in ipairs(Church.Children(mine)) do if not info.adopted then holding = holding + 1 end end
+		table.insert(lines, 3, ("named %d of %d (%d left), %d holding a place"):format(S.named[mine] or 0, Church.NAMES_PER, r.missionary, holding))
+	end
 	local dropped = {}
 	for why, n in pairs(st.dropped) do dropped[#dropped + 1] = why .. "=" .. n end
 	table.sort(dropped)

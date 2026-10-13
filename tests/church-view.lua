@@ -327,8 +327,8 @@ end)
 -- now says he has named 10 of 10, the most one may, and what frees a place.
 test("1.2.4 Church: an Apostle at his ten is told why and how many he named, wherever he names from", function()
 	local w, c = Cast()
-	for i = 1, 9 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
 	local per = c.a1.Church.NAMES_PER
+	for i = 1, per - 1 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
 	eq(w:As(c.a1, c.a1.Church.Rights).missionary, 0, "Mira Wells and nine more: his ten")
 	-- The Name page: the header with none left, then the reason with his count, and what frees a place.
 	local name = Build(w, c.a1, "name")
@@ -373,6 +373,121 @@ test("1.2.4 Church: an Apostle at his ten is told why and how many he named, whe
 	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
 	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY)
 	eq(menu.buttons[1].enabled, true)
+end)
+
+-- A line's tooltip as the game would show it: its lines, one under the other.
+local function TipText(tooltip)
+	local out = {}
+	tooltip({ AddLine = function(_, text) out[#out + 1] = tostring(text) end })
+	return table.concat(out, "\n")
+end
+
+-- 1.2.4 (the same report, its review): the Church's total (Church.MISSIONARIES_MAX, 300 since
+-- 1.1.6) refuses every naming of a missionary at once (Church.MayAct, after the namer's own ten),
+-- whatever his own count. The Name page still offered "Name a missionary (9 of 10 left)" and its
+-- dialog, the People page and the right-click line too, and the refusal said only "That list is
+-- full.". Each way to name now says the Church holds its total, with the number, and what frees a place.
+test("1.2.4 Church: at the Church's total an Apostle with places of his own left is told the Church is full, with its count", function()
+	local w, c = Cast()
+	local Ch, per = c.a1.Church, c.a1.Church.NAMES_PER
+	local saved = Ch.MISSIONARIES_MAX
+	local ok, err = pcall(function()
+		-- (The total lowered on his client, as the limits test in tests/church.lua does: Mira Wells holds its one place.)
+		Ch.MISSIONARIES_MAX = 1
+		Ch.Changed()
+		local r = w:As(c.a1, Ch.Rights)
+		eq(r.missionary, per - 1, "his own ten is not the cause")
+		local text = L.CHURCH_FULL_LINE:format(1) .. " " .. L.CHURCH_FULL_HOW
+		-- The Name page: his own count in the header, nothing to click, the Church's total and what frees a place.
+		local name = Build(w, c.a1, "name")
+		local header = Find(name, L.CHURCH_NAME_MISSIONARY:format(per - 1, per))
+		assert(header, Texts(name))
+		eq(header.onClick, nil, "no dialog the Church would refuse")
+		eq(TipText(header.tooltip), L.CHURCH_MISSIONARY .. "\n" .. text)
+		assert(Find(name, L.CHURCH_FULL_LINE:format(1)), Texts(name))
+		assert(Find(name, L.CHURCH_FULL_HOW), Texts(name))
+		eq(Find(name, L.CHURCH_QUOTA_HOW), nil, "not his ten")
+		-- The People page: the group's line and his own row's, greyed, nothing to click.
+		local people = Build(w, c.a1, "people")
+		assert(Find(people, L.CHURCH_FULL_LINE:format(1)), Texts(people))
+		eq(Find(people, L.CHURCH_NAME_MISSIONARY:format(per - 1, per)), nil, Texts(people))
+		Find(people, "Aldric Vane").onClick()
+		people = Build(w, c.a1, "people")
+		local under = Find(people, L.CHURCH_ACT_NAME_UNDER:format("Aldric Vane"))
+		assert(under and under.onClick == nil, Texts(people))
+		eq(TipText(under.tooltip), L.CHURCH_MISSIONARY .. "\n" .. text)
+		-- The right-click line stays, greyed; its tooltip and its click say why.
+		local menu = { buttons = {} }
+		function menu.Button(label, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = label, fn = fn, tip = tip, enabled = enabled } end
+		w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+		eq(#menu.buttons, 1)
+		eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY)
+		eq(menu.buttons[1].enabled, false)
+		eq(menu.buttons[1].tip, text)
+		-- /oly church name: refused with the Church's total, not "That list is full."; nobody is named.
+		local before = #w.sent
+		eq(w:Act(c.a1, Ch.Slash, "name Kid Eleven"), false)
+		eq(w:Printed(c.a1), text)
+		eq(#w.sent, before, "nothing sent")
+		eq(w:As(c.member, c.member.Church.Role, "Kid Eleven-Realm"), nil)
+		-- A place in the total again: the naming comes back.
+		Ch.MISSIONARIES_MAX = saved
+		Ch.Changed()
+		name = Build(w, c.a1, "name")
+		local again = Find(name, L.CHURCH_NAME_MISSIONARY:format(per - 1, per))
+		assert(again and again.onClick, Texts(name))
+		eq(Find(name, L.CHURCH_FULL_HOW), nil)
+	end)
+	Ch.MISSIONARIES_MAX = saved
+	Ch.Changed()
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.4 (the review): two namings under one parent at the same moment, his own tenth and a root's
+-- under him, each refused by the clients that heard the other first, both reach every book through
+-- the keepers' pages, which take an entry without the quota (Church.TakeEntry): one entry more than
+-- his ten, the later holding no place (the tree's "quota"), the next freed place its own. His words
+-- said "You have named 11 of 10"; they count his ten, as many as the People page shows under him.
+test("1.2.4 Church: two namings at once past his ten: his words say his ten, never one more", function()
+	local w, c = Cast()
+	local per = c.a1.Church.NAMES_PER
+	for i = 1, per - 2 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	w:Run(11)
+	-- Neither heard before the other went.
+	eq(w:As(c.a1, c.a1.Church.NameMissionary, "Kid Mine"), true)
+	eq(w:As(c.author, c.author.Church.NameMissionary, "Kid Root", A1), true)
+	w:Flush()
+	for _ = 1, 4 do w:Run(700); w:Presence(); w:Run(130); w:Tick(); w:Run(130) end
+	local S = w:As(c.a1, c.a1.Church.State)
+	eq(S.named[Key(A1)], per + 1, "both entries in his book")
+	eq(#w:As(c.a1, c.a1.Church.Children, Key(A1)), per, "ten hold a place")
+	local quota = L.CHURCH_NO_QUOTA_SELF:format(per, per)
+	local name = Build(w, c.a1, "name")
+	assert(Find(name, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(name))
+	eq(Find(name, L.CHURCH_QUOTA_LINE:format(per + 1, per)), nil, Texts(name))
+	local people = Build(w, c.a1, "people")
+	Find(people, "Aldric Vane").onClick()
+	people = Build(w, c.a1, "people")
+	assert(Find(people, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(people))
+	assert(Find(people, L.CHURCH_ACT_UNDER_FULL:format("Aldric Vane", per, per)), Texts(people))
+	local menu = { buttons = {} }
+	function menu.Button(label, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = label, tip = tip, enabled = enabled } end
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY_FULL:format(per, per))
+	eq(menu.buttons[1].tip, quota)
+	eq(w:Act(c.a1, c.a1.Church.Slash, "name Kid Eleven"), false)
+	eq(w:Printed(c.a1), quota)
+	eq(w:Act(c.author, c.author.Church.NameMissionary, "Kid Twelve", A1), false)
+	eq(w:Printed(c.author), L.CHURCH_NO_QUOTA_UNDER:format("Aldric Vane", per, per))
+	-- The status window (for the author to read) keeps the book's own count, and how many hold a place.
+	local status = table.concat(w:As(c.a1, c.a1.Church.StatusLines), "\n")
+	assert(status:find(("named %d of %d (0 left), %d holding a place"):format(per + 1, per, per), 1, true), status)
+	-- One of his removed: the one waiting takes the place freed, and he is still at his ten.
+	w:Run(61)
+	eq(w:Act(c.a1, c.a1.Church.Remove, "M", "Kid Numbera"), true)
+	eq(#w:As(c.a1, c.a1.Church.Children, Key(A1)), per)
+	eq(w:As(c.a1, c.a1.Church.Rights).missionary, 0)
+	assert(Find(Build(w, c.a1, "name"), L.CHURCH_QUOTA_LINE:format(per, per)))
 end)
 
 test("1.1.6 Church: the Church chat button opens the Chat tab on the Church's room; /oly church status opens a window to copy from", function()

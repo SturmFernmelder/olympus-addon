@@ -421,13 +421,21 @@ end
 -- People: the Head, the Apostles and their networks, the orphans, the correspondents
 ---------------------------------------------------------------------------
 
--- (1.2.4) Why this player has none left to name (his ten, Church.NAMES_PER): his count on a line of
+-- (1.2.4) May this player name a missionary now (Church.Rights): a place of his own left, and one
+-- in the Church's total (Church.MISSIONARIES_MAX).
+local function MayNameNow(r) return r.missionary ~= nil and r.missionary > 0 and not r.full end
+-- Why not, as Church.MayAct refuses, in its order: his ten (Church.NAMES_PER), else the total.
+local function NoneLeftText(r) return r.missionary == 0 and Church.QuotaText(ns.me) or Church.FullText() end
+
+-- (1.2.4) Why this player can name none now: his count (his ten) or the Church's total on a line of
 -- its own, the whole reason in its tooltip, and (how) what frees a place on the next. Nothing to
 -- click: the dialog would only refuse.
-local function QuotaLines(lines, named, how)
-	local tip = Tip(L.CHURCH_MISSIONARY, Church.QuotaText(ns.me))
-	lines[#lines + 1] = { indent = 1, text = Red(L.CHURCH_QUOTA_LINE:format(named or Church.NAMES_PER, Church.NAMES_PER)), tooltip = tip }
-	if how then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_QUOTA_HOW), tooltip = tip } end
+local function QuotaLines(lines, r, how)
+	local tip = Tip(L.CHURCH_MISSIONARY, NoneLeftText(r))
+	local line, after = L.CHURCH_FULL_LINE:format(Church.MISSIONARIES_MAX), L.CHURCH_FULL_HOW
+	if r.missionary == 0 then line, after = L.CHURCH_QUOTA_LINE:format(r.named or Church.NAMES_PER, Church.NAMES_PER), L.CHURCH_QUOTA_HOW end
+	lines[#lines + 1] = { indent = 1, text = Red(line), tooltip = tip }
+	if how then lines[#lines + 1] = { indent = 1, text = Grey(after), tooltip = tip } end
 end
 
 local function Actions(lines, info, indent)
@@ -438,14 +446,19 @@ local function Actions(lines, info, indent)
 	local name = ns.FullName(info.n)
 	local role = info.role
 	local mayName = (root or info.key == me) and (role == "A" or (info.valid and (info.depth or 0) < Church.DEPTH_MAX))
-	local named = S.named[info.key] or 0
-	if mayName and named < Church.NAMES_PER then
+	local named = Church.NamedShown(info.key)
+	local full = S.valid >= Church.MISSIONARIES_MAX
+	if mayName and named < Church.NAMES_PER and not full then
 		lines[#lines + 1] = { indent = indent, text = Gold(L.CHURCH_ACT_NAME_UNDER:format(Name(info.n))),
 			onClick = function() View.Ask("missionary", { under = root and name or nil }) end }
-	elseif mayName then
+	elseif mayName and named >= Church.NAMES_PER then
 		-- (1.2.4) At his ten the line says so, with his count, instead of vanishing.
 		lines[#lines + 1] = { indent = indent, text = Grey(L.CHURCH_ACT_UNDER_FULL:format(Name(info.n), named, Church.NAMES_PER)),
 			tooltip = Tip(L.CHURCH_MISSIONARY, Church.QuotaText(name)) }
+	elseif mayName then
+		-- (1.2.4) The Church's total: the line greyed, the total and what frees a place in its tooltip.
+		lines[#lines + 1] = { indent = indent, text = Grey(L.CHURCH_ACT_NAME_UNDER:format(Name(info.n))),
+			tooltip = Tip(L.CHURCH_MISSIONARY, Church.FullText()) }
 	end
 	local mayRemove = root or info.key == me
 	if role == "M" and not mayRemove then mayRemove = (info.p and Church.Key(info.p.ac) == me) or Church.Above(me, info.key) end
@@ -528,11 +541,11 @@ function View.PeopleLines()
 	lines[#lines + 1] = { header = true, text = L.CHURCH_MISSIONARIES:format(S.valid),
 		tooltip = Tip(L.CHURCH_MISSIONARY, L.CHURCH_MISSIONARIES_TIP) }
 	local rights = Rights()
-	if not PreviewRole() and rights.missionary and rights.missionary > 0 then
+	if not PreviewRole() and MayNameNow(rights) then
 		lines[#lines + 1] = { indent = 1, text = Gold(L.CHURCH_NAME_MISSIONARY:format(rights.missionary, Church.NAMES_PER)),
 			onClick = function() View.Ask("missionary") end, tooltip = Tip(L.CHURCH_MISSIONARY, L.CHURCH_NAME_MISSIONARY_TIP) }
 	elseif not PreviewRole() and rights.missionary then
-		QuotaLines(lines, rights.named, false)
+		QuotaLines(lines, rights, false)
 	end
 	for _, k in ipairs(S.order) do
 		if #Church.Children(k) > 0 then
@@ -557,11 +570,11 @@ function View.NameLines()
 	local lines = { Nav("name") }
 	local r = Rights()
 	if r.missionary then
-		local left = r.missionary > 0
+		local left = MayNameNow(r)
 		lines[#lines + 1] = { header = true, text = Gold(L.CHURCH_NAME_MISSIONARY:format(r.missionary, Church.NAMES_PER)),
 			onClick = left and function() View.Ask("missionary") end or nil,
-			tooltip = Tip(L.CHURCH_MISSIONARY, left and L.CHURCH_NAME_MISSIONARY_TIP or Church.QuotaText(ns.me)) }
-		if not left then QuotaLines(lines, r.named, true) end
+			tooltip = Tip(L.CHURCH_MISSIONARY, left and L.CHURCH_NAME_MISSIONARY_TIP or NoneLeftText(r)) }
+		if not left then QuotaLines(lines, r, true) end
 	end
 	if r.apostle then
 		lines[#lines + 1] = { header = true, text = Gold(L.CHURCH_NAME_APOSTLE:format(r.apostle, Church.APOSTLES_MAX)),
@@ -729,13 +742,15 @@ function View.MenuLines(target, menu)
 	local p = Church.Place(target.name)
 	if p or Church.RootCode(target.name) then return end
 	local name = target.name
-	if r.missionary and r.missionary > 0 then
+	if MayNameNow(r) then
 		menu.Button(L.CHURCH_MENU_MISSIONARY, function() View.AskConfirm("missionary", { name = name }) end,
 			L.CHURCH_MISSIONARY, L.CHURCH_MENU_MISSIONARY_TIP, not target.locked)
 	elseif r.missionary then
-		-- (1.2.4) At his ten: the line greyed with his count, its tooltip what frees a place.
-		menu.Button(L.CHURCH_MENU_MISSIONARY_FULL:format(r.named or Church.NAMES_PER, Church.NAMES_PER),
-			function() ns.Print(Church.QuotaText(ns.me)) end, L.CHURCH_MISSIONARY, Church.QuotaText(ns.me), false)
+		-- (1.2.4) At his ten: the line greyed with his count, its tooltip what frees a place; at the
+		-- Church's total, the plain line greyed, its tooltip the total.
+		local why = NoneLeftText(r)
+		menu.Button(r.missionary == 0 and L.CHURCH_MENU_MISSIONARY_FULL:format(r.named or Church.NAMES_PER, Church.NAMES_PER) or L.CHURCH_MENU_MISSIONARY,
+			function() ns.Print(why) end, L.CHURCH_MISSIONARY, why, false)
 	end
 	if r.apostle and r.apostle > 0 then
 		menu.Button(L.CHURCH_MENU_APOSTLE, function() View.AskConfirm("apostle", { name = name }) end,
