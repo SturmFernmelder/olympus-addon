@@ -117,10 +117,26 @@ channels; the same charter and Join controls work for each side.
 ## What it does
 
 ### Census: the army at a glance
-- Every Olympus guild in one list: **Guild · Members · Online · Lord**. Columns sort by
-  clicking, like the Guild window. By default, fresh reports and larger guilds come first;
-  at the same size the exact `<OLYMPUS>` comes first, then the higher average level, then the
-  name (1.1.5). The Realm lists its guilds in the same order.
+- Every Olympus guild in one list: **Guild · Members · Online · Avg lvl · Lord**. Columns sort by
+  clicking, like the Guild window: a first click on Members, Online or Avg lvl puts the highest
+  first, a second the lowest. By default, fresh reports and larger guilds come first; at the same
+  size the exact `<OLYMPUS>` comes first, then the higher average level, then the name (1.1.5).
+  Any other column's tie goes to the higher average level, then the name; by Avg lvl, a guild
+  without one comes last either way and a tie goes to the larger guild (1.2.4). A title wider
+  than its column (the narrow window, a longer language's words) shows its short form (*Memb.*,
+  *Onl.*, *Avg*), or is cut with "..." inside its own header, never over the next one.
+- The Realm lists its guilds in the same default order, and its own **Order** line above them
+  (1.2.4) sorts them by members (the default), online, average level, guild or Lord: a count the
+  highest first, a name A to Z, ties as in the Census. A column clicked in the Census leaves the
+  Realm as it was, and the Realm's order leaves the Census as it was.
+- **Avg lvl** (1.2.4): each guild's average level from its report, to the tenth and cut down as
+  the report carries it, your own guild's too, so every client shows the same number (`-` when a
+  report carries none, as an older version's, or one no guild can have). The Realm shows it in
+  parentheses after each Lord's *online* or *offline*, Recruiting after each guild's free slots,
+  and the copy for Discord in a column of its own. Wherever guilds are listed by a count (free
+  slots, soldiers in a zone, a map pin, the Royal Inspection, the dues table after its members),
+  the same count goes to the higher average level first, then the name, and the average level
+  shows after the count (in the dues table, in each guild's hover).
 - **Total soldiers** and **online now** across the whole realm.
 - **Where the army stands**: top zones ("Stormwind City 742") and totals per continent
   (Eastern Kingdoms, Kalimdor), counted by the guilds whose census comes from a member who

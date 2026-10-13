@@ -1556,11 +1556,8 @@ local function TableLines(lines, q)
 	local own = GetGuildInfo("player")
 	if own and ns.IsFederation(own) and not seen[own:lower()] then rows[#rows + 1] = { name = own, paid = 0, copper = 0, payers = 0 } end
 	for _, r in ipairs(rows) do r.members = Dues.Members(r.name) end
-	table.sort(rows, function(a, b)
-		if a.copper ~= b.copper then return a.copper > b.copper end
-		if (a.members or 0) ~= (b.members or 0) then return (a.members or 0) > (b.members or 0) end
-		return a.name < b.name
-	end)
+	-- (1.2.4: as much paid by as many members, the higher average level first, then the name.)
+	ns.Data.SortGuildCounts(rows, "copper", "members")
 	local shown = 0
 	for _, r in ipairs(rows) do
 		if ns.Holds(q, r.name) then
@@ -1573,6 +1570,10 @@ local function TableLines(lines, q)
 				tooltip = function(tt)
 					tt:AddLine("<" .. r.name .. ">", 1, 0.82, 0)
 					tt:AddLine(L.DUES_GUILD_TIP:format(tostring(r.members or "?"), paid, Coins(amount), Coins(r.copper), r.payers), 1, 1, 1, true)
+					-- (1.2.4's review: its average level, the table's tie-break after its members, as the
+					-- Census's hover says it; none, no line.)
+					local avg = ns.Data.AvgLevelText(ns.Data.Guild(r.name))
+					if avg then tt:AddDoubleLine(L.AVG_LEVEL, avg, 1, 0.82, 0, 1, 1, 1) end
 					-- (1.1.2's review: its members are the census's, the guild's last report.)
 					if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(tt, "count-other-guild-report") end
 				end }

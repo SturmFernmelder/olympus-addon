@@ -153,10 +153,12 @@ test("Squads: actual Realm tree inserts only own-guild hierarchy when that guild
 		c.Acts = { Gates = function() return nil end }
 		c.FormatNumber = tostring
 		c.Roster.online = {}
-		c.Data = { Dispute = function() return nil end, Summary = function() return { guilds = {
+		-- (1.2.4: the rest is Data's own: the Realm's guild headers and Recruiting carry their average
+		-- level, its order a tie-break, Data.AvgLevelText and Data.SortGuildCounts.)
+		c.Data = setmetatable({ Dispute = function() return nil end, Summary = function() return { guilds = {
 			{ name = w.guild, fresh = true, g = { leader = "Officer", total = 15, online = 0, mine = true } },
 			{ name = "Olympus III", fresh = true, g = { leader = "Foreign", total = 15, online = 0 } },
-		} } end }
+		} } end }, { __index = ns.Data })
 		assert(loadfile(ROOT .. "Olympus/Views.lua"))("Olympus", c)
 		local function Count(lines) local count = 0; for _, line in ipairs(lines) do if line.squadLeader then count = count + 1 end end return count end
 		eq(Count(c.Views.RealmLines()), 0)

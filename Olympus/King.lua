@@ -1441,12 +1441,16 @@ function King.InspectionLines()
 		local left = inspect.t + King.INSPECT_TIME + 10 - ns.Now()
 		if left > 0 then lines[#lines + 1] = { indent = 1, text = Gold(L.THRONE_INSPECT_RUNNING:format(math.ceil(left))) } end
 		lines[#lines + 1] = { indent = 1, text = L.THRONE_INSPECT_SUMMARY:format(reporters, total, pct) }
+		-- (1.2.4: as many inspected, the higher average level first, then the name: one order every time;
+		-- 1.2.4's review: its average level after its count, so that order is seen, both kept whole up
+		-- to half the row.)
 		local guilds = {}
 		for guild, g in pairs(byGuild) do guilds[#guilds + 1] = { name = guild, ok = g.ok, n = g.ok + g.bad } end
-		table.sort(guilds, function(a, b) return a.n > b.n end)
+		ns.Data.SortGuildCounts(guilds, "n")
+		local Tag = ns.Views and ns.Views.AvgTag or function() return "" end
 		for _, g in ipairs(guilds) do
-			lines[#lines + 1] = { indent = 2, text = Green("<" .. g.name .. ">"),
-				right = ("%d%%  (%d/%d)"):format(g.n > 0 and math.floor(g.ok * 100 / g.n + 0.5) or 0, g.ok, g.n) }
+			lines[#lines + 1] = { indent = 2, text = Green("<" .. g.name .. ">"), rightWide = true,
+				right = ("%d%%  (%d/%d)"):format(g.n > 0 and math.floor(g.ok * 100 / g.n + 0.5) or 0, g.ok, g.n) .. Tag(ns.Data.Guild(g.name)) }
 		end
 		if #names > 0 then
 			lines[#lines + 1] = { indent = 1, text = "|cffff4040" .. L.THRONE_VIOLATORS:format(#names) .. "|r" }

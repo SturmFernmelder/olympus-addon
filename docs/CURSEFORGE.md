@@ -83,7 +83,7 @@ versions before 1.1 just get the whisper, as before.
 ## What it does
 
 ### Census: the army at a glance
-- Every Olympus guild in one list: **Guild · Members · Online · Lord**. Columns sort by
+- Every Olympus guild in one list: **Guild · Members · Online · Avg lvl · Lord**. Columns sort by
   clicking, like the Guild window.
 - **Total soldiers** and **online now** across the whole realm.
 - **Where the army stands**: top zones ("Stormwind City 742") and totals per continent

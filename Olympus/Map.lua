@@ -27,12 +27,15 @@ local function PinEnter(self)
 	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
 	GameTooltip:AddLine(ns.Zones.NameForKey(self.key), 1, 0.82, 0)
 	GameTooltip:AddLine(L.PIN_TOTAL:format(ns.FormatNumber(self.count)), 1, 1, 1)
+	-- (1.2.4: as many there, the higher average level first, then the name: one order every time;
+	-- 1.2.4's review: its average level after its count, so that order is seen.)
 	local list = {}
-	for name, n in pairs(self.guilds or {}) do list[#list + 1] = { name, n } end
-	table.sort(list, function(a, b) return a[2] > b[2] end)
+	for name, n in pairs(self.guilds or {}) do list[#list + 1] = { name = name, n = n } end
+	ns.Data.SortGuildCounts(list, "n")
+	local Tag = ns.Views and ns.Views.AvgTag or function() return "" end
 	for i = 1, math.min(10, #list) do
 		-- (Guilds from other players' reports: plain text, whatever they carry, 0.9.2.)
-		GameTooltip:AddDoubleLine(ns.Codec.Plain(list[i][1]), ns.FormatNumber(list[i][2]), 0.8, 0.8, 0.8, 1, 1, 1)
+		GameTooltip:AddDoubleLine(ns.Codec.Plain(list[i].name), ns.FormatNumber(list[i].n) .. Tag(ns.Data.Guild(list[i].name)), 0.8, 0.8, 0.8, 1, 1, 1)
 	end
 	-- 1.1.2's review: why a zone's soldiers add up to less than the army online (the answer bank's).
 	if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(GameTooltip, "count-map-zones") end

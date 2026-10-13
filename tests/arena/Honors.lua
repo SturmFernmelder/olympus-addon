@@ -503,6 +503,23 @@ test("honours: the best guild is the highest average level; ties go to more memb
 	eq(Honors.GuildTop(nil), nil)
 end)
 
+-- 1.2.4: the average level the census carries is cut down to the tenth (Codec: math.floor(avgLevel
+-- * 10)), and every client shows it so (Data.AvgTenths). A guild master's own client has his guild's
+-- unrounded, from his roster: rounded here, his 47.96 was 48.0 on his client and 47.9 on every other,
+-- so his client alone could give him the owl, its title and its letter at a near tie.
+test("honours: 1.2.4 the best guild's average level is cut down to the tenth as the census carries it, our own unrounded one too", function()
+	local rows = {
+		{ guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 47.96 }, -- (ours, from our roster)
+		{ guild = "Olympus Alpha", leader = "Ann", members = 100, avgLevel = 47.9 },  -- (theirs, from their report)
+	}
+	local list = Honors.GuildRanking(rows)
+	eq(Keys(list, "guild"), "Olympus Alpha,Olympus Zeta", "a tie at 47.9: by the name, as on every client")
+	eq(list[2].avgLevel, 47.9)
+	eq(Honors.GuildTop({ { guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 59.99 },
+		{ guild = "Olympus Alpha", leader = "Ann", members = 101, avgLevel = 59.9 } }).guild, "Olympus Alpha", "59.9 each: the more members")
+	eq(Honors.GuildTop({ { guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 59.99 } }).avgLevel, 59.9, "never 60.0")
+end)
+
 test("honours: the best guild from the census as it is kept: one faction, the guilds the caller leaves out, and only fresh reports", function()
 	local now = 1790000000
 	local guilds = {
