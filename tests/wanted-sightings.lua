@@ -239,13 +239,18 @@ local function WithSightings(fn)
 			if cl.listeners.LOGIN then world:As(cl, cl.listeners.LOGIN) end
 			return cl
 		end
-		-- A Horde player put on a client's Wanted list (as its manager would).
+		-- Existing confirmed killers, with a prior cycle already claimed. A manual 0/0
+		-- listing alone is no longer wanted in 1.2.4; the observation tests need real wanted data.
 		function world:List(cl, name, guid)
 			local W = cl.W
 			local can = W.CanManage
 			W.CanManage = function() return true end
 			pcall(world.As, world, cl, W.AddTarget, name, guid)
 			W.CanManage = can
+			world:As(cl, function()
+				local t = cl.rdb.wanted.targets[W.Identity(nil, guid).key]
+				if t and not W.IsWanted(t) then t.base = { lifetimeKills = 1 }; W.Rebuild() end
+			end)
 		end
 		function world:Client(name, guid, o)
 			o = o or {}
@@ -378,6 +383,44 @@ local function MadeBackup(data)
 	local payload = ns.Backup.Write(data)
 	return ("OLYB1:%d:%s:%s"):format(#payload, ns.Backup.Sum(payload), payload)
 end
+
+test("wanted sightings 1.2.4: a 0-point 0-kill entry is never observed, sent, received or marked; voiding its only death hides both maps and cancels a queued sighting without losing the kill history", function()
+	WithSightings(function(world)
+		local o = world:Client("Aldric-Realm", "Player-1-AB000001", { role = "council", manager = true, wanted = false })
+		local king = world:Client("Kingly-Realm", "Player-1-AB0000F1", { role = "king", manager = true, wanted = false })
+		local prey = "Player-1-0A000099"
+		for _, cl in ipairs({ o, king }) do assert(world:As(cl, cl.W.AddTarget, "Prey-Realm", prey)) end
+		world:Lease(king); world:Choose(o, king)
+		local ok, why = world:See(o, "target", Horde("Prey-Realm", prey))
+		eq(ok, false); eq(why, "unlisted")
+		eq(#world:Pins(o), 0); eq(#world:Waiting(o), 0)
+		eq(next(world:As(o, o.W.PinFrames)), nil, "no target marker")
+		local wire = ("WS~S~1~Olympus II~0000000000000099~%d~1429~400~500~0~1.0a000099~Prey-Realm"):format(world.epoch)
+		ok, why = world:As(king, king.W.HandleSighting, "WHISPER", o.name, wire)
+		eq(ok, false); eq(why, "unlisted"); eq(#world:Pins(king), 0)
+		-- The member kills him: his claim stays on the ledger but does not make him wanted.
+		assert(world:As(o, o.W.CaptureCombatLog, 1, "PARTY_KILL", false, o.guid, o.name, 0, 0, prey, "Prey-Realm"))
+		eq(#world:As(o, o.W.Target, nil, prey).claims, 1)
+		eq(#world:As(o, o.W.Targets, "listed"), 0)
+		world:Advance(6)
+		local counted, death = world:As(o, o.W.CaptureCombatLog, 2, "PARTY_KILL", false, prey, "Prey-Realm", 0, 0, king.guid, king.name)
+		assert(counted, tostring(death))
+		assert(world:See(o, "target", Horde("Prey-Realm", prey)))
+		local f = assert(world:As(o, o.W.PinFrames)[prey])
+		eq(#world:Waiting(o), 1, "one queued sighting")
+		o.lib:Take()
+		assert(world:As(o, o.W.Correct, death.id, "incorrect death"))
+		eq(#world:Pins(o), 0); eq(world:As(o, o.W.PinFrames)[prey], nil)
+		eq(o.lib:Take(), "mini-, world-", "removed at once")
+		world:Pump(); eq(Dropped(world, "unlisted"), 1, "the queued sighting is not sent")
+		local t = world:As(o, o.W.Target, nil, prey)
+		eq(t.current, 0); eq(t.lifetimeKills, 0); eq(#t.claims, 1, "the kill history is preserved")
+		world:Advance(6)
+		assert(world:As(o, o.W.CaptureCombatLog, 3, "PARTY_KILL", false, prey, "Prey-Realm", 0, 0, king.guid, king.name))
+		eq(#world:Pins(o), 1, "the still-fresh private observation returns when he becomes wanted")
+		assert(world:As(o, o.W.PinFrames)[prey], "his marker returns with his new confirmed death")
+	end)
+end)
 
 test("wanted sightings (1.2.0): off until the member's own Yes, a line of its own on the privacy page that says what goes and to whom, asked until answered; its No, or /oly sightings off, stops collecting at once", function()
 	WithSightings(function(world)
@@ -534,7 +577,7 @@ test("wanted sightings: only a listed Horde player (1.2.0: never just a hostile 
 			eq(okCase, false, case[1]); eq(why, case[1], case[1])
 		end
 		-- A Horde player this client's own list names counts, flagged or not.
-		assert(world:As(o, o.W.AddTarget, "Listed-Realm", "Player-1-0A000018"))
+		world:List(o, "Listed-Realm", "Player-1-0A000018")
 		local okListed, listed = world:See(o, "target", Horde("Listed-Realm", "Player-1-0A000018", { pvp = false, hostile = false }))
 		assert(okListed, listed); eq(listed.listed, true)
 		-- A layer seen too long ago is not known (0).
@@ -833,7 +876,7 @@ test("wanted sightings: a pin per Horde player where he was seen last, on the mi
 		end)
 		world:Advance(6)
 		world:As(king, function() assert(king.W.CaptureCombatLog(2, "PARTY_KILL", false, GROM, "Grom-Realm", 0, 0, o2.guid, o2.name)) end)
-		eq(world:As(king, king.W.Target, "Grom-Realm").lifetimeKills, 2)
+		eq(world:As(king, king.W.Target, "Grom-Realm").lifetimeKills, 3, "one prior confirmed kill and two new ones")
 		world:Lease(king)
 		world:Choose(o, king); world:Choose(o2, king)
 		o.layer = { mapID = 1429, zoneUID = 4242, t = world.epoch }
@@ -846,12 +889,12 @@ test("wanted sightings: a pin per Horde player where he was seen last, on the mi
 		eq(f.world.badge.texture, king.W.ICON_PATHS[#king.W.ICON_PATHS], "the Most Wanted banner")
 		eq(f.world.size, king.W.SIGHT_BADGE); eq(f.world.round, true)
 		local tip = world:Hover(king, f.world.badge)
-		eq(tip, table.concat({ "Grom", L.WANTED_LIFETIME:format(2), L.WANTED_BOUNTY:format(2), L.WANTED_SIGHT_SEEN:format("0s", "Aldric"),
+		eq(tip, table.concat({ "Grom", L.WANTED_LIFETIME:format(3), L.WANTED_BOUNTY:format(2), L.WANTED_SIGHT_SEEN:format("0s", "Aldric"),
 			L.WANTED_SIGHT_YOUR_LAYER, L.WANTED_SIGHT_NEARBY }, "\n"))
 		eq(world:Hover(king, f.mini), tip, "the minimap's says the same")
 		local mine = world:As(o, o.W.PinFrames)[GROM]
-		-- (1.2.0: only the wanted are sighted, so he is on the observer's own list too, no kills counted there.)
-		eq(world:Hover(o, mine.world.badge), table.concat({ "Grom", L.WANTED_LIFETIME:format(0), L.WANTED_BOUNTY:format(0), L.WANTED_SIGHT_SEEN:format("0s", L.WANTED_SIGHT_BY_YOU),
+		-- His prior confirmed kill keeps him wanted with no open bounty on the observer's client.
+		eq(world:Hover(o, mine.world.badge), table.concat({ "Grom", L.WANTED_LIFETIME:format(1), L.WANTED_BOUNTY:format(0), L.WANTED_SIGHT_SEEN:format("0s", L.WANTED_SIGHT_BY_YOU),
 			L.WANTED_SIGHT_YOUR_LAYER, L.WANTED_SIGHT_NEARBY }, "\n"), "on the observer's own: his list, his own sighting")
 		-- Two minutes later another Olympian sees him elsewhere, on another layer: the one pin moves there.
 		world:Advance(120)
@@ -872,21 +915,20 @@ test("wanted sightings: a pin per Horde player where he was seen last, on the mi
 		-- on purpose: an entry a reviewer takes off is an abusive one, and nothing of his counts any
 		-- more, his kills neither (before, his history stayed counted).
 		assert(world:As(king, king.W.RemoveTarget, "Grom-Realm", GROM))
-		tip = world:Hover(king, f.world.badge)
-		eq(select(2, tip:gsub("\n", "\n")) + 1, 6, tip)
-		assert(tip:find(L.WANTED_LIFETIME:format(0), 1, true) and tip:find(L.WANTED_SIGHT_REMOVED, 1, true), tip)
-		assert(not tip:find(L.WANTED_BOUNTY:format(2), 1, true) and not tip:find(L.WANTED_SIGHT_UNLISTED, 1, true), "no bounty, and not 'never listed'")
+		eq(world:As(king, king.W.PinFrames)[GROM], nil, "a removed entry has no Wanted marker")
+		eq(#world:Pins(king), 0, "nor a visible sighting")
+		eq(king.lib:Take(), "mini-, world-", "removed from both maps at once")
 		-- An older sighting arriving late does not move it back.
 		local late = ("WS~S~1~Olympus II~00000000000000bb~%d~1429~900~900~0~1.0a000001~Grom-Realm"):format(world.epoch - 300)
 		world:As(king, king.W.HandleSighting, "WHISPER", o.name, late)
-		eq(world:Pins(king)[1].x, 200)
+		eq(#world:Pins(king), 0)
 		-- Fifteen minutes after the newest: gone, from both maps.
 		world:Advance(king.W.SIGHT_TTL - 60)
 		world:As(king, king.W.RefreshPins)
 		eq(king.lib:Take(), "", "still fresh")
 		world:Advance(1)
 		world:As(king, king.W.RefreshPins)
-		eq(king.lib:Take(), "mini-, world-")
+		eq(king.lib:Take(), "", "already hidden when taken off")
 		eq(#world:Pins(king), 0); eq(rawget(f.world.badge, "sighting"), nil)
 		-- 48 at most: the oldest go first.
 		local o3 = world:Client("Cedric-Realm", "Player-1-AB000003")

@@ -328,6 +328,15 @@ test("wanted: top-level page, stock Orc icon, authority gate, normalized identit
 		w.manager = false
 		local lines = W.Build()
 		local row
+		-- (1.2.4, changed on purpose, the author's report: a Horde player with 0 points and 0 kills is
+		-- not on the list, one listed by hand neither. Grom's row shows once he has killed a member;
+		-- his entry learns his GUID from it.)
+		for _, line in ipairs(lines) do assert(line.id ~= "wanted:" .. grom.key, "listed by hand, 0 points and 0 kills: not shown") end
+		w.olympian("Victim-Realm")
+		assert(w.kill(301, "Grom-Realm", "Player-1-ABCD0001", "Victim-Realm", "Player-1-AC000301"))
+		grom = assert(W.Target("Grom-Realm"))
+		eq(grom.lifetimeKills, 1)
+		lines = W.Build()
 		for _, line in ipairs(lines) do if line.id == "wanted:" .. grom.key then row = line end end
 		assert(row and row.onClick and row.tooltip, "the responsive Views row")
 		local tip = Tooltip(); row.tooltip(tip)
@@ -1458,7 +1467,7 @@ local function ScopeOf(c)
 	return (raw:gsub(".", function(ch) return ("%02x"):format(ch:byte()) end)):sub(1, 16)
 end
 
-test("wanted 1.2.3 (no list): an ordinary member's own killing blow on a Horde player nobody listed puts him on Most Wanted at once, the claim recorded, and the row goes to the Olympus channel by itself", function()
+test("wanted 1.2.3 (no list): an ordinary member's own killing blow on a Horde player nobody listed makes his entry at once, the claim recorded (1.2.4: on the Most Wanted list only once he kills a member), and the row goes to the Olympus channel by itself", function()
 	WithWanted(function(w, W, c)
 		w.manager = false -- an ordinary member: nobody listed anyone, and there is no store yet
 		eq(c.rdb.wanted, nil)
@@ -1468,9 +1477,11 @@ test("wanted 1.2.3 (no list): an ordinary member's own killing blow on a Horde p
 		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, horde)
 		assert(ok, tostring(e))
 		eq(e.action, "claim"); eq(e.kind, "PARTY_KILL"); eq(e.points, 0, "no bounty was open on him: a claim of nothing")
-		local t = assert(W.Target(nil, horde), "on Most Wanted by himself")
+		local t = assert(W.Target(nil, horde), "his entry, by himself")
 		eq(t.active, true); eq(t.name, "Fresh Horde-Realm"); eq(#t.claims, 1); eq(t.cycle, 2); eq(t.source, "PARTY_KILL")
 		eq(#W.Targets(true), 1)
+		-- (1.2.4, the author's report: 0 points and 0 kills, he killed none of ours: not wanted.)
+		eq(#W.Targets("listed"), 0)
 		-- The row on the channel at once: no Send, no review.
 		eq(#w.sent, 1); eq(w.sent[1].dist, "CHANNEL")
 		local wire = w.sent[1].text
@@ -1483,6 +1494,7 @@ test("wanted 1.2.3 (no list): an ordinary member's own killing blow on a Horde p
 		eq(#W.Targets(), 1); eq(#w.sent, 1)
 		-- A bounty open on him (a member's death) is paid by the next own killing blow.
 		w.advance(); assert(w.kill(3001, "Fresh Horde-Realm", horde, w.olympian("Victim-Realm"), "Player-1-AC000001"))
+		eq(#W.Targets("listed"), 1, "he killed a member: wanted")
 		w.advance(); local paid, claim = w.handlers.PARTY_KILL(w.units.player.guid, horde)
 		assert(paid); eq(claim.points, 1)
 		eq(W.Rankings().all[1].guid, w.units.player.guid); eq(W.Rankings().all[1].points, 1)
@@ -2070,7 +2082,9 @@ test("wanted 1.2.3: /oly wanted status opens a copy window with this session's c
 		eq(shown.title, ns.L.WANTED_STATUS_TITLE); eq(shown.opts.key, "wanted"); eq(shown.action.label, ns.L.WANTED_STATUS_REFRESH)
 		local text = shown.text
 		assert(text:find(ns.L.WANTED_STATUS_REFUSED:format("attacker 1, faction 1, shape 1"), 1, true), text)
-		assert(text:find(ns.L.WANTED_STATUS_STORE:format("RealmGroup", "Alliance", 2, 0, 2, 0, ns.L.WANTED_STATUS_YES), 1, true), text)
+		-- (1.2.4, changed on purpose: the store's line also counts the entries off the list, 0 points
+		-- and 0 kills: here none, both Horde players killed a member.)
+		assert(text:find(ns.L.WANTED_STATUS_STORE:format("RealmGroup", "Alliance", 2, 0, 0, 2, 0, ns.L.WANTED_STATUS_YES), 1, true), text)
 		assert(text:find(ns.L.WANTED_STATUS_KILL .. "  Status Horde-Realm  " .. ns.L.WANTED_STATUS_REFUSAL:format("attacker"), 1, true), text)
 		-- (1.2.3, changed on purpose: a death's line says the points it added, Daniel's bounty.)
 		assert(text:find(ns.L.WANTED_STATUS_DEATH .. "  Status Horde-Realm  " .. ns.L.WANTED_STATUS_BOUNTY:format(1), 1, true), text)
@@ -3351,7 +3365,9 @@ test("wanted 1.2.3 bounty: corpse camping counts once in 10 minutes (the deaths 
 			w.die(w.forever("Camper-Realm", camper))
 		end
 		local t = W.Target(nil, camper)
-		eq(t.current, 40, "a plain level-40 member, three times in 8 minutes: 40 (before: 3)"); eq(t.lifetimeKills, 3)
+		-- (1.2.4, changed on purpose, the author's report "3 kills, 18 points": the kills count as the
+		-- points do, one. Before: 3.)
+		eq(t.current, 40, "a plain level-40 member, three times in 8 minutes: 40 (before: 3)"); eq(t.lifetimeKills, 1)
 		eq(#t.victims, 3, "the two others stay, as provenance"); eq(t.victims[1].points, 40); eq(t.victims[2].points, 0); eq(t.victims[3].points, 0)
 		w.advance(W.Bounty.SCORE.REPEAT_GAP - 480)
 		w.die(w.forever("Camper-Realm", camper))
@@ -3374,6 +3390,164 @@ test("wanted 1.2.3 bounty: corpse camping counts once in 10 minutes (the deaths 
 		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, camper)
 		assert(ok, tostring(e)); eq(e.points, 120 + 120 + 100, "his level, the bounty, the revenge")
 		eq(W.Rankings().all[1].points, 200, "his Slayer's row holds 200")
+	end)
+end)
+
+-- 1.2.4, the author's report on the preview: "3 kills that seem to be of the same person, and only
+-- 18 points", and "many with 0 points, 0 kills: with 0 points and 0 kills he should not be on the
+-- Most Wanted list". The tab's row, its tooltip, his page, the API's rows and /oly wanted status.
+local function WantedRow(W, guid)
+	for _, line in ipairs((W.Build())) do if line.id == "wanted:g:" .. guid then return line end end
+	return nil
+end
+local function TipText(line)
+	local tip = Tooltip()
+	line.tooltip(tip)
+	return table.concat(tip.lines, "\n")
+end
+
+test("wanted 1.2.4 (the author's report: 3 kills of the same member, 18 points): the kills count as the points do: the same member killed again by the same Horde player within 10 minutes is one kill on the tab's row, its tooltip, his page and /oly wanted status, after a reload too; the deaths in between stay on his page, marked as not counted", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		w.units.player.level = 18
+		local camper = "Player-1-0D00E101"
+		w.hordePlayer("Camper-Realm", camper)
+		for i = 1, 3 do
+			if i > 1 then w.advance(240) end
+			w.die(w.forever("Camper-Realm", camper))
+		end
+		local t = W.Target(nil, camper)
+		eq(t.current, 18, "a plain level-18 member, three times in 8 minutes: 18")
+		eq(t.lifetimeKills, 1, "one kill, as the points count it (before: 3)")
+		local row = assert(WantedRow(W, camper), "on Most Wanted")
+		eq(row.right, ns.L.WANTED_ROW_COUNTS:format(18, 1))
+		local tip = TipText(row)
+		assert(tip:find(ns.L.WANTED_LIFETIME:format(1), 1, true), tip)
+		assert(tip:find(ns.L.WANTED_REPEATS:format(3, 1, 10), 1, true), tip)
+		local _, marked = tip:gsub(ns.L.WANTED_AGAIN_SHORT:gsub("%p", "%%%0"), "")
+		eq(marked, 2, "the two deaths in between, marked in the tooltip")
+		-- His page: his one kill, and the three deaths, the two in between said so.
+		assert(W.OpenTarget(nil, camper))
+		local page = W.Build()
+		local kills, counted, again = nil, 0, 0
+		for _, line in ipairs(page) do
+			if line.right == ns.L.WANTED_LIFETIME:format(1) then kills = line end
+			if line.text == c.DisplayName(c.me) and type(line.right) == "string" then
+				if line.right:find(ns.L.WANTED_VICTIM_POINTS:format(18, ""), 1, true) then counted = counted + 1 end
+				if line.right:find(ns.L.WANTED_VICTIM_AGAIN:format(""), 1, true) then
+					again = again + 1
+					local vt = Tooltip(); line.tooltip(vt)
+					assert(table.concat(vt.lines, "\n"):find(ns.L.WANTED_VICTIM_AGAIN_TIP:format(10), 1, true), "why it did not count")
+				end
+			end
+		end
+		assert(kills, "his page: one kill")
+		eq(counted, 1, "the death that counted, +18"); eq(again, 2, "the two in between: again, not counted")
+		W.Back()
+		-- /oly wanted status: his bounty row, and each death in between said so.
+		local status = W.StatusText()
+		assert(status:find(ns.L.WANTED_STATUS_BOUNTY_ROW:format(c.DisplayName("Camper-Realm"), 18, 1), 1, true), status)
+		local _, told = status:gsub(ns.L.WANTED_STATUS_AGAIN:format(10):gsub("%p", "%%%0"), "")
+		eq(told, 2, status)
+		-- After a reload: the same (the totals are built again from the saved rows).
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		t = W.Target(nil, camper)
+		eq(t.current, 18); eq(t.lifetimeKills, 1)
+		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(18, 1))
+		-- Ten minutes after the one that counted: a second kill, and its points.
+		w.advance(W.Bounty.SCORE.REPEAT_GAP - 480)
+		w.die(w.forever("Camper-Realm", camper))
+		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(36, 2))
+		-- Another member's deaths to him, heard: his own gap, the same rule.
+		local mate = w.participant("Mate-Realm", "Player-1-CC00E101")
+		for i, digest in ipairs({ "00000000000e1001", "00000000000e1002" }) do
+			w.advance(i == 1 and W.DEATH_WINDOW + 1 or 120)
+			assert(w.commHandlers.WK("CHANNEL", mate, BountyRow(c, W, { digest = digest, at = w.epoch,
+				horde = "1.0d00e101", own = "1.cc00e101", worth = "M~30~0", name = "Camper-Realm" })))
+		end
+		t = W.Target(nil, camper)
+		eq(t.current, 66, "his first death adds 30, the one two minutes later nothing")
+		eq(t.lifetimeKills, 3, "and one kill")
+		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(66, 3))
+		-- A bounty at its cap still counts the kill (the death counted; only the points stop).
+		W.Bounty.SCORE.BOUNTY_MAX = 66
+		w.advance(W.Bounty.SCORE.REPEAT_GAP)
+		w.die(w.forever("Camper-Realm", camper))
+		t = W.Target(nil, camper)
+		eq(t.current, 66); eq(t.lifetimeKills, 4, "a fourth kill, at the cap")
+	end)
+end)
+
+test("wanted 1.2.4 (the author's report: many on Most Wanted with 0 points and 0 kills): a Horde player a member killed who killed none of ours is not wanted: off the tab's list and /oly wanted status's count, while his entry keeps the claim and its Slayer's points; he is listed the moment he kills a member, and stays listed for his kill once his bounty is claimed", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		w.units.player.level = 40
+		local me = w.units.player.guid
+		local prey = "Player-1-0D00E201"
+		w.hordePlayer("Prey-Realm", prey)
+		w.units.target = { name = "Prey-Realm", guid = prey, faction = "Horde", level = 30 }
+		local ok, e = w.handlers.PARTY_KILL(me, prey)
+		w.units.target = nil
+		assert(ok, tostring(e)); eq(e.action, "claim"); eq(e.points, 60, "twice his level, for the Slayer")
+		local t = assert(W.Target(nil, prey), "his entry holds the claim")
+		eq(t.active, true); eq(#t.claims, 1); eq(t.current, 0); eq(t.lifetimeKills, 0)
+		eq(W.Rankings().all[1].points, 60, "the kill counts on the Slayers board")
+		eq(#w.wire("WK~2~"), 1, "and goes to every member")
+		-- Another member's killing blow on another Horde player, heard: the same.
+		local other = w.participant("Hunter-Realm", "Player-1-CC00E201")
+		w.hordePlayer("Other Prey-Realm", "Player-1-0D00E202")
+		assert(w.commHandlers.WK("CHANNEL", other, BountyRow(c, W, { digest = "00000000000e2001",
+			at = w.epoch, kind = "P", horde = "1.0d00e202", own = "1.cc00e201", worth = "M~50~25", name = "Other Prey-Realm" })))
+		eq(W.Target(nil, "Player-1-0D00E202").claims[1].points, 50)
+		eq(#W.Rankings().all, 2, "both Slayers")
+		-- Neither is on Most Wanted: 0 points and 0 kills.
+		eq(WantedRow(W, prey), nil, "not wanted: he killed none of ours")
+		eq(WantedRow(W, "Player-1-0D00E202"), nil)
+		local empty = false
+		for _, line in ipairs((W.Build())) do if line.text and line.text:find(ns.L.WANTED_EMPTY, 1, true) then empty = true end end
+		assert(empty, "the list says nobody is wanted yet")
+		local status = W.StatusText()
+		assert(status:find(ns.L.WANTED_STATUS_STORE:format("RealmGroup", "Alliance", 0, 2, 0, 2, 2, ns.L.WANTED_STATUS_YES), 1, true), status)
+		assert(status:find(ns.L.WANTED_STATUS_NONE, 1, true), "no bounty")
+		-- He kills a member (this client's player): wanted at once, for his bounty and his kill.
+		w.advance(W.DEATH_WINDOW + 1)
+		w.die(w.forever("Prey-Realm", prey))
+		eq(WantedRow(W, prey).right, ns.L.WANTED_ROW_COUNTS:format(40, 1))
+		status = W.StatusText()
+		assert(status:find(ns.L.WANTED_STATUS_STORE:format("RealmGroup", "Alliance", 1, 1, 0, 3, 2, ns.L.WANTED_STATUS_YES), 1, true), status)
+		-- Killed for his bounty: a new cycle at 0 points, and still wanted for the member he killed.
+		w.advance(W.DEATH_WINDOW + 1)
+		w.units.target = { name = "Prey-Realm", guid = prey, faction = "Horde", level = 30 }
+		ok, e = w.handlers.PARTY_KILL(me, prey)
+		w.units.target = nil
+		assert(ok, tostring(e)); eq(e.points, 40, "his bounty alone: this member was paid his level within the hour")
+		eq(W.Target(nil, prey).current, 0)
+		eq(WantedRow(W, prey).right, ns.L.WANTED_ROW_COUNTS:format(0, 1), "0 points and 1 kill: listed")
+		-- After a reload: the same list.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		assert(WantedRow(W, prey), "still listed")
+		eq(WantedRow(W, "Player-1-0D00E202"), nil, "still not")
+		eq(#W.Rankings().all, 2)
+	end)
+end)
+
+-- (1.2.4, changed on purpose: an entry a reviewer's void left with nothing, and one listed by hand
+-- before 1.2.3 that never counted anything, are 0 points and 0 kills: not on the list either.)
+test("wanted 1.2.4: an entry with nothing counted is not on Most Wanted: one listed by hand that never counted anything, or one whose only death a reviewer voided", function()
+	WithWanted(function(w, W, c)
+		assert(w.add("Hand-Realm", "Player-1-0D00E301"))
+		eq(W.Target(nil, "Player-1-0D00E301").active, true)
+		eq(WantedRow(W, "Player-1-0D00E301"), nil, "listed by hand, nothing counted: not wanted")
+		local sender = w.participant("Voided-Realm", "Player-1-CC00E301")
+		assert(w.commHandlers.WK("CHANNEL", sender, BountyRow(c, W, { digest = "00000000000e3001", at = w.epoch,
+			horde = "1.0d00e302", own = "1.cc00e301", worth = "M~20~0", name = "Voided Horde-Realm" })))
+		eq(WantedRow(W, "Player-1-0D00E302").right, ns.L.WANTED_ROW_COUNTS:format(20, 1))
+		local king = w.authority("Kingly-Realm", "king")
+		assert(w.commHandlers.WV("CHANNEL", king, ("WV~V~1~%s~%s~00000000000e3001~%d"):format(ScopeOf(c), sender, w.epoch)))
+		eq(W.Target(nil, "Player-1-0D00E302").current, 0, "voided")
+		eq(WantedRow(W, "Player-1-0D00E302"), nil, "nothing counted any more: off the list")
 	end)
 end)
 
@@ -4600,6 +4774,67 @@ test("wanted 1.2.4 repair: the Slayer letter says what the claim pays once its n
 		eq(ranked[1].name, c.me); eq(ranked[1].points, 160, "as the Slayers ranking says")
 		eq(W.Bounty.LetterOf(key).points, ranked[1].points)
 		eq(#c.rdb.wanted.slayerLetters, 0, "made once, gone")
+	end)
+end)
+
+-- (1.2.4, the author's report "3 kills, 18 points": the letter named every death of the cycle as a
+-- kill, the corpse-camping gap's too.)
+test("wanted 1.2.4 (the author's report: 3 kills, 18 points): the Slayer letter's kills count as the bounty does: a Horde player who killed one member three times in 8 minutes had killed 1 of ours, his bounty 18", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		w.units.player.level = 18
+		local me = w.units.player.guid
+		local Fire = Timers(c)
+		local camper = "Player-1-0D00E401"
+		w.hordePlayer("Letter Camper-Realm", camper)
+		for i = 1, 3 do
+			if i > 1 then w.advance(240) end
+			w.die(w.forever("Letter Camper-Realm", camper))
+		end
+		w.dead = false
+		eq(W.Target(nil, camper).current, 18); eq(W.Target(nil, camper).lifetimeKills, 1)
+		w.advance(60)
+		w.units.target = { name = "Letter Camper-Realm", guid = camper, faction = "Horde", level = 20 }
+		local ok, e = w.handlers.PARTY_KILL(me, camper)
+		w.units.target = nil
+		assert(ok, tostring(e)); eq(e.points, 40 + 18 + W.Bounty.SCORE.REVENGE, "his level, his bounty, the revenge")
+		w.advance(W.Bounty.LETTER_SETTLE)
+		while Fire("wanted notices") do end
+		eq(#w.letters, 1)
+		eq(W.LetterText(w.letters[1]), ns.L.WANTED_LETTER:format(c.DisplayName("Letter Camper-Realm"), "20", 1, 18,
+			ns.L.WANTED_LETTER_LEVEL:format(40) .. ns.L.WANTED_LETTER_REVENGE:format(W.Bounty.SCORE.REVENGE), 158), "1 of ours (before: 3)")
+	end)
+end)
+
+test("wanted 1.2.4 counted kills: repeated deaths trimmed from the victim history remain uncounted in the cycle summary and Slayer letter, across a checkpoint and reload", function()
+	WithWanted(function(w, W, c)
+		w.manager = false
+		w.units.player.level = 18
+		W.MAX_VICTIMS, W.MAX_EVIDENCE = 2, 3
+		local camper = "Player-1-0D00E402"
+		w.hordePlayer("Overflow Camper-Realm", camper)
+		for i = 1, 4 do
+			if i > 1 then w.advance(120) end
+			w.die(w.forever("Overflow Camper-Realm", camper))
+		end
+		local t = W.Target(nil, camper)
+		eq(t.current, 18); eq(t.lifetimeKills, 1)
+		eq(t.victimOverflow, 2); eq(t.victimKillOverflow, 1, "one counted and one repeat trimmed")
+		eq(W.Stats().checkpointed, 1, "the earlier deaths folded")
+		assert(TipText(assert(WantedRow(W, camper))):find(ns.L.WANTED_REPEATS:format(4, 1, 10), 1, true), "the whole cycle, including its overflow")
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; W.MAX_VICTIMS = 2; assert(W.Load())
+		t = W.Target(nil, camper)
+		eq(t.victimOverflow, 2); eq(t.victimKillOverflow, 1)
+		w.advance(W.DEATH_WINDOW + 1)
+		w.units.target = { name = "Overflow Camper-Realm", guid = camper, faction = "Horde", level = 20 }
+		local ok, e = w.handlers.PARTY_KILL(w.units.player.guid, camper)
+		assert(ok, tostring(e)); eq(e.points, 158)
+		local claim = W.Target(nil, camper).claims[1]
+		eq(claim.overflow, 2); eq(claim.killOverflow, 1)
+		local letter = W.Bounty.LetterOf(W.Bounty.LetterKey(e, claim, "Overflow Camper-Realm"))
+		eq(letter.kills, 1, "overflow repeats must not become kills in the letter")
+		eq(W.Target(nil, camper).victimKillOverflow, 0, "the next cycle starts empty")
 	end)
 end)
 

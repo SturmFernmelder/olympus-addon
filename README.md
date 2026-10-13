@@ -1636,7 +1636,12 @@ master (or the Head, the King or the author), who keeps that guild full and answ
 
 **Wanted fills itself (1.2.3).** Nobody lists a Horde player first and no name is typed: a Horde
 player who kills an Olympus member, or is killed by one, enters Wanted by himself, and the kill or
-death counts at once. Your own death is read from the game's death recap (its killing blow: a
+death counts at once. The Most Wanted list (1.2.4) shows only the wanted, a Horde player with a
+bounty open or a kill of ours: one a member killed who killed none of us (0 points and 0 kills)
+keeps his entry, and its claim pays the Slayer as before, but he is not on the list until he kills
+a member. The same rule applies to sightings and their map markers: an entry with 0 points and
+0 kills is not observed or sent as wanted, and losing its last counted death hides its markers
+at once. Your own death is read from the game's death recap (its killing blow: a
 recent hostile player's damage), your own killing blow from the game's kill event (PARTY_KILL:
 yours only, never a party member's or a pet's). The Horde faction is proven by your client, never
 guessed: a Horde unit it sees (or saw within a minute), else the game's lookup of the GUID (a race
@@ -1668,7 +1673,8 @@ not bring it back. There is no review and no Send evidence any more.
 **The bounty (1.2.3).** A death adds to the Horde player's bounty the victim's office and his
 level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any
 other office 10, a member 0; one office only, the highest. The same member killed by the same
-Horde player counts once in 10 minutes (corpse camping), and one bounty holds 2000 points at most.
+Horde player counts once in 10 minutes (corpse camping), its kills too (1.2.4): a death in between
+adds no points and no kill, and stays on his page marked so. One bounty holds 2000 points at most.
 A killing blow pays twice the Horde player's level and his whole bounty, which then starts again
 at 0; a kill with no bounty open pays the level part alone. A member who kills the very Horde
 player who killed him within 14 days gets 100 more, once for each such kill. One member's kills of

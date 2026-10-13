@@ -307,6 +307,27 @@ test("1.2.4 the API: a granted addon gets copies of exactly what the pages show:
 	W3.NoErrors(w)
 end)
 
+-- (1.2.4, the author's report: "many with 0 points, 0 kills on the Most Wanted list": they are not
+-- on it any more, and the API reads the tab's list.)
+test("1.2.4 the API: GetWanted lists what the Wanted tab lists: a Horde player with 0 points and 0 kills (one a member killed who killed none of ours) is left out, though his entry and its claim stay", function()
+	local w, cast, viewer, API = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	local at = w.clock - 300
+	viewer.rdb.wanted.targets["g:Player-4002-0000F00D"] = { key = "g:Player-4002-0000F00D", name = "Prey Only-Emberfall",
+		guid = "Player-4002-0000F00D", active = true, addedAt = at, source = "PARTY_KILL", current = 0, lifetimeKills = 0, cycle = 2,
+		openSince = at, victimOverflow = 0, victims = {},
+		claims = { { id = "c2", slayer = N.fighterA, points = 50, cycle = 1, at = at, evidence = "PARTY_KILL", level = 25 } } }
+	eq(#w:As(viewer, viewer.ns.Wanted.Targets, true), 2, "both entries on the ledger")
+	local rows = Do(w, viewer, api, "GetWanted")
+	eq(#rows, 1, "only the one wanted"); eq(rows[1].guid, HORDE.guid)
+	local page = w:As(viewer, viewer.ns.Wanted.Targets, "listed")
+	eq(#page, 1); eq(page[1].guid, rows[1].guid, "the tab's list")
+	W3.NoErrors(w)
+end)
+
 test("1.2.4 the API: every table is the addon's own copy: changing it changes nothing of Olympus's, nor what the next call or another addon gets", function()
 	local w, cast, viewer, API = Setup()
 	local O, C = viewer.OlympusAPI, viewer.Consent

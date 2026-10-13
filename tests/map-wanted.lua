@@ -89,6 +89,9 @@ test("Wanted map option: hides and restores actual sightings without changing mi
 		-- (Only the wanted are sighted: the target is on this client's list.)
 		c.Wanted.CanManage = function() return true end
 		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
+		-- A prior confirmed kill whose bounty was already claimed, not a manual 0/0 listing.
+		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
+		c.Wanted.Rebuild()
 		c.db.wantedSightings = true -- (1.2.0: off until the member's Yes)
 		assert(c.Wanted.ObserveUnit("target"))
 		local f = assert(c.Wanted.PinFrames()[guid])
