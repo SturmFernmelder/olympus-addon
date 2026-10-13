@@ -29,7 +29,9 @@ local function Master(name, guild)
 	if ns.WatchChat and ns.WatchChat.Barred and ns.WatchChat.Barred("powers", name) then return false end
 	if ns.Moderation and ns.Moderation.Hides and ns.Moderation.Hides(name, guild) then return false end
 	local rank, source = ns.Data.AuthorizedRank(name, guild)
-	if guild == GetGuildInfo("player") then return Fresh() and rank == 0 and source == "roster" end
+	if guild == GetGuildInfo("player") then
+		return Fresh() and rank == 0 and source == "roster" and (not Same(name, ns.me) or select(3, GetGuildInfo("player")) == 0)
+	end
 	return rank == 0 and (source == "signed" or source == "pinned")
 end
 local function Destination(name)
@@ -203,6 +205,9 @@ function Carry.Revoke()
 	Changed(); return true
 end
 function Carry.Handle(dist, sender, text)
+	if type(text) == "string" and text:sub(1, 5) == "XC~3~" then
+		return ns.CarryMerger and ns.CarryMerger.Handle(dist, sender, text) or false
+	end
 	if type(text) == "string" and text:sub(1, 5) == "XC~2~" then
 		return ns.CarryHistory and ns.CarryHistory.Handle(dist, sender, text) or false
 	end
@@ -293,6 +298,9 @@ function Carry.Lines()
 	if ns.CarryHistory and ns.CarryHistory.Lines then
 		for _, line in ipairs(ns.CarryHistory.Lines()) do lines[#lines + 1] = line end
 	end
+	if ns.CarryMerger and ns.CarryMerger.Lines then
+		for _, line in ipairs(ns.CarryMerger.Lines()) do lines[#lines + 1] = line end
+	end
 	local s = Store(); local d = s and s.draft
 	if Source(d) then
 		lines[#lines + 1] = { text = L.CARRY_READY:format(d.sourceGuild, d.guild, ns.DisplayName(d.to), #d.rows) }
@@ -326,7 +334,10 @@ end
 function Carry.Slash(rest)
 	local cmd, tail = (rest or ""):match("^(%S*)%s*(.-)$")
 	local ok, why
-	if cmd == "history" then
+	if cmd == "merger" then
+		if ns.CarryMerger and ns.CarryMerger.Slash then ns.CarryMerger.Slash(tail) end
+		return
+	elseif cmd == "history" then
 		local action, name = tail:match("^(%S*)%s*(.-)$")
 		if action == "collect" then ok, why = ns.CarryHistory and ns.CarryHistory.Collect(name)
 		elseif action == "key" then ok, why = ns.CarryHistory and ns.CarryHistory.RequestKey(name)

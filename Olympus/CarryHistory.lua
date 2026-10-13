@@ -21,7 +21,9 @@ local function Name(s)
 	return type(full) == "string" and #full <= 72 and ns.RealmOf(full) and full or nil
 end
 local function Same(a, b) return Name(a) and Name(b) and ns.Fold(Name(a)) == ns.Fold(Name(b)) end
-local function Guild(s) return type(s) == "string" and #s <= 72 and s ~= "" and not s:find("[|~^%c]") and ns.IsFederation(s) end
+local function GuildShape(s) return type(s) == "string" and #s <= 72 and s ~= "" and not s:find("[|~^%c]") end
+local function Guild(s) return GuildShape(s) and ns.IsFederation(s) end
+H.GuildShape = GuildShape
 local function Scope() return tostring(ns.faction) .. ":" .. tostring(ns.group or ns.GroupOf(ns.realm)) end
 local function Count(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
 local function Preview() return ns.ViewAs and ns.ViewAs.Previewing and ns.ViewAs.Previewing() or ns.King and ns.King.Preview and ns.King.Preview() end
@@ -36,7 +38,9 @@ local function OwnRole(kind, subject, guild)
 	if kind == "D" then return ns.IsTreasurer and ns.IsTreasurer(ns.me, GetGuildInfo("player")) == true end
 	if guild ~= GetGuildInfo("player") then return false end
 	local rank = ns.Roster.RankOf(ns.me)
-	return type(rank) == "number" and (kind == "W" and rank == 0 or kind == "L" and rank <= ns.CAPTAIN_RANK)
+	local native = select(3, GetGuildInfo("player"))
+	return type(rank) == "number" and type(native) == "number"
+		and (kind == "W" and rank == 0 and native == 0 or kind == "L" and rank <= ns.CAPTAIN_RANK and native <= ns.CAPTAIN_RANK)
 end
 local function Store()
 	if type(ns.db) ~= "table" or not Name(ns.me) then return nil end
@@ -98,8 +102,10 @@ local function PayloadFields(text)
 	if n > H.FIELDS or H.Payload(out) ~= text then return nil end
 	return out
 end
+H.ReadPayload = PayloadFields
 function H.Text(r)
-	if type(r) ~= "table" or not KINDS[r.kind] or not Name(r.issuer) or not Name(r.subject) or not Guild(r.guild)
+	-- Archived guild labels are historical metadata, not present membership/authority.
+	if type(r) ~= "table" or not KINDS[r.kind] or not Name(r.issuer) or not Name(r.subject) or not GuildShape(r.guild)
 		or type(r.guid) ~= "string" or #r.guid < 1 or #r.guid > 64 or r.guid:find("[^%w%-]")
 		or r.scope ~= Scope() or type(r.id) ~= "string" or #r.id < 1 or #r.id > 160 or r.id:find("[|%c]")
 		or not Whole(r.at) or not Whole(r.signedAt) or r.at > r.signedAt + H.SKEW or not Whole(r.seq) or r.seq < 1
@@ -289,6 +295,69 @@ function H.Archive()
 	table.sort(out, function(a, b) return a.text < b.text end)
 	return out
 end
+-- Read-only identity seam: no forwarded capsule can write this cache. Consumers receive a
+-- copy of public identity evidence, never the account signing seed or active role authority.
+function H.KeyPin(name)
+	name = Name(name); local s = Store()
+	local pin = name and s and s.keys[ns.Fold(name)]
+	return type(pin) == "table" and pin.direct == true and Copy(pin) or nil
+end
+function H.FreezeOwnSource(guild, done)
+	if guild ~= GetGuildInfo("player") or not OwnRole("W", ns.me, guild) then return false, "source-master" end
+	if not ns.Debts or ns.Debts.missing or not ns.Debts.MyKey then return false, "signing-unavailable" end
+	local s, actor, scope = Store(), ns.me, Scope()
+	if not s then return false, "storage" end
+	local list, seen, witnesses = {}, {}, {}
+	for _, c in pairs(s.originals) do
+		if type(c) ~= "table" then return false, "invalid-original" end
+		if c.pending then return false, "original-signing-pending" end
+		local r = c.text and H.Parse(c.text)
+		if not r then return false, "invalid-original" end
+		if r and Same(r.issuer, actor) and r.guild == guild then
+			list[#list + 1] = Copy(c); seen[r.kind == "W" and r.fields.originalId or r.id] = true
+		end
+	end
+	for _, entry in ipairs(ns.Loot and ns.Loot.Notes and ns.Loot.Notes() or {}) do
+		if type(entry) ~= "table" then return false, "invalid-note" end
+		local n = entry.n
+		if type(n) == "table" and n.to and Name(n.to) and not seen[entry.key] then
+			witnesses[#witnesses + 1] = { subject = Name(n.to), fields = { sourceKind = "L", originalWriter = n.writer or "?",
+				originalAt = n.t or 0, originalId = entry.key, originalGuild = guild, words = n.text or "", via = n.via or "" } }
+		end
+	end
+	if #list + #witnesses > H.RECORDS then return false, "snapshot-retention" end
+	local i = 0
+	local function CurrentSource()
+		return Same(actor, ns.me) and scope == Scope() and guild == GetGuildInfo("player") and OwnRole("W", ns.me, guild)
+	end
+	local function Finish()
+		if not CurrentSource() then if done then done(nil, "source-changed") end; return end
+		table.sort(list, function(a, b) return a.text < b.text end)
+		local queued = Run(function()
+			local _, own = ns.Debts.MyKey()
+			local guid = UnitGUID and UnitGUID("player")
+			if not own or not guid or issecretvalue and issecretvalue(guid) then return nil end
+			for _, c in ipairs(list) do
+				local r, pk, sig = Capsule(c)
+				if not r or r.guid ~= guid or pk ~= own or not ns.Ed25519.Verify(pk, c.text, sig) then return nil end
+			end
+			return true
+		end, function(ok, why)
+			if done then done(ok and CurrentSource() and list or nil, why or (not ok and "original-signature" or nil)) end
+		end)
+		if not queued and done then done(nil, "crypto-busy") end
+	end
+	local function Next()
+		if not CurrentSource() then if done then done(nil, "source-changed") end; return end
+		i = i + 1; local entry = witnesses[i]
+		if not entry then Finish(); return end
+		local queued, why = H.CaptureWitness(entry.subject, guild, entry.fields, function(c, problem)
+			if c then list[#list + 1] = c; Next() elseif done then done(nil, problem or "witness-signing") end
+		end)
+		if not queued and done then done(nil, why) end
+	end
+	Next(); return true
+end
 
 -- XC version 2 shares Carry's one registration. A page is ONE immutable declaration,
 -- no more than 34 small packets; the next page waits for its exact cursor/digest ACK.
@@ -310,7 +379,9 @@ local function Master(name, guild)
 	if ns.Moderation and ns.Moderation.Hides and ns.Moderation.Hides(name, guild) then return false end
 	local rank, source
 	if ns.Data and ns.Data.AuthorizedRank then rank, source = ns.Data.AuthorizedRank(name, guild) end
-	if guild == GetGuildInfo("player") then return Fresh() and rank == 0 and source == "roster" end
+	if guild == GetGuildInfo("player") then
+		return Fresh() and rank == 0 and source == "roster" and (not Same(name, ns.me) or select(3, GetGuildInfo("player")) == 0)
+	end
 	return rank == 0 and (source == "signed" or source == "pinned")
 end
 local function Destination(name)

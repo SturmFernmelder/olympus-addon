@@ -36,7 +36,12 @@ local function Client(name, guild)
 		w.dialogs[#w.dialogs + 1] = { which = which, data = data }; return true
 	end }
 	n.Acts = { Pardoned = function() return w.pardoned == true end }
-	local env = setmetatable({ StaticPopupDialogs = {}, GetGuildInfo = function() return w.guild end,
+	-- The native API returns the player's current rank independently of a cached roster.
+	-- Existing scenarios change both together; nativeRank models the real demotion-before-
+	-- roster-refresh window without weakening the complete-snapshot assertions.
+	local env = setmetatable({ StaticPopupDialogs = {}, GetGuildInfo = function()
+		return w.guild, nil, w.nativeRank ~= nil and w.nativeRank or w.members[base.Fold(name)]
+	end,
 		IsInGuild = function() return w.guild ~= nil end, GetTime = function() return w.now end,
 		GetServerTime = function() return w.now end, GetLocale = function() return "enUS" end,
 		GetChannelName = function() return 0 end, JoinChannelByName = function() end,
@@ -162,6 +167,15 @@ test("carry: guild and role changes invalidate consent, queued batches and impor
 	eq(#b.ns.Carry.List(), 1); b.member(b.name, 1); eq(#b.ns.Carry.List(), 0)
 	b.member("Replacement-Realm", 0); b.ns.me = "Replacement-Realm"; eq(#b.ns.Carry.List(), 0, "saved quote copy belongs to its exact consenting GM")
 	b.ns.me = b.name; b.member(b.name, 0); b.snapshotGuild = "Olympus II"; eq(#b.ns.Carry.List(), 0, "old roster is not authority after moving")
+end)
+
+test("carry: native player demotion overrides a still-fresh rank-zero roster before accepting private history", function()
+	local m, g = Setup(); local _, key = Offered(m, g)
+	eq(g.ns.Roster.RankOf(g.name), 0); assert(g.ns.Roster.Fresh())
+	g.nativeRank = 1
+	eq(g.ns.Carry.Accept(key), false, "live rank already changed while complete cached roster still says GM")
+	g.nativeRank = nil
+	assert(g.ns.Carry.Accept(key))
 end)
 
 test("carry: revocation before completion and conflicting duplicate offer/fragment close the transfer", function()
