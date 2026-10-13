@@ -7748,12 +7748,15 @@ end)
 
 test("Throne: the King's map button fits its label, says whether he is shown, and changes at once", function()
 	WithUI(function()
-		local savedGuild, savedSend, savedPos, savedMe = GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, ns.me
+		local savedGuild, savedSend, savedPos, savedMap, savedMe = GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, C_Map.GetBestMapForUnit, ns.me
 		local ok, err = pcall(function()
 			ns.db.throneLocation = nil
 			GetGuildInfo = function() return "Olympus", "King", 0 end
 			ns.me = "Asmongold Asmongler-Realm"
 			ns.Comm.Send = function() end
+			-- A genuinely publishable map needs both the real API's map id and coordinates.
+			-- The old UI-only fixture supplied coordinates without a map, while the sender refused it.
+			C_Map.GetBestMapForUnit = function() return 1453 end
 			C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end
 			local w, UI = ForeverWorld(true)
 			CommunitiesFrame:Show(); w.buttons[1]:Click()
@@ -7793,7 +7796,7 @@ test("Throne: the King's map button fits its label, says whether he is shown, an
 			b:Click()
 			eq(ns.db.throneLocation, false)
 		end)
-		GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, ns.me = savedGuild, savedSend, savedPos, savedMe
+		GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, C_Map.GetBestMapForUnit, ns.me = savedGuild, savedSend, savedPos, savedMap, savedMe
 		ns.db.throneLocation = nil
 		ns.King.Reset()
 		if not ok then error(err, 0) end

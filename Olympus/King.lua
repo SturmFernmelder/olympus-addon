@@ -1124,16 +1124,36 @@ local SHOW_FLAG = HBD_PINS_WORLDMAP_SHOW_CONTINENT or 2
 local crowns                 -- { world, mini } pin frames, made on first use
 local crownAt                -- where they are drawn now (drawn again only when he moved)
 
-function King.SharingLocation() return ns.db.throneLocation == true end
+-- Configured opt-in: also used by the independent layer/match/lives policy. It must not be
+-- rewritten merely because this frame has no publishable position (an instance or loading map).
+function King.SharingLocation() return ns.db ~= nil and ns.db.throneLocation == true end
+
+local function LocationPosition()
+	if IsInInstance and IsInInstance() then return nil, "instance" end
+	local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+	if type(mapID) ~= "number" or mapID <= 0 or mapID >= math.huge or mapID ~= math.floor(mapID) then return nil, "position" end
+	local pos = C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
+	if not pos or type(pos.GetXY) ~= "function" then return nil, "position" end
+	local x, y = pos:GetXY()
+	if type(x) ~= "number" or type(y) ~= "number" or x ~= x or y ~= y
+		or x < 0 or x > 1 or y < 0 or y > 1 or (x == 0 and y == 0) then return nil, "position" end
+	return mapID, x, y
+end
+
+-- Effective status uses exactly the sender's current position gate, not just its saved consent.
+-- No role, consent or independent game-live setting is changed by asking this read-only status.
+function King.EffectiveLocation()
+	if not King.SharingLocation() then return false, "off" end
+	if not King.IsKing() then return false, "role" end
+	local mapID, why = LocationPosition()
+	if not mapID then return false, why end
+	return true
+end
 
 local function SendLocation(force)
 	if not King.SharingLocation() or not King.IsKing() then return end
-	if IsInInstance and IsInInstance() then return end
-	local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-	local pos = mapID and C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
-	if not pos then return end
-	local x, y = pos:GetXY()
-	if not x or (x == 0 and y == 0) then return end
+	local mapID, x, y = LocationPosition()
+	if not mapID then return end
 	local now = ns.Now()
 	local moved = lastLocation.mapID ~= mapID or math.abs((lastLocation.x or 0) - x) > 0.003 or math.abs((lastLocation.y or 0) - y) > 0.003
 	if not force and (now - lastLocation.t < King.LOCATION_EVERY or (not moved and now - lastLocation.t < King.LOCATION_STILL)) then return end
@@ -1692,7 +1712,8 @@ function King.Build(s)
 	if not home then table.insert(lines, 1, Line("< " .. L.THRONE_ROOM, INK, { onClick = Go("home"), gapAfter = true })) end
 	-- While the army sees him on the map, the page says so on top, whatever it shows.
 	if King.SharingLocation() and King.IsKing() then
-		table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. L.THRONE_LOCATION_LIVE, TITLE, { gapAfter = true }))
+		local status = King.EffectiveLocation() and L.THRONE_LOCATION_LIVE or L.THRONE_LOCATION_PAUSED
+		table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. status, TITLE, { gapAfter = true }))
 	end
 	local steward = King.IsSteward()
 	if steward then table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. L.STEWARD_ACTING, TITLE, { gapAfter = true })) end
