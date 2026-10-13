@@ -34,6 +34,26 @@ test("1.2.4 letter content: both languages describe verified records and retain 
 	end
 end)
 
+test("1.2.4 Legate wording: current duty and letter replace the old council century rules in both locales", function()
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local c = Language(locale)
+		local L = c.L
+		assert(L.NOMINEES_MAIN_TITLE:find("Legates", 1, true))
+		assert(L.NOMINEES_MAIN_HINT:find("25", 1, true), "manual appointment capacity is visible")
+		assert(L.NOMINEES_LEGATE_DUTY:find("39", 1, true) and L.NOMINEES_LEGATE_DUTY:find("40", 1, true))
+		local phrases = locale == "enUS" and { "optional", "offline", "events, raids and wars" }
+			or { "opcionais", "offline", "eventos, raides e guerras" }
+		for _, phrase in ipairs(phrases) do assert(L.NOMINEES_LEGATE_DUTY:find(phrase, 1, true), phrase) end
+		local notice = L.NOMINEES_LEGATE_APPOINTED:format("Issuer", "Olympus", L.NOMINEES_LEGATE_DUTY)
+		assert(notice:find("Issuer", 1, true) and notice:find("Olympus", 1, true) and notice:find("39", 1, true))
+		eq(L.SQUAD_TOTAL:format(40), locale == "enUS" and "40/40 members" or "40/40 membros")
+		assert(not L.NOMINEES_NOTE:find("30", 1, true), "offline duration is no longer appointment revocation")
+		assert(not L.BORDERS_WHO_BRONZE:lower():find("legate", 1, true), "Legate office does not award the correspondent's border")
+		assert(L.LETTER_1_2_4:find("Legates", 1, true))
+		assert(L.LETTER_1_2_4:find(locale == "enUS" and "High Council membership alone does not appoint one" or "pertencer ao High Council não nomeia ninguém sozinho", 1, true))
+	end
+end)
+
 test("Version letter content: both languages explain the guild, 99 soldiers, Church and free games with supported role markers", function()
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local cns = Language(locale)

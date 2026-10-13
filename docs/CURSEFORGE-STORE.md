@@ -166,19 +166,21 @@ versions before 1.1 just get the whisper, as before.
   online, then one of his Captains, and says yes: **one whisper to each** from that click, the
   Captain told who to look after, the recruit told who to ask. The pair shows on his list (his
   client's alone); nothing goes on the channel.
-- **Centurions and correspondents** (1.1.5): a guild master of an Olympus guild (not the King's)
+- **Legates and correspondents** (1.1.5): a guild master of an Olympus guild (not the King's)
   has a tab of his own in the Throne's place, **Guild** (or `/oly nominees`), laid out as the
-  King's Hands page: **+ Name a centurion** (his target, or a name he types), his list (a click
+  King's Hands page: **+ Name a legate** (his target, or a name he types), his list (a click
   takes a title back, asked first), and a line per High Council department to name its
-  correspondent. Up to 10
-  centurions and one correspondent per department (6 at most), members of his own guild only: the
-  addon refuses an 11th centurion, a second correspondent for a department, one name twice and
-  anyone outside his roster, and says why. Each wears Max's bronze border without wings, and the
-  bronze mark on nameplates and in the game's chat, only while the server gives them that guild.
+  correspondent. Since 1.2.4, up to 25
+  Legates and one correspondent per department (6 at most), members of his own guild only: the
+  addon refuses a 26th Legate, a second correspondent for a department, one name twice and
+  anyone outside his roster, and says why. Correspondents retain Max's bronze border without
+  wings. Legates no longer receive that portrait border merely for this office; a separate badge
+  design has not been chosen or enabled. Offices count only while verified in the guild.
   His own client sends the list on the Olympus channel; every addon takes it from that guild's
   master alone (proven as for his bronze wings: your roster for your own guild, two census senders
-  for another), saves it 30 days from his last repeat (6 hours before 1.2.4), and drops it once he
-  is no longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent
+  for another), retains accepted bounded lists across logouts and offline periods, and drops the
+  duty when a verified removal or change of guild master is seen. `/oly nominees legate <name>`
+  (the old `centurion` spelling remains an alias), `/oly nominees correspondent
   <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
@@ -186,6 +188,14 @@ versions before 1.1 just get the whisper, as before.
   board and says its dedicated workflow is not available yet. Heraldry runs its own guild's
   Decrees, Agenda and musters; its current appointment grants no global Crown authority. A Church
   contact still needs a Church appointment for its private room and recruitment numbers.
+  A Legate organizes an agreed raid group of 40 including themselves (up to 39 guildmates),
+  coordinating attendance at events, raids and wars. Groups are optional and fluid, not exclusive
+  partitions or restrictions on playing with another leader when theirs is offline. The appointed
+  character receives a quiet
+  explanation once per appointment. They can edit their own group's list, not another leader's;
+  existing authorized officers retain oversight. Old oversized saved groups stay read-only until
+  an authorized, confirmed replacement archives the original membership privately. No guild
+  invitations, removals or native promotions happen automatically.
 - **Level race**: the highest level players of the realm.
 - **Recruiting**: the guilds that still have free slots, so new players go where there is room
   (the five with the most, then every one on a click, 1.1).
@@ -430,9 +440,10 @@ A tab with a crown that only the King sees: the guild master of the guild named 
 "Olympus" (of his faction), and on the Alliance that very character, Asmongold Asmongler: the
 addon knows him by name, like the Treasurer. It opens on **the Throne Room** (the queue of
 his court while it is open, and the army's key), and holding court takes him there. Since 1.1.5
-the Treasury has its own tab alone, and under the Throne Room are **the King's centurions**:
-since 1.2.4 the High Council, as its signed list names them (nobody is named in game), each
-councillor of his guild with his War Room squad. Each of his tools lives where it belongs:
+the Treasury has its own tab alone, and under the Throne Room are **the King's guild's Legates**:
+up to 25 explicitly appointed members, named by the King or real High Council. A council title
+does not automatically appoint a group leader. Each Legate organizes an agreed group of up to
+40 including themselves in the War Room. Each of his tools lives where it belongs:
 
 *The list is in the README, with the rest of this section: [The Throne (the King and his Hands)](https://github.com/dnl-gentile/olympus-addon#the-throne-the-king-and-his-hands).*
 
@@ -562,12 +573,29 @@ publish the request to the board.
   removes anyone. There is no guarantee fund yet.
 
 ### The Missionary Church of Olympus (1.1.6)
-The Church brings new players into Olympus. **Asmongold is its Head**, using the addon's canonical
-King identity. This position cannot be nominated; a legacy signed Head marker grants no Head powers.
-The author's signed list sets the Twelve Apostles. The King, the author and the signed High Council may name
-other Apostles in game. Under the Apostles are their **missionaries**: an Apostle names missionaries, and each missionary may name more under himself, so
-every Apostle's network grows. Each Olympus guild has one **Church correspondent**, named by its guild
-master (or the Head, the King or the author), who keeps that guild full and answers to the Head.
+
+**Guild fullness (1.2.4).** The correspondents' ranking counts the current correspondent's own
+management of that guild, not invitation points. Every new appointment starts afresh, including
+the same person returning after another correspondent. Only completed server UTC days score:
+all admitted native-roster observations must be **above 950**; any observed 950 or fewer breaks
+the streak. An unobserved or budget-capped day is **unknown**: no point and no erasure of the
+proved streak. Each qualifying day's observations are averaged first, then those daily means
+receive equal weight in the streak's tie-break. This is role-authenticated, client-observed
+evidence, **not server certification or proof of continuous 24-hour fullness**. Incomplete,
+filtered or stale rosters and census totals do not supply observations. The counter reuses
+the existing complete native roster cache and its captured server timestamp; it performs no
+second 1,000-member scan. Current verified
+correspondents send only live own-guild observations privately to a Church keeper; census-only
+appointments and retrospective correspondent claims cannot establish a day elsewhere.
+Authorized keepers privately relay only retained admitted observations, in requested batches
+of at most 150, rotating through the bounded cache. Contiguous same-count observations are
+coalesced without changing their count or mean. Seven days of relay evidence, 128 guilds and
+20,000 runs at most are retained; older days fold into this client's durable checkpoint for
+that exact person and appointment, with at most 32 management checkpoints per guild.
+Checkpoints are never accepted from another client: a fresh client without older evidence keeps
+that history unknown. A predecessor's proof, a person's former appointment and an old unscoped
+guild aggregate cannot score the new management. Ordinary presence with an unchanged appointment
+does not reset its own proven streak. No new honour, gold rule or public/general-channel feed is added.
 
 *Continued in the README: [The Missionary Church of Olympus (1.1.6)](https://github.com/dnl-gentile/olympus-addon#the-missionary-church-of-olympus-116).*
 
@@ -900,7 +928,7 @@ code.
 | `/oly lfg` · `/oly lfg dungeon\|raid\|pvp\|layer [note]` · `/oly lfg off` | the Board (1.1): who is looking for a group; raise your flag (a box with your note first) or lower it |
 | `/oly week` | the week on the Board and Decrees: army and own-guild Agenda entries for 7 days, alongside your guild's calendar; eligible schedulers see separate army and guild buttons ("Sat 20:00 Raid night") |
 | `/oly location on` · `/oly location off` | share (or not) your zone and layer on the Olympus channel |
-| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the centurions and correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
+| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the legates and correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
 | `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V), like an elite creature's dragon: the game's gold elite mark for the King, its silver for the High Council, bronze for guild masters and the people they name, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
 | `/oly chatmarks on` · `/oly chatmarks off` | 1.1.5: the mark of a player's border tier before their name in the game's own chat (channels, say, yell, emote, party, raid, instance and whispers; guild and officer chat the dragons alone, never the star): the King's gold dragon, a High Councillor's silver then their icon, the bronze of a guild master and the people he names, the star for any other member your addon can check. Olympus's own lines carry none. Through the game's own name filter, so the name's link, right-click and /r stay the game's; on by default, hidden with the gamepad UI, and a councillor's on the King's screen while the council's names are hidden |
 | `/oly block <name>` | ignore a player |
@@ -939,7 +967,7 @@ also saved in `WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua`.
 - **Feature requests:** Fernmelder, whose 39 posts became 1.1 (the Fernmelder release);
   shenanigans_ (the nameplate marks), Valdericht (`<OLYMPIAN>`), Pyralis Ashandar (taking
   donations) and Zeal (what the King hides stays off the channel).
-- **Art:** Max (the bronze elite borders, drawn over the game's own: the winged one is the guild masters' since 1.1.5, the plain one their centurions' and correspondents').
+- **Art:** Max (the bronze elite borders, drawn over the game's own: the winged one is the guild masters' since 1.1.5, the plain one their legates' and correspondents').
 - **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
   to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
   player who told us WoW had handed him the channel.

@@ -82,9 +82,9 @@ test("chat rooms (1.2.4): each guild has its master's room with his corresponden
 		end
 		assert(aCorr ~= bCorr and aCent ~= bCent and aCorr:sub(7) == aCent:sub(7))
 		eq(R.GuildRoom("gcent", "OLYMPUS II"), aCent, "the guild's folded name")
-		eq(R.Info(aCorr).label, "Master & Correspondents"); eq(R.Info(aCent).label, "Master & Centurions")
+		eq(R.Info(aCorr).label, "Master & Correspondents"); eq(R.Info(aCent).label, "Master & Legates")
 		eq(R.Info(aCent).guild, w.guild)
-		eq(R.Info(bCent).label, GUILD_B .. ": Master & Centurions", "another guild's: its name")
+		eq(R.Info(bCent).label, GUILD_B .. ": Master & Legates", "another guild's: its name")
 		eq(R.Info("gcent:000000000000"), nil, "a key of no guild this client lists")
 		eq(R.Info("gcent:" .. ("f"):rep(13)), nil); eq(R.Info("gcorr:Olympus II"), nil, "never by name")
 		-- Who is in our guild's two rooms.
@@ -148,12 +148,39 @@ test("chat rooms (1.2.4): the King's guild's centurions sit with the King in its
 		w.lists[KG] = { by = "Sage Rook-Realm", entries = { { name = "Iris Rook-Realm", role = "centurion" } } }
 		local cent, corr = R.GuildRoom("gcent", KG), R.GuildRoom("gcorr", KG)
 		eq(R.Info(corr), nil, "no correspondents' room for the King's guild")
-		eq(R.Info(cent).label, KG .. ": Master & Centurions")
+		eq(R.Info(cent).label, KG .. ": Master & Legates")
 		eq(R.CanAccess(cent, w.king), true, "the King, its master, without the signed list")
 		eq(R.CanAccess(cent, "Iris Rook-Realm"), true, "a centurion of the King's and the High Council's naming")
 		eq(R.CanAccess(cent, cast.bMaster), false)
 		eq(R.CanAccess("allcenturions", "Iris Rook-Realm"), true)
 		eq(R.CanAccess("masters", w.king), true); eq(R.CanAccess("allcenturions", w.king), true)
+	end)
+end)
+
+test("chat rooms Legates: the King's guild needs an explicit appointment, not a council title; removal stops queued delivery", function()
+	WithRooms(function(w, R, c)
+		local cast = Guilds(w, R, c)
+		local KG, sage, peer = "Olympus", "Sage Rook-Realm", "Iris Rook-Realm"
+		w.guild, w.king = KG, "Crown Rook-Realm"
+		w.council[sage:lower()] = true
+		w.ranks[KG] = { [w.king] = 0, [sage] = 3, [peer] = 3 }
+		c.Roster.members = { { name = w.king }, { name = sage }, { name = peer } }
+		local room = R.GuildRoom("gcent", KG)
+		eq(R.CanAccess(room, sage), false, "a councillor is not automatically a Legate")
+		eq(R.CanAccess(room, peer), false)
+		w.lists[KG] = { by = sage, entries = { { name = peer, role = "centurion" } } }
+		eq(R.CanAccess(room, peer), true, "the compatible role token represents an explicit appointment")
+		eq(R.CanAccess(room, sage), false, "appointing does not appoint the council member themselves")
+		c.me = peer
+		eq(R.Send(room, "assembling the raid group"), true)
+		eq(Targets(w), w.king, "an unnamed councillor does not receive the guild's Legate conversation")
+		local job = w.jobs[1]
+		w.lists[KG].entries = {}
+		eq(R.CanAccess(room, peer), false)
+		eq(w.finish(job), false, "a removed Legate cannot deliver a queued line")
+		eq(R.Receive("WHISPER", w.king, RoomMessage(room, 77, "assembly update"), 2000), false)
+		w.lists[KG] = { by = cast.aMaster, entries = { { name = peer, role = "centurion" } } }
+		eq(R.CanAccess(room, peer), false, "another guild's master cannot appoint the King's Legates")
 	end)
 end)
 
@@ -183,7 +210,7 @@ test("chat rooms (1.2.4): a department is one line of Nominees.DEPARTMENT_LIST: 
 		eq(R.Options("department")[1].id, "dept:lore")
 		local ids = {}
 		for _, option in ipairs(R.Options("role")) do ids[#ids + 1] = option.id end
-		eq(table.concat(ids, ","), "council,dept:lore")
+		eq(table.concat(ids, ","), "council,allcenturions,dept:lore", "council oversight remains separate from its portfolio")
 	end)
 end)
 
@@ -523,7 +550,9 @@ test("chat rooms (1.2.4): every room against the cast: the King, councillors tit
 		local everyButCouncil = "masters,allcenturions,dept:war,dept:treasury,gcorr:A,gcent:A,gcorr:B,gcent:B"
 		local want = {
 			{ w.king, "council,secretariat,masters,allcenturions" },
-			{ titled, "council,dept:war" }, { seat, "council" }, { steward, "secretariat" }, { treasurer, "council,dept:treasury" },
+			-- Council oversight of the federation's leaders remains explicit in allcenturions.
+			-- This does not appoint them as Legates or admit them to a guild's private group room.
+			{ titled, "council,allcenturions,dept:war" }, { seat, "council,allcenturions" }, { steward, "secretariat" }, { treasurer, "council,dept:treasury" },
 			{ cast.aMaster, "masters,allcenturions,gcorr:A,gcent:A" }, { cast.aOfficer, "allcenturions,gcent:A" },
 			{ cast.aCenturion, "allcenturions,gcent:A" }, { cast.aWar, "dept:war,gcorr:A" }, { cast.aMember, "" },
 			{ cast.bMaster, "" }, { cast.bOfficer, "" }, { cast.bCenturion, "" }, { cast.bWar, "" },

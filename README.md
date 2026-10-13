@@ -184,9 +184,10 @@ channels; the same charter and Join controls work for each side.
   card and answer an operation's invitation.
   The guild master, Captains, its confirmed War correspondent and signed War councillors who are
   in that same guild manage its operations and records. A councillor of another guild gets no
-  cross-guild writing power. Its military squads (up to 10, each a leader and up to 99 soldiers
-  those officers assign) are led by its guild master's centurions; in the King's guild by the
-  High Councillors in it (1.2.4: the King's centurions). Guilds, Classes and Races remain views of known census information
+  cross-guild writing power. Its military groups (up to 25, each an appointed Legate and up to
+  39 guildmates, 40 people total) have explicit appointments in every guild, including the King's.
+  A Legate manages their own agreed group; existing authorized officers retain oversight.
+  Guilds, Classes and Races remain views of known census information
   available to members, not privileged command consoles. Empty lists say what is missing, and a
   role preview sends no War Room action.
 - Below Search in the light header, **Guilds / Classes / Races / Professions** select four views of the
@@ -227,19 +228,21 @@ channels; the same charter and Join controls work for each side.
   online, then one of his Captains, and says yes: **one whisper to each** from that click, the
   Captain told who to look after, the recruit told who to ask. The pair shows on his list (his
   client's alone); nothing goes on the channel.
-- **Centurions and correspondents** (1.1.5): a guild master of an Olympus guild (not the King's)
+- **Legates and correspondents** (1.1.5): a guild master of an Olympus guild (not the King's)
   has a tab of his own in the Throne's place, **Guild** (or `/oly nominees`), laid out as the
-  King's Hands page: **+ Name a centurion** (his target, or a name he types), his list (a click
+  King's Hands page: **+ Name a legate** (his target, or a name he types), his list (a click
   takes a title back, asked first), and a line per High Council department to name its
-  correspondent. Up to 10
-  centurions and one correspondent per department (6 at most), members of his own guild only: the
-  addon refuses an 11th centurion, a second correspondent for a department, one name twice and
-  anyone outside his roster, and says why. Each wears Max's bronze border without wings, and the
-  bronze mark on nameplates and in the game's chat, only while the server gives them that guild.
+  correspondent. Since 1.2.4, up to 25
+  Legates and one correspondent per department (6 at most), members of his own guild only: the
+  addon refuses a 26th Legate, a second correspondent for a department, one name twice and
+  anyone outside his roster, and says why. Correspondents retain Max's bronze border without
+  wings. Legates no longer receive that portrait border merely for this office; a separate badge
+  design has not been chosen or enabled. Offices count only while verified in the guild.
   His own client sends the list on the Olympus channel; every addon takes it from that guild's
   master alone (proven as for his bronze wings: your roster for your own guild, two census senders
-  for another), saves it 30 days from his last repeat (6 hours before 1.2.4), and drops it once he
-  is no longer guild master. `/oly nominees centurion <name>`, `/oly nominees correspondent
+  for another), retains accepted bounded lists across logouts and offline periods, and drops the
+  duty when a verified removal or change of guild master is seen. `/oly nominees legate <name>`
+  (the old `centurion` spelling remains an alias), `/oly nominees correspondent
   <department number> <name>` and `/oly nominees remove <name>` do it in chat.
   A confirmed correspondent also sees a **Guild** workspace for their own department. War and
   Justice duties apply only to their own guild, checked against its fresh roster and its current
@@ -247,6 +250,14 @@ channels; the same charter and Join controls work for each side.
   board and says its dedicated workflow is not available yet. Heraldry runs its own guild's
   Decrees, Agenda and musters; its current appointment grants no global Crown authority. A Church
   contact still needs a Church appointment for its private room and recruitment numbers.
+  A Legate organizes an agreed raid group of 40 including themselves (up to 39 guildmates),
+  coordinating attendance at events, raids and wars. Groups are optional and fluid, not exclusive
+  partitions or restrictions on playing with another leader when theirs is offline. The appointed
+  character receives a quiet
+  explanation once per appointment. They can edit their own group's list, not another leader's;
+  existing authorized officers retain oversight. Old oversized saved groups stay read-only until
+  an authorized, confirmed replacement archives the original membership privately. No guild
+  invitations, removals or native promotions happen automatically.
 - **Level race**: the highest level players of the realm.
 - **Recruiting**: the guilds that still have free slots, so new players go where there is room
   (the five with the most, then every one on a click, 1.1).
@@ -502,7 +513,7 @@ WoW channel number to join). Each channel is exclusive to a rank:
   channels (General, Trade, LocalDefense, LookingForGroup and any other), say, yell, emote,
   party, raid, instance chat and whispers both ways: the mark of their border's tier, the game's
   gold elite dragon for the King, its silver one for a High Councillor (then the icon they
-  picked), the bronze for a guild master of an Olympus guild and the centurions and correspondents
+  picked), the bronze for a guild master of an Olympus guild and the legates and correspondents
   he names (1.1.5, in his guild alone), and Olympus's star for any other
   member your addon can check: your guild's roster, or for another guild its census, naming them
   in the guild their own Olympus messages speak for (someone else's report alone proves nothing,
@@ -695,10 +706,10 @@ arrives. The rooms, in the list's order (none of yours: no Roles tab):
 | **High Council** | the signed councillors, the King and the Federal Treasurer |
 | **Secretariat** | the King and his Stewards |
 | **Guild Masters** | the guild master of every Olympus guild, the King |
-| **Masters & Centurions** | every guild's master and centurions (its officers and those its master names), the King |
+| **Masters & Legates** | every guild's master and legates (its officers and those its master names), the King |
 | One room a department (**Federal Treasury**, **Department of War**, **Council of Justice**, **Association of Artisanry**, **Department of Heritage**, **The Missionary Church of Olympus**) | its councillors by the signed titles list, and each guild's correspondent of it; the Federal Treasury's also the Federal Treasurer |
 | **Master & Correspondents** (one a guild) | that guild's master and his correspondents (the King's guild has none) |
-| **Master & Centurions** (one a guild) | that guild's master and his centurions; the King's guild's: the King and the centurions he and the High Council name |
+| **Master & Legates** (one a guild) | that guild's master and his legates; the King's guild's: the King and the legates he and the High Council name |
 | **Apostles** | the author, the King, the Head and the signed Apostles |
 | **Apostles & Missionaries** | the Apostles' room and the missionaries |
 | **Church** | the whole Church, as in 1.1.6 |
@@ -710,7 +721,7 @@ arrives. The rooms, in the list's order (none of yours: no Roles tab):
 - A guild's own rooms hold its own people: a member of one guild is in no other guild's room.
 - Another guild's guild masters and officers are known only from the author's signed leadership
   list. Until it is out (`/oly status`, **signed leadership**), the rooms that reach other guilds
-  (the masters', the masters' and centurions', the departments') reach your own guild and the
+  (the masters', the masters' and legates', the departments') reach your own guild and the
   signed people (the King, the councillors, the author) alone, and say so over their lines.
 - A line goes to 40 members of a room at most (the Church's rooms 30, those heard online), the
   author, the King, the High Council and the guild masters first, then those who wrote in the room
@@ -723,9 +734,9 @@ arrives. The rooms, in the list's order (none of yours: no Roles tab):
 - A list of more than ten rooms folds each group (the departments, each kind of guild room, the
   Church's) into one row, **Departments (6) >**, whose click opens its own list beside it, eight a
   page with **Previous** and **More (n)**. It is Olympus's own, with the mouse and the gamepad UI.
-- A line from an older client to 1.2.3's treasurers', all departments' or one guild's centurions'
+- A line from an older client to 1.2.3's treasurers', all departments' or one guild's legates'
   room is dropped quietly; 1.2.3 clients do not know the new rooms, and drop a guild master's line
-  in the masters' and centurions' room and the Treasurer's in the Federal Treasury's.
+  in the masters' and legates' room and the Treasurer's in the Federal Treasury's.
 
 ### The Board: who is looking for a group, and where (1.1)
 The Realm tab links **the Board** (or `/oly lfg`): who in Olympus wants a group right now, from
@@ -1090,10 +1101,10 @@ A tab with a crown that only the King sees: the guild master of the guild named 
 "Olympus" (of his faction), and on the Alliance that very character, Asmongold Asmongler: the
 addon knows him by name, like the Treasurer. It opens on **the Throne Room**, with his Agenda,
 week and key rotation. Since 1.1.5 the Treasury has its own tab alone, and under the Throne Room
-are **the King's centurions**: since 1.2.4 the High Council, as its signed list names them (nobody
-is named in game), each councillor of his guild with his War Room squad (those first, as the War
-Room numbers them while he streams); councillors read the list, his Steward and Hands a count until
-the council is shown to everyone. Each of his tools lives where it belongs:
+are **the King's guild's Legates**: up to 25 explicitly appointed members, named by the King or
+real High Council. A council title no longer automatically leads a group. Each Legate organizes
+an agreed group of up to 40 including themselves in the War Room. Each of his tools lives where
+it belongs:
 - **The King's Agenda** (a button on the Throne): minutes and an event ("30 Raid on
   Crossroads"). The whole army gets a popup with the appointment (what, in how long, where)
   and sees it on the Census, with reminders 10 minutes and 1 minute before. Since 1.1 it also
@@ -1849,7 +1860,7 @@ afterwards: their word reaches every client, what it counted stops counting, and
 not bring it back. There is no review and no Send evidence any more.
 
 **The bounty (1.2.3).** A death adds to the Horde player's bounty the victim's office and his
-level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a centurion 20, any
+level: the King 100, a High Councillor 50, the master of an Olympus guild 30, a legate 20, any
 other office 10, a member 0; one office only, the highest. The same member killed by the same
 Horde player counts once in 10 minutes (corpse camping), its kills too (1.2.4): a death in between
 adds no points and no kill, and stays on his page marked so. One bounty holds 2000 points at most.
@@ -1862,7 +1873,7 @@ camping a corpse or killing a friend's character over and over pays no more. A S
 raid), the death nor the kill. An office counts only where every client verifies it the same way,
 so that every client shows the same points: the pinned King, the signed High Council list, the
 signed leadership list for a guild master, the signed titles (a Steward, an arbiter), the
-Treasurer's and the author's characters; a centurion, a correspondent, one of the King's Hands or a
+Treasurer's and the author's characters; a legate, a correspondent, one of the King's Hands or a
 guild master whom only his own guild's roster or the census knows counts as a member, and never a
 census rank alone, a guild officer's rank or what a row says. Levels are the game's: your own from
 your client at the death or kill, the Horde player's from a unit of his (his corpse, a nameplate,
@@ -2254,8 +2265,8 @@ message (the game adds it). What goes where:
 | The shared block terms (1.1): each word, whether it was added or removed, and when; for 15 minutes after an edit, the editor's own client adds his name to it (never to anyone else's) | everyone on the Olympus channel | only from the client of the King, his Steward, a Hand or a High Councillor: at once when they edit it, and every 10 minutes while they play (not when another client just sent the same list). Your own filter is never sent |
 | Your position as a dot on the map | your guild | only with `/oly share` (off by default) |
 | A Lord's mentor pair (1.1): the recruit's name to the Captain, the Captain's name to the recruit, as whispers in his words | those two players | only when the Lord clicks **Send both** |
-| A guild master's centurions and correspondents (1.1.5): their names, and each correspondent's department | everyone on the Olympus channel; since 1.2.4 each addon that takes it saves it (its guild, his name, the names and departments, when it last heard it), 300 guilds at most and always your own guild's, until 30 days after it last heard him or he is no longer guild master | only from that guild master's client: a few seconds after he names someone or takes a title back, and every 5 minutes while he plays |
-| The end of 1.1.5's list of the King's guild's centurions (1.2.4): an empty list, no names | everyone on the Olympus channel | only from the King's or a High Councillor's client: once if it still holds that list, and a few seconds after an older client's (once a minute at most) |
+| A guild master's Legates and correspondents: names and each correspondent's department | everyone on the Olympus channel; each client saves up to 300 accepted guild lists, including its own, while the source is offline; verified removal or change of master revokes the duty | only from that guild master's client: after a change and every 5 minutes while online |
+| The King's guild's manually appointed Legates (1.2.4): up to 25 names, original issuer and revision, including an empty removal list | everyone on the Olympus channel; retained appointments use compatible historical ids, with current King/High Council issuer verification | only from the King or an actual High Councillor's client after an authorized edit or repeat; no automatic retirement message |
 | Join Olympus (1.1, outside an Olympus guild): "which guild should I ask?" (J1), and your request (J3: the guild you ask, your level and class) | the one member the screen asks: one found with `/who` at a search, and the one you are about to whisper | J1 at a search (one member every 15 seconds at most, none while a recent answer is known; while only one answer names the gates, one more member at once, three in 10 minutes at most) and just before a whisper (again if that member never answered); J3 with each whisper you send |
 | The answer (J2): whether you take recruit whispers, the King's gates, and up to 8 guilds with room the census confirms, each with its free slots and up to 2 of its Lords and Captains online that two reports name (never the King) | the recruit who asked, alone | when a recruit's addon asks you, once a minute per recruit and 10 a minute at most (with do not contact on, a bare "no" to the rest) |
 | A treasury keeper's book (balance, gold and items given and who gave them, the ranking) and the guild bank of `<Olympus>` (its gold and items) | the parts the King shows the army (his switches): everyone on the Olympus channel. The rest (1.1): the King, his Steward and the keepers alone, by whisper, never on the channel (from a keeper whose addon is 1.1: one still on 1.0 sends his whole book on the channel, as 1.0 did) | only after that keeper says yes (each keeper, the King too, is asked once; `/oly treasurer on\|off`), withdrawn at once when he turns it off, and again every 5 minutes while he plays, for clients that were offline |
@@ -2414,7 +2425,7 @@ to keep the addon healthy. Since 1.2 his character (and his test builds) also se
 The Watch and the Throne included, whatever his rank: each page shows only what his own client
 holds and may show (nobody's private records reach him for it), and its actions keep their own
 checks. **View as** in the window's title bar, his alone, previews the tabs and sections of the
-King, the High Council, the Treasurer, an arbiter, a guild master, a Centurion or officer, a
+King, the High Council, the Treasurer, an arbiter, a guild master, a Legate or officer, a
 correspondent, a member or someone outside Olympus (the High Council's has The Watch for its
 Judgments, the desk being an officer's; an arbiter's, the King's and the council's have the
 arbiter's lines in the Games tab, which act only when his own character is one; 1.1.6 has no
@@ -2500,16 +2511,17 @@ few characters working together can still reach is said plainly further down
     vote; the King can't take back a Steward's Hand: that Steward does, or the author by
     removing him): everywhere else they count as Captains, so outsiders' reports can't add one
     to the Crown.
-  - **The King's centurions** (1.2.4) are the High Council: its signed list alone names them. A
-    list of the King's guild's centurions (1.1.5's, from an older client) counts for nothing: no
-    border, chat room or bounty office.
-  - **A guild master's centurions and correspondents** (1.1.5) count only from the list his own
+  - **The King's Legates** (1.2.4) are explicitly appointed by the King or real High Council,
+    up to 25 members of the King's guild. A council title alone does not make its holder a
+    Legate. Historical appointment ids remain compatible; role previews appoint nobody.
+| A guild master's Legates and correspondents: names and each correspondent's department | everyone on the Olympus channel; each client saves up to 300 accepted guild lists, including its own, while the source is offline; verified removal or change of master revokes the duty | only from that guild master's client: after a change and every 5 minutes while online |
     client sends (the sender the server stamps), and only while the census or your roster proves
     him that guild's master as for his bronze wings; a list from anyone else is refused and never
     replaces his. Their border shows only on a player the server puts in that guild, so nobody can
     borrow it, and the list ends when he is no longer guild master. Since 1.2.4 each addon keeps the
-    list it took while he is offline, saved, for 30 days after it last heard him: a demotion that no
-    census report or roster of yours shows stays unseen that long.
+    accepted bounded list while its source is offline. A removal or demotion that no current
+    authoritative observation shows stays unknown; saved lists are not fresh evidence granting
+    cross-guild powers. Current guild actions still require verified authority and membership.
   - A sender speaks for one guild only (a player who changed guilds can speak for the new one
     after 15 quiet minutes). A guild is one whatever the capitals a report spells it with: a
     second spelling is a vote on the same guild, never a second guild.
@@ -2731,7 +2743,7 @@ Other limits:
 | `/oly inactive [7\|14\|30]` | your guild's members offline that long, by name (a rank that may remove members removes one per click, asked first) |
 | `/oly warndays <days>` | when a Lord or Captain counts as away: red in the Realm, and one line when a Lord crosses it |
 | `/oly recruits` | Lords: your recruits, and a Captain as each one's mentor (one whisper to each, from your click) |
-| `/oly nominees [centurion <name> \| correspondent <n> <name> \| remove <name>]` | guild masters (1.1.5): up to 10 centurions and one correspondent per High Council department, members of your guild, who wear bronze without wings while in it (in the King's guild, the High Council are the King's centurions); alone, your Guild tab (the Throne for the King's people) |
+| `/oly nominees [legate <name> \| correspondent <n> <name> \| remove <name>]` | guild masters: up to 25 Legates and one correspondent per department from their own guild. The King or real High Council explicitly appoints up to 25 Legates of the King's guild; being on the council alone appoints nobody. The historical `centurion` command remains an alias |
 | `/oly nocontact on\|off` | do not contact: recruits' Join screens skip you (on), or may ask you (off) |
 | `/oly patrol` | start or stop the tabard patrol |
 | `/oly mark [note]` | mark your target |
@@ -2777,7 +2789,7 @@ Other limits:
 | `/oly layerhelp on` · `/oly layerhelp off` | get (or not) requests to invite players to your layer (1.1: not until you say yes) |
 | `/oly layerauto on` · `/oly layerauto off` | invite layer requests without the window |
 | `/oly location on` · `/oly location off` | share (or not) your zone and layer on the Olympus channel |
-| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the centurions and correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
+| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the legates and correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
 | `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V), like an elite creature's dragon: the game's gold elite mark for the King, its silver for the High Council, bronze for guild masters and the people they name, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
 | `/oly chatmarks on` · `/oly chatmarks off` | 1.1.5: the mark of a player's border tier before their name in the game's own chat (channels, say, yell, emote, party, raid, instance and whispers; guild and officer chat the dragons alone, never the star): the King's gold dragon, a High Councillor's silver then their icon, the bronze of a guild master and the people he names, the star for any other member your addon can check. Olympus's own lines carry none. Through the game's own name filter, so the name's link, right-click and /r stay the game's; on by default, hidden with the gamepad UI, and a councillor's on the King's screen while the council's names are hidden |
 | `/oly key <secret>` | officers: seal the Olympus channel |
@@ -3118,7 +3130,7 @@ Gundlach and contributors (speedata, 3-clause BSD) for Olympus Link's QR code
   shenanigans_ (the nameplate marks), Valdericht (`<OLYMPIAN>`), Pyralis Ashandar (taking
   donations), Zeal (what the King hides stays off the channel), and FedGuy / Fed Olympus
   (nameplate-assisted layer hopping).
-- **Art:** Max (the bronze elite borders, drawn over the game's own: the winged one is the guild masters' since 1.1.5, the plain one their centurions' and correspondents').
+- **Art:** Max (the bronze elite borders, drawn over the game's own: the winged one is the guild masters' since 1.1.5, the plain one their legates' and correspondents').
 - **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
   to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
   player who told us WoW had handed him the channel.

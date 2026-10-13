@@ -241,7 +241,7 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
   views. Compare points, kills, revenge notice/avenger actions and the bounty's reset after a
   claim. Test a proved Olympian alt link and an unlinked character separately: do not infer
   Horde account ownership or claim the unrelated two-account farming case solved.
-- **Role rooms and Games:** check approved HC, GM, centurion, department, Church and Watch
+- **Role rooms and Games:** check approved HC, GM, legate, department, Church and Watch
   audiences with one authorized participant and one excluded client. A role preview grants
   no membership. Enter must yield an echo/history entry or an explanation of failure/partial
   delivery. With many rooms, selection and drafting remain responsive. Finish a Bones game:
@@ -249,8 +249,14 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
   reconnect within retention limits; a lifecycle update must not open the window by itself.
 - **Guild authority:** an ordinary sister-guild master cannot send a global Crown decree,
   muster, agenda or moderation action. Their own authorized guild actions stay available.
-  Verify Heraldry correspondent revocation while a message is queued. The King's centurions
-  match the signed High Council; no conflicting manual appointment control is offered. Lottery
+  Verify Heraldry correspondent revocation while a message is queued. Explicitly appoint a
+  member of the King's guild as Legate; an unnamed High Councillor must not gain a group merely
+  from that title. Check the 25-leader cap, the group's 40-total cap and Legate self-management
+  without access to another leader's group. Nomination and its quiet local notice must explain
+  attendance at events, raids and wars without repeating on unrelated appointments or reload.
+  Review a retained oversized legacy group: cancel changes nothing; confirm retains the complete
+  old membership privately before replacing it. Check the same actions with another client and
+  gamepad mode. No automatic invitations, removals or native promotions may happen. Lottery
   draws remain King/author/HC-only, with no public Lottery ranking and no paid tickets.
 - **Records:** compare the participants' retained game/duel results and closed-month ranking
   after reload, later join and recovery from another holder. Exercise more than one day/month

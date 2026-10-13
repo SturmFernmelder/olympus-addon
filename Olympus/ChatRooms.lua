@@ -297,22 +297,13 @@ local function Correspondent(name, department)
 	return false
 end
 
--- 1.2.4 (the author's rule): in the King's guild the High Council are the King's centurions, the
--- signed list alone saying who (no list of anyone's names one there since: Nominees.ListOf). In that
--- guild's own room (own), a councillor in our fresh roster of it; across the federation, every
--- signed councillor, wherever his own guild is.
-local function KingsCenturion(name, guild, own)
-	if not ns.IsKingGuild(guild) or ns.IsHighCouncillor(name) ~= true then return false end
-	if not own then return true end
-	local R = ns.Roster
-	return R ~= nil and R.Fresh ~= nil and R.Fresh() ~= nil and R.RankOf ~= nil and R.RankOf(ns.FullName(name)) ~= nil
-end
-
--- own: the guild's own room (Guild Centurions), else All Centurions.
-local function Centurion(name, guild, own)
+-- The historical room ids and role token remain compatible. Legates of every guild, including
+-- the King's, are appointed explicitly; a signed High Council title never appoints its holder.
+-- Native officers retain their existing guild-room oversight, not an automatic Legate title.
+local function Centurion(name, guild)
 	local rank = Rank(name, guild)
 	return rank ~= nil and rank > 0 and rank <= ns.CAPTAIN_RANK
-		or Nomination(name, guild) == "centurion" or KingsCenturion(name, guild, own)
+		or Nomination(name, guild) == "centurion"
 end
 
 -- 1.2.4: a guild's master: rank 0 by our roster or the signed list, and the pinned King for his own
@@ -426,7 +417,7 @@ KINDS[#KINDS + 1] = { id = "masters", kind = "role", label = function() return T
 	preview = { king = true, gm = true }, author = true,
 	Access = function(name) return IsAuthor(name) or IsKing(name) or AnyGuild(name, function(n, g) return Rank(n, g) == 0 end) end,
 	Candidates = function(add) Candidates.Leaders(add) end }
-KINDS[#KINDS + 1] = { id = "allcenturions", kind = "role", label = function() return Text("CHATROOM_ALLCENTURIONS", "Masters & Centurions") end,
+KINDS[#KINDS + 1] = { id = "allcenturions", kind = "role", label = function() return Text("CHATROOM_ALLCENTURIONS", "Masters & Legates") end,
 	preview = { king = true, gm = true, officer = true }, author = true,
 	Access = function(name) return IsAuthor(name) or IsKing(name) or ns.IsHighCouncillor(name) == true or AnyGuild(name, function(n, g) return Master(n, g) or Centurion(n, g, false) end) end,
 	Candidates = function(add) Candidates.Leaders(add); Candidates.Council(add) end }
@@ -460,10 +451,10 @@ KINDS[#KINDS + 1] = { prefix = "gcorr", kind = "role", group = "gcorr", perGuild
 	end,
 	Candidates = function(add, guild) Candidates.Guild(add, guild, false) end }
 KINDS[#KINDS + 1] = { prefix = "gcent", kind = "role", group = "gcent", perGuild = true, author = true,
-	groupLabel = function() return Text("CHATROOM_GCENT", "Master & Centurions") end,
+	groupLabel = function() return Text("CHATROOM_GCENT", "Master & Legates") end,
 	label = function(guild)
-		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCENT", "Master & Centurions") end
-		return Text("CHATROOM_GCENT_OF", "%s: Master & Centurions"):format(guild)
+		if Same(guild, OwnGuild()) then return Text("CHATROOM_GCENT", "Master & Legates") end
+		return Text("CHATROOM_GCENT_OF", "%s: Master & Legates"):format(guild)
 	end,
 	preview = { king = true, gm = true, officer = true },
 	Access = function(name, guild)

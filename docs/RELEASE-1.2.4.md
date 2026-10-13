@@ -15,8 +15,13 @@ tickets stay disabled.
 - Heraldry handles the guild's Decrees, Agenda and musters through the current own-guild master
   or verified correspondent. Army authority keeps its separate verified Crown, author and
   Heraldry Council duties. An ordinary guild master gains no army-wide Crown powers.
-- The centurion list for the King's guild is the signed High Council, rather than another manual
-  appointment list. The century remains a unit of up to 100 people.
+- Centurions are now Legates: up to 25 explicitly appointed leaders per guild, including the
+  King's guild. A signed High Council title does not automatically appoint a Legate.
+  Each organizes their own agreed group of 40 total (leader plus up to 39 guildmates), coordinating
+  attendance at events, raids and wars. Naming explains this purpose; the appointed character gets
+  a quiet local notice. Existing officer oversight remains. Legacy oversized saved groups remain
+  read-only until an authorized confirmed review archives the old membership and replaces it.
+  Historical command/role/room identifiers remain compatible. No automatic invites or kicks.
 - Approved role rooms show delivery failures and partial delivery. Class and race rooms remain
   removed. Games lists live Arena/Bones conversations; after a Bones game ends, participants
   can continue its conversation while spectators retain read-only history, within retention
@@ -98,10 +103,13 @@ tickets stay disabled.
 - History carry supplies no full signed continuity, named guild-merger inheritance, transferred
   payment status or original royal pardon deadline. Withdrawal to an offline master is not
   guaranteed. No new dues grace-period policy is implemented.
-- Church correspondent streaks require daily history: above 950 members, average membership
-  as the tie-break; unknown days pause without incrementing or breaking the streak. An existing
-  snapshot cannot establish earlier full days. Daily-history rollout must be checked separately;
-  a same-day session cannot validate tomorrow's real daily transition.
+- Church correspondent streaks count completed UTC days with observed membership strictly above
+  950 during that exact person's appointment. Each new management starts with no inherited days;
+  a same-appointment heartbeat does not reset it. Unknown/capped days pause, observed days at or
+  below 950 break the streak, and equally weighted daily averages break ties. Older local
+  checkpoints remain scoped to their original management. Keeper catch-up recovers retained raw
+  observations from the latest seven days, not an unretained all-time history. A same-day test
+  cannot validate tomorrow's real daily transition or prove a missed historical day.
 - Windows, actual gamepad behavior, locales, mixed versions, multiplayer delivery, historical
   recovery, native guild actions, the reported network-ban error in a battleground, and live
   performance remain acceptance gates. Test instructions are in [BETA-TESTING.md](BETA-TESTING.md).
