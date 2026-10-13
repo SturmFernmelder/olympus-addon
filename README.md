@@ -1647,13 +1647,21 @@ the identities (an unfinished PvP match).
 
 Each own row goes at once to the Olympus channel, and every member's client adds it to its own
 Wanted and Slayers boards: a death adds to the Horde player's bounty, a killing blow claims it.
-A client takes a row only from a member it can verify (its own guild's roster, or
-a guild rank it can verify), about that member's own death or killing blow (the Olympian is the
-sender as the server names him; his GUID only where the receiving client can prove it is his), of
-its own realm group and faction, at most 7 days old, once, eight a minute from one member and
-twenty in five minutes about one Horde player. The King, a High Councillor or the author relays
-what his client took, so members of other guilds count it too, and answers a late login's
-catch-up with the newest rows. They alone can **Take off** an abusive entry or **Void** one row
+A client takes a row from a member as the Olympus chat takes one (1.2.4): its own guild's roster
+or a guild rank it can verify decides where it can; a member of another Olympus guild counts on
+his own word for the Olympus guild his row names, his one guild (not another that his own
+messages named in the last 15 minutes), never a name your own guild's roster lacks that names your
+guild. Until 1.2.4 a client took only a member it could prove, and no client can prove an ordinary
+member of another guild (the game tells a player's guild only to someone who sees him), so every
+other guild refused his rows and Most Wanted stayed empty. A row must be about that member's own
+death or killing blow (the Olympian is the sender as the server names him; his GUID only where
+the receiving client can prove it is his), of its own realm group and faction, at most 7 days old,
+once, eight a minute and sixty a day from one member and twenty in five minutes about one Horde
+player. The King, a High Councillor or the author relays what his client took, so that a client
+before 1.2.4 counts it too, and answers a late login's catch-up with the newest rows; a relay
+never makes a client take a sender it knows is no member. `/oly wanted status` names the guild
+each member's row speaks for and why one was refused (`stranger`, `hidden`, `olympian`, and the
+rest). They alone can **Take off** an abusive entry or **Void** one row
 afterwards: their word reaches every client, what it counted stops counting, and a later event does
 not bring it back. There is no review and no Send evidence any more.
 
@@ -2123,9 +2131,14 @@ anchor still needs a direct publisher word; this is not guaranteed offline boots
 WY, W4 and W5 use the Olympus channel's public or sealed audience described below, not a
 private staff lane. Older clients ignore W4/W5 and still accept original direct WY words.
 
-WK membership (1.2.3) needs the receiving client's own fresh guild roster or a guild rank it can
-verify for the guild the row names; a claimed guild alone is not enough, and an ordinary member
-of another guild counts there through a reviewer's relay. A death must be the sender's own (S, a
+WK membership (1.2.4) is the Olympus chat's: the receiving client's own fresh guild roster or a
+guild rank it can verify (the census, the signed leadership manifest) where it has one, else the
+Olympus guild the row names as its sender's one claimed guild (Data.ClaimGuild), never a guildmate
+of the receiver's speaking for another guild nor a name the receiver's roster lacks naming its
+guild. A modified client can therefore claim an Olympus guild that only that guild's own clients
+can refuse; the flood limits, a reviewer's Take off and Void, and the moderators' words (on the
+sender or the guild his row names) bound what it counts. A reviewer relays such rows for clients
+before 1.2.4, and a relay is refused where the receiving client knows its sender is no member. A death must be the sender's own (S, a
 bounty), a claim the sender's own killing blow (P); a row naming another character's GUID as the
 sender is refused, and a GUID the receiving client cannot name is left off the row (the sender by
 his name alone, never a frame by a name). What a row is worth (the bounty) counts no higher than

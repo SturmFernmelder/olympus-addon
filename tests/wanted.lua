@@ -1608,9 +1608,11 @@ test("wanted 1.2.3 intake: a shared row counts only from a verified member, abou
 		eq(Why(sender, Row({ at = w.epoch + W.GLOBAL_SKEW + 60 })), "stale")
 		eq(Why(sender, Row({ month = W.MonthNow() - W.MAX_MONTHS })), "shape")
 		w.strangers[c.Fold("Outsider-Realm")] = true
-		eq(Why("Outsider-Realm", Row({ own = "1.dd000041" })), "olympus", "a stranger's row")
+		-- (1.2.4: the three refusals "olympus" was have their own reasons: "stranger", "hidden",
+		-- "olympian"; tests/wanted-guilds.lua has them with the real Channels, Data and Roster.)
+		eq(Why("Outsider-Realm", Row({ own = "1.dd000041" })), "stranger", "a stranger's row")
 		c.Moderation.Hides = function(name) return c.Fold(name) == c.Fold(sender) end
-		eq(Why(sender, Row()), "olympus", "a sender the moderators hide")
+		eq(Why(sender, Row()), "hidden", "a sender the moderators hide")
 		c.Moderation.Hides = nil
 		-- The Olympian side is the sender: a GUID this client knows as someone else's is refused, one
 		-- it cannot name is kept off the row (his name alone, as the server stamps it).
@@ -1624,7 +1626,7 @@ test("wanted 1.2.3 intake: a shared row counts only from a verified member, abou
 		eq(e.victimName, sender); eq(e.victimGuid, nil, "a GUID this client cannot prove his is not taken")
 		-- The Horde side as the sender proved it, unless this client sees otherwise.
 		w.olympian("Olympian Too-Realm")
-		eq(Why(sender, Row({ name = "Olympian Too-Realm" })), "olympus", "an Olympian is never a Horde entry")
+		eq(Why(sender, Row({ name = "Olympian Too-Realm" })), "olympian", "an Olympian is never a Horde entry")
 		w.horde["Player-1-0F000044"] = { name = "Ally-Realm", race = "Human" }
 		eq(Why(sender, Row({ horde = "1.0f000044", name = "Ally-Realm" })), "faction", "an Alliance race on this client")
 		w.units.target = { name = "Seen-Realm", guid = "Player-1-0F000045", faction = "Alliance" }
@@ -2068,7 +2070,8 @@ test("wanted 1.2.3: /oly wanted status opens a copy window with this session's c
 		-- (1.2.3, changed on purpose: a death's line says the points it added, Daniel's bounty.)
 		assert(text:find(ns.L.WANTED_STATUS_DEATH .. "  Status Horde-Realm  " .. ns.L.WANTED_STATUS_BOUNTY:format(1), 1, true), text)
 		assert(text:find(ns.L.WANTED_STATUS_DEATH .. "  Ally-Realm  " .. ns.L.WANTED_STATUS_REFUSAL:format("faction"), 1, true), text)
-		assert(text:find(ns.L.WANTED_STATUS_HEARD .. "  Heard Horde-Realm · Sharer-Realm  " .. ns.L.WANTED_STATUS_BOUNTY:format(1), 1, true), text)
+		-- (1.2.4, changed on purpose: a member's row names the guild it speaks for after its sender.)
+		assert(text:find(ns.L.WANTED_STATUS_HEARD .. "  Heard Horde-Realm · Sharer-Realm <Olympus II>  " .. ns.L.WANTED_STATUS_BOUNTY:format(1), 1, true), text)
 		local _, recaps = text:gsub("  " .. ns.L.WANTED_STATUS_DEATH .. "  ", "")
 		eq(recaps, 2, "the death read on PLAYER_DEAD and again by its retry is one line, its last answer")
 		assert(not text:find("Creature", 1, true), "a creature killed is no line")
@@ -2985,23 +2988,30 @@ test("wanted 1.2.3 world: a member's own death to a Horde player nobody listed r
 	end)
 end)
 
-test("wanted 1.2.3 world: a member of another guild whom this client cannot verify counts on a reviewer's relay, not on his own word alone; a removal reaches a late login in the catch-up", function()
+-- (1.2.4, changed on purpose, the author's report "nobody on the Most Wanted list": an ordinary
+-- member of another guild, whom no client can prove, counts at once on his own word as the
+-- [Olympus] chat's member, Share.Member; before, every other client refused him and only a reviewer
+-- of his own guild's relay carried his rows. The King still relays both rows, for clients before
+-- 1.2.4. tests/wanted-guilds.lua has this with the real Channels, Data and Roster.)
+test("wanted 1.2.4 world: a member of another guild whom this client cannot prove counts on his own word at once, the King's relay changes nothing here; a removal reaches a late login in the catch-up", function()
 	WithWorld(function(world)
 		local king = world:Client("Varrick-Realm", "Player-1-0A000081", "king", nil, "Olympus II")
 		local here = world:Client("Here-Realm", "Player-1-0A000082", nil, nil, "Olympus III")
 		local far = world:Client("Far-Realm", "Player-1-0A000083", nil, nil, "Olympus II")
 		local horde = "Player-1-0B000081"
 		world:Hunt(nil, nil, "Distant-Realm", horde, far, far)
-		eq(world:As(here, here.W.Target, nil, horde), nil, "an ordinary member of another guild: his own word is not enough here")
 		-- (1.2.3, changed on purpose, Daniel's revenge: Far killed the very Horde player who killed him,
 		-- so his claim pays his death's point and 100 more, on every client alike.)
 		local revenge = 1 + king.W.Bounty.SCORE.REVENGE
+		local t = world:As(here, here.W.Target, nil, horde)
+		assert(t, "an ordinary member of another guild: his own word counts here")
+		eq(#t.victims, 0, "the cycle his own kill closed"); eq(#t.claims, 1)
+		eq(t.claims[1].slayer, far.name); eq(t.claims[1].points, revenge, "the same points on his own word")
 		eq(world:As(king, king.W.Target, nil, horde).claims[1].points, revenge, "his guild's King verifies him")
 		world:Run(15)
-		local t = world:As(here, here.W.Target, nil, horde)
-		assert(t, "the King's relay"); eq(#t.victims, 0, "the cycle his own kill closed"); eq(#t.claims, 1)
-		eq(t.claims[1].slayer, far.name); eq(t.claims[1].points, revenge, "the same points on the King's relay")
-		eq(world:As(here, here.W.Rankings).all[1].guid, far.guid, "the King's client proved the GUID his")
+		t = world:As(here, here.W.Target, nil, horde)
+		eq(#t.claims, 1, "the King's relay: a replay"); eq(t.claims[1].points, revenge)
+		eq(world:As(here, here.W.Rankings).all[1].guid, far.guid, "this client's lookup proved the GUID his")
 		local relays = 0
 		for _, m in ipairs(world.log) do if m.from == king and m.text:find("^WK~R~2~") then relays = relays + 1 end end
 		eq(relays, 2, "the death and the kill, once each")
@@ -4084,9 +4094,9 @@ test("wanted 1.2.4 notices: a death avenged: another member's own kill of that H
 			eq(#AvengedShown(w), 0, "a kill before the deaths")
 			-- Rows refused before they count: a stranger's, a sender the moderators hide.
 			w.strangers[c.Fold("Outsider-Realm")] = true
-			eq(select(2, Kill("Outsider-Realm", "1.dd00e101")), "olympus")
+			eq(select(2, Kill("Outsider-Realm", "1.dd00e101")), "stranger")
 			c.Moderation.Hides = function(name) return c.Fold(name) == c.Fold(second) end
-			eq(select(2, Kill(second, "1.cc00e102")), "olympus")
+			eq(select(2, Kill(second, "1.cc00e102")), "hidden")
 			c.Moderation.Hides = nil
 			eq(#AvengedShown(w), 0)
 			-- The avenger's own kill, now: one notice, at once.

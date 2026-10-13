@@ -1584,6 +1584,32 @@ local function EvidenceMember(sender, guild)
 	return ok and type(level) == "number" and level >= 1 and verified == true
 end
 
+-- (1.2.4) Who may speak for his own death or killing blow here (Share.Take): a member as the
+-- [Olympus] chat takes one (Channels.VerifiedLevel 1 or more), true and whether he was proven.
+-- Proven first (EvidenceMember: this client's own guild's fresh roster, a rank the census or the
+-- signed manifest names). A plain member of another Olympus guild is in neither, and no client can
+-- prove more of him: the game gives a player's guild only for a unit of his (GetGuildInfo), the
+-- /who ask is a restricted call (C_FriendList.SendWho, HasRestrictions: Forever's
+-- FriendListDocumentation.lua) and an addon message carries no guild (CHAT_MSG_ADDON:
+-- ChatInfoDocumentation.lua). Until 1.2.4 every other client refused him for it, the reviewers'
+-- too, so nothing was relayed and Most Wanted stayed empty. Now his own word counts as the chat's
+-- does: for the Olympus guild the row names (guild, from Sight.GuildName), his one guild
+-- (Data.ClaimGuild: not another that his messages named within CLAIM_TTL, the signed manifest on
+-- or not), never a guildmate of ours speaking for another guild, nor one our own roster lacks
+-- naming ours (VerifiedLevel 0). A reviewer can still take off what such a member sends (WV).
+function Share.Member(sender, guild)
+	if EvidenceMember(sender, guild) then return true, true end
+	if type(guild) ~= "string" or guild == "" then return false end
+	local C, D = ns.Channels, ns.Data
+	if type(C) ~= "table" or C.missing or type(C.VerifiedLevel) ~= "function" then return false end
+	if type(D) == "table" and type(D.ClaimGuild) == "function" then
+		local ok, bound = pcall(D.ClaimGuild, sender, guild)
+		if not ok or not bound then return false end
+	end
+	local ok, level = pcall(C.VerifiedLevel, sender, guild)
+	return ok and type(level) == "number" and level >= 1, false
+end
+
 -- Whether a player GUID is the sender's character: true or false when this client can name it
 -- (a unit, or the game's cache of seen players), nil when it cannot.
 local function GuidIsSender(guid, sender)
@@ -3239,17 +3265,19 @@ end
 -- GUIDs as WY writes them (server.id), <scope> the realm group and faction (Scope), <digest> the
 -- row's own (16 hex), <at> its time and <month> its month as the sender's client counted them.
 -- What a receiver takes (Share.Take): a row of its own realm group and faction, fresh (SHARE_AGE,
--- GLOBAL_SKEW), from a member it verifies (its own guild's fresh roster, a guild rank it can verify
--- for the guild the row names, or a reviewer), whom the moderators do not hide, about the
+-- GLOBAL_SKEW), from a member as the [Olympus] chat takes one (Share.Member, 1.2.4: its own guild's
+-- fresh roster, a guild rank it can verify for the guild the row names, a reviewer, else that
+-- Olympus guild as its sender's one claimed guild), whom the moderators do not hide, about the
 -- sender's own death or killing blow: the Olympian side is the sender, by the name the server
 -- stamps, his GUID only where this client proves it is his (GuidIsSender: a unit, or the game's
 -- lookup), refused where it proves it is someone else's. The Horde side as the sender's client
 -- proved it, refused where this client sees him as no Horde player (a unit, an Alliance race) or
 -- as an Olympian. Once (its id: the sender and the digest), unless voided, SHARE_RATE_MAX a window
 -- from one member and SHARE_TARGET_MAX about one Horde player from everyone. A relay only from a
--- reviewer (the King, a signed High Councillor, the author), on whose word a member this client
--- cannot verify (one of another guild, whose rank no census names) counts, SHARE_RELAY_MAX a
--- window from one. A mark (WV) only from a reviewer, on his own word. A client before 1.2.3 has
+-- reviewer (the King, a signed High Councillor, the author), on whose word a client before 1.2.4
+-- counts a member it cannot verify (one of another guild, whose rank no census names), unless this
+-- client knows him no member (Share.Disowned), SHARE_RELAY_MAX a window from one. A mark (WV) only
+-- from a reviewer, on his own word. A client before 1.2.3 has
 -- no handler for WK or WV, and ignores them.
 ---------------------------------------------------------------------------
 
@@ -3259,13 +3287,14 @@ Share.ALLIANCE_RACES = { Human = true, Dwarf = true, NightElf = true, Gnome = tr
 -- (This session's captures and refusals, the newest last, DIAG_MAX at most: /oly wanted status.)
 -- kind: "kill" (own killing blow), "death" (own death), "heard" (a member's row), "relay" (a
 -- reviewer's relay), "mark" (a reviewer's removal or void). why: the row recorded, or the reason.
-function Share.Note(kind, ok, why, who, from)
+-- guild (1.2.4): the guild a member's row names, shown after its sender.
+function Share.Note(kind, ok, why, who, from, guild)
 	local reason = ok and "ok" or tostring(why or "?")
 	Share.counts[kind] = (Share.counts[kind] or 0) + 1
 	if ok then Share.counts.counted = (Share.counts.counted or 0) + 1 else Share.why[reason] = (Share.why[reason] or 0) + 1 end
 	local e = ok and type(why) == "table" and why or nil
 	local row = { at = math.floor(Clock()), kind = kind, ok = ok == true, why = not ok and reason or nil, who = Clean(who, 72),
-		from = Clean(from, 72), action = e and e.action or nil, points = e and e.points or nil }
+		from = Clean(from, 72), guild = Clean(guild, 48), action = e and e.action or nil, points = e and e.points or nil }
 	Share.log[#Share.log + 1] = row
 	while #Share.log > Wanted.DIAG_MAX do table.remove(Share.log, 1) end
 	return row
@@ -3470,6 +3499,19 @@ function Share.SameGiven(a, b)
 	return given ~= "" and given == Given(b)
 end
 
+-- (1.2.4) A reviewer's relay counts on his word, as before, unless this client knows better: the
+-- guild its sender's own messages named here (Data.ClaimedGuild: his row, a chat line, a census
+-- report) makes him no member (Share.Member), as when he names our own guild and our roster lacks
+-- him. A reviewer now relays the rows of members he cannot prove either (Share.Member), so that a
+-- client before 1.2.4 counts them; his relay never overrules what this client proves.
+function Share.Disowned(sender)
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.ClaimedGuild) ~= "function" then return false end
+	local ok, claimed = pcall(D.ClaimedGuild, sender)
+	if not ok or type(claimed) ~= "string" then return false end
+	return not Share.Member(sender, Sight.GuildName(claimed))
+end
+
 -- One shared row (WK) taken into this client's ledger: true and the row recorded, or false, why.
 function Share.Take(dist, sender, row)
 	if dist ~= "CHANNEL" then return false, "lane" end
@@ -3488,16 +3530,21 @@ function Share.Take(dist, sender, row)
 	local now = math.floor(Clock())
 	if row.at > now + Wanted.GLOBAL_SKEW or now - row.at > Wanted.SHARE_AGE then return false, "stale" end
 	if not Whole(row.month, MonthNow() - Wanted.MAX_MONTHS + 1, MonthNow() + 1) then return false, "shape" end
+	-- (1.2.4: each refusal its own word in /oly wanted status, "olympus" for all three before:
+	-- "hidden", the moderators hide him, or the guild his row names; "stranger", no member here,
+	-- Share.Member; "olympian", the Horde side is a member.)
+	local guild = not relay and Sight.GuildName(row.guild) or nil
 	local M = ns.Moderation
 	if type(M) == "table" and not M.missing and type(M.Hides) == "function" then
-		local ok, hidden = pcall(M.Hides, from)
-		if not ok or hidden then return false, "olympus" end
+		local ok, hidden = pcall(M.Hides, from, guild, true)
+		if not ok or hidden then return false, "hidden" end
 	end
-	if not relay and not Wanted.CanPublish(from) and not EvidenceMember(from, Sight.GuildName(row.guild)) then return false, "olympus" end
+	if not relay and not Wanted.CanPublish(from) and not Share.Member(from, guild) then return false, "stranger" end
+	if relay and not Wanted.CanPublish(from) and Share.Disowned(from) then return false, "stranger" end
 	local horde = Identity(row.name, row.horde)
 	if not horde or not horde.name then return false, "shape" end
 	-- The Horde side as the sender's client proved it, unless this client sees him otherwise.
-	if VerifiedOlympian(horde) then return false, "olympus" end
+	if VerifiedOlympian(horde) then return false, "olympian" end
 	local seen, contradicted = KnownHorde(horde)
 	if contradicted then return false, "faction" end
 	if not seen and type(GetPlayerInfoByGUID) == "function" then
@@ -3514,7 +3561,7 @@ function Share.Take(dist, sender, row)
 		if not Share.SameGiven(known, horde.name) then return false, "identity" end
 		horde = Identity(known, horde.guid)
 		if not horde or not horde.name then return false, "shape" end
-		if VerifiedOlympian(horde) then return false, "olympus" end
+		if VerifiedOlympian(horde) then return false, "olympian" end
 	end
 	-- The Olympian side: the sender, his GUID only where this client proves it is his (or the
 	-- reviewer who relays it says his own client did).
@@ -3562,7 +3609,7 @@ function Wanted.HandleShared(dist, sender, text)
 	local ok, e = Share.Take(dist, sender, row)
 	-- (Not noted: our own row coming back, and a relay of a row held already.)
 	if ok or not (e == "own" or e == "replay" and row and row.via) then
-		Share.Note(row and row.via and "relay" or "heard", ok, e, row and row.name, row and row.from or sender)
+		Share.Note(row and row.via and "relay" or "heard", ok, e, row and row.name, row and row.from or sender, row and row.guild)
 	end
 	return ok, e
 end
@@ -5413,7 +5460,8 @@ function Wanted.StatusText()
 		local when = type(dateFn) == "function" and dateFn("%H:%M:%S", r.at) or tostring(r.at)
 		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0) or L.WANTED_STATUS_BOUNTY:format(r.points or 0))
 			or L.WANTED_STATUS_REFUSAL:format(r.why or "?")
-		Add(("  %s  %s  %s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "", result))
+		Add(("  %s  %s  %s%s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "",
+			r.guild and (" <" .. r.guild .. ">") or "", result))
 	end
 	if #Share.log == 0 then Add("  " .. L.WANTED_STATUS_EMPTY) end
 	Add("")
