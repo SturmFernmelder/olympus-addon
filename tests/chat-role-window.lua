@@ -11,6 +11,8 @@ test("1.2.4 chat performance: census packets coalesce the main window while loca
 		local ok, err = pcall(function()
 			UI.RefreshSoon = function() calls = calls + 1 end
 			ns.After = function(delay, label, fn) queued[#queued + 1] = { delay = delay, fn = fn } end
+			-- WithWindow captures ChatWindow's listeners separately from UI's; invoke the
+			-- actual UI listener here rather than the isolated chat-only event bus.
 			for i = 0, 11 do now = i * 5; UI.DataChanged() end
 			eq(calls, 1, "twelve packets do not rebuild the main window twelve times")
 			eq(#queued, 1, "one timer, not one per packet")
