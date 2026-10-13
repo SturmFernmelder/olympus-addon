@@ -2697,7 +2697,31 @@ function UI.FilterChanged(tab, fromTop)
 	UI.RefreshSoon()
 end
 
-ns.On("DATA_CHANGED", function() UI.RefreshSoon() end)
+-- The open chat has its own message/authority refresh. Background census traffic must not
+-- rebuild the whole main window for every packet; keep one pending summary refresh at most.
+UI.CHAT_DATA_EVERY = 60
+local chatDataAt, chatDataPending = -math.huge, false
+function UI.DataChanged()
+	if not main or not main:IsShown() then return end
+	if main.tab ~= "chat" or playerProfile or not ns.IsMember() or main.layoutLocked then return UI.RefreshSoon() end
+	local now = GetTime()
+	if now < chatDataAt then chatDataAt = -math.huge end
+	if now - chatDataAt >= UI.CHAT_DATA_EVERY then
+		chatDataAt = now
+		return UI.RefreshSoon()
+	end
+	if chatDataPending then return end
+	chatDataPending = true
+	ns.After(UI.CHAT_DATA_EVERY - (now - chatDataAt), "chat census summary", function()
+		chatDataPending = false
+		if main and main:IsShown() and main.tab == "chat" and not playerProfile
+			and GetTime() - chatDataAt >= UI.CHAT_DATA_EVERY then
+			chatDataAt = GetTime()
+			UI.RefreshSoon()
+		end
+	end)
+end
+ns.On("DATA_CHANGED", UI.DataChanged)
 ns.On("MAP_TOGGLED", function() UI.Refresh() end)
 ns.On("INSPECT_CHANGED", function() if main and ViewOf(main.tab) == "heraldry" then UI.RefreshSoon() end end)
 -- Layers show in the Realm tab, and the King's layer line tops the Census and the Realm.

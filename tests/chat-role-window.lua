@@ -1,6 +1,28 @@
 local ns, test, eq, WithWindow, WithGamepadUI = ...
 local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]chat%-role%-window%.lua$") or "./"
 
+test("1.2.4 chat performance: census packets coalesce the main window while local message events remain independent", function()
+	WithWindow(function(w)
+		w.CW.Open("A")
+		local UI = w.UI
+		local oldRefresh, oldAfter = UI.RefreshSoon, ns.After
+		local calls, queued, now = 0, {}, 0
+		GetTime = function() return now end
+		local ok, err = pcall(function()
+			UI.RefreshSoon = function() calls = calls + 1 end
+			ns.After = function(delay, label, fn) queued[#queued + 1] = { delay = delay, fn = fn } end
+			for i = 0, 11 do now = i * 5; UI.DataChanged() end
+			eq(calls, 1, "twelve packets do not rebuild the main window twelve times")
+			eq(#queued, 1, "one timer, not one per packet")
+			now = 60; queued[1].fn(); eq(calls, 2)
+			w.fire("CHAT_LINE", "A", ns.me, "still immediate")
+			eq(calls, 2, "a line uses the chat's own refresh, not a census rebuild")
+		end)
+		UI.RefreshSoon, ns.After = oldRefresh, oldAfter
+		if not ok then error(err, 0) end
+	end)
+end)
+
 test("watch chat context menu: actions are opt-in and recheck permission and target", function()
 	WithWindow(function(w)
 		local saved, allowed, calls, timed = rawget(ns, "WatchChat"), true, {}, true

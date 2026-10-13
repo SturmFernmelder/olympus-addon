@@ -236,7 +236,7 @@ end)
 test("1.2.3 memory: nothing the Chat tab draws is older than ERA_MAX (the census's redraw, DATA_GAP), whatever changed without telling it; a click redraws at once", function()
 	WithChannel(function(w)
 		local CW = w.CW
-		eq(CW.ERA_MAX, 5, "the census's own gap (DATA_GAP)")
+		eq(CW.ERA_MAX, 60, "1.2.4: background census work is refreshed once a minute")
 		local function Header(sender)
 			for _, b in ipairs(w.f.bubbles) do
 				if b:IsShown() and b.entry and b.entry.sender == sender and b.header:IsShown() then return b.who:GetText() end
@@ -258,7 +258,7 @@ test("1.2.3 memory: nothing the Chat tab draws is older than ERA_MAX (the census
 		assert(not Header("Writer5-Realm"):find(ns.HIGH_COUNCIL_COLOR, 1, true), "a direct redraw: at once")
 		-- The census's redraw (DATA_CHANGED, DATA_GAP after the last) starts a new era too.
 		ns.rdb.council.names.writer5 = "Writer5"
-		w.fire("DATA_CHANGED"); w.tick(5.1)
+		w.fire("DATA_CHANGED"); w.tick(CW.ERA_MAX + 0.1)
 		assert(Header("Writer5-Realm"):find(ns.HIGH_COUNCIL_COLOR, 1, true), "the census's redraw")
 	end)
 end)
@@ -280,7 +280,9 @@ test("1.2.3 memory: a moderator's word is asked about each line of the Chat tab'
 			eq(asked, 1, "a line that came: that line alone")
 			asked = 0
 			w.tick(w.CW.ERA_MAX); w.arrive("another, an era later")
-			eq(asked, 100, "a new era: every line again")
+			-- At the one-minute navigation deadline the ticker first redraws all 100 retained
+			-- lines; the subsequent new line then needs only its own moderation lookup.
+			eq(asked, 101, "scheduled navigation redraw, then only the new line")
 		end)
 		M.Hides = real
 		if not ok then error(err, 0) end
@@ -410,7 +412,7 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 			eq(#s.Leaders(), 2, "the council's two writers lead squads")
 			-- The first notice it hears tells (what the squads were it never told), and the census's
 			-- redraw comes DATA_GAP after the last.
-			w.fire("DATA_CHANGED"); w.tick(5.1)
+			w.fire("DATA_CHANGED"); w.tick(CW.ERA_MAX + 0.1)
 			w.arrive("warm-up")
 			local plain = Allocated(function() w.arrive("a plain line") end)
 			local era = CW.era
@@ -425,13 +427,13 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 			assert(after <= plain * 1.5 + 1, ("a line after a notice %.1f KB, a plain line %.1f KB"):format(after, plain))
 			assert(after * 2 <= direct, ("a line after a notice %.1f KB, a direct redraw %.1f KB"):format(after, direct))
 			-- A notice every second and no line: no redraw before DATA_GAP from the census's last, one at it.
-			w.fire("DATA_CHANGED"); w.tick(5.1)
+			w.fire("DATA_CHANGED"); w.tick(CW.ERA_MAX + 0.1)
 			renders, era = 0, CW.era
-			for i = 1, 24 do
+			for i = 1, 299 do
 				w.tick(0.2)
 				if i % 5 == 0 then w.fire("DATA_CHANGED") end
 			end
-			eq(renders, 0, "four notices in 4.8 s: no redraw")
+			eq(renders, 0, "59 census notices in 59.8 s: no redraw")
 			eq(CW.era, era, "nothing worked out again")
 			w.tick(0.2); w.tick(0.2)
 			eq(renders, 1, "the census's own redraw, at DATA_GAP")
@@ -443,7 +445,7 @@ test("1.2.3 memory: a census notice WarSquads hears (DATA_CHANGED, every second 
 					if b:IsShown() and b.entry and b.entry.sender == sender and b.header:IsShown() then return b.who:GetText() end
 				end
 			end
-			w.fire("DATA_CHANGED"); w.tick(5.1)
+			w.fire("DATA_CHANGED"); w.tick(CW.ERA_MAX + 0.1)
 			assert(Header("Writer7-Realm"):find(ns.HIGH_COUNCIL_COLOR, 1, true), "a councillor's line")
 			renders, era = 0, CW.era
 			for k = 1, #told do told[k] = nil end

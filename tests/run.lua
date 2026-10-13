@@ -55881,7 +55881,7 @@ do
 			eq(calls, 1, "drawn once")
 			f:Fire("OnUpdate", 0.3)
 			eq(calls, 1, "nothing new: not again")
-			-- The census: at most once every 5 seconds.
+			-- 1.2.4: background census marks refresh once a minute, not every five seconds.
 			local clock = 100
 			GetTime = function() return clock end
 			w.fire("DATA_CHANGED")
@@ -55890,8 +55890,8 @@ do
 			w.fire("DATA_CHANGED")
 			clock = 102
 			f:Fire("OnUpdate", 0.3)
-			eq(calls, 2, "not within 5 s")
-			clock = 105
+			eq(calls, 2, "not within 60 s")
+			clock = 160
 			f:Fire("OnUpdate", 0.3)
 			eq(calls, 3, "then once")
 			-- Unread counts start again when it opens.

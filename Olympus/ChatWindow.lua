@@ -75,7 +75,9 @@ local BUBBLE_MIN = 180
 local GAP_IN, GAP_OUT = 3, 10                         -- between bubbles of one writer, between writers
 local GROUP_TIME = 300                                -- a pause this long starts a new header
 local STICK_SLACK = 2
-local THROTTLE, DATA_GAP = 0.2, 5
+-- Census traffic may arrive every second. Refresh existing chat marks once a minute; direct
+-- messages, moderation, consent and local settings still redraw through their own events.
+local THROTTLE, DATA_GAP = 0.2, 60
 local LINE_H = 14                                     -- a line of text, where the client gives no height
 local PIN_LINES, GUIDE_LINES, COUNT_LINES = 3, 4, 2   -- the strips over the lines, at most
 local GUIDE_X = 20                                    -- the Olympus tab's line: the room its x takes on the right
