@@ -97,7 +97,12 @@ local function WithWanted(fn)
 		IsInInstance = function() return w.inside == true, w.inside and "pvp" or "none" end
 		C_DateAndTime = { GetCurrentCalendarTime = function() return { year = w.year, month = w.month } end }
 		GetFileIDFromPath = function(path) return w.assets[path] and 1 or nil end
-		UnitTokenFromGUID = nil
+		-- (1.2.4: the game's token for a GUID, as Forever has it, UnitDocumentation.lua: a unit this
+		-- client has (w.units), else none. Before, none at all, a client without the call.)
+		UnitTokenFromGUID = function(guid)
+			for unit, u in pairs(w.units) do if u.guid == guid then return unit end end
+			return nil
+		end
 		-- The game's lookup of a player GUID (PlayerScriptDocumentation.lua: localizedClass,
 		-- englishClass, localizedRace, englishRace, sex, name, realmName): w.identities are Olympians
 		-- (Human), w.horde Horde players (an Orc unless his race is given; a name only when given).
@@ -2177,7 +2182,12 @@ local function WithWorld(fn)
 		C_DeathRecap = { HasRecapEvents = function() return current ~= nil and current.recap ~= nil end,
 			GetRecapEvents = function() return current and current.recap or {} end }
 		IsInInstance = function() return false, "none" end
-		UnitTokenFromGUID = nil
+		-- (1.2.4: as Forever has it, UnitDocumentation.lua: a token only for a unit of the client the
+		-- game runs. Before, none at all, a client without the call.)
+		UnitTokenFromGUID = function(guid)
+			for unit, u in pairs(current and current.units or {}) do if u.guid == guid then return unit end end
+			return nil
+		end
 		GetPlayerInfoByGUID = function(guid)
 			for _, cl in ipairs(world.clients) do
 				if cl.guid == guid then return "Warrior", "WARRIOR", "Human", "Human", 2, ns.ShortName(cl.name), "Realm" end
