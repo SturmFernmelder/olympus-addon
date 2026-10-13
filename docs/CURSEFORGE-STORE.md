@@ -29,14 +29,16 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
+- **1.2.4**: Implementation candidate: role rooms, retained signed game records, guild average levels,
+  Church appointment catch-up, Heraldry guild duties and Wanted count fixes. Not published;
+  Windows visual and multiplayer acceptance remain separate gates. Undefined departmental metrics
+  and unrelated future backlog are not included as finished features.
 - **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
   from members' own kills and deaths, bounties by office and level; the missionaries' crook
-- **1.2.1**: Bones table chat; Watch and Wanted relay fixes; weekly briefs; local chat label options
-- **1.2.0**: The Watch (each guild's moderation desk, the Tabards in it); crafting requests on the Crafters
-  tab; the King's arrow on the minimap; Vox Populi's history and a guild master's own questions; the
-  Guild treasuries in one list with one search; Bones between players for points, at a tavern or at a
-  camp; no arbiters without bets (duels and Bones between their two players); duel points that
-  consider levels; Find a player by level, distance and game
+- **1.2.2**: The stutter fixed (the level race's checks off the message handler, data changes taken once
+  a second, the map left alone while closed, the minute jobs spread out) and `/oly perf`; the
+  privacy page and Bones invitations; guild removal and rank changes; Church counts; chat reports to
+  the King and the High Council; [Olympus] links; Shift + the guild key; the security reviews' fixes
 
 Every version's notes are in the [GitHub releases](https://github.com/dnl-gentile/olympus-addon/releases). This page is the short one for CurseForge: the [README](https://github.com/dnl-gentile/olympus-addon#olympus) has every section in full.
 

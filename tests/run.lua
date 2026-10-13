@@ -61739,9 +61739,9 @@ end)()
 	end)
 
 	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.3") -- (1.2.2: the same files, a new version, since 1.2.1 was already published; 1.2.3 next)
+		eq(ns.VERSION, "1.2.4") -- the consolidated correction candidate has one identity in both folders
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.3", 1, true))
+		assert(toc:find("## Version: 1.2.4", 1, true))
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -62083,11 +62083,12 @@ end)()
 	-- the minute's. The account has played before (an update) unless a test says otherwise. The
 	-- portrait frame as the client's, with its portrait texture (1.1.5: the letter's window must not
 	-- be one, Harness.Win.Metal).
-	local function WithLetters(fn)
+	local function WithLetters(fn, version)
 		WithUI(function()
-			local saved = { letters = ns.Letters, read = ns.db.lettersRead, baseline = ns.db.lettersAutoVersion, sessions = ns.db.sessions, combat = rawget(_G, "InCombatLockdown"),
+			local saved = { version = ns.VERSION, letters = ns.Letters, read = ns.db.lettersRead, baseline = ns.db.lettersAutoVersion, sessions = ns.db.sessions, combat = rawget(_G, "InCombatLockdown"),
 				instance = IsInInstance, gamepad = ns.GamepadUI, member = ns.IsMember, log = ns.Log, print = ns.Print, chat = ns.db.addonChat,
 				template = TEMPLATES.PortraitFrameTemplate }
+			if version then ns.VERSION = version end -- reproduce a historical release without changing the running candidate
 			local w = { on = {}, after = {}, every = {}, printed = {} }
 			saved.fire = ns.Fire
 			local ok, err = pcall(function()
@@ -62124,6 +62125,7 @@ end)()
 				fn(w, saved)
 			end)
 			TEMPLATES.PortraitFrameTemplate = saved.template
+			ns.VERSION = saved.version
 			ns.Letters, ns.db.lettersRead, ns.db.sessions = saved.letters, saved.read, saved.sessions
 			ns.db.lettersAutoVersion = saved.baseline
 			InCombatLockdown, IsInInstance, ns.IsMember = saved.combat, saved.instance, saved.member; GamepadStyle(nil)
@@ -62138,8 +62140,8 @@ end)()
 		return n
 	end
 
-	test("1.2.3 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.3")
+	test("1.2.4 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.4")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -62169,22 +62171,23 @@ end)()
 			ns.db.lettersRead = { ["1.1.6"] = true, ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true)
-			eq(w.Letters.Frame().version, "1.2.3")
-			eq(ns.db.lettersRead["1.2.3"], true)
+			eq(w.Letters.Frame().version, ns.VERSION)
+			eq(ns.db.lettersRead[ns.VERSION], true)
 			eq(w.Letters.Ask("update"), false, "shown once per release")
 		end)
-		-- A reader of the published 1.2.2 letter gets 1.2.3's alone.
+		-- A reader of all previous published letters gets the new candidate's alone.
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true }
 			ns.Consent.Show():Hide()
-			eq(w.Letters.Ask("update"), true, "a reader of the published 1.2.2 letter gets 1.2.3's")
-			eq(w.Letters.Frame().version, "1.2.3")
-			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text("1.2.3")), "and only 1.2.3's")
+			eq(w.Letters.Ask("update"), true, "a reader of the previous published letter gets the new one's")
+			eq(w.Letters.Frame().version, ns.VERSION)
+			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text(ns.VERSION)), "only the current letter")
 		end)
 	end)
 
 	test("1.2.3 version letters: unread 1.2.2 comes before 1.2.3 on the update parchment, both are marked shown, but history remains individual", function()
-		WithLetters(function(w)
+		local function LegacyLetters(fn) return WithLetters(fn, "1.2.3") end
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			local _, oldBody = Lt.Text("1.2.2")
 			local _, newBody = Lt.Text("1.2.3")
@@ -62212,7 +62215,7 @@ end)()
 			eq(Lt.Show("1.2.2"), true)
 			eq(Lt.Frame().body:GetText(), oldBody)
 		end)
-		WithLetters(function(w)
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
@@ -62220,7 +62223,7 @@ end)()
 			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.3")), "read old release is not repeated")
 		end)
 		-- An account whose 1.2.0 letter was never shown, nor 1.2.2's: both, the oldest first.
-		WithLetters(function(w)
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			local _, b120 = Lt.Text("1.2.0")
 			local _, b122 = Lt.Text("1.2.2")
