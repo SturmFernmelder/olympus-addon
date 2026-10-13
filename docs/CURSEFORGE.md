@@ -990,15 +990,28 @@ alone until then).
   the author when their addon asks, never on the Olympus channel. A yes given to 1.1's question
   (the King, his Steward and his Hands) still covers those alone: he is asked once more whether the
   others see it too, and his "only the King's" keeps it as it was. Their addon takes it only from
-  a Lord or Captain of that guild as the census confirms (a snapshot is its sender's word), keeps
-  it until logout (dropped at once if that character leaves the High Council or the Hands; his
-  addon's next ask then says it holds nothing, as after a login or a `/reload`, and that has it
-  sent again, 3 minutes after the last one at the soonest, where an unchanged snapshot otherwise
-  goes to the same viewer once in 3 hours), and shows it on the Treasury tab under **Guild treasuries** (the tab appears for
-  it): every bank they hold, <Olympus>'s too when they see it (and their own guild's, as their own
-  client last read it), with its gold, the ledger apart (the Treasury's books are <Olympus>'s
-  alone: none is kept for another guild), its items, who shared it and when (an old snapshot
-  marked), sorted, with a total; the Olympus guilds of the census whose bank they hold no snapshot
+  a Lord or Captain of that guild as the census confirms (a snapshot is its sender's word; 1.2.4:
+  one heard before the census can say, in the first 200 seconds after a login or a `/reload`,
+  while no report of that guild has come yet or its report is older than 15 minutes, or while only
+  its sender's own report names him, is held unseen, in memory, one a sender, of Olympus guilds
+  alone, and taken once the census confirms him, or dropped if it says he is none; nothing of it
+  goes on the channel; before 1.2.4 it was dropped, and sent again only 3 hours later), keeps it
+  (1.2.4, the author's call: in its saved variables too, across logouts, as <Olympus>'s own bank
+  is: the newest of each guild in the older's place, never dropped for its age, nor when the census
+  forgets its guild after a week unheard; one snapshot a guild, Olympus guilds alone, 512 KB of
+  them for a realm group's characters together, past which the one heard longest ago leaves the
+  save; dropped at once, the save too, if that character leaves the High Council, and after 20
+  minutes of a session outside the audience if it left while offline; what came to it as a Steward
+  or a Hand, which a yes to 1.1's question may cover alone, shows in a later session only once it
+  is one again (a Hand alone: unseen while the King is offline), and goes, the save too, once the
+  King's list is heard without it; its addon's next ask then says it holds nothing, as after a
+  login or a `/reload`, and that has it sent again, 3 minutes after the last one at the soonest,
+  where an unchanged snapshot otherwise goes to the same viewer once in 3 hours), and
+  shows it on the Treasury tab under **Guild treasuries** (the tab appears for it): every bank
+  they hold, in the treasury ranking (below), <Olympus>'s too when they see it (and their own
+  guild's, as their own client last read it), the ledger apart (the Treasury's books are
+  <Olympus>'s alone: none is kept for another guild), who shared it and when (an old snapshot
+  marked), with a total; the Olympus guilds of the census whose bank they hold no snapshot
   of listed apart as "no snapshot received" (not a refusal: their sharer may not have been online
   since, or may share with the King, his Stewards and his Hands alone). A click opens a guild's
   bank in place, as the guild bank shows its own (its tabs, slots, counts, tooltips, and what left
@@ -1009,11 +1022,33 @@ alone until then).
   marked so. Each snapshot is indexed once, not at every letter typed, and an item the game had
   not loaded yet shows by itself once it has. His no takes it back from their screens: at once
   from each one whose addon asked in the last 18 minutes (their addon asks every 15; his keeps who
-  asked, and when, through a `/reload`), from the others at their next ask, once each, even after
-  a `/reload` of his, for as long as his no stands (Konig's review: one who asked before could
-  keep it all session); it counts from him even when the census no longer names him. The limit:
-  one his addon did not hear ask in those 18 minutes (he was offline meanwhile) and does not hear
-  again before he logs off keeps it on his screen until that player logs out (it is never saved).
+  asked, and when, through a `/reload`), from the others at their next ask, once each (1.2.4: and at
+  each one's first ask after a login, since their addon may keep it from an earlier session and a
+  no whispered while that player was logging off was lost), even after a `/reload` of his, for as
+  long as his no stands (Konig's review: one who asked before could keep it all session); it
+  counts from him even when the census no longer names him (1.2.4: one demoted since he shared
+  still gives it with `/oly bank share off`; a yes stays a guild master's or an officer's), and
+  takes it from their saved variables too, a copy kept unseen as well. The limit: one his addon did not hear ask in those 18 minutes
+  (he was offline meanwhile) and does not hear again before he logs off keeps it, saved (1.2.4),
+  until his no reaches that viewer's addon at a later ask while both are online.
+- **The treasury ranking** (1.2.4, the author's ask: "um ranking dos tesouros", "o melhor vai
+  ganhar"): in the Guild treasuries' list, in place of its banks' rows, for the same viewers alone.
+  <Olympus> shows apart, as the Federal Treasury, outside the race. Every other guild holds a
+  place: its Federal Treasury correspondent (from its guild master's list of nominees; the last one
+  he named still shows, kept with the snapshot, past the 6 hours his list counts, while the census
+  names no other guild master there; "no correspondent" when none), the guild, its gold, its items (their count; the stacks in the tooltip), their value,
+  the total (gold plus value) and when its bank was read (an old snapshot marked). The highest
+  total first; on the same total, the guild with the higher average level (the census), then by
+  name. An item's value is what a vendor pays for it (the 11th return of the game's
+  `C_Item.GetItemInfo`, in copper: the item's own data, the same on every client), or Olympus's own
+  value for it where its table names the item (the table ships empty in 1.2.4: a later version
+  fills it, never with a guess), times its count: not its market value, and no auction is read. An
+  item the game has not loaded yet counts in the items, not in the value, which shows "at least"
+  until its data comes and fills it in by itself (the game is asked for 100 items a draw at most);
+  an item no vendor buys counts in the items alone, and the tooltip says how many. The guilds with
+  no snapshot are listed below it. A click on a row opens that guild's bank as before. Nothing of
+  the ranking is sent anywhere: sharing its numbers with everyone (never a bank's items) is for a
+  later version.
 - **Sent by each keeper's addon by itself** (every 5 minutes and after a change), once he said
   yes: his book's balance, totals, ranking, items donated and latest lines (1.1: never a line of
   gold given to the Treasurer's characters, see the dues below). On the Olympus
@@ -1578,7 +1613,7 @@ message (the game adds it). What goes where:
 | Your character's name and what you gave, when you give gold or items to a treasury keeper (by trade or mail): in the ranking of donors (the top 100, with each one's total), the items donated (with who gave each last) and the book's latest lines (1.1: never the lines of gold given to the Treasurer's characters, which are the dues; this week's donors only as a count, never by name; in the Treasurer's part of the ranking, your gold to his characters less each week's up to the dues' amount his addon knew that week, and less all you sent with the dues' note) | with the King's ranking or book switch on: everyone on the Olympus channel. Otherwise (1.1): the keepers, the King and his Steward alone, by whisper | while that keeper shares his book: his yes, and a donor is not asked |
 | That you are taking donations, if you keep a book of the treasury (1.1), with your zone only if you share your location | everyone on the Olympus channel | only while you turn it on (**Taking donations**, `/oly donations on`): every 2 minutes and when your zone changes, off when you log out |
 | A request to the treasury, if you are a Lord or a Captain (1.1): the item's number, the count, your guild | the treasury's keepers, the King and his Steward heard online (their addon 1.1 or later), by whisper; while the King shows the army the book, the open ones also on the Olympus channel, from the keepers' addons | when you ask (a click on an item, or `/oly need`; 6 new requests an hour at most), then every 15 minutes while it is open |
-| Your guild bank's snapshot, if you are the guild master or an officer of an Olympus guild other than the King's (1.1): items and counts, its gold, when it was seen (not the tabs' names) | the King, the High Council (his Stewards and Hands among them), the Treasurer and the author alone (1.2; a yes given to 1.1's question: the King, his Steward and his Hands until you answer again), by whisper, when their addon asks (never on the Olympus channel) | only after your yes (asked once when you open the bank; `/oly bank share on\|off`); your no takes it back from their screens: at once from those whose addon asked in the last 18 minutes, from the others at their next ask while you are online (one never heard again keeps it until he logs out) |
+| Your guild bank's snapshot, if you are the guild master or an officer of an Olympus guild other than the King's (1.1): items and counts, its gold, when it was seen (not the tabs' names) | the King, the High Council (his Stewards and Hands among them), the Treasurer and the author alone (1.2; a yes given to 1.1's question: the King, his Steward and his Hands until you answer again), by whisper, when their addon asks (never on the Olympus channel) | only after your yes (asked once when you open the bank; `/oly bank share on\|off`); your no takes it back from their screens: at once from those whose addon asked in the last 18 minutes, from the others at their next ask while you are online, from their saved variables too, even once you are no longer an officer (1.2.4: each one's addon keeps the newest of each guild there, across logouts, and ranks the guilds' treasuries by their numbers on its own screen, sending nothing of it; one never heard again keeps it, saved, until your no reaches him) |
 | Your character's name, if you gave to the treasury before 1.0 (the early supporters): names only, no amounts, in alphabetical order | with the King's ranking switch on: everyone on the Olympus channel, shown at the end of the Treasury tab. Otherwise (1.1): the keepers, the King and his Steward alone, by whisper | from the Treasurer's addon once he said yes to 1.0's question or to his line on the first-open page, both of which say their names go to everyone on the channel (his 0.9.3 yes is not enough), after his login and when a client asks: a donor is not asked |
 | The dues' amount (1.1): one amount a week, the same for everyone | everyone on the Olympus channel | from the King's and his Steward's addons alone, when they set it and every 5 minutes |
 | Your guild's dues list (1.1): each of its players who paid the Treasurer in the last 5 weeks with that guild on the payment (name, gold this week, hours since his last payment), how many hours ago the Treasurer's mail character last played, and a digest (with a secret of his session) that changes when this week's payers with no guild change | the King, his Steward, or a Captain or Lord of that guild who asked, alone (whispers from the Treasurer's addon); when nothing changed, one whisper saying so | when they open the dues page, once every 5 minutes per asker at most, while the Treasurer shares his book |

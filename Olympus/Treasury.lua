@@ -3490,8 +3490,8 @@ end
 -- Who sees the guild bank: the keepers and the King always, the army with the King's "book".
 local function BankVisible(role) return role ~= "member" or Treasury.Shows("book") end
 
--- Counts are taken only from the snapshot already held: item units and occupied stacks. There is
--- deliberately no item-to-gold estimate; no verified valuation exists in the addon.
+-- Counts are taken only from the snapshot already held: item units and occupied stacks. (1.2.4:
+-- the items' value, Bank.Value, is their vendor price over Olympus's table, not their market value.)
 local function BankSnapshotTotals(snap)
 	local units, stacks = 0, 0
 	for _, tab in ipairs(type(snap) == "table" and type(snap.tabs) == "table" and snap.tabs or {}) do
@@ -3513,7 +3513,7 @@ local function SnapshotLines(lines, b, opts)
 	lines[#lines + 1] = { text = L.TREASURY_BANK_GOLD, right = Treasury.Coins(b.money or 0) }
 	local units, stacks = BankSnapshotTotals(b)
 	lines[#lines + 1] = { text = L.TREASURY_GUILD_ITEMS:format(units, stacks), tooltip = opts.valueTip and function(tt)
-		tt:AddLine(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, 1, 1, true)
+		Treasury.ValueTip(tt, ns.Bank.Value and ns.Bank.Value(b))
 	end or nil }
 	-- 1.1: what left the bank since the snapshot before (counts only, never who: the bank's log is
 	-- never read), and in the grid the slots those stacks sat in, faded.
@@ -3668,10 +3668,16 @@ Treasury.DirectoryShown = DirectoryShown
 
 -- The banks the list shows, rebuilt from what Bank.lua holds now (it rechecks the viewer and the
 -- current authority): { key, guild, snap, by, home, money, units, stacks, t, old }, <Olympus>'s
--- first, then the most gold first. A viewer who is of another Olympus guild finds his own guild's
--- bank there too, as his own client last read it (no one whispers him his own: Treasury.Private),
--- or a newer snapshot of it an officer of his shared; one bank a guild.
-local function DirectoryBanks(role)
+-- first. A viewer who is of another Olympus guild finds his own guild's bank there too, as his own
+-- client last read it (no one whispers him his own: Treasury.Private), or a newer snapshot of it an
+-- officer of his shared; one bank a guild. 1.2.4 (the author's ranking of the treasuries): with each
+-- its items' value (value, pending, unpriced: Bank.Value), its total (gold + value), its Federal
+-- Treasury correspondent (corr, corrKept: Bank.Correspondent; none for <Olympus>, the Federal
+-- Treasury itself), its average level (level: the census) and its place (pos; <Olympus> has none,
+-- outside the race): the highest total first, then the higher average level, then the name. Only
+-- for the ranking drawn (`ranked`): a search's keystroke, the tab's visibility, a guild's page by
+-- name work out no value (their totals are the gold) and ask the game for no item's data.
+local function DirectoryBanks(role, ranked)
 	local out = {}
 	if not DirectoryShown() then return out end
 	local B = ns.Bank
@@ -3693,25 +3699,66 @@ local function DirectoryBanks(role)
 	if type(mine) == "table" and type(guild) == "string" and mine.guild == guild then Add(mine) end
 	for _, s in ipairs(B.Sisters()) do Add(s) end
 	local now = ns.Now()
+	if ranked and B.PriceAsks then B.PriceAsks() end
 	for _, b in ipairs(out) do
 		local x = B.Index(b.snap)
 		b.units, b.stacks = x and x.units or 0, x and x.stacks or 0
 		b.money, b.t = math.max(0, math.floor(tonumber(b.snap.money) or 0)), tonumber(b.snap.t) or 0
 		b.old = now - b.t > (B.SISTER_OLD or math.huge)
+		local v = ranked and B.Value and B.Value(b.snap)
+		b.value, b.pending, b.unpriced, b.ranked = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0, ranked and true or nil
+		b.total = b.money + b.value
+		if ranked and not b.home and B.Correspondent then b.corr, b.corrKept = B.Correspondent(b.guild) end
+		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(b.guild)
+		b.level, b.folded = type(g) == "table" and tonumber(g.avgLevel) or 0, ns.Fold(b.guild)
 	end
 	table.sort(out, function(a, c)
 		if a.home ~= c.home then return a.home == true end
-		if a.money ~= c.money then return a.money > c.money end
+		if a.total ~= c.total then return a.total > c.total end
+		if a.level ~= c.level then return a.level > c.level end
+		if a.folded ~= c.folded then return a.folded < c.folded end
 		return a.key < c.key
 	end)
+	local pos = 0
+	for _, b in ipairs(out) do
+		if not b.home then pos = pos + 1; b.pos = pos end
+	end
 	return out
 end
 
+-- 1.2.4: the ranking of the Guild treasuries as numbers alone: { federal = <Olympus>'s row or nil,
+-- rows = { { pos, guild, correspondent, money, units, stacks, value, pending, unpriced, total, t, old,
+-- level }, ... } }, in its order. What the Treasury tab draws in place of the banks' rows, for their
+-- audience alone. Sharing it with everyone, its numbers without any bank's items, is for later (the
+-- author's "depois"): a message of these fields would go from here. Nothing sends it in 1.2.4.
+function Treasury.Ranking(role)
+	local out = { rows = {} }
+	for _, b in ipairs(DirectoryBanks(role, true)) do
+		local row = { pos = b.pos, guild = b.guild, correspondent = b.corr or nil, money = b.money, units = b.units, stacks = b.stacks,
+			value = b.value, pending = b.pending, unpriced = b.unpriced, total = b.total, t = b.t, old = b.old, level = b.level }
+		if b.home then out.federal = row else out.rows[#out.rows + 1] = row end
+	end
+	return out
+end
+
+-- An amount of the ranking: "at least" while some of the bank's items wait for their data.
+local function AtLeast(b, text) return b.pending > 0 and L.TREASURY_RANK_ATLEAST:format(text) or text end
+-- What a bank's items are worth, said (v: Bank.Value's).
+function Treasury.ValueTip(tt, v)
+	if type(v) == "table" then
+		local text = Treasury.GoldText(v.value)
+		tt:AddLine(L.TREASURY_RANK_VALUE:format(v.pending > 0 and L.TREASURY_RANK_ATLEAST:format(text) or text), 1, 0.82, 0)
+		if v.pending > 0 then tt:AddLine(L.TREASURY_RANK_PENDING:format(v.pending), 1, 1, 1, true) end
+		if v.unpriced > 0 then tt:AddLine(L.TREASURY_RANK_UNPRICED:format(v.unpriced), 1, 1, 1, true) end
+	end
+	tt:AddLine(L.TREASURY_GUILD_VALUE_TIP, 0.8, 0.8, 0.8, true)
+end
+
 -- One of them by name, as the list would show it now (nil: not authorized, or no longer held).
-local function DirectoryBank(name)
+local function DirectoryBank(name, ranked)
 	if type(name) ~= "string" or name == "" then return nil end
 	local key = name:lower()
-	for _, b in ipairs(DirectoryBanks()) do if b.key == key then return b end end
+	for _, b in ipairs(DirectoryBanks(nil, ranked)) do if b.key == key then return b end end
 end
 
 -- Its ledger: the Treasury books' balance (<Olympus>'s alone), as this viewer sees it. Returns its
@@ -3740,21 +3787,35 @@ local function DirTip(b, click)
 		tt:AddLine(L.TREASURY_GUILD_TITLE:format(b.guild), 1, 0.82, 0)
 		tt:AddLine(L.TREASURY_GUILD_SHARED_BY:format(DirWho(b), ns.Ago(b.t)), 1, 1, 1, true)
 		if b.old then tt:AddLine(L.TREASURY_DIR_STATE_OLD, 1, 0.4, 0.4, true) else tt:AddLine(L.TREASURY_DIR_STATE_SHARED, 0.6, 1, 0.6, true) end
+		-- (A search's rows are not ranked: their correspondent and value are worked out here, at the
+		-- hover alone, as the ranking's are: the branch's review.)
+		local B = ns.Bank
+		local corr, kept = b.corr, b.corrKept
+		if not b.ranked and not b.home and B.Correspondent then corr, kept = B.Correspondent(b.guild) end
+		if not b.home then
+			local who = corr and ns.DisplayName(corr) or nil
+			tt:AddLine(not who and L.TREASURY_RANK_CORR_NONE or (kept and L.TREASURY_RANK_CORR_KEPT or L.TREASURY_RANK_CORR):format(who), 1, 1, 1, true)
+		end
+		tt:AddLine(L.TREASURY_GUILD_ITEMS:format(b.units or 0, b.stacks or 0), 1, 1, 1, true)
 		tt:AddLine(b.home and L.TREASURY_DIR_LEDGER_TIP or L.TREASURY_GUILD_BOOK_UNAVAILABLE, 0.8, 0.8, 0.8, true)
-		tt:AddLine(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 0.8, 0.8, 0.8, true)
+		local v = b.ranked and { value = b.value or 0, pending = b.pending or 0, unpriced = b.unpriced or 0 } or (B.Value and B.Value(b.snap))
+		Treasury.ValueTip(tt, v)
 		if click then tt:AddLine(click, 0.6, 1, 0.6, true) end
 	end
 end
 
--- Its line under its name: its ledger and its items; who took it and when on the right.
+-- Its line under its name: its gold, its items and their value (1.2.4; <Olympus>'s ledger first);
+-- who took it and when on the right (an old one in red).
 local function DirDetail(b)
-	return { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(b.units, b.stacks)),
+	local text = L.TREASURY_RANK_DETAIL:format(Treasury.GoldText(b.money), b.units, AtLeast(b, Treasury.GoldText(b.value)))
+	if b.home then text = L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. text end
+	return { indent = 1, text = Grey(text),
 		right = (b.old and Red or Grey)(L.TREASURY_DIR_WHEN:format(DirWho(b), ns.Ago(b.t))), tooltip = DirTip(b) }
 end
 
 -- The census's Olympus guilds (but the King's) whose bank this client holds none of: no snapshot
--- received, which is no refusal (snapshots live in memory and come only while a sharer is online;
--- a yes may be the King's alone, 1.1's).
+-- received, which is no refusal (a snapshot comes only while a sharer is online, kept since 1.2.4
+-- until a newer one or his no; a yes may be the King's alone, 1.1's).
 local function Unheld(banks)
 	local have, out = {}, {}
 	for _, b in ipairs(banks) do have[b.key] = true end
@@ -3792,7 +3853,7 @@ local function SisterLines(lines, role)
 		end
 		return false
 	end
-	local banks = DirectoryBanks(role)
+	local banks = DirectoryBanks(role, true)
 	lines[#lines + 1] = { header = true, text = L.TREASURY_GUILDS, tooltip = function(tt)
 		tt:AddLine(L.TREASURY_GUILDS, 1, 0.82, 0)
 		tt:AddLine(L.TREASURY_GUILDS_TIP, 1, 1, 1, true)
@@ -3814,10 +3875,14 @@ local function SisterLines(lines, role)
 		lines[#lines + 1] = { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format(ledger) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(units, stacks)),
 			tooltip = TotalTip, gapAfter = true }
 	end
-	for _, bank in ipairs(banks) do
-		local b = bank
+	-- 1.2.4: the ranking in place of the banks' rows (the author's ask): <Olympus> apart, the Federal
+	-- Treasury, outside the race; then each guild in its place, its correspondent, its gold, its
+	-- items, their value and its total; a click opens its bank as before.
+	local function Row(b)
 		local opened = dirOpen == b.key
-		lines[#lines + 1] = { text = (opened and Gold or tostring)((opened and "[-] " or "[+] ") .. "<" .. b.guild .. ">"), right = Treasury.Coins(b.money),
+		local label = b.home and L.TREASURY_RANK_FEDERAL:format("<" .. b.guild .. ">")
+			or L.TREASURY_RANK_ROW:format(b.pos, b.corr and ns.DisplayName(b.corr) or L.TREASURY_RANK_NO_CORR, "<" .. b.guild .. ">")
+		lines[#lines + 1] = { text = (opened and Gold or tostring)((opened and "[-] " or "[+] ") .. label), right = AtLeast(b, Treasury.Coins(b.total)),
 			key = "sister:" .. b.guild, tooltip = DirTip(b, L.TREASURY_DIR_EXPAND_TIP),
 			onClick = function()
 				dirOpen = dirOpen ~= b.key and b.key or nil
@@ -3828,6 +3893,19 @@ local function SisterLines(lines, role)
 			SnapshotLines(lines, b.snap, { byLine = (b.home and L.TREASURY_BANK_AS_OF or L.TREASURY_GUILD_SHARED_BY):format(DirWho(b), ns.Ago(b.t)),
 				gone = true, open = dirTabs[b.key], setOpen = function(i) dirTabs[b.key] = i end, key = "dirtab:" .. b.key .. ":", valueTip = true })
 			lines[#lines].gapAfter = true
+		end
+	end
+	local ranked = 0
+	for _, b in ipairs(banks) do
+		if b.home then Row(b) else ranked = ranked + 1 end
+	end
+	if ranked > 0 then
+		lines[#lines + 1] = { text = Grey(L.TREASURY_RANK_HEAD), right = Grey(L.TREASURY_RANK_TOTAL), key = "dir:ranking", tooltip = function(tt)
+			tt:AddLine(L.TREASURY_RANK_HEAD, 1, 0.82, 0)
+			tt:AddLine(L.TREASURY_RANK_TIP, 1, 1, 1, true)
+		end }
+		for _, b in ipairs(banks) do
+			if not b.home then Row(b) end
 		end
 	end
 	local others = Unheld(banks)
@@ -3850,7 +3928,7 @@ end
 -- the item lit.
 local function GuildLines()
 	local lines = { { text = Gold("< " .. L.TREASURY_TITLE), onClick = function() Treasury.Show("summary") end, gapAfter = true } }
-	local b = DirectoryBank(guildShown)
+	local b = DirectoryBank(guildShown, true)
 	if not b then
 		lines[#lines + 1] = { header = true, text = L.TREASURY_GUILDS }
 		Para(lines, L.TREASURY_GUILD_SNAPSHOT_GONE)

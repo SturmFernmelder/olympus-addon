@@ -44922,7 +44922,8 @@ test("1.1 sister guilds' banks (Fern): their treasurer's yes, whispered to the K
 			-- page, with the line on its Book, is where the search leads, ShowGuild.)
 			lines = T.Build()
 			page = Texts(lines)
-			assert(page:find("[-] <Olympus Zeus>", 1, true) and page:find("Tab 1", 1, true), page)
+			-- (1.2.4: the ranking's row, its place and its correspondent before the guild; changed on purpose.)
+			assert(page:find("[-] " .. ns.L.TREASURY_RANK_ROW:format(1, ns.L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true) and page:find("Tab 1", 1, true), page)
 			eq(Grid(lines)[3].id, 2589, "its grid in the list, where the stack sits")
 			eq(T.ShowGuild("Olympus Zeus"), true)
 			lines = T.Build()
@@ -45026,6 +45027,7 @@ do
 		for i = from or 1, #lines do if tostring(lines[i].text):find(text, 1, true) then return i, lines[i] end end
 	end
 	local function Key(lines, key) for _, l in ipairs(lines) do if l.key == key then return l end end end
+	local function KeyAt(lines, key) for i, l in ipairs(lines) do if l.key == key then return i end end end
 	local function Grids(lines)
 		local out = {}
 		for i, l in ipairs(lines) do if l.items then out[#out + 1] = i end end
@@ -45069,7 +45071,8 @@ do
 		local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
-		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true } -- (punctuation alone)
+		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true, -- (punctuation alone)
+			TREASURY_RANK_ROW = true, TREASURY_RANK_TOTAL = true } -- (1.2.4: and "Total", one word in both)
 		for _, key in ipairs({ "TREASURY_DIR_TOTAL", "TREASURY_DIR_TOTAL_TIP", "TREASURY_DIR_LEDGER", "TREASURY_DIR_LEDGER_NONE",
 			"TREASURY_DIR_LEDGER_HIDDEN", "TREASURY_DIR_LEDGER_TIP", "TREASURY_DIR_WHO", "TREASURY_DIR_GM", "TREASURY_DIR_OFFICER",
 			"TREASURY_DIR_KEEPER", "TREASURY_DIR_WHEN", "TREASURY_DIR_STATE_SHARED", "TREASURY_DIR_STATE_OLD", "TREASURY_DIR_EXPAND_TIP",
@@ -45077,7 +45080,11 @@ do
 			"TREASURY_DIR_FOUND_TIP", "TREASURY_DIR_FOUND_IN", "TREASURY_DIR_PLACE", "TREASURY_DIR_PLACES_MORE", "TREASURY_DIR_LIT",
 			"SEARCH_TIP_TREASURY_GUILDS", "BANK_SISTER_WIDER", "BANK_SISTER_WIDER_YES", "BANK_SISTER_WIDER_NO", "BANK_SISTER_KING_KEPT",
 			"TREASURY_GUILDS_TIP", "TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_BOOK_UNAVAILABLE", "BANK_SISTER_ASK", "BANK_SISTER_ON",
-			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK" }) do
+			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK",
+			-- 1.2.4: the ranking of the treasuries.
+			"TREASURY_RANK_HEAD", "TREASURY_RANK_TOTAL", "TREASURY_RANK_TIP", "TREASURY_RANK_FEDERAL", "TREASURY_RANK_ROW",
+			"TREASURY_RANK_NO_CORR", "TREASURY_RANK_DETAIL", "TREASURY_RANK_ATLEAST", "TREASURY_RANK_VALUE", "TREASURY_RANK_PENDING",
+			"TREASURY_RANK_UNPRICED", "TREASURY_RANK_CORR", "TREASURY_RANK_CORR_KEPT", "TREASURY_RANK_CORR_NONE", "TREASURY_GUILD_VALUE_TIP" }) do
 			assert(type(rawget(ns.L, key)) == "string", "English " .. key)
 			assert(type(rawget(pt.L, key)) == "string" and (same[key] or pt.L[key] ~= ns.L[key]), "Portuguese " .. key)
 			eq(select(2, pt.L[key]:gsub("%%[ds]", "")), select(2, ns.L[key]:gsub("%%[ds]", "")), key)
@@ -45403,13 +45410,21 @@ do
 			eq(lines[total].right, T.Coins(424242 + 424242 + 900000))
 			assert(lines[total + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[total + 1].text)
 			assert(lines[total + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85 + 85 + 200, 7), 1, true), lines[total + 1].text)
-			-- <Olympus> first, then the most gold first.
-			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), Find(lines, "[+] <Olympus Hera>", total), Find(lines, "[+] <Olympus Zeus>", total)
+			-- <Olympus> first, then the most first. (1.2.4, changed on purpose: the ranking's rows, found
+			-- by their keys; the most gold plus the items' value first. This client holds no item data:
+			-- each total is its gold, "at least".)
+			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), KeyAt(lines, "sister:Olympus Hera"), KeyAt(lines, "sister:Olympus Zeus")
 			assert(home and hera and zeus and home < hera and hera < zeus, page)
-			-- Each row: its gold; the ledger apart (<Olympus>'s books alone), its items, who shared it, when.
-			eq(lines[zeus].right, T.Coins(424242))
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), lines[zeus + 1].text)
+			-- Each row: its total; the ledger apart (<Olympus>'s books alone: no "none kept" on another
+			-- guild's row any more), its gold, items and their value, who shared it, when; its stacks in
+			-- the tooltip.
+			eq(lines[zeus].right, ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
+			assert(not lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
+			eq(lines[zeus + 1].text, "|cff9d9d9d" .. ns.L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 85, ns.L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+			local stacks = { lines = {} }
+			function stacks:AddLine(s) self.lines[#self.lines + 1] = s end
+			lines[zeus].tooltip(stacks)
+			assert(table.concat(stacks.lines, "\n"):find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), table.concat(stacks.lines, "\n"))
 			assert(lines[zeus + 1].right:find(ns.L.TREASURY_DIR_WHO:format("Zed", ns.L.TREASURY_DIR_GM), 1, true), lines[zeus + 1].right)
 			assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 3600), 1, true), lines[zeus + 1].right)
 			assert(lines[home + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[home + 1].text)
@@ -45436,8 +45451,8 @@ do
 			-- A click opens Olympus Zeus in place: what the guild bank above shows of its own, line for line.
 			Key(T.Build(), "sister:Olympus Zeus").onClick()
 			lines = T.Build()
-			local open = Find(lines, "[-] <Olympus Zeus>")
-			assert(open, Texts(lines))
+			local open = KeyAt(lines, "sister:Olympus Zeus")
+			assert(open and lines[open].text:find("[-] ", 1, true), Texts(lines))
 			local grids = Grids(lines)
 			eq(#grids, 2, "the bank above, and Olympus Zeus's")
 			local function Portrait(at)
@@ -45795,8 +45810,9 @@ do
 			eq(T.Private(SAGE, "TS", B.Message(ns.rdb.bank, "TS")), false, "never whispered to himself")
 			T.Show("summary")
 			local lines = T.Build()
-			local zeus = Find(lines, "[+] <Olympus Zeus>")
-			assert(zeus and lines[zeus].right == T.Coins(31337), Texts(lines))
+			-- (1.2.4: its row in the ranking, its gold the total while this client holds no item data.)
+			local zeus = Key(lines, "sister:Olympus Zeus")
+			assert(zeus and zeus.right == ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(31337)), Texts(lines))
 			-- The others the census knows: no snapshot received (Hera, Ares, Olympus II), never Zeus.
 			local others = Key(lines, "dir:others")
 			assert(others and others.text:find(ns.L.TREASURY_DIR_UNHELD:format(3), 1, true), Texts(lines))
@@ -45823,9 +45839,11 @@ do
 			AsKing()
 			Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 41414, { { i = 1, items = { { id = 2770, n = 13, s = 2 } } } }, 60), "Zora-Realm")
 			As(SAGE, "Olympus Zeus", 0)
-			eq(Row(), T.Coins(41414), "the officer's, newer")
+			-- (1.2.4: the row's total, gold plus the items' value; no item data here: "at least".)
+			local AtLeast = function(c) return ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(c)) end
+			eq(Row(), AtLeast(41414), "the officer's, newer")
 			ns.rdb.bank = Snap(w, "Olympus Zeus", SAGE, 51515, { { i = 1, name = "Our Tab", items = { { id = 2770, n = 14, s = 2 } } } })
-			eq(Row(), T.Coins(51515), "his own read, newer")
+			eq(Row(), AtLeast(51515), "his own read, newer")
 			-- Another guild's master outside the audience: his own bank is no directory of his.
 			B.Reset()
 			As(HERA, "Olympus Hera", 0)
@@ -45980,6 +45998,802 @@ do
 			AsZed()
 			B.Reset()
 			eq(B.SisterConsent(), false); eq(B.AskSister(), false); eq(B.SisterMessage(), nil)
+		end)
+	end)
+
+	-- 1.2.4 (the author's report: other guilds' treasuries he had seen were gone, <Olympus>'s alone
+	-- stayed). A snapshot heard while the census could not judge its sender yet (the viewer's first
+	-- Data.CROWN_AFTER after a login or a /reload, when every guild master is refused, or that guild's
+	-- report missing or older than Data.FRESH) was dropped without a word, and its sender's client,
+	-- which took it as delivered, sent it again only SISTER_REPEAT (3 hours) later. The viewer's first
+	-- ask goes ASK_AFTER (40 s) after login and is answered at once: a guild master online before him
+	-- always landed in that window.
+	test("1.2.4 Guild treasuries: a snapshot the census cannot judge yet (the viewer's login window, a stale report) is held and taken once the census confirms its sender; meanwhile his 15-minute ask names nothing on the channel", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin = ns.Comm.loginAt
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Pieces(to)
+					local out = {}
+					for _, x in ipairs(w.whispered) do if x.to == to and x.msg:find("^TW~TS~") then out[#out + 1] = x.msg end end
+					return out
+				end
+				local function Deliver(pieces, from) for _, m in ipairs(pieces) do T.HandlePrivate("WHISPER", from or "Zed-Realm", m) end end
+				-- Zed, the guild master of Olympus Zeus, says yes. Sage logs in; his addon's first ask is answered.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } })
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				local bank, when = ns.rdb.bank, math.floor(ns.rdb.bank.t)
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				local pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				-- It reaches Sage's client 60 s after his login, inside the census's window: not shown yet.
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				Deliver(pieces)
+				eq(#B.Sisters(), 0, "not shown before the census can confirm its sender")
+				-- The window over, the census confirms Zed: taken, with nothing sent again (before 1.2.4:
+				-- nothing for 3 hours).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Census(w)
+				Run() -- (the check due once the window is over)
+				local s = B.Sisters()
+				eq(#s, 1, "taken once the census confirms him"); eq(s[1].money, 424242); eq(s[1].by, "Zed-Realm"); eq(s[1].t, when)
+				-- An officer's snapshot while his guild's report is older than Data.FRESH (no window): held,
+				-- taken when a fresh report comes (DATA_CHANGED).
+				B.Reset()
+				AsSage(); ns.Comm.loginAt = w.clock - 3600
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60
+				Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 1111, { { i = 1, items = { { id = 2589, n = 5, s = 1 } } } }), "Zora-Realm")
+				eq(#B.Sisters(), 0, "a stale report: not yet")
+				Census(w)
+				CoreFire("DATA_CHANGED") -- (the harness keeps ns.Fire quiet: the real one, as a report heard fires it)
+				s = B.Sisters()
+				eq(#s, 1, "a fresh report confirms her"); eq(s[1].by, "Zora-Realm"); eq(s[1].money, 1111)
+				-- Refused for good: the census, fresh and settled, does not name the sender. Nothing held.
+				B.Reset()
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(#B.Sisters(), 0); eq(B.Held(), 0, "a sender the census does not name: dropped as before")
+				-- Inside the window he is held (the census can say nothing yet), and dropped once it says no.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1)
+				ns.Comm.loginAt = w.clock - 3600
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 0, "never shown"); eq(B.Held(), 0, "dropped once the census says no")
+				-- Bounded: one held snapshot a sender (his newest), of Olympus guilds alone.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				Hear(Snap(w, "Olympus Hera", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1, "one a sender: his newest")
+				-- (Changed on purpose, the branch's review: inside the window an Olympus guild no report has
+				-- named yet this session is held too. The census forgets at login the rows it has not heard for
+				-- Data.KEEP, so after a week away every guild is such a one until its report comes.)
+				Hear(Snap(w, "Olympus Nowhere", "Other Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Other Guy-Realm")
+				eq(B.Held(), 2, "a guild the census has not heard of yet: held too")
+				Hear(Snap(w, "Sons of Nothing", "Third Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Third Guy-Realm")
+				eq(B.Held(), 2, "no Olympus guild: never held")
+				-- The 15-minute ask while one is held names nothing, and Zed's client sends nothing again for it.
+				-- (Changed on purpose, the branch's review: its first draft named the held snapshot's time on
+				-- the channel, and Zed's client sent the same text again at every ask; the census's next report,
+				-- DATA_CHANGED, is what takes it, the text held already.)
+				B.Reset(); T.ResetPrivate()
+				AsZed(); ns.rdb.bank = bank
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60 -- (and his guild's report stale)
+				Deliver(pieces)
+				eq(B.Held(), 1)
+				Run() -- (Sage's client's own timers, before this test plays Zed's: still held)
+				eq(B.Held(), 1)
+				w.sent = {}
+				eq(T.Ask(true), true); eq(LastSent(w), "TA~Olympus II~0", "his login's ask: he holds nothing")
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true)
+				local ask = LastSent(w)
+				eq(ask, "TA~Olympus II~1", "a routine ask, as 1.2.3's: no snapshot's time on the channel")
+				AsZed()
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, ask); Run()
+				eq(#Pieces(SAGE), 0, "a routine ask: nothing again for SISTER_REPEAT")
+				AsSage(); Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 1, "taken once his guild's report is fresh"); eq(B.Held(), 0)
+				eq(B.Sisters()[1].t, when)
+			end)
+			ns.Comm.loginAt = savedLogin
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4 (the author's call: "Não precisa ser temporário... As guildas podem ser definitivas, iguais à
+	-- guilda principal"): each guild's latest snapshot a viewer took is kept across logouts, as
+	-- <Olympus>'s own is. Before 1.2.4 it lived in memory alone ("it is never saved", README.md).
+	test("1.2.4 Guild treasuries: each guild's latest snapshot is kept across a logout (saved, bounded: one a guild, Olympus guilds, a size cap), never dropped for its age; its sharer's no takes it from the save too; a viewer who leaves the audience drops them at once", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin, savedCap = ns.Comm.loginAt, B.SISTERS_SAVED_BYTES
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Stored(name)
+					local all = ns.rdb.sisterBanks
+					local mine = type(all) == "table" and all[name:lower()] or nil
+					local n = 0
+					for _ in pairs(mine or {}) do n = n + 1 end
+					return n, mine
+				end
+				ns.Comm.loginAt = w.clock - 3600
+				AsSage()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }, 3600), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 2, items = { { id = 2770, n = 20, s = 7 } } } }), HERA)
+				eq(#B.Sisters(), 2)
+				eq(Stored(SAGE), 2, "both in the saved variables")
+				-- A /reload or a logout: memory gone, both back as they came, its items too.
+				B.Reload()
+				local s = B.Sisters()
+				eq(#s, 2, "kept across the reload")
+				eq(s[1].guild, "Olympus Hera"); eq(s[1].money, 900000); eq(s[1].by, HERA)
+				eq(s[1].tabs[1].name, "Tab 2"); eq(s[1].tabs[1].items[1].id, 2770); eq(s[1].tabs[1].items[1].s, 7)
+				eq(s[2].guild, "Olympus Zeus"); eq(s[2].t, w.clock - 3600); eq(s[2].money, 424242)
+				T.Show("summary")
+				Key(T.Build(), "sister:Olympus Zeus").onClick()
+				local lines = T.Build()
+				eq(#Grids(lines), 1, "its bank opens as before"); eq(lines[Grids(lines)[1]].items[1].id, 2589)
+				Key(lines, "sister:Olympus Zeus").onClick()
+				-- The newest of a guild replaces the older, in the save too (one a guild).
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 2)
+				B.Reload()
+				s = B.Sisters()
+				eq(s[2].money, 525252); eq(s[2].tabs[1].items[1].n, 61)
+				-- No age takes one away: a month later it is still there, marked old.
+				w.clock = w.clock + 30 * 86400
+				Census(w)
+				B.Reload()
+				eq(#B.Sisters(), 2, "never dropped for its age")
+				lines = T.Build()
+				local zeus = Key(lines, "sister:Olympus Zeus")
+				assert(zeus, Texts(lines))
+				for i, l in ipairs(lines) do if l == zeus then assert(lines[i + 1].right:find("ff6060", 1, true), "marked old: " .. lines[i + 1].right) end end
+				-- His no takes it back, from the save too: from whoever sent it, whatever the census says now.
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - 2 * ns.Data.FRESH
+				B.HandleSister("WHISPER", "Faker Guy-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 2, "not from anyone")
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 1, "his own no")
+				eq(Stored(SAGE), 1, "gone from the save")
+				B.Reload()
+				eq(#B.Sisters(), 1, "and after a reload")
+				-- His addon tells it to the viewer's ask after a login too (a fresh one): before 1.2.4 such
+				-- an ask held nothing, now it may hold his snapshot from an earlier session.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } })
+				ns.db.sisterBankShares, ns.db.sisterBankSent = { ["zed-realm"] = false }, { ["zed-realm"] = "Olympus Zeus" }
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				eq(#w.whispered, 1, "the no, to an ask after a login"); eq(w.whispered[1].to, SAGE); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 1, "once a session")
+				ns.db.sisterBankShares, ns.db.sisterBankSent = nil, nil
+				-- A guild gone from the census stays in the save. (Changed on purpose, the branch's review: the
+				-- census forgets at a viewer's login every row it has not heard for Data.KEEP, so after a week
+				-- away every saved snapshot went.) Its sender's no still takes it.
+				AsSage()
+				ns.rdb.guilds["Olympus Hera"] = nil
+				B.Reload()
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1, "kept, the census's row forgotten")
+				B.HandleSister("WHISPER", HERA, "TS~Olympus Hera~0~0~")
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 0, "its sender's no")
+				-- Leaving the audience: what he held goes at once, the save too.
+				Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1)
+				local council = ns.rdb.council
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				eq(#B.Sisters(), 0, "no longer a viewer"); eq(Stored(SAGE), 0, "the save too, at once")
+				ns.rdb.council = council
+				B.Reload()
+				eq(#B.Sisters(), 0, "dropped, not hidden")
+				-- Taken off while offline: at his next login nothing shows, and once his role is known for
+				-- ROLE_SETTLE of that session (a Hand's waits for the King's list), the save goes too.
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 1)
+				B.Reload()
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				ns.Comm.loginAt = w.clock
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 1, "not yet: his role may come")
+				w.clock = w.clock + B.ROLE_SETTLE
+				Census(w)
+				B.Holding()
+				eq(Stored(SAGE), 0, "a session outside the audience: gone")
+				ns.rdb.council = council
+				ns.Comm.loginAt = w.clock - 3600
+				-- Another character of the account, never of the audience, neither sees nor drops them.
+				B.Reload()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				B.Reload()
+				AsSoldier()
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				Census(w)
+				eq(#B.Sisters(), 0); B.Holding()
+				eq(Stored(SAGE), 1, "a soldier's session leaves Sage's alone"); eq(Stored("Soldier-Realm"), 0)
+				B.Reload(); AsSage()
+				eq(#B.Sisters(), 1, "Sage's again")
+				-- The size cap: past SISTERS_SAVED_BYTES of text for the realm group, the one heard longest
+				-- ago leaves the save (still shown this session).
+				local _, mine = Stored(SAGE)
+				local one = #mine["olympus zeus"].text
+				B.SISTERS_SAVED_BYTES = one * 2 + 10
+				w.clock = w.clock + 1
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), HERA)
+				w.clock = w.clock + 1
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm" }, "W11-Realm", "W12-Realm")
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 1, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Hermy-Realm")
+				eq(#B.Sisters(), 3, "all three shown")
+				local n
+				n, mine = Stored(SAGE)
+				eq(n, 2, "two fit"); eq(mine["olympus zeus"], nil, "the one heard longest ago left the save")
+				B.Reload()
+				eq(#B.Sisters(), 2)
+			end)
+			ns.Comm.loginAt, B.SISTERS_SAVED_BYTES = savedLogin, savedCap
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4 (the author's ask: "eu quero um ranking dos tesouros com mais gold, com mais itens... Esse
+	-- ranking vai ser no lugar desses bancos aqui. Teria que ter: o nome do correspondente, o nome da
+	-- guilda, a quantidade de gold, a quantidade de itens, o valor dos itens... Em ordem, em ranking
+	-- mesmo"; a guild's average level breaks a tie, his rule everywhere).
+	test("1.2.4 Guild treasuries: the ranking in the banks' place (position, correspondent, guild, gold, items, the items' value, total, when); <Olympus> apart as the Federal Treasury; by total, then average level, then name; items still loading say 'at least'; a click opens the bank; nothing sent", function()
+		WithDirectory(function(w, K, Run)
+			local T, B, L, N = ns.Treasury, ns.Bank, ns.L, ns.Nominees
+			local savedValues, savedLogin = B.ITEM_VALUES, ns.Comm.loginAt
+			local ok, err = pcall(function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- The game's item data as C_Item gives it, its 11th return what a vendor pays, in copper
+				-- (made-up prices: this is no price list). Linen Cloth's data not loaded yet.
+				local SELL = { [2589] = 10, [2770] = 25, [929] = 0, [2996] = 100 }
+				local cached = { [2589] = false, [2770] = true, [929] = true, [2996] = true }
+				local requested = {}
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function(id) return cached[id] == true end,
+					RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+					GetItemInfo = function(id)
+						if not cached[id] then return nil end
+						return NAMES[id], "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, SELL[id]
+					end,
+				}
+				-- The census's average levels: Olympus Hermes 55, Olympus Hera and Olympus Zeus 40.
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm", avgLevel = 55 }, "W11-Realm", "W12-Realm")
+				ns.rdb.guilds["Olympus Apollo"] = Vouched({ total = 70, online = 3, zones = {}, t = w.clock, leader = "Apo", realm = "Realm", avgLevel = 10 }, "W13-Realm", "W14-Realm")
+				-- Zed names Olympus Zeus's Federal Treasury correspondent (his list, the census proving him).
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				N.Handle("CHANNEL", "Hermy-Realm", ("NM~1~Olympus Hermes~%d~1~1~d=Department of War=Warry"):format(w.clock))
+				-- <Olympus>'s bank (the King's own read), and four guilds'. After the data comes, Hermes,
+				-- Hera and Zeus are alike in total (10g 6s), Apollo ahead.
+				ns.rdb.bank = Snap(w, "Olympus", KING, 5000000, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } })
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, { { i = 1, items = { { id = 2589, n = 60, s = 3 }, { id = 929, n = 5, s = 4 } } } }, 7200), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 100500, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } }, 60), HERA)
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 100400, { { i = 1, items = { { id = 2996, n = 2, s = 1 } } } }), "Hermy-Realm")
+				Hear(Snap(w, "Olympus Apollo", "Apo-Realm", 200000, { { i = 1, items = {} } }), "Apo-Realm")
+				w.sent, w.whispered = {}, {}
+				T.Show("summary")
+				local lines = T.Build()
+				local page = Texts(lines)
+				-- <Olympus> apart, the Federal Treasury: no position, outside the race.
+				local fed = Key(lines, "sister:Olympus")
+				assert(fed and fed.text:find(L.TREASURY_RANK_FEDERAL:format("<Olympus>"), 1, true), page)
+				eq(fed.right, T.Coins(5000000 + 100), "its gold and its items' value")
+				local head = Key(lines, "dir:ranking")
+				assert(head and head.text:find(L.TREASURY_RANK_HEAD, 1, true) and head.right:find(L.TREASURY_RANK_TOTAL, 1, true), page)
+				local tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				head.tooltip(tip)
+				eq(tip.lines[2], L.TREASURY_RANK_TIP)
+				-- In order: the most first; alike, the higher average level; then the name.
+				local function At(key) for i, l in ipairs(lines) do if l.key == key then return i, l end end end
+				local apollo, hermes, hera, zeus = At("sister:Olympus Apollo"), At("sister:Olympus Hermes"), At("sister:Olympus Hera"), At("sister:Olympus Zeus")
+				assert(At("sister:Olympus") < At("dir:ranking") and At("dir:ranking") < apollo, page)
+				assert(apollo < hermes and hermes < hera and hera < zeus, "Zeus's items still loading: " .. page)
+				eq(lines[apollo].text, "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Apollo>"))
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				eq(lines[hermes].text, "[+] " .. L.TREASURY_RANK_ROW:format(2, L.TREASURY_RANK_NO_CORR, "<Olympus Hermes>"), "another department's correspondent is none of the treasury's")
+				-- Zeus: its gold, its items (stacks in the tooltip), their value "at least" while Linen Cloth's
+				-- data loads (asked of the game once), the potions no vendor buys counted in the items alone.
+				eq(lines[zeus].right, L.TREASURY_RANK_ATLEAST:format(T.Coins(100000)))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+				assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 7200), 1, true), lines[zeus + 1].right)
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				local said = table.concat(tip.lines, "\n")
+				for _, want in ipairs({ L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), L.TREASURY_GUILD_ITEMS:format(65, 2),
+					L.TREASURY_RANK_PENDING:format(60), L.TREASURY_RANK_UNPRICED:format(5), L.TREASURY_GUILD_VALUE_TIP }) do
+					assert(said:find(want, 1, true), want .. " in " .. said)
+				end
+				eq(#requested, 1); eq(requested[1], 2589)
+				T.Build(); eq(#requested, 1, "asked once")
+				-- Its data arrives: the value fills in by itself (one redraw), no "at least" left.
+				cached[2589] = true
+				eq(B.ItemInfoReceived(2589), true)
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].right, T.Coins(100600))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, T.GoldText(600)) .. "|r")
+				hermes, hera = At("sister:Olympus Hermes"), At("sister:Olympus Hera")
+				assert(hermes < hera and hera < zeus, "alike: the higher average level, then the name: " .. Texts(lines))
+				eq(lines[hera].right, T.Coins(100600)); eq(lines[hermes].right, T.Coins(100600))
+				-- The guilds with no snapshot here, below.
+				local others = At("dir:others")
+				assert(others and others > zeus and lines[others].text:find(L.TREASURY_DIR_UNHELD:format(2), 1, true), Texts(lines))
+				-- A click opens that guild's bank, as before.
+				lines[zeus].onClick()
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				assert(lines[zeus].text:find("[-] ", 1, true), lines[zeus].text)
+				eq(#Grids(lines), 2, "the bank above, and Olympus Zeus's")
+				lines[zeus].onClick()
+				-- The ranking as numbers alone (the seam for sharing it later): no item, no tab.
+				local r = T.Ranking()
+				eq(r.federal.guild, "Olympus"); eq(r.federal.total, 5000100); eq(r.federal.pos, nil)
+				eq(#r.rows, 4)
+				local z = r.rows[4]
+				eq(z.pos, 4); eq(z.guild, "Olympus Zeus"); eq(z.correspondent, "Zcorr-Realm"); eq(z.money, 100000); eq(z.units, 65); eq(z.stacks, 2)
+				eq(z.value, 600); eq(z.pending, 0); eq(z.unpriced, 5); eq(z.total, 100600); eq(z.level, 40); eq(z.t, w.clock - 7200)
+				for _, row in ipairs(r.rows) do
+					for k, v in pairs(row) do assert(type(v) ~= "table", "a table in the ranking's row: " .. k) end
+				end
+				-- Nothing of it was sent anywhere (sharing it is for later).
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+				-- His guild master offline longer than his list counts: the correspondent last named still shows,
+				-- with the save, after a reload too.
+				w.clock = w.clock + N.FRESH + 60
+				Census(w)
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				assert(table.concat(tip.lines, "\n"):find(L.TREASURY_RANK_CORR_KEPT:format(ns.DisplayName("Zcorr-Realm")), 1, true), table.concat(tip.lines, "\n"))
+				B.Reload()
+				eq(T.Ranking().rows[4].correspondent, "Zcorr-Realm", "kept with the snapshot")
+				-- Olympus's own table, where it names an item, over its vendor price (empty as shipped).
+				eq(next(savedValues), nil, "shipped empty: no price is guessed")
+				B.ITEM_VALUES = { [929] = 50 }
+				B.Reload()
+				r = T.Ranking()
+				eq(r.rows[2].guild, "Olympus Zeus", "now ahead of the guilds alike")
+				eq(r.rows[2].value, 600 + 250); eq(r.rows[2].unpriced, 0); eq(r.rows[2].pos, 2)
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+			end)
+			B.ITEM_VALUES, ns.Comm.loginAt = savedValues, savedLogin
+			N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4, the branch's review (each case below failed before its fix). The names are made up.
+	local function Stored(name)
+		local all = ns.rdb.sisterBanks
+		local mine = type(all) == "table" and all[name:lower()] or nil
+		local n = 0
+		for _ in pairs(mine or {}) do n = n + 1 end
+		return n, mine
+	end
+	local function Bank1(item, n) return { { i = 1, items = { { id = item or 2589, n = n or 60, s = 3 } } } } end
+	local function KeepLogin(fn)
+		local saved = ns.Comm.loginAt
+		local ok, err = pcall(fn)
+		ns.Comm.loginAt = saved
+		if not ok then error(err, 0) end
+	end
+	local function TipText(line)
+		local tip = { lines = {} }
+		function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+		line.tooltip(tip)
+		return table.concat(tip.lines, "\n")
+	end
+
+	test("1.2.4 Guild treasuries (review): a guild master only his own census report names yet is held past the login window and taken once another report names him; of two senders held for one guild, the newer snapshot is shown whichever came last", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				-- Olympus Zeus's report as Zed's addon alone has sent it so far: he is its reporter, and its
+				-- runner-up answers a login's census request 5 minutes apart at most (Comm.lua).
+				local function Reported(...)
+					ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm",
+						officers = { { name = "Zora", online = true, days = 0 } } }, ...)
+				end
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				Reported("Zed-Realm")
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 0); eq(B.Held(), 1)
+				-- The window over, his own report still the only one: held, unseen (before: dropped at the
+				-- window's end, and his addon, which took it as delivered, sent it again 3 hours later).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Reported("Zed-Realm")
+				Run()
+				eq(#B.Sisters(), 0, "never shown on his own word"); eq(B.Held(), 1, "still held after the window")
+				w.sent = {}
+				eq(T.Ask(true), true)
+				w.clock = w.clock + 120
+				eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~1", "nothing held is named on the channel")
+				-- The runner-up's report comes: taken.
+				Reported("Zed-Realm", "W3-Realm")
+				CoreFire("DATA_CHANGED")
+				local s = B.Sisters()
+				eq(#s, 1, "taken once another report names him"); eq(s[1].money, 424242); eq(B.Held(), 0)
+				-- Two senders of one guild, neither confirmed yet (the row kept from the last session is stale
+				-- at login): the newer snapshot is shown once both are, whichever came last (before: the last
+				-- to come, and the newer one's sender waited 3 hours).
+				for _, order in ipairs({ { "Zed-Realm", "Zora-Realm" }, { "Zora-Realm", "Zed-Realm" } }) do
+					B.Reset(); AsSage(); ns.Comm.loginAt = w.clock - 60
+					Census(w)
+					ns.rdb.guilds["Olympus Zeus"].t = w.clock - 3600
+					local snaps = { ["Zed-Realm"] = Snap(w, "Olympus Zeus", "Zed-Realm", 2222, Bank1(2589, 2)),
+						["Zora-Realm"] = Snap(w, "Olympus Zeus", "Zora-Realm", 1111, Bank1(2589, 1), 7200) }
+					Hear(snaps[order[1]], order[1]); Hear(snaps[order[2]], order[2])
+					eq(B.Held(), 2, "one a sender")
+					w.clock = w.clock + ns.Data.CROWN_AFTER
+					Census(w)
+					Run()
+					s = B.Sisters()
+					eq(#s, 1); eq(s[1].by, "Zed-Realm", "the newer, " .. order[2] .. "'s last"); eq(s[1].money, 2222); eq(B.Held(), 0)
+				end
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a viewer away more than a week keeps every snapshot saved (the census forgets its rows at his login, before any report); one sent again at his login, its guild not reported yet, is held and taken once its report comes", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				As(SAGE, "Olympus II", 3)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(Stored(SAGE), 2)
+				-- Eight days later he logs in: the census's rows older than Data.KEEP went at INIT.
+				w.clock = w.clock + 8 * 86400
+				for name in pairs(ns.rdb.guilds) do ns.rdb.guilds[name] = nil end
+				B.Reload(); ns.Comm.loginAt = w.clock - 40
+				eq(#B.Sisters(), 2, "both shown (before: both deleted)"); eq(Stored(SAGE), 2, "both still saved")
+				-- Zed's addon answers his login's ask with a newer one, Olympus Zeus not reported yet: held.
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 525252, Bank1(2589, 61)), "Zed-Realm")
+				eq(B.Held(), 1)
+				-- The window over before that report comes: still held (before: dropped, 3 hours to wait).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Run()
+				eq(B.Held(), 1)
+				Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(B.Held(), 0)
+				local zeus
+				for _, x in ipairs(B.Sisters()) do if x.guild == "Olympus Zeus" then zeus = x end end
+				eq(zeus and zeus.money, 525252, "the newer one, taken")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a Hand's saved treasuries wait, unseen, while the King's list is not heard (he logged off) and come back with it; once his list is heard without him, what came as a Hand goes, the save too; a councillor keeps his own, and a 1.1 'only the King's' snapshot never shows to him in a later session while he is no Hand", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				local HELPER = "Helper-Realm"
+				local function KingSends(add, remove)
+					AsKing()
+					if add then K.AddHand(add) end
+					if remove then K.RemoveHand(remove) end
+					K.SendHands(true)
+					return LastSent(w)
+				end
+				local function AsHelper() As(HELPER, "Olympus II", 3) end
+				local function Heard(list) AsHelper(); K.HandleCommand("CHANNEL", KING, list) end
+				local function Lapse() w.clock = w.clock + K.HANDS_FRESH + 1; Census(w); AsHelper() end
+				-- Helper, a Hand alone (not on the council), takes Olympus Zeus's bank.
+				Heard(KingSends("Helper"))
+				eq(K.IsHand(), true); eq(B.SeesSisters(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(HELPER), 1)
+				-- The King logs off: his list lapses. Unseen, kept (before: dropped from the save at once).
+				Lapse()
+				eq(K.IsHand(), false)
+				eq(#B.Sisters(), 0, "no Hand here now: not shown"); eq(Stored(HELPER), 1, "kept")
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				Census(w)
+				B.Holding(); eq(Stored(HELPER), 1, "however long the King is away")
+				-- A /reload while he is still away, then his list again: back as it was.
+				B.Reload()
+				eq(#B.Sisters(), 0)
+				Heard(KingSends())
+				local s = B.Sisters()
+				eq(#s, 1, "back with the King's list"); eq(s[1].money, 424242)
+				-- The King takes him off: his list, heard, does not name him. Gone, the save too.
+				Heard(KingSends(nil, HELPER))
+				eq(K.IsHand(), false)
+				eq(#B.Sisters(), 0); eq(Stored(HELPER), 0, "his list says he is no Hand: gone")
+				-- Helper on the council too, and a Hand again. Zed's snapshot comes to him as a Hand (Zed's yes
+				-- may be 1.1's, the King's alone: his addon knows, ours cannot), Hera's while he is a
+				-- councillor alone.
+				ns.rdb.council = { at = 1, names = { ["sage elder"] = "Sage Elder", helper = "Helper" } }
+				Heard(KingSends("Helper"))
+				eq(K.IsHand(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				Lapse()
+				eq(K.IsHand(), false); eq(B.SeesSisters(), true)
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(#B.Sisters(), 2, "this session: both, as 1.2.3 showed them")
+				-- His next session, the King away: what came to him as a Hand stays unseen, saved.
+				B.Reload()
+				s = B.Sisters()
+				eq(#s, 1, "only what came to him as a councillor (before: both)"); eq(s[1].guild, "Olympus Hera")
+				eq(Stored(HELPER), 2)
+				-- The King's list names him again: shown.
+				Heard(KingSends())
+				eq(#B.Sisters(), 2)
+				eq(T.Ask(true), true)
+				-- The King takes him off: what came to him as a Hand goes, the save too; his next ask says he
+				-- holds nothing, so that whoever's yes covers a councillor sends his again.
+				Heard(KingSends(nil, HELPER))
+				s = B.Sisters()
+				eq(#s, 1); eq(s[1].guild, "Olympus Hera"); eq(Stored(HELPER), 1)
+				w.sent = {}
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~0", "his next ask: afresh")
+				-- A no from its sender reaches a copy kept unseen.
+				Heard(KingSends("Helper"))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424243, Bank1()), "Zed-Realm")
+				eq(Stored(HELPER), 2)
+				Lapse()
+				B.Reload()
+				eq(#B.Sisters(), 1)
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				local _, mine = Stored(HELPER)
+				eq(mine["olympus zeus"], nil, "his no, unseen as it was"); assert(mine["olympus hera"], "Hera's stays")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a search's guild row says the same correspondent and items' value as the ranking's", function()
+		WithDirectory(function(w, K, Run)
+			local T, L, N = ns.Treasury, ns.L, ns.Nominees
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function() return true end,
+					RequestLoadItemDataByID = function() end,
+					GetItemInfo = function(id) return NAMES[id], "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, 10 end,
+				}
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, Bank1()), "Zed-Realm")
+				T.Show("summary")
+				local ranked = TipText(Key(T.Build(), "sister:Olympus Zeus"))
+				ns.Views.SetFilter("treasury", "zeus")
+				local found = Key(ns.Views.Build("treasury"), "found:olympus zeus")
+				assert(found, "the search finds the guild")
+				local said = TipText(found)
+				for _, want in ipairs({ L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), L.TREASURY_RANK_VALUE:format(T.GoldText(600)) }) do
+					assert(ranked:find(want, 1, true), want .. " in the ranking's: " .. ranked)
+					assert(said:find(want, 1, true), want .. " in the search's: " .. said)
+				end
+				assert(not said:find(L.TREASURY_RANK_CORR_NONE, 1, true), said)
+			end)
+			ns.Views.ClearFilters(); N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): the correspondent kept with a guild's snapshot goes once the census names another guild master", function()
+		WithDirectory(function(w, K, Run)
+			local T, B, N = ns.Treasury, ns.Bank, ns.Nominees
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, Bank1()), "Zed-Realm")
+				eq(B.Correspondent("Olympus Zeus"), "Zcorr-Realm")
+				-- Zed logs off: his list no longer counts; the name he gave stays with the snapshot.
+				w.clock = w.clock + N.FRESH + 60
+				Census(w)
+				local name, kept = B.Correspondent("Olympus Zeus")
+				eq(name, "Zcorr-Realm"); eq(kept, true)
+				B.Reload()
+				eq(T.Ranking().rows[1].correspondent, "Zcorr-Realm", "kept across a reload")
+				-- Zora leads Olympus Zeus now, as the census says: the name Zed gave goes, the save too
+				-- (before: shown "as its guild master last named him" for good).
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zora", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				eq(B.Correspondent("Olympus Zeus"), nil, "not his to answer for under another guild master")
+				eq(T.Ranking().rows[1].correspondent, nil)
+				B.Reload()
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				eq(T.Ranking().rows[1].correspondent, nil, "gone from the save too")
+			end)
+			N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a sharer's no whispered to a viewer who had just logged off reaches him at his login's ask (his addon keeps the snapshot saved now), once", function()
+		WithDirectory(function(w, K, Run)
+			local T = ns.Treasury
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 424242, Bank1())
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				assert(#w.whispered > 0, "sent to Sage")
+				local function Nos()
+					local n = 0
+					for _, x in ipairs(w.whispered) do if x.to == SAGE and x.msg == "TS~Olympus Zeus~0~0~" then n = n + 1 end end
+					return n
+				end
+				-- Sage logs off. Ten minutes later Zed says no: whispered to Sage, offline, so lost.
+				w.clock = w.clock + 600
+				w.whispered = {}
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(Nos(), 1)
+				-- An hour later Sage logs in, Zed's session the same: his login's ask is told it again.
+				w.clock = w.clock + 3600
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				eq(Nos(), 1, "told at his login's ask (before: never, all of Zed's session)")
+				w.clock = w.clock + T.ASK_EVERY
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(Nos(), 1, "not at his routine asks")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): an officer demoted since she shared her guild's bank still takes it back with /oly bank share off, from the viewers' saves too; a yes stays a guild master's or an officer's", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- Zora, an officer, says yes; Sage's addon asks and takes it.
+				AsZora()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 777777, Bank1())
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				local msg = B.Message(ns.rdb.bank, "TS")
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				As(SAGE, "Olympus II", 3)
+				B.HandleSister("WHISPER", "Zora-Realm", msg)
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1)
+				-- She is demoted: the server's rank 3, the census names her no officer now.
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				As("Zora-Realm", "Olympus Zeus", 3)
+				w.whispered = {}
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(B.SisterConsent(), false, "her no, taken (before: refused, her yes kept)")
+				local no
+				for _, x in ipairs(w.whispered) do if x.to == SAGE then no = x.msg end end
+				eq(no, "TS~Olympus Zeus~0~0~", "told to Sage, whose addon asked within 18 minutes")
+				As(SAGE, "Olympus II", 3)
+				B.HandleSister("WHISPER", "Zora-Realm", no)
+				eq(#B.Sisters(), 0, "taken back"); eq(Stored(SAGE), 0, "from the save too")
+				-- A yes is still a guild master's or an officer's alone.
+				As("Zora-Realm", "Olympus Zeus", 3)
+				SlashCmdList.OLYMPUS("bank share on")
+				eq(B.SisterConsent(), false)
+				-- Who never shared and is no officer has no answer to give.
+				As("Plain Member-Realm", "Olympus Zeus", 3)
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(ns.db.sisterBankShares["plain member-realm"], nil)
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a loading screen's moment with no guild's name (in a guild) takes nothing away: what is shown and saved stays, a snapshot heard then is held and taken after it, and its sender's no heard then still counts", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			local savedInGuild = IsInGuild
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- The Treasurer is of the audience through his guild, <Olympus>, which a loading screen hides.
+				AsTreasurer()
+				eq(B.SeesSisters(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(ns.me), 1)
+				IsInGuild = function() return true end
+				GetGuildInfo = function() return nil end
+				eq(B.Holding(), false, "unseen meanwhile")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(B.Held(), 1, "heard on the loading screen: held")
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				eq(B.Holding(), false); eq(Stored(ns.me), 1, "nothing dropped, however long it lasts")
+				CoreFire("DATA_CHANGED")
+				eq(B.Held(), 1, "not handled while it lasts")
+				AsTreasurer()
+				Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 2, "both, Hera's heard on the loading screen too"); eq(Stored(ns.me), 2)
+				-- Zed's no heard on a loading screen: still taken (from the sender of the copy kept).
+				GetGuildInfo = function() return nil end
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				AsTreasurer()
+				local s = B.Sisters()
+				eq(#s, 1); eq(s[1].guild, "Olympus Hera"); eq(Stored(ns.me), 1)
+			end)
+			IsInGuild = savedInGuild
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): the items' value asks the game for VALUE_ASKS items' data a draw at most, the rest at the next draws, none twice, and fills in once their data comes", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				local cached, requested = {}, {}
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function(id) return cached[id] == true end,
+					RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+					GetItemInfo = function(id)
+						if not cached[id] then return nil end
+						return "Item " .. id, "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, 2
+					end,
+				}
+				-- 150 items no client of this test has loaded, over two tabs (made-up item numbers).
+				local tabs = { { i = 1, items = {} }, { i = 2, items = {} } }
+				for k = 1, 150 do
+					local tab = tabs[k <= 75 and 1 or 2]
+					tab.items[#tab.items + 1] = { id = 30000 + k, n = 1, s = #tab.items + 1 }
+				end
+				AsKing()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, tabs), "Zed-Realm")
+				T.Show("summary")
+				T.Build()
+				eq(#requested, B.VALUE_ASKS, "a draw asks VALUE_ASKS at most")
+				T.Build()
+				eq(#requested, 150, "the rest at the next draw")
+				local seen = {}
+				for _, id in ipairs(requested) do assert(not seen[id], "asked twice: " .. id); seen[id] = true end
+				eq(T.Ranking().rows[1].pending, 150)
+				for k = 1, 150 do cached[30000 + k] = true; B.ItemInfoReceived(30000 + k) end
+				local r = T.Ranking().rows[1]
+				eq(r.pending, 0); eq(r.value, 300); eq(r.total, 100300)
+				eq(#requested, 150, "nothing asked once loaded")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): one character's save keeps SISTERS_MAX guilds at most, the one heard longest ago leaving first", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			local savedMax = B.SISTERS_MAX
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				As(SAGE, "Olympus II", 3)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 1, Bank1()), "Zed-Realm")
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Hera", HERA, 2, Bank1()), HERA)
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 3, Bank1(2589, 61)), "Zed-Realm") -- (Zeus's newer: heard last)
+				eq(Stored(SAGE), 2)
+				B.SISTERS_MAX = 1
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 4, Bank1(2589, 62)), "Zed-Realm")
+				local n, mine = Stored(SAGE)
+				eq(n, 1); assert(mine["olympus zeus"] and not mine["olympus hera"], "Hera's, heard longest ago, left the save")
+			end)
+			B.SISTERS_MAX = savedMax
+			if not ok then error(err, 0) end
 		end)
 	end)
 end
@@ -46757,12 +47571,16 @@ do
 			local row = Find(lines, "sister:Olympus Zeus")
 			assert(row and row.onClick, Texts(lines))
 			-- (1.2's directory: a click opens the bank in place; its page is a search's way to an item.)
-			eq(Plain(row.text), "[+] <Olympus Zeus>"); eq(row.right, T.Coins(424242))
+			-- (1.2.4, changed on purpose: the ranking's row, its place and correspondent, its total; its
+			-- gold, items and their value under it, the stacks in its tooltip. No item data here: "at least".)
+			eq(Plain(row.text), "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"))
+			eq(row.right, L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
 			local tip = Tip(row)
-			assert(tip:find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true) and tip:find("Zed", 1, true), tip)
+			assert(tip:find(L.TREASURY_GUILD_VALUE_TIP, 1, true) and tip:find("Zed", 1, true) and tip:find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), tip)
 			local under
 			for i, l in ipairs(lines) do if l == row then under = lines[i + 1] end end
-			eq(under.indent, 1); assert(Plain(under.text):find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), under.text)
+			eq(under.indent, 1)
+			assert(Plain(under.text):find(L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 60, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))), 1, true), under.text)
 			assert(Plain(under.right):find("Zed", 1, true), under.right)
 			-- Its page: the way back, its title, the same portrait (no stacks gone, nothing to ask for), its Book not shared.
 			eq(T.ShowGuild("Olympus Zeus"), true)
@@ -46783,7 +47601,8 @@ do
 			for _, l in ipairs(page) do
 				if Plain(l.text) == L.TREASURY_BANK_GOLD then eq(l.right, T.Coins(424242)) end
 				if Plain(l.text) == L.TREASURY_GUILD_ITEMS:format(60, 1) then
-					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true), "no gold estimate, said so")
+					-- (1.2.4: the items' value is the vendor's price, said so; before, no estimate at all.)
+					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_TIP, 1, true), "what the value is, said so")
 				end
 				if l.items then eq(l.onItem, nil, "nothing to ask for from another guild's bank") end
 			end
@@ -46963,7 +47782,7 @@ do
 			-- (1.2: a click opens its bank in place; its page is ShowGuild's, a search's way to an item.)
 			row.onClick()
 			local open = Texts(Summary())
-			assert(open:find("[-] <Olympus Zeus>", 1, true), open)
+			assert(open:find("[-] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true), open) -- (1.2.4: the ranking's row)
 			eq(T.ShowGuild("Olympus Zeus"), true); eq(T.mode, "guild")
 			assert(Texts((T.Build())):find(L.TREASURY_GUILD_TITLE:format("Olympus Zeus"), 1, true), "its page")
 			T.Show("summary")
@@ -47014,7 +47833,7 @@ test("1.1 the treasury's new lines (bank, sister guilds, requests, donations, ba
 		"BANK_SISTERS_TIP", "BANK_SISTER_OF", "BANK_SISTER_TAB", "BANK_SISTER_ASK", "BANK_SISTER_YES", "BANK_SISTER_NO", "BANK_SISTER_ON",
 		"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK", "TREASURY_GUILDS", "TREASURY_GUILDS_TIP", "TREASURY_GUILDS_NONE",
 		"TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_TITLE", "TREASURY_GUILD_ITEMS", "TREASURY_GUILD_SHARED_BY",
-		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_UNAVAILABLE", "TREASURY_GUILD_BOOK_UNAVAILABLE",
+		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_TIP", "TREASURY_GUILD_BOOK_UNAVAILABLE",
 		"TREASURY_GUILD_SNAPSHOT_GONE", "TREASURY_EARLY_COLLAPSE_TIP",
 		"BANK_REQUESTS", "BANK_REQUESTS_TIP", "BANK_MY_REQUESTS", "BANK_REQUEST_HOLDS", "BANK_REQUEST_CLICK", "BANK_REQUEST_CLICK_ANSWER",
 		"BANK_REQUEST_NEW_LINE", "BANK_REQUEST_PROMPT", "BANK_REQUEST_ANY_PROMPT", "BANK_REQUEST_ASK", "BANK_REQUEST_ANSWER", "BANK_REQUEST_MARK_DONE",
@@ -50410,15 +51229,19 @@ do
 				eq(#w.whispered, 1, "the no"); eq(w.whispered[1].to, KING); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
 				AsKing(); B.HandleSister("WHISPER", "Zed-Realm", w.whispered[1].msg)
 				eq(#B.Sisters(), 0, "withdrawn")
-				-- Once a session: his asks after that cost nothing; a Hand's addon asking afresh (after its
-				-- login: it holds nothing) is not told either.
+				-- Once a session: his asks after that cost nothing. (1.2.4, changed on purpose: a Hand's
+				-- addon asking afresh, after its login, is told too, once: a viewer's addon keeps a
+				-- guild's snapshot across logouts now, so an ask after a login may hold his.)
 				AsLord(); w.clock = w.clock + T.ASK_EVERY
 				T.HandleAsk("CHANNEL", KING, "TA~Olympus~1"); Run()
 				eq(#w.whispered, 1, "told once")
 				AsKing(); K.AddHand("Helper"); K.SendHands(true); local hands = LastSent(w)
 				AsLord(); K.HandleCommand("CHANNEL", KING, hands)
 				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~0"); Run()
-				eq(#w.whispered, 1, "a fresh ask holds nothing")
+				eq(#w.whispered, 2, "an ask after a login: told too")
+				eq(w.whispered[2].to, "Helper-Realm"); eq(w.whispered[2].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 2, "once")
 				-- The Lord's addon reloads (its session's memory gone) while the King still holds his bank
 				-- (sent before the no): remembered, the King's next ask gets the no.
 				B.Reset(); Holds()
@@ -51007,7 +51830,8 @@ do
 				Pages(function(path, doc)
 					assert(doc:find("from each one whose addon asked in the last 18 minutes", 1, true), path)
 					assert(doc:find("from the others at their next ask", 1, true), path)
-					assert(doc:find("keeps it on his screen until that player logs out", 1, true), path)
+					-- (1.2.4, changed on purpose: a viewer's addon keeps it across logouts now.)
+					assert(doc:find("keeps it, saved (1.2.4), until his no reaches that viewer's addon at a later ask", 1, true), path)
 					assert(doc:find("your no takes it back from their screens: at once from those whose addon asked in the last 18 minutes", 1, true), path)
 				end)
 			end)

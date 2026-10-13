@@ -272,6 +272,9 @@ local function Hand(name)
 end
 
 function King.IsHand() return not King.SetsLists() and ns.IsMember() and Hand(ns.me) end
+-- 1.2.4 (Bank.lua): the King's list is heard here now (he keeps repeating it), so that IsHand's
+-- false says this character is no Hand of his, not only that his list is not heard (he left).
+function King.HandsFresh() return King.IsKing() or ns.Now() - handsAt <= King.HANDS_FRESH end
 -- Whether the King's list or a Steward's names this sender (1.0.0): their word alone, never a
 -- census vote. His Hands speak with his Crown for his guild on every client outside it
 -- (Decree.lua, Channels.VerifiedLevel); on its own members' clients its roster says who speaks
