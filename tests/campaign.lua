@@ -340,6 +340,65 @@ test("Campaign: excluded assigned materials remain excluded after their source r
 	eq(king.ns.Campaign.State().counts[1710], 0, "row eviction does not restore a previously excluded maximum")
 end)
 
+test("Campaign: excluded assigned cash cannot return after row rotation and a later unassigned native gift from the same donor", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local minimum = keeper.ns.Dues.Amount()
+	local e = NativeTrade(w, keeper, "Repeat Cash Giver", minimum + 5000)
+	w:As(keeper, function() assert(keeper.ns.Campaign.Allocate(e)) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 5000)
+	w:As(keeper, function() keeper.ns.Treasury.Toggle(e); keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0)
+	w:As(keeper, function()
+		for i = 1, keeper.ns.Treasury.MAX + 1 do keeper.ns.Treasury.Record("Other Giver", 1, "trade", nil, { quiet = true }) end
+		keeper.ns.Campaign.Report(true)
+	end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0)
+	w:As(keeper, function()
+		for _, row in ipairs(keeper.ns.Treasury.Book().lines) do assert(row.jarReceipt ~= e.jarReceipt, "the excluded source row really rotated away") end
+		keeper.ns.rdb = World.Copy(keeper.ns.rdb)
+		assert(loadfile(ROOT .. "Olympus/Campaign.lua"))("Olympus", keeper.ns)
+		eq(keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].sourceValid, false, "exclusion remains persisted across reload")
+	end)
+	local later = NativeTrade(w, keeper, "Repeat Cash Giver", minimum + 5000)
+	w:As(keeper, function()
+		local r = keeper.ns.rdb.campaignReceipts[keeper.name]
+		eq(r.allocations[later.jarReceipt], nil, "the later native gift was never manually assigned")
+		keeper.ns.Campaign.Report(true)
+	end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0, "new native proof cannot revive an excluded attribution whose source row was evicted")
+	eq(keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].money, 0)
+	w:As(keeper, function()
+		keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].sourceValid = nil -- pre-field saved allocation
+		keeper.ns.Campaign.Report(true)
+	end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0, "an older absent zeroed source also fails closed instead of guessing permission")
+end)
+
+test("Campaign: a valid rotated cash attribution still rechecks the verified current minimum", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local minimum = keeper.ns.Dues.Amount()
+	local e = NativeTrade(w, keeper, "Valid Rotated Giver", minimum + 5000)
+	w:As(keeper, function()
+		assert(keeper.ns.Campaign.Allocate(e))
+		for i = 1, keeper.ns.Treasury.MAX + 1 do keeper.ns.Treasury.Record("Other Giver", 1, "trade", nil, { quiet = true }) end
+		keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].sourceValid = nil -- pre-field positive allocation
+		keeper.ns.Campaign.Report(true)
+	end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 5000, "a valid attributed receipt survives bounded row rotation")
+	w:As(king, function()
+		local s = king.ns.Campaign.State(); s.baselines[e.wk] = minimum + 5000; s.rev = s.rev + 1
+		king.ns.Campaign.Publish(true)
+	end); w:Run(2)
+	w:As(keeper, function() keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0, "row rotation cannot freeze an obsolete weekly minimum")
+	eq(keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].sourceValid, true, "a zero amount caused by the minimum is not an excluded source")
+	-- The attribution is still valid, merely reduced by the reserved baseline. A later native
+	-- receipt can meet that baseline without increasing the earlier manually assigned maximum.
+	NativeTrade(w, keeper, "Valid Rotated Giver", 5000)
+	w:As(keeper, function() keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 5000, "only a still-valid original attributed maximum is recalibrated")
+end)
+
 test("Campaign: missing or invalid native trade quantity preserves the legacy book fallback but authenticates no material", function()
 	local w, king, keeper = Setup(); Start(w, king)
 	for _, example in ipairs({ { label = "missing" }, { label = "zero", count = 0 }, { label = "negative", count = -1 },

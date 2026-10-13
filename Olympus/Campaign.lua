@@ -206,6 +206,7 @@ function Campaign.Allocate(e)
 	if r.n >= Campaign.MAX_RECEIPTS then ns.Print(L.CAMPAIGN_FULL:format(Campaign.MAX_RECEIPTS)); return false end
 	a.receipt, a.book = e.jarReceipt, e.jarBook
 	a.maximum, a.maximumCount, a.week, a.donor = a.money, a.count, e.wk, ns.Dues.Key(e.name)
+	a.sourceValid = true
 	r.allocations[e.jarReceipt], r.n = a, r.n + 1
 	Revision(r); Campaign.Report(true); Changed()
 	return true
@@ -240,7 +241,15 @@ function Campaign.Reconcile(actor)
 	table.sort(ids)
 	for _, id in ipairs(ids) do
 		local a, e = r.allocations[id], present[id]
-		local valid = not e or (not e.out and not e.excluded and not e.kind and not e.noted)
+		local valid = a.sourceValid
+		if e then
+			valid = not e.out and not e.excluded and not e.kind and not e.noted
+		elseif valid == nil then
+			-- Older allocations without retained source state can keep an existing positive
+			-- attribution, but an absent zeroed row cannot prove permission to revive it.
+			valid = (Number(a.item and a.count or a.money) or 0) > 0
+		end
+		if a.sourceValid ~= valid then a.sourceValid, changed = valid, true end
 		if a.item then
 			-- An evicted source row preserves the last reconciled attribution, including an
 			-- explicit exclusion. Its original maximum is not a new confirmation.
