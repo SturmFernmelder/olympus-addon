@@ -106,14 +106,26 @@ test("Campaign: native completed trade gold and material receipts count, never t
 	local e = NativeTrade(w, keeper, "Minimum Giver", minimum)
 	assert(e.jarReceipt, "a real native gold receipt is marked before voluntary allocation")
 	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), false, "a weekly baseline is not voluntary campaign funding") end)
+	w:As(keeper, function() keeper.ns.Treasury.Record("Manual Baseline Giver", minimum * 10, "trade", nil, { quiet = true }) end)
+	e = NativeTrade(w, keeper, "Manual Baseline Giver", minimum)
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), false, "manual money cannot meet the native payer's reserved baseline") end)
+	e = NativeTrade(w, keeper, "Manual Baseline Giver", 5000)
+	w:As(keeper, function()
+		eq(keeper.ns.Campaign.Allocate(e), true)
+		local r = keeper.ns.rdb.campaignReceipts[keeper.name]
+		eq(r.allocations[e.jarReceipt].money, 5000, "only the actual native excess is allocated")
+	end)
+	e = NativeTrade(w, keeper, "Direct Excess Giver", minimum + 5000)
+	w:As(keeper, function()
+		eq(keeper.ns.Campaign.Allocate(e), true)
+		local r = keeper.ns.rdb.campaignReceipts[keeper.name]
+		eq(r.allocations[e.jarReceipt].money, 5000, "a large first native trade never allocates its whole amount")
+	end)
 	e = NativeTrade(w, keeper, "Material Giver", 0, 1710, 20)
 	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), true, "actual completed incoming material trade") end)
 	w:Run(2); eq(king.ns.Campaign.State().counts[1710], 20)
-	local note = keeper.ns.Dues.Note and keeper.ns.Dues.Note()
-	if note then
-		local noted = Confirmed(w, keeper, "Noted Giver", minimum * 2, { note = note })
-		w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(noted), false, "noted dues are excluded in full") end)
-	end
+	local noted = Confirmed(w, keeper, "Noted Giver", minimum * 2, { note = keeper.ns.Dues.Note() })
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(noted), false, "noted dues are excluded in full") end)
 end)
 
 test("Campaign: mail materials wait for actual bag arrival, and missing count APIs or failed mail cannot create campaign receipts", function()
@@ -143,6 +155,77 @@ test("Campaign: mail materials wait for actual bag arrival, and missing count AP
 	w:Run(2); eq(king.ns.Campaign.State().counts[1710], 20)
 end)
 
+test("Campaign: missing native cash history fails closed while a confirmed material goal remains allocatable", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local e = NativeTrade(w, keeper, "Unknown History Giver", keeper.ns.Dues.Amount() + 5000)
+	w:As(keeper, function()
+		keeper.ns.Treasury.Book().jarNativeWeeks = nil
+		eq(keeper.ns.Campaign.Allocate(e), false, "general book sums cannot substitute for missing native proof")
+	end)
+	e = NativeTrade(w, keeper, "Material Only Giver", 0, 1710, 20)
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), true) end)
+	w:Run(2); eq(king.ns.Campaign.State().got, 0); eq(king.ns.Campaign.State().counts[1710], 20)
+end)
+
+test("Campaign: a verified increase next reset reserves that week's new minimum; materials and other keepers' voluntary gifts stay unchanged", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	w:As(king, function() king.ns.Dues.SetAmount("2"); eq(king.ns.Dues.Pending(), 20000) end)
+	w:Run(2)
+	w.clock = w:As(keeper, function() return keeper.ns.Dues.WeekStart(keeper.ns.Dues.Week() + 1) end) + 60
+	w:As(keeper, function() eq(keeper.ns.Dues.Amount(), 20000, "actual King's amount becomes this week's amount") end)
+	local e = NativeTrade(w, keeper, "Raised Minimum Giver", 20000)
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), false, "the initial campaign baseline cannot turn the raised minimum into voluntary gold") end)
+	e = NativeTrade(w, keeper, "Raised Excess Giver", 25000)
+	w:As(keeper, function()
+		eq(keeper.ns.Campaign.Allocate(e), true)
+		eq(keeper.ns.rdb.campaignReceipts[keeper.name].allocations[e.jarReceipt].money, 5000)
+	end)
+	e = NativeTrade(w, keeper, "Raised Material Giver", 0, 1710, 20)
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), true) end)
+	e = NativeTrade(w, king, "Other Keeper Giver", 20000)
+	w:As(king, function()
+		eq(king.ns.Campaign.Allocate(e), true, "the King is a non-Treasurer keeper; this gift is not a second dues collection")
+		eq(king.ns.rdb.campaignReceipts[king.name].allocations[e.jarReceipt].money, 20000)
+	end)
+	w:Run(2); eq(king.ns.Campaign.State().counts[1710], 20); eq(king.ns.Campaign.State().got, 25000)
+end)
+
+test("Campaign: an unverified or malformed current dues word cannot supply cash eligibility, without blocking confirmed materials", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local e = NativeTrade(w, keeper, "Unknown Amount Giver", 20000)
+	w:As(keeper, function()
+		local C = keeper.ns.Campaign
+		keeper.ns.rdb.duesAmount = { copper = 10000, before = 10000, at = w.clock, from = "Forged King-Emberfall" }
+		eq(C.Allocate(e), false, "a claimed policy issuer is not verified")
+		keeper.ns.rdb.duesAmount.from = king.name; keeper.ns.rdb.duesAmount.before = 0
+		eq(C.Allocate(e), false, "malformed history is not silently replaced by the default")
+	end)
+	e = NativeTrade(w, keeper, "Known Material Giver", 0, 1710, 20)
+	w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), true) end)
+	w:Run(2); eq(king.ns.Campaign.State().got, 0); eq(king.ns.Campaign.State().counts[1710], 20)
+end)
+
+test("Campaign: the pinned mail keeper outside an Olympus guild can assign actual receipts locally; only his Treasurer relays that account's aggregate", function()
+	local w, king, keeper = Setup()
+	local mail = Client(w, "treasurerMail"); mail.guild = nil
+	mail.ns.rdb = keeper.ns.rdb -- actual same-account realm store, as the existing mail book uses
+	mail.ns.Comm.Whisper = function() return false end -- real Comm refuses a non-member's outgoing lane
+	Start(w, king)
+	local e = NativeTrade(w, mail, "Mail Account Giver", mail.ns.Dues.Amount() + 5000)
+	w:As(mail, function()
+		local rows = {}; mail.ns.Campaign.Lines(rows)
+		local assign
+		for _, row in ipairs(rows) do if row.text and row.text:find("Assign received", 1, true) then assign = row end end
+		assert(assign and assign.onClick, "the pinned private mail keeper has the normal attribution action")
+		eq(mail.ns.Campaign.Allocate(e), true)
+	end)
+	w:Run(1); eq(king.ns.Campaign.State().got, 0, "local attribution is not delivery")
+	w:As(keeper, function() assert(keeper.ns.Campaign.Report(true)) end)
+	w:Run(2); eq(king.ns.Campaign.State().got, 5000)
+	for _, packet in ipairs(w:Sent({ type = "CJ", dist = "WHISPER" })) do eq(packet.target, king.name) end
+	assert(not w:ChannelText():find("Mail Account Giver", 1, true))
+end)
+
 test("Campaign: a new unallocated gift cannot grow an old assigned portion; trimmed receipt rows and bounded allocation ledgers keep confirmed totals", function()
 	local w, king, keeper = Setup(); Start(w, king)
 	local amount = keeper.ns.Dues.Amount()
@@ -162,7 +245,12 @@ test("Campaign: a new unallocated gift cannot grow an old assigned portion; trim
 	local nextReceipt = Confirmed(w, keeper, "Boundary Giver", amount + 10000)
 	w:As(keeper, function()
 		local r = keeper.ns.rdb.campaignReceipts[keeper.name]
-		r.n = keeper.ns.Campaign.MAX_RECEIPTS
+		-- Exactly the declared persistent allocation boundary, not a merely forged count.
+		for id = 2, keeper.ns.Campaign.MAX_RECEIPTS + 1 do
+			if id ~= nextReceipt.jarReceipt then r.allocations[id] = { item = 1710, count = 0, maximumCount = 1 } end
+		end
+		r.n, r.next = keeper.ns.Campaign.MAX_RECEIPTS, keeper.ns.Campaign.MAX_RECEIPTS + 1
+		assert(keeper.ns.Campaign.Eligible(nextReceipt, keeper.ns.Treasury.Book()), "otherwise eligible; not rejected as an already assigned id")
 		eq(keeper.ns.Campaign.Allocate(nextReceipt), false, "the persistent allocation bound sends nothing extra")
 	end)
 end)

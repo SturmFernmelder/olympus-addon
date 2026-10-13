@@ -74,6 +74,7 @@ local function Local(actor, create)
 		if n > Campaign.MAX_RECEIPTS or not Number(id) or type(a) ~= "table" or (a.item and not Number(a.count, ns.Treasury.MAX_COUNT))
 			or (not a.item and not Number(a.money)) then return nil end
 	end
+	if n ~= r.n or r.next < r.n then return nil end
 	return r
 end
 local function Items(text, goals, max)
@@ -160,7 +161,12 @@ local function Allowance(b, e)
 	if not ns.Treasury.TreasurerPin(b.name) then return Number(p.c) or 0 end
 	local baseline = s and s.baselines[wk]
 	if not Number(baseline, D.MAX_AMOUNT) or baseline == 0 then return 0 end
-	local amount = math.max(baseline, tonumber(p.d) or 0)
+	local word = ns.rdb and ns.rdb.duesAmount
+	if word ~= nil and (type(word) ~= "table" or not Number(word.at) or not Number(word.copper, D.MAX_AMOUNT) or tonumber(word.copper) == 0
+		or not Number(word.before, D.MAX_AMOUNT) or tonumber(word.before) == 0 or not (ns.IsKingCharacter(word.from) or ns.King.IsStewardName(word.from))) then return 0 end
+	local current = D.AmountOf(wk)
+	if not Number(current, D.MAX_AMOUNT) or current == 0 then return 0 end
+	local amount = math.max(baseline, current, tonumber(p.d) or 0)
 	return math.max(0, (tonumber(p.c) or 0) - amount)
 end
 local function Group(e) return tostring(e.jarBook) .. "|" .. tostring(e.wk) .. "|" .. tostring(ns.Dues.Key(e.name)) end
@@ -196,7 +202,8 @@ function Campaign.Allocate(e)
 	if not found then return false end
 	local a = Campaign.Eligible(e, found.b)
 	local r = Local()
-	if not a or not r or r.n >= Campaign.MAX_RECEIPTS or (a.item and (not a.count or a.count == 0)) then return false end
+	if not a or not r or (a.item and (not a.count or a.count == 0)) then return false end
+	if r.n >= Campaign.MAX_RECEIPTS then ns.Print(L.CAMPAIGN_FULL:format(Campaign.MAX_RECEIPTS)); return false end
 	a.receipt, a.book = e.jarReceipt, e.jarBook
 	a.maximum, a.maximumCount, a.week, a.donor = a.money, a.count, e.wk, ns.Dues.Key(e.name)
 	r.allocations[e.jarReceipt], r.n = a, r.n + 1
@@ -331,6 +338,7 @@ function Campaign.Handle(dist, sender, message)
 		if not any then return end
 		local old = Campaign.State()
 		if old and (rev <= old.rev or id < old.id) then return end
+		if old and old.id == id and old.closed then return end -- one immutable closing note
 		if old and old.id == id and (old.start ~= start or old.finish ~= finish or old.purpose ~= purpose or old.target ~= target or ItemWord(old.goals) ~= ItemWord(goals)
 			or (old.closed and f[11] ~= "1")) then return end
 		local s = { id = id, rev = rev, start = start, finish = finish, target = target, got = got, goals = goals, counts = counts,
@@ -366,7 +374,7 @@ ns.Comm.Handle("CJ", Campaign.Handle)
 
 local function ItemName(id) return (GetItemInfo and GetItemInfo(id)) or ("Item " .. id) end
 function Campaign.Lines(lines)
-	if not ns.IsMember() or Preview() then return end
+	if (not ns.IsMember() and not Campaign.MayAllocate()) or Preview() then return end
 	local s = Campaign.State()
 	if s and not s.closed then
 		lines[#lines + 1] = { header = true, text = L.CAMPAIGN_TITLE, tooltip = function(tt) tt:AddLine(L.CAMPAIGN_TIP, 1, 1, 1, true) end }

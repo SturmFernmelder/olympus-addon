@@ -12,6 +12,7 @@ L.CAMPAIGN_CLOSE_PROMPT = "Write what this campaign bought. This King's note goe
 L.CAMPAIGN_CLOSED = "Campaign closed: %s"
 L.CAMPAIGN_ASSIGN = "Assign received %s to this campaign"
 L.CAMPAIGN_ASSIGN_PROMPT = "Assign this actually received voluntary %s to '%s'? No money moves. Its allocated receipt cannot be assigned again."
+L.CAMPAIGN_FULL = "This keeper's campaign ledger already holds %d assigned receipts. No extra receipt was attributed."
 L.CAMPAIGN_ASSIGN_TIP = "Keeper only. Confirm that this actually received voluntary gift serves the current campaign. No old gifts, weekly minimum, sale, transfer or custody is counted. This receipt can be assigned once; no money moves."
 if GetLocale and GetLocale() == "ptBR" then
 	L.CAMPAIGN_TITLE = "Campanha voluntária"
@@ -26,5 +27,6 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CAMPAIGN_CLOSED = "Campanha encerrada: %s"
 	L.CAMPAIGN_ASSIGN = "Atribuir %s recebidos a esta campanha"
 	L.CAMPAIGN_ASSIGN_PROMPT = "Atribuir estes %s voluntários realmente recebidos a '%s'? Nenhum ouro é movido. O recibo atribuído não pode ser usado de novo."
+	L.CAMPAIGN_FULL = "O registro desta campanha deste responsável já guarda %d recibos atribuídos. Nenhum recibo extra foi atribuído."
 	L.CAMPAIGN_ASSIGN_TIP = "Só o responsável pelo Tesouro. Confirme que esta doação voluntária realmente recebida atende à campanha atual. Não entram presentes antigos, mínimo semanal, vendas, transferências ou custódia. Cada recibo só pode ser atribuído uma vez; nenhum ouro é movido."
 end
