@@ -825,6 +825,10 @@ local function Merge(list, id, n)
 	end
 	list[#list + 1] = { id = id, n = n }
 end
+local function KnownItemCount(n)
+	n = tonumber(n)
+	return n ~= nil and n >= 1 and n <= Treasury.MAX_COUNT and n == math.floor(n)
+end
 local function TradeItems(info, link, first, last)
 	local list = {}
 	if not info then return list end
@@ -832,7 +836,13 @@ local function TradeItems(info, link, first, last)
 		local name, _, n = info(i)
 		if name and name ~= "" then
 			local id = LinkId(link and link(i))
-			if id then Merge(list, id, math.max(1, math.floor(tonumber(n) or 1))) end
+			if id then
+				-- Preserve the old book's fallback count, but do not turn missing/fractional
+				-- native quantity into confirmed campaign evidence. One unknown merged slot
+				-- makes the combined item quantity unconfirmed too.
+				Merge(list, id, math.max(1, math.floor(tonumber(n) or 1)))
+				for _, it in ipairs(list) do if it.id == id then it.nativeCount = it.nativeCount ~= false and KnownItemCount(n); break end end
+			end
 		end
 	end
 	return list
@@ -879,7 +889,7 @@ function Treasury.Info(a, b)
 	-- Items: given with nothing back, a donation (or a payment); in a deal, part of it (not counted).
 	for _, it in ipairs(done.gotList or {}) do
 		local deal = (net < 0 and "purchase") or (done.gaveItems and "sale") or nil
-		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal, observed = true })
+		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal, observed = it.nativeCount == true })
 	end
 	for _, it in ipairs(done.gaveList or {}) do
 		local deal = (net > 0 and "sale") or (done.gotItems and "purchase") or nil
@@ -1091,10 +1101,11 @@ function Treasury.MailItemTaking(i, a)
 	for k = first, last do
 		local name, itemID, _, n = GetInboxItem(i, k)
 		local id = name and (LinkId(GetInboxItemLink and GetInboxItemLink(i, k)) or tonumber(itemID))
+		local nativeCount = KnownItemCount(n)
 		n = math.max(1, math.floor(tonumber(n) or 1))
 		if id then
 			local p = { key = ("%d|%d|%s|%s|%d|%d"):format(i, k, m.sender, tostring(m.subject or ""), id, n), sender = m.sender, id = id, n = n,
-				returned = m.returned, cod = m.cod, t = now, book = book }
+				returned = m.returned, cod = m.cod, t = now, book = book, nativeCount = nativeCount }
 			local known = false
 			for _, q in ipairs(itemPending) do if q.key == p.key then known = true end end
 			if not known then
@@ -1125,7 +1136,7 @@ function Treasury.ItemsChanged()
 			for _, r in ipairs(itemPending) do
 				if r.id == id then r.have = math.max(r.have, q.have + q.n) break end
 			end
-			SettleItem(q, true) -- bags hold the requested count; a request/fallback alone confirms nothing
+			SettleItem(q, q.nativeCount == true) -- both attachment quantity and bag arrival must be known
 		end
 	end
 end

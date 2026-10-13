@@ -325,3 +325,69 @@ test("Campaign meter: actual row rendering clamps the reusable fill, keeps numer
 	end
 	H.WithUI(function() Draw(); H.WithGamepadUI(true, Draw) end)
 end)
+
+test("Campaign: excluded assigned materials remain excluded after their source receipt row rotates away", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local e = NativeTrade(w, keeper, "Material Giver", 0, 1710, 20)
+	w:As(keeper, function() assert(keeper.ns.Campaign.Allocate(e)) end); w:Run(2)
+	eq(king.ns.Campaign.State().counts[1710], 20)
+	w:As(keeper, function() keeper.ns.Treasury.Toggle(e); keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().counts[1710], 0)
+	w:As(keeper, function()
+		for i = 1, keeper.ns.Treasury.MAX + 1 do keeper.ns.Treasury.Record("Other Giver", 1, "trade", nil, { quiet = true }) end
+		keeper.ns.Campaign.Report(true)
+	end); w:Run(2)
+	eq(king.ns.Campaign.State().counts[1710], 0, "row eviction does not restore a previously excluded maximum")
+end)
+
+test("Campaign: missing or invalid native trade quantity preserves the legacy book fallback but authenticates no material", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	for _, example in ipairs({ { label = "missing" }, { label = "zero", count = 0 }, { label = "negative", count = -1 },
+		{ label = "fraction", count = 1.5 }, { label = "bad", count = "unknown" } }) do
+		local e = NativeTrade(w, keeper, "Unknown Count " .. example.label, 0, 1710, example.count)
+		assert(e and e.item == 1710); eq(e.count, 1, "existing non-campaign fallback remains unchanged")
+		w:As(keeper, function() eq(keeper.ns.Campaign.Allocate(e), false, "unknown native quantity: " .. example.label) end)
+	end
+end)
+
+test("Campaign: missing native mail attachment quantity cannot authenticate an inferred material count", function()
+	local w, king, keeper = Setup(); Start(w, king)
+	local bags = 0; local g = keeper.globals
+	g.GetInboxInvoiceInfo = function() end
+	g.GetInboxHeaderInfo = function() return nil, nil, "Unknown Mail Count", "Potions", 0, 0, nil, nil, nil, false, nil, true, false end
+	g.GetInboxItem = function() return "Potion", 1710, nil, nil end
+	g.GetInboxItemLink = function() return "item:1710" end
+	g.C_Item = { GetItemCount = function() return bags end }; g.GetItemCount = false
+	w:As(keeper, function()
+		keeper.ns.Treasury.MailItemTaking(1, 1); bags = 1; keeper.ns.Treasury.ItemsChanged()
+		local e = keeper.ns.Treasury.Lines()[1]; assert(e); eq(e.count, 1, "legacy book fallback")
+		eq(keeper.ns.Campaign.Allocate(e), false, "bag growth cannot verify a missing attachment quantity")
+	end)
+end)
+
+test("Campaign: Treasurer revalidates only the permitted mail actor before relaying its aggregate", function()
+	local w, king, keeper, member = Setup(); local mail = Client(w, "treasurerMail")
+	mail.guild = nil; mail.ns.rdb = keeper.ns.rdb; mail.ns.Comm.Whisper = function() return false end
+	Start(w, king)
+	local minimum = mail.ns.Dues.Amount()
+	local e = NativeTrade(w, mail, "Mail Account Giver", minimum + 5000)
+	w:As(mail, function() assert(mail.ns.Campaign.Allocate(e)) end)
+	w:As(keeper, function() keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 5000)
+	-- A valid newer public King policy raises the campaign's reserved baseline. Both sender
+	-- roles still exist; this exercises reconciliation, not a fixture that disables the sender.
+	w:As(king, function()
+		local s = king.ns.Campaign.State(); s.baselines[e.wk] = minimum + 5000; s.rev = s.rev + 1
+		king.ns.Campaign.Publish(true)
+	end); w:Run(2)
+	eq(keeper.ns.Campaign.State().baselines[e.wk], minimum + 5000)
+	w:As(keeper, function() keeper.ns.Campaign.Report(true) end); w:Run(2)
+	eq(king.ns.Campaign.State().got, 0, "relay updates the mail actor's revision after its eligibility changes")
+	w:As(keeper, function()
+		local private = { id = keeper.ns.Campaign.State().id, rev = 1, next = 1, n = 1, books = {},
+			allocations = { [1] = { item = 1710, count = 20, maximumCount = 20 } } }
+		keeper.ns.rdb.campaignReceipts[member.name] = private
+		eq(keeper.ns.Campaign.Reconcile(member.name), false, "no arbitrary other-actor reconciliation")
+		eq(private.allocations[1].count, 20)
+	end)
+end)

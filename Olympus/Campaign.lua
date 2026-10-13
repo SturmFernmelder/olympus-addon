@@ -213,11 +213,14 @@ end
 
 -- Correct an assigned line if the Treasury later stops counting it. Removed old book rows do
 -- not erase confirmed contributions (books themselves keep cumulative sums apart from 500 rows).
-function Campaign.Reconcile()
-	local r = Local()
+function Campaign.Reconcile(actor)
+	actor = ns.FullName(actor or ns.me)
+	if not Campaign.MayAllocate() or (actor ~= ns.FullName(ns.me)
+		and not (ns.IsTreasurer(ns.me, GetGuildInfo("player")) and ns.IsTreasurerMail(actor))) then return false end
+	local r = Local(actor)
 	if not r then return false end
 	local changed, used, present, ids = false, {}, {}, {}
-	for _, x in ipairs(BookLines()) do if x.e.jarCampaign == r.id then present[x.e.jarReceipt] = x.e end end
+	for _, x in ipairs(BookLines(actor)) do if x.e.jarCampaign == r.id then present[x.e.jarReceipt] = x.e end end
 	for name in pairs(r.books) do
 		local b = ns.Treasury.BookOf(name)
 		for _, e in ipairs(b and b.lines or {}) do
@@ -239,7 +242,10 @@ function Campaign.Reconcile()
 		local a, e = r.allocations[id], present[id]
 		local valid = not e or (not e.out and not e.excluded and not e.kind and not e.noted)
 		if a.item then
-			local count = valid and math.min(a.maximumCount or 0, e and (Number(e.count, ns.Treasury.MAX_COUNT) or 0) or (a.maximumCount or 0)) or 0
+			-- An evicted source row preserves the last reconciled attribution, including an
+			-- explicit exclusion. Its original maximum is not a new confirmation.
+			local count = valid and (e and math.min(a.maximumCount or 0, Number(e.count, ns.Treasury.MAX_COUNT) or 0)
+				or (Number(a.count, ns.Treasury.MAX_COUNT) or 0)) or 0
 			if a.count ~= count then a.count, changed = count, true end
 		else
 			local b = ns.Treasury.BookOf(a.book)
@@ -265,13 +271,15 @@ function Campaign.Report(force)
 	local now = ns.Now()
 	if not force and now - lastReport < Campaign.EVERY then return false end
 	lastReport = now
-	Campaign.Reconcile()
 	local any = false
 	for actor in pairs(ns.rdb.campaignReceipts or {}) do
 		local r = type(actor) == "string" and Local(actor)
 		local mine = actor == ns.FullName(ns.me)
 		local relay = type(actor) == "string" and ns.IsTreasurer(ns.me, GetGuildInfo("player")) and ns.IsTreasurerMail(actor)
 		if (mine or relay) and r and r.id == Campaign.State().id and r.rev > 0 then
+			-- A pinned mail actor can be offline while its primary Treasurer relays. Recheck
+			-- that actor's own receipts before publishing, under the same private relay boundary.
+			Campaign.Reconcile(actor)
 			local money, counts = Totals(r)
 			local rev, id = r.rev, r.id
 			local message = ("CJ~R~%d~%d~%s~%s~%d~%s"):format(id, rev, GetGuildInfo("player") or "", actor, money, ItemWord(counts))
