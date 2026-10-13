@@ -721,9 +721,10 @@ end
 -- to the settings' rankPub (all three at once, the switch from before).
 -- (1.2.4, the author's ask: rankings and what shows them are never lost.) The words are the realm
 -- group's (GroupWords), and any client holding one tells it (a copy: the same fields and its giver,
--- AU~L1~<a|b|l>~<1|0>~<time>~<Giver-Realm>): to a client that asks at its login for the games it
--- lacks (AU~L1~q~<letters>), and at a holder's login to his guild when it spans the group's realms
--- (over GUILD: the King's channel is his realm's alone). A 1.2.3 client reads neither form.
+-- AU~L1~<a|b|l>~<1|0>~<time>~<Giver-Realm>), in answer alone: to a client that asks, once a
+-- session as its Games tab opens, for the games it lacks (AU~L1~q~<letters>), on the channel and,
+-- where its guild spans the group's realms, over GUILD (the King's channel is his realm's alone).
+-- A 1.2.3 client reads neither form.
 
 local function PublishersOf(realm)
 	local w = WordsOf(realm).publishers
@@ -831,8 +832,10 @@ end
 -- sender). A copy can't be told from one a modified client made up (no signature of the giver's
 -- travels with it: Konig's rule for the treasury's switches), so it only fills: a game with no word
 -- here, or with an older copy; never over a word heard from a giver himself. A giver's own word
--- replaces any copy of his (his client says what his word is), else the newest stands, the King's
--- own on the same second (the words' rule). True, or false and why.
+-- replaces any copy, whichever giver it names and whatever its time (the review: a copy made up in
+-- another publisher's name, dated after the King's word, refused the King's own repeats for good),
+-- else the newest stands, the King's own on the same second (the words' rule). True, or false and
+-- why.
 local function TakePublish(sender, game, on, at, giver)
 	local g = GroupWords()
 	if not g then return false, "store" end
@@ -843,7 +846,7 @@ local function TakePublish(sender, game, on, at, giver)
 		local was = tonumber(held.at) or 0
 		if copy then
 			if not held.copy or at <= was then return false, "older" end
-		elseif not (held.copy and Same(held.from, giver)) and not Replaces(held, at, giver) then
+		elseif not held.copy and not Replaces(held, at, giver) then
 			return false, "older"
 		end
 		if not copy and held.copy and was == at and (held.on == true) == (on == true) and Same(held.from, giver) then
@@ -916,18 +919,26 @@ end
 -- group's realms); a holder answers on that lane with each of them it holds (its own as its
 -- giver's word, any other as a copy) ANSWER_MIN to ANSWER_MIN + ANSWER_SPREAD seconds later,
 -- leaving out a word that went out meanwhile, once per ANSWER_GAP at most; about RELAYS holders
--- take an ask up, whatever the army's size (Comm's count of our guild's addon users). Nothing goes
--- unasked: an idle member sends nothing and runs no clock for it (the weight rule).
+-- take an ask up, whatever the army's size: on the channel, which joins every Olympus guild, in the
+-- army's addon users (the census's, King.AddonsOnline, as the signed authority's answers draw; the
+-- review: our guild's alone drew about RELAYS holders of each guild), over the guild in our
+-- guild's (Comm's count). Nothing goes unasked: an idle member sends nothing and runs no clock for
+-- it (the weight rule).
 Roles.RELAYS = 3
 Roles.ANSWER_MIN, Roles.ANSWER_SPREAD = 2, 10
 Roles.random = math.random
 local wordHeard = {} -- [game] = { key, at }: the word last heard told, by anyone
 local answering, lastAnswerAt = nil, -math.huge
 local function WordKey(game, on, at, from) return ("%s|%s|%d|%s"):format(game, on and "1" or "0", math.floor(tonumber(at) or 0), ns.FullName(from or "?"):lower()) end
-local function Drawn()
-	local C = ns.Comm
-	local peers = type(C) == "table" and type(C.PeerCount) == "function" and tonumber(C.PeerCount(true)) or 0
-	return Roles.random() <= math.min(1, Roles.RELAYS / (peers + 1))
+local function Drawn(dist)
+	local C, K = ns.Comm, ns.King
+	local peers = type(C) == "table" and type(C.PeerCount) == "function" and tonumber(C.PeerCount(dist ~= "GUILD")) or 0
+	local users = peers + 1
+	if dist ~= "GUILD" and type(K) == "table" and type(K.AddonsOnline) == "function" then
+		local ok, n = pcall(K.AddonsOnline)
+		if ok and tonumber(n) then users = math.max(users, tonumber(n)) end
+	end
+	return Roles.random() <= math.min(1, Roles.RELAYS / users)
 end
 -- This client's words for those games (all: nil) told on dist; since: one told by anyone after it
 -- is left out. The number told.
@@ -955,7 +966,7 @@ local function HeardAsk(dist, letters)
 		local game = Roles.LETTER_GAME[l]
 		if Standing(game) then games[game], any = true, true end
 	end
-	if not any or not Drawn() then return end
+	if not any or not Drawn(dist) then return end
 	local since = Now()
 	answering = games
 	ns.Arena.After(Roles.ANSWER_MIN + Roles.random() * Roles.ANSWER_SPREAD, "rankings answer", function()

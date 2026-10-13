@@ -2703,8 +2703,9 @@ sees it too. Any client that holds a word tells it: a member who opens the Games
 word for a game asks once a session, and about three holders answer with the word and its
 giver's name; where the guild spans the group's realms the ask and the answers go over the guild
 too. Nothing goes unasked. A told copy carries no signature of the giver's, so it never replaces
-a word a client heard from its giver, the giver's own word replaces any copy of his, and a copy
-naming someone who may not publish that game counts nowhere (`tests/arena/rankings-word.lua`).
+a word a client heard from its giver, a word heard from its giver replaces any copy (whoever the
+copy names, whatever its time), and a copy naming someone who may not publish that game counts
+nowhere (`tests/arena/rankings-word.lua`).
 **What the Bones ranking keeps** (1.2.4, `Olympus/FarkleTable.lua`): a game counts once both
 players' signed halves agree. A game with one half is kept as long as its month's games (62 days;
 it was 7), and a player whose client never got the other's half asks him for it at his later

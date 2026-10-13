@@ -133,3 +133,69 @@ test("1.2.4 rankings word: a copy (unsigned) only fills: never over a word heard
 	eq(Public(w, fresh, "bones"), true, "the newer copy stands")
 	NoErrors(w)
 end)
+
+-- (The review) A copy is unsigned: one naming another publisher (a councillor the King named for that
+-- game), dated after the King's word, held on a member's client that heard neither giver. The King's
+-- own word, older than the made-up copy, must still replace it: any giver's own word replaces any copy.
+-- Before, it was refused as older, at every repeat of his, so the made-up copy stood for good there.
+test("1.2.4 rankings word: a made-up copy naming another publisher, newer than the King's word, gives way to the King's own word at his next repeat", function()
+	local w = World.New()
+	local king, hc = w:Role("king"), w:Role("councillor")
+	local late = w:Client("Parric Stowe")
+	-- (the member hears the King name the councillor, then is away when the King shows Bones)
+	assert(w:As(king, king.ns.ArenaRoles.SetPublishers, { { name = hc.name, games = { bones = true } } }))
+	w:Run(0)
+	w:Logout(late)
+	assert(w:As(king, king.ns.ArenaRoles.Publish, "bones", true))
+	w:Run(0)
+	local at = Word(w, king, "bones").at
+	w:Logout(king); w:Logout(hc)
+	w:Run(3 * 3600)
+	local x = w:Client("Idris Fold")
+	w:Login(late)
+	w:Run(0)
+	eq(w:As(late, late.ns.ArenaRoles.MayPublish, hc.name, "bones"), true, "the councillor publishes Bones")
+	eq(Word(w, late, "bones"), nil, "no word heard")
+	-- x makes up the councillor's word hiding Bones, an hour after the King's
+	Say(w, x, ("b~0~%d~%s"):format(at + 3600, hc.name))
+	eq(Public(w, late, "bones"), false, "the made-up copy, while nothing else is heard")
+	-- the King logs in: his client says his own word again (its time the same, older than the copy)
+	w:Login(king)
+	w:Run(king.ns.ArenaRoles.LOGIN_REPEAT + 1)
+	eq(Public(w, late, "bones"), true, "the King's own word replaces the copy")
+	eq(Word(w, late, "bones").from, N.king); eq(Word(w, late, "bones").copy, nil)
+	-- and a copy, newer still, never replaces it again
+	Say(w, x, ("b~0~%d~%s"):format(at + 7200, hc.name))
+	eq(Public(w, late, "bones"), true, "a copy never replaces a giver's own word")
+	NoErrors(w)
+end)
+
+-- (The review) "About three holders whatever the army's size": the channel joins every Olympus guild,
+-- so a holder's odds to answer an ask heard there are three in the army's addon users (the census's,
+-- King.AddonsOnline, as the signed authority's answers draw), not three in his own guild's (Comm's
+-- peers): with thirty guilds about ninety holders were drawn for each ask. Over the guild, his
+-- guild's.
+test("1.2.4 rankings word: a holder answers an ask on the channel at the army's odds, over the guild at his guild's", function()
+	local w = World.New()
+	local king = w:Role("king")
+	local lida = w:Client("Lida Fenn")
+	assert(w:As(king, king.ns.ArenaRoles.Publish, "bones", true))
+	w:Run(0)
+	w:Logout(king)
+	local late = w:Client("Parric Stowe")
+	-- (Lida's draw: one half; the army's addon users online: 300, her guild's few)
+	lida.ns.ArenaRoles.random = function() return 0.5 end
+	lida.ns.King.AddonsOnline = function() return 300 end
+	local before = #AUs(w, lida)
+	Say(w, late, "q~b")
+	w:Run(lida.ns.ArenaRoles.ANSWER_MIN + lida.ns.ArenaRoles.ANSWER_SPREAD + 2)
+	eq(#AUs(w, lida), before, "three in 300 on the channel: not drawn")
+	eq(Public(w, late, "bones"), false)
+	w:Run(lida.ns.ArenaRoles.ANSWER_GAP + 1)
+	Say(w, late, "q~b", "GUILD")
+	w:Run(lida.ns.ArenaRoles.ANSWER_MIN + lida.ns.ArenaRoles.ANSWER_SPREAD + 2)
+	local said = AUs(w, lida)
+	eq(#said, before + 1, "over the guild: her guild's few, drawn"); eq(said[#said].dist, "GUILD")
+	eq(Public(w, late, "bones"), true)
+	NoErrors(w)
+end)
