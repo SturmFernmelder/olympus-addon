@@ -3357,15 +3357,16 @@ test("wanted 1.2.4 scoring migration: retained live evidence is rebuilt under sc
 	end)
 end)
 
-test("wanted 1.2.4 scoring migration: the retained production-shaped 534 and 332 leaders deterministically become 30 and 169", function()
+test("wanted 1.2.4 scoring migration: the actual retained ten-claim Hobo 534 and Socio 332 deterministically become 30 and 169, with the personal balancing letter once", function()
 	WithWanted(function(w, W, c)
-		w.manager = false
+		w.manager, w.dead = false, false
+		c.CaptureError = function(where, err) error(tostring(where) .. ": " .. tostring(err)) end
 		local hobo = w.participant("Hobo Heretics-Realm", "Player-1-CC00BC01")
 		local socio = w.participant("Socioeconomic Factors-Realm", "Player-1-CC00BC02")
 		local seq = 0
 		local function Row(sender, own, horde, level, kind, ml)
 			seq = seq + 1
-			w.advance()
+			w.advance(W.SHARE_RATE_WINDOW + 1)
 			w.hordePlayer("Snapshot Prey " .. seq .. "-Realm", horde)
 			assert(w.commHandlers.WK("CHANNEL", sender, BountyRow(c, W, {
 				digest = ("%016x"):format(0xbc010000 + seq), at = w.epoch, kind = kind or "P",
@@ -3375,9 +3376,9 @@ test("wanted 1.2.4 scoring migration: the retained production-shaped 534 and 332
 			})))
 		end
 
-		-- These five retained no-bounty claims are exactly the old 534-point Hobo row and
-		-- exactly 30 under score v2: 51, 51, 51, 54 and 60.
-		for i, level in ipairs({ 51, 51, 51, 54, 60 }) do
+		-- The ten levels in the retained Hobo history: 267 levels were 534 points under the
+		-- old 2 x level rule and are exactly 30 under score v2 (3 each).
+		for i, level in ipairs({ 23, 26, 22, 30, 26, 30, 27, 30, 26, 27 }) do
 			Row(hobo, "Player-1-CC00BC01", ("Player-1-0D00BC%02X"):format(i), level)
 		end
 		-- Socio's retained rows are an ordinary level-26 claim (52 -> 3) and a level-60
@@ -3387,7 +3388,7 @@ test("wanted 1.2.4 scoring migration: the retained production-shaped 534 and 332
 		Row(socio, "Player-1-CC00BC02", "Player-1-0D00BC11", 60)
 		local before = W.Rankings().all
 		eq(before[1].name, socio); eq(before[1].points, 169)
-		eq(before[2].name, hobo); eq(before[2].points, 30)
+		eq(before[2].name, hobo); eq(before[2].points, 30); eq(before[2].claims, 10)
 		local socioKey, hoboKey = before[1].key, before[2].key
 
 		-- Recreate the derived score-v1 caches around those same retained facts. The rows'
@@ -3407,15 +3408,62 @@ test("wanted 1.2.4 scoring migration: the retained production-shaped 534 and 332
 		for _, e in ipairs(s.evidence) do if oldById[e.id] then e.points = oldById[e.id] end end
 		s.slayers[hoboKey].total, s.slayers[hoboKey].months[W.MonthNow()] = 534, 534
 		s.slayers[socioKey].total, s.slayers[socioKey].months[W.MonthNow()] = 332, 332
-		eq(s.slayers[hoboKey].total, 534); eq(s.slayers[socioKey].total, 332)
+		eq(s.slayers[hoboKey].total, 534); eq(s.slayers[hoboKey].claims, 10)
+		eq(s.slayers[hoboKey].monthClaims[W.MonthNow()], 10)
+		eq(s.slayers[socioKey].total, 332)
+		-- This is Hobo's login: only the character whose own displayed total decreases receives
+		-- the saved note. Another character cannot consume it.
+		c.me, w.units.player.name, w.units.player.guid = hobo, hobo, "Player-1-CC00BC01"
 		s.scoreVersion = 1
 
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		W = c.Wanted; assert(W.Load())
 		local after = W.Rankings().all
 		eq(after[1].name, socio); eq(after[1].points, 169)
-		eq(after[2].name, hobo); eq(after[2].points, 30)
+		eq(after[2].name, hobo); eq(after[2].points, 30); eq(after[2].claims, 10)
+		local month = W.Rankings().month
+		eq(month[2].name, hobo); eq(month[2].points, 30); eq(month[2].claims, 10)
 		eq(c.rdb.wanted.scoreVersion, 2)
+		local pending = assert(c.rdb.wanted.scoreMigrationLetter)
+		eq(pending.who, "n:" .. c.Fold(hobo)); eq(pending.old, 534); eq(pending.new, 30)
+
+		-- No usable UI: the letter is not consumed, including across a reload.
+		local window = c.Window
+		c.Window = false
+		w.advance(W.Bounty.NOTICE_LOGIN)
+		local shown, why = W.Bounty.Notices()
+		eq(shown, 0); eq(why, "ui"); assert(c.rdb.wanted.scoreMigrationLetter)
+		c.Window = window
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		eq(c.rdb.wanted.scoreMigrationLetter.old, 534, "the undisplayed note survived the reload")
+		w.advance(W.Bounty.NOTICE_LOGIN)
+		eq(W.Bounty.Notices(), 1)
+		local frame = assert(w.windows.OlympusWantedScoreMigration)
+		eq(frame.shown, true); eq(frame.title.text, ns.L.WANTED_SCORE_MIGRATION_TITLE)
+		eq(frame.body.text, ns.L.WANTED_SCORE_MIGRATION_BODY:format(534, 30), "exact old and new totals, retained-history rule and signature")
+		assert(frame.body.text:find("\nFaladoriel Skylance\nThe Royal Dev$"), frame.body.text)
+		eq(c.rdb.wanted.scoreMigrationLetter, nil, "cleared only after the frame was shown")
+
+		-- Once shown, a reload cannot create it again.
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted; assert(W.Load())
+		w.advance(W.Bounty.NOTICE_LOGIN)
+		eq(W.Bounty.Notices(), 0); eq(c.rdb.wanted.scoreMigrationLetter, nil)
+		eq(w.windows.OlympusWantedScoreMigration, frame, "no second frame")
+	end)
+end)
+
+test("wanted 1.2.4 scoring migration: an equal or increased personal total never qualifies for the balancing letter", function()
+	WithWanted(function(_, W, c)
+		assert(W.Load())
+		local s, who = c.rdb.wanted, "n:" .. c.Fold(c.me)
+		for _, totals in ipairs({ { 30, 30 }, { 29, 30 } }) do
+			s.scoreMigrationLetter = { version = W.SCORE_VERSION, who = who, old = totals[1], new = totals[2] }
+			eq(W.Bounty.ScoreMigration(s, who), nil)
+			assert(W.Prune())
+			eq(s.scoreMigrationLetter, nil, "invalid pending note is removed, not shown")
+		end
 	end)
 end)
 
@@ -3479,9 +3527,11 @@ test("wanted 1.2.4 scoring migration: a future score version fails closed withou
 		assert(W.AddTarget("Future Prey-Realm", "Player-1-0D00BA05"))
 		local s = c.rdb.wanted
 		s.scoreVersion, s.futureMarker = W.SCORE_VERSION + 1, { keep = true }
+		s.scoreMigrationLetter = { keep = true, version = W.SCORE_VERSION + 1 }
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		W = c.Wanted
 		eq(W.Load(), false); eq(s.scoreVersion, 3); eq(s.futureMarker.keep, true)
+		eq(s.scoreMigrationLetter.keep, true, "future data is untouched")
 		eq(W.MigrateScoring(s), false); eq(#W.Rankings().all, 0)
 	end)
 end)

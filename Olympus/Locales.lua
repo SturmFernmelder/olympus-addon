@@ -4093,6 +4093,8 @@ L.WANTED_EARLIER_ROW = "- %s (level %s) killed you at %s: +%d points on his boun
 L.WANTED_EARLIER_END = "Your deaths will not be in vain. We will avenge you."
 L.WANTED_LEVEL_FLOOR = "%d+"
 L.WANTED_LEVEL_UNKNOWN = "??"
+L.WANTED_SCORE_MIGRATION_TITLE = "A note about your Slayer score"
+L.WANTED_SCORE_MIGRATION_BODY = "Your recorded kills and their history were kept. Your Slayer total changed from %d to %d because the old rule gave two points per Horde-player level, which made common kills outweigh bounties too heavily.\n\nThe new rule gives one point per ten Horde-player levels, rounded up. A target's full bounty and the 100-point revenge bonus are unchanged. The same rule applies to every Slayer, including me.\n\nWhere the old record kept enough facts, Olympus recalculated it exactly. Older totals without enough detail remain preserved in history; the addon does not guess them into the new ranking.\n\nThis is not a punishment or a correction aimed at you. The earlier balance was my mistake. Thank you for helping test it.\n\nFaladoriel Skylance\nThe Royal Dev"
 -- 1.2.4, the notices: the toast at each own death to a Horde player (its name and the points it
 -- added, "again" inside the corpse-camping gap), the avenged dialog and its buttons, the Slayer
 -- letter (the King's letter) and the King's toast in its place.
@@ -4255,6 +4257,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.WANTED_EARLIER_END = "Suas mortes não serão em vão. Nós vamos vingar você."
 	L.WANTED_LEVEL_FLOOR = "%d+"
 	L.WANTED_LEVEL_UNKNOWN = "??"
+	L.WANTED_SCORE_MIGRATION_TITLE = "Uma nota sobre a sua pontuação de Slayer"
+	L.WANTED_SCORE_MIGRATION_BODY = "Seus abates registrados e o histórico deles foram mantidos. A sua pontuação de Slayer mudou de %d para %d porque a regra antiga dava dois pontos por nível do jogador da Horda, o que fazia abates comuns pesarem demais em comparação com as recompensas.\n\nA nova regra dá um ponto a cada dez níveis do jogador da Horda, arredondado para cima. A recompensa completa do alvo e o bônus de 100 pontos por vingança não mudaram. A mesma regra vale para todos os Slayers, inclusive para mim.\n\nQuando o registro antigo manteve detalhes suficientes, o Olympus recalculou tudo com exatidão. Totais antigos sem detalhes suficientes continuam preservados no histórico; o addon não tenta adivinhá-los para colocá-los no novo ranking.\n\nIsto não é uma punição nem uma correção direcionada a você. O balanceamento anterior foi um erro meu. Obrigado por ajudar a testar.\n\nFaladoriel Skylance\nThe Royal Dev"
 	L.WANTED_DEATH_TOAST = "O jogador da Horda que te matou, %s, acaba de ganhar %d pontos na recompensa dele nos Mais Procurados. Sua morte não será em vão. Não se preocupe: nós vamos vingar você."
 	L.WANTED_DEATH_TOAST_AGAIN = "%s te matou de novo. Sua morte não será em vão. Não se preocupe: nós vamos vingar você."
 	L.WANTED_DEATH_TOAST_PLAIN = "O jogador da Horda que te matou, %s, está nos Mais Procurados. Sua morte não será em vão. Não se preocupe: nós vamos vingar você."

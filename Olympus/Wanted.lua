@@ -176,6 +176,7 @@ local Share = { rates = {}, days = {}, targets = {}, relayed = {}, relayedOrder 
 -- a table, as Share is), and this session's state of the earlier deaths' reader and its notice.
 local Bounty = { session = {} }
 Wanted.Bounty = Bounty -- (tests, /oly wanted status)
+local scoreMigrationFrame
 local ScheduleGlobalRepeat
 -- Sightings, this session's only (nothing of them is saved): the pins ([Horde GUID] = the newest
 -- sighting of him), their frames, the ids taken (replays), this client's own last sighting of each
@@ -4277,6 +4278,21 @@ function Bounty.LegacyClaimPoints(level, bounty, revenge)
 		+ (revenge and S.REVENGE or 0))
 end
 
+-- This character's saved Slayer total, when the store actually has one. The score migration uses
+-- the number the player saw before it rebuilds the derived table, then the number made from the
+-- same retained history afterwards. A missing old row is not silently treated as a loss.
+local function OwnSlayerTotal(s)
+	local name = CleanName(ns.me)
+	if not name then return nil, nil end
+	local guid
+	if type(UnitGUID) == "function" then
+		local ok, value = pcall(UnitGUID, "player")
+		if ok and not Secret(value) then guid = Guid(value) end
+	end
+	local row = ResolveSlayer(s, { name = name, guid = guid }, false, false)
+	return row and Whole(row.total, 0, Wanted.MAX_POINTS) or nil, NameKey(name)
+end
+
 -- Saved score-version 1 data has two sources. Live evidence still contains the frozen facts and
 -- Rebuild can score it exactly. A checkpoint has only its retained claims plus aggregate paid
 -- rows: each retained claim is recalculated only when its old points match the old formula and
@@ -4287,6 +4303,7 @@ function Wanted.MigrateScoring(s)
 	local savedVersion = Whole(s.scoreVersion, 1, 2147483647)
 	if savedVersion and savedVersion > Wanted.SCORE_VERSION then return false end
 	local from = Whole(savedVersion, 1, Wanted.SCORE_VERSION - 1) or 1
+	local oldOwn, ownKey = OwnSlayerTotal(s)
 	local archive = { from = from, to = Wanted.SCORE_VERSION, at = math.floor(Clock()), targets = {},
 		recalculatedClaims = 0, archivedClaims = 0, archivedPoints = 0 }
 	local bases = {}
@@ -4373,6 +4390,14 @@ function Wanted.MigrateScoring(s)
 	end
 	s.scoreVersion = Wanted.SCORE_VERSION
 	Rebuild(s)
+	local newOwn = select(1, OwnSlayerTotal(s)) or 0
+	-- The balancing note belongs only to the character whose displayed total went down. It stays in
+	-- the realm store until its parchment really opens; another character cannot consume it.
+	if ownKey and oldOwn and oldOwn > newOwn then
+		s.scoreMigrationLetter = { version = Wanted.SCORE_VERSION, who = ownKey, old = oldOwn, new = newOwn }
+	else
+		s.scoreMigrationLetter = nil
+	end
 	return true
 end
 
@@ -5023,6 +5048,10 @@ function Bounty.Blocked()
 		end)
 		if not ok or shown then return "letter" end
 	end
+	if scoreMigrationFrame then
+		local ok, shown = pcall(function() return scoreMigrationFrame:IsShown() end)
+		if not ok or shown then return "score-letter" end
+	end
 	return nil
 end
 
@@ -5648,6 +5677,99 @@ function Bounty.See(r)
 	return UI.ShowPerson({ name = ns.ShortName(name), realm = ns.RealmOf(name), guild = r.guild, source = "addon" }) and true or false
 end
 
+-- The one-way score-v2 balancing note. It is personal to the character that saw a lower total,
+-- never a broadcast or a reusable King's letter. Its saved row is removed only after this
+-- parchment reports itself shown, so a missing UI or a reload before then cannot consume it.
+function Bounty.ScoreMigration(s, me)
+	local r = type(s) == "table" and s.scoreMigrationLetter or nil
+	if type(r) ~= "table" or r.version ~= Wanted.SCORE_VERSION or type(r.who) ~= "string" or #r.who > 120
+		or not r.who:find("^n:") then return nil end
+	local old, new = Whole(r.old, 0, Wanted.MAX_POINTS), Whole(r.new, 0, Wanted.MAX_POINTS)
+	if not old or not new or old <= new or me and r.who ~= me then return nil end
+	return { version = Wanted.SCORE_VERSION, who = r.who, old = old, new = new }
+end
+
+function Bounty.ScoreMigrationText(r)
+	r = type(r) == "table" and r or {}
+	return L.WANTED_SCORE_MIGRATION_BODY:format(tonumber(r.old) or 0, tonumber(r.new) or 0)
+end
+
+local function MakeScoreMigrationFrame()
+	if type(ns.Window) ~= "function" then return nil end
+	local f = ns.Window("OlympusWantedScoreMigration", UIParent, { inset = false, close = false, escape = false })
+	if type(f) ~= "table" then return nil end
+	f:SetFrameStrata("DIALOG")
+	f:SetToplevel(true)
+	f:SetSize(470, 530)
+	f:SetPoint("CENTER", 0, 30)
+	f:EnableMouse(true)
+	f:SetMovable(true)
+	f:RegisterForDrag("LeftButton")
+	f:SetScript("OnDragStart", f.StartMoving)
+	f:SetScript("OnDragStop", f.StopMovingOrSizing)
+	local inner = type(f.inner) == "table" and f.inner or { 9, -24, -6, 4 }
+	local bg = f:CreateTexture(nil, "BACKGROUND", nil, 1)
+	bg:SetPoint("TOPLEFT", inner[1], inner[2])
+	bg:SetPoint("BOTTOMRIGHT", inner[3], inner[4])
+	local ui = ns.UI
+	local parchments = type(ui) == "table" and type(ui.PARCHMENTS) == "table" and ui.PARCHMENTS
+		or { "Interface\\QuestFrame\\QuestBG", "Interface\\Stationery\\StationeryTest1" }
+	local file = type(ui) == "table" and type(ui.FirstTexture) == "function" and ui.FirstTexture(parchments) or parchments[1]
+	if type(GetFileIDFromPath) == "function" and not GetFileIDFromPath(file) then
+		bg:SetColorTexture(0.87, 0.80, 0.64, 0.97)
+	else
+		bg:SetTexture(file)
+		if file:find("QuestBG", 1, true) then bg:SetTexCoord(0, 296 / 512, 0, 331 / 512) end
+	end
+	f.title = f:CreateFontString(nil, "ARTWORK", _G.QuestTitleFont and "QuestTitleFont" or "GameFontNormalLarge")
+	f.title:SetPoint("TOP", 0, -30)
+	f.title:SetText(L.WANTED_SCORE_MIGRATION_TITLE)
+	f.body = f:CreateFontString(nil, "ARTWORK", _G.QuestFont and "QuestFont" or "GameFontHighlight")
+	f.body:SetPoint("TOPLEFT", 38, -74)
+	f.body:SetPoint("RIGHT", -38, 0)
+	f.body:SetJustifyH("LEFT")
+	f.body:SetJustifyV("TOP")
+	if f.body.SetWordWrap then f.body:SetWordWrap(true) end
+	f.done = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+	f.done:SetSize(100, 24)
+	f.done:SetPoint("BOTTOM", 0, 24)
+	f.done:SetText(OKAY or "OK")
+	f.done:SetScript("OnClick", function() f:Hide() end)
+	f.close = CreateFrame("Button", nil, f, "UIPanelCloseButton")
+	f.close:SetPoint("TOPRIGHT", -4, -4)
+	f.close:SetScript("OnClick", function() f:Hide() end)
+	f:SetScript("OnHide", function()
+		if ns.After and Bounty.Waiting() then ns.After(1, "wanted notices", Bounty.NoticesSoon) end
+	end)
+	if ns.EscapeCloses then
+		ns.EscapeCloses("OlympusWantedScoreMigration")
+		if f.HookScript then f:HookScript("OnShow", function() ns.EscapeCloses("OlympusWantedScoreMigration") end) end
+	end
+	return f
+end
+
+function Bounty.ShowScoreMigration(s, me)
+	local r = Bounty.ScoreMigration(s, me)
+	if not r then return false, "none" end
+	local ok, frame = pcall(function()
+		scoreMigrationFrame = scoreMigrationFrame or MakeScoreMigrationFrame()
+		if not scoreMigrationFrame then return nil end
+		scoreMigrationFrame.body:SetText(Bounty.ScoreMigrationText(r))
+		scoreMigrationFrame:Show()
+		return scoreMigrationFrame
+	end)
+	if not ok or not frame then
+		if not ok and ns.CaptureError then ns.CaptureError("wanted score migration letter", frame) end
+		return false, "ui"
+	end
+	local shownOK, shown = pcall(function() return frame:IsShown() end)
+	if not shownOK or shown ~= true then return false, "ui" end
+	s.scoreMigrationLetter = nil
+	return true
+end
+
+function Bounty.ScoreMigrationFrame() return scoreMigrationFrame end
+
 -- The first of a list's notices for this character, or nil, and its place.
 function Bounty.For(list, me)
 	for i, r in ipairs(type(list) == "table" and list or {}) do if type(r) == "table" and r.who == me then return r, i end end
@@ -5656,7 +5778,8 @@ end
 -- Whether a notice waits for this character.
 function Bounty.Waiting()
 	local s, me = Store(false), NameKey(ns.me)
-	return s ~= nil and me ~= nil and (Bounty.For(s.slayerLetters, me) ~= nil or Bounty.For(s.avenged, me) ~= nil)
+	return s ~= nil and me ~= nil and (Bounty.ScoreMigration(s, me) ~= nil
+		or Bounty.For(s.slayerLetters, me) ~= nil or Bounty.For(s.avenged, me) ~= nil)
 end
 
 -- The notices for this character shown, when nothing is in the way (NOTICE_LOGIN after login, and
@@ -5673,6 +5796,9 @@ function Bounty.Notices()
 	if Bounty.LoginLeft() > 0 then return 0, "login" end
 	local why = Bounty.Blocked()
 	if why then return 0, why end
+	local migration, migrationWhy = Bounty.ShowScoreMigration(s, me)
+	if migration then return 1, Bounty.Waiting() and "score-letter" or nil end
+	if migrationWhy ~= "none" then return 0, migrationWhy end
 	local n, letters = Bounty.SendLetters(s, me)
 	local function Sooner(other)
 		if not letters then return other end
@@ -5729,7 +5855,8 @@ function Bounty.NoticeWait(why)
 		local left = (tonumber(Bounty.session.settleAt) or 0) - math.floor(Clock())
 		return math.max(1, math.min(Bounty.LETTER_SETTLE, left))
 	end
-	return (why == "window" or why == "dialog" or why == "kings-letter") and Bounty.WINDOW_TICK or Bounty.NOTICE_TICK
+	return (why == "window" or why == "dialog" or why == "kings-letter" or why == "score-letter")
+		and Bounty.WINDOW_TICK or Bounty.NOTICE_TICK
 end
 function Bounty.NoticesSoon()
 	local n, why = Bounty.Notices()
@@ -5936,6 +6063,10 @@ function Bounty.PruneNotices(s, now)
 	end
 	while #letters > Bounty.LETTERS_MAX do table.remove(letters, 1) end
 	s.avenged, s.slayerLetters = avenged, letters
+	-- A balancing letter survives reloads only in its exact personal, decreasing v2 shape. It is
+	-- otherwise inert data, never a source for either ranking or protocol.
+	local migration = Bounty.ScoreMigration(s)
+	s.scoreMigrationLetter = migration
 	-- (1.2.4 repair: the claims told of, by shape, within GRUDGE_DAYS and TOLD_MAX.)
 	Bounty.TrimTold(s, now)
 end
@@ -6229,6 +6360,7 @@ function Wanted.ResetForTests()
 	authenticatedGlobal, globalFloor, publisherHeads = nil, nil, {}
 	pendingGlobal, pendingGlobalCount = {}, 0
 	publishedGlobal = nil
+	scoreMigrationFrame = nil
 	Wanted.globalCatch.asked, Wanted.globalCatch.replied = -math.huge, -math.huge
 	Wanted.globalCatch.generation = Wanted.globalCatch.generation + 1
 	restoring, restoreChecked = nil, {}
