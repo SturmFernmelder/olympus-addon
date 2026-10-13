@@ -77,6 +77,71 @@ test("1.2.4 records history: bounded digests rotate every old unsealed day witho
 	Errors(w)
 end)
 
+test("1.2.4 records rotation review: equal inventories on different full pages never schedule false pushes", function()
+	for _, kind in ipairs({ "days", "months" }) do
+		local w, a, b, c = Setup()
+		local mine, peer = Do(w, c, "Store", "b", true), Do(w, b, "Store", "b", true)
+		local R = c.ns.Records
+		if kind == "days" then
+			for i = 0, R.DIGEST_DAYS + 9 do
+				local at = w.clock - i * 86400
+				local body = Pair(w, a, b, "Kreview" .. i, "1", at)
+				local rec = w:As(c, R.TYPES.b.Read, body)
+				local day = math.floor(at / 86400)
+				mine.days[day], peer.days[day] = { [rec.id] = body }, { [rec.id] = body }
+			end
+		else
+			local latest = Do(w, c, "MonthOf", w.clock) - 1
+			for i = 0, R.DIGEST_MONTHS + 4 do
+				-- Already-adopted fixtures: real RSA adoption has a separate round trip.
+				mine.seals[latest - i], peer.seals[latest - i] = { r = "", h = string.rep("a", 64) }, { r = "", h = string.rep("a", 64) }
+			end
+		end
+		c.ns.Records.random = function() return 0 end
+		b.ns.Arena.Send = function() return true end
+		assert(Do(w, b, "SendDigest", "b")) -- advance to a noncontiguous historical page
+		local page = Do(w, b, "DigestBody", "b")
+		local pushes = 0
+		c.ns.Arena.Send = function(tag) if tag == "RD" then pushes = pushes + 1 end; return true end
+		w:As(c, c.comm.handlers.RD, "CHANNEL", b.name, "RD~L1~" .. page)
+		w:Run(12)
+		eq(pushes, 0, kind .. " omitted by rotation do not prove a missing record")
+		Errors(w)
+	end
+end)
+
+test("1.2.4 records rotation review: genuinely newer days and sealed months still schedule recovery pushes", function()
+	for _, kind in ipairs({ "days", "months" }) do
+		local w, a, b, c = Setup()
+		local mine, peer = Do(w, c, "Store", "b", true), Do(w, b, "Store", "b", true)
+		local R = c.ns.Records
+		if kind == "days" then
+			for i = 0, R.DIGEST_DAYS do
+				local at = w.clock - i * 86400
+				local body = Pair(w, a, b, "Knewer" .. i, "1", at)
+				local rec = w:As(c, R.TYPES.b.Read, body)
+				local day = math.floor(at / 86400)
+				mine.days[day] = { [rec.id] = body }
+				if i > 0 then peer.days[day] = { [rec.id] = body } end
+			end
+		else
+			local latest = Do(w, c, "MonthOf", w.clock) - 1
+			for i = 0, R.DIGEST_MONTHS do
+				mine.seals[latest - i] = { r = "", h = string.rep("a", 64) }
+				if i > 0 then peer.seals[latest - i] = { r = "", h = string.rep("a", 64) } end
+			end
+		end
+		c.ns.Records.random = function() return 0 end
+		local pushes = 0
+		c.ns.Arena.Send = function(tag) if tag == "RD" then pushes = pushes + 1 end; return true end
+		local page = Do(w, b, "DigestBody", "b")
+		w:As(c, c.comm.handlers.RD, "CHANNEL", b.name, "RD~L1~" .. page)
+		w:Run(12)
+		eq(pushes, 1, "newest " .. kind .. " is not a rotated omission")
+		Errors(w)
+	end
+end)
+
 test("1.2.4 records regression: an unsigned conflicting body cannot invalidate a legitimate record or its ranking", function()
 	local w, a, b, c = Setup() local body = Pair(w, a, b, "Kr2") Keys(w, a, b) Take(w, c, body)
 	local fake = Pair(w, a, b, "Kr2", "2"):gsub("~[%w%-_]+$", "~" .. string.rep("A", 86))

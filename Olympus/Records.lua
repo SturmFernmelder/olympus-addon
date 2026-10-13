@@ -839,13 +839,13 @@ local function OnDigest(dist, sender, mode, body)
 	heardDigest[letter] = now
 	local s = Store(letter)
 	local x = Index(letter)
-	local listed, nListed, oldest, need, counts, push = {}, 0, math.huge, {}, {}, false
+	local listed, nListed, newest, need, counts, push = {}, 0, -math.huge, {}, {}, false
 	for item in (days .. ","):gmatch("([^,]*),") do
 		local d, n, h = item:match("^([0-9a-z]+)%.([0-9a-z]+)%.([0-9a-z]+)$")
 		d, n, h = N36(d, 0, 400000), N36(n, 0, 1000000), N36(h, 0, 4294967295)
 		if d and n and h and not listed[d] then
 			listed[d], nListed = true, nListed + 1
-			oldest = min(oldest, d)
+			newest = max(newest, d)
 			if not Compacted(s, d) then
 				local g = x.dig[d]
 				local mn, mx = g and g.n or 0, g and g.x or 0
@@ -856,9 +856,11 @@ local function OnDigest(dist, sender, mode, body)
 			end
 		end
 	end
-	-- (days held here that its digest does not name, within what it names: it lacks them)
+	-- A full page rotates older days; their omission says nothing about the peer's
+	-- inventory. Only a newer day (the newest days are always named), or an omission
+	-- from a short, complete inventory establishes that a push is useful.
 	for d in pairs(x.dig) do
-		if not listed[d] and (d >= oldest or nListed < R.DIGEST_DAYS) then push = true break end
+		if not listed[d] and (d > newest or nListed < R.DIGEST_DAYS) then push = true break end
 	end
 	table.sort(need, function(a, b) return a > b end)
 	local asks = 0
@@ -870,17 +872,20 @@ local function OnDigest(dist, sender, mode, body)
 		end
 	end
 	-- Sealed months: one held elsewhere and not here (or another seal of it) asked for.
-	local mlisted = {}
+	local mlisted, nMonths, newestMonth = {}, 0, -math.huge
 	for item in (tostring(months or "") .. ","):gmatch("([^,]*),") do
 		local m, h8 = item:match("^([0-9a-z]+)%.(%x+)$")
 		m = N36(m, 0, 100000)
-		if m and h8 and #h8 == 8 then
+		if m and h8 and #h8 == 8 and not mlisted[m] then
 			mlisted[m] = true
+			nMonths, newestMonth = nMonths + 1, max(newestMonth, m)
 			local seal = s and s.seals[m]
 			if not (Adopted(seal) and seal.h:sub(1, 8) == h8:lower()) then AskSeal(letter, m) end
 		end
 	end
-	for m, seal in pairs(s and s.seals or {}) do if Adopted(seal) and not mlisted[m] then push = true end end
+	for m, seal in pairs(s and s.seals or {}) do
+		if Adopted(seal) and not mlisted[m] and (m > newestMonth or nMonths < R.DIGEST_MONTHS) then push = true break end
+	end
 	-- It lacks what this client holds: our own digest, drawn, a few seconds later (another
 	-- digest of that type heard meanwhile tells it as well).
 	if push and s and now - (lastDigest[letter] or -math.huge) >= R.PUSH_GAP and not answering["digest" .. letter] and Drawn() then

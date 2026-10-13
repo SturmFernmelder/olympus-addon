@@ -18,6 +18,9 @@ digest names the newest three record-days and rotates through older unsealed rec
 remaining slots. Sealed months likewise keep the newest month visible and rotate through older
 ones, so years-old retained summaries remain discoverable. Reading a digest does not advance
 either rotation; only an admitted send does, so a full queue does not skip a historical page.
+An omitted older day or month on a full rotating page is not treated as missing evidence;
+equal inventories on different pages do not provoke extra response digests. Newer evidence,
+different listed hashes, and omissions from a short complete inventory still request recovery.
 Missing results travel on the existing paced low lane. Large days are requested in successive hash buckets, with
 at most 350 64-bit SHA-256 fingerprints per request, below the transport's assembly size.
 Verification has 20 records in flight and 200 waiting; pending keys hold at most 500 records,
