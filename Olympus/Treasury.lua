@@ -351,6 +351,7 @@ end
 -- Who has the tab: the keepers, the King and his Steward (where a Treasurer can be, or once a
 -- book came; the author's view always), and every member once the King shows the army something.
 function Treasury.Visible()
+	if ns.GuildFinance and not ns.GuildFinance.missing and ns.GuildFinance.Visible() then return true end
 	if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then return true end
 	local campaign = ns.Campaign and not ns.Campaign.missing and ns.Campaign.State()
 	if campaign and not campaign.closed and ns.IsMember() then return true end
@@ -884,7 +885,7 @@ function Treasury.Info(a, b)
 		Treasury.Record(done.name, net, "trade", nil, { book = book, excluded = done.gaveItems or nil, kind = done.gaveItems and "sale" or nil,
 			guild = done.guild, observed = true })
 	elseif net < 0 then
-		Treasury.Record(done.name, -net, "trade", true, { book = book, excluded = done.gotItems or nil, kind = done.gotItems and "purchase" or nil })
+		Treasury.Record(done.name, -net, "trade", true, { book = book, excluded = done.gotItems or nil, kind = done.gotItems and "purchase" or nil, observed = true })
 	end
 	-- Items: given with nothing back, a donation (or a payment); in a deal, part of it (not counted).
 	for _, it in ipairs(done.gotList or {}) do
@@ -928,7 +929,7 @@ function Treasury.MailSent()
 	local m = mailOut
 	mailOut = nil
 	if not m then return end
-	if m.money > 0 then Treasury.Record(m.to, m.money, "mail", true, { book = m.book, note = m.subject }) end
+	if m.money > 0 then Treasury.Record(m.to, m.money, "mail", true, { book = m.book, note = m.subject, observed = true }) end
 	for _, it in ipairs(m.items) do
 		local sold = m.cod > 0
 		Treasury.Record(m.to, 0, "mail", true, { book = m.book, item = it.id, count = it.n, excluded = sold or nil, kind = sold and "sale" or nil })
@@ -1399,6 +1400,7 @@ function Treasury.HandleWithdraw(dist, sender, text)
 	for _, from in ipairs(gone) do reports[from] = nil end
 	local bank = ns.rdb.bankReport
 	if type(bank) == "table" and SameChar(bank.by, sender) then ns.rdb.bankReport = nil end
+	if ns.GuildFinance and not ns.GuildFinance.missing and type(ns.GuildFinance.Withdrawn) == "function" then ns.GuildFinance.Withdrawn(sender) end
 	ns.Fire("TREASURY_CHANGED")
 	ns.Fire("DATA_CHANGED")
 end
@@ -2207,6 +2209,7 @@ local function PumpPrivate()
 	local waited = 0
 	local function Finish(ok)
 		if sending ~= o then return end
+		local dispatched = ok and PrivateValid(o) and privateKinds[o.kind].dispatched
 		if ok then
 			sentTo[o.to] = sentTo[o.to] or {}
 			sentTo[o.to][o.key] = { msg = o.msg, at = ns.Now(), kind = o.kind }
@@ -2214,6 +2217,9 @@ local function PumpPrivate()
 			held = true -- the normal share tick can retry; failed bytes were never delivered whole
 		end
 		sending = nil
+		-- Transport completion only, not the recipient's acknowledgement. A kind can
+		-- advance its bounded private delivery workflow while the original guard holds.
+		if dispatched then ns.SafeCall("treasury private dispatched", dispatched, o.to, o.msg) end
 		if outbox[1] then ns.After(Treasury.PRIVATE_PACE, "treasury private", PumpPrivate) end
 	end
 	local function Next()
@@ -4361,6 +4367,7 @@ end
 
 function Treasury.Build(q)
 	local role = Treasury.Role()
+	if Treasury.mode == "guild-finance" and ns.GuildFinance and not ns.GuildFinance.missing then return ns.GuildFinance.Build(q) end
 	if Treasury.mode == "own-guild" then
 		return OwnGuildLines(), L.TAB_TREASURY, L.TREASURY_GUILD_TITLE:format(GetGuildInfo("player") or "?")
 	end
@@ -4382,6 +4389,10 @@ function Treasury.Build(q)
 	elseif Treasury.mode == "keepers" then lines = KeeperLines()
 	else
 		lines = SummaryLines(role, q)
+		if ns.GuildFinance and not ns.GuildFinance.missing then
+			local link = ns.GuildFinance.Link()
+			if link then lines[#lines + 1] = link end
+		end
 		if ns.Campaign and not ns.Campaign.missing and (q == nil or q == "") then ns.Campaign.Lines(lines) end
 		if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then
 			table.insert(lines, 1, { text = Gold("> " .. L.TREASURY_OWN_LINK), onClick = Treasury.OpenOwnGuild, gapAfter = true })
