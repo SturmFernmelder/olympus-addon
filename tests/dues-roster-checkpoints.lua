@@ -29,6 +29,10 @@ local function Load(w, c)
 		end
 		assert(loadfile(MODULE))("Olympus", c.ns)
 		local C = c.ns.Comm; C.Hash36 = ns.Comm.Hash36; C.Cancel = function() end
+		-- This private-transport world has no census discovery/broadcast simulation.
+		-- LOGIN still exercises the real native roster scan, with no discovered peers.
+		C.PeerCount = function() return 0 end
+		C.MaybeBroadcast = function() return false end
 		C.SendBatch = function(_, pieces, _, target, urgent, done, opts)
 			w:Timer(c, 0, nil, function()
 				if opts and opts.guard and not opts.guard() then if done then done(false) end; return end
@@ -358,5 +362,133 @@ test("Dues roster checkpoints: actual native foreign receipt is a positive lower
 		local book = t.ns.Treasury.BookOf(t.name); book.duesProofsCut = { [week] = true }
 		eq(t.ns.DuesGrace.Progress(p.name, nil, gm.guild).latest.state, "counted", "valid intake stays a lower bound when other proofs have been cut")
 	end)
+	NoErrors(w)
+end)
+
+local function Schedules(w, c, observe, deliver)
+	w:As(c, function()
+		local a, b = c.ns.DuesRosterCheckpoints.Scheduled(); eq(a, observe); eq(b, deliver)
+	end)
+	local count = 0
+	for _, timer in ipairs(w:Timers(c)) do
+		if timer.where == "native dues roster boundaries" or timer.where == "private dues roster pages" then count = count + 1 end
+	end
+	eq(count, (observe and 1 or 0) + (deliver and 1 or 0), "actual uncancelled handles match eligibility")
+end
+
+test("Dues roster checkpoints: scheduler leaves ordinary and default-off GM clients with zero timers and no private store writes", function()
+	local w, _, _, gm, p = Setup()
+	for _, c in ipairs({ p, gm }) do
+		w:As(c, function() c.ns.Fire("LOGIN"); c.ns.Fire("DATA_CHANGED"); c.ns.Fire("TREASURY_CHANGED") end)
+		Schedules(w, c, false, false); eq(c.ns.rdb.duesRosterCheckpoints, nil)
+	end
+	w:As(p, function() eq(p.ns.DuesRosterCheckpoints.SetSharing(true), false) end)
+	eq(p.ns.rdb.duesRosterCheckpoints, nil, "a refused stale/non-GM click cannot allocate a private book")
+	w:Run(125)
+	for _, c in ipairs({ p, gm }) do Schedules(w, c, false, false); eq(c.ns.rdb.duesRosterCheckpoints, nil) end
+	NoErrors(w)
+end)
+
+test("Dues roster checkpoints: scheduler starts on actual opt-in immediately, cancels on native demotion, and resumes saved opt-in only after a fresh roster event", function()
+	local w, _, _, gm = Setup(); local week = w:As(gm, function() return gm.ns.Dues.Week() end)
+	Enable(w, gm); Schedules(w, gm, true, true)
+	assert(gm.ns.rdb.duesRosterCheckpoints.own[gm.guild].snapshots[gm.guild .. "|" .. week .. "|B"], "actual enable observes the reset now, not after randomized ticker startup")
+	gm.rank = 1; Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end); Schedules(w, gm, false, false)
+	gm.rank = 0; Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end); Schedules(w, gm, true, true)
+	w:As(gm, function()
+		gm.ns.Roster.snapshotAt = w.clock - 100
+		gm.ns.Fire("LOGIN")
+		eq(gm.ns.rdb.duesRosterCheckpoints.own[gm.guild].on, true, "stale login does not delete the explicit saved consent")
+	end)
+	Schedules(w, gm, false, false)
+	Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end); Schedules(w, gm, true, true)
+	NoErrors(w)
+end)
+
+test("Dues roster checkpoints: scheduler drains opt-out withdrawal then cancels, and an offline receiver exhausts bounded retries without restarting", function()
+	local w, t, _, gm = Setup()
+	Enable(w, gm); Send(w, gm)
+	w:As(gm, function() assert(gm.ns.DuesRosterCheckpoints.SetSharing(false)) end)
+	Schedules(w, gm, false, true)
+	w:Run(2); Send(w, gm, 5); Schedules(w, gm, false, false)
+	w:As(gm, function() assert(gm.ns.DuesRosterCheckpoints.SetSharing(true)); assert(gm.ns.DuesRosterCheckpoints.SetSharing(false)) end)
+	t.online = false; w:Run(2); Schedules(w, gm, false, true)
+	for _ = 1, 35 do
+		Jump(w, w.clock + 31)
+		w:As(gm, function() gm.ns.DuesRosterCheckpoints.Wake(); gm.ns.DuesRosterCheckpoints.Pump() end)
+		w:Run(0.1)
+	end
+	Schedules(w, gm, false, false)
+	local sent = #w.sent
+	Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end); w:Run(10)
+	Schedules(w, gm, false, false); eq(#w.sent, sent, "an exhausted signed withdrawal is retained, not automatically resent forever")
+	NoErrors(w)
+end)
+
+test("Dues roster checkpoints: actual crypto and module reload recovers only the exact original pending opt-out template after fresh native eligibility", function()
+	local w, t, _, gm = Setup(); local week = w:As(t, function() return t.ns.Dues.Week() end)
+	Enable(w, gm); Observe(w, t, gm); Send(w, gm); Close(w, t, gm, week)
+	assert(Window(w, t, gm.guild, week))
+	w:As(gm, function() assert(gm.ns.DuesRosterCheckpoints.SetSharing(false)) end)
+	local key = gm.guild .. "|" .. (week + 1) .. "|X"
+	local pending = gm.ns.rdb.duesRosterCheckpoints.own[gm.guild].snapshots[key]
+	assert(pending and pending.pending and pending.template)
+	local originalText = w:As(gm, function() return gm.ns.DuesRosterCheckpoints.Text(pending.template) end)
+	-- World.Login discards the prior timer session and constructs a NEW Ed25519 queue
+	-- and namespace. The old queued signature cannot finish as in Fire(LOGIN)-only tests.
+	w:Logout(gm); w:Login(gm); Load(w, gm)
+	w:As(gm, function() gm.ns.Fire("LOGIN") end)
+	Schedules(w, gm, false, false)
+	Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end)
+	Schedules(w, gm, false, true)
+	w:Run(2); Send(w, gm, 8)
+	local signed = gm.ns.rdb.duesRosterCheckpoints.own[gm.guild].snapshots[key]
+	assert(signed and signed.sig and signed.sent, Describe(t, gm))
+	eq(signed.text, originalText, "reload cannot substitute a new date, role, scope or consent revision")
+	eq(Window(w, t, gm.guild, week), nil)
+	Schedules(w, gm, false, false)
+	NoErrors(w)
+end)
+
+test("Dues roster checkpoints: temporary lost native freshness during actual X signing preserves exact consent intent for a later fresh event", function()
+	local w, t, _, gm = Setup()
+	Enable(w, gm); Send(w, gm)
+	w:As(gm, function() assert(gm.ns.DuesRosterCheckpoints.SetSharing(false)); gm.ns.Roster.complete = false end)
+	local o = gm.ns.rdb.duesRosterCheckpoints.own[gm.guild]
+	local key, p = next(o.snapshots); assert(p and p.template)
+	local original = w:As(gm, function() return gm.ns.DuesRosterCheckpoints.Text(p.template) end)
+	w:Run(2)
+	assert(o.snapshots[key] and o.snapshots[key].template, "the real crypto callback must not delete a withdrawn consent")
+	Schedules(w, gm, false, false)
+	Jump(w, w.clock + 31); Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end)
+	w:Run(2); Send(w, gm, 8)
+	assert(o.snapshots[key].sent); eq(o.snapshots[key].text, original)
+	Schedules(w, gm, false, false)
+	NoErrors(w)
+end)
+
+test("Dues roster checkpoints: pending withdrawal sends nothing while demoted or moved and may resume only after current eligibility returns", function()
+	local w, _, _, gm = Setup()
+	Enable(w, gm); Send(w, gm)
+	w:As(gm, function() assert(gm.ns.DuesRosterCheckpoints.SetSharing(false)) end)
+	local o = gm.ns.rdb.duesRosterCheckpoints.own[gm.guild]
+	local _, pending = next(o.snapshots); assert(pending and pending.template)
+	local original = w:As(gm, function() return gm.ns.DuesRosterCheckpoints.Text(pending.template) end)
+	local function Sent()
+		local count = 0
+		for _, row in ipairs(w.sent) do if row.client == gm and row.msg and row.msg:match("^TW~DQ") then count = count + 1 end end
+		return count
+	end
+	local before = Sent()
+	gm.rank = 1; Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end)
+	Schedules(w, gm, false, false); w:Run(35); eq(Sent(), before, "a fresh native demotion cannot send the pending withdrawal")
+	assert(pending.template and not pending.abandoned, "demotion pauses the bounded original intent instead of fabricating a replacement")
+	gm.rank, gm.guild = 0, "Olympus Willow"; Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end)
+	Schedules(w, gm, false, false); w:Run(35); eq(Sent(), before, "a guild move cannot send under the old guild identity")
+	gm.guild = World.GUILD; Scan(w); w:As(gm, function() gm.ns.Fire("DATA_CHANGED") end)
+	Schedules(w, gm, false, true); w:Run(2); Send(w, gm, 8)
+	local signed = o.snapshots[next(o.snapshots)]
+	assert(signed and signed.sent); eq(signed.text, original, "renewed eligibility signs the exact original withdrawal")
+	Schedules(w, gm, false, false)
 	NoErrors(w)
 end)

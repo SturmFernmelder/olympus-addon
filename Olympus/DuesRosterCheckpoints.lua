@@ -5,6 +5,8 @@ ns.DuesRosterCheckpoints = R
 local T, D, A, E = ns.Treasury, ns.Dues, ns.Authority, ns.Ed25519
 local incoming, verified, keys, permits, asked, stream, lastSeen = {}, {}, {}, {}, {}, nil, nil
 local jobs, nextPump = 0, 0
+local boundaryTicker, pageTicker, waking
+local signing = {} -- actual in-flight jobs only, never a persisted promise of a signature
 local function Clock() return math.floor(GetServerTime and GetServerTime() or ns.Now()) end
 local function Whole(n, max) return type(n) == "number" and n == n and n % 1 == 0 and n >= 0 and n <= (max or 4294967295) end
 local function Count(t) local n = 0; for _ in pairs(t) do n = n + 1 end; return n end
@@ -46,16 +48,16 @@ function R.CurrentGM(guild)
 		if p.guild == guild and p.rank == 0 and Master(p.name, guild) then return p.name end
 	end
 end
-local function Keeper() return Safe() and ns.DuesGrace and ns.DuesGrace.Keeper() end
+local function Keeper() return Safe() and ns.DuesGrace and type(ns.DuesGrace.Keeper) == "function" and ns.DuesGrace.Keeper() end
 local function Primary()
 	local name = ns.TREASURER_CHARACTERS and ns.TREASURER_CHARACTERS[1]
 	return Name(name)
 end
 local function Identity() return table.concat({ ns.me, GetGuildInfo("player") or "", ns.group or "", ns.faction or "" }, "|") end
-local function Store()
+local function Store(make)
 	if type(ns.rdb) ~= "table" then return nil end
 	local s = ns.rdb.duesRosterCheckpoints
-	if s == nil then
+	if s == nil and make ~= false then
 		s = { version = 1, scope = ns.group .. "|" .. ns.faction, own = {}, received = {}, floors = {}, keys = {}, amounts = {} }
 		ns.rdb.duesRosterCheckpoints = s
 	end
@@ -77,7 +79,7 @@ local function Option(s, guild)
 		and Whole(o.revision) and o.revision > 0 and Whole(o.expires) and o or nil
 end
 function R.Sharing()
-	local guild = NativeGM(); local o = guild and Option(Store(), guild)
+	local guild = NativeGM(); local o = guild and Option(Store(false), guild)
 	return o and o.on == true and Clock() <= o.expires or false
 end
 local function Source(c)
@@ -252,22 +254,61 @@ local function Make(c)
 	local o = s and Option(s, c.guild); if not o then return false end
 	local key = Slot(c); o.snapshots = type(o.snapshots) == "table" and o.snapshots or {}
 	if o.snapshots[key] then return false end
-	o.snapshots[key] = { pending = true }
-	return Run(function()
+	local pending = { pending = true, kind = c.kind, at = c.at, template = c.kind == "X" and c or nil }
+	o.snapshots[key], signing[pending] = pending, true
+	local queued = Run(function()
 		local _, pk = ns.Debts.MyKey(); local _, pk64, claim = ns.Debts.ClaimParts()
 		return { sig = E.ToB64(ns.Debts.Sign("OLYDR1|" .. root)), pk = pk64, claim = claim }
 	end, function(result)
-		if result and Source(c) and o.snapshots[key] and o.snapshots[key].pending then
+		signing[pending] = nil
+		if o.snapshots[key] ~= pending then return end
+		if result and Source(c) then
 			c.root, c.text, c.wire, c.sig, c.pk, c.claim = root, text, E.ToB64(text), result.sig, result.pk, result.claim
 			o.snapshots[key] = c
+		elseif pending.template then
+			-- A temporary lost roster/identity capability is not a new consent decision.
+			-- Keep only this exact bounded X intent; a later fresh DATA event rechecks it.
+			pending.pending, pending.resumeAt = false, Clock() + 30
 		else o.snapshots[key] = nil end
+		R.Wake()
 	end)
+	if not queued then
+		signing[pending] = nil
+		if pending.template then pending.pending, pending.resumeAt = false, Clock() + 30 else o.snapshots[key] = nil end
+	end
+	return queued
+end
+local function WithdrawalTemplate(p)
+	local c = type(p) == "table" and p.template
+	return type(c) == "table" and c.kind == "X" and R.Text(c) ~= nil and Source(c)
+		and c.guid == UnitGUID("player") and Clock() - c.at >= 0 and Clock() - c.at <= R.TTL and c or nil
+end
+local function ResumeWithdrawal(o)
+	for key, p in pairs(o.snapshots) do
+		local c = WithdrawalTemplate(p)
+		if c and not signing[p] and (not p.resumeAt or Whole(p.resumeAt) and Clock() >= p.resumeAt) and jobs < R.JOBS then
+			local saved = Store(false)
+			p.resumeAt, signing[p] = Clock() + 30, true
+			A.VerifyHistoricalRoleProof(c.proof, c.issuer, c.guild, c.at, c.faction, function(role)
+				signing[p] = nil
+				if Store(false) ~= saved or o.snapshots[key] ~= p then return end
+				if role and WithdrawalTemplate(p) then
+					o.snapshots[key] = nil
+					Make(c) -- same original template: never a new capture date or reconstructed office
+				elseif not role then p.abandoned = true end
+				R.Wake()
+			end)
+			return
+		end
+	end
 end
 function R.SetSharing(on)
-	local guild, s = NativeGM(), Store()
-	if not guild or not s or not Master(ns.me, guild) then return false end
+	local guild = NativeGM()
+	if not guild or not Master(ns.me, guild) then return false end
+	local s = Store(); if not s then return false end
 	local old = Option(s, guild); if old and old.on == (on == true) and old.expires >= Clock() then return false end
-	local o = { actor = ns.me, on = on == true, revision = (old and old.revision or 0) + 1, expires = Clock() + R.OPT_FOR, snapshots = {} }
+	local o = { actor = ns.me, on = on == true, revision = (old and old.revision or 0) + 1, expires = Clock() + R.OPT_FOR,
+		snapshots = {}, withdrawalUntil = on ~= true and Clock() + R.TTL or nil }
 	s.own[guild], stream = o, nil
 	if not o.on then
 		local proof = A.ExportOriginalRoleProof()
@@ -275,6 +316,7 @@ function R.SetSharing(on)
 			kind = "X", at = Clock(), revision = o.revision, expires = o.expires, guid = UnitGUID("player"),
 			proof = proof, rows = {}, identity = Identity() }) end
 	end
+	R.Wake()
 	ns.Fire("TREASURY_CHANGED"); return true
 end
 local function Capture(kind, week)
@@ -343,13 +385,13 @@ function R.Pump()
 	if not stream then
 		local guild, s = NativeGM(), Store(); local o = guild and Option(s, guild)
 		for _, c in pairs(o and o.snapshots or {}) do
-			if WireSnapshot(c) and not c.sent and c.identity == Identity() and Source(c) and c.week >= D.Week() - R.KEEP + 1 then
+			if WireSnapshot(c) and not c.sent and not c.abandoned and c.identity == Identity() and Source(c) and c.week >= D.Week() - R.KEEP + 1 then
 				stream = { c = c, i = 0, at = Clock(), retries = 0 }; break
 			end
 		end
 	end
 	local q = stream; if not q or q.wait and Clock() - q.wait < 30 then return false end
-	q.retries = q.retries + 1; if q.retries > 30 then stream = nil; return false end
+	q.retries = q.retries + 1; if q.retries > 30 then q.c.abandoned, stream = true, nil; R.Wake(); return false end
 	local c, to, text = q.c, Primary()
 	if q.i == 0 then text = table.concat({ "DQ", "1", "K", c.guild, c.guid, c.pk, c.claim, c.root }, "~")
 	else
@@ -363,7 +405,7 @@ function R.Handle(dist, sender, text)
 	if dist ~= "WHISPER" or not Safe() or not Name(sender) or type(text) ~= "string" or #text > R.PART + 400 then return false end
 	if text == "DQ~1~Q" then
 		if not Same(sender, Primary()) then return false end
-		local s, guild = Store(), NativeGM(); local o = guild and Option(s, guild)
+		local s, guild = Store(false), NativeGM(); local o = guild and Option(s, guild)
 		for _, c in pairs(o and o.snapshots or {}) do if WireSnapshot(c) and Source(c) then
 			local msg = table.concat({ "DQ", "1", "K", c.guild, c.guid, c.pk, c.claim, c.root }, "~")
 			return Send(sender, msg, "roster-recovery-key", function() return Source(c) end)
@@ -383,7 +425,7 @@ function R.Handle(dist, sender, text)
 		if not q or not Same(sender, Primary()) or not Source(q.c) or index ~= q.i then return false end
 		if index == 0 and (root ~= q.c.root or hash ~= Digest(q.c.pk .. q.c.claim)) then return false end
 		if index > 0 and (root ~= q.c.root or hash ~= Digest(q.c.wire:sub((index - 1) * R.PART + 1, index * R.PART))) then return false end
-		if index == math.ceil(#q.c.wire / R.PART) then q.c.sent, stream = true, nil
+		if index == math.ceil(#q.c.wire / R.PART) then q.c.sent, stream = true, nil; R.Wake()
 		else q.i, q.wait, q.retries = q.i + 1, nil, 0 end
 		return true
 	end
@@ -467,8 +509,42 @@ function R.RecheckSaved()
 	end
 	return true
 end
+-- No periodic work (and no store creation) for default/off clients. A retained opt-in
+-- can wait for DATA_CHANGED from the actual roster scan/author manifest at login.
+-- Observation still requires the complete fresh native roster; stale membership never
+-- becomes a checkpoint. An off transition keeps only bounded delivery of its signed X.
+function R.Wake()
+	if waking then return end
+	waking = true
+	local observe, deliver, began = Keeper(), false, false
+	local s, guild = Store(false), GetGuildInfo("player")
+	local o = s and Guild(guild) and Option(s, guild)
+	if o and Clock() <= o.expires and NativeGM() == guild and Master(ns.me, guild) then
+		if o.on then observe, deliver = true, true
+		elseif Whole(o.withdrawalUntil) and Clock() <= o.withdrawalUntil then
+			for _, c in pairs(o.snapshots) do
+				if type(c) == "table" and c.kind == "X" and not c.sent and not c.abandoned
+					and (WithdrawalTemplate(c) or WireSnapshot(c) and Source(c)) then deliver = true; break end
+			end
+			if deliver then ResumeWithdrawal(o) end
+		end
+	end
+	deliver = observe or deliver
+	if observe and not boundaryTicker then
+		boundaryTicker = ns.Every(60, "native dues roster boundaries", function() R.Wake(); if boundaryTicker then R.Observe() end end)
+		began = true
+	elseif not observe and boundaryTicker then boundaryTicker:Cancel(); boundaryTicker = nil; lastSeen = nil end
+	if deliver and not pageTicker then
+		pageTicker = ns.Every(2, "private dues roster pages", function() R.Wake(); if pageTicker then R.Pump() end end)
+	elseif not deliver and pageTicker then pageTicker:Cancel(); pageTicker = nil; stream = nil end
+	waking = false
+	if began then R.Observe() end -- randomized Every startup must not miss a real reset boundary
+end
+function R.Scheduled() return boundaryTicker ~= nil, pageTicker ~= nil end
+for _, event in ipairs({ "DATA_CHANGED", "TREASURY_CHANGED", "WATCH_CHANGED", "VIEWAS_CHANGED" }) do ns.On(event, R.Wake) end
 ns.On("LOGIN", function()
-	incoming, verified, keys, permits, asked, stream, lastSeen = {}, {}, {}, {}, {}, nil, nil
-	ns.Every(60, "native dues roster boundaries", R.Observe)
-	ns.Every(2, "private dues roster pages", R.Pump)
+	if boundaryTicker then boundaryTicker:Cancel(); boundaryTicker = nil end
+	if pageTicker then pageTicker:Cancel(); pageTicker = nil end
+	incoming, verified, keys, permits, asked, stream, lastSeen, signing = {}, {}, {}, {}, {}, nil, nil, {}
+	R.Wake()
 end)
