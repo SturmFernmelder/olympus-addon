@@ -34,7 +34,7 @@ local function Crown(name)
 end
 local function Lord(name, guild)
 	if type(guild) ~= "string" or not ns.IsFederation(guild) or Off(name, guild) then return false end
-	local rank, source, support = ns.Data.AuthorizedRank(ns.FullName(name), guild)
+	local rank, source = ns.Data.AuthorizedRank(ns.FullName(name), guild)
 	if rank ~= 0 then return false end
 	if source == "roster" then
 		if guild ~= GetGuildInfo("player") or not ns.Roster.Fresh() then return false end
@@ -42,9 +42,9 @@ local function Lord(name, guild)
 		return true
 	end
 	if source == "signed" or source == "pinned" then return true end
-	local g = ns.Data.Guild(guild)
-	return source == "census" and (support or 0) >= 2 and g ~= nil and not ns.Data.Dispute(g)
-		and Clock() - (tonumber(g.t) or 0) >= 0 and Clock() - (tonumber(g.t) or 0) <= ns.Data.FRESH
+	-- A new private financial audience never inherits the old census capability fallback.
+	-- Two reports may corroborate a directory entry, but cannot prove this Lord's office.
+	return false
 end
 function F.MayView(guild, name)
 	name = name or ns.me
