@@ -1775,6 +1775,7 @@ StandIn("Moderation", { "Slash" })
 StandIn("Alts", { "Slash" })
 StandIn("Keys", { "RotatePrompt" })
 StandIn("Loot", { "Show" }) -- (1.1)
+StandIn("Carry", { "Slash" }) -- 1.2.4: private, explicitly unverified history quotes
 StandIn("War", { "Show", "Slash" }) -- 1.2: the own-guild Department of War room
 StandIn("Crafters", { "Ask", "Slash" }) -- (1.1)
 StandIn("ChatWindow", { "Open", "Toggle" }) -- 1.1.1: the Chat tab of the Olympus window (ChatWindow.lua)
@@ -2171,6 +2172,8 @@ local function Slash(input)
 			-- 1.1 (Fern's #22): the guild's loot notes and points, on the Realm tab.
 			ns.UI.SelectTab("realm")
 			ns.Loot.Show(true)
+		elseif cmd == "carry" then
+			ns.Carry.Slash(rest)
 		elseif cmd == "war" then
 			-- 1.2: own-guild operations, LFG, Centuries and readiness. No federal writer exists.
 			ns.War.Slash(rest)

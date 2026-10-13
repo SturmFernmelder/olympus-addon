@@ -35,6 +35,7 @@ Locales\MainKeyText.lua
 Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
+Locales\CarryText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Core.lua
@@ -98,6 +99,7 @@ Judgment.lua
 KingArrow.lua
 Consent.lua
 WeeklyBrief.lua
+Carry.lua
 ChatRooms.lua
 WarSquads.lua
 CraftRequests.lua
