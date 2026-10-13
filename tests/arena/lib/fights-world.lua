@@ -6,15 +6,35 @@ local H = ...
 local World = H.World
 local W3 = {}
 
+-- Explicit future-launch fixture, by composition: the foundation World remains unchanged and
+-- OFF. A newly loaded HonorsNet is opened after file loading, before INIT/LOGIN; reload gets a
+-- fresh module too. Shipped-release worlds/clients never opt in, even inside this future helper.
+function W3.LevelRaceWorld(opts)
+	local w = World.New(opts)
+	local as, seen = w.As, {}
+	local function Loaded(c, ...)
+		c = type(c) == "table" and c or w:Find(c)
+		local net = c and c.ns and rawget(c.ns, "HonorsNet")
+		if type(net) == "table" and seen[c] ~= net then
+			seen[c] = net
+			if (c.compliance or w.compliance) ~= "shipped" then net.LEVEL_RACE_LAUNCHED = true end
+		end
+		return ...
+	end
+	function w:As(c, fn, ...) return Loaded(c, as(self, c, fn, ...)) end
+	return w
+end
+
 W3.DUEL_KO = "%s has defeated %s in a duel"        -- ArenaParse.EN's DUEL_WINNER_KNOCKOUT, argument order kept
 W3.DUEL_FLED = "%s has fled from %s in a duel"      -- (the retreat: the loser first)
 W3.ROLL = "%s rolls %d (%d-%d)"
 
 -- A world with the King (and the live switch on unless live = false), the signed arbiter, the two
--- fighters and a spectator; opts.more: more clients, { name, where } each.
+-- fighters and a spectator; opts.more: more clients, { name, where } each. This fights-design
+-- helper explicitly opens the future level race (levelRace = false keeps the shipped OFF policy).
 function W3.New(opts)
 	opts = opts or {}
-	local w = World.New(opts.world)
+	local w = opts.levelRace == false and World.New(opts.world) or W3.LevelRaceWorld(opts.world)
 	local cast = {}
 	cast.king = w:Role("king")
 	cast.arbiter = w:Role("arbiter")

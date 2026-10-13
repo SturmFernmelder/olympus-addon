@@ -5,7 +5,8 @@ local ADDON, ns = ...
 
 -- Level-race claims (IL), the donor holders' word (ID, also on GUILD from the Treasurer's own
 -- client), the Oracle's (IO), the belt podium, and verification of a pick for any viewer through
--- Honors. Registers IL ID IO (sent in L whatever the live switch: Arena.LIVE_EXEMPT). The honours
+-- Honors. Registers IL ID IO (sent in L whatever the live switch: Arena.LIVE_EXEMPT, but IL only
+-- after a level-race launch). The honours
 -- exemption of the weight rule: PLAYER_LEVEL_UP (acting at a multiple of 10) and one AP timer while
 -- the pick is not the default, through ns.On/ns.Every.
 -- API (the design): Verified(name) -> { frame, title, mark, chat }, Holdings(name), FrameTexture(key),
@@ -113,7 +114,12 @@ end
 H.LETTER_FONT = 15              -- its words' size at least
 H.LETTER_BUTTON = 120
 H.REFRESH_DELAY = 60            -- after login, the own honours looked at once the words came in
--- The start of the level race: the 1.2 release (a claim timed before it counts for nothing).
+-- The level race belongs to a future realm launch, not this correction release. A saved book,
+-- a timestamp or the independent games-live switch cannot start it. No runtime setting or wire
+-- word enables it: future algorithm fixtures explicitly opt in at their composition seam.
+H.LEVEL_RACE_LAUNCHED = false
+function H.LevelRaceActive() return H.LEVEL_RACE_LAUNCHED == true end
+-- Historical algorithm parameter only; it is not evidence that a race has launched.
 H.RACE_START = 1790812800
 
 local stats = { refused = {}, claims = 0, vouched = 0, places = 0 }
@@ -301,11 +307,12 @@ ns.On("DATA_CHANGED", function()
 	end)
 end)
 
-local inputs, inputsGen, inputsAt
+local inputs, inputsGen, inputsAt, inputsRace
 -- The facts every Holdings call takes (kept while nothing changed, a minute at most).
 function H.Inputs()
 	local now = Now()
-	if inputs and inputsGen == gen and inputsAt == math.floor(now / 60) then return inputs end
+	local race = H.LevelRaceActive()
+	if inputs and inputsGen == gen and inputsAt == math.floor(now / 60) and inputsRace == race then return inputs end
 	local LG = ns.ArenaLedger
 	local store = H.Store()
 	local donors = store and store.donors
@@ -329,7 +336,8 @@ function H.Inputs()
 		podium = LG and LG.PodiumWords and LG.PodiumWords("L") or {},
 		tiers = tiers,
 		donors = donors and { all = Places(donors.all), month = Places(donors.month), monthNo = donors.monthNo } or nil,
-		levels = store and store.levels or {},
+		-- Retain the historical book, but it awards no title, frame, mark or letter before launch.
+		levels = race and store and store.levels or {},
 		guild = BestGuild(),
 		oracle = ow and { month = Places(ow.names), monthNo = lastMonth } or nil,
 		church = church and { missionaries = Places(church.missionaries), apostles = Places(church.apostles), at = church.at } or nil,
@@ -337,7 +345,7 @@ function H.Inputs()
 		wanted = WantedTop(),
 		now = now,
 	}
-	inputsGen, inputsAt = gen, math.floor(now / 60)
+	inputsGen, inputsAt, inputsRace = gen, math.floor(now / 60), race
 	return inputs
 end
 
@@ -382,7 +390,7 @@ function H.PickKnown(name)
 	return ok and type(p) == "table"
 end
 
-local cache, cacheGen, cacheHour = {}, -1, -1
+local cache, cacheGen, cacheHour, cacheRace = {}, -1, -1, nil
 -- What a player's pick shows to this client (the design): { frame (an honour key, "rank" or "none"),
 -- title (an honour key or nil), mark (the honour's art, or "rank"), chat (the honour's art for a
 -- chat mark, or nil), honour (the honour shown), art, shape, metal, milestone }.
@@ -393,7 +401,8 @@ function H.Verified(name, guid)
 	-- Kept while nothing changed, and never past the hour: the month's koi and ravens turn over with
 	-- the clock alone (no word comes when a month ends).
 	local hour = math.floor(Now() / 3600)
-	if cacheGen ~= gen or cacheHour ~= hour then cache, cacheGen, cacheHour = {}, gen, hour end
+	local race = H.LevelRaceActive()
+	if cacheGen ~= gen or cacheHour ~= hour or cacheRace ~= race then cache, cacheGen, cacheHour, cacheRace = {}, gen, hour, race end
 	if cache[key] then return cache[key] end
 	local pick, known = PickOf(name)
 	local v = { frame = "rank", mark = "rank" }
@@ -509,6 +518,7 @@ function H.Label(key)
 end
 
 function H.Levels()
+	-- The historical book remains readable; live award inputs are separately gated in Inputs.
 	local s = H.Store()
 	return s and s.levels or {}
 end
@@ -545,6 +555,7 @@ H.Placed = Placed
 -- Our own claim: sent at the level-up's moments, never once the place is known.
 local claimed = {} -- [level] = t
 function H.SendClaim(level)
+	if not H.LevelRaceActive() then return false, "level-race-off" end
 	if Placed(level) then return false, "placed" end
 	local gk = ns.ArenaProfile.MyGk()
 	if not gk then return false, "gk" end
@@ -553,6 +564,7 @@ function H.SendClaim(level)
 	return Arena.Send("IL", "L", table.concat({ gk, B36(level), B36(t) }, "~"))
 end
 function H.OnLevelUp(level)
+	if not H.LevelRaceActive() then return false, "level-race-off" end
 	level = tonumber(level)
 	if not level or not ns.Honors.LEVEL_METAL[level] or Placed(level) then return end
 	claimed[level] = claimed[level] or Now()
@@ -565,6 +577,7 @@ end
 -- reach a milestone whose place is not known here.
 local levelHooked = false
 function H.WatchLevels()
+	if not H.LevelRaceActive() then return false end
 	if levelHooked then return true end
 	local level = UnitLevel and tonumber(UnitLevel("player")) or 60
 	local open = false
@@ -873,6 +886,7 @@ end
 -- place stood sent no claim then (SendClaim), so he is not among them. Returns the places struck
 -- ({ milestone, gk, name }).
 function H.CheckPlaces()
+	if not H.LevelRaceActive() then return {} end
 	local s = H.Store()
 	local out = {}
 	if not s or type(s.levels) ~= "table" then return out end
@@ -905,6 +919,7 @@ end
 -- (H.Vouched). A census change asks this at once (a guild's row is its newest report: a sender's
 -- report is seen now or may never be); the race itself waits RACE_SOON (H.RaceSoon, 1.2.1).
 local function Look(s, now)
+	if not H.LevelRaceActive() then return end
 	-- (1.2.1: a claim vouched under the old rule, one census row, is vouched again under this one.)
 	if s.vouchRule ~= H.VOUCH_RULE then
 		for _, c in pairs(s.claims) do if type(c) == "table" then c.vouched = false end end
@@ -928,6 +943,7 @@ end
 H.RACE_SOON = 5
 local raceSoon = false
 function H.RaceSoon()
+	if not H.LevelRaceActive() then return false end
 	if raceSoon then return false end
 	raceSoon = true
 	ns.After(H.RACE_SOON, "arena level race soon", function() raceSoon = false H.RunRace() end)
@@ -952,6 +968,7 @@ end
 -- several senders claim counts only for the one the game pairs it with (VerifyGk), else only
 -- vouched claims of it count.
 function H.RunRace()
+	if not H.LevelRaceActive() then return {} end
 	local s = H.Store(true)
 	local now = Now()
 	Look(s, now)
@@ -1004,6 +1021,7 @@ function H.RunRace()
 end
 
 local function OnLevel(dist, sender, mode, body)
+	if not H.LevelRaceActive() then return Count("level-race-off") end
 	if mode ~= "L" then return Count("mode") end
 	local gk, level, t = Arena.Fields(body, 3)
 	if not t then return Count("shape") end
@@ -1046,6 +1064,7 @@ ns.Comm.Handle("IL", ns.Arena.Handle("IL", OnLevel))
 -- the places held (three at most: lookups alone) against the server's word, at once; the race
 -- RACE_SOON later (H.RaceSoon), once for a burst of reports.
 ns.On("DATA_CHANGED", function()
+	if not H.LevelRaceActive() then return end
 	local s = H.Store()
 	if s and s.claims and next(s.claims) then
 		for _, c in pairs(s.claims) do
@@ -1066,6 +1085,7 @@ end)
 -- The clerk's AB~H: the places this clerk holds (m:gk:name:t), taken for a milestone with no
 -- place here (a place never changes once recorded).
 function H.RecordsBody()
+	if not H.LevelRaceActive() then return nil end
 	local s = H.Store()
 	local parts = {}
 	for _, m in ipairs(ns.Honors.MILESTONES) do
@@ -1076,10 +1096,12 @@ function H.RecordsBody()
 	return #parts > 0 and ("H~" .. table.concat(parts, ",")) or nil
 end
 function H.SendRecords()
+	if not H.LevelRaceActive() then return false, "level-race-off" end
 	local body = H.RecordsBody()
 	if body then Arena.Send("AB", "L", body, { key = "ab h", low = true }) end
 end
 function H.TakeRecords(sender, mode, rest)
+	if not H.LevelRaceActive() then return false, "level-race-off" end
 	if mode ~= "L" then return end
 	local s = H.Store(true)
 	local any = false
@@ -1099,6 +1121,7 @@ function H.TakeRecords(sender, mode, rest)
 end
 -- AQ~H: the clerk says the places; a claimant says his claim again.
 function H.Answer(sender)
+	if not H.LevelRaceActive() then return false end
 	local LG = ns.ArenaLedger
 	if LG and LG.IsClerk and LG.IsClerk() then H.SendRecords() return true end
 	for level in pairs(claimed) do if not Placed(level) then H.SendClaim(level) return true end end
@@ -1304,7 +1327,9 @@ function H.Known()
 		belt = (titles and next(titles) ~= nil) or (words and next(words) ~= nil) or Arena.Heavy("L") ~= nil,
 		tier = Arena.Heavy("L") ~= nil,
 		donor = s ~= nil and s.donors ~= nil,
-		level = s ~= nil and s.levels ~= nil and next(s.levels) ~= nil,
+		-- OFF is a known-disabled source, not an unheard ranking: no old derived honour is
+		-- remembered as wearable while waiting for a relay. The historical book stays intact.
+		level = not H.LevelRaceActive() or (s ~= nil and s.levels ~= nil and next(s.levels) ~= nil),
 		guild = fresh,
 		oracle = s ~= nil and s.oracle ~= nil and next(s.oracle) ~= nil,
 		missionary = fresh3,
@@ -1835,7 +1860,15 @@ H.NOTICE_W, H.NOTICE_H, H.NOTICE_TOP = 440, 44, 260
 function H.Standing()
 	local P = ns.ArenaProfile
 	local m = type(P) == "table" and type(P.Mine) == "function" and P.Mine() or {}
-	return type(m.standing) == "table" and m.standing or {}
+	local standing = type(m.standing) == "table" and m.standing or {}
+	if H.LevelRaceActive() then return standing end
+	-- Old notice standings are historical too: retain the saved facts, but expose no live place
+	-- in an unlaunched race (and do not announce that an old recorded place was newly lost).
+	local out = {}
+	for family, v in pairs(standing) do
+		if type(family) ~= "string" or not family:match("^level%-%d+$") then out[family] = v end
+	end
+	return out
 end
 
 -- A family's list as the notices name it (L.HONOR_RANKING), for a family whose frame this version

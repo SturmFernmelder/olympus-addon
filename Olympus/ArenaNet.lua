@@ -677,6 +677,14 @@ local function Compliant(kind)
 	return type(C) == "table" and type(C.Wire) == "function" and C.Wire(kind) == true
 end
 
+-- IL is launch-only, independent of the King's games-live switch. Missing HonorsNet is closed
+-- too, so a raw sender or a mixed-version peer cannot bypass its collection boundary.
+local function LevelRaceWire(kind)
+	if kind ~= "IL" then return true end
+	local H = ns.HonorsNet
+	return type(H) == "table" and type(H.LevelRaceActive) == "function" and H.LevelRaceActive() == true
+end
+
 -- Why an item may not go out now, or nil (the design): the compliance gate, the sim, the kill switch
 -- (a player's own obligations excepted), a test build's L or channel, L while this realm's live
 -- switch is off, outside an Olympus guild.
@@ -684,6 +692,7 @@ local function Refusal(kind, mode, o)
 	if not Arena.TYPES[kind] then return "type" end
 	if mode ~= "L" and mode ~= "T" then return "mode" end
 	if not Compliant(kind) then return "compliance" end
+	if not LevelRaceWire(kind) then return "level-race-off" end
 	if Arena.Sim() then return "sim" end
 	if ns.IsMember and not ns.IsMember() then return "guild" end
 	local obligation = Arena.OBLIGATIONS[kind] or o.obligation == true
@@ -1404,6 +1413,7 @@ function Arena.Handle(kind, fn)
 		if proto ~= tostring(Arena.PROTO) then Count(stats.dropped, "proto") return end
 		-- (A wager's type from anyone, a modified client's too: never taken while the gate says no.)
 		if not Compliant(kind) then Count(stats.dropped, "compliance") return end
+		if not LevelRaceWire(kind) then Count(stats.dropped, "level-race-off") return end
 		if Arena.Off() then Count(stats.dropped, "off") return end
 		if Arena.Sim() and not injecting then Count(stats.dropped, "sim") return end
 		if not Accepts(kind, mode, dist) then Count(stats.dropped, Arena.TestBuild() and "live-in-test" or "lane") return end

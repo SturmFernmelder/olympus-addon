@@ -45,7 +45,8 @@ end
 print("HonorsNet: the King's letter (1.2.1)")
 
 test("1.2.4 honour letter previews: every family uses the real framed letter without awarding, consuming or transmitting anything", function()
-	local w, cast = W3.New()
+	-- All-family author samples stay available with the actual pre-launch race OFF.
+	local w, cast = W3.New({ levelRace = false })
 	local author = w:Client(N.author)
 	H.WithUI(function()
 		-- Use the same native-template fixture as the existing framed-letter geometry cases.
