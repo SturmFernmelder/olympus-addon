@@ -4399,6 +4399,76 @@ test("1.2.4 My profile's portrait: in the detail box, made once, inside it (its 
 	end)
 end)
 
+-- 1.2.4 (the author in game: "design dos icons na pagina nao ta aproveitando bem espaco vazio da
+-- window"): "My profile"'s Icons lays its grid out for the room the window gives his page's list
+-- (UI.ListRoom; the grid itself, ProfileEdit.IconGrid, is tests/arena/profile-edit.lua's). That room
+-- is his page's list as UI.Layout places it (one strip of sections, no column titles), in both
+-- looks; a window resized (the Communities window it docks to minimized, or maximized) draws his
+-- page again for its new room. Fails on 1.2.4's first: no UI.ListRoom; a resize only laid it out.
+test("1.2.4 My profile: UI.ListRoom is his page's list as the window lays it out (its width, the height in sight under the section strip), in both looks and after a resize; a resize draws his page again, another page is only laid out", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		local drawn, page = 0, pe.Page
+		pe.Page = function(...) drawn = drawn + 1 return page(...) end
+		local queued = {}
+		uns.After = function(_, _, fn) queued[#queued + 1] = fn end
+		local function RunQueued() local q = queued queued = {} for _, fn in ipairs(q) do fn() end return #q end
+		eq(UI.ListRoom(1), nil, "no window yet")
+		-- The list his page has: the list's width (UI.Layout sets the list's views to it) and the
+		-- height of the scroll frame in sight.
+		local function Same(main, why)
+			local w, h, hd = UI.ListRoom(1)
+			local _, _, _, sh = main.scroll:GetRect()
+			eq(#main.pageNavLines, 1, why .. ": his page's one strip"); eq(main.colHeader:IsShown(), false, why .. ": no column titles")
+			eq(w, main.views[main.tab]:GetWidth(), why .. ": the list's width"); eq(h, sh, why .. ": the height in sight")
+			eq(hd, main.style == "hd", why)
+			return w, h
+		end
+		-- The old look, at its own place: 338 x 424.
+		UI.SelectTab("realm")
+		local main = OlympusFrame
+		UI.ShowPerson({ name = ns.me })
+		eq(UI.OwnProfileShown(), true)
+		local w, h = Same(main, "the old look")
+		eq(w, 296); eq(h, 211)
+		RunQueued()
+		local before = drawn
+		main:SetSize(338, 524)
+		eq(RunQueued(), 1, "a redraw asked"); eq(drawn, before + 1, "his page drawn again")
+		w, h = Same(main, "the old look, taller")
+		eq(h, 311)
+		-- Another page: laid out, not drawn again.
+		main.buttons[1]:Click()
+		eq(UI.PlayerProfileShown(), false)
+		RunQueued()
+		before = drawn
+		main:SetSize(338, 424)
+		eq(RunQueued(), 0, "no redraw for another page"); eq(drawn, before)
+		main:Hide()
+		-- Forever's: the HD look docked to the Communities window (the Social window's 385 wide, its
+		-- 426 tall), then minimized (406).
+		FriendsFrame = FakeFrame("FriendsFrame", UIParent, 385, 424)
+		CommunitiesFrame = FakeFrame("CommunitiesFrame", UIParent, 814, 426)
+		CommunitiesFrame.rect, CommunitiesFrame.shown = { 0, 150, 814, 426 }, true
+		UI.OpenDocked(CommunitiesFrame, "realm", true, "hd")
+		main = OlympusFrameHD
+		eq(main:GetWidth(), 385); eq(main:GetHeight(), 426)
+		UI.ShowPerson({ name = ns.me })
+		w, h = Same(main, "Forever")
+		eq(w, 352); eq(h, 223)
+		RunQueued()
+		before = drawn
+		CommunitiesFrame.h = 406
+		UI.FollowHost(CommunitiesFrame)
+		eq(main:GetHeight(), 406)
+		eq(RunQueued(), 1); eq(drawn, before + 1, "his page drawn again for the minimized window")
+		w, h = Same(main, "Forever, minimized")
+		eq(w, 352); eq(h, 203)
+	end)
+end)
+
 -- 1.2.4: an item slot that is no item ("My profile"'s icon picker in the list: a texture and its name).
 -- Fails on 1.2.3: the tooltip said "#nil".
 test("1.2.4 Views: a slot of an items row with a label and no item id: its tooltip's first line is its label", function()

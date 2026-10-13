@@ -1249,7 +1249,12 @@ local function CreateMain(style)
 		-- (1.2.4: and the person page shown, for what it held: ProfileLeft.)
 		if self == main then ProfileLeft(playerProfile) end
 	end)
-	f:SetScript("OnSizeChanged", function(self) if self == main then UI.Layout() end end)
+	-- (1.2.4: his own page, "My profile", drawn again for its new room: its Icons fill it.)
+	f:SetScript("OnSizeChanged", function(self)
+		if self ~= main then return end
+		UI.Layout()
+		if UI.OwnProfileShown() then UI.RefreshSoon() end
+	end)
 	return f
 end
 
@@ -1393,6 +1398,24 @@ local function FitHeader()
 	if main.headerHover then main.headerHover:SetWidth(math.max(40, room - HEADER_RIGHT)) end
 end
 
+-- The list's width in the window as it is now, and how far `n` strips of page navigation push it down.
+local function ListWidth()
+	local g = GEOMETRY[main.style]
+	return main:GetWidth() - g.scroll.left + (main.scrollRight or g.scroll.right) - 2
+end
+local function StripsHeight(n) return n > 0 and n * ns.Views.SUBTAB_STYLE.height + 3 or 0 end
+
+-- 1.2.4: the room a page's list has in the window as it is now, under `strips` strips of page
+-- navigation (UI.Layout's, without column titles or a page search): its width, the height in sight,
+-- and whether its rows are the HD look's. "My profile"'s Icons lays its grid out in it
+-- (ProfileEdit.lua), before the layout for its page is done. nil before the window is made.
+function UI.ListRoom(strips)
+	if not main then return nil end
+	local g = GEOMETRY[main.style]
+	local n = math.max(0, math.floor(tonumber(strips) or 0))
+	return ListWidth(), (main:GetHeight() or 0) + g.scroll.topNoCols - StripsHeight(n) - g.scroll.bottom, main.style == "hd"
+end
+
 -- Positions that depend on the window width (buttons, columns, list width) and on
 -- membership (the Join screen has no column titles).
 local function DrawPageNavigation()
@@ -1400,7 +1423,7 @@ local function DrawPageNavigation()
 	-- (1.2.4: a person page has no strip, but the player's own, "My profile": its sections.)
 	local page = main.pageNavTab == main.tab and (not playerProfile or UI.OwnProfileShown()) and not UI.Locked()
 	local lines = page and main.pageNavLines or {}
-	local width = main:GetWidth() - g.scroll.left + (main.scrollRight or g.scroll.right) - 2
+	local width = ListWidth()
 	local searchHeight = 0
 	main.pageSearchHolders = main.pageSearchHolders or {}
 	for tab, holder in pairs(main.pageSearchHolders) do
@@ -1432,13 +1455,12 @@ local function DrawPageNavigation()
 		row:Show()
 	end
 	for i = #lines + 1, #main.pageNavRows do main.pageNavRows[i]:Hide() end
-	return searchHeight + (#lines > 0 and #lines * ns.Views.SUBTAB_STYLE.height + 3 or 0)
+	return searchHeight + StripsHeight(#lines)
 end
 
 function UI.Layout()
 	if not main then return end
 	local g = GEOMETRY[main.style]
-	local w = main:GetWidth()
 	LayoutButtons()
 	LayoutDetailButtons()
 	FitHeader()
@@ -1464,7 +1486,7 @@ function UI.Layout()
 	main.scroll:ClearAllPoints()
 	main.scroll:SetPoint("TOPLEFT", g.scroll.left, hasCols and g.scroll.top or g.scroll.topNoCols - navHeight)
 	main.scroll:SetPoint("BOTTOMRIGHT", right, g.scroll.bottom)
-	local listW = w - g.scroll.left + right - 2
+	local listW = ListWidth()
 	for _, v in pairs(main.views) do v:SetWidth(listW) end
 	if hasCols then
 		local layout = ns.Views.COLUMNS[main.tab]

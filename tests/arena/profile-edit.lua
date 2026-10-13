@@ -443,6 +443,179 @@ test("1.2.4 My profile, Icons: the picker inline, the list built once per open (
 	W3.NoErrors(w)
 end)
 
+-- 1.2.4, the author in game on the Icons page ("design dos icons na pagina nao ta aproveitando bem
+-- espaco vazio da window"): 7 x 4 slots 2 px apart at the list's left, whatever the window (on
+-- Forever, 77 of its list's 352 px empty at the right). The grid now takes the window's room. Drawn
+-- here on the real Olympus window (UI.lua loaded over the harness's stand-in frames, H.WithUI),
+-- docked as on Forever (the HD look, the Social window's 385 wide, the Communities window's 426
+-- tall) or on its own with the gamepad UI, and by Views.Render as UI.Refresh draws a page.
+-- Fails on 1.2.4's first: 7 columns, 28 slots a page at every size.
+local function OlympusWindow()
+	local uns = setmetatable({}, { __index = H.ns })
+	uns.On = function() end
+	assert(loadfile(H.ADDON_DIR .. "UI.lua"))("Olympus", uns)
+	local social = CreateFrame("Frame", "FriendsFrame", UIParent) -- (named: WithUI clears it)
+	social:SetSize(385, 424)
+	local host = CreateFrame("Frame", nil, UIParent)
+	host:SetSize(814, 426)
+	host:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -100)
+	uns.UI.OpenDocked(host, "census", true, "hd")
+	return uns.UI
+end
+local function GridLine(lines) for _, l in ipairs(lines) do if l.items then return l end end end
+local function PagerText(lines) return lines[#lines].nav and lines[#lines].nav[2].text end
+-- His page drawn as the window draws it (UI.Refresh: the section strip out, page chrome; the rest by
+-- Views.Render) in a list `width` wide: the list, its items row and the row's slots shown.
+local function Drawn(lines, width, hd)
+	local V = H.ns.Views
+	local body = V.SplitPageNav(lines, false)
+	local content = CreateFrame("Frame", nil, UIParent)
+	content:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 0, 0)
+	content:SetWidth(width)
+	content.style = hd and "hd" or "old"
+	V.Render(content, body)
+	local row
+	for _, r in ipairs(content.rows) do if r:IsShown() and r.line and r.line.items then row = r end end
+	assert(row, "the items row drawn")
+	local slots = {}
+	for _, b in ipairs(row.items) do if b:IsShown() then slots[#slots + 1] = b end end
+	return content, row, slots
+end
+-- Every slot's cell (grid.slot px, the button in its middle: the harness's buttons are the 30 px
+-- ones made where the game's template is missing) inside the list, 4 px of room at each end, and
+-- inside its row; the same step between two both ways; as far from the list's left edge as the
+-- row's last from its right (a px for the rounding); each a shown button (the gamepad UI's cursor
+-- stops on every visible button).
+local function Inside(content, row, slots, grid, why)
+	local cl, _, cw = content:GetRect()
+	local _, rb, _, rh = row:GetRect()
+	local inset = math.floor((grid.slot - slots[1]:GetWidth()) / 2)
+	local function Cell(b) local l, b0 = b:GetRect() return l - inset, b0 - (grid.slot - b:GetHeight() - inset) end
+	for k, b in ipairs(slots) do
+		local l, bottom = Cell(b)
+		assert(l >= cl + 4 and l + grid.slot <= cl + cw - 4, why .. ": slot " .. k .. " inside the list's width: " .. l .. "+" .. grid.slot .. " of " .. cw)
+		assert(bottom >= rb and bottom + grid.slot <= rb + rh, why .. ": slot " .. k .. " inside its row")
+		eq(b:GetObjectType(), "Button", why); eq(b:IsVisible(), true, why)
+		if (k - 1) % grid.columns ~= 0 then eq(l - Cell(slots[k - 1]), grid.slot + grid.gap, why .. ": the same room between two") end
+		if k > grid.columns then eq(select(2, Cell(slots[k - grid.columns])) - bottom, grid.slot + grid.gap, why .. ": the same room between two rows") end
+	end
+	local leftRoom = Cell(slots[1]) - cl
+	local rightRoom = cl + cw - (Cell(slots[math.min(#slots, grid.columns)]) + grid.slot)
+	assert(math.abs(leftRoom - rightRoom) <= 1, why .. ": in the middle of the list: " .. leftRoom .. " left, " .. rightRoom .. " right")
+end
+
+test("1.2.4 My profile, Icons fill the Olympus window: as many columns as its width holds and rows as its height holds (never fewer than 7 x 4 a page), evenly apart, every slot inside the list, fewer pages; a window resized lays it out again, the icon chosen still chosen; the councillor's strip, the sample, the filter, the pager and the buttons kept; the gamepad UI's own window too", function()
+	local w, cast = W3.New({ more = { { "hc", N.councillor } } })
+	local A, hc = cast.A, cast.hc
+	local L = A.ns.L
+	MacroIcons(A, 120); MacroIcons(hc, 120) -- (121 icons: 120 numbers and one name, so the filter shows)
+	local ui = W3.PageUI(w, A)
+	local hcUI = W3.PageUI(w, hc)
+	eq(PE(w, A).Emblem(200040), true, "an emblem in use, the 40th icon")
+	eq(PE(w, A).Open("emblem"), true)
+	-- Drawn outside the Olympus window (no room known): 7 x 4 as 1.2.4's first, on 5 pages.
+	local lines = Page(w, A)
+	eq(GridLine(lines).columns, 7); eq(#GridLine(lines).items, 28); eq(GridLine(lines).gap, nil, "drawn as before")
+	eq(PagerText(lines), L.COUNCIL_ICON_PAGE:format(2, 5))
+	H.WithUI(function()
+		local real = OlympusWindow()
+		local main = assert(_G.OlympusFrameHD, "the HD window")
+		eq(main:GetWidth(), 385); eq(main:GetHeight(), 426)
+		H.WithStub("UI", real, function()
+			ui.ListRoom, hcUI.ListRoom = real.ListRoom, real.ListRoom
+			-- Forever's window: its list under the section strip 352 x 223 px.
+			local width, height, hd = real.ListRoom(1)
+			eq(width, 352); eq(height, 223); eq(hd, true)
+			lines = Page(w, A)
+			local grid = GridLine(lines)
+			eq(grid.columns, 8, "as many as 352 px hold"); eq(grid.gap, 6, "the room left spread evenly"); eq(grid.slot, 37, "the game's item button")
+			eq(#grid.items, 32, "four rows: the sample, what the emblem is for and the filter leave the grid less than a page of 28")
+			eq(PagerText(lines), L.COUNCIL_ICON_PAGE:format(2, 4), "fewer pages, still at the icon in use")
+			eq(lines[2].text, L.MYPROFILE_EMBLEM_SAMPLE:format("|T200040:16|t"), "the sample kept")
+			local filter
+			for _, l in ipairs(lines) do if l.input then filter = l end end
+			assert(filter and filter.text == L.COUNCIL_ICON_FILTER, "the filter kept")
+			local buttons = select(4, Page(w, A))
+			eq(buttons[2][1], "COUNCIL_ICON_DEFAULT"); eq(buttons[3][1], "MYPROFILE_USE")
+			local content, row, slots = Drawn(lines, width, hd)
+			eq(#slots, 32)
+			Inside(content, row, slots, grid, "Forever")
+			eq(row:GetHeight() + 24 + 10 <= height, true, "the grid and its pager in one screen of the list")
+			for k, b in ipairs(slots) do eq(b.locked == true, grid.items[k].value == 200040, "the icon in use lit, alone: slot " .. k) end
+			-- The next page; a slot's click there previews it (nothing saved).
+			w:As(A, lines[#lines].nav[3].onClick)
+			lines = Page(w, A)
+			eq(PagerText(lines), L.COUNCIL_ICON_PAGE:format(3, 4))
+			content, row, slots = Drawn(lines, width, hd)
+			eq(GridLine(lines).items[6].value, 200070)
+			w:As(A, function() slots[6]:Click() end)
+			local c = PE(w, A).Icons()
+			eq(c.choice, 200070, "the slot's click: the preview")
+			eq(select(4, Page(w, A))[3].enabled, true, "Use this icon")
+			eq(A.ns.ArenaProfile.Mine().emblem, 200040, "nothing saved")
+			-- A larger window (the window resized: its size from the guild window it docks to).
+			main:SetSize(520, 640)
+			width, height = real.ListRoom(1)
+			eq(width, 487); eq(height, 437)
+			lines = Page(w, A)
+			grid = GridLine(lines)
+			eq(grid.columns, 12); eq(grid.gap, 3); eq(#grid.items, 72, "12 x 6")
+			eq(PagerText(lines), L.COUNCIL_ICON_PAGE:format(1, 2), "the page with the icon chosen")
+			content, row, slots = Drawn(lines, width, hd)
+			Inside(content, row, slots, grid, "520 x 640")
+			eq(content:GetHeight() <= height, true, "the whole page in sight: " .. content:GetHeight() .. " of " .. height)
+			eq(c.choice, 200070, "still chosen")
+			for k, b in ipairs(slots) do eq(b.locked == true, grid.items[k].value == 200070, "the icon chosen lit, alone: slot " .. k) end
+			-- Forever's size again: the page with it again.
+			main:SetSize(385, 426)
+			lines = Page(w, A)
+			eq(#GridLine(lines).items, 32); eq(PagerText(lines), L.COUNCIL_ICON_PAGE:format(3, 4))
+			eq(GridLine(lines).items[6].found, true); eq(c.choice, 200070)
+			eq(PE(w, A).UseIcon(), true)
+			eq(A.ns.ArenaProfile.Mine().emblem, 200070, "Use this icon saves the one chosen")
+			-- A councillor's chat icon on Forever's window: his strip, his sample, the filter, the grid inside.
+			eq(PE(w, hc).Open("icon"), true)
+			local hcLines = Page(w, hc)
+			eq(#hcLines[2].nav, 2, "Emblem | Council icon kept")
+			grid = GridLine(hcLines)
+			eq(grid.columns, 8); eq(#grid.items, 32)
+			content, row, slots = Drawn(hcLines, 352, true)
+			Inside(content, row, slots, grid, "a councillor's")
+			main:SetSize(520, 640)
+			hcLines = Page(w, hc)
+			grid = GridLine(hcLines)
+			eq(grid.columns, 12); eq(#grid.items > 72, true, "more rows without what the emblem is for: " .. #grid.items)
+			content, row, slots = Drawn(hcLines, 487, true)
+			Inside(content, row, slots, grid, "a councillor's, 520 x 640")
+			eq(content:GetHeight() <= 437, true, "his whole page in sight")
+		end)
+	end)
+	-- With the gamepad UI on, the window opens on its own (never docked): the old look, 338 x 424.
+	H.WithGamepadUI(true, function()
+		H.WithUI(function()
+			local real = OlympusWindow()
+			local main = assert(_G.OlympusFrame, "the window at its own place")
+			eq(main:GetWidth(), 338); eq(main:GetHeight(), 424)
+			H.WithStub("UI", real, function()
+				ui.ListRoom = real.ListRoom
+				local width, height, hd = real.ListRoom(1)
+				eq(width, 296); eq(height, 211); eq(hd, false)
+				eq(PE(w, A).Open("emblem"), true)
+				lines = Page(w, A)
+				local grid = GridLine(lines)
+				eq(grid.columns, 7); eq(grid.gap, 4, "spread over the list"); eq(#grid.items, 28)
+				local content, row, slots = Drawn(lines, width, hd)
+				Inside(content, row, slots, grid, "the gamepad UI's window")
+				-- The gamepad's press on a slot (a click on its button): the preview, as with the mouse.
+				w:As(A, function() slots[2]:Click() end)
+				eq(PE(w, A).Icons().choice, GridLine(lines).items[2].value)
+				eq(select(4, Page(w, A))[3].enabled, true)
+			end)
+		end)
+	end)
+	W3.NoErrors(w)
+end)
+
 test("1.2.4 My profile, Who sees what: what goes out, his page's facts as others open them, and his Profile choices of the privacy page, one click each (the history's republishes his word); read-only lines take no click; the privacy page by an explicit click", function()
 	local w, cast = W3.New()
 	local A = cast.A

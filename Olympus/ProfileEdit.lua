@@ -43,7 +43,15 @@ local L = ns.L
 local PE = ProfileEdit
 local Arena = ns.Arena
 
-PE.ICON_COLS, PE.ICON_ROWS = 7, 4 -- the Icons grid: 7 slots of 39 px (273) inside the list's 296 at the default width
+-- The Icons grid (1.2.4, the author in game: "design dos icons na pagina nao ta aproveitando bem
+-- espaco vazio da window": 7 x 4 slots at the list's left, 77 px of Forever's 352 px list empty at
+-- its right): as many slots a row as the Olympus window's list holds, the game's item buttons
+-- (Views.ITEM_SLOT, 37) the same room apart both ways, at least ICON_GAP and at most ICON_GAP_MAX,
+-- the grid in the middle of the list; as many rows as the height left holds, never fewer slots a
+-- page than ICON_COLS x ICON_ROWS (PE.IconGrid). 7 x 4 where no window gives it a room (a page
+-- drawn outside the Olympus window).
+PE.ICON_COLS, PE.ICON_ROWS = 7, 4
+PE.ICON_GAP, PE.ICON_GAP_MAX = 2, 8
 PE.WRAP = 48 -- a long sentence, cut into rows of about this many letters (a list row is one line)
 PE.SECTIONS = { "look", "icons", "privacy", "letters" }
 
@@ -284,7 +292,10 @@ local function RefreshSoon()
 	if type(UI.RefreshSoon) == "function" then UI.RefreshSoon() elseif type(UI.Refresh) == "function" then UI.Refresh() end
 end
 
-local function Per() return PE.ICON_COLS * PE.ICON_ROWS end
+-- The slots of a page as the grid was last drawn (the list opens at the page of the icon in use;
+-- its first draw finds its page again if the room holds another count, Repage).
+local lastPer
+local function Per() return lastPer or PE.ICON_COLS * PE.ICON_ROWS end
 -- An entry of the list: a game icon (a file number, an icon's name), or an honour's mark
 -- ({ key, texture, label }, Workshop.IconEntry). Its key in the list, its picture, its words, and
 -- what a choice of it hands on (a mark's key).
@@ -333,7 +344,7 @@ local function OpenIcons(kind)
 			break
 		end
 	end
-	icons = { kind = kind, list = list, shown = list, page = page, filter = "", choice = choice, current = choice, names = names }
+	icons = { kind = kind, list = list, shown = list, page = page, per = Per(), filter = "", choice = choice, current = choice, names = names }
 	return icons
 end
 function PE.Icons() return icons end -- (tests: the list held)
@@ -383,7 +394,7 @@ end
 function PE.NoIcon() return PE.ChooseIcon(nil) end
 function PE.IconPage(delta)
 	if not icons then return false end
-	local pages = math.max(1, math.ceil(#icons.shown / Per()))
+	local pages = math.max(1, math.ceil(#icons.shown / (icons.per or Per())))
 	icons.page = math.max(1, math.min(pages, icons.page + (tonumber(delta) or 0)))
 	PE.Refresh()
 	return true
@@ -534,9 +545,63 @@ local function LookLines(lines, vm)
 	if #vm.honours == 0 then Words(lines, L.PROFILE_NO_HONOURS, 1) end
 end
 
+-- The grid `width` x `height` px hold (the list's width; the height left for the grid's row): how many
+-- slots a row (as many as fit ICON_GAP apart), the room between two (the room left spread evenly
+-- between them, within ICON_GAP and ICON_GAP_MAX, the same between two rows), how many rows (as
+-- many as the height holds that far apart, never fewer than a page of ICON_COLS x ICON_ROWS slots
+-- takes: where the window is short the list scrolls to the rest, as it did), a slot's size and
+-- where the first sits (the grid in the middle of the list). In Views.Render's terms: a row has
+-- 4 px of room at each end, 2 above its slots and 2 below.
+function PE.IconGrid(width, height)
+	local V = ns.Views
+	local slot = type(V) == "table" and tonumber(V.ITEM_SLOT) or 37
+	local least, most = PE.ICON_GAP, PE.ICON_GAP_MAX
+	local w = math.max(0, (tonumber(width) or 0) - 8)
+	local h = math.max(0, (tonumber(height) or 0) - 4)
+	local columns = math.max(1, math.floor((w + least) / (slot + least)))
+	local gap = columns > 1 and math.floor((w - columns * slot) / (columns - 1)) or most
+	gap = math.max(least, math.min(most, gap))
+	local rows = math.max(math.floor((h + gap) / (slot + gap)), math.ceil(PE.ICON_COLS * PE.ICON_ROWS / columns))
+	local used = columns * slot + (columns - 1) * gap
+	return { columns = columns, rows = rows, gap = gap, slot = slot, left = 4 + math.max(0, math.floor((w - used) / 2)) }
+end
+
+-- The grid for the room the Olympus window gives the page's list now (UI.ListRoom, under the
+-- section strip), less what the section's other rows take there (lines[first] on: the councillor's
+-- strip, the sample, what the emblem is for, the filter; and the pager): the whole page in sight
+-- where the window holds a page of ICON_COLS x ICON_ROWS or more (PE.IconGrid). Measured as
+-- Views.Render draws them (Views.LinesHeight); a window resized draws the page again (UI.lua). No
+-- room known: ICON_COLS x ICON_ROWS, drawn as before.
+local PAGER = { nav = { {}, {}, {} } } -- (a strip is one height whatever its words)
+local function Grid(lines, first)
+	local UI, V = ns.UI, ns.Views
+	local fixed = { columns = PE.ICON_COLS, rows = PE.ICON_ROWS }
+	if type(UI) ~= "table" or type(UI.ListRoom) ~= "function" or type(V) ~= "table" or type(V.LinesHeight) ~= "function" then return fixed end
+	local width, height, hd = UI.ListRoom(1)
+	if type(width) ~= "number" or type(height) ~= "number" then return fixed end
+	local rest = { PAGER }
+	for i = first, #lines do rest[#rest + 1] = lines[i] end
+	local used = V.LinesHeight(rest, hd, width)
+	if not used then return fixed end
+	return PE.IconGrid(width, height - used)
+end
+
+-- The page for `per` slots a page, the list held drawn before with another count (the window
+-- resized): the page with the icon chosen if it was in sight, else the one with the first in sight.
+local function Repage(c, per)
+	if c.per == per then return end
+	local first = (c.page - 1) * (c.per or per) + 1
+	local at, key = first, IconKey(c.choice)
+	for i = first, math.min(#c.shown, first + (c.per or per) - 1) do
+		if key and IconKey(c.shown[i]) == key then at = i break end
+	end
+	c.page, c.per = math.floor((at - 1) / per) + 1, per
+end
+
 -- Icons: the picker inline (a councillor's strip between his emblem and his chat icon), the
--- sample, the filter, one row of 7 x 4 slots, the pager.
+-- sample, the filter, the slots (Grid: as many as the window's room holds), the pager.
 local function IconsLines(lines, vm)
+	local first = #lines + 1
 	if vm.councillor and GamesOn() then
 		lines[#lines + 1] = { nav = {
 			{ text = L.MYPROFILE_EMBLEM_HEAD, selected = iconKind == "emblem", onClick = function() PE.SetSection("icons", "emblem") end },
@@ -568,7 +633,10 @@ local function IconsLines(lines, vm)
 	if c.names then
 		lines[#lines + 1] = { text = L.COUNCIL_ICON_FILTER, input = { text = c.filter, onChange = function(text) PE.FilterIcons(text) end } }
 	end
-	local per = Per()
+	local grid = Grid(lines, first)
+	local per = grid.columns * grid.rows
+	Repage(c, per)
+	lastPer = per
 	local pages = math.max(1, math.ceil(#c.shown / per))
 	c.page = math.max(1, math.min(c.page, pages))
 	if #c.shown == 0 then
@@ -580,7 +648,8 @@ local function IconsLines(lines, vm)
 		local icon = c.shown[i]
 		items[#items + 1] = { icon = IconArt(icon), label = IconLabel(icon), found = chosen ~= nil and IconKey(icon) == chosen, value = icon }
 	end
-	lines[#lines + 1] = { items = items, columns = PE.ICON_COLS, onItem = function(it) PE.ChooseIcon(it.value) end }
+	lines[#lines + 1] = { items = items, columns = grid.columns, gap = grid.gap, slot = grid.slot, left = grid.left,
+		onItem = function(it) PE.ChooseIcon(it.value) end }
 	lines[#lines + 1] = { nav = {
 		{ text = "<", onClick = c.page > 1 and function() PE.IconPage(-1) end or nil },
 		{ text = L.COUNCIL_ICON_PAGE:format(c.page, pages) },

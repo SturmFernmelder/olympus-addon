@@ -27,6 +27,8 @@ Views.SUBTAB_STYLE = {
 }
 local ROW_H_NAV = Views.SUBTAB_STYLE.height -- the Realm's Guilds / Classes / Races / Professions
 local ITEM, ITEM_GAP = 30, 2 -- an item on an items row (line.items) without the game's button template (37 with it)
+local ITEM_GAME = 37 -- the game's item button (ItemButtonTemplate)
+Views.ITEM_SLOT = ITEM_GAME -- (1.2.4: the slot a grid that fits its room is laid out for, ProfileEdit.IconGrid)
 local expanded = {}
 local CROWN = "|TInterface\\GroupFrame\\UI-Group-LeaderIcon:13:13|t "
 local ASSIST = "|TInterface\\GroupFrame\\UI-Group-AssistantIcon:12:12|t "
@@ -218,7 +220,7 @@ local function ItemButton(r, k)
 	local ok, b = pcall(CreateFrame, "Button", nil, r, "ItemButtonTemplate")
 	if ok and b and b.icon and SetItemButtonTexture then
 		b.blizzard = true
-		r.itemSize = 37
+		r.itemSize = ITEM_GAME
 	else
 		if ok and b then b:Hide() end
 		b = CreateFrame("Button", nil, r)
@@ -730,6 +732,25 @@ local function FitRight(r, width, leftX)
 	r.right:SetPoint("LEFT", r, "RIGHT", -RIGHT_INSET - keep, 0)
 end
 
+-- An items row's grid (line.items), for its buttons of `own` px in a list `width` wide: a slot's
+-- cell, the step from one slot to the next, how many a row holds, the room between two and where
+-- the first sits. As ever: the buttons' size, ITEM_GAP after each, from 4 px in. 1.2.4, line.gap
+-- (with line.slot, a cell's size, and line.left, where the first cell starts): cells that many px
+-- apart both ways, each button in the middle of its cell (the game's, 37, or ours, 30), "My
+-- profile"'s Icons laid out for the room its window gives (ProfileEdit.IconGrid).
+local function ItemGrid(line, own, width)
+	local gap = tonumber(line.gap)
+	local slot = gap and tonumber(line.slot) or own
+	local step = slot + (gap or ITEM_GAP)
+	local columns = line.columns or math.max(1, math.floor((width - 8) / step))
+	return slot, step, columns, gap, tonumber(line.left) or 4
+end
+-- Its height: 2 px above its first row of slots, 2 below its last (the gap after it too, without line.gap).
+local function GridHeight(rows, slot, step, gap)
+	if gap then return rows * slot + (rows - 1) * gap + 4 end
+	return rows * step + 4
+end
+
 function Views.Render(content, lines, layout)
 	local width = content:GetWidth()
 	local hd = content.style == "hd"
@@ -752,8 +773,9 @@ function Views.Render(content, lines, layout)
 			r.right:Hide()
 			for c = 1, 4 do r.cols[c]:Hide() end
 			if not (r.items and r.items[1]) then ItemButton(r, 1) end
-			local size = (r.itemSize or ITEM) + ITEM_GAP
-			local columns = line.columns or math.max(1, math.floor((width - 8) / size))
+			local own = r.itemSize or ITEM
+			local slot, step, columns, gap, left = ItemGrid(line, own, width)
+			local inset = math.floor((slot - own) / 2)
 			local slots = line.slots or #line.items
 			local bySlot = {}
 			for k, it in ipairs(line.items) do
@@ -764,11 +786,11 @@ function Views.Render(content, lines, layout)
 				local b = r.items[k] or ItemButton(r, k)
 				SetSlot(b, bySlot[k])
 				b:ClearAllPoints()
-				b:SetPoint("TOPLEFT", 4 + ((k - 1) % columns) * size, -2 - math.floor((k - 1) / columns) * size)
+				b:SetPoint("TOPLEFT", left + inset + ((k - 1) % columns) * step, -2 - inset - math.floor((k - 1) / columns) * step)
 				b:Show()
 			end
 			for k = slots + 1, #r.items do r.items[k]:Hide() end
-			height = math.ceil(math.max(1, slots) / columns) * size + 4
+			height = GridHeight(math.ceil(math.max(1, slots) / columns), slot, step, gap)
 		elseif line.filters then
 			r.left:Hide()
 			r.right:Hide()
@@ -826,6 +848,33 @@ function Views.Render(content, lines, layout)
 	PlaceInput(content, inputRow)
 	content.lineCount = #lines
 	content:SetHeight(-y + 8)
+end
+
+-- 1.2.4: how tall Render makes `lines` in a list `width` wide (hd: the HD look's rows), its room
+-- above the first row and below the last included, measured without drawing: a page that fits its
+-- window ("My profile"'s Icons, ProfileEdit.lua) asks it. An items row is measured as the game's
+-- buttons (ITEM_GAME) unless line.gap gives its cells (line.slot). nil for a row of filters (its
+-- buttons' height is theirs).
+function Views.LinesHeight(lines, hd, width)
+	local rowH = hd and ROW_H_HD or ROW_H
+	local y, input = 2, false
+	for _, line in ipairs(lines or {}) do
+		local height
+		if line.items then
+			local slot, step, columns, gap = ItemGrid(line, ITEM_GAME, tonumber(width) or 0)
+			height = GridHeight(math.ceil(math.max(1, line.slots or #line.items) / columns), slot, step, gap)
+		elseif line.filters then
+			return nil
+		elseif line.nav then
+			height = ROW_H_NAV
+		elseif line.input and not line.cols and not input then
+			input, height = true, ROW_H_INPUT
+		else
+			height = rowH
+		end
+		y = y + height + (line.header and 4 or 0) + (line.gapAfter and 6 or 0)
+	end
+	return y + 8
 end
 
 -- The last row clicked in `content` ({ index, top, lines, t }: where it started, how many lines
