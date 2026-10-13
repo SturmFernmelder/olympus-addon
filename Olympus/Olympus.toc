@@ -36,6 +36,7 @@ Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
 Locales\CarryText.lua
+Locales\CampaignText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Core.lua
@@ -74,6 +75,7 @@ Bank.lua
 Backup.lua
 Acts.lua
 Chronicle.lua
+Campaign.lua
 Moderation.lua
 Alts.lua
 Keys.lua

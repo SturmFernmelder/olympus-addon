@@ -1257,6 +1257,19 @@ and whose each is.
 A tab with a coin for the treasury's keepers, for the King, and for every member once the King
 shows the army something of it (1.1: for every member on the Treasurer's realms, with the dues' button
 alone until then).
+- **Voluntary campaigns (1.2.4)**: the real King can start one purpose, a gold goal and up to
+  four material goals in the Treasury summary: `Raid supplies | 100 | 1710=20`. Its receipt
+  window is exactly 14 days. A real keeper explicitly assigns an actually confirmed mail/trade
+  receipt; nothing sends money or sweeps old/manual gifts. Native-observed gold alone can meet
+  the reserved weekly baseline; only its voluntary excess can be assigned. Missing confirmation
+  or baseline means no cash attribution. Materials wait for actual bag/trade confirmation.
+  Stable local receipt identities prevent duplicate attribution across a reload, and a receipt
+  the book stops counting reduces the aggregate. At most 2,000 allocations per keeper per
+  campaign are retained. Keeper aggregates go privately to the King; only his public aggregate
+  progress and numeric bars reach the army, with no contributor or non-contributor names.
+  The window ending stops intake, not the King's closing decision: he writes what was bought
+  in the Chronicle, once, and the bar disappears. No second dues, escrow, privileges, donor
+  honours or changes to existing ranking/publication consent are introduced.
 - **Its keepers (1.0)**: the Treasurer of Olympus (that exact character, in the guild OLYMPUS),
   the King, and up to 5 characters the King adds on the Treasury tab (**The treasury's
   keepers**, then **Add a treasury character**, by name or target; a click on one takes it off).

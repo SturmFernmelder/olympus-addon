@@ -352,6 +352,8 @@ end
 -- book came; the author's view always), and every member once the King shows the army something.
 function Treasury.Visible()
 	if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then return true end
+	local campaign = ns.Campaign and not ns.Campaign.missing and ns.Campaign.State()
+	if campaign and not campaign.closed and ns.IsMember() then return true end
 	if Treasury.IsKeeper() or ns.King.Preview() then return true end
 	-- (1.1: the King, his Steward or a Hand holding a sister guild's bank, 1.2: any of the Guild
 	-- treasuries' audience, and a Lord or Captain with a request to the treasury: Bank.lua.)
@@ -719,6 +721,8 @@ function Treasury.Record(name, copper, how, out, o)
 	ns.Fire("TREASURY_CHANGED")
 	-- 1.2: the fee's receipt (ZF) goes from the arena's side (Debts.lua), by its ref.
 	if kind == "fee" and feeRef then ns.Fire("TREASURY_FEE", name, copper, feeRef, feeTest) end
+	-- Campaign candidates come only from native confirmed intake, never manual Record edits.
+	if o.observed == true then ns.Fire("TREASURY_RECEIPT", e, b) end
 	return e
 end
 
@@ -875,7 +879,7 @@ function Treasury.Info(a, b)
 	-- Items: given with nothing back, a donation (or a payment); in a deal, part of it (not counted).
 	for _, it in ipairs(done.gotList or {}) do
 		local deal = (net < 0 and "purchase") or (done.gaveItems and "sale") or nil
-		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal })
+		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal, observed = true })
 	end
 	for _, it in ipairs(done.gaveList or {}) do
 		local deal = (net > 0 and "sale") or (done.gotItems and "purchase") or nil
@@ -1003,11 +1007,12 @@ local function Settle(p, observed)
 	-- (1.1: the mail's subject, the dues' note: its week and guild, Dues.lua.)
 	Treasury.Record(p.sender, p.money, "mail", nil, { book = p.book, note = p.note, observed = observed == true })
 end
-local function SettleItem(p)
+local function SettleItem(p, observed)
 	if p.returned then return Returned(p.book, p.sender, 0, p.id, p.n) end
 	-- Cash on delivery: bought, not given.
 	local bought = p.cod > 0
-	Treasury.Record(p.sender, 0, "mail", nil, { book = p.book, item = p.id, count = p.n, excluded = bought or nil, kind = bought and "purchase" or nil })
+	Treasury.Record(p.sender, 0, "mail", nil, { book = p.book, item = p.id, count = p.n, excluded = bought or nil, kind = bought and "purchase" or nil,
+		observed = observed == true })
 end
 local function DropStale(list, now)
 	for i = #list, 1, -1 do if now - list[i].t >= Treasury.PENDING_FOR then table.remove(list, i) end end
@@ -1120,7 +1125,7 @@ function Treasury.ItemsChanged()
 			for _, r in ipairs(itemPending) do
 				if r.id == id then r.have = math.max(r.have, q.have + q.n) break end
 			end
-			SettleItem(q)
+			SettleItem(q, true) -- bags hold the requested count; a request/fallback alone confirms nothing
 		end
 	end
 end
@@ -4366,6 +4371,7 @@ function Treasury.Build(q)
 	elseif Treasury.mode == "keepers" then lines = KeeperLines()
 	else
 		lines = SummaryLines(role, q)
+		if ns.Campaign and not ns.Campaign.missing and (q == nil or q == "") then ns.Campaign.Lines(lines) end
 		if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then
 			table.insert(lines, 1, { text = Gold("> " .. L.TREASURY_OWN_LINK), onClick = Treasury.OpenOwnGuild, gapAfter = true })
 		end

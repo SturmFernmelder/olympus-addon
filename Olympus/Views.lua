@@ -766,6 +766,27 @@ local function GridHeight(rows, slot, step, gap)
 	return rows * step + 4
 end
 
+-- A small meter beneath an ordinary row's numeric label. Own textures only; if a client lacks
+-- color textures the existing white texture fallback is used, and the numeric label remains.
+function Views.DrawMeter(r, meter, width, left)
+	if type(meter) ~= "table" then if r.meterBack then r.meterBack:Hide(); r.meterFill:Hide() end return end
+	if not r.meterBack then
+		r.meterBack, r.meterFill = r:CreateTexture(nil, "BACKGROUND"), r:CreateTexture(nil, "ARTWORK")
+		for _, texture in ipairs({ r.meterBack, r.meterFill }) do
+			if texture.SetColorTexture then texture:SetColorTexture(1, 1, 1, 1) else texture:SetTexture("Interface\\Buttons\\WHITE8X8") end
+		end
+		r.meterBack:SetVertexColor(0.2, 0.2, 0.2, 0.7); r.meterFill:SetVertexColor(0.8, 0.62, 0.18, 0.9)
+	end
+	local value, total = tonumber(meter.value), tonumber(meter.total)
+	local ratio = value and total and value == value and total == total and total > 0 and math.max(0, math.min(1, value / total)) or 0
+	local size = math.max(1, width - left - RIGHT_INSET)
+	for _, texture in ipairs({ r.meterBack, r.meterFill }) do
+		texture:ClearAllPoints(); texture:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", left, 2); texture:SetHeight(4)
+	end
+	r.meterBack:SetWidth(size); r.meterBack:Show()
+	r.meterFill:SetWidth(math.max(0.01, size * ratio)); r.meterFill:SetShown(ratio > 0)
+end
+
 function Views.Render(content, lines, layout)
 	local width = content:GetWidth()
 	local hd = content.style == "hd"
@@ -833,11 +854,11 @@ function Views.Render(content, lines, layout)
 			r.right:SetFontObject(font or "GameFontHighlightSmall")
 			local leftX = 4 + (line.indent or 0) * 12
 			r.left:ClearAllPoints()
-			r.left:SetPoint("LEFT", leftX, 0)
+			r.left:SetPoint("LEFT", leftX, line.meter and 4 or 0)
 			r.left:SetText(line.text or "")
 			r.right:SetText(line.right or "")
 			r.right:ClearAllPoints()
-			r.right:SetPoint("RIGHT", -RIGHT_INSET, 0)
+			r.right:SetPoint("RIGHT", -RIGHT_INSET, line.meter and 4 or 0)
 			-- A text box's line: its text as wide as it is, the box after it (PlaceInput).
 			if line.input and not inputRow then
 				inputRow, height = r, ROW_H_INPUT
@@ -845,7 +866,9 @@ function Views.Render(content, lines, layout)
 				r.left:SetPoint("RIGHT", r.right, "LEFT", -RIGHT_GAP, 0)
 				FitRight(r, width, leftX, line.rightWide and 2 or 3)
 			end
+			if line.meter then height = height + 8 end
 		end
+		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and line.meter or nil, width, 4 + (line.indent or 0) * 12)
 		if not line.items then for k = 1, #(r.items or {}) do r.items[k]:Hide() end end
 		if not line.nav then for k = 1, #(r.nav or {}) do r.nav[k]:Hide() end end
 		if not line.filters then for k = 1, #(r.filters or {}) do r.filters[k]:Hide() end end

@@ -951,6 +951,16 @@ Steward and the lists of Hands it holds, whose each is.
 A tab with a coin for the treasury's keepers, for the King, and for every member once the King
 shows the army something of it (1.1: for every member on the Treasurer's realms, with the dues' button
 alone until then).
+- **Voluntary campaigns (1.2.4)**: the real King defines one purpose and a gold goal, optionally
+  up to four material goals (`Raid supplies | 100 | 1710=20`). Receipts have a fixed 14-day
+  window. A real keeper manually assigns an actually confirmed trade/mail gift, once across
+  reloads; only native-observed voluntary gold above its weekly baseline is eligible. Old or
+  manual money cannot meet that baseline, and unconfirmed intake counts nothing. Materials
+  wait for actual bag/trade confirmation. Up to 2,000 assignments per keeper are retained;
+  corrections in the book reduce totals. Only aggregate progress announced by the King is
+  public; keeper receipt identities and giver names stay private. The King closes with one
+  Chronicle purchase note and removes the bar. Nothing moves money, adds dues, grants a perk,
+  or changes donor-ranking publication and consent.
 - **Its keepers (1.0)**: the Treasurer of Olympus (that exact character, in the guild OLYMPUS),
   the King, and up to 5 characters the King adds on the Treasury tab (**The treasury's
   keepers**, then **Add a treasury character**, by name or target; a click on one takes it off).
