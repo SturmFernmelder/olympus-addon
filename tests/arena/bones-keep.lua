@@ -245,6 +245,30 @@ test("1.2.4 Bones kept: the profile's Bones of every player shown cost one readi
 	NoErrors(w)
 end)
 
+-- (The review) The months kept add up for good, and each was read by working the ranking out again
+-- over every game held (FT.Best), so the profile's Bones cost one more full reading each month, for
+-- ever. A month past what the store holds (HALVES_DAYS) has no game left: its kept list is all there is.
+test("1.2.4 Bones kept: the profile's Bones read a month past the store's 62 days from its kept list alone, not by working every game held out again", function()
+	local w, a, b, c = Setup()
+	Game(w, { id = "Kq1", p1 = a, p2 = b, w = "2", t = w.clock - 3600 })
+	local FT = c.ns.FarkleTable
+	local now = MonthOf(w, c, w.clock)
+	local months = Store(c).months
+	for m = now - 20, now - 9 do
+		months[m] = { n = 3, at = w.clock, rows = { { name = b.name, games = 3, won = 2, lost = 1 }, { name = a.name, games = 3, won = 1, lost = 2 } } }
+	end
+	local best, n = FT.Best, 0
+	FT.Best = function(...) n = n + 1 return best(...) end
+	local ok, res = pcall(function() return w:As(c, FT.PlayerStats, b.name) end)
+	FT.Best = best
+	if not ok then error(res, 0) end
+	eq(res.games, 12 * 3 + 1, "every month kept, and this month's game"); eq(res.won, 12 * 2 + 1)
+	assert(n <= 3, "the ranking worked out for the months the store holds alone: " .. n)
+	local old = w:As(c, FT.Month, now - 15)
+	eq(old.kept, true); eq(old.champion, b.name)
+	NoErrors(w)
+end)
+
 test("1.2.4 Bones kept: a free table's live record is the live realm's, not the rehearsals': `test clear` mid-game, then a /reload, and the game goes on and counts", function()
 	local w, a, b, c = Setup()
 	local id = assert(Do(w, a, "Create", { guest = b.name, target = 2000 }))

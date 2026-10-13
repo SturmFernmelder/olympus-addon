@@ -1345,9 +1345,16 @@ end
 function FT.Month(month)
 	month = tonumber(month)
 	if not month then return nil end
-	local rows, n = FT.Best("L", { month = month })
 	local b = RankStore(false)
 	local kept = b and b.months[month]
+	local rows, n
+	if type(kept) == "table" and month < MonthOf(Now() - FT.HALVES_DAYS * 86400) then
+		-- (a month past what the store holds: its games are gone, its kept list is all there is. The
+		-- review: Best read every game held again for each month kept, and the months add up for good.)
+		rows, n = {}, 0
+	else
+		rows, n = FT.Best("L", { month = month })
+	end
 	local out = { month = month, rows = rows or {} }
 	if type(kept) == "table" and type(kept.rows) == "table" and (tonumber(kept.n) or 0) > (tonumber(n) or 0) then
 		out.rows, out.kept = {}, true
