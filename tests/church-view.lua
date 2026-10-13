@@ -52,7 +52,7 @@ local function Build(w, cl, page)
 	return w:As(cl, cl.View.Build)
 end
 
-test("1.2.4 Church correspondence: guild representation replaces invitation points and does not invent a historical streak", function()
+test("1.2.4 Church correspondence: guild representation uses observed days and never invents historical fullness from census", function()
 	local w, c = Cast()
 	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Plain Member"), true)
 	c.author.View.list = "c"
@@ -63,16 +63,19 @@ test("1.2.4 Church correspondence: guild representation replaces invitation poin
 	assert(row and row.player == "Plain Member-Realm", "the guild's actual appointed correspondent")
 	assert(row.text:find(World.GUILD, 1, true), "represents the guild, not invitation points")
 	eq(row.cols, nil, "no invitation score or invented streak column")
-	assert(Texts(lines):find(L.CHURCH_CAPACITY_PENDING, 1, true), "explicit pending policy, no pretend ranking")
+	assert(Texts(lines):find(L.CHURCH_FULLNESS_RULE, 1, true), "explicit observation and unknown-day policy")
+	eq(row.fullness.days, nil, "a census snapshot invents no zero or streak")
+	eq(row.right, L.CHURCH_CAPACITY_UNKNOWN)
+	eq(#lines[2].filters, 1, "fullness is an ongoing streak, not invitation week/month filters")
 	local tip = {}
 	row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
-	assert(table.concat(tip, "\n"):find("951", 1, true), "snapshot labelled as current evidence only")
+	assert(table.concat(tip, "\n"):find(L.CHURCH_FULLNESS_TIP, 1, true), "client-evidence limitation")
 	-- With no census record, the same valid appointment remains visible without a fabricated count.
 	c.author.c.Data.Guild = function() return nil end
 	lines = Build(w, c.author, "ranking")
 	for _, line in ipairs(lines) do if line.capacityGuild == World.GUILD then row = line end end
 	tip = {}; row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
-	assert(table.concat(tip, "\n"):find(L.CHURCH_CAPACITY_UNKNOWN, 1, true))
+	eq(row.fullness.days, nil)
 end)
 
 test("Church discoverability: missionaries are the third visible group with existing appointment action", function()
@@ -531,7 +534,10 @@ test("1.1.6 Church: every word the Church shows is in English and pt-BR, with th
 		local savedLocale = GetLocale
 		GetLocale = function() return locale end
 		local t = { L = {} }
-		local ok, err = pcall(function() assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", t) end)
+		local ok, err = pcall(function()
+			assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", t)
+			assert(loadfile(ROOT .. "Olympus/Locales/ChurchFullnessText.lua"))("Olympus", t)
+		end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
 		return t.L
@@ -550,7 +556,7 @@ test("1.1.6 Church: every word the Church shows is in English and pt-BR, with th
 	for _, k in ipairs({ "CHURCH_RANKING_A", "CHURCH_RANKING_M", "CHURCH_RANKING_C", "CHURCH_WHY_FULL", "CHURCH_WHY_DEEP", "CHURCH_WHY_QUOTA",
 		"CHURCH_WHY_CHAIN", "CHURCH_NO_HOLDS", "CHURCH_NO_QUOTA", "CHURCH_NO_DEEP" }) do used[k] = true end
 	for key in pairs(used) do
-		if key:sub(-1) ~= "_" and key ~= "CHURCH_CHANGED" and key ~= "CHURCH_COUNT_CHANGED" and key ~= "CHURCH_PUBLIC_CHANGED" and key ~= "CHURCH_TOP_CHANGED" then
+		if key:sub(-1) ~= "_" and key ~= "CHURCH_CHANGED" and key ~= "CHURCH_COUNT_CHANGED" and key ~= "CHURCH_PUBLIC_CHANGED" and key ~= "CHURCH_TOP_CHANGED" and key ~= "CHURCH_FULLNESS_CHANGED" then
 			assert(rawget(en, key), "English: " .. key)
 			assert(rawget(pt, key), "pt-BR: " .. key)
 			eq(Codes(pt[key]), Codes(en[key]), "codes: " .. key)

@@ -19,6 +19,7 @@ World.COUNCILLOR = "Brin Tallow-Realm"
 World.COUNCIL = assert(loadfile(ROOT .. "tests/fixtures/church-council.lua"))()
 -- The Church's words, into the harness's locale table, as the game loads Locales/ChurchText.lua.
 assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", ns)
+assert(loadfile(ROOT .. "Olympus/Locales/ChurchFullnessText.lua"))("Olympus", ns)
 
 local GLOBALS = { "GetGuildInfo", "IsInGuild", "InCombatLockdown", "QueryGuildEventLog", "GetNumGuildEvents", "GetGuildEventInfo",
 	"UnitIsPlayer", "GetTime", "C_ChatInfo", "GetServerTime" }
@@ -170,6 +171,7 @@ function World:Client(name, opts)
 			assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/Church.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChurchCount.lua"))("Olympus", c)
+			assert(loadfile(ROOT .. "Olympus/ChurchFullness.lua"))("Olympus", c)
 			if opts.view then assert(loadfile(ROOT .. "Olympus/ChurchView.lua"))("Olympus", c) end
 		end)
 		c.Church.after = function(seconds, _, fn) w:Later(cl, seconds, fn) end
@@ -201,6 +203,8 @@ function World:RefreshRosters()
 		end
 		local R = cl.c.Roster
 		R.members, R.byName, R.guild, R.snapshotAt = rows, byName, cl.guild, self.clock
+		R.serverAt = self.clock
+		R.lastStats = { numTotal = #rows, seen = #rows, t = self.clock }
 		R.generation = (R.generation or 0) + 1
 	end
 end

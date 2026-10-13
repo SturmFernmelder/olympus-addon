@@ -1382,6 +1382,28 @@ publish the request to the board.
   removes anyone. There is no guarantee fund yet.
 
 ### The Missionary Church of Olympus (1.1.6)
+
+**Guild fullness (1.2.4).** The correspondents' ranking is the guild's proved streak, shown with
+its current Church correspondent, not invitation points. Only completed server UTC days score:
+all admitted native-roster observations must be **above 950**; any observed 950 or fewer breaks
+the streak. An unobserved or budget-capped day is **unknown**: no point and no erasure of the
+proved streak. Each qualifying day's observations are averaged first, then those daily means
+receive equal weight in the streak's tie-break. This is role-authenticated, client-observed
+evidence, **not server certification or proof of continuous 24-hour fullness**. Incomplete,
+filtered or stale rosters and census totals do not supply observations. The counter reuses
+the existing complete native roster cache and its captured server timestamp; it performs no
+second 1,000-member scan. Current verified
+correspondents send only live own-guild observations privately to a Church keeper; census-only
+appointments and retrospective correspondent claims cannot establish a day elsewhere.
+Authorized keepers privately relay only retained admitted observations, in requested batches
+of at most 150, rotating through the bounded cache. Contiguous same-count observations are
+coalesced without changing their count or mean. Seven days of relay evidence, 128 guilds and
+20,000 runs at most are retained; older days fold into this client's durable streak checkpoint.
+Checkpoints are never accepted from another client: a fresh client without older evidence keeps
+that history unknown. This is provisionally the **guild's observed history**, inherited when its
+representative changes, not a claim about that person's tenure. No new honour, gold rule or
+public/general-channel feed is added.
+
 The Church brings new players into Olympus. **Asmongold is its Head**, using the addon's canonical
 King identity. This position cannot be nominated; a legacy signed Head marker grants no Head powers.
 The author's signed list sets the Twelve Apostles. The King, the author and the signed High Council may name
@@ -1419,8 +1441,8 @@ master (or the Head, the King or the author), who keeps that guild full and answ
   **Mine** is for the Head, Apostles, missionaries and
   Church correspondents; **Name** appears only to someone with a naming duty. **Reassignments** is
   for the Head, the King and the author to keep or move missionaries whose namer lost his place.
-- **Two rankings**, the Apostles and the missionaries (and the correspondents' list), this week, the
-  last 30 days or all time. The Church's room and private numbers are for the Church, the High
+- **Two invitation rankings**, the Apostles and the missionaries, this week, the last 30 days or
+  all time; correspondents use the ongoing guild-fullness streak above. The Church's room and private numbers are for the Church, the High
   Council, the King and the author. The King, signed High Council and author can open or close the
   ranking for every member; your row shows
   there only if you choose to show it (off by default). The author's Member preview shows the same

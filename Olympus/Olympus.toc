@@ -29,6 +29,7 @@ Locales\ArenaLotteryText.lua
 Locales\ArenaMatchText.lua
 Locales\ComplianceText.lua
 Locales\ChurchText.lua
+Locales\ChurchFullnessText.lua
 Locales\WeeklyBriefText.lua
 Locales\GuildCharterText.lua
 Locales\MainKeyText.lua
@@ -108,6 +109,7 @@ CraftRequests.lua
 ViewAs.lua
 Church.lua
 ChurchCount.lua
+ChurchFullness.lua
 ChurchView.lua
 TabardsV2.lua
 Letters.lua

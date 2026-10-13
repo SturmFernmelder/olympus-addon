@@ -1357,6 +1357,8 @@ end
 -- A ranking on this keeper's own ledger: list a (Apostles), m (missionaries), c (correspondents);
 -- window w, m, a. Rows: { rank, key, name, role, score, own, share, levels, joins, stays, net, pub }.
 function Count.Ranking(list, window)
+	-- The invitation wire has no guild/day evidence. It must never masquerade as fullness.
+	if list == "c" then return {} end
 	local S = Church.State()
 	local rows, cache = {}, {}
 	local function Add(k, n, role)
@@ -2010,6 +2012,7 @@ end
 -- What the tab shows: a keeper's own numbers, else the last answer kept. rows (ranking) or lines
 -- (detail), the time they are as of, and whether they came from another client.
 function Count.RankingView(list, window)
+	if list == "c" then return ns.ChurchFullness.Ranking(), Clock(), false end
 	if Church.IsKeeper(ns.me) and not Church.IsKing(ns.me) then return Count.Ranking(list, window), Clock(), false end
 	local v = View()[list .. ":" .. window .. ":-"]
 	return v and v.rows or {}, v and v.asOf, true

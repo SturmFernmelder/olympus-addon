@@ -146,6 +146,7 @@ end
 
 local function Filters(who)
 	local filters = who and { ListFilter(), WindowFilter() } or { WindowFilter() }
+	if who and View.list == "c" then filters = { ListFilter() } end
 	return { filters = filters, id = "church-filters", gapAfter = true }
 end
 
@@ -286,23 +287,21 @@ function View.RankingLines()
 	local lines = { Nav("ranking"), Filters(true) }
 	local switch = SwitchLine()
 	if switch then lines[#lines + 1] = switch end
-	-- Correspondents keep a guild full; their old invitation score is not that metric.
-	-- Do not award an invented historical streak from a present-day census snapshot.
 	if View.list == "c" then
 		lines[#lines + 1] = { header = true, text = L.CHURCH_RANKING_C }
-		lines[#lines + 1] = { text = Grey(L.CHURCH_CAPACITY_PENDING), gapAfter = true }
-		local rows = {}
-		for _, c in pairs(Church.State().corr) do rows[#rows + 1] = c end
-		table.sort(rows, function(a, b) return tostring(a.g) < tostring(b.g) end)
-		for _, c in ipairs(rows) do
-			local g = ns.Data and ns.Data.Guild and ns.Data.Guild(c.g)
-			local n = type(g) == "table" and tonumber(g.total) or nil
-			local count = n and n == math.floor(n) and n >= 0 and n <= ns.Codec.GUILD_CAP and tostring(n) or L.CHURCH_CAPACITY_UNKNOWN
-			lines[#lines + 1] = { text = Plain(c.g), right = Name(c.n), player = ns.FullName(c.n), capacityGuild = c.g,
-				tooltip = Tip(Name(c.n), L.CHURCH_CAPACITY_SNAPSHOT:format(count)), indent = 1 }
+		lines[#lines + 1] = { text = Grey(L.CHURCH_FULLNESS_RULE), gapAfter = true }
+		if not PreviewRole() then ns.ChurchFullness.Ask() end
+		local rows = ns.ChurchFullness.Ranking()
+		for _, row in ipairs(rows) do
+			local value = row.average and L.CHURCH_FULLNESS_VALUE:format(row.days, row.average)
+				or (row.days == 0 and L.CHURCH_FULLNESS_ZERO or L.CHURCH_CAPACITY_UNKNOWN)
+			if row.state == "unknown" and row.days then value = L.CHURCH_FULLNESS_PAUSED:format(value) end
+			lines[#lines + 1] = { text = row.rank .. ". " .. L.CHURCH_FULLNESS_ROW:format(Plain(row.guild), Name(row.name)),
+				right = value, player = ns.FullName(row.name), capacityGuild = row.guild, fullness = row,
+				tooltip = Tip(Name(row.name), L.CHURCH_FULLNESS_TIP), indent = 1 }
 		end
 		if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
-		return lines, L.CHURCH_TITLE, L.CHURCH_RANKING_DETAIL
+		return lines, L.CHURCH_TITLE, L.CHURCH_FULLNESS_RULE
 	end
 	local rows, asOf, remote = Count.RankingView(View.list, View.window)
 	if remote and not PreviewRole() then Count.Ask(View.list, View.window) end
@@ -779,7 +778,7 @@ if ns.PlayerMenu and ns.PlayerMenu.Add then
 	ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40)
 end
 
-for _, event in ipairs({ "CHURCH_CHANGED", "CHURCH_COUNT_CHANGED", "CHURCH_PUBLIC_CHANGED" }) do
+for _, event in ipairs({ "CHURCH_CHANGED", "CHURCH_COUNT_CHANGED", "CHURCH_PUBLIC_CHANGED", "CHURCH_FULLNESS_CHANGED" }) do
 	ns.On(event, function()
 		if ns.UI and ns.UI.IsShown and ns.UI.IsShown() then Redraw() end
 	end)
