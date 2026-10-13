@@ -265,22 +265,7 @@ local function Games()
 		end
 		out.bones = rows
 	end
-	if Call("ArenaHome", "RankingsPublic", "lottery") == true then
-		local lot = Call("Lottery", "Winners", "L")
-		lot = type(lot) == "table" and lot or {}
-		local latest, biggest = {}, {}
-		for i, x in ipairs(type(lot.latest) == "table" and lot.latest or {}) do
-			if i > 5 then break end
-			if type(x) == "table" then
-				latest[#latest + 1] = { name = Plain(x.name, 72), day = Plain(x.day, 16), beast = Plain(x.beast, 48), amount = Num(x.amount, true) or 0 }
-			end
-		end
-		for i, x in ipairs(type(lot.biggest) == "table" and lot.biggest or {}) do
-			if i > 5 then break end
-			if type(x) == "table" then biggest[#biggest + 1] = { place = i, name = Plain(x.name, 72), amount = Num(x.amount, true) or 0 } end
-		end
-		out.lottery = { latest = latest, biggest = biggest }
-	end
+	-- Lottery's saved winners are private history, even with an older game's publish word.
 	return out
 end
 

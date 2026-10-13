@@ -261,16 +261,15 @@ test("1.2.4 the API: a granted addon gets copies of exactly what the pages show:
 	rawset(viewer.ns, "ChurchCount", { Top3 = function() return nil end })
 	eq(Do(w, viewer, api, "GetRankings", "church"), nil, "closed: nothing")
 	eq(select(2, Do(w, viewer, api, "GetRankings", "census")), "kind")
-	-- The King makes the Lottery's ranking public: its winners, as the Games tab lists them.
+	-- Lottery history is private even with a prior public ranking word.
 	viewer.db.lotteryWinners = { L = { e1 = { at = w.clock - 3600, rows = { { name = N.bettor3, beast = 7, amount = 25000 } } } } }
-	eq(W3.M(w, cast.king, "ArenaHome").SetRankingsPublic(true, "lottery"), true)
+	eq(W3.M(w, cast.king, "ArenaHome").SetRankingsPublic(true, "lottery"), false)
+	assert(W3.M(w, cast.king, "ArenaRoles").Publish("lottery", true)) -- an older client's word
 	w:Run(1)
-	eq(w:As(viewer, viewer.ns.ArenaHome.RankingsPublic, "lottery"), true, "every client heard the King")
+	eq(w:As(viewer, viewer.ns.ArenaHome.RankingsPublic, "lottery"), false, "never a public Lottery ranking")
 	local games = Do(w, viewer, api, "GetRankings", "games")
-	eq(Keys(games), "lottery", "the published game alone")
-	eq(games.lottery.latest[1].name, N.bettor3); eq(games.lottery.latest[1].amount, 25000)
-	eq(Keys(games.lottery.latest[1]), "amount,beast,day,name")
-	eq(games.lottery.biggest[1].place, 1)
+	eq(games.lottery, nil, "private saved winners are never exported")
+	eq(viewer.db.lotteryWinners.L.e1.rows[1].name, N.bettor3, "the history is retained")
 	-- The profile: his guild, rank and role, the frame and title his profile shows.
 	local p = Do(w, viewer, api, "GetProfile")
 	eq(Keys(p), "frame,guild,member,name,rank,rankIndex,role")
@@ -325,6 +324,20 @@ test("1.2.4 the API: GetWanted lists what the Wanted tab lists: a Horde player w
 	eq(#rows, 1, "only the one wanted"); eq(rows[1].guid, HORDE.guid)
 	local page = w:As(viewer, viewer.ns.Wanted.Targets, "listed")
 	eq(#page, 1); eq(page[1].guid, rows[1].guid, "the tab's list")
+	W3.NoErrors(w)
+end)
+
+test("1.2.4 the API Lottery privacy: even an older ArenaHome exposing a public Lottery word cannot export saved winners", function()
+	local w, cast, viewer = Setup()
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, viewer.OlympusAPI.Register, "MapPins")
+	w:As(viewer, viewer.Consent.Choose, "api:mappins", true)
+	viewer.db.lotteryWinners = { L = { old = { at = w.clock - 10, rows = { { name = N.bettor3, beast = 7, amount = 25000 } } } } }
+	-- This is the verified old ArenaHome contract, whose per-game publish word exposed Lottery.
+	viewer.ns.ArenaHome.RankingsPublic = function(game) return game == "lottery" end
+	local result = Do(w, viewer, api, "GetRankings", "games")
+	eq(result.lottery, nil, "the API itself enforces private Lottery history")
+	eq(viewer.db.lotteryWinners.L.old.rows[1].name, N.bettor3, "the private record survives")
 	W3.NoErrors(w)
 end)
 

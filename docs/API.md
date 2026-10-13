@@ -144,14 +144,13 @@ Treasury's ranking not shown to the army), is `nil`.
 	games = { -- only the games the King made public
 		arena = { { place = 1, name = "Name-Realm", rating = 1520, wins = 9, losses = 2 }, ... },
 		bones = { { place = 1, name = "Name-Realm", games = 12, won = 8 }, ... },
-		lottery = { latest = { { name = "Name-Realm", day = "10-11", beast = "07 Sheep", amount = 25000 }, ... },
-			biggest = { { place = 1, name = "Name-Realm", amount = 25000 }, ... } },
 	},
 }
 ```
 
 The Slayers boards are this client's own (what it observed), as the Wanted tab says. A game the
-King keeps to the staff is not there, whoever the player is. `amount` is in copper.
+King keeps to the staff is not there, whoever the player is. Lottery results are private history
+and never appear in rankings, including when an older client published a Lottery ranking word.
 
 `donors` is there only while the King shows every member the Treasury's ranking (it is off until he
 does), whoever the player is: the King's and the Treasury keepers' own view never counts. `all` is

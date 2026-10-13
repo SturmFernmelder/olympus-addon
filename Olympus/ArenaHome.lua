@@ -839,12 +839,13 @@ function ArenaHome.GamesStaff()
 	return ns.Workshop ~= nil and type(ns.Workshop.Visible) == "function" and ns.Workshop.Visible() == true
 end
 ArenaHome.rankGame = "arena"
-local RANK_GAMES = { "arena", "bones", "lottery" }
+local RANK_GAMES = { "arena", "bones" } -- Lottery is private draw history, never a ranking.
 local RANK_WORDS = { arena = "ARENA_SECTION_ARENA", bones = "ARENA_SECTION_BONE", lottery = "ARENA_SECTION_LOTTERY" }
 -- The games' rankings for everyone, one game at a time (the owner's answer, 2026-10-04: the King
 -- and the councillors he names publish, per game): each game's publish word (ArenaRoles.RankPublic),
 -- else the King's settings' rankPub. game nil: any of them.
 function ArenaHome.RankingsPublic(game)
+	if game == "lottery" then return false end
 	local R = ns.ArenaRoles
 	if type(R) ~= "table" or type(R.RankPublic) ~= "function" then return false end
 	if game then return R.RankPublic(game) == true end
@@ -854,10 +855,12 @@ end
 -- Who may flip a game's switch (the shown one by default): the King, or a councillor the King names
 -- for that game (ArenaRoles.MayPublish). The rest of the staff see it read-only.
 function ArenaHome.MaySetRankings(game)
+	if (game or ArenaHome.rankGame) == "lottery" then return false end
 	local R = ns.ArenaRoles
 	return type(R) == "table" and type(R.MayPublish) == "function" and R.MayPublish(ns.me, game or ArenaHome.rankGame) == true
 end
 function ArenaHome.SetRankingsPublic(on, game)
+	if (game or ArenaHome.rankGame) == "lottery" then return false, "private" end
 	local ok, why = Call("ArenaRoles", "Publish", game or ArenaHome.rankGame, on)
 	if not ok then ns.Print(L.ARENA_GAMES_SWITCH_REFUSED:format(tostring(why or "?"))) end
 	ns.Fire("ARENA_CHANGED")
@@ -869,6 +872,7 @@ function ArenaHome.NamesPublishers()
 end
 -- The King names a councillor for game, or no more (on false): his T1~J again, that one changed.
 function ArenaHome.SetPublisher(name, game, on)
+	if game == "lottery" then return false, "private" end
 	local R = ns.ArenaRoles
 	if type(R) ~= "table" or type(R.Publishers) ~= "function" then return false end
 	local list, found = {}, false
