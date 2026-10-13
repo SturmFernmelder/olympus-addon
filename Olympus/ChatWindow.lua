@@ -1148,7 +1148,9 @@ local function DrawLines(all)
 	end
 	-- The lines of ours that were not sent: a grey note each, a click puts one back in the box.
 	local t = tier
-	-- (1.2.4: one refused at Enter has its words still in the box: its reason alone, nothing to put back.)
+	-- (1.2.4: one refused at Enter has its words still in the box: its reason alone, nothing to put back;
+	-- a room's line some of its members got stays in the room as said: not everyone got it, and why,
+	-- nothing to put back either, as a second send would reach twice those who had it.)
 	for _, note in ipairs(notes[t] or {}) do
 		local key = WHY[note.why] or WHY.failed
 		nr = nr + 1
@@ -1156,8 +1158,8 @@ local function DrawLines(all)
 		if note.said then
 			-- (1.2.4: a line that went, and the members of its room online it could not reach: ChatWindow.Missed.)
 			y = y + Row(nr, Grey(note.said), y, width)
-		elseif note.kept then
-			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key])), y, width)
+		elseif note.kept or note.partial then
+			y = y + Row(nr, Grey((note.partial and L.CHATWIN_PART_SENT or L.CHATWIN_NOT_SENT):format(L[key])), y, width)
 		else
 			y = y + Row(nr, Grey(L.CHATWIN_NOT_SENT:format(L[key]) .. " " .. L.CHATWIN_PUT_BACK), y, width, function() PutBack(t, note) end)
 		end
@@ -2822,12 +2824,23 @@ end
 -- words stay in the box, and a line sent takes the note away (Submit). Before, the reason went to
 -- the game's chat frame at best, under the Olympus window.
 function ChatWindow.Refused(t, why)
+	ChatWindow.Unrefused(t)
 	local list = notes[t] or {}
 	notes[t] = list
 	for i = #list, 1, -1 do if list[i].kept or list[i].said then table.remove(list, i) end end
 	list[#list + 1] = { why = WHY[why] and why or "failed", kept = true }
 	while #list > MAX_NOTES do table.remove(list, 1) end
 	MarkDirty()
+end
+-- (The refusal's note lives as long as its words in the box: the box emptied in its room, by hand
+-- or by an empty Enter, takes it away too, as a line sent does. The box's OnTextChanged.)
+function ChatWindow.Unrefused(t)
+	local list = notes[t]
+	if not list then return end
+	local had = #list
+	for i = #list, 1, -1 do if list[i].kept then table.remove(list, i) end end
+	if #list == 0 then notes[t] = nil end
+	if #list ~= had then MarkDirty() end
 end
 
 -- 1.2.4: a role room's line that went, to FANOUT of its members at most (ChatRooms.FANOUT; the
@@ -3641,6 +3654,7 @@ local function Build(h)
 		if tier then
 			local text = self:GetText() or ""
 			ChatWindow.drafts[tier] = text ~= "" and text or nil
+			if Trim(text) == "" then ChatWindow.Unrefused(tier) end
 		end
 		ns.SafeCall("chat tab box", Hint)
 	end)
@@ -4121,11 +4135,14 @@ ns.On("CHAT_SEND_FAILED", function(t, why, text)
 	while #list > MAX_NOTES do table.remove(list, 1) end
 	MarkDirty()
 end)
-ns.On("CHAT_ROOM_SEND_FAILED", function(id, why, text)
+-- 1.2.4 (the review): reached, how many of the room got it (ChatRooms.Send; a provider's room says 0).
+-- Some did: the line stays in the room as said, and its note says not everyone got it, with nothing
+-- to put back (sent again, it would reach twice those who had it).
+ns.On("CHAT_ROOM_SEND_FAILED", function(id, why, text, reached)
 	if not ChatWindow.Logical(id) or type(text) ~= "string" or text == "" then return end
 	local list = notes[id] or {}
 	notes[id] = list
-	list[#list + 1] = { why = WHY[why] and why or "failed", text = text }
+	list[#list + 1] = { why = WHY[why] and why or "failed", text = text, partial = (tonumber(reached) or 0) > 0 or nil }
 	while #list > MAX_NOTES do table.remove(list, 1) end
 	MarkDirty()
 end)
