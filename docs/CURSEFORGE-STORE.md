@@ -414,10 +414,9 @@ A tab with a crown that only the King sees: the guild master of the guild named 
 "Olympus" (of his faction), and on the Alliance that very character, Asmongold Asmongler: the
 addon knows him by name, like the Treasurer. It opens on **the Throne Room** (the queue of
 his court while it is open, and the army's key), and holding court takes him there. Since 1.1.5
-the Treasury has its own tab alone, and under the Throne Room are **the centurions of the King's
-guild** (up to 10, bronze without wings), named by the King or a High Councillor, who has the
-Throne for them; his Steward and Hands read the list (department heads come in 1.1.6). Each of
-his tools lives where it belongs:
+the Treasury has its own tab alone, and under the Throne Room are **the King's centurions**:
+since 1.2.4 the High Council, as its signed list names them (nobody is named in game), each
+councillor of his guild with his War Room squad. Each of his tools lives where it belongs:
 
 *The list is in the README, with the rest of this section: [The Throne (the King and his Hands)](https://github.com/dnl-gentile/olympus-addon#the-throne-the-king-and-his-hands).*
 

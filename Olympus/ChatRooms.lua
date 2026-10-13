@@ -193,10 +193,22 @@ local function Correspondent(name, department)
 	return false
 end
 
-local function Centurion(name, guild)
+-- 1.2.4 (the author's rule): in the King's guild the High Council are the King's centurions, the
+-- signed list alone saying who (no list of anyone's names one there since: Nominees.ListOf). In that
+-- guild's own room (own), a councillor in our fresh roster of it; across the federation, every
+-- signed councillor, wherever his own guild is.
+local function KingsCenturion(name, guild, own)
+	if not ns.IsKingGuild(guild) or ns.IsHighCouncillor(name) ~= true then return false end
+	if not own then return true end
+	local R = ns.Roster
+	return R ~= nil and R.Fresh ~= nil and R.Fresh() ~= nil and R.RankOf ~= nil and R.RankOf(ns.FullName(name)) ~= nil
+end
+
+-- own: the guild's own room (Guild Centurions), else All Centurions.
+local function Centurion(name, guild, own)
 	local rank = Rank(name, guild)
 	return rank ~= nil and rank > 0 and rank <= ns.CAPTAIN_RANK
-		or Nomination(name, guild) == "centurion"
+		or Nomination(name, guild) == "centurion" or KingsCenturion(name, guild, own)
 end
 
 local function RoleAccess(id, name)
@@ -204,10 +216,10 @@ local function RoleAccess(id, name)
 	if id == "departments" then return DepartmentFor(name) ~= nil or Correspondent(name) end
 	if id == "centurions" then
 		local guild = GetGuildInfo and GetGuildInfo("player")
-		return guild ~= nil and ns.IsFederation(guild) and Centurion(name, guild) or false
+		return guild ~= nil and ns.IsFederation(guild) and Centurion(name, guild, true) or false
 	end
 	for _, guild in ipairs(Guilds()) do
-		if id == "masters" and Rank(name, guild) == 0 or id == "allcenturions" and Centurion(name, guild) then return true end
+		if id == "masters" and Rank(name, guild) == 0 or id == "allcenturions" and Centurion(name, guild, false) then return true end
 	end
 	return false
 end
@@ -569,6 +581,13 @@ local function Members(id)
 				local N = ns.Nominees
 				local list = N and N.ListOf and N.ListOf(guild)
 				for _, entry in ipairs(list and list.entries or {}) do Add(entry.name) end
+			end
+		end
+		-- (1.2.4: the King's centurions, the signed High Council, in the centurions' rooms.)
+		if id == "centurions" or id == "allcenturions" then
+			local c = ns.rdb and ns.rdb.council
+			for key, display in pairs(type(c) == "table" and type(c.names) == "table" and c.names or {}) do
+				Add(type(display) == "string" and display or key)
 			end
 		end
 		local d = DEPT_BY_ID[id]

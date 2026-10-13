@@ -124,8 +124,9 @@ ns.Borders = Borders
 --   nominee  a centurion or correspondent his guild master named (Nominees.RoleOf: the list his
 --            master's client sends, taken only from that guild's master as Facts proves a guild
 --            master, and dropped when he stops being it), while the server gives the unit that
---            very guild (GetGuildInfo): nobody outside it can borrow it; in the King's guild (1.1.5),
---            a centurion the King or a High Councillor named (the list taken from them alone)
+--            very guild (GetGuildInfo): nobody outside it can borrow it. None in the King's guild
+--            (1.2.4, the author's rule: the King's centurions are the High Council, in their silver;
+--            1.1.5's list of its centurions counts for nothing since, Nominees.ListOf)
 -- The supplied primary federal Treasurer dragon is portrait-only (TreasurerPin == 1, never
 -- the mail alternate); the King takes precedence. Existing chat/nameplate marks stay unchanged.
 -- Portrait order: the King, the primary Treasurer, the High Council, the dev, a guild master, a nominee
