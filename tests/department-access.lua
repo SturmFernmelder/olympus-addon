@@ -74,6 +74,35 @@ test("guild departments: exact own-guild correspondent authority comes from a fr
 	end)
 end)
 
+-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept".) Fails before: the guild
+-- master's list lived in memory 6 hours, so with him offline since the evening, or after any /reload, a
+-- correspondent lost his department, its Guild workspace and the department line said nobody was named.
+test("guild departments (1.2.4): a correspondent keeps his department while the guild master is offline, across a reload, until the master's list ends", function()
+	World(function(w, c)
+		local dept = "Department of War"
+		w.name(dept)
+		local heardAt = w.now
+		eq(c.Nominees.IsCorrespondent(c.me, w.guild, dept), true)
+		-- The guild master logs off for the night: nobody repeats the list; our roster still names him master.
+		w.now = w.now + 9 * 3600; c.Roster.snapshotAt = w.now
+		eq(c.Nominees.IsCorrespondent(c.me, w.guild, dept), true, "kept past the old six hours")
+		-- A /reload: Nominees.lua loads again, its memory empty; the saved list comes back.
+		assert(loadfile(ROOT .. "Olympus/Nominees.lua"))("Olympus", c)
+		local N = c.Nominees
+		eq(N.IsCorrespondent(c.me, w.guild, dept), true, "kept across a reload")
+		eq(N.OwnDepartment(), dept); eq((N.GuildAccess()), true)
+		eq(N.Correspondent(w.guild, dept), c.me, "the department line names him")
+		-- Our roster still decides: a demotion of the master ends it at once.
+		c.Roster.byName["Guildmaster-Realm"] = 1
+		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "deposed")
+		c.Roster.byName["Guildmaster-Realm"] = 0
+		-- Thirty days without a word from him: it ends.
+		w.now = heardAt + N.FRESH + 1; c.Roster.snapshotAt = w.now
+		eq(N.IsCorrespondent(c.me, w.guild, dept), false, "expired nomination")
+		eq((N.GuildAccess()), false)
+	end)
+end)
+
 test("guild departments: each correspondent sees their own panel with inert previews and no other department controls", function()
 	World(function(w, c)
 		local N = c.Nominees

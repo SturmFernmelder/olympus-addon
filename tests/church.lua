@@ -258,12 +258,15 @@ test("1.1.6 Church: missionaries: an Apostle names under himself, a missionary u
 	eq(Role(w, c.a3, "Forged Pick-Realm"), nil, "a missionary names under himself only")
 end)
 
-test("1.1.6 Church: the chain's limits: ten per parent, five levels, three hundred in all", function()
+test("1.2.4 Church: the chain's limits: twelve per parent, five levels, five thousand in all", function()
 	local w, c = Cast()
-	for i = 1, 10 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
-	eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Eleven"), false, "the eleventh")
-	-- (1.2.4: the namer is told his own count and what frees a place, not "that person".)
-	eq(w:Printed(c.a1), ns.L.CHURCH_NO_QUOTA_SELF:format(10, 10))
+	for i = 1, 12 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Thirteen"), false, "the thirteenth")
+	eq(w:Printed(c.a1), ns.L.CHURCH_NO_QUOTA_SELF:format(12, 12))
+	w:Run(11)
+	local over = w:As(c.a1, c.a1.Church.ActText, "+", "M", "Kid Thirteen", nil, nil, w.clock)
+	local accepted, why = w:As(c.member, c.member.Church.TakeAct, c.a1.name, over)
+	eq(accepted, false); eq(why, "quota", "a modified sender's thirteenth is refused too")
 	-- Five levels below the Apostle, not six.
 	local parent = c.a2
 	local names = { "Lev One", "Lev Two", "Lev Three", "Lev Four", "Lev Five" }
@@ -277,15 +280,113 @@ test("1.1.6 Church: the chain's limits: ten per parent, five levels, three hundr
 	eq(Place(w, five, "Lev Five").depth, 5)
 	eq(w:Act(five, five.Church.NameMissionary, "Lev Six"), false, "the sixth level")
 	eq(w:Printed(five), ns.L.CHURCH_NO_DEEP)
-	-- The total: a relayed book past 300 leaves the later ones invalid, holding nothing.
+	-- The total also applies to a relayed book, not just the naming action.
 	local S0 = w:As(c.member, c.member.Church.State)
-	eq(S0.valid, 15)
+	eq(S0.valid, 17)
 	local saved = c.member.Church.MISSIONARIES_MAX
-	c.member.Church.MISSIONARIES_MAX = 14
+	c.member.Church.MISSIONARIES_MAX = 16
 	c.member.Church.Changed()
 	local S = w:As(c.member, c.member.Church.State)
-	eq(S.valid, 14); eq(#S.invalid, 1); eq(S.invalid[1].why, "full")
+	eq(S.valid, 16); eq(#S.invalid, 1); eq(S.invalid[1].why, "full")
 	c.member.Church.MISSIONARIES_MAX = saved
+end)
+
+-- Saved missionary trees with ordinary character names. The fixture describes twelve children
+-- per parent in breadth-first order; the actual Church parser, saved-book check and tree derive
+-- decide which places count, including quota, depth and total failures.
+local function TreeName(i, prefix)
+	local letters = {}
+	for at = 4, 1, -1 do letters[at] = string.char(97 + i % 26); i = math.floor(i / 26) end
+	return (prefix or "Tree") .. " " .. table.concat(letters) .. "-Realm"
+end
+local function TreeBook(w, cl, count, page)
+	local b, queue, candidate = w:As(cl, cl.Church.Book), { APOSTLES[1] }, 0
+	for i = 1, count do
+		local name
+		repeat
+			candidate = candidate + 1
+			name = TreeName(candidate)
+		until not page or cl.Church.PageOf(Key(name)) == page
+		local parentAt = math.floor((i - 1) / 12) + 1
+		local parent = queue[parentAt]
+		local line = ("NB~1~p~M~%s~%s~%s~%s~-~%s"):format(name, parent, parent,
+			parentAt == 1 and "A" or "M", ns.Codec.Base36(w.clock - count + i))
+		local _, key, entry = cl.Church.ParseEntry(line)
+		assert(key and entry, line)
+		b.p[key] = entry
+		queue[#queue + 1] = name
+	end
+	w:As(cl, cl.Church.CheckSaved)
+	assert(w:As(cl, cl.Church.Book) == b, "the actual saved-book check keeps the fixture")
+	return b, queue
+end
+
+test("1.2.4 Church: five thousand saved missionaries stay valid and cached; the next naming is refused and pruning keeps the accepted tree", function()
+	local w = World.New({ apostles = APOSTLES })
+	local keeper = w:Client(APOSTLES[1])
+	local b = TreeBook(w, keeper, 5001)
+	local S = w:As(keeper, keeper.Church.State)
+	eq(S.valid, 5000, "the full saved tree counts")
+	eq(#S.invalid, 1); eq(S.invalid[1].why, "full", "a saved 5,001st place grants nothing")
+	for _ = 1, 20 do eq(w:As(keeper, keeper.Church.State), S, "an unchanged tree is derived once") end
+	local can, why = w:As(keeper, keeper.Church.MayAct, "+", "M", "One More", APOSTLES[2], nil, World.KING)
+	eq(can, false); eq(why, "full", "the 5,001st naming is refused")
+	-- A newer page with a self-cycle grants nothing. Surplus invalid entries must not push an
+	-- older accepted parent out of the saved book, which would break the whole branch below it.
+	for i = 1, 40 do
+		local name = TreeName(i, "Surplus")
+		local _, key, entry = keeper.Church.ParseEntry(("NB~1~p~M~%s~%s~%s~K~-~%s"):format(name, name, World.KING, ns.Codec.Base36(w.clock + i)))
+		b.p[key] = entry
+	end
+	w:As(keeper, keeper.Church.Changed)
+	eq(w:As(keeper, keeper.Church.State).valid, 5000)
+	w:As(keeper, keeper.Church.Prune)
+	local places = 0
+	for _ in pairs(b.p) do places = places + 1 end
+	eq(places, 5000 + keeper.Church.APOSTLES_MAX * 2, "the saved book stays bounded")
+	eq(w:As(keeper, keeper.Church.State).valid, 5000, "every accepted parent and child survives")
+	local reloaded = w:Client(APOSTLES[1], { rdb = World.Copy(keeper.ns.rdb) })
+	w:As(reloaded, reloaded.Church.CheckSaved)
+	eq(w:As(reloaded, reloaded.Church.State).valid, 5000, "the larger tree survives a reload")
+end)
+
+test("1.2.4 Church: a page larger than the transfer budget finishes over bounded answers and retries a missed answer", function()
+	local w = World.New({ apostles = APOSTLES })
+	local keeper = w:Client(APOSTLES[1])
+	TreeBook(w, keeper, 350, "P0")
+	local late = w:Client(World.AUTHOR)
+	local expected = w:As(keeper, keeper.Church.BookDigest)
+	local all = w:As(keeper, keeper.Church.PageLines, "P0")
+	eq(#all, 350, "one page is larger than two answers")
+	local seen, calls, original = {}, 0, keeper.Church.PageLines
+	keeper.Church.PageLines = function(page) calls = calls + 1; return original(page) end
+	for attempt = 1, 8 do
+		w.clock = w.clock + keeper.Church.ASK_GAP + 1
+		w:ClearSent()
+		eq(w:As(late, late.Church.AskPages, keeper.name), true)
+		local ask = w:Sent(late, "NB", "WHISPER", "q")[1]
+		assert(ask)
+		w.pending = {} -- deliver explicitly to model the first answer lost in transit
+		calls = 0
+		eq(w:As(keeper, keeper.Church.AnswerAsk, late.name, ask.msg), true)
+		assert(calls <= 18, "bounded page passes, never one pass per entry")
+		local entries = w:Sent(keeper, "NB", "WHISPER", "p")
+		eq(#entries, keeper.Church.TRANSFER_MAX, "each unfinished answer keeps the existing budget")
+		w.pending = {}
+		if attempt > 1 then
+			for _, e in ipairs(entries) do
+				assert(#e.msg <= 255, "every entry fits the unchanged protocol")
+				seen[e.msg] = true
+				w:As(late, late.Church.Receive, "WHISPER", keeper.name, e.msg)
+			end
+		end
+		if w:As(late, late.Church.BookDigest) == expected then break end
+	end
+	local distinct = 0
+	for _ in pairs(seen) do distinct = distinct + 1 end
+	eq(distinct, 350, "later answers reach every entry, including the missed first slice")
+	eq(w:As(late, late.Church.BookDigest), expected, "the late keeper converges")
+	eq(w:As(late, late.Church.State).valid, 350)
 end)
 
 test("1.1.6 Church: a namer who loses his place: his nominees stay, marked, one level up; the Head keeps or moves them", function()
@@ -345,24 +446,54 @@ test("1.1.6 Church: the tree is the same whatever order the acts come in; a cycl
 	eq(w:As(y, y.Church.MayAct, "+", "M", "Their Pick-Realm", nil, nil, "Cyc One-Realm"), false, "no naming")
 end)
 
-test("Church correspondent authority: census claims never appoint; signed or roster masters may appoint, and revocation removes the derived role", function()
+-- A guild's census proving (or deposing) its master, as Data.AuthorizedRank reads it in the world
+-- (tests/church-world.lua), and the DATA_CHANGED every census report heard fires on each client.
+local function Census(w, guild, name, rank)
+	w.census[ns.Fold(guild) .. ":" .. Key(name)] = rank
+	for _, cl in ipairs(w.clients) do if cl.Church and cl.online then w:As(cl, cl.ns.Fire, "DATA_CHANGED") end end
+end
+local function Leader(w, guild, name)
+	w.leaders = w.leaders or {}
+	w.leaders[ns.Fold(guild)] = name
+end
+-- A /reload, or a login the next day: the same character's saved data (its SavedVariables), nothing
+-- of the session (its memory, its pending acts, what it heard), the files loaded again (INIT).
+local function Reload(w, cl)
+	cl.online = false
+	local again = w:Client(cl.name, { guild = cl.guild or false, rank = cl.rank, rdb = cl.ns.rdb })
+	w:As(again, again.ns.Fire, "INIT")
+	return again
+end
+
+-- (1.2.4: another guild's master by Data.AuthorizedRank, as for his bronze wings and the list of his
+-- nominees: its census until the author enforces the signed leadership, that list alone from then on.
+-- 1.2.1 to 1.2.3 asked the signed list alone, which no release enforces: this test's first half asserted
+-- that a census guild master never appoints, and his correspondent showed on no client outside his guild,
+-- the author's ask "the Church shows no correspondent". The signed half is the same as then.)
+test("Church correspondent authority: another guild's master appoints by his census until the signed leadership is enforced, by that list alone after; revocation removes the derived role", function()
 	local w, c = Cast()
-	local rank
-	c.member.ns.Authority = { Rank = function(name, guild)
+	local rank, enforced = nil, true
+	c.member.ns.Authority = { Enforced = function() return enforced end, Rank = function(name, guild)
 		if name == c.gm.name and guild == World.GUILD2 then return rank, rank ~= nil and "signed" or nil end
 	end }
-	w.census[ns.Fold(World.GUILD2) .. ":" .. Key(c.gm.name)] = 0
+	Census(w, World.GUILD2, c.gm.name, 0)
 	local text = w:As(c.gm, c.gm.Church.ActText, "+", "C", "Vale Helper-Realm", nil, World.GUILD2, w.clock)
 	w:As(c.member, c.member.Church.Receive, "CHANNEL", c.gm.name, text)
-	eq(Role(w, c.member, "Vale Helper"), nil, "a census guild master has no appointment power")
+	eq(Role(w, c.member, "Vale Helper"), nil, "the signed leadership enforced: a census guild master has no appointment power")
 	w:As(c.member, c.member.Church.RetryPending)
 	eq(Role(w, c.member, "Vale Helper"), nil)
 	rank = 0
 	w:As(c.member, c.member.ns.Fire, "DATA_CHANGED")
 	eq(Role(w, c.member, "Vale Helper"), "C", "the signed guild master's pending act takes effect")
 	rank = nil
-	eq(Role(w, c.member, "Vale Helper"), nil, "a revoked or expired issuer loses authority even without a book change")
+	eq(Role(w, c.member, "Vale Helper"), nil, "a revoked or expired issuer loses authority even without a book change, kept from no memory")
 	eq(w:As(c.member, c.member.Church.Book).c[ns.Fold(World.GUILD2)].n, "Vale Helper-Realm", "the appointment stays archived")
+	-- As every release ships it (not enforced): the census's guild master, two senders naming him.
+	enforced = false
+	w:As(c.member, c.member.ns.Fire, "DATA_CHANGED")
+	eq(Role(w, c.member, "Vale Helper"), "C", "his census proves him: his guild's correspondent")
+	Census(w, World.GUILD2, c.gm.name, 3)
+	eq(Role(w, c.member, "Vale Helper"), nil, "the census gives him another rank: it ends at once")
 	-- A trusted root can issue a new appointment; local guild masters still use the real roster.
 	w:Run(1)
 	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Root Helper", World.GUILD2), true)
@@ -374,21 +505,29 @@ test("Church correspondent authority: census claims never appoint; signed or ros
 	eq(Role(w, c.member, "Plain Member"), nil, "own-roster demotion is rechecked")
 end)
 
-test("Church correspondent authority: a keeper's page cannot invent a nomination issuer, and a signed appointment is rechecked after import", function()
+test("Church correspondent authority: a keeper's page cannot invent a nomination issuer, and an imported appointment is rechecked", function()
 	local w, c = Cast()
-	local rank
-	c.councillor.ns.Authority = { Rank = function(name, guild)
+	local rank, enforced = nil, false
+	c.councillor.ns.Authority = { Enforced = function() return enforced end, Rank = function(name, guild)
 		if name == c.gm.name and guild == World.GUILD2 then return rank, rank ~= nil and "signed" or nil end
 	end }
 	eq(w:As(c.councillor, c.councillor.Church.AskPages, c.a1.name), true)
 	local page = ("NB~1~p~C~%s~Vale Helper-Realm~%s~G~-~%s"):format(World.GUILD2, c.gm.name, ns.Codec.Base36(w.clock))
 	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, page), false, "the relay's keeper role does not authenticate the original namer")
 	eq(Role(w, c.councillor, "Vale Helper"), nil)
-	rank = 0
+	eq(w:As(c.councillor, c.councillor.Church.Stats).dropped.issuer, 1)
+	-- (1.2.4) His census proves him: the keeper's line is taken, as his own act would be.
+	Census(w, World.GUILD2, c.gm.name, 0)
 	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, page), true)
 	eq(Role(w, c.councillor, "Vale Helper"), "C")
+	Leader(w, World.GUILD2, "Vale Usurper-Realm"); Census(w, World.GUILD2, "Vale Usurper", 0); Census(w, World.GUILD2, c.gm.name, nil)
+	eq(Role(w, c.councillor, "Vale Helper"), nil, "imported appointments lose their role when the census proves another master")
+	-- The signed leadership enforced: that list's word alone, at once.
+	Leader(w, World.GUILD2, nil); Census(w, World.GUILD2, "Vale Usurper", nil)
+	enforced, rank = true, 0
+	eq(Role(w, c.councillor, "Vale Helper"), "C")
 	rank = nil
-	eq(Role(w, c.councillor, "Vale Helper"), nil, "imported appointments lose their role when the issuer's authority ends")
+	eq(Role(w, c.councillor, "Vale Helper"), nil, "imported appointments lose their role when the signed issuer's authority ends")
 end)
 
 test("1.1.6 Church: correspondents: a guild master for his own guild, a root for any; replaced by a newer naming", function()
@@ -399,24 +538,283 @@ test("1.1.6 Church: correspondents: a guild master for his own guild, a root for
 	Everyone(w, function(cl) if cl.guild == World.GUILD then eq(Role(w, cl, "Plain Member"), "C", cl.name) end end)
 	-- Another guild's master: only for his own guild, never for ours.
 	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper", World.GUILD), false)
-	-- His own guild, on a client of another guild: signed leadership, never census vouches.
-	local signedRank
-	c.member.ns.Authority = { Rank = function(name, guild)
-		if name == c.gm.name and guild == World.GUILD2 then return signedRank, signedRank ~= nil and "signed" or nil end
-	end }
+	-- His own guild, on a client of another guild: by the census (two vouches); unknown, it waits.
+	-- (1.2.4: as in 1.1.6 and 1.2.0; 1.2.1 to 1.2.3 asked the signed leadership alone here.)
 	local text = w:As(c.gm, c.gm.Church.ActText, "+", "C", "Vale Helper-Realm", nil, World.GUILD2, w.clock)
 	w:As(c.member, c.member.Church.Receive, "GUILD", c.gm.name, text)
 	eq(w:As(c.member, c.member.Church.State).corr[ns.Fold(World.GUILD2)], nil, "not yet")
 	eq(#w:As(c.member, c.member.Church.Pending), 1)
-	signedRank = 0
-	w:As(c.member, c.member.Church.RetryPending)
+	Census(w, World.GUILD2, c.gm.name, 0)
 	eq(w:As(c.member, c.member.Church.State).corr[ns.Fold(World.GUILD2)].n, "Vale Helper-Realm")
+	eq(#w:As(c.member, c.member.Church.Pending), 0, "taken when the census report came (DATA_CHANGED)")
 	-- A newer naming replaces; the correspondent himself may step down.
 	w:Act(c.king, c.king.Church.NameCorrespondent, "Other Helper", World.GUILD)
 	eq(w:As(c.member, c.member.Church.State).corr[ns.Fold(World.GUILD)].n, "Other Helper-Realm")
 	eq(Role(w, c.member, "Plain Member"), nil)
 	eq(w:As(helper, helper.Church.MayAct, "-", "C", nil, nil, World.GUILD, helper.name), true)
 	eq(w:As(c.member, c.member.Church.MayAct, "-", "C", nil, nil, World.GUILD, c.member.name), false)
+end)
+
+-- (1.2.4, the author's ask: "the Church shows no correspondent named, but I doubt no GM named one ... if
+-- the GM isn't online, it has to be kept".) Fails before: no client outside his guild took his naming
+-- (the signed leadership alone, which nobody enforces), so the author, the King and every Apostle of
+-- another guild showed "none", the GM online or not.
+test("1.2.4 Church: another guild's master names his correspondent: every client takes it once his census proves him, and keeps it while he is offline, across a reload, 30 days after it last proved him", function()
+	local w, c = Cast()
+	local vale = w:Client("Vale Member", { guild = World.GUILD2 })
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper"), true, "his own guild, by his own rank")
+	local gkey = ns.Fold(World.GUILD2)
+	for _, cl in ipairs({ c.author, c.king, c.a1, c.member, vale, c.gm }) do
+		eq(Role(w, cl, "Vale Helper"), "C", cl.name)
+		eq(w:As(cl, cl.Church.State).corr[gkey].n, "Vale Helper-Realm", cl.name)
+	end
+	-- He logs off, and so do his guild's reporters: the census goes quiet, nobody can tell any more.
+	c.gm.online, vale.online = false, false
+	Census(w, World.GUILD2, c.gm.name, nil)
+	w:Run(3600)
+	eq(Role(w, c.author, "Vale Helper"), "C", "kept while his guild is offline")
+	eq(Role(w, c.member, "Vale Helper"), "C")
+	-- A login the next day: the author's saved book keeps it.
+	w:Run(86400)
+	local author = Reload(w, c.author)
+	eq(Role(w, author, "Vale Helper"), "C", "kept across a reload")
+	eq(w:As(author, author.Church.State).corr[gkey].n, "Vale Helper-Realm")
+	-- His census heard again (day 20) proves him again: kept 30 days from then.
+	w:Run(18 * 86400)
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(Role(w, author, "Vale Helper"), "C")
+	Census(w, World.GUILD2, c.gm.name, nil)
+	w:Run(author.Church.CORR_KEEP - 60)
+	eq(Role(w, author, "Vale Helper"), "C", "29 days and some after it last proved him")
+	w:Run(120)
+	eq(Role(w, author, "Vale Helper"), nil, "30 days without a word: no longer shown")
+	eq(w:As(author, author.Church.Book).c[gkey].n, "Vale Helper-Realm", "the naming stays in the book")
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(Role(w, author, "Vale Helper"), "C", "his next word proves him again")
+end)
+
+test("1.2.4 Church: a kept correspondent ends at once when he takes it back, when the census proves another master or gives him another rank; his master still gains nothing beyond it", function()
+	local w, c = Cast()
+	local gkey = ns.Fold(World.GUILD2)
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper"), true)
+	Census(w, World.GUILD2, c.gm.name, nil)
+	w:Run(3600)
+	-- He takes it back while his census is quiet: every client showing it takes his word.
+	eq(Role(w, c.member, "Vale Helper"), "C")
+	eq(w:Act(c.gm, c.gm.Church.RemoveCorrespondent, World.GUILD2), true)
+	for _, cl in ipairs({ c.author, c.king, c.a1, c.member }) do eq(Role(w, cl, "Vale Helper"), nil, cl.name) end
+	eq(w:As(c.author, c.author.Church.Book).cx[gkey] ~= nil, true, "his removal, in the book")
+	-- Named again, kept again; then another master proven (the report's leader, two senders naming him).
+	w:Run(60)
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Second"), true)
+	Census(w, World.GUILD2, c.gm.name, nil)
+	w:Run(3600)
+	eq(Role(w, c.author, "Vale Second"), "C")
+	Leader(w, World.GUILD2, "Vale Heir-Realm"); Census(w, World.GUILD2, "Vale Heir", 0)
+	eq(Role(w, c.author, "Vale Second"), nil, "another guild master proven")
+	eq(w:As(c.author, c.author.Church.State).corr[gkey], nil)
+	Leader(w, World.GUILD2, nil); Census(w, World.GUILD2, "Vale Heir", nil)
+	eq(Role(w, c.author, "Vale Second"), nil, "the census quiet again: a deposed master's naming does not come back")
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(Role(w, c.author, "Vale Second"), "C", "proven its master again")
+	-- His guild taken off the network by the moderators: it ranks nobody here, his naming with it.
+	c.author.ns.Data.NetOff = function(guild) return guild == World.GUILD2 end
+	w:As(c.author, c.author.ns.Fire, "DATA_CHANGED")
+	eq(Role(w, c.author, "Vale Second"), nil, "a guild off the network")
+	c.author.ns.Data.NetOff = nil
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(Role(w, c.author, "Vale Second"), "C", "back on it, his census proves him again")
+	Census(w, World.GUILD2, c.gm.name, 2)
+	eq(Role(w, c.author, "Vale Second"), nil, "the census gives him another rank")
+	-- The same census that names him its master gives him nothing else: no Apostle, no missionary, no
+	-- correspondent for another guild, no public ranking, no Church role of his own.
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:As(c.member, c.member.Church.MayAct, "+", "A", "Gm Pick-Realm", nil, nil, c.gm.name), false)
+	eq(select(2, w:As(c.member, c.member.Church.MayAct, "+", "M", "Gm Pick-Realm", nil, nil, c.gm.name)), "rights")
+	eq(select(2, w:As(c.member, c.member.Church.MayAct, "+", "C", "Gm Pick-Realm", nil, World.GUILD, c.gm.name)), "rights")
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Plain Member", World.GUILD), false)
+	eq(w:Act(c.gm, c.gm.Church.SetPublic, true), false)
+	eq(Role(w, c.member, c.gm.name), nil, "a guild master holds no Church place by his rank")
+end)
+
+test("1.2.4 Church: a correspondent kept on a client that can't tell is not relayed into one that can't either; a census-only correspondent's word has the smaller budget", function()
+	local w, c = Cast()
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper"), true)
+	Census(w, World.GUILD2, c.gm.name, nil)
+	-- A late client (it was offline) asks a keeper who keeps it: it can't tell either, so the line waits.
+	local late = w:Client("Late Councillor")
+	w.council[late.key] = true
+	eq(w:As(late, late.Church.AskPages, c.a1.name), true)
+	w:Run(30)
+	eq(Role(w, late, "Vale Helper"), nil, "no client takes a guild master's naming it cannot confirm")
+	eq((w:As(late, late.Church.Stats).dropped.issuer or 0) >= 1, true, "dropped as issuer")
+	-- His census heard, the next ask takes it.
+	Census(w, World.GUILD2, c.gm.name, 0)
+	w:Run(late.Church.ASK_GAP + 1)
+	eq(w:As(late, late.Church.AskPages, c.a1.name), true)
+	w:Run(30)
+	eq(Role(w, late, "Vale Helper"), "C")
+	-- Only another guild's census stands behind him: ChurchCount's smaller budget, as any census-only witness.
+	local S = w:As(c.a1, c.a1.Church.State)
+	eq(S.corrCensus[ns.Fold(World.GUILD2)], true)
+	eq(select(2, w:As(c.a1, c.a1.Count.VerifiedWitness, "Vale Helper-Realm", World.GUILD2, "Some Recruit-Realm", 1)), "census")
+	-- Our own guild's, by our roster: the full budget, as before.
+	local master = w:Client("Ember Master", { rank = 0 })
+	eq(w:Act(master, master.Church.NameCorrespondent, "Plain Member"), true)
+	eq(w:As(c.a1, c.a1.Church.State).corrCensus[ns.Fold(World.GUILD)], nil)
+	local ok, how = w:As(c.a1, c.a1.Count.VerifiedWitness, "Plain Member-Realm", World.GUILD, "Some Recruit-Realm", 1)
+	eq(ok, true); eq(how, nil)
+end)
+
+-- Letters for invented names (a character's name has no digits): 1 "Ab", 2 "Ac", ...
+local function Letters(i)
+	return string.char(65 + math.floor(i / 26) % 26) .. string.char(97 + i % 26)
+end
+
+-- (1.2.4, the review: since a guild master is known by his census, two characters can name a made-up
+-- guild's correspondent.) Fails before: the book kept the 64 newest namings, whoever made them, so 64
+-- made-up guilds named after the King pushed his naming (and a guild master's by our roster) out of every
+-- book, the keepers' too, and real guilds past 64 lost theirs the same way.
+test("1.2.4 Church: past the cap, the namings that no longer hold go first, then the census's (the one confirmed longest ago, then the oldest), never a root's or a roster's; every guild the signed leadership can name fits", function()
+	local w, c = Cast()
+	local obs = c.councillor
+	local MAX = obs.Church.CORRESPONDENTS_MAX
+	eq(MAX >= ns.Authority.MAX_GUILDS, true, "as many guilds as the author's signed leadership can name")
+	w:Run(1)
+	eq(w:Act(c.king, c.king.Church.NameCorrespondent, "Root Helper", World.GUILD2), true)
+	w:Run(10)
+	local master = w:Client("Ember Master", { rank = 0 })
+	eq(w:Act(master, master.Church.NameCorrespondent, "Plain Member"), true)
+	w:Run(400)
+	-- MAX + 1 guilds whose census names their master (made up or not, a client can't tell), each master's
+	-- naming newer than both, as a keeper's pages carry them.
+	eq(w:As(obs, obs.Church.AskPages, c.a1.name), true)
+	w:Run(5)
+	local start = w.clock - 390
+	local function Guild(i) return ("Olympus Made %03d"):format(i) end
+	for i = 1, MAX + 1 do
+		local boss = "Boss " .. Letters(i) .. "-Realm"
+		w.census[ns.Fold(Guild(i)) .. ":" .. Key(boss)] = 0 -- (a guild not heard before: no DATA_CHANGED needed)
+		local page = ("NB~1~p~C~%s~Helper %s-Realm~%s~G~-~%s"):format(Guild(i), Letters(i), boss, ns.Codec.Base36(start + i))
+		eq(w:As(obs, obs.Church.TakeEntry, c.a1.name, page), true, Guild(i))
+	end
+	-- One of them deposed by his census, one gone quiet a minute ago (kept, confirmed longest ago).
+	Census(w, Guild(60), "Boss " .. Letters(60), 2)
+	Census(w, Guild(90), "Boss " .. Letters(90), nil)
+	w:Run(60)
+	local book = w:As(obs, obs.Church.Book)
+	local n = 0
+	for _ in pairs(book.c) do n = n + 1 end
+	eq(n, MAX + 3)
+	w:As(obs, obs.Church.Prune)
+	n = 0
+	for _ in pairs(book.c) do n = n + 1 end
+	eq(n, MAX, "the cap")
+	eq(book.c[ns.Fold(World.GUILD2)] and book.c[ns.Fold(World.GUILD2)].n, "Root Helper-Realm", "the King's naming stays")
+	eq(book.c[ns.Fold(World.GUILD)] and book.c[ns.Fold(World.GUILD)].n, "Plain Member-Realm", "our guild master's, by our roster, stays")
+	eq(Role(w, obs, "Root Helper"), "C"); eq(Role(w, obs, "Plain Member"), "C")
+	eq(book.c[ns.Fold(Guild(60))], nil, "the deposed master's naming goes first")
+	eq(book.c[ns.Fold(Guild(90))], nil, "then the one confirmed longest ago")
+	eq(book.c[ns.Fold(Guild(1))], nil, "then the oldest naming of those confirmed now")
+	eq(book.c[ns.Fold(Guild(2))] ~= nil, true, "the rest stay")
+	eq(book.c[ns.Fold(Guild(MAX + 1))] ~= nil, true)
+	eq(Role(w, obs, "Helper " .. Letters(2)), "C")
+end)
+
+-- (1.2.4, the review.) Fails before: a keeper's page took a correspondent's removal by the one who named
+-- him whatever this client knew of him, while the same removal live was refused here: a keeper that could
+-- not tell passed on a deposed master's late removal, and its time refused the new master's naming.
+test("1.2.4 Church: a keeper's page takes a removal by the namer only while his naming holds here; a deposed master's is refused, and the new master's naming stands", function()
+	local w, c = Cast()
+	local gkey = ns.Fold(World.GUILD2)
+	Census(w, World.GUILD2, c.gm.name, 0)
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper"), true)
+	Census(w, World.GUILD2, c.gm.name, nil)
+	w:Run(60)
+	-- His census quiet, his naming kept: his removal, from a page, is taken (as it would be live).
+	eq(Role(w, c.head, "Vale Helper"), "C")
+	eq(w:As(c.head, c.head.Church.AskPages, c.a1.name), true)
+	local removal = ("NB~1~p~Y~%s~-~%s~G~-~%s"):format(World.GUILD2, c.gm.name, ns.Codec.Base36(w.clock))
+	eq(w:As(c.head, c.head.Church.TakeEntry, c.a1.name, removal), true, "kept here: his word")
+	eq(Role(w, c.head, "Vale Helper"), nil)
+	-- Another master proven, the old one ranked 2: his naming no longer holds on this client.
+	Leader(w, World.GUILD2, "Vale Heir-Realm"); Census(w, World.GUILD2, "Vale Heir", 0); Census(w, World.GUILD2, c.gm.name, 2)
+	eq(Role(w, c.councillor, "Vale Helper"), nil)
+	eq(select(2, w:As(c.councillor, c.councillor.Church.MayAct, "-", "C", nil, nil, World.GUILD2, c.gm.name)), "none", "live: refused")
+	eq(w:As(c.councillor, c.councillor.Church.AskPages, c.a1.name), true)
+	local t = w.clock
+	removal = ("NB~1~p~Y~%s~-~%s~G~-~%s"):format(World.GUILD2, c.gm.name, ns.Codec.Base36(t))
+	local dropped = w:As(c.councillor, c.councillor.Church.Stats).dropped.issuer or 0
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, removal), false, "from a page: refused as well")
+	eq(w:As(c.councillor, c.councillor.Church.Stats).dropped.issuer, dropped + 1)
+	eq(w:As(c.councillor, c.councillor.Church.Book).cx[gkey], nil, "no removal in the book")
+	-- His correspondent's own step-down, his naming no longer holding: refused too.
+	local down = ("NB~1~p~Y~%s~-~Vale Helper-Realm~G~-~%s"):format(World.GUILD2, ns.Codec.Base36(t))
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, down), false)
+	-- The new master's naming, made before that removal: taken.
+	local naming = ("NB~1~p~C~%s~Heir Pick-Realm~Vale Heir-Realm~G~-~%s"):format(World.GUILD2, ns.Codec.Base36(t - 30))
+	eq(w:As(c.councillor, c.councillor.Church.TakeEntry, c.a1.name, naming), true)
+	eq(Role(w, c.councillor, "Heir Pick"), "C")
+	eq(w:As(c.councillor, c.councillor.Church.State).corr[gkey].n, "Heir Pick-Realm")
+end)
+
+-- (1.2.4, the review: the other tests' census is the world's stand-in, tests/church-world.lua.)
+-- Church.IsGuildMaster on the real Data.AuthorizedRank (Data.KnownRank): another guild's master needs
+-- two senders naming him, one of them someone else, in a report FRESH old at most, and CROWN_AFTER since
+-- the login; short of that this client can't tell, and a correspondent it confirmed before stays.
+test("1.2.4 Church: another guild's master on the real census: two senders, a fresh report, after the login's reporting cycle; can't tell short of that, and his kept correspondent stays meanwhile", function()
+	local w, c = Cast()
+	local obs = c.member
+	-- The harness's Data (the real file) for another guild's ranks: the stand-ins go.
+	obs.ns.Data.AuthorizedRank, obs.ns.Data.Guild = nil, nil
+	local D = ns.Data
+	eq(obs.ns.Data.AuthorizedRank, D.AuthorizedRank)
+	local saved = { now = ns.Now, guilds = ns.rdb.guilds, login = ns.Comm.loginAt }
+	local ok, err = pcall(function()
+		ns.Now = function() return w.clock end
+		ns.Comm.loginAt = w.clock - D.CROWN_AFTER - 1
+		ns.rdb.guilds = {}
+		local gm, gkey = c.gm.name, ns.Fold(World.GUILD2)
+		local function Row(leader, votes)
+			local row = { guild = World.GUILD2, leader = ns.ShortName(leader), realm = "Realm", officers = {}, t = w.clock, total = 10, online = 2, zones = {}, vouch = {} }
+			for _, v in ipairs(votes) do row.vouch[v[1]] = { t = w.clock, sig = "picture", ranks = v[2] } end
+			ns.rdb.guilds[World.GUILD2] = row
+			w:As(obs, obs.ns.Fire, "DATA_CHANGED")
+			return row
+		end
+		local function Master(name) return w:As(obs, obs.Church.IsGuildMaster, name or gm, World.GUILD2) end
+		local names = { [gm] = 0 }
+		Row(gm, { { gm, names } })
+		eq(Master(), nil, "his own report alone: can't tell")
+		Row(gm, { { gm, names }, { "Vale Member-Realm", names } })
+		eq(Master(), true, "two senders, one of them someone else")
+		-- He names his correspondent: this client takes it on that census.
+		eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Vale Helper"), true)
+		eq(Role(w, obs, "Vale Helper"), "C")
+		-- A login (the first CROWN_AFTER): can't tell yet; kept.
+		ns.Comm.loginAt = w.clock - 30
+		w:As(obs, obs.ns.Fire, "DATA_CHANGED")
+		eq(Master(), nil, "30 s after login")
+		eq(Role(w, obs, "Vale Helper"), "C", "kept meanwhile")
+		ns.Comm.loginAt = w.clock - D.CROWN_AFTER - 1
+		-- His guild's reports stop: FRESH later, can't tell; kept.
+		w:Run(D.FRESH + 1)
+		w:As(obs, obs.ns.Fire, "DATA_CHANGED")
+		eq(Master(), nil, "the report is old")
+		eq(Role(w, obs, "Vale Helper"), "C", "kept while his guild is quiet")
+		-- The census proves another master: no, at once.
+		Row("Vale Heir-Realm", { { "Vale Member-Realm", { ["Vale Heir-Realm"] = 0, [gm] = 2 } }, { "Vale Other-Realm", { ["Vale Heir-Realm"] = 0, [gm] = 2 } } })
+		eq(Master(), false, "another rank for him")
+		eq(Master("Vale Heir-Realm"), true)
+		eq(Role(w, obs, "Vale Helper"), nil, "ended")
+		eq(w:As(obs, obs.Church.State).corr[gkey], nil)
+	end)
+	ns.Now, ns.rdb.guilds, ns.Comm.loginAt = saved.now, saved.guilds, saved.login
+	assert(ok, err)
 end)
 
 test("1.1.6 Church: acts dated ahead, replayed or older than a removal are refused; a net-off client sends none", function()
@@ -733,8 +1131,8 @@ end)
 test("1.1.6 Church: the Head's keep: never past the new parent's quota, none in the Head's own slot, and the kept one's invites from his first day still count", function()
 	local w, c = Cast()
 	local kid = w:Client("Kid Alpha")
-	for i = 1, 9 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
-	w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Alpha"), true, "his tenth")
+	for i = 1, 11 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Alpha"), true, "his twelfth")
 	eq(w:Act(kid, kid.Church.NameMissionary, "Grand Kid"), true)
 	local namedAt = w.clock
 	w:Run(11); eq(w:Act(kid, kid.Church.NameMissionary, "Grand Kidb"), true)
@@ -743,7 +1141,7 @@ test("1.1.6 Church: the Head's keep: never past the new parent's quota, none in 
 		local p = Place(w, c.member, n)
 		eq(p.valid, true, n); eq(p.adopted, true, n); eq(p.parent, Key(APOSTLES[1]), n)
 	end
-	-- Hours later the Head keeps one: Aldric's tenth own again. A second keep would be his eleventh.
+	-- Hours later the Head keeps one: Aldric's twelfth own again. A second keep would be his thirteenth.
 	w:Run(3 * 3600)
 	eq(w:Act(c.king, c.king.Church.Keep, "Grand Kid"), true)
 	w:Run(11)
