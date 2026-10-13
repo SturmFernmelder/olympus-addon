@@ -2487,15 +2487,16 @@ end
 Watch.ChatShown = ChatShown
 
 -- The tab (UI.AddTab's visible).
-function Watch.TabVisible() return Watch.DeskShown() or Watch.JudgmentsShown() or ChatShown() end
+function Watch.TabVisible() return Watch.DeskShown() or Watch.JudgmentsShown() or ChatShown()
+	or (ns.JusticeTasks and ns.JusticeTasks.Visible()) or false end
 
 -- The sections this player sees, and the one shown when he picked none (or one he no longer
 -- sees): the desk (with its Reports, Cases and a case's page), else the Judgments, else the Tabards.
 local function Sections()
 	local desk = Watch.DeskShown()
 	local list = { desk = desk, reports = desk, cases = desk, case = desk,
-		judgments = Watch.JudgmentsShown(), chat = ChatShown(), tabards = Watch.TabardsShown(), member = Watch.MemberShown() }
-	list.first = desk and "desk" or list.judgments and "judgments" or list.chat and "chat" or list.tabards and "tabards" or list.member and "member" or "desk"
+		judgments = Watch.JudgmentsShown(), justice = ns.JusticeTasks and ns.JusticeTasks.Visible(), chat = ChatShown(), tabards = Watch.TabardsShown(), member = Watch.MemberShown() }
+	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards" or list.member and "member" or "desk"
 	return list
 end
 
@@ -2516,7 +2517,7 @@ function Watch.ViewKey()
 	local section = Section()
 	if section == "tabards" then return "heraldry" end
 	if section == "chat" then return Watch.DeskShown() and "watch" or "judgments" end
-	return (section == "judgments" or section == "member") and "judgments" or "watch"
+	return (section == "judgments" or section == "member" or section == "justice") and "judgments" or "watch"
 end
 
 -- The page shown, for the window's place and its "?" (UI.PageId: "watch/cases").
@@ -2528,7 +2529,7 @@ end
 
 function Watch.Show(mode, key)
 	Watch.mode = (mode == "reports" or mode == "cases" or mode == "case" or mode == "tabards" or mode == "judgments"
-		or mode == "chat" or mode == "member") and mode or nil
+		or mode == "chat" or mode == "member" or mode == "justice") and mode or nil
 	Watch.caseKey = Watch.mode == "case" and key or nil
 	ns.Fire("WATCH_CHANGED")
 end
@@ -2711,6 +2712,7 @@ local function Nav()
 	-- 1.2: the Judgments and the Tabards, for whoever sees them.
 	local J = Judgment()
 	if Watch.JudgmentsShown() then items[#items + 1] = { key = "judgments", text = L.WATCH_NAV_JUDGMENTS:format(J.Count()) } end
+	if ns.JusticeTasks and ns.JusticeTasks.Visible() then items[#items + 1] = { key = "justice", text = rawget(L, "JUSTICE_TASKS_NAV") or "Justice requests" } end
 	-- 1.1.6: Chat moderation (WatchChat.lua).
 	if ChatShown() then items[#items + 1] = { key = "chat", text = L.WATCHCHAT_NAV } end
 	if Watch.TabardsShown() then items[#items + 1] = { key = "tabards", text = L.TAB_HERALDRY } end
@@ -3214,6 +3216,11 @@ end
 
 function Watch.Build()
 	if Section() == "member" then return MemberLines(), L.TAB_WATCH, L.WATCH_MEMBER_DETAIL end
+	if Section() == "justice" and ns.JusticeTasks and ns.JusticeTasks.Visible() then
+		local lines = { Nav() }
+		for _, row in ipairs(ns.JusticeTasks.Lines()) do lines[#lines + 1] = row end
+		return lines, L.TAB_WATCH, rawget(L, "JUSTICE_TASKS_TITLE") or "Justice requests — private activity"
+	end
 	-- 1.2: the Tabards (Views.lua's own lines, search box and detail) under the same navigation.
 	if OnTabards() then
 		local lines, title, text = ns.Views.Build("heraldry")

@@ -99,6 +99,7 @@ UI.lua
 MainKey.lua
 Watch.lua
 Judgment.lua
+JusticeTasks.lua
 KingArrow.lua
 Consent.lua
 WeeklyBrief.lua
