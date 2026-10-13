@@ -524,6 +524,8 @@ end
 function Map.WorldMapShown()
 	if Map.dirty and ns.Gate.Allowed("map-overlay") then Map.Refresh() end
 	ns.SafeCall("map overlay", Map.LayoutOverlay)
+	local W = ns.Wanted
+	if type(W) == "table" and type(W.RefreshPins) == "function" then ns.SafeCall("wanted map shown", W.RefreshPins) end
 end
 
 -- "Olympus" menu on the world map: everything map related lives here, like Questie's toggle.
@@ -609,7 +611,12 @@ local function HookWorldMap() -- gp:map-overlay
 	hooked = true
 	-- (Each does nothing with the gamepad UI on: LayoutOverlay's first line.)
 	local function relayout() ns.SafeCall("map overlay", Map.LayoutOverlay) end
-	if WorldMapFrame.OnMapChanged then pcall(hooksecurefunc, WorldMapFrame, "OnMapChanged", relayout) end
+	local function mapChanged()
+		relayout()
+		local W = ns.Wanted
+		if type(W) == "table" and type(W.RefreshPins) == "function" then ns.SafeCall("wanted map changed", W.RefreshPins) end
+	end
+	if WorldMapFrame.OnMapChanged then pcall(hooksecurefunc, WorldMapFrame, "OnMapChanged", mapChanged) end
 	-- (1.2.1: opening it also draws what the census changed while it was closed, Map.WorldMapShown.)
 	WorldMapFrame:HookScript("OnShow", function() ns.SafeCall("map shown", Map.WorldMapShown) end)
 	WorldMapFrame:HookScript("OnHide", relayout)

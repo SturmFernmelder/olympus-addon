@@ -2204,13 +2204,15 @@ function Wanted.LiveSighting(t)
 	return e
 end
 
--- Newest truthful source: a native nearby observation while it is live, otherwise the permanent
--- zone/time carried by combat evidence. Neither path manufactures the Horde player's coordinates.
+-- Newest truthful source: compare the native nearby observation with the permanent zone/time
+-- carried by combat evidence. A combat row can arrive after a nearby observation and must not be
+-- hidden merely because the older pin is still alive. Neither path manufactures coordinates.
 function Wanted.LastSeen(t)
 	if not Wanted.CanSeeLocations() or type(t) ~= "table" then return nil end
 	local old, live = t.lastSighting, Wanted.LiveSighting(t)
-	-- A live entry is necessarily the current observation (and expires after 15 minutes). Prefer it
-	-- over the carried ledger row so one target never gets both a nearby pin and a zone marker.
+	if type(old) == "table" and type(old.at) == "number" and (not live or old.at > live.at) then
+		return { source = "ledger", at = old.at, zone = old.zone, precision = old.precision, evidence = old.evidence }
+	end
 	if live then
 		local zone
 		if type(C_Map) == "table" and type(C_Map.GetMapInfo) == "function" then
@@ -2220,8 +2222,7 @@ function Wanted.LastSeen(t)
 		return { source = "native", at = live.at, zone = zone or (old and old.zone) or L.WANTED_UNKNOWN,
 			mapID = live.mapID, x = live.x, y = live.y, observer = live.observer, nearby = true }
 	end
-	if type(old) ~= "table" or type(old.at) ~= "number" then return nil end
-	return { source = "ledger", at = old.at, zone = old.zone, precision = old.precision, evidence = old.evidence }
+	return nil
 end
 
 function Wanted.CanOpenSighting(sighting)
@@ -2766,6 +2767,19 @@ Wanted.SightingsOn = SightingsOn
 local Sight = {}
 Sight.historyFrames, Sight.historySpare = {}, {}
 
+-- A session-only sighting changes only the Wanted page. Redraw it when it is actually open;
+-- the 15-second pin beat otherwise stays silent and cannot create a UI refresh loop.
+function Sight.RefreshPage()
+	local U = ns.UI
+	if type(U) ~= "table" or type(U.RefreshSoon) ~= "function"
+		or type(U.IsShown) ~= "function" or type(U.PageId) ~= "function" then return false end
+	local okShown, shown = pcall(U.IsShown)
+	local okPage, page = pcall(U.PageId)
+	if not okShown or shown ~= true or not okPage or type(page) ~= "string" or not page:match("^wanted/") then return false end
+	U.RefreshSoon()
+	return true
+end
+
 -- The moderators took this client off (net-off): it sends none of this.
 local function NetOff()
 	local M = ns.Moderation
@@ -3120,9 +3134,9 @@ function Wanted.ObserveUnit(unit)
 	local e = { id = id, guid = ident.guid, name = ident.name, mapID = mapID, x = x, y = y, layer = Sight.MyLayer(mapID),
 		at = now, observer = observer, own = true, listed = listed }
 	stats.sightSeen = stats.sightSeen + 1
-	Keep(e)
+	local changed = Keep(e)
 	e.sent = SendSighting(e)
-	Wanted.RefreshPins()
+	Wanted.RefreshPins(changed)
 	return true, e
 end
 
@@ -3148,7 +3162,7 @@ function Wanted.SetSightings(on, silent)
 			C.Send("CHANNEL", "WS~R~0", "wanted-reviewer", false, false, nil, { owner = Wanted })
 		end
 	end
-	Wanted.RefreshPins()
+	Wanted.RefreshPins(true)
 	if not silent then ns.Print(on and L.WANTED_SIGHTINGS_ON or L.WANTED_SIGHTINGS_OFF) end
 	if on and TakesSightings() and leaseAt == nil then Wanted.AnnounceReviewer() end
 	return true
@@ -3297,8 +3311,8 @@ local function TakeSighting(dist, sender, text)
 	local e = { id = id, guid = ident.guid, name = ident.name, mapID = mapID, x = x, y = y, layer = layer, at = at,
 		observer = sender, guild = guild, own = false }
 	stats.sightTaken = stats.sightTaken + 1
-	Keep(e)
-	Wanted.RefreshPins()
+	local changed = Keep(e)
+	Wanted.RefreshPins(changed)
 	return true, e
 end
 
@@ -3313,7 +3327,7 @@ function Sight.TakeBack(dist, sender, text)
 		if not e.own and SameName(e.observer, sender) then pins[guid], n = nil, n + 1 end
 	end
 	stats.sightWithdrawn = stats.sightWithdrawn + n
-	if n > 0 then Wanted.RefreshPins() end
+	if n > 0 then Wanted.RefreshPins(true) end
 	return true, n
 end
 
@@ -3380,14 +3394,14 @@ function Wanted.SightingShortAge(at)
 	return math.floor(seconds / 31536000) .. "y"
 end
 
--- Permanent, zone-only history for the world map. A fresh native nearby pin replaces the old
--- zone marker while it is alive; after 15 minutes the dated zone marker remains.
+-- Permanent, zone-only history for the world map. It is suppressed only when the live native
+-- observation is the newer source selected by LastSeen; a newer combat sighting remains visible.
 function Wanted.HistoricalSightings(mapFilter)
 	local grouped = {}
 	if not Wanted.CanSeeLocations() then return grouped end
 	for _, t in ipairs(Wanted.Targets("listed")) do
-		local old, live = t.lastSighting, Wanted.LiveSighting(t)
-		if type(old) == "table" and type(old.at) == "number" and not live then
+		local old = Wanted.LastSeen(t)
+		if type(old) == "table" and old.source == "ledger" then
 			local mapID = Wanted.SightingMapID(old)
 			if mapID and (not mapFilter or mapID == mapFilter) then
 				local group = grouped[mapID]
@@ -3478,11 +3492,17 @@ end
 
 local SIGHT_SHOW = HBD_PINS_WORLDMAP_SHOW_PARENT or 1
 
-local function RefreshPinsNow()
+local function RefreshPinsNow(refreshPage)
 	local now = math.floor(Clock())
+	local pageChanged = refreshPage == true
 	for guid, e in pairs(pins) do
-		if not SightLive(e, now) then pins[guid] = nil stats.sightExpired = stats.sightExpired + 1 end
+		if not SightLive(e, now) then
+			pins[guid] = nil
+			stats.sightExpired = stats.sightExpired + 1
+			pageChanged = true
+		end
 	end
+	if pageChanged then Sight.RefreshPage() end
 	local P = ns.Pins and ns.Pins()
 	if not P then return false end
 	local world = ns.WorldMapIcons(P, Wanted)
@@ -3568,9 +3588,9 @@ local function RefreshPinsNow()
 	return true
 end
 
-function Wanted.RefreshPins()
-	if ns.SafeCall then return ns.SafeCall("wanted pins", RefreshPinsNow) end
-	return RefreshPinsNow()
+function Wanted.RefreshPins(refreshPage)
+	if ns.SafeCall then return ns.SafeCall("wanted pins", RefreshPinsNow, refreshPage) end
+	return RefreshPinsNow(refreshPage)
 end
 
 -- (Tests: the frames each pin has now.)
@@ -6266,6 +6286,9 @@ ns.On("DATA_CHANGED", function()
 	if not authenticatedGlobal then RestoreGlobal() end
 	if LeaseDue() then Wanted.AnnounceReviewer() end
 end)
+-- A newly applied location bar must remove both fresh and historical pins at once, and the open
+-- Wanted page must stop showing its location rows without waiting for the pin ticker.
+ns.On("WATCHCHAT_CHANGED", function() Wanted.RefreshPins(true) end)
 -- The King hid his crown: what waits for a reviewer is cancelled, what went is taken back.
 ns.On("KING_LOCATION_CHANGED", function()
 	if Sight.CrownHidden() and (sightJobCount > 0 or next(told.by) ~= nil) then

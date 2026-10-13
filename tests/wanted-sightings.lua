@@ -217,8 +217,16 @@ local function WithSightings(fn)
 				if not good then error(where .. ": " .. tostring(why), 0) end
 				return good
 			end
-			c.UI = { Refresh = function() end, RefreshSoon = function() end, AddTab = function() end,
-				FirstTexture = function(paths) return paths[#paths] end }
+			c.UI = {
+				Refresh = function() cl.uiRefreshes = (cl.uiRefreshes or 0) + 1 end,
+				RefreshSoon = function() cl.uiRefreshes = (cl.uiRefreshes or 0) + 1 end,
+				IsShown = function() return cl.uiOpen == true end,
+				PageId = function()
+					return cl.uiPage or ("wanted/" .. (c.Wanted and c.Wanted.PageId and c.Wanted.PageId() or "list"))
+				end,
+				AddTab = function() end,
+				FirstTexture = function(paths) return paths[#paths] end,
+			}
 			c.Log = function() end
 			c.EscapeCloses = function() end
 			cl.handlers, cl.listeners, cl.events, cl.ns, cl.lib, cl.filters = {}, {}, {}, c, PinLib(cl), {}
@@ -1306,6 +1314,47 @@ test("wanted sightings: location withdrawal stops a queued sighting and takes ba
 		world:Pump(); eq(#world:Pins(king), 0, "already delivered pins are taken back")
 		eq(#world:Pins(o), 3, "local pins remain local")
 		eq(o.db.wantedSightings, true, "location withdrawal does not change sightings consent")
+	end)
+end)
+
+test("wanted sightings: an open Wanted profile refreshes only when a pin is added, received, withdrawn or expires", function()
+	WithSightings(function(world)
+		local o = world:Client("Aldric-Realm", "Player-1-AB000001")
+		local king = world:Client("Kingly-Realm", "Player-1-AB0000F1", { role = "king", manager = true })
+		world:Lease(king); world:Choose(o, king)
+		o.uiOpen, king.uiOpen = true, true
+		assert(world:As(o, o.W.OpenTarget, nil, GROM))
+		assert(world:As(king, king.W.OpenTarget, nil, GROM))
+		o.uiRefreshes, king.uiRefreshes = 0, 0
+
+		assert(world:See(o, "nameplate1", Horde("Grom-Realm", GROM)))
+		eq(o.uiRefreshes, 1, "adding a local pin redraws the open profile")
+		world:Pump()
+		eq(king.uiRefreshes, 1, "receiving a pin redraws the open profile")
+		local function HasObserved(cl)
+			for _, line in ipairs(world:As(cl, cl.W.Build)) do
+				if line.id == "wanted-observed:g:" .. GROM then return true end
+			end
+			return false
+		end
+		assert(HasObserved(king), "the received observation appears without a manual page refresh")
+		world:As(king, king.W.RefreshPins)
+		eq(king.uiRefreshes, 1, "an unchanged pin refresh does not create a redraw loop")
+
+		world:As(o, o.W.SetSightings, false, true)
+		eq(o.uiRefreshes, 2, "withdrawing local pins redraws their profile")
+		world:Pump()
+		eq(king.uiRefreshes, 2, "taking back the delivered pin redraws the reviewer's profile")
+		eq(HasObserved(king), false, "the withdrawn observation disappears immediately")
+
+		assert(world:See(king, "target", Horde("Grom-Realm", GROM)))
+		eq(king.uiRefreshes, 3, "a new native observation redraws once")
+		world:As(king, king.W.RefreshPins)
+		eq(king.uiRefreshes, 3, "the normal pin beat is quiet while nothing changed")
+		world:Advance(king.W.SIGHT_TTL + 1)
+		world:As(king, king.W.RefreshPins)
+		eq(king.uiRefreshes, 4, "expiry redraws once")
+		eq(HasObserved(king), false, "the expired observation disappears immediately")
 	end)
 end)
 
