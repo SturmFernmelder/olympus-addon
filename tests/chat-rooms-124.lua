@@ -365,6 +365,28 @@ test("chat rooms (1.2.4): a line goes to FANOUT members at most, the author, the
 	end)
 end)
 
+-- 1.2.4, the silent send's fix over the lines budget: the sender's line is in its room at Enter,
+-- and a line none of whose whispers left goes from it again. It gives its place in every room's
+-- lines together back too (LINES_TOTAL): kept counted otherwise, each such line made the budget
+-- let other lines go before their time.
+test("chat rooms (1.2.4): a line none of whose whispers left goes from its room and from the count of the lines kept", function()
+	WithRooms(function(w, R, c)
+		local names = { "Tester 01-Realm", "Tester 02-Realm" }
+		assert(R.RegisterAudience("testers", { label = "Testers", CanAccess = function() return true end,
+			Recipients = function() return names end }))
+		R.LINES_TOTAL = 3
+		eq(R.Send("testers", "lost on the way"), true)
+		eq(R.KeptLines(), 1, "shown at Enter"); eq(R.History("testers")[1].pending, true)
+		for _, job in ipairs(w.jobs) do w.finish(job, false, "failed") end
+		eq(#R.History("testers"), 0, "it reached nobody: gone")
+		eq(R.KeptLines(), 0, "its place given back")
+		for k = 1, 3 do assert(R.Receive("WHISPER", names[1], RoomMessage("testers", k, "line " .. k), 1000 + k)) end
+		eq(R.KeptLines(), 3)
+		local h = R.History("testers")
+		eq(#h, 3, "LINES_TOTAL lines, none let go early"); eq(h[1].text, "line 1")
+	end)
+end)
+
 -- "não precisa ficar atualizando a todo o tempo ... uma atualização mais lenta, de 1 minuto em 1
 -- minuto": the census's notices check the rooms kept again once a minute at most; a room read or
 -- picked is checked at once, its lines let go when it is no longer this character's.

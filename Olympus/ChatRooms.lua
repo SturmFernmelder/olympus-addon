@@ -1109,6 +1109,7 @@ local function Unkeep(id, e)
 	for i = #r.lines, 1, -1 do
 		if r.lines[i] == e then
 			table.remove(r.lines, i)
+			kept = math.max(0, kept - 1) -- (and its place in every room's lines together, LINES_TOTAL)
 			stats.sent = math.max(0, stats.sent - 1)
 			ns.Fire("CHAT_ROOM_CHANGED", id)
 			return
