@@ -11,11 +11,11 @@ tickets stay disabled.
   tie-breaks. Longer headings fit their columns.
 - Church appointments remain available when their source is offline. Apostles and missionaries
   can each have twelve direct missionaries; the retained Church and its synchronization support
-  up to 5,000 missionaries. Incomplete information does not silently demote a signed Apostle.
+  up to 5,000 Church members. Incomplete information does not silently demote a signed Apostle.
 - Heraldry handles the guild's Decrees, Agenda and musters through the current own-guild master
   or verified correspondent. Army authority keeps its separate verified Crown, author and
   Heraldry Council duties. An ordinary guild master gains no army-wide Crown powers.
-- The King's centurions are the High Councillors in his guild, rather than another manual
+- The centurion list for the King's guild is the signed High Council, rather than another manual
   appointment list. The century remains a unit of up to 100 people.
 - Approved role rooms show delivery failures and partial delivery. Class and race rooms remain
   removed. Games lists live Arena/Bones conversations; after a Bones game ends, participants
@@ -89,9 +89,10 @@ tickets stay disabled.
   a completed private leaderboard. No public Justice ranking is introduced.
 - Cross enlargement is implemented; consistent normalization of the other honour families
   against the rank dragons is still open. Approved artwork needs visual acceptance in game.
-- Level Race's frame remains withheld for launch. Existing level-claim timing is not a complete
-  explicit launch policy; no completed launch-only award gate is claimed here. Future tournament
-  honours are not treated as rewards for the ordinary qualifier ranking.
+- Level Race ships explicitly off: no collection, level-claim send/receive, effective standings
+  or live level honours. Old evidence stays retained and the author's art/letter previews still
+  work. A future release must deliberately define and open its launch; ordinary settings and
+  role previews cannot start it. Future tournament honours are not rewards for qualifier ranking.
 - Unlinked Horde characters and unrelated accounts cannot be proved to share an owner through
   the current anti-farming path. The reported two-account farming scenario remains a live check.
 - History carry supplies no full signed continuity, named guild-merger inheritance, transferred
