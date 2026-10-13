@@ -578,8 +578,8 @@
         "What's the Realm tab?",
         "Why is a Lord's name red?"
       ],
-      "answer": "The hierarchy: the King, the Treasurer, then every guild's Lord and Captains, online or how many days away, each guild's average level after its Lord, in the Census's order. A name turns red after a long absence (3 days by default; /oly warndays changes it).",
-      "in_game": "The Realm tab is the hierarchy: King, Treasurer, Lords (their guild's average level after them), Captains. Red names have been away 3+ days (/oly warndays to change).",
+      "answer": "The hierarchy: the King, the Treasurer, then every guild's Lord and Captains, online or days away, its average level after its Lord; its Order line sorts the guilds (members, online, average level, guild, Lord). A name turns red after a long absence (3 days by default; /oly warndays changes it).",
+      "in_game": "The Realm tab is the hierarchy: King, Treasurer, Lords (their guild's average level after them), Captains; its Order line sorts the guilds. Red names have been away 3+ days (/oly warndays to change).",
       "sources": [
         "README.md:131-143"
       ]

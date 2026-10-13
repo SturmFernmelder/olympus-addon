@@ -398,6 +398,28 @@ local function FitText(fs, room, fonts) -- gp:lookups
 	fs:SetWidth(math.max(1, room))
 end
 
+-- (1.2.4's review) A column's title in its header, never over the next one: the old headers'
+-- templates draw it 8 from their left edge, and the next header starts 2 before this one's right
+-- edge (UI.Layout). A title wider than that room takes its language's short title (col.short,
+-- Views.COLUMNS: the narrow window, a longer language's words), and one still too wide is cut
+-- ("...") inside its own; one that fits keeps its own width, as before.
+UI.TITLE_INSET = 10
+local function FitColumnTitle(b, col, width)
+	b:SetText(L[col.key])
+	local fs = b.GetFontString and b:GetFontString()
+	if not fs then return end
+	local function Wide()
+		return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+	end
+	local room = math.max(1, width - UI.TITLE_INSET)
+	fs:SetWidth(0)
+	if Wide() > room and col.short then b:SetText(L[col.short]) end
+	if Wide() > room then
+		if fs.SetWordWrap then fs:SetWordWrap(false) end
+		fs:SetWidth(room)
+	end
+end
+
 -- Header lines end this far from the window's right edge: the big line keeps clear of
 -- the close button column (24 wide on Forever, 32 on the Classic clients), the small one
 -- sits lower and only keeps off the border.
@@ -1457,7 +1479,7 @@ function UI.Layout()
 				-- The old headers' middle part is sized by Blizzard's code; the HD ones stretch.
 				if (main.style == "old" or b.whoTemplate) and WhoFrameColumn_SetWidth then pcall(WhoFrameColumn_SetWidth, b, width) else b:SetWidth(width) end -- gp:own-templates
 				b:SetWidth(width)
-				b:SetText(L[col.key])
+				FitColumnTitle(b, col, width)
 				b.sortKey = col.sort
 				b:Show()
 				x = x + width - 2

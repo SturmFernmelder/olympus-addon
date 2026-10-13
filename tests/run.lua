@@ -1551,7 +1551,10 @@ test("map refresh runs end to end with a map library (continent totals included)
 	GameTooltip = savedTip
 	ns.rdb.guilds = {}
 	assert(okTip, errTip)
-	eq(table.concat(tip, ","), "Olympus Many 9,Olympus High 4,Olympus Low 4,Olympus Also 4,Olympus Unknown 4")
+	-- (Changed on purpose, 1.2.4's review: each guild's average level after its count, where its
+	-- report has one, so that order is seen; before, the count alone.)
+	for i, line in ipairs(tip) do tip[i] = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") end
+	eq(table.concat(tip, ","), "Olympus Many 9  (avg lvl 10.0),Olympus High 4  (avg lvl 50.0),Olympus Low 4  (avg lvl 20.0),Olympus Also 4,Olympus Unknown 4")
 end)
 
 ---------------------------------------------------------------------------
@@ -2237,6 +2240,9 @@ local TEMPLATES = {
 	ColumnDisplayButtonNoScriptsTemplate = function(w)
 		w.h = 24
 		for _, key in ipairs({ "Left", "Middle", "Right" }) do w[key] = NewWidget("Texture", nil, w) end
+		-- (1.2.4's review: its title's font, as Forever 1.60.1's SharedUIPanelTemplates.xml gives it,
+		-- <NormalFont style="GameFontHighlightSmall"/>: the titles are measured in it, UI.Layout.)
+		w.normalFont = "GameFontHighlightSmall"
 	end,
 	ScrollFrameTemplate = function(w)
 		w.ScrollBar = NewWidget("EventFrame", nil, w)
@@ -34140,7 +34146,9 @@ test("1.1 census search (Fern #16): a zone lists its soldiers, its guilds most s
 		eq(head.right, nil, "no trend before tonight's first sample")
 		assert(Fern.Tip(head):find(ns.L.SEARCH_ZONE_TIP, 1, true), "what it counts")
 		local _, at = Fern.Find(lines, "Stormwind City")
-		eq(Fern.Bare(lines[at + 1].text), "<Olympus>"); eq(lines[at + 1].right, "120")
+		-- (Changed on purpose, 1.2.4's review: a guild's average level after its count, where its
+		-- report has one: the order's tie-break, seen.)
+		eq(Fern.Bare(lines[at + 1].text), "<Olympus>"); eq(Fern.Bare(lines[at + 1].right), "120  (avg lvl 14.0)")
 		eq(Fern.Bare(lines[at + 2].text), "<Olympus II>"); eq(lines[at + 2].right, "30")
 		-- A click opens that guild in the Realm.
 		lines[at + 2].onClick()
@@ -40241,6 +40249,38 @@ do
 			-- Nothing of it before the King (or his Steward) gives one: no word to repeat.
 			ns.rdb.duesAmount = nil
 			AsKing(); eq(D.SendAmount(true), false)
+		end)
+	end)
+
+	-- 1.2.4's review: the table's guilds, as much gold in from as many members, go to the higher
+	-- average level first (Data.SortGuildCounts); no test held that order (reverting it left the
+	-- suite green), nor said it where the order is read.
+	test("1.2.4's review: the dues table, as much gold from as many members: the higher average level first, said in its row's hover", function()
+		WithDues(function(w, K, T, mail)
+			AsTreasurer()
+			local week = D.Week()
+			for name, avg in pairs({ ["Olympus Alpha"] = 20, ["Olympus Beta"] = 50, ["Olympus Gamma"] = false }) do
+				ns.rdb.guilds[name] = Vouched({ total = 100, online = 1, zones = {}, t = w.clock, leader = "Lead", realm = "Realm",
+					avgLevel = avg or nil }, "W7-Realm", "W8-Realm")
+			end
+			Mail(mail, "Payera", 10000, D.Note(week, "Olympus Alpha"))
+			Mail(mail, "Payerb", 10000, D.Note(week, "Olympus Gamma"))
+			Mail(mail, "Payerc", 10000, D.Note(week, "Olympus Beta"))
+			D.Open()
+			local _, lines = Page(T)
+			local order = {}
+			for _, l in ipairs(lines) do
+				local name = tostring(l.text):match("^<(Olympus %a+)>$")
+				if name == "Olympus Alpha" or name == "Olympus Beta" or name == "Olympus Gamma" then order[#order + 1] = name end
+			end
+			eq(table.concat(order, ","), "Olympus Beta,Olympus Alpha,Olympus Gamma", "50.0, 20.0, none (by the name alone: Alpha first)")
+			local function Hover(name)
+				local tip = {}
+				Row(lines, "<" .. name .. ">").tooltip({ AddLine = function() end, AddDoubleLine = function(_, a, b) tip[a] = b end })
+				return tip[ns.L.AVG_LEVEL]
+			end
+			eq(Hover("Olympus Beta"), "50.0"); eq(Hover("Olympus Alpha"), "20.0")
+			eq(Hover("Olympus Gamma"), nil, "none: no line")
 		end)
 	end)
 

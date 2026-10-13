@@ -113,12 +113,17 @@ end
 -- like the others; its title is short, "Avg lvl" / "Nv. méd.". The Online column gives up some room,
 -- its numbers being the smaller, and the Guild and Lord columns some; before, the four columns
 -- were 0.40, 0.20, 0.16 and 0.24.)
+-- (1.2.4's review: the Online and Avg lvl titles a little more room, from the Guild's, and the three
+-- numbers' a short title each, `short`: a title wider than its column takes it, and one still too
+-- wide is cut inside its own (UI.Layout), never drawn over the next; the German, Spanish and French
+-- titles are longer. The old window's columns are then 90, 54, 45, 54 and 57 wide; the HD one's
+-- 106, 64, 53, 64 and 67.)
 Views.COLUMNS = {
 	census = {
-		{ key = "COL_GUILD", sort = "name", x = 0.00, w = 0.33 },
-		{ key = "COL_MEMBERS", sort = "members", x = 0.33, w = 0.18, justify = "RIGHT" },
-		{ key = "COL_ONLINE", sort = "online", x = 0.51, w = 0.14, justify = "RIGHT" },
-		{ key = "COL_AVG_LEVEL", sort = "level", x = 0.65, w = 0.16, justify = "RIGHT" },
+		{ key = "COL_GUILD", sort = "name", x = 0.00, w = 0.30 },
+		{ key = "COL_MEMBERS", short = "COL_MEMBERS_SHORT", sort = "members", x = 0.30, w = 0.18, justify = "RIGHT" },
+		{ key = "COL_ONLINE", short = "COL_ONLINE_SHORT", sort = "online", x = 0.48, w = 0.15, justify = "RIGHT" },
+		{ key = "COL_AVG_LEVEL", short = "COL_AVG_LEVEL_SHORT", sort = "level", x = 0.63, w = 0.18, justify = "RIGHT" },
 		{ key = "COL_LORD", sort = "lord", x = 0.81, w = 0.19 },
 	},
 	heraldry = {
@@ -1174,6 +1179,9 @@ local function AvgTag(g, dim)
 	if dim or not before then return "  " .. Grey(L.AVG_LEVEL_TAG:format(text)) end
 	return "  " .. Grey(before) .. text .. (after ~= "" and Grey(after) or "")
 end
+-- (1.2.4's review: the same words where other files list guilds by a count and break its ties by
+-- the average level: the Throne's inspection, the map's pins.)
+Views.AvgTag = AvgTag
 
 local SORTERS = {
 	name = function(e) return e.name:lower() end,
@@ -1217,14 +1225,14 @@ local function SeenRow(e)
 	return { cols = { Grey(e.name), Grey("?"), Grey(online), Grey("?"), Grey(L.NO_ADDON) }, tooltip = SeenTooltip(e) }
 end
 
--- The reported guilds in the order the column titles say, fresh reports first. (1.2.4: the
--- Realm's guilds too, so that its guilds follow the title clicked in the Census, the average
--- level's among them: the Realm has no titles of its own.)
+-- The reported guilds in the order the column titles say, fresh reports first; `sort` (1.2.4's
+-- review): another order of the same kind, { key, desc } (the Realm's own, Views.realmSort).
 -- A tie: the higher average level first (1.2.4, the author's ask: one of the first tie-breaks,
 -- whichever way the column runs), then the name. The average level's own column: a guild without
 -- one last whichever way, a tie the larger guild first, then the name.
-local function SortedGuilds(list)
-	local key, desc = Views.sort.key, Views.sort.desc
+local function SortedGuilds(list, sort)
+	sort = sort or Views.sort
+	local key, desc = sort.key, sort.desc
 	local get = SORTERS[key] or SORTERS.members
 	local level = key == "level"
 	local guilds = {}
@@ -1337,6 +1345,9 @@ local function RecruitingLines(lines, s, min)
 	for _, o in ipairs(open) do
 		lines[#lines + 1] = GuildLink(o.name, L.FREE_SLOTS:format(ns.FormatNumber(o.free)) .. AvgTag(o.e.g),
 			(gates and o.name == gates.guild and CROWN or "") .. Views.DisputeMark(o.e.g))
+		-- (1.2.4's review: its free slots and average level kept whole up to half the row, a long
+		-- name giving way, as the Realm's guilds; a third cut the average off.)
+		lines[#lines].rightWide = true
 	end
 	if #open == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.ALL_FULL) } end
 	lines[#lines].gapAfter = true
@@ -1360,11 +1371,16 @@ local function ZoneLines(lines, s, lq)
 					Why(tt, "count-map-zones")
 				end,
 			}
-			-- (1.2.4: as many there, the higher average level first, then the name.)
+			-- (1.2.4: as many there, the higher average level first, then the name; 1.2.4's review:
+			-- its average level shown after its count, so that order is seen, both kept whole up to
+			-- half the row.)
 			local guilds = {}
 			for guild, n in pairs(s.zoneGuilds[z.key] or {}) do guilds[#guilds + 1] = { name = guild, n = n } end
 			ns.Data.SortGuildCounts(guilds, "n")
-			for _, g in ipairs(guilds) do lines[#lines + 1] = GuildLink(g.name, ns.FormatNumber(g.n)) end
+			for _, g in ipairs(guilds) do
+				lines[#lines + 1] = GuildLink(g.name, ns.FormatNumber(g.n) .. AvgTag(ns.Data.Guild(g.name)))
+				lines[#lines].rightWide = true
+			end
 			lines[#lines].gapAfter = true
 		end
 	end
@@ -1863,6 +1879,39 @@ local function GuildMatches(e, ctx, rows)
 	return found
 end
 
+-- (1.2.4's review) The Realm's own order of its guilds: by default the shared order (Data.Summary's,
+-- the Census's own by default), else by one of the Census's columns, a count the highest first, a
+-- name A to Z, as a first click on its title; chosen on its own line above its guilds, the Realm
+-- having no column titles, and never by a title clicked in the Census (the Realm followed it
+-- unseen). The author's ask: its guilds sorted by their average level too.
+Views.realmSort = "members"
+Views.REALM_ORDERS = {
+	{ key = "members", label = "COL_MEMBERS" }, { key = "online", label = "COL_ONLINE" }, { key = "level", label = "AVG_LEVEL" },
+	{ key = "name", label = "COL_GUILD" }, { key = "lord", label = "COL_LORD" },
+}
+local function RealmOrder()
+	for _, o in ipairs(Views.REALM_ORDERS) do if o.key == Views.realmSort then return o end end
+	return Views.REALM_ORDERS[1]
+end
+-- `guilds` (Data.Summary's, in the shared order) in the Realm's order.
+function Views.RealmOrdered(guilds)
+	local key = RealmOrder().key
+	if key == "members" then return guilds end
+	return SortedGuilds(guilds, { key = key, desc = key ~= "name" and key ~= "lord" })
+end
+local function RealmOrderLine()
+	local current, options = RealmOrder(), {}
+	for _, o in ipairs(Views.REALM_ORDERS) do
+		local key = o.key
+		options[#options + 1] = { text = L[o.label], selected = key == current.key,
+			onClick = key ~= current.key and function()
+				Views.realmSort = key
+				ns.UI.Refresh()
+			end or nil }
+	end
+	return { id = "realm-order", filters = { { label = L.REALM_ORDER, value = L[current.label], options = options, understated = true } } }
+end
+
 -- `q`, the search (Views.Query): the High Council's names (for whoever may see it), then each
 -- guild whose name holds it, whole, and each whose Lord, Captains or members seen do, opened on
 -- those alone; "No match" for none. The chats' link stays (the Chat tab it opens has a search of
@@ -2100,10 +2149,10 @@ local function RealmLines(s, q)
 		local own = GetGuildInfo("player")
 		ctx, rows, more = { q = q, own = own, hits = SeenHits(q, own) }, 0, 0
 	end
-	-- (1.2.4: in the order of the Census's column title clicked, its average level's among them;
-	-- by default Data.Summary's own, the shared order, as before.)
-	local ordered = (Views.sort.key == "members" and Views.sort.desc) and s.guilds or SortedGuilds(s.guilds)
-	for _, e in ipairs(ordered) do
+	-- (1.2.4's review: in the Realm's own order, chosen on its line above its guilds; by default
+	-- Data.Summary's own, the shared order, as before. A search's guilds in it too.)
+	if not q and #s.guilds > 1 then lines[#lines + 1] = RealmOrderLine() end
+	for _, e in ipairs(Views.RealmOrdered(s.guilds)) do
 		if not q or NameHolds(q, e.name) then
 			-- (Found by its name: the guild as ever, opened or not.)
 			if q then found = found + 1 end
@@ -2198,6 +2247,7 @@ local function RealmLines(s, q)
 		local mark, d = Views.DisputeMark(open[i].e.g)
 		lines[#lines + 1] = {
 			text = mark .. Green("<" .. name .. ">"), right = L.FREE_SLOTS:format(ns.FormatNumber(open[i].free)) .. AvgTag(open[i].e.g),
+			rightWide = true, -- (1.2.4's review: its average level kept whole, a long name giving way)
 			-- The King and his Hands open a guild's gates from here.
 			onClick = commands and function() ns.Acts.GatesClick(name) end or nil,
 			tooltip = function(tt)

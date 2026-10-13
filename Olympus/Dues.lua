@@ -1570,6 +1570,10 @@ local function TableLines(lines, q)
 				tooltip = function(tt)
 					tt:AddLine("<" .. r.name .. ">", 1, 0.82, 0)
 					tt:AddLine(L.DUES_GUILD_TIP:format(tostring(r.members or "?"), paid, Coins(amount), Coins(r.copper), r.payers), 1, 1, 1, true)
+					-- (1.2.4's review: its average level, the table's tie-break after its members, as the
+					-- Census's hover says it; none, no line.)
+					local avg = ns.Data.AvgLevelText(ns.Data.Guild(r.name))
+					if avg then tt:AddDoubleLine(L.AVG_LEVEL, avg, 1, 0.82, 0, 1, 1, 1) end
 					-- (1.1.2's review: its members are the census's, the guild's last report.)
 					if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(tt, "count-other-guild-report") end
 				end }
