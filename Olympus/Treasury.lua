@@ -2364,13 +2364,7 @@ function Treasury.Ask(fresh)
 	if lastAsk == -math.huge then fresh = true end
 	if ns.Bank and ns.Bank.Lapsed and ns.Bank.Lapsed() then fresh = true end
 	lastAsk = ns.Now()
-	-- 1.2.4: a routine ask names, after its guild, the snapshots its client holds unconfirmed
-	-- (Bank.Lacking: their times, "/" apart; a guild's name never holds one, Clean). A 1.2.3 addon
-	-- reads the field as its asker's guild and leaves it unread, as before.
-	local field = Clean(GetGuildInfo("player"))
-	local lacks = not fresh and ns.Bank and ns.Bank.Lacking and ns.Bank.Lacking() or {}
-	if #lacks > 0 then field = field .. "/" .. table.concat(lacks, "/") end
-	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(field, fresh and 0 or 1), "treasuryask")
+	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(Clean(GetGuildInfo("player")), fresh and 0 or 1), "treasuryask")
 	return true
 end
 function Treasury.AskDue() return ns.Now() - lastAsk >= Treasury.ASK_EVERY end
@@ -2382,14 +2376,8 @@ function Treasury.AskDue() return ns.Now() - lastAsk >= Treasury.ASK_EVERY end
 -- to him again inside it too, PRIVATE_GAP apart: Bank.HeardAsk, Treasury.Resend).
 function Treasury.HandleAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" then return end
-	local head, fresh = text:match("^TA~([^~]*)~([01])$")
+	local fresh = text:match("^TA~[^~]*~([01])$")
 	if not fresh then return end
-	-- (1.2.4: the snapshots it lacks, Treasury.Ask; LACK_MAX of them read at most.)
-	local lacks = {}
-	for t in head:gmatch("/(%d+)") do
-		if #lacks >= (ns.Bank and ns.Bank.LACK_MAX or 4) then break end
-		if #t <= 10 then lacks[#lacks + 1] = tonumber(t) end
-	end
 	sender = ns.FullName(sender)
 	local now = ns.Now()
 	local reset = fresh == "0" and now - (resetAt[sender] or -math.huge) >= Treasury.RESET_GAP
@@ -2400,7 +2388,7 @@ function Treasury.HandleAsk(dist, sender, text)
 		if reset then sentTo[sender] = nil end
 		Treasury.SendPrivate(sender)
 	end
-	if ns.Bank and ns.Bank.HeardAsk then ns.Bank.HeardAsk(sender, reset, fresh == "0", lacks) end
+	if ns.Bank and ns.Bank.HeardAsk then ns.Bank.HeardAsk(sender, reset, fresh == "0") end
 end
 ns.Comm.Handle("TA", function(...) Treasury.HandleAsk(...) end)
 
@@ -3718,7 +3706,7 @@ local function DirectoryBanks(role, ranked)
 		b.money, b.t = math.max(0, math.floor(tonumber(b.snap.money) or 0)), tonumber(b.snap.t) or 0
 		b.old = now - b.t > (B.SISTER_OLD or math.huge)
 		local v = ranked and B.Value and B.Value(b.snap)
-		b.value, b.pending, b.unpriced = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0
+		b.value, b.pending, b.unpriced, b.ranked = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0, ranked and true or nil
 		b.total = b.money + b.value
 		if ranked and not b.home and B.Correspondent then b.corr, b.corrKept = B.Correspondent(b.guild) end
 		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(b.guild)
@@ -3799,13 +3787,19 @@ local function DirTip(b, click)
 		tt:AddLine(L.TREASURY_GUILD_TITLE:format(b.guild), 1, 0.82, 0)
 		tt:AddLine(L.TREASURY_GUILD_SHARED_BY:format(DirWho(b), ns.Ago(b.t)), 1, 1, 1, true)
 		if b.old then tt:AddLine(L.TREASURY_DIR_STATE_OLD, 1, 0.4, 0.4, true) else tt:AddLine(L.TREASURY_DIR_STATE_SHARED, 0.6, 1, 0.6, true) end
+		-- (A search's rows are not ranked: their correspondent and value are worked out here, at the
+		-- hover alone, as the ranking's are: the branch's review.)
+		local B = ns.Bank
+		local corr, kept = b.corr, b.corrKept
+		if not b.ranked and not b.home and B.Correspondent then corr, kept = B.Correspondent(b.guild) end
 		if not b.home then
-			local who = b.corr and ns.DisplayName(b.corr) or nil
-			tt:AddLine(not who and L.TREASURY_RANK_CORR_NONE or (b.corrKept and L.TREASURY_RANK_CORR_KEPT or L.TREASURY_RANK_CORR):format(who), 1, 1, 1, true)
+			local who = corr and ns.DisplayName(corr) or nil
+			tt:AddLine(not who and L.TREASURY_RANK_CORR_NONE or (kept and L.TREASURY_RANK_CORR_KEPT or L.TREASURY_RANK_CORR):format(who), 1, 1, 1, true)
 		end
 		tt:AddLine(L.TREASURY_GUILD_ITEMS:format(b.units or 0, b.stacks or 0), 1, 1, 1, true)
 		tt:AddLine(b.home and L.TREASURY_DIR_LEDGER_TIP or L.TREASURY_GUILD_BOOK_UNAVAILABLE, 0.8, 0.8, 0.8, true)
-		Treasury.ValueTip(tt, { value = b.value or 0, pending = b.pending or 0, unpriced = b.unpriced or 0 })
+		local v = b.ranked and { value = b.value or 0, pending = b.pending or 0, unpriced = b.unpriced or 0 } or (B.Value and B.Value(b.snap))
+		Treasury.ValueTip(tt, v)
 		if click then tt:AddLine(click, 0.6, 1, 0.6, true) end
 	end
 end

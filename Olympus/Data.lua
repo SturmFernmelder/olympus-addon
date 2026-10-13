@@ -700,6 +700,21 @@ function Data.KnownRank(sender, guild, soft)
 	return rank, named
 end
 
+-- 1.2.4 (Bank.lua: a guild's snapshot held until the census can judge its sender): whether a
+-- current report on `guild` (a vote of VOUCH_TTL, its sender's own among them) names `sender` at
+-- `rank` or above. It proves nothing (a report never proves its own sender's rank: KnownRank); it
+-- only says that more reports may.
+function Data.Names(sender, guild, rank)
+	local g = type(guild) == "string" and Data.Guild(guild) or nil
+	if type(g) ~= "table" or type(sender) ~= "string" then return false end
+	local who = ns.FullName(sender)
+	for _, v in pairs(Votes(g.vouch, ns.Now())) do
+		local k = v.ranks[who]
+		if k and k <= rank then return true end
+	end
+	return false
+end
+
 -- A rank that may grant a capability. Our own guild comes from Blizzard's roster and the pinned
 -- King from Core.lua. The existing census trust model remains byte-for-byte compatible until the
 -- author's signed list explicitly activates Authority.lua's one-way enforcement boundary. From

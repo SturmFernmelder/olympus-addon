@@ -1022,12 +1022,11 @@ local sisterSeen, sisterLapsed = false, false -- this client was of the audience
 -- census's Data.CROWN_AFTER (200 s), when no guild master counts yet: a guild master online before
 -- the viewer always landed there. Such a TS is now held (in memory, never shown) and handled again
 -- when the census changes (DATA_CHANGED) and once that window is over: taken if the census then
--- confirms its sender, dropped if it says he is none, held while it still cannot say. Only for the
--- census's own Olympus guilds; one a guild and one a sender (his newest), SISTERS_MAX at most. While
--- one is held, its viewer's routine ask (Treasury.Ask) says he lacks it: the snapshot's time
--- (LACK_MAX of them at most, never a guild or a name), and its sender sends it again (HeardAsk).
-Bank.LACK_MAX = 4
-local held, heldCount = {}, 0 -- [guild, lower case] = { sender, text, when, at }: a TS the census could not judge yet
+-- confirms its sender, dropped if it says he is none, held while it still cannot say (Unsettled).
+-- Only for Olympus guilds; one a sender (his last word), SISTERS_MAX at most, handled oldest
+-- snapshot first, so that of two senders of one guild the newer one stays.
+-- Nothing of it goes on the channel: the text is held already, the census's next report takes it.
+local held, heldCount = {}, 0 -- [sender, lower case] = { sender, key, text, when, at }: a TS the census could not judge yet
 local heldTimer               -- the login (Comm.loginAt) whose window's end a check is due at
 local rechecking = false
 
@@ -1060,25 +1059,31 @@ end
 -- 1.2.4 (the author's call: "Não precisa ser temporário... As guildas podem ser definitivas, iguais
 -- à guilda principal"): each guild's latest snapshot this character takes is kept in the saved
 -- variables too, as <Olympus>'s own is (ns.rdb.sisterBanks[character, lower case][guild, lower
--- case] = { text, by, heard, corr }: its TS as it came, who sent it, when it was heard, the
--- correspondent last named for it), and comes back into memory once this character is of the
--- audience again after a login or a /reload (Restore). The newest of a guild replaces the older
--- there too. Its items stay this character's to open; no other character, of this account or
--- another, is shown them. Bounded: one a guild, SISTERS_MAX guilds, the census's own Olympus guilds
--- alone (a guild the census forgets, Data.KEEP after its last report, goes from here too), and
--- SISTERS_SAVED_BYTES of text for every character of the realm group together: past it the one
--- heard longest ago leaves the save (still shown this session). No age takes one away (an old one
--- is marked, SISTER_OLD). Its sharer's no does (HandleSister: from whoever sent it, whatever the
--- census says of him now, a copy kept from an earlier session too; his addon tells it at the
--- viewer's first ask of a session as at the others, HeardAsk), and so does this character's leaving
--- the audience: at once in a session (Holding), and otherwise once its role is known for ROLE_SETTLE
--- of a session spent outside it (taken off the High Council while offline: a Hand's role waits for
--- the King's list, which a login does not have yet).
+-- case] = { text, by, heard, corr, corrBy, crown }: its TS as it came, who sent it, when it was
+-- heard, the correspondent last named for it and by whom, whether it came as a Steward or a Hand),
+-- and comes back into memory once this character is of the audience again after a login or a
+-- /reload (Restore). The newest of a guild replaces the older there too. Its items stay this
+-- character's to open; no other character, of this account or another, is shown them. Bounded: one
+-- a guild, SISTERS_MAX guilds, Olympus guilds alone, and SISTERS_SAVED_BYTES of text for every
+-- character of the realm group together: past it the one heard longest ago leaves the save (still
+-- shown this session). No age takes one away (an old one is marked, SISTER_OLD), nor the census
+-- forgetting its guild (Data.KEEP: a viewer away a week finds no row at his login). Its sharer's no
+-- does (HandleSister: from whoever sent it, whatever the census says of him now, a copy kept unseen
+-- too; his addon tells it at the viewer's first ask of a session and at his login's, HeardAsk), and
+-- so does this character's leaving the audience: at once in a session (Holding), and otherwise once
+-- its role is known for ROLE_SETTLE of a session spent outside it (taken off the High Council while
+-- offline). What came to it as a Steward or a Hand (crown: a 1.1 yes covers those alone, and only
+-- its sender's addon knows which yes it was) is shown in a later session only while this character
+-- is of the crown again, and goes, the save too, once it surely is not: no Steward, and the King's
+-- list heard without him (King.HandsFresh). A Hand's role rides on that list alone, which stops when
+-- the King logs off: until it is heard again, his copies wait unseen.
 ---------------------------------------------------------------------------
 Bank.SISTERS_SAVED_BYTES = 512 * 1024 -- some 70 full banks (a TS is 7.4 KB at most: Room), 128 of 4 KB
-Bank.ROLE_SETTLE = 20 * 60            -- (King.HANDS_FRESH: a Hand knows he is one within it)
-local restored = false   -- this session's memory took what the save kept
-local outsideSince       -- this session's first look at the role outside the audience
+Bank.ROLE_SETTLE = 20 * 60            -- (a session this long outside the audience: its role is known)
+local restored = false      -- this session's memory took what the save kept
+local restoredCrown = false -- ...what came as a Steward or a Hand too (this character of the crown then)
+local crownMay = true       -- the save may hold such copies (false once looked and none left)
+local outsideSince          -- this session's first look at the role outside the audience
 local function CharKey() return tostring(ns.FullName(ns.me) or ""):lower() end
 local function SavedAll(make)
 	local r = ns.rdb
@@ -1098,11 +1103,20 @@ local function SavedMine(make)
 	end
 	return all[key]
 end
--- A guild the save may keep: an Olympus guild of the census, not the King's.
+-- A guild the save may keep: an Olympus guild, not the King's. (Its sender was confirmed when it
+-- came; the census's row is not asked for again: Data.KEEP forgets it while a viewer is away.)
 local function Keepable(guild)
 	return type(guild) == "string" and guild ~= "" and not ns.IsKingGuild(guild) and ns.IsFederation(guild)
-		and ns.Data ~= nil and ns.Data.Guild(guild) ~= nil
 end
+-- This character, of the crown's own audience (the King, a Steward, a Hand); and a copy taken now
+-- marked as one that came to a Steward or a Hand (the King's never lapses: none of his is marked).
+local function CrownMe() return ns.King.IsKing() or ns.King.IsSteward() or ns.King.IsHand() end
+local function CrownMark() return (not ns.King.IsKing() and (ns.King.IsSteward() or ns.King.IsHand())) or nil end
+-- No longer of the crown, for sure: neither King nor Steward, and the King's list, heard now, does
+-- not name him (nor a Steward's he still hears: King.IsHand).
+local function OutOfCrown() return not CrownMe() and ns.King.HandsFresh ~= nil and ns.King.HandsFresh() end
+-- A loading screen's moment: in a guild, its name not given yet. It tells nothing of the role.
+local function Loading() return IsInGuild ~= nil and IsInGuild() and GetGuildInfo("player") == nil end
 -- The save over SISTERS_SAVED_BYTES, or a character's over SISTERS_MAX: the one heard longest ago goes.
 local function TrimSaved()
 	local all = SavedAll(false)
@@ -1144,52 +1158,89 @@ local function Save(key, r, text)
 	if not Keepable(r.guild) then return end
 	local mine = SavedMine(true)
 	if not mine then return end
-	local old = mine[key]
-	mine[key] = { text = text, by = r.by, heard = r.heard, corr = type(old) == "table" and old.corr or nil }
+	local old = type(mine[key]) == "table" and mine[key] or {}
+	mine[key] = { text = text, by = r.by, heard = r.heard, corr = old.corr, corrBy = old.corrBy, crown = r.crown }
+	if r.crown then crownMay = true end
 	TrimSaved()
 end
-local function Unsave(key)
-	local mine = SavedMine(false)
-	if mine then mine[key] = nil; if next(mine) == nil then ns.rdb.sisterBanks[CharKey()] = nil end end
-end
--- This character's save, dropped (it left the audience).
-local function ForgetSaved()
+local function DropMine()
 	local all = SavedAll(false)
 	if all then all[CharKey()] = nil; if next(all) == nil then ns.rdb.sisterBanks = nil end end
 end
+local function Unsave(key)
+	local mine = SavedMine(false)
+	if mine then mine[key] = nil; if next(mine) == nil then DropMine() end end
+end
+-- This character's save, dropped (it left the audience): all but what came to it as a Steward or a
+-- Hand, which waits for the King's list (DropCrown).
+local function ForgetSaved()
+	local mine = SavedMine(false)
+	if not mine then return end
+	for key, e in pairs(mine) do
+		if not (type(e) == "table" and e.crown) then mine[key] = nil end
+	end
+	if next(mine) == nil then DropMine() end
+end
+-- What came to it as a Steward or a Hand, dropped (OutOfCrown): from memory and the save. Its next
+-- ask then says it holds nothing, so that whoever's yes covers it still (a councillor's, the
+-- Treasurer's, the author's) sends his again.
+local function DropCrown()
+	local gone = false
+	for key, x in pairs(sisters) do
+		if x.crown then sisters[key], sisterCount, gone = nil, sisterCount - 1, true end
+	end
+	local mine = SavedMine(false)
+	if mine then
+		for key, e in pairs(mine) do
+			if type(e) == "table" and e.crown then mine[key], gone = nil, true end
+		end
+		if next(mine) == nil then DropMine() end
+	end
+	crownMay = false
+	if gone then sisterLapsed = true end
+end
 local Parse -- (below: a TS read as HandleSister reads it)
--- What the save kept, back in memory (once a session, this character of the audience): each
--- read again as it came; one that no longer reads, or of a guild the census forgot, goes.
+-- What the save kept, back in memory (once a session, this character of the audience; what came as
+-- a Steward or a Hand once it is of the crown too): each read again as it came; one that no longer
+-- reads goes.
 local function Restore()
 	restored = true
+	local crown = CrownMe()
+	if crown then restoredCrown = true end
 	local mine = SavedMine(false)
 	if not mine then return end
 	for key, e in pairs(mine) do
 		local r = type(e) == "table" and type(e.text) == "string" and Parse(e.text) or nil
 		if not r or r.when == 0 or r.guild:lower() ~= key or not Keepable(r.guild) or type(e.by) ~= "string" then
 			mine[key] = nil
+		elseif e.crown and not crown then
+			crownMay = true -- (kept unseen: shown once this character is of the crown again)
 		elseif not sisters[key] and sisterCount < Bank.SISTERS_MAX then
 			sisters[key] = { guild = r.guild, by = e.by, t = math.min(r.when, ns.Now()), money = r.money, tabs = r.tabs,
-				heard = tonumber(e.heard) or 0, sister = true, numbered = r.numbered, saved = true,
-				corr = (type(e.corr) == "string" or e.corr == false) and e.corr or nil }
+				heard = tonumber(e.heard) or 0, sister = true, numbered = r.numbered, saved = true, crown = e.crown and true or nil,
+				corr = (type(e.corr) == "string" or e.corr == false) and e.corr or nil,
+				corrBy = type(e.corrBy) == "string" and e.corrBy or nil }
 			sisterCount = sisterCount + 1
+			if e.crown then crownMay = true end
 		end
 	end
-	if next(mine) == nil then ForgetSaved() end
+	if next(mine) == nil then DropMine() end
 end
 
 -- Still of it: once this character no longer is (taken off the High Council, no longer a Hand),
 -- what it held goes, at its next use or the share tick at the latest, and its next ask once it is
 -- of it again says it holds nothing (Bank.Lapsed: its senders' 3 hours, SISTER_REPEAT, never wait).
--- 1.2.4: the save goes with it (above); and a loading screen's moment with no guild's name (in a
--- guild, GetGuildInfo still nil) tells nothing of the role: what it holds stays, unseen.
+-- 1.2.4: the save goes with it (above, what came as a Steward or a Hand once the King's list says
+-- so); and a loading screen's moment tells nothing of the role: what it holds stays, unseen.
 local function Holding()
+	local loading = Loading()
+	if crownMay and not loading and OutOfCrown() then DropCrown() end
 	if Bank.SeesSisters() then
 		sisterSeen, outsideSince = true, nil
-		if not restored then Restore() end
+		if not restored or (not restoredCrown and CrownMe()) then Restore() end
 		return true
 	end
-	if IsInGuild and IsInGuild() and GetGuildInfo("player") == nil then return false end
+	if loading then return false end
 	local now = ns.Now()
 	outsideSince = outsideSince or math.min(now, tonumber(ns.Comm and ns.Comm.loginAt) or now)
 	if sisterSeen then
@@ -1200,7 +1251,7 @@ local function Holding()
 	end
 	if sisterCount > 0 then wipe(sisters) sisterCount = 0 end
 	if heldCount > 0 then wipe(held) heldCount = 0 end
-	restored = false
+	restored, restoredCrown = false, false
 	return false
 end
 Bank.Holding = Holding
@@ -1222,21 +1273,24 @@ function Bank.LordOrCaptain(sender, guild)
 end
 
 -- 1.2.4: the legacy census refused `sender` for `guild` only because it cannot say yet: inside our
--- login's Data.CROWN_AFTER (the reports of this session still coming in), that guild's report older
--- than Data.FRESH, or too few reports naming him a Lord or a Captain so far (one, where a guild
--- master needs two: the soft rank Data.KnownRank gives what only shows). Never once the author's
--- signed list is enforced (it says who is who at once), never for our own guild after the window
--- (our roster says it), and for the census's Olympus guilds alone.
+-- login's Data.CROWN_AFTER (the reports of this session still coming in), no report of that guild
+-- heard yet (the census forgets at login the rows it has not heard for Data.KEEP: after a week away,
+-- every one), its report older than Data.FRESH, or a report naming him a Lord or a Captain that
+-- does not prove it yet (his own alone: he is its reporter, and the runner-up's comes up to 10
+-- minutes later; one where a guild master needs two). Never once the author's signed list is
+-- enforced (it says who is who at once), never for our own guild after the window (our roster says
+-- it), and for Olympus guilds alone. (What is held stays in memory, one a sender: a guild whose
+-- census can never confirm anyone here costs that much until the session ends.)
 local function Unsettled(sender, guild)
 	local D = ns.Data
 	if not D or (ns.Authority and ns.Authority.Enforced and ns.Authority.Enforced()) then return false end
-	if not ns.IsFederation(guild) or not D.Guild(guild) then return false end
+	if not ns.IsFederation(guild) or ns.IsKingGuild(guild) then return false end
 	local now = ns.Now()
 	if now - (ns.Comm and ns.Comm.loginAt or 0) < D.CROWN_AFTER then return true end
 	if guild == GetGuildInfo("player") then return false end
-	if now - (tonumber(D.Guild(guild).t) or 0) > D.FRESH then return true end
-	local soft = D.KnownRank(ns.FullName(sender), guild, true)
-	return soft ~= nil and soft <= ns.CAPTAIN_RANK
+	local g = D.Guild(guild)
+	if type(g) ~= "table" or now - (tonumber(g.t) or 0) > D.FRESH then return true end
+	return D.Names ~= nil and D.Names(ns.FullName(sender), guild, ns.CAPTAIN_RANK) == true
 end
 Bank.Unsettled = Unsettled
 
@@ -1348,29 +1402,19 @@ end
 -- One of the directory's audience asked (TA): our guild's bank goes to him if our yes covers him
 -- (fresh: he holds none, RESET_GAP apart; empty: his ask says so, however soon: the same snapshot
 -- again PRIVATE_GAP after the last at the soonest, Treasury.Resend). While our no stands, after our
--- snapshot went out: the no, once a session (Konig's review of 1.1). 1.2.4: `lacks`, the times of
--- the snapshots his addon holds unconfirmed (HandleSister): ours among them, it goes again as an
--- empty ask's does.
-local function Lacks(lacks)
-	local snap = Bank.Own()
-	local t = type(snap) == "table" and math.floor(tonumber(snap.t) or 0) or nil
-	for _, x in ipairs(type(lacks) == "table" and lacks or {}) do
-		if t and x == t then return true end
-	end
-	return false
-end
-function Bank.HeardAsk(sender, fresh, empty, lacks)
+-- snapshot went out: the no, once a session (Konig's review of 1.1). 1.2.4: and at each ask after
+-- his login (fresh, RESET_GAP apart): his addon keeps our snapshot across logouts now, so "I hold
+-- nothing" no longer means it holds none of ours, and a no told while he was logging off was lost
+-- (his addon offline) though marked told.
+function Bank.HeardAsk(sender, fresh, empty)
 	if not SisterViewer(sender) then return end
 	local name = ns.FullName(sender)
 	sisterHeard[name] = ns.Now()
 	KeptHeard()[name] = sisterHeard[name]
-	if fresh then ns.Treasury.ForgetSent(sender, "TS")
-	elseif empty or Lacks(lacks) then ns.Treasury.Resend(sender, "TS") end
+	if fresh then ns.Treasury.ForgetSent(sender, "TS") elseif empty then ns.Treasury.Resend(sender, "TS") end
 	if Bank.SisterConsent() == false then
-		-- (1.2.4: an ask after his login too: a viewer's addon keeps our snapshot across logouts now,
-		-- so "I hold nothing" no longer means it holds none of ours.)
 		local guild = SentGuild()
-		if guild and not sisterNoTold[name] then TellNo(sender, guild) end
+		if guild and (fresh or not sisterNoTold[name]) then TellNo(sender, guild) end
 		return
 	end
 	local msg = Bank.SisterMessage()
@@ -1383,13 +1427,24 @@ function Bank.NotFound(Is)
 end
 
 -- on: his yes, 1.2's (the directory's whole audience), or with kingOnly 1.1's kept (the King, his
--- Stewards and his Hands: his answer to OLYMPUS_SISTER_BANK_WIDER); otherwise his no.
+-- Stewards and his Hands: his answer to OLYMPUS_SISTER_BANK_WIDER); otherwise his no. 1.2.4 (the
+-- branch's review): a no is his to give whatever he is now. One who answered or shared as a guild
+-- master or an officer and was demoted since (or is of another guild) takes his snapshot back
+-- still, from the viewers' screens and saves (their addon takes a no from whoever sent the copy it
+-- keeps); a yes stays a guild master's or an officer's alone.
 function Bank.SetSisterConsent(on, kingOnly)
-	if not Bank.SisterTreasurer() then return ns.Print(L.BANK_SISTER_ONLY) end
+	local officer = Bank.SisterTreasurer()
+	if not officer then
+		local t = ns.db and ns.db.sisterBankShares
+		local answered = type(t) == "table" and t[SisterKey()] ~= nil
+		if on or not (answered or SentGuild()) then return ns.Print(L.BANK_SISTER_ONLY) end
+	end
 	ns.db.sisterBankShares = type(ns.db.sisterBankShares) == "table" and ns.db.sisterBankShares or {}
 	ns.db.sisterBankShares[SisterKey()] = on and (kingOnly and Bank.CONSENT_KING or Bank.CONSENT_ALL) or false
-	ns.db.sisterBankFor = type(ns.db.sisterBankFor) == "table" and ns.db.sisterBankFor or {}
-	ns.db.sisterBankFor[SisterKey()] = GetGuildInfo("player") -- (the guild his question named: Answer)
+	if officer then
+		ns.db.sisterBankFor = type(ns.db.sisterBankFor) == "table" and ns.db.sisterBankFor or {}
+		ns.db.sisterBankFor[SisterKey()] = GetGuildInfo("player") -- (the guild his question named: Answer)
+	end
 	ns.Print(on and (kingOnly and L.BANK_SISTER_KING_KEPT or L.BANK_SISTER_ON) or L.BANK_SISTER_OFF)
 	if on then
 		wipe(sisterNoTold) -- (a later no goes to every viewer again)
@@ -1403,6 +1458,7 @@ function Bank.SetSisterConsent(on, kingOnly)
 	-- from the others at their next ask (HeardAsk). Whole snapshots still go only to those heard
 	-- within AUDIENCE_FRESH (ShareSister).
 	local guild, now = SentGuild() or GetGuildInfo("player"), ns.Now()
+	if not guild then return end -- (no guild of his ever went out, none now: nothing to take back)
 	local within = {}
 	for name, t in pairs(KeptHeard()) do within[name] = t end
 	for name, t in pairs(sisterHeard) do
@@ -1462,12 +1518,10 @@ end
 -- afterwards), the newest kept, in memory alone. 1.2: the one it replaces, the same sender's and
 -- older, is kept with it (prev: one, never a chain), for what left the bank since (Bank.Previous);
 -- the same snapshot heard again (his addon repeats it) changes nothing. 1.2.4: one the census
--- cannot judge yet is held (Hold), not dropped.
-local function Hold(key, sender, text, when)
-	for k, h in pairs(held) do -- (one a sender: his newest)
-		if k ~= key and h.sender == sender then held[k], heldCount = nil, heldCount - 1 end
-	end
-	if not held[key] then
+-- cannot judge yet is held (Hold), not dropped; so is one heard on a loading screen's moment.
+local function Hold(key, who, text, when)
+	local id = who:lower()
+	if not held[id] then
 		if heldCount >= Bank.SISTERS_MAX then
 			local oldest
 			for k, h in pairs(held) do if not oldest or h.at < held[oldest].at then oldest = k end end
@@ -1475,7 +1529,7 @@ local function Hold(key, sender, text, when)
 		end
 		heldCount = heldCount + 1
 	end
-	held[key] = { sender = sender, text = text, when = when, at = ns.Now() }
+	held[id] = { sender = who, key = key, text = text, when = when, at = ns.Now() } -- (his last word)
 	-- Once our login's window is over, every snapshot held is handled again (one check a login).
 	local login, D = ns.Comm and ns.Comm.loginAt, ns.Data
 	if login and heldTimer ~= login and ns.Now() - login < D.CROWN_AFTER then
@@ -1485,15 +1539,20 @@ local function Hold(key, sender, text, when)
 end
 -- (Tests: how many are held.)
 function Bank.Held() return heldCount end
--- Every snapshot held, handled again as it came (the census may confirm its sender now; one it
--- still cannot judge is held again). Returns how many are no longer held (taken or dropped).
+-- Every snapshot held, handled again as it came, the oldest first (of two senders of one guild, the
+-- newer stays: HandleSister keeps the newest); the census may confirm its sender now, and one it
+-- still cannot judge is held again. Not on a loading screen's moment. Returns how many are no
+-- longer held (taken or dropped).
 function Bank.Recheck()
-	if rechecking or heldCount == 0 then return 0 end
+	if rechecking or heldCount == 0 or Loading() then return 0 end
 	rechecking = true
 	local list = {}
 	for _, h in pairs(held) do list[#list + 1] = h end
 	wipe(held); heldCount = 0
-	table.sort(list, function(a, b) return a.at < b.at end)
+	table.sort(list, function(a, b)
+		if (a.when or 0) ~= (b.when or 0) then return (a.when or 0) < (b.when or 0) end
+		return a.at < b.at
+	end)
 	local ok, err = pcall(function()
 		for _, h in ipairs(list) do Bank.HandleSister("WHISPER", h.sender, h.text) end
 	end)
@@ -1502,19 +1561,6 @@ function Bank.Recheck()
 	return #list - heldCount
 end
 ns.On("DATA_CHANGED", function() if heldCount > 0 then Bank.Recheck() end end)
--- What this client's ask says it lacks (Treasury.Ask): the times of the snapshots it holds
--- unconfirmed, the newest first, LACK_MAX at most. A sender's addon that finds its own there sends
--- it again; the time alone names no guild and no one on the channel.
-function Bank.Lacking()
-	local out = {}
-	if heldCount == 0 or not Bank.SeesSisters() then return out end
-	for _, h in pairs(held) do
-		if tonumber(h.when) and h.when > 0 then out[#out + 1] = math.floor(h.when) end
-	end
-	table.sort(out, function(a, b) return a > b end)
-	for i = #out, Bank.LACK_MAX + 1, -1 do out[i] = nil end
-	return out
-end
 
 -- A TS as it travels, read: { guild, when, money, tabs, numbered } (when 0: a no, no tabs read), or
 -- nil for none or one of the King's guild. (1.2.4: the save keeps the text, read again here.)
@@ -1529,21 +1575,42 @@ Parse = function(text)
 	return { guild = guild, when = when, money = math.min(tonumber(money) or 0, 2147483647), tabs = tabs, numbered = numbered }
 end
 
+-- `who` sent the copy of `key`'s bank this character keeps: in memory, or saved (shown or not now).
+local function SentBy(key, who)
+	local x = sisters[key]
+	if x and ns.Treasury.SameChar(x.by, who) then return true end
+	local mine = SavedMine(false)
+	local e = mine and mine[key]
+	return type(e) == "table" and type(e.by) == "string" and ns.Treasury.SameChar(e.by, who)
+end
+
 function Bank.HandleSister(dist, sender, text)
-	if dist ~= "WHISPER" or type(text) ~= "string" or not Holding() then return end
+	if dist ~= "WHISPER" or type(text) ~= "string" then return end
 	local guild, when = text:match("^TS~([^~]*)~(%d+)~")
 	guild = guild and ns.King.CleanGuild(guild)
 	if not guild or ns.IsKingGuild(guild) then return end
-	local key, now = guild:lower(), ns.Now()
+	local key, now, who = guild:lower(), ns.Now(), ns.FullName(sender)
 	when = tonumber(when)
-	-- (A no from whoever sent the snapshot held counts, whatever the census says of him now.)
-	local own = when == 0 and sisters[key] and ns.Treasury.SameChar(sisters[key].by, ns.FullName(sender))
-	if not own and not Bank.LordOrCaptain(sender, guild) then
-		if Unsettled(sender, guild) then Hold(key, ns.FullName(sender), text, when) end
+	-- A no from whoever sent the copy kept counts, whatever the census says of him now. 1.2.4: and
+	-- whatever this character is now: it only takes away, from the save too, a copy kept unseen as
+	-- well (a loading screen's moment, a Hand while the King's list is not heard).
+	if when == 0 and SentBy(key, who) then
+		if held[who:lower()] then held[who:lower()], heldCount = nil, heldCount - 1 end
+		if sisters[key] then sisters[key], sisterCount = nil, sisterCount - 1 end
+		Unsave(key)
+		ns.Fire("TREASURY_CHANGED")
 		return
 	end
-	-- (Taken now: what this sender's addon sent of it before, still held, is behind it.)
-	if held[key] and ns.Treasury.SameChar(held[key].sender, ns.FullName(sender)) then held[key], heldCount = nil, heldCount - 1 end
+	if not Holding() then
+		if Loading() then Hold(key, who, text, when) end
+		return
+	end
+	if not Bank.LordOrCaptain(sender, guild) then
+		if Unsettled(sender, guild) then Hold(key, who, text, when) end
+		return
+	end
+	-- (Taken now: what this sender's addon sent before, still held, is behind it.)
+	if held[who:lower()] then held[who:lower()], heldCount = nil, heldCount - 1 end
 	if when == 0 then
 		if sisters[key] then sisters[key], sisterCount = nil, sisterCount - 1 end
 		Unsave(key) -- (1.2.4: from the save too)
@@ -1552,19 +1619,26 @@ function Bank.HandleSister(dist, sender, text)
 	end
 	local p = Parse(text)
 	if not p or p.guild:lower() ~= key then return end
-	local r = { guild = guild, by = ns.FullName(sender), t = math.min(when, now), money = p.money,
-		tabs = p.tabs, heard = now, sister = true, numbered = p.numbered }
+	local r = { guild = guild, by = who, t = math.min(when, now), money = p.money,
+		tabs = p.tabs, heard = now, sister = true, numbered = p.numbered, crown = CrownMark() }
 	local kept = sisters[key]
 	if kept and kept.t > r.t then return end
 	local same = kept and ns.Treasury.SameChar(kept.by, r.by)
 	if same and kept.t == r.t and kept.money == r.money and kept.numbered == r.numbered and #kept.tabs == #r.tabs then
 		kept.heard = now
+		-- (Heard again outside the crown: its sender's yes covers this character as it is now.)
+		if not r.crown then kept.crown = nil end
 		local mine = SavedMine(false)
-		if mine and mine[key] then mine[key].heard = now else Save(key, kept, text) end
+		if mine and mine[key] then
+			mine[key].heard = now
+			if not r.crown then mine[key].crown = nil end
+		else
+			Save(key, kept, text)
+		end
 		return
 	end
 	if same and kept.t < r.t then r.prev = kept elseif same then r.prev = kept.prev end
-	if kept then kept.prev, r.corr = nil, kept.corr end
+	if kept then kept.prev, r.corr, r.corrBy = nil, kept.corr, kept.corrBy end
 	if not kept then
 		if sisterCount >= Bank.SISTERS_MAX then
 			local oldest
@@ -1580,7 +1654,7 @@ function Bank.HandleSister(dist, sender, text)
 	ns.Fire("DATA_CHANGED") -- (a viewer's tab may appear)
 end
 ns.Comm.Handle("TS", function(...) Bank.HandleSister(...) end)
-ns.Treasury.OnPrivate("TS", { from = function() return true end, to = function() return Holding() end,
+ns.Treasury.OnPrivate("TS", { from = function() return true end, to = function() return Holding() or Loading() end,
 	send = function(to) return Bank.SisterTreasurer() and Serves(to) end, repeatAfter = Bank.SISTER_REPEAT,
 	handle = function(...) Bank.HandleSister(...) end })
 
@@ -1600,10 +1674,24 @@ function Bank.Sisters()
 end
 
 -- 1.2.4: the Federal Treasury correspondent `guild`'s master named (Nominees: his list while it
--- counts here, the census proving him), kept with that guild's snapshot, in the save too, so it
--- still shows once his list is no longer heard (he logged off: Nominees.FRESH). Returns his name, or
--- nil for none; and whether it is the one kept.
+-- counts here, the census proving him), kept with that guild's snapshot, in the save too, with who
+-- named him, so it still shows once his list is no longer heard (he logged off: Nominees.FRESH),
+-- while he still leads that guild: once the census names another guild master there, the kept name
+-- goes (the branch's review: his pick is no longer the guild's; the new one's list names his own).
+-- Returns his name, or nil for none; and whether it is the one kept.
 Bank.CORRESPONDENT = "Federal Treasury"
+local function KeepCorr(key, x, name, by)
+	x.corr, x.corrBy = name, by
+	local mine = SavedMine(false)
+	if mine and type(mine[key]) == "table" then mine[key].corr, mine[key].corrBy = name, by end
+end
+-- The census names a guild master of `guild` other than `by` (nothing known: not that).
+local function OtherMaster(by, guild)
+	if type(by) ~= "string" or by == "" then return true end
+	local g = ns.Data and ns.Data.Guild(guild)
+	if type(g) ~= "table" or type(g.leader) ~= "string" or g.leader == "" then return false end
+	return ns.FullName(g.leader, g.realm):lower() ~= ns.FullName(by):lower()
+end
 function Bank.Correspondent(guild)
 	if type(guild) ~= "string" or guild == "" or ns.IsKingGuild(guild) then return nil end
 	local key, N = guild:lower(), ns.Nominees
@@ -1614,14 +1702,13 @@ function Bank.Correspondent(guild)
 		for _, e in ipairs(type(list.entries) == "table" and list.entries or {}) do
 			if e.role == "correspondent" and type(e.dept) == "string" and e.dept:lower() == Bank.CORRESPONDENT:lower() then name = e.name break end
 		end
-		if x then
-			x.corr = name or false
-			local mine = SavedMine(false)
-			if mine and type(mine[key]) == "table" then mine[key].corr = name or false end
-		end
+		if x then KeepCorr(key, x, name or false, type(list.by) == "string" and list.by or nil) end
 		return name, false
 	end
-	if x and type(x.corr) == "string" then return x.corr, true end
+	if x and type(x.corr) == "string" then
+		if not OtherMaster(x.corrBy, guild) then return x.corr, true end
+		KeepCorr(key, x, false, nil)
+	end
 	return nil
 end
 
@@ -2154,6 +2241,7 @@ function Bank.Reload()
 	wipe(queried)
 	wipe(sisters); wipe(sisterHeard); wipe(sisterNoTold); wipe(held)
 	heldCount, heldTimer, rechecking, restored, outsideSince = 0, nil, false, false, nil
+	restoredCrown, crownMay = false, true
 	sisterCount, sisterAsked, sisterSeen, sisterLapsed = 0, false, false, false
 	wipe(indexed); wipe(foldedNames); wipe(nameMiss); wipe(nameAsked)
 	wipe(prices); wipe(priceAsked); wipe(valued)
