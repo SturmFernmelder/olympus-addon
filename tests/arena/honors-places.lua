@@ -680,7 +680,7 @@ test("1.2.4 the Bones' charm through the month after: this client's games past F
 		eq(#Bones(w, x, "Best", "L", { month = closed }), 3, x.short .. ": last month's list as it closed")
 		x.ns.FarkleTable.HALVES_MAX = 3
 		Bones(w, x, "Prune")
-		eq(#Bones(w, x, "Best", "L", { month = closed }), 0, x.short .. ": last month's games pruned here")
+		eq(#Bones(w, x, "Best", "L", { month = closed }), 3, x.short .. ": signed durable records preserve the closed month's players after legacy pruning")
 		eq(#Bones(w, x, "Best", "L"), 3, x.short .. ": this month's kept")
 	end
 	for _, x in ipairs(everyone) do w:As(x, x.ns.HonorsNet.Refresh) end

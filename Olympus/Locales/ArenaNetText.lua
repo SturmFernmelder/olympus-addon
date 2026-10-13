@@ -93,6 +93,18 @@ L.BACKUP_ARENA_FAILED = "The Blood Arena: left out, not readable: %s."
 L.BACKUP_ARENA_ELSEWHERE = "The Blood Arena: the parts of %s stay there (made on that realm): only your key and copper lines come back here."
 L.PROFILE_EDIT_BTN = "Edit my profile"
 
+-- 1.2.4, the shared records (Records.lua): /oly arena records and the author's seal.
+L.RECORDS_HELP = "/oly arena records [seal] - the games and duels this client holds and passes on; seal: paste the author's signed seal"
+L.RECORDS_TITLE = "Olympus: the shared records"
+L.RECORDS_LINE = "%s: %d held, %d waiting for a player's key, %d in conflict, %d months sealed"
+L.RECORDS_TYPE_b = "Bones games"
+L.RECORDS_TYPE_d = "Duels"
+L.RECORDS_KEYS = "Players' keys heard from them: %d"
+L.RECORDS_REQUESTS = "Seal requests (closed months, for scripts/council-sign.py seal):"
+L.RECORDS_SEAL_PROMPT = "Paste the signed seal (the line scripts/council-sign.py seal printed):"
+L.RECORDS_SEAL_TAKEN = "Olympus: the seal is taken; it goes to the army now."
+L.RECORDS_SEAL_BAD = "Olympus: that is no seal this client takes (its signature, its realm group, or an older one than held)."
+
 if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_TEST_LINE = "Versão de teste da arena %d da %s · feita %s · expira %s · canal: %s · commit %s"
 	L.ARENA_TEST_LOGIN = "Versão de teste da arena %d do Olympus: a arena funciona só na sua raide ou grupo, e nada conta. /oly arena status"
@@ -169,4 +181,14 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.BACKUP_ARENA_FAILED = "A Arena de Sangue: deixado de fora, ilegível: %s."
 	L.BACKUP_ARENA_ELSEWHERE = "A Arena de Sangue: as partes de %s ficam lá (feitas naquele reino): só a sua chave e as linhas de cobre voltam aqui."
 	L.PROFILE_EDIT_BTN = "Editar meu perfil"
+	L.RECORDS_HELP = "/oly arena records [seal] - os jogos e duelos que este cliente guarda e repassa; seal: colar o selo assinado do autor"
+	L.RECORDS_TITLE = "Olympus: os registros comuns"
+	L.RECORDS_LINE = "%s: %d guardados, %d esperando a chave de um jogador, %d em conflito, %d meses selados"
+	L.RECORDS_TYPE_b = "Jogos de Bones"
+	L.RECORDS_TYPE_d = "Duelos"
+	L.RECORDS_KEYS = "Chaves de jogadores ouvidas deles: %d"
+	L.RECORDS_REQUESTS = "Pedidos de selo (meses fechados, para scripts/council-sign.py seal):"
+	L.RECORDS_SEAL_PROMPT = "Cole o selo assinado (a linha que scripts/council-sign.py seal mostrou):"
+	L.RECORDS_SEAL_TAKEN = "Olympus: o selo foi aceito; ele vai para o exército agora."
+	L.RECORDS_SEAL_BAD = "Olympus: isso não é um selo que este cliente aceita (a assinatura, o grupo de reinos, ou um mais antigo que o guardado)."
 end

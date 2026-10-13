@@ -1120,13 +1120,25 @@ function HV.KeepOwn(b, key, h, mine)
 end
 
 local PruneHalves -- (below)
+-- (1.2.4) A game both halves agree on, each signed: a record of the shared records (Records.lua),
+-- which any holder tells whoever lacks it. Its two halves' bodies, the host's seat first.
+function HV.RecordBody(a, b) return a .. "^" .. b end
+function HV.ToRecords(e)
+	local bodies = type(e) == "table" and type(e.bodies) == "table" and e.bodies or nil
+	local a, b = bodies and bodies[Low(e.p1) or ""], bodies and bodies[Low(e.p2) or ""]
+	if type(a) ~= "string" or type(b) ~= "string" then return false end
+	return Call("Records", "Take", "b", HV.RecordBody(a, b), Me(), "self") == true
+end
 -- A half h = { id, p1, p2, seat (whose: 1 the host's, 2 the guest's), w, s1, s2, how, steps, hash,
 -- t (its end), began, tc, mode, pk, sig, core, body } heard from sender (its player, or the game's
 -- other player relaying it, its signature checked; mine: this client's own, never refused for the
--- flood rule): true (and "again" when it was held already), or false and why.
-local function TakeHalf(sender, h, mine)
+-- flood rule): true (and "again" when it was held already), or false and why. trusted (1.2.4): a
+-- half of a record the shared records took (Records.lua: its key the one its player declared here,
+-- its signature checked), whoever told it: taken as its own player's.
+local function TakeHalf(sender, h, mine, trusted)
 	local p1, p2, by = Low(h.p1), Low(h.p2), Low(sender)
 	local who = h.seat == 1 and p1 or (h.seat == 2 and p2 or nil)
+	if trusted then by = who end
 	if not p1 or not p2 or p1 == p2 or not who or not by or (by ~= p1 and by ~= p2) then return false, "sender" end
 	local now = Now()
 	local cut = now - FT.HALVES_DAYS * 86400
@@ -1134,6 +1146,8 @@ local function TakeHalf(sender, h, mine)
 	local b = RankStore(true)
 	if not b then return false, "store" end
 	local key = HalfKey(h.id, h.p1, h.p2)
+	-- (1.2.4: two records of this game saying two results, each signed by both players: neither counts)
+	if type(b.clash) == "table" and b.clash[key] then return false, "conflict" end
 	local said = HV.Said(h)
 	local me = Low(Me())
 	-- (this player's own game, one his client knows: his half and the other's, for his repeats)
@@ -1149,6 +1163,10 @@ local function TakeHalf(sender, h, mine)
 	if type(e) == "table" and type(e.by) == "table" and e.by[who] ~= nil then
 		-- (each player's first half stays: an honest client never says another)
 		if HV.ReadWord(e.by[who]) ~= said then return false, "changed" end
+		if h.pk and h.sig and not (type(e.bodies) == "table" and e.bodies[who]) then
+			e.bodies = type(e.bodies) == "table" and e.bodies or {}
+			e.bodies[who] = h.body
+		end
 		if ownGame then HV.KeepOwn(b, key, h, who == me) end
 		return true, "again"
 	end
@@ -1164,8 +1182,17 @@ local function TakeHalf(sender, h, mine)
 		hd.n = hd.n + 1
 	end
 	e.by[who] = HV.Word(h)
-	-- (a player's own word carries his key: this client's for him from now on)
-	if by == who and h.pk then b.keys[who] = h.pk end
+	-- (1.2.4: a signed half's body, kept until the game agrees: the shared records' record)
+	if h.pk and h.sig then
+		e.bodies = type(e.bodies) == "table" and e.bodies or {}
+		e.bodies[who] = h.body
+	end
+	-- (a player's own word carries his key: this client's for him from now on, and the shared
+	-- records' key for him too)
+	if by == who and h.pk and not trusted then
+		b.keys[who] = h.pk
+		Call("Records", "Pin", who, h.pk)
+	end
 	if ownGame then HV.KeepOwn(b, key, h, who == me) end
 	local ok = not e.full and HV.Agreed(e)
 	if ok then
@@ -1177,6 +1204,7 @@ local function TakeHalf(sender, h, mine)
 			b.open[key] = nil
 			b.done[key] = HV.DoneLine({ w = ok.w, t = ok.t, dur = ok.dur, at = now, said = ok.said, p1 = e.p1, p2 = e.p2 })
 			hd.day[ka], hd.day[kb] = (hd.day[ka] or 0) + 1, (hd.day[kb] or 0) + 1
+			HV.ToRecords(e)
 		end
 	end
 	HV.gen = HV.gen + 1
@@ -1330,7 +1358,7 @@ function HV.Archive(b)
 		local rows, n = FT.Best("L", { month = m })
 		n = tonumber(n) or 0
 		local kept = b.months[m]
-		if type(rows) == "table" and n > 0 and not (type(kept) == "table" and (tonumber(kept.n) or 0) > n) then
+		if type(rows) == "table" and n > 0 and not (type(kept) == "table" and (kept.sealed or (tonumber(kept.n) or 0) > n)) then
 			local out = {}
 			for i, r in ipairs(rows) do out[i] = { name = r.name, games = r.games, won = r.won, lost = r.lost } end
 			b.months[m] = { n = n, at = Now(), rows = out }
@@ -1348,7 +1376,8 @@ function FT.Month(month)
 	local b = RankStore(false)
 	local kept = b and b.months[month]
 	local rows, n
-	if type(kept) == "table" and month < MonthOf(Now() - FT.HALVES_DAYS * 86400) then
+	if type(kept) == "table" and (kept.sealed or (month < MonthOf(Now() - FT.HALVES_DAYS * 86400)
+		and not (ns.Records and not ns.Records.missing and ns.Records.ContainsMonth and ns.Records.ContainsMonth("b", month)))) then
 		-- (a month past what the store holds: its games are gone, its kept list is all there is. The
 		-- review: Best read every game held again for each month kept, and the months add up for good.)
 		rows, n = {}, 0
@@ -1356,8 +1385,9 @@ function FT.Month(month)
 		rows, n = FT.Best("L", { month = month })
 	end
 	local out = { month = month, rows = rows or {} }
-	if type(kept) == "table" and type(kept.rows) == "table" and (tonumber(kept.n) or 0) > (tonumber(n) or 0) then
-		out.rows, out.kept = {}, true
+	-- (1.2.4: a month the author's seal closed, Records.lua: its totals, whatever this client holds)
+	if type(kept) == "table" and type(kept.rows) == "table" and (kept.sealed or (tonumber(kept.n) or 0) > (tonumber(n) or 0)) then
+		out.rows, out.kept, out.sealed = {}, true, kept.sealed == true or nil
 		for _, r in ipairs(kept.rows) do
 			if type(r) == "table" and type(r.name) == "string" and not HV.RankHides(r.name) then
 				out.rows[#out.rows + 1] = { name = r.name, key = Low(r.name), games = tonumber(r.games) or 0, won = tonumber(r.won) or 0,
@@ -3955,6 +3985,8 @@ local function HearHalf(dist, sender, h)
 	local b = RankStore(false)
 	if HV.HeldAlready(b, h) then return TakeHalf(sender, h) end
 	local pin = HV.PinOf(b, player)
+	-- (1.2.4: or any key the half's player declared to this client himself, RK: the shared records')
+	if not (pin and h.pk == pin) and Call("Records", "HasKey", player, h.pk) == true then pin = h.pk end
 	if not pin or h.pk ~= pin or not h.sig then return false, "pin" end
 	local ok = HV.CheckSig(h.body, HV.Raw(pin, 32), "OLYB1|" .. h.core, HV.Raw(h.sig, 64), function(good)
 		if good then TakeHalf(sender, h) end
@@ -4148,7 +4180,10 @@ function FT.Best(mode, opts)
 	if not b then return {} end
 	local month = tonumber(opts.month) or MonthOf(Now(), opts.offset)
 	local ctx = HV.Context()
-	local cached = opts.offset == nil and bestCache[month]
+	-- (opts.all, 1.2.4: the month's totals for its seal, Records.lua: nobody left out for being
+	-- hidden or blocked here, a view of this client's own; never kept as the list)
+	local keep = opts.offset == nil and not opts.all
+	local cached = keep and bestCache[month]
 	if cached and cached.ctx == ctx then return cached.rows, cached.held end
 	-- every game both halves agree on, its players hidden by nobody here and never one owner's
 	-- characters (the alt check, Debts.SameOwner); held (1.2.4): the agreed games the month's list
@@ -4156,10 +4191,20 @@ function FT.Best(mode, opts)
 	local games, hidden, same, held = {}, {}, {}, 0
 	local minDur, dayMax, pairMax, pairSecs = RankCap("MIN_RATED_DUR"), RankCap("DAY_MAX"), RankCap("PAIR_MAX"), RankCap("PAIR_DAYS") * 86400
 	local function Hidden(name, k)
+		if opts.all then return false end
 		if hidden[k] == nil then hidden[k] = HV.RankHides(name) end
 		return hidden[k]
 	end
-	for key, s in pairs(b.done) do
+	local done = {}
+	for key, value in pairs(b.done) do done[key] = value end
+	local records = ns.Records
+	if records and not records.missing and records.Bodies and records.MonthStart then
+		for _, body in ipairs(records.Bodies("b", floor(records.MonthStart(month) / 86400) - RankCap("PAIR_DAYS"), floor(records.MonthStart(month + 1) / 86400))) do
+			local rec = FT.ReadRecord(body)
+			if rec and not done[rec.id] then done[rec.id] = HV.DoneLine(rec.done) end
+		end
+	end
+	for key, s in pairs(done) do
 		local r = HV.ReadDone(s)
 		if r and (MonthOf(r.t, opts.offset) == month or MonthOf(r.t + pairSecs, opts.offset) == month) then held = held + 1 end
 		local a, c = r and Low(r.p1), r and Low(r.p2)
@@ -4218,7 +4263,7 @@ function FT.Best(mode, opts)
 		return x.key < y.key
 	end)
 	for i, r in ipairs(rows) do r.place = i end
-	if opts.offset == nil then bestCache[month] = { ctx = ctx, rows = rows, held = held } end
+	if keep then bestCache[month] = { ctx = ctx, rows = rows, held = held } end
 	return rows, held
 end
 
@@ -4733,3 +4778,67 @@ function FT.Reset()
 	invitesSeen, invitesAsked = {}, false
 end
 FT._ = { tables = function() return tables end, notices = function() return notices end, Split = Split, Terms = Terms, Fields = Fields }
+
+-- Two original KN halves, never an unsigned summary. RK binds their keys to the server's sender.
+function FT.ReadRecord(body)
+	local left, right = tostring(body):match("^([^^]+)%^([^^]+)$")
+	if not left then return nil, "shape" end
+	local halves = {}
+	for seat, value in ipairs({ left, right }) do
+		local f = Split(value)
+		local p1, p2 = A().Name(f[2] or ""), A().Name(f[3] or "")
+		local h = ValidId(f[1] or "") and p1 and p2 and NoticeHalf(f, f[1], p1, p2, "L")
+		if not h or h.seat ~= seat or not h.pk or not h.sig or h.began > h.t then return nil, "half" end
+		halves[seat] = h
+	end
+	local a, b = halves[1], halves[2]
+	if a.id ~= b.id or not Same(a.p1, b.p1) or not Same(a.p2, b.p2) or Same(a.p1, a.p2) or a.pk == b.pk then return nil, "pair" end
+	local agreed = HV.Agreed({ p1 = a.p1, p2 = a.p2, by = { [Low(a.p1)] = HV.Word(a), [Low(a.p2)] = HV.Word(b) } })
+	if not agreed then return nil, "result" end
+	local parts = {}
+	for seat, h in ipairs(halves) do
+		local pk, sig = HV.Raw(h.pk, 32), HV.Raw(h.sig, 64)
+		if not pk or not sig then return nil, "key" end
+		parts[seat] = { name = seat == 1 and h.p1 or h.p2, pk64 = h.pk, sig64 = h.sig, pk = pk, sig = sig, msg = "OLYB1|" .. h.core }
+	end
+	agreed.p1, agreed.p2, agreed.at = a.p1, a.p2, agreed.t
+	return { id = HalfKey(a.id, a.p1, a.p2), t = agreed.t, content = agreed.said .. "|" .. agreed.t .. "|" .. agreed.dur, parts = parts, done = agreed }
+end
+if ns.Records and ns.Records.Register then
+	ns.Records.Register("b", {
+		Read = FT.ReadRecord, DAY_MAX = FT.HALVES_DAY_KEEP,
+		Took = function(rec)
+			local b = RankStore(true)
+			if b and not (b.clash and b.clash[rec.id]) then
+				b.done[rec.id] = b.done[rec.id] or HV.DoneLine(rec.done)
+				HV.held, bestCache = nil, {} HV.gen = HV.gen + 1
+			end
+		end,
+		Conflict = function(rec)
+			local b = RankStore(true)
+			if b then
+				b.clash = b.clash or {} b.clash[rec.id] = true
+				b.done[rec.id], b.open[rec.id] = nil, nil
+				for month, kept in pairs(b.months) do if not kept.sealed then b.months[month] = nil end end
+				HV.held, bestCache = nil, {} HV.gen = HV.gen + 1
+			end
+		end,
+		Totals = function(month) return FT.Best("L", { month = month, all = true }) end,
+		Sealed = function(month, rows)
+			local b = RankStore(true)
+			if b then b.months[month] = { sealed = true, rows = rows, at = Now(), n = #rows } end
+		end,
+		Pins = function() return (RankStore(false) or {}).keys or {} end,
+		Mine = function()
+			local out = {}
+			for _, e in pairs((RankStore(false) or {}).own or {}) do
+				if e.mode == "L" and e.mine and e.theirs then
+					local f = Split(e.mine)
+					out[#out + 1] = f[16] == "1" and HV.RecordBody(e.mine, e.theirs) or HV.RecordBody(e.theirs, e.mine)
+				end
+			end
+			return out
+		end,
+		Has = function() local b = RankStore(false) return b ~= nil and next(b.own) ~= nil end,
+	})
+end

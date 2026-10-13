@@ -759,7 +759,7 @@ function LG.ReadHalf(body)
 end
 
 -- Whether two halves (one each side) are the same duel: its entry, or nil and why.
-local function Agree(a, b)
+local function Agree(a, b, all)
 	if a.side ~= "A" then a, b = b, a end
 	if a.side ~= "A" or b.side ~= "B" or a.fid ~= b.fid then return nil, "halves" end
 	if a.gkA ~= b.gkA or a.gkB ~= b.gkB or not Same(a.A, b.A) or not Same(a.B, b.B) then return nil, "pair" end
@@ -780,7 +780,7 @@ local function Agree(a, b)
 	-- The level each saw of the other is the one the other gave of himself.
 	if (a.opp and a.opp ~= b.lvl) or (b.opp and b.opp ~= a.lvl) then return nil, "level" end
 	local M = ns.Moderation
-	if type(M) == "table" and not M.missing and M.Hides and (M.Hides(a.A) or M.Hides(a.B)) then return nil, "off" end
+	if not all and type(M) == "table" and not M.missing and M.Hides and (M.Hides(a.A) or M.Hides(a.B)) then return nil, "off" end
 	local seen = a.opp ~= nil and b.opp ~= nil and a.lvl ~= nil and b.lvl ~= nil
 	local t = math.max(a.t, b.t)
 	return { season = LG.SeasonOf(t, "L"), fid = a.fid, t = t, cat = a.cat, bo = a.bo, gkA = a.gkA, A = a.A, fA = a.facts,
@@ -880,7 +880,10 @@ local function CheckPair(fid, p, a, b, e, mode)
 			Drop(fid)
 			-- (A key is its fighter's only from his own half that checked, his gk the game's word.)
 			for _, x in ipairs({ a, b }) do
-				if x.first and Bound(x.signer, x.gk) == true then Pin(x.gk, x.pk64) end
+				if x.first and Bound(x.signer, x.gk) == true then
+					Pin(x.gk, x.pk64)
+					if ns.Records and ns.Records.Pin then ns.Records.Pin(x.signer, x.pk64, x.gk) end
+				end
 			end
 			if v == nil then e.fl, e.wait = (e.fl:gsub("r", "")), Has(e.fl, "r") and "r" or "d" end
 			e.kA, e.kB = KeyPrint(a.pk), KeyPrint(b.pk)
@@ -890,6 +893,7 @@ local function CheckPair(fid, p, a, b, e, mode)
 				waiting[e.fid] = { mode = mode, season = e.season }
 				GkLater()
 			end
+			if ns.Records and ns.Records.Take then ns.Records.Take("d", a.body .. "^" .. b.body, ns.me, "self") end
 		end
 	end
 	for _, h in ipairs({ a, b }) do
@@ -940,6 +944,8 @@ function LG.TakeHalf(dist, sender, mode, body, own)
 	if mode ~= "L" or not Arena.Counts(mode) then return Count("rehearsal") end
 	local h, why = LG.ReadHalf(body)
 	if not h then return Count(why) end
+	local records = ns.Records and ns.Records.Store and ns.Records.Store("d")
+	if records and records.clash[h.fid .. ":" .. h.A:lower() .. ":" .. h.B:lower()] then return Count("conflict") end
 	local first = Same(sender, h.signer)
 	if first then
 		-- (Its time and its gk are its fighter's word: fresh only, a clerk's late one excepted, and
@@ -2702,3 +2708,76 @@ Arena.Action("ledger.word", function() return ns.ArenaRoles.IsPublicArbiter(ns.m
 	function(kind, cat, gk, reason, ref) local id = LG.Word(kind, cat, gk, reason, ref) Watch() return id end)
 Arena.Action("ledger.season", function() return ns.ArenaRoles.IsKing(ns.me) or ns.ArenaRoles.IsPublicArbiter(ns.me, "L") end,
 	function(...) local ok, why = LG.SetSeason(...) Watch() return ok, why end)
+
+function LG.ReadRecord(body)
+	local left, right = tostring(body):match("^([^^]+)%^([^^]+)$")
+	local a, b = left and LG.ReadHalf(left), right and LG.ReadHalf(right)
+	if not a or not b or a.side ~= "A" or b.side ~= "B" then return nil, "half" end
+	local e, why = Agree(a, b, true) -- signed records are stable; local moderation filters their views
+	if not e then return nil, why end
+	if BothBound(e) == false then return nil, "gk" end
+	e.kA, e.kB, e.keptAt, e.halves = KeyPrint(a.pk), KeyPrint(b.pk), e.t, { A = a.body, B = b.body }
+	return { id = e.fid .. ":" .. e.A:lower() .. ":" .. e.B:lower(), t = e.t,
+		content = table.concat({ e.gkA, e.gkB, e.bo, e.cat, e.w, e.m, e.sc, e.dur, e.t, e.fA, e.fB }, "|"), entry = e,
+		parts = { { name = a.signer, pk64 = a.pk64, sig64 = a.sig64, pk = a.pk, sig = a.sig, msg = a.text },
+			{ name = b.signer, pk64 = b.pk64, sig64 = b.sig64, pk = b.pk, sig = b.sig, msg = b.text } } }
+end
+function LG.RecordTotals(month)
+	local list, rows, by = {}, {}, {}
+	local R = ns.Records
+	for _, body in ipairs(R.Bodies("d", math.floor(R.MonthStart(month) / LG.DAY) - LG.PAIR_DAYS, math.floor(R.MonthStart(month + 1) / LG.DAY))) do
+		local rec = LG.ReadRecord(body)
+		if rec and BothBound(rec.entry) == true then list[#list + 1] = rec.entry end
+	end
+	local counted = LG.Counted(list)
+	for _, e in ipairs(list) do
+		if counted[e.fid] and R.MonthOf(e.t) == month then
+			for _, side in ipairs({ "A", "B" }) do
+				local name = e[side] local key = name:lower()
+				local row = by[key]
+				if not row then row = { name = name, games = 0, won = 0, lost = 0 } by[key] = row rows[#rows + 1] = row end
+				row.games = row.games + 1
+				if e.w == side then row.won = row.won + 1 else row.lost = row.lost + 1 end
+			end
+		end
+	end
+	return rows
+end
+function LG.RecordMonth(month)
+	local R = ns.Records
+	if not R or not R.Sealed then return {} end
+	return R.Sealed("d", month) or LG.RecordTotals(month)
+end
+if ns.Records and ns.Records.Register then
+	ns.Records.Register("d", {
+		Read = LG.ReadRecord, DAY_MAX = LG.DUEL_KEEP_DAY,
+		Took = function(rec)
+			local e = rec.entry local v = BothBound(e)
+			if v == nil then e.fl, e.wait = e.fl:gsub("r", ""), Has(e.fl, "r") and "r" or "d" end
+			if Keep(e, "L", "records") and e.wait then waiting[e.fid] = { mode = "L", season = e.season } GkLater() end
+		end,
+		Conflict = function(rec)
+			local e = rec.entry local book = Book("L", e.season)
+			local held = book and book.list[e.fid]
+			if held and Has(held.fl, "d") and Same(held.A, e.A) and Same(held.B, e.B) then Unkeep(held, "L") end
+		end,
+		Totals = LG.RecordTotals,
+		Sealed = function() Bump() end,
+		Pins = function()
+			local out = {}
+			for _, e in ipairs(LG.Entries()) do
+				for _, body in pairs(e.halves or {}) do
+					local h = LG.ReadHalf(body)
+					if h and pins[h.gk] == h.pk64 then out[h.signer] = h.pk64 end
+				end
+			end
+			return out
+		end,
+		Mine = function()
+			local out = {}
+			for _, e in ipairs(LG.Entries()) do if e.halves and e.halves.A and e.halves.B then out[#out + 1] = e.halves.A .. "^" .. e.halves.B end end
+			return out
+		end,
+		Has = function() return #LG.Entries() > 0 end,
+	})
+end

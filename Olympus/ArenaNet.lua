@@ -59,7 +59,8 @@ Arena.PARK_TRIES = 36         -- ...this many times at most (about six hours)
 -- 15 A, 3 I, 16 K (the design adds KL), matchmaking's AM (the design), the Lottery's
 -- winners, LW (its bank's word for the Games tab's rankings), and the games' rankings'
 -- publish word AU (ArenaRoles, 2026-10-04), the games' ledger AY (ArenaLedger, 1.1.6), and the
--- duels' signed halves AX (ArenaLedger, 1.2.3): 69.
+-- duels' signed halves AX (ArenaLedger, 1.2.3), and (1.2.4) the shared records' RK RD RA RR RS RT
+-- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals): 75.
 -- Arena.Send refuses any other type.
 Arena.TYPES = {
 	EP = "ArenaNet", EC = "ArenaChat", EM = "ArenaChat", ER = "ArenaTest", EH = "ArenaTest",
@@ -80,6 +81,7 @@ Arena.TYPES = {
 	AM = "ArenaMatch",
 	LW = "Lottery",
 	AU = "ArenaRoles",
+	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RS = "Records", RT = "Records",
 }
 -- A player's own obligations go out even with the arena turned off, and in L while the live switch
 -- is off (the design): receipts, key claims, Farkle's payments; a debt mark about himself (ZX) and a
@@ -105,6 +107,8 @@ Arena.FREE_TYPES = {
 	AB = true, AQ = true,             -- the clerk's carousel and the single asks (late members catch up)
 	KI = true, KA = true, KO = true, KP = true, KG = true, KY = true, KK = true, KT = true, KE = true, -- Bones
 	KQ = true, KR = true, KS = true, KN = true, KL = true,
+	-- (1.2.4) the shared records (Records.lua): any holder tells the games and duels that count
+	RK = true, RD = true, RA = true, RR = true, RS = true, RT = true,
 }
 -- The types a sender may mark as his own obligation (o.obligation: ZX about himself, a staked AW,
 -- the Wallet's hello): taken in L whatever the switch, their handlers check the rest.
