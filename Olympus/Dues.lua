@@ -1784,6 +1784,38 @@ local function ReceiptSender()
 		or not (ns.IsTreasurer(ns.me, GetGuildInfo("player")) or ns.IsTreasurerMail(ns.me)) then return nil end
 	return T.TreasurerPin(ns.me)
 end
+-- An old book's opening predates this native proof tracker. It says nothing about
+-- missing receipts. Only the actual pinned character starts its own local tracker;
+-- generic remote book copies do not carry this field or its complete proof map.
+function Dues.StartNativePayerTracking()
+	local pin, now = ReceiptSender(), Clock()
+	if not Whole(pin, 128) or pin < 1 or not Whole(now, MAX_COPPER) or now < 1577836800 then return false end
+	local book = ns.Treasury.Book()
+	if type(book) ~= "table" or ns.Treasury.TreasurerPin(book.name) ~= pin then return false end
+	if book.duesPayerProofs ~= nil and type(book.duesPayerProofs) ~= "table" then return false end
+	if book.duesNativeTracking == nil then
+		book.duesPayerProofs = book.duesPayerProofs or {}
+		book.duesNativeTracking = { version = 1, at = now, issuer = ns.FullName(ns.Normal(ns.me)), pin = pin,
+			group = ns.GroupOf(ns.realm), faction = ns.faction }
+	end
+	return true
+end
+function Dues.NativePayerCoverage(book, week)
+	if type(book) ~= "table" or not Whole(week, 1000000) or week > Dues.Week() or book.epoch ~= ns.Treasury.EPOCH
+		or type(book.duesPayerProofs) ~= "table" or type(book.name) ~= "string" then return false end
+	local m, start, pin = book.duesNativeTracking, Dues.WeekStart(week), ns.Treasury.TreasurerPin(book.name)
+	if not Whole(pin, 128) or pin < 1 then return false end
+	if type(m) ~= "table" or m.version ~= 1 or not Whole(m.at, MAX_COPPER) or m.at < 1577836800 or m.at > start
+		or m.issuer ~= ns.FullName(ns.Normal(book.name)) or m.pin ~= pin
+		or m.group ~= ns.GroupOf(ns.realm) or m.faction ~= ns.faction then return false end
+	-- Restoring a ledger is not restoring original native observation coverage. Native
+	-- positive receipts remain a lower bound; an older week's absence stays unknown.
+	if book.restored ~= nil then
+		local at = tonumber(book.restored)
+		if not at or at ~= at or at < 0 or at > start then return false end
+	end
+	return true
+end
 local function QueuePayerReceipt(pin, to, proof, week)
 	local key = pin .. "~" .. to:lower() .. "~" .. week
 	if not payerReceipts[key] then
@@ -1814,6 +1846,7 @@ function Dues.PayerBooked(book, e, payer, observed)
 	local week = tonumber(e.wk)
 	if not week or week < Dues.Week() - Dues.WEEKS_KEPT + 1 or week > Dues.Week() then return false end
 	local to = ns.FullName(ns.Normal(payer))
+	Dues.StartNativePayerTracking()
 	local proofs, count = PayerProofs(book)
 	local key = to:lower() -- new private proof identity retains the realm, unlike legacy ledger keys
 	local rows = proofs[week] or {}
@@ -2074,9 +2107,11 @@ StaticPopupDialogs["OLYMPUS_DUES_AMOUNT"] = {
 }
 
 ns.On("LOGIN", function()
+	Dues.StartNativePayerTracking()
 	Dues.MarkMail()
 	ns.After(30, "dues amount", function() Dues.SendAmount(true) end)
 	ns.Every(60, "dues amount", function()
+		Dues.StartNativePayerTracking()
 		Dues.SendAmount()
 		Dues.MarkMail()
 	end)

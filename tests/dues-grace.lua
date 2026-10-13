@@ -368,6 +368,27 @@ test("Dues grace: tracker first started mid-week and a later restored ledger nev
 	NoErrors(w)
 end)
 
+test("Dues grace: native proof coverage rejects future weeks, unknown pins, wrong scope and incomplete proof maps", function()
+	local w, t, _, p = Setup()
+	w:As(t, function()
+		local D, book = t.ns.Dues, t.ns.Treasury.Book()
+		local week = D.Week() - 1
+		eq(D.NativePayerCoverage(book, week), true)
+		eq(D.NativePayerCoverage(book, D.Week() + 1), false, "future bookkeeping is not native observation")
+		local unknown = World.Copy(book)
+		unknown.name, unknown.duesNativeTracking.issuer, unknown.duesNativeTracking.pin = "Unknown Keeper-Realm", "Unknown Keeper-Realm", nil
+		eq(D.NativePayerCoverage(unknown, week), false, "two absent pins cannot authenticate an unknown keeper")
+		for _, field in ipairs({ "issuer", "group", "faction" }) do
+			local wrong = World.Copy(book); wrong.duesNativeTracking[field] = "wrong"
+			eq(D.NativePayerCoverage(wrong, week), false)
+		end
+		local incomplete = World.Copy(book); incomplete.duesPayerProofs = nil
+		eq(D.NativePayerCoverage(incomplete, week), false, "a marker alone is not a complete native map")
+	end)
+	w:As(p, function() eq(p.ns.Dues.StartNativePayerTracking(), false, "a participant cannot start a pinned native tracker") end)
+	NoErrors(w)
+end)
+
 test("Dues grace: removing the queued last week cannot substitute an older second missed week at native dispatch", function()
 	local w, t, king, p = Setup(); local first = Week(w, t) - 3
 	Start(w, t, first); Close(w, t, first); Close(w, t, first + 1); Close(w, t, first + 2)
