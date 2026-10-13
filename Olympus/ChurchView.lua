@@ -25,6 +25,7 @@ local Church, Count = ns.Church, ns.ChurchCount
 
 View.page, View.list, View.window = "ranking", "a", "m"
 View.open = {}
+View.rulesReturn = nil
 
 local function Grey(s) return "|cff9d9d9d" .. tostring(s or "") .. "|r" end
 local function Gold(s) return "|cffffd200" .. tostring(s or "") .. "|r" end
@@ -109,6 +110,22 @@ end
 
 function View.Show(page, arg)
 	View.page, View.arg = page, arg
+	Redraw()
+end
+
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	View.rulesReturn = { key = key, page = View.page, list = View.list, window = View.window, arg = View.arg }
+	View.page, View.arg = "rules", nil
+	Redraw()
+	return true
+end
+
+local function CloseRules()
+	local back = View.rulesReturn or { page = View.Pages()[1] }
+	View.rulesReturn = nil
+	View.page, View.list, View.window, View.arg = back.page or View.Pages()[1], back.list or View.list, back.window or View.window, back.arg
 	Redraw()
 end
 
@@ -289,6 +306,8 @@ function View.RankingLines()
 	if switch then lines[#lines + 1] = switch end
 	if View.list == "c" then
 		lines[#lines + 1] = { header = true, text = L.CHURCH_RANKING_C }
+		local rules = ns.RankingRules and ns.RankingRules.Link("church-fullness", function() ShowRules("church-fullness") end)
+		if rules then lines[#lines + 1] = rules end
 		lines[#lines + 1] = { text = Grey(L.CHURCH_FULLNESS_RULE), gapAfter = true }
 		if not PreviewRole() then ns.ChurchFullness.Ask() end
 		local rows = ns.ChurchFullness.Ranking()
@@ -308,6 +327,8 @@ function View.RankingLines()
 	lines[#lines + 1] = AsOfLine(asOf, remote)
 	lines[#lines + 1] = { header = true, text = L["CHURCH_RANKING_" .. View.list:upper()],
 		tooltip = Tip(L["CHURCH_RANKING_" .. View.list:upper()], L.CHURCH_POINTS_TIP) }
+	local rules = ns.RankingRules and ns.RankingRules.Link("church-score", function() ShowRules("church-score") end)
+	if rules then lines[#lines + 1] = rules end
 	if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
 	local me = Church.Key(ns.me)
 	for _, row in ipairs(rows) do
@@ -669,6 +690,8 @@ function View.PublicLines()
 	local lines = { Nav("public") }
 	local v = Count.PublicView()
 	lines[#lines + 1] = { header = true, text = L.CHURCH_TITLE }
+	local rules = ns.RankingRules and ns.RankingRules.Link("church-score", function() ShowRules("church-score") end)
+	if rules then lines[#lines + 1] = rules end
 	for _, it in ipairs({ { "a", "CHURCH_RANKING_A" }, { "m", "CHURCH_RANKING_M" } }) do
 		lines[#lines + 1] = { header = true, text = L[it[2]] }
 		local rows = v and v[it[1]] or {}
@@ -693,6 +716,16 @@ end
 function View.Build()
 	if not View.Visible() then return {}, L.CHURCH_TITLE, L.CHURCH_NO_ACCESS end
 	local page = View.page
+	if page == "rules" then
+		local key = View.rulesReturn and View.rulesReturn.key
+		local lines = ns.RankingRules and ns.RankingRules.Lines(key, CloseRules)
+		if lines then return lines, L.CHURCH_TITLE, L.RANK_RULES_NOTE end
+		local back = View.rulesReturn
+		View.rulesReturn = nil
+		page = back and back.page or View.Pages()[1]
+		View.list, View.window, View.arg = back and back.list or View.list, back and back.window or View.window, back and back.arg or nil
+		View.page = page
+	end
 	if page == "detail" then
 		local person = View.arg
 		if person and not PreviewRole() and Count.MaySeeDetail(ns.me, person) and Audience() then return View.DetailLines(person) end
@@ -738,6 +771,37 @@ local buttons = {
 	{ "CHURCH_BTN_CHAT", function() View.OpenChat() end, shown = Audience },
 	{ "CHURCH_BTN_REGISTER", function() View.Ask("register") end, shown = Person },
 }
+
+if ns.RankingRules then
+	ns.RankingRules.Register("church-score", {
+		title = L.RANK_RULE_CHURCH_TITLE,
+		icon = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude",
+		allowed = function() return Audience() or Count.PublicView() ~= nil end,
+		sections = function()
+			local shares = Count.SHARES or {}
+			return {
+				{ topic = "score", text = L.RANK_RULE_CHURCH_SCORE:format(Count.POINTS_JOIN, Count.STAY_DAYS, Count.POINTS_STAY,
+					math.floor((shares[1] or 0) * 100 + 0.5), math.floor((shares[2] or 0) * 100 + 0.5), math.floor((shares[3] or 0) * 100 + 0.5)) },
+				{ topic = "order", text = L.RANK_RULE_CHURCH_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_CHURCH_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_CHURCH_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("church-fullness", {
+		title = L.RANK_RULE_CHURCH_FULLNESS_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_GroupLooking",
+		allowed = Audience,
+		sections = function()
+			return {
+				{ topic = "score", text = L.CHURCH_FULLNESS_RULE },
+				{ topic = "order", text = L.RANK_RULE_CHURCH_FULLNESS_ORDER },
+				{ topic = "evidence", text = L.CHURCH_FULLNESS_TIP },
+				{ topic = "visibility", text = L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY },
+			}
+		end,
+	})
+end
 
 if ns.UI and ns.UI.AddTab then
 	ns.UI.AddTab({ key = "church", label = "TAB_CHURCH", after = "crafters",

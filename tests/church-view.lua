@@ -52,6 +52,25 @@ local function Build(w, cl, page)
 	return w:As(cl, cl.View.Build)
 end
 
+test("1.2.4 Church ranking rules: the highlighted in-window page preserves the exact list and time window on Back", function()
+	local w = World.New()
+	local c = w:Client(World.AUTHOR, { view = true })
+	c.View.page, c.View.list, c.View.window = "ranking", "m", "w"
+	local lines = Build(w, c)
+	local link
+	for _, line in ipairs(lines) do if line.id == "ranking-rules:church-score" then link = line break end end
+	assert(link and link.onClick, Texts(lines))
+	w:As(c, link.onClick)
+	eq(c.View.page, "rules")
+	lines = Build(w, c)
+	eq(lines[1].id, "ranking-rules-back")
+	assert(Texts(lines):find(L.RANK_RULE_CHURCH_SCORE:format(c.Count.POINTS_JOIN, c.Count.STAY_DAYS, c.Count.POINTS_STAY, 25, 10, 5), 1, true), Texts(lines))
+	w:As(c, lines[1].onClick)
+	eq(c.View.page, "ranking")
+	eq(c.View.list, "m")
+	eq(c.View.window, "w")
+end)
+
 test("1.2.4 Church correspondence: guild representation uses observed days and never invents historical fullness from census", function()
 	local w, c = Cast()
 	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Plain Member"), true)

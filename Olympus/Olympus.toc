@@ -43,9 +43,11 @@ Locales\CarryText.lua
 Locales\CarryMergerText.lua
 Locales\CampaignText.lua
 Locales\GuildFinanceText.lua
+Locales\RankingRulesText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Core.lua
+RankingRules.lua
 GamepadRegistry.lua
 Gamepad.lua
 Diagnostics.lua

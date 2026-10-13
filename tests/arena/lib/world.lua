@@ -63,7 +63,7 @@ World.FromArena = FromArena
 World.MODULES = { "Channels", "King", "Treasury", "Dues", "Moderation", "Alts", "Workshop", "Consent" }
 -- Loaded into each client too, before them, never shared: Ed25519.lua's job queue (one client's
 -- signature checks never count against another's limit, nor run with its globals).
-World.OWN = { "Ed25519" }
+World.OWN = { "Ed25519", "RankingRules" }
 World.LOCALES = { "ArenaNetText", "ArenaMoneyText", "ArenaMarketsText", "ArenaFightsText", "ArenaFarkleText", "ArenaHomeText", "ArenaLotteryText",
 	"ComplianceText" }
 -- 1.1.6, the compliance gate (Compliance.lua): the scenarios of the 2.0 betting paths run with a test

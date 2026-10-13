@@ -168,6 +168,7 @@ function World:Client(name, opts)
 		-- (1.2.3: ChatRooms.lua no longer defines a dialog in the game's global table, the race and class
 		-- rooms' request warning gone with them: nothing of the harness's to put back after it.)
 		w:As(cl, function()
+			assert(loadfile(ROOT .. "Olympus/RankingRules.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/Church.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChurchCount.lua"))("Olympus", c)

@@ -2271,6 +2271,8 @@ local function RealmLines(s, q)
 		return a.name < b.name
 	end)
 	lines[#lines + 1] = { header = true, text = L.LEVEL_RACE }
+	local rules = ns.RankingRules and ns.RankingRules.Link("realm-level", function() ns.RankingRules.OpenRealm("realm-level") end)
+	if rules then lines[#lines + 1] = rules end
 	if #racers == 0 then lines[#lines + 1] = { text = Grey(L.NONE_REPORTED) } end
 	-- The top 100, shown 25 at a time (0.9.7): the window stays light.
 	local shownRacers = math.min(#racers, Views.RACE_MAX, Views.raceShown)
@@ -2794,6 +2796,22 @@ Views.RACE_MAX, Views.RACE_PAGE = 100, 25 -- the level race: its top 100, 25 at 
 Views.RECRUIT_SHOWN = 5 -- guilds with room shown in the Realm's Recruiting, the rest on a click (1.1)
 Views.raceShown = Views.RACE_PAGE
 Views.INSPECT_ROWS = 200 -- inspected players listed on the Tabards page
+
+if ns.RankingRules then
+	ns.RankingRules.Register("realm-level", {
+		title = L.RANK_RULE_LEVEL_TITLE,
+		icon = "Interface\\Icons\\Achievement_Level_60",
+		allowed = function() return ns.IsMember() == true end,
+		sections = function()
+			return {
+				{ topic = "score", text = L.RANK_RULE_LEVEL_SCORE },
+				{ topic = "order", text = L.RANK_RULE_LEVEL_ORDER:format(Views.RACE_MAX, Views.RACE_PAGE) },
+				{ topic = "evidence", text = L.RANK_RULE_LEVEL_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_LEVEL_VISIBILITY },
+			}
+		end,
+	})
+end
 
 -- 1.1 (Fern's #28): the gear an officer's click kept (Inspect.InspectGear), newest first, the
 -- players whose name or guild holds `q`: a click shows or hides the items, in their slots, each

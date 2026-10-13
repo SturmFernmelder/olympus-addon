@@ -734,6 +734,18 @@ end
 
 -- The Arena tab's lines (Views.Register): a summary, each line a click into the Arena window.
 function ArenaHome.TabLines()
+	if ArenaHome.rulesKey then
+		local key = ArenaHome.rulesKey
+		local function Back()
+			local back = ArenaHome.rulesReturn or {}
+			ArenaHome.rulesKey, ArenaHome.rulesReturn = nil, nil
+			ArenaHome.rankGame, ArenaHome.staffShown = back.rankGame or ArenaHome.rankGame, back.staffShown
+			if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+		end
+		local ruleLines = ns.RankingRules and ns.RankingRules.Lines(key, Back)
+		if ruleLines then return ruleLines, L.ARENA_TAB_TITLE, L.RANK_RULES_NOTE end
+		ArenaHome.rulesKey, ArenaHome.rulesReturn = nil, nil
+	end
 	local lines = {}
 	local kind, banner = ArenaHome.Banner()
 	if banner then lines[#lines + 1] = { text = (kind == "sim" and "|cffc080ff" or "|cffff6060") .. banner .. "|r", gapAfter = true } end
@@ -841,6 +853,14 @@ end
 ArenaHome.rankGame = "arena"
 local RANK_GAMES = { "arena", "bones" } -- Lottery is private draw history, never a ranking.
 local RANK_WORDS = { arena = "ARENA_SECTION_ARENA", bones = "ARENA_SECTION_BONE", lottery = "ARENA_SECTION_LOTTERY" }
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	ArenaHome.rulesReturn = { rankGame = ArenaHome.rankGame, staffShown = ArenaHome.staffShown }
+	ArenaHome.rulesKey = key
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+	return true
+end
 -- The games' rankings for everyone, one game at a time (the owner's answer, 2026-10-04: the King
 -- and the councillors he names publish, per game): each game's publish word (ArenaRoles.RankPublic),
 -- else the King's settings' rankPub. game nil: any of them.
@@ -919,6 +939,9 @@ local function RankingLines(lines)
 			if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
 		end,
 		tooltip = function(tt) tt:AddLine(L.ARENA_GAMES_RANKINGS, 1, 0.82, 0) tt:AddLine(L.ARENA_GAMES_RANKINGS_TIP, 1, 1, 1, true) end }
+	local rulesKey = game == "bones" and "bones-ranking" or "arena-rating"
+	local rules = ns.RankingRules and ns.RankingRules.Link(rulesKey, function() ShowRules(rulesKey) end)
+	if rules then lines[#lines + 1] = rules end
 	local n0 = #lines
 	if game == "arena" then
 		local view = Data.Rankings("all", "A", 1) or {}
@@ -1098,6 +1121,45 @@ local function ArbiterLines(lines)
 	for _, line in ipairs(own) do lines[#lines + 1] = line end
 end
 ArenaHome.RankingLines, ArenaHome.StaffLines, ArenaHome.ArbiterLines = RankingLines, StaffLines, ArbiterLines
+
+if ns.RankingRules then
+	ns.RankingRules.Register("arena-rating", {
+		title = L.RANK_RULE_ARENA_TITLE,
+		icon = function() return ArenaHome.HonorIcon and ArenaHome.HonorIcon() or "Interface\\Icons\\INV_Sword_04" end,
+		allowed = function() return ArenaHome.GamesStaff() or ArenaHome.RankingsPublic("arena") end,
+		sections = function()
+			local R, G = ns.ArenaRating or {}, ns.ArenaLedger or {}
+			return {
+				{ topic = "score", text = {
+					L.RANK_RULE_ARENA_SCORE:format(R.START or 1500, R.K_NEW or 40, R.NEW_FIGHTS or 10, R.K or 24,
+						R.K_HIGH or 16, R.HIGH_RATING or 2000, R.LEVEL_POINTS or 50, R.GAP_CAP or 800),
+					L.RANK_RULE_ARENA_REPEAT:format(math.floor((R.PAIR_WINDOW or 86400) / 3600)),
+				} },
+				{ topic = "limits", text = L.RANK_RULE_ARENA_LIMITS:format(G.MIN_RATED_DUR or 15, G.DAY_MAX or 10, G.PAIR_MAX or 3, G.PAIR_DAYS or 7) },
+				{ topic = "order", text = L.RANK_RULE_ARENA_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_ARENA_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_ARENA_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("bones-ranking", {
+		title = L.RANK_RULE_BONES_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Dice_02",
+		allowed = function() return ArenaHome.GamesStaff() or ArenaHome.RankingsPublic("bones") end,
+		sections = function()
+			local caps = ns.FarkleTable and ns.FarkleTable.RANK_CAPS or {}
+			local G = ns.ArenaLedger or {}
+			return {
+				{ topic = "score", text = L.RANK_RULE_BONES_SCORE },
+				{ topic = "limits", text = L.RANK_RULE_BONES_LIMITS:format(G.MIN_RATED_DUR or caps.MIN_RATED_DUR or 15,
+					G.DAY_MAX or caps.DAY_MAX or 10, G.PAIR_MAX or caps.PAIR_MAX or 3, G.PAIR_DAYS or caps.PAIR_DAYS or 7) },
+				{ topic = "order", text = L.RANK_RULE_BONES_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_BONES_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_BONES_VISIBILITY },
+			}
+		end,
+	})
+end
 
 -- The games (the Games tab's rows and buttons, the owner's call 2026-09-30): Arena, Bones, the
 -- Lottery, and the Wallet (Treasury > My money, the design). Icons as the lab's games window's,

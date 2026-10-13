@@ -108,6 +108,7 @@ local itemPending = {}       -- mail items asked for, until the bags hold them: 
 local lastMoney              -- the character's gold as last seen while takes wait
 local bookShown = Treasury.BOOK_SHOWN
 local rankShown = Treasury.RANK_PAGE
+local rulesReturn -- exact in-tab state before a ranking's explanation page
 
 local function Grey(s) return "|cff9d9d9d" .. s .. "|r" end
 local function Gold(s) return "|cffffd200" .. s .. "|r" end
@@ -3285,6 +3286,22 @@ function Treasury.Show(mode)
 	ns.Fire("TREASURY_CHANGED")
 end
 
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	rulesReturn = { key = key, mode = Treasury.mode, guild = guildShown, tab = Treasury.sisterTab }
+	Treasury.mode = "rules"
+	ns.Fire("TREASURY_CHANGED")
+	return true
+end
+
+local function CloseRules()
+	local back = rulesReturn or { mode = "summary" }
+	rulesReturn = nil
+	Treasury.mode, guildShown, Treasury.sisterTab = back.mode or "summary", back.guild, back.tab
+	ns.Fire("TREASURY_CHANGED")
+end
+
 -- The ranking and the book from their first page again (the tab's search changed, Views.lua).
 function Treasury.FirstPage() bookShown, rankShown = Treasury.BOOK_SHOWN, Treasury.RANK_PAGE end
 
@@ -3328,6 +3345,8 @@ local function RankLines(lines, rank, q)
 		tt:AddLine(L.TREASURY_RANKING, 1, 0.82, 0)
 		if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(tt, "count-treasury-donors") end
 	end }
+	local rules = ns.RankingRules and ns.RankingRules.Link("treasury-donors", function() ShowRules("treasury-donors") end)
+	if rules then lines[#lines + 1] = rules end
 	if #rank == 0 then lines[#lines + 1] = { text = Grey(L.TREASURY_NONE) } end
 	local n = #found
 	for k = 1, math.min(n, rankShown) do
@@ -3932,6 +3951,8 @@ local function SisterLines(lines, role)
 			tt:AddLine(L.TREASURY_RANK_HEAD, 1, 0.82, 0)
 			tt:AddLine(L.TREASURY_RANK_TIP, 1, 1, 1, true)
 		end }
+		local rules = ns.RankingRules and ns.RankingRules.Link("treasury-guilds", function() ShowRules("treasury-guilds") end)
+		if rules then lines[#lines + 1] = rules end
 		for _, b in ipairs(banks) do
 			if not b.home then Row(b) end
 		end
@@ -4367,6 +4388,16 @@ end
 
 function Treasury.Build(q)
 	local role = Treasury.Role()
+	if Treasury.mode == "rules" then
+		local key = rulesReturn and rulesReturn.key
+		local lines = ns.RankingRules and ns.RankingRules.Lines(key, CloseRules)
+		if lines then return lines, L.TAB_TREASURY, L.RANK_RULES_NOTE end
+		-- Access can change while this page is open. Restore in place while Build is already
+		-- drawing; firing another refresh here would recursively enter the renderer.
+		local back = rulesReturn or { mode = "summary" }
+		rulesReturn = nil
+		Treasury.mode, guildShown, Treasury.sisterTab = back.mode or "summary", back.guild, back.tab
+	end
 	if Treasury.mode == "guild-finance" and ns.GuildFinance and not ns.GuildFinance.missing then return ns.GuildFinance.Build(q) end
 	if Treasury.mode == "own-guild" then
 		return OwnGuildLines(), L.TAB_TREASURY, L.TREASURY_GUILD_TITLE:format(GetGuildInfo("player") or "?")
@@ -4410,6 +4441,7 @@ end
 
 -- A list of donors shows on the tab (the book, or the ranking): its search box too (Views.lua).
 function Treasury.Searchable()
+	if Treasury.mode == "rules" then return false end
 	if Treasury.mode == "own-guild" then return false end
 	if Treasury.mode == "wallet" or Treasury.mode == "money" then return false end
 	if Treasury.mode == "guild" then return false end
@@ -4572,6 +4604,35 @@ function Treasury.RestoreWord(flags, keepers)
 end
 Treasury.FlagDigits = FlagDigits
 
+if ns.RankingRules then
+	ns.RankingRules.Register("treasury-donors", {
+		title = L.RANK_RULE_DONORS_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Coin_01",
+		allowed = function() return Treasury.MaySee("ranking") end,
+		sections = function()
+			return {
+				{ topic = "score", text = { L.RANK_RULE_DONORS_SCORE, L.RANK_RULE_DONORS_DUES } },
+				{ topic = "order", text = L.RANK_RULE_DONORS_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_DONORS_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_DONORS_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("treasury-guilds", {
+		title = L.RANK_RULE_GUILD_TREASURY_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Coin_02",
+		allowed = DirectoryShown,
+		sections = function()
+			return {
+				{ topic = "score", text = L.RANK_RULE_GUILD_TREASURY_SCORE },
+				{ topic = "order", text = L.RANK_RULE_GUILD_TREASURY_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_GUILD_TREASURY_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_GUILD_TREASURY_VISIBILITY },
+			}
+		end,
+	})
+end
+
 -- Tests start from a clean state.
 function Treasury.Reset()
 	Treasury.CancelShares()
@@ -4590,7 +4651,7 @@ function Treasury.Reset()
 	earlyOpen, guildShown, Treasury.sisterTab = false, nil, nil
 	dirOpen, dirOthers, guildHit = nil, false, nil
 	wipe(dirTabs)
-	Treasury.mode = "summary"
+	Treasury.mode, rulesReturn = "summary", nil
 	if ns.rdb then
 		ns.rdb.treasuryReports, ns.rdb.treasuryBooks, ns.rdb.treasuryKeepers, ns.rdb.treasuryArchive = nil, nil, nil, nil
 		ns.rdb.treasuryEarly = nil
