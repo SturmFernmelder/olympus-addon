@@ -27160,11 +27160,9 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	-- (1.2.4, the author's rule: the King's centurions are the High Council. 1.1.5 gave Max's bronze
-	-- without wings to the centurions of the King's guild a list from the King's or a councillor's
-	-- client named; such a list, from an older client, gives none now, and a councillor in the King's
-	-- guild wears his own silver, above the bronze. Was: "...from the King's or a councillor's list alone".)
-	test("1.2.4 the King's guild's centurions' border: a list from the King's or a councillor's (older) client gives no bronze any more; a High Councillor in the King's guild wears his silver", function()
+	-- Manual Legates have the bronze chat identity, not a bronze portrait. The High Council's
+	-- own silver portrait still wins. The legacy c= wire is retained for compatible nominations.
+	test("1.2.4 the King's guild's Legates: a manual authorized list gives bronze chat identity but no bronze portrait; a High Councillor wears silver", function()
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
 			ns.rdb.council.names["vera councillor"] = true
@@ -27173,7 +27171,8 @@ do
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", "Olympus", "Member", 4))
 			eq(w.shown("target"), nil, "no bronze from a list in the King's guild")
-			assert(w.B.MarkOfName("Ada-Realm", "Olympus") ~= "bronze", "the game's chat: no bronze either")
+			eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "actual compatible manual nomination")
+			eq(w.B.MarkOfName("Ada-Realm", "Olympus"), "bronze", "the game's chat keeps the Legate identity mark")
 			w.target(nil); w.target(BorderUnit("Vera Councillor", "Olympus", "Member", 4))
 			eq(w.shown("target"), "silver-elite", "a High Councillor of the King's guild: one of the King's centurions, in his silver")
 			ns.rdb.council.names["vera councillor"] = nil
@@ -27189,11 +27188,11 @@ do
 			local AUTHOR_REALM = ns.AUTHOR_REALM
 			local dev = ns.AUTHOR .. "-" .. AUTHOR_REALM
 			ns.Roster.byName = { [MASTER] = 0, ["Tester-Realm"] = 2 }
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada;c=Zeusy;c=" .. dev))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada;c=Zeusy;c=" .. dev))
 			w.internal("LOGIN")
 			local function Tier(unit) w.target(nil); w.target(unit) return w.shown("target"), w.B.MarkOf("target") end
 			local ada = BorderUnit("Ada", THEIRS, "Member", 4)
-			eq(Tier(ada), "bronze", "a nominee")
+			eq(Tier(ada), "bronze", "a correspondent retains the plain bronze portrait")
 			-- A guild master before a nominee (named in a list of his own guild's).
 			local border, mark = Tier(BorderUnit("Zeusy", THEIRS, "Zeus", 0))
 			eq(border, "bronze-elite"); eq(mark, "bronze")
@@ -27336,10 +27335,9 @@ do
 		end)
 	end)
 
-	-- (1.1.5, the author's calls: the Throne for the King and the councillors is almost the guild
-	-- master's page, the King's guild's centurions, with the Throne's Hands, crown on the map, agenda,
-	-- court and army key; the treasury out, it has its own tab.)
-	test("1.1.5 the tab in the Throne's place: the King, his Hands and the High Council have the Throne with the King's centurions (no treasury); a guild master of another Olympus guild his Guild tab; one who is both, both; the King's guild has no guild master's Guild tab; a member none", function()
+	-- Main-guild Legates are named manually by King/High Council. A Hand may read that list,
+	-- but the Hand appointment grants no nomination authority. Treasury remains its own tab.
+	test("1.2.4 the tab in the Throne's place: King and High Council manually appoint main-guild Legates, Hands read only; guild masters retain their Guild tab and ordinary members neither", function()
 		WithNominees(function(w)
 			local L, K = ns.L, ns.King
 			local savedHands = ns.rdb.kingHands
@@ -27348,8 +27346,7 @@ do
 					for _, l in ipairs(lines) do if tostring(l.text):find(text, 1, true) then return l end end
 				end
 				local MAIN = L.NOMINEES_MAIN_TITLE
-				-- The King: the Throne Room, his army's key, then his centurions (1.2.4: the High Council,
-				-- to read; was "his to name", a + line that named them).
+				-- The King: the Throne Room, his army's key and manually appointed Legates.
 				w.asKing()
 				eq(K.TabVisible(), true); eq(K.ThroneShown(), true); eq(K.TabLabel(), "TAB_THRONE")
 				eq((N.IsMaster()), false, "the King's guild: no guild master's Guild tab")
@@ -27357,7 +27354,7 @@ do
 				eq(title, L.TAB_THRONE); eq(detail, L.THRONE_YOU_ARE_KING)
 				eq(lines[1].text, L.THRONE_ROOM)
 				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_MAIN_HINT:sub(1, 20)), "his centurions")
-				eq(Has(lines, L.NOMINEES_ADD_CENTURION), nil, "nobody for him to name")
+				assert(Has(lines, L.NOMINEES_ADD_CENTURION), "the King may manually name a Legate")
 				eq(Has(lines, L.TREASURY_TITLE), nil, "no treasury on the Throne")
 				eq(Has(lines, L.NOMINEES_CORRESPONDENTS), nil, "no correspondents for the King's guild (1.1.6: its department heads)")
 				eq(Has(lines, L.NOMINEES_TITLE), nil, "no guild master's section")
@@ -27365,21 +27362,20 @@ do
 				w.asIn("Other Boss-Realm", "Olympus", 0)
 				eq(K.GuildShown(), false, "no guild master's Guild tab in the King's guild")
 				eq(K.TabVisible(), false, "and no Throne (the King is his character alone)")
-				-- A High Councillor, a member of another guild: the Throne, one of the King's centurions.
+				-- A real High Councillor may name main-guild Legates, but is not automatically one.
 				w.asIn("Vera Councillor-Realm", OURS, 3)
 				eq(K.TabVisible(), true); eq(K.ThroneShown(), true); eq(K.TabLabel(), "TAB_THRONE")
 				lines, title, detail = K.Build()
 				eq(lines[1].text, L.THRONE_ROOM_COUNCIL); eq(detail, L.THRONE_YOU_ARE_COUNCILLOR)
 				assert(Has(lines, L.THRONE_COUNCIL_HINT:sub(1, 20)), "what is hers here")
-				assert(Has(lines, MAIN) and not Has(lines, L.NOMINEES_ADD_CENTURION), "the King's centurions, nobody for her to name (1.2.4)")
+				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_ADD_CENTURION), "real Council may name a main-guild Legate")
 				eq(Has(lines, L.TREASURY_TITLE), nil)
 				-- A councillor who leads another Olympus guild: the Throne, his Guild tab's section after it.
 				w.asIn("Vera Councillor-Realm", OURS, 0)
 				eq(K.TabLabel(), "TAB_THRONE"); eq(K.GuildShown(), true)
 				lines = K.Build()
 				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_TITLE) and Has(lines, L.NOMINEES_CORRESPONDENTS), "both")
-				-- A Hand of the King (no councillor): the Throne, the King's centurions to read (1.2.4: only
-				-- counted, the council not shown to him yet; a list from the King's older client, nothing).
+				-- A Hand (not Council) reads the same manual list, without nomination controls.
 				w.asKing(); K.AddHand("Helper"); K.SendHands(true)
 				local hands = w.sent[#w.sent].msg
 				w.asIn("Helper-Realm", OURS, 3)
@@ -27390,8 +27386,9 @@ do
 				lines, _, detail = K.Build()
 				eq(lines[1].text, L.THRONE_ROOM_HAND:format("Asmon")); eq(detail, L.THRONE_YOU_ARE_HAND:format("Asmon"))
 				assert(Has(lines, MAIN), "the King's centurions")
-				assert(Has(lines, L.NOMINEES_MAIN_COUNT:format(1)), "counted"); eq(Has(lines, "vera"), nil, "no name shown to him")
-				eq(Has(lines, "Ada"), nil, "nobody of the older client's list")
+				eq(#N.KingsCenturions(), 1, "the accepted manual list has one Legate, not automatic councillors")
+				eq(Has(lines, "vera"), nil, "the manual list does not expose the Council as Legates")
+				assert(Has(lines, "Ada"), "the accepted manual nominee is visible to a Hand")
 				eq(Has(lines, L.NOMINEES_ADD_CENTURION), nil, "not his to name")
 				-- A member of another guild, of the King's guild: none.
 				w.asIn("Plain Pip-Realm", OURS, 3)
@@ -27404,12 +27401,8 @@ do
 		end)
 	end)
 
-	-- (1.2.4, the author's rule: the King's centurions are the High Council, nobody named. Two tests
-	-- of 1.1.5's were here: the King or a councillor named up to 10 centurions of the King's guild on
-	-- the Throne, its list sent and taken from them, repeated in turn, ended with its sender's seat; and
-	-- the Throne's + line, the click that took a title back, their dialogs with the gamepad UI. All of
-	-- it is gone: tests/king-centurions.lua has what stands in its place, the older clients' list ended
-	-- included. The guild master's own dialogs with the gamepad UI keep their test below.)
+	-- Detailed manual King/Council nomination and gamepad coverage lives in king-centurions.lua.
+	-- The old centurion command remains a compatible alias, not automatic Council membership.
 	test("1.2.4 /oly nominees opens the Throne and manually names or removes Legates for the King's authorized council; legacy centurion command remains compatible", function()
 		WithNominees(function(w)
 			local L, K = ns.L, ns.King
@@ -55326,7 +55319,7 @@ do
 				local shown = {}
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() then shown[#shown + 1] = b.item.entry.kind end end
 				eq(table.concat(shown, ","), "global,guild,arena", "Arena follows the defaults; authorized tabs follow it")
-				eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Arena") .. mark, "the pickers' mark")
+				eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Games") .. mark, "the Games picker keeps its stable arena room key")
 				eq(global.underline:IsShown(), true); eq(guild.underline:IsShown(), false)
 				eq(global:GetHeight(), ns.Views.SUBTAB_STYLE.height, "Chat and Realm tabs use the same height")
 				eq(global.label:Anchor("CENTER")[5], ns.Views.SUBTAB_STYLE.labelY)
@@ -55690,7 +55683,7 @@ do
 			local function Cell(kind)
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == kind then return b end end
 			end
-			local PICKERS = { arena = w.CW.Localized("ARENA_CHAT_TAB", "Arena") } -- (1.2.3: Race and Class gone)
+			local PICKERS = { arena = w.CW.Localized("ARENA_CHAT_TAB", "Games") } -- Games label; stable arena key, no Race/Class tabs
 			local savedTexture = rawget(_G, "C_Texture")
 			C_Texture = nil
 			w.CW.Render()
