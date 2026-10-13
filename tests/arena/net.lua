@@ -1109,10 +1109,10 @@ local SPEC_TYPES = {
 	ArenaNet = "EP", ArenaChat = "EC EM", ArenaTest = "ER EH", Wallet = "ZH ZE ZN ZG ZD ZK ZC ZW ZS ZQ ZL ZJ", Debts = "ZT ZX ZY ZR ZF",
 	Stakes = "ZA ZV", Markets = "BM BO BS BK BV", MarketBank = "BF", ArenaFights = "AF AG AC AW AR AS AN", ArenaLedger = "AE AB AQ AV AH AY AX",
 	ArenaTourney = "AT AD", ArenaProfile = "AP", HonorsNet = "IL ID IO", FarkleTable = "KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD KL",
-	ArenaMatch = "AM", Lottery = "LW", ArenaRoles = "AU",
+	ArenaMatch = "AM", Lottery = "LW", ArenaRoles = "AU", Records = "RK RD RA RR RS RT",
 }
 
-test("1.2 the arena's foundation: the registry: Arena.TYPES names all 69 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
+test("1.2 the arena's foundation: the registry: Arena.TYPES names all 75 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
 	local src = Read(H.ADDON_DIR .. "Comm.lua")
@@ -1142,12 +1142,12 @@ test("1.2 the arena's foundation: the registry: Arena.TYPES names all 69 types b
 			eq(a.ns.Arena.TYPES[kind], owner, kind .. " in Arena.TYPES")
 		end
 	end
-	eq(n, 69)
-	eq(legacy, 68)
+	eq(n, 75)
+	eq(legacy, 74)
 	for kind in pairs(listed) do assert(spec[kind], kind .. " in Comm.lua is no arena type") end
 	local m = 0
 	for kind in pairs(a.ns.Arena.TYPES) do m = m + 1; assert(spec[kind], kind .. " is not in the design's list") end
-	eq(m, 69)
+	eq(m, 75)
 	-- Registered only by their owners' files, through Arena.Handle, with a literal.
 	for _, file in ipairs(World.ARENA_FILES) do
 		local code = Read(H.ADDON_DIR .. file .. ".lua"):gsub("%-%-[^\n]*", "")

@@ -13,6 +13,7 @@
   python3 scripts/council-sign.py apostle "<Name-Realm>" [Alliance|Horde] # one of the Church's Twelve Apostles (1.1.6), then sign as "council"
   python3 scripts/council-sign.py apostle --remove "<Name-Realm>"        # end it: sign again without him
   python3 scripts/council-sign.py check [CouncilList.lua]                 # (or --check) read back what was signed
+  python3 scripts/council-sign.py seal "RS1~..."                         # reviewed monthly Records request; prints its signed seal
 
 The private key never leaves ~/.olympus. The addon carries only the public key (Sign.lua) and
 checks the signature: RSA-2048, e = 3, PKCS#1 v1.5 over SHA-256. CouncilList.lua holds the lists:
@@ -123,7 +124,7 @@ that is not a game icon's name or number; a list longer than the addon takes.
 OLYMPUS_COUNCIL_KEY, OLYMPUS_COUNCIL_OUT and OLYMPUS_COUNCIL_JSON give other paths for the key,
 the lists and the council (the tests use a throwaway key in a temporary folder).
 """
-import hashlib, json, os, re, secrets, sys, time
+import datetime, hashlib, json, os, re, secrets, sys, time
 
 KEY = os.environ.get("OLYMPUS_COUNCIL_KEY") or os.path.expanduser("~/.olympus/council-key.json")
 OUT = os.environ.get("OLYMPUS_COUNCIL_OUT") or os.path.join("dist", "CouncilList.lua")
@@ -233,6 +234,24 @@ def sign(names, realm=REALM, at=None):
     key["last_at"] = at
     save_key(key)
     return text, sig
+
+def seal(request):
+    """Sign only a validated monthly Records request; never replace the council output."""
+    request = request.strip()
+    m = re.fullmatch(r"RS1~(\d+)~([^~]+)~(Alliance|Horde)~([bd])~(\d+)~(\d+)~([0-9a-f]{64})", request)
+    if not m: sys.exit("not a monthly records request")
+    at, realm, faction, letter, month, count, digest = m.groups()
+    at, month, count = int(at), int(month), int(count)
+    check([], realm)
+    if count > 5000 or month < 1970 * 12 or month > 9998 * 12:
+        sys.exit("records month or row count outside the addon bounds")
+    end_year, end_month = divmod(month + 1, 12)
+    end = datetime.datetime(end_year, end_month + 1, 1, tzinfo=datetime.timezone.utc).timestamp()
+    if at < end + 7 * 86400 or at > int(time.time()) + 86400:
+        sys.exit("records month has not closed for seven days, or request is in the future")
+    fits(request, 900, "records seal")
+    with open(KEY) as f: key = json.load(f)
+    return request + "~" + signature(request, key)
 
 # The council file (see the top): every field checked as the addon reads it, before anything is
 # signed. Returns the realm group, public, the councillors outside any department and the
@@ -794,6 +813,8 @@ if __name__ == "__main__":
         text, sig = sign(sys.argv[2], *sys.argv[3:4])
         write_out(text + "~" + sig)
         print(OUT, "written:", text)
+    elif len(sys.argv) == 3 and sys.argv[1] == "seal":
+        print(seal(sys.argv[2]))
     elif len(sys.argv) in (2, 3) and sys.argv[1] == "council":
         names, titles, authority = sign_council(sys.argv[2] if len(sys.argv) == 3 else COUNCIL)
         write_out(names, titles, authority)

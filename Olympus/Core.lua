@@ -1778,6 +1778,7 @@ StandIn("War", { "Show", "Slash" }) -- 1.2: the own-guild Department of War room
 StandIn("Crafters", { "Ask", "Slash" }) -- (1.1)
 StandIn("ChatWindow", { "Open", "Toggle" }) -- 1.1.1: the Chat tab of the Olympus window (ChatWindow.lua)
 StandIn("Arena", { "RunSlash" }) -- 1.2: the Blood Arena's core (ArenaNet.lua)
+StandIn("Records", {}) -- 1.2.4: the shared records of the games and duels that count (Records.lua)
 -- 1.1.2: the right-click menus' lines (PlayerMenu.lua), a player's version (Versions.lua), the
 -- answer bank's Answers and explanations (Answers.lua).
 StandIn("PlayerMenu", {})

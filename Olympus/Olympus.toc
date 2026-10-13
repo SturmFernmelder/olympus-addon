@@ -128,6 +128,7 @@ ArenaNet.lua
 ArenaRoles.lua
 ArenaMoney.lua
 Debts.lua
+Records.lua
 Wallet.lua
 Stakes.lua
 Markets.lua

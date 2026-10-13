@@ -186,13 +186,14 @@ test("1.2.4 Bones kept: a closed month's list is kept for good, its totals and c
 	assert(at, "last month's header on the Games tab")
 	assert(tostring(lines[at].right):find(b.short, 1, true), "its champion: " .. tostring(lines[at].right))
 	assert(tostring(lines[at + 1].text):find("#1", 1, true) and tostring(lines[at + 1].text):find(b.short, 1, true), tostring(lines[at + 1].text))
-	-- Everyone but c logs out; 64 days on, c's login prunes the games (past HALVES_DAYS).
+	-- Everyone but c logs out; the legacy half store prunes, but 9b's unsealed signed records
+	-- remain and reconstruct the monthly list until an authenticated monthly seal is adopted.
 	for _, p in ipairs({ a, b, d, king }) do w:Logout(p) end
 	Relog(w, c, 64 * 86400)
-	eq(#Best(w, c, { month = closed }), 0, "its games are gone")
-	eq(#Best(w, c, { month = closed + 1 }), 0)
+	eq(#Best(w, c, { month = closed }), 3, "the three players reconstructed from durable records")
+	eq(#Best(w, c, { month = closed + 1 }), 2)
 	local kept = Do(w, c, "Month", closed)
-	eq(kept.kept, true, "the list kept")
+	eq(kept.kept, nil, "the unsealed list comes from its original signed records")
 	eq(kept.champion, b.name, "its champion")
 	eq(Row(kept.rows, b).won, 2); eq(Row(kept.rows, b).games, 2)
 	eq(Row(kept.rows, a).won, 1); eq(Row(kept.rows, a).games, 2)

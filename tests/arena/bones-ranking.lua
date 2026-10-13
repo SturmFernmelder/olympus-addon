@@ -551,6 +551,16 @@ test("1.2.3 Bones ranking: members away when a game ended rank it at the players
 	local w, a, b, c = Setup()
 	local x = w:Player(P3)
 	local d = w:Player(P4)
+	-- Exercise the legacy KN fallback as a mixed-version session. 9b's independent RK/RR
+	-- catch-up now reaches these members sooner; records.lua covers that new path separately.
+	local function Legacy(client)
+		local R = client.ns.Records
+		if R then R.RELAYS = 0 R.SendKey = function() return false end end
+		client.ns.Records = nil
+	end
+	for _, client in ipairs(w.clients) do Legacy(client) end
+	local login = w.Login
+	w.Login = function(self, client) local result = login(self, client) Legacy(client) return result end
 	-- (c heard b's own half of an earlier game: c holds b's key; d was away)
 	w:Logout(d)
 	Half(w, b, { id = "Kpin", p1 = b, p2 = x, w = "1", t = w.clock - 7200 })
@@ -679,7 +689,7 @@ test("1.2.4 Bones ranking: Best's second value counts the games a month's list r
 	Do(w, c, "Prune")
 	local pruned
 	rows, pruned = Best(w, c, { month = closed })
-	eq(Order(rows), "Torvin Hale, Lida Fenn, Parric Stowe, Selka Drummond", "recounted from what is left: the game left out counts")
+	eq(Order(rows), "Lida Fenn, Parric Stowe, Selka Drummond", "durable original games keep the earlier pair cap even after legacy pruning")
 	eq(Top(), "Lida Fenn, Parric Stowe", "the closed month's list as it stood")
 	w:Run(61)
 	local function Charm(p)
@@ -688,8 +698,7 @@ test("1.2.4 Bones ranking: Best's second value counts the games a month's list r
 	end
 	eq(Charm(d), "bones-1", "the gold charm stays his") eq(Charm(e), "bones-2")
 	eq(Charm(a), "-", "never a's partway through the month")
-	-- (Best's second value each time: the month's games and the two of the PAIR_DAYS before it; then
-	-- the late one; then the two before it pruned.)
-	eq(read, 4) eq(late, 5) eq(pruned, 3)
+	-- The original pair-cap evidence remains in Records even after the legacy half store prunes.
+	eq(read, 4) eq(late, 5) eq(pruned, 5)
 	NoErrors(w)
 end)

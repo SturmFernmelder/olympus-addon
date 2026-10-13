@@ -1,0 +1,60 @@
+# Shared game records (1.2.4)
+
+Bones and direct duels keep their two original signed result halves in Olympus's core saved
+data, separately for each realm group and faction. Any ordinary holder can relay those halves.
+A receiver needs each player's key heard from that player, or an already verified wallet claim;
+a relay never establishes another player's identity. Unknown keys leave a bounded pending record
+until a player's own key arrives. If those players are offline and their keys were never heard,
+the receiver waits. Older clients continue using KN/AX and their existing ranking rules.
+
+Accepted records are a union by stable game/pair identity. Repeats add no second game. Two different
+results for the same identity become a conflict only after both original signatures verify against
+the established keys. Conflicting records stay for review and count in neither ranking; an
+unsigned or incorrectly signed allegation cannot invalidate an accepted result. Duel GUIDs still
+need the game's existing name/GUID proof before a result becomes rated.
+
+About three holders send digests every ten minutes, regardless of network size. Missing results
+travel on the existing paced low lane. Large days are requested in successive hash buckets, with
+at most 350 64-bit SHA-256 fingerprints per request, below the transport's assembly size.
+Verification has 20 records in flight and 200 waiting; pending keys hold at most 500 records,
+and each relayer has separate attempt and accepted-result budgets. Receiving a digest does not
+grant authority or change any ranking itself.
+
+Unsealed original records do not expire with the legacy half stores. Bones can reconstruct an old
+monthly ranking from those records; direct duels also expose monthly win/loss totals through
+`ArenaLedger.RecordMonth(month)`. Season Elo, pair/day caps, minimum duration and GUID proof
+continue to use the established rating rules.
+
+## Closing a month
+
+Seven days after a month closes, `/oly arena records` shows that client's unsigned monthly
+requests. A request includes the realm group, faction, game type, month, number of players and
+SHA-256 of canonical totals. The author reviews the actual totals before signing it:
+
+```sh
+python3 scripts/council-sign.py seal 'RS1~...'
+```
+
+This prints a signed seal using the existing council key. It does not change the key, council
+membership, leadership authority or council output. No test reads the author's key: the round
+trip generates a temporary key and removes that temporary folder afterward.
+
+Paste the signed result with `/oly arena records seal`. Anyone can relay a genuine seal and its
+totals, but only the existing author's public key can authorize it. The receiver adopts the totals
+only after their complete text matches the signed hash and row count. Only then can original
+records older than 62 days in that month be compacted; the authenticated monthly totals remain.
+A seal without matching totals permits no deletion. Totals assemblies are bounded and kept long
+enough for the client's paced transport.
+
+## Client checks still required
+
+Use two players and an ordinary observer. Complete one free Bones game and one direct duel with
+the King's live switch off; each result should appear once, survive reload, and remain ranked.
+Join a later observer that has heard the players' keys; a holder's digest should bring the signed
+results over the low lane while the ordinary chat and invitations stay responsive. A later
+observer without those keys should show pending records and accept them only after the players'
+own key declarations. Also test mixed 1.2.3/1.2.4 clients, including the old KN/AX repeat path.
+
+Inspect an old month's request and test a temporary signed seal with mismatching totals first:
+its original records must stay. Once the exact authenticated totals arrive, the old originals
+may compact and the month must keep its podium and totals across reload.
