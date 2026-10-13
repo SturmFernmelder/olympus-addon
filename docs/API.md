@@ -111,7 +111,9 @@ The name you registered.
 
 ### `handle:GetWanted()`
 
-The Wanted list as the Wanted tab lists it, its active entries in its order:
+The Wanted list as the Wanted tab lists it, its entries in its order: each Horde player with a
+bounty open or a kill of ours (one a member killed who killed none of ours, 0 points and 0 kills, is
+not on it):
 
 ```lua
 {
@@ -120,8 +122,8 @@ The Wanted list as the Wanted tab lists it, its active entries in its order:
 }
 ```
 
-`bounty` is the current bounty in points, `kills` the Olympus members he killed, `cycle` the
-bounty's cycle; `name` can be `nil` when the game has not told a name for that GUID. Never the
+`bounty` is the current bounty in points, `kills` the Olympus members he killed, counted as the
+bounty counts them (the same member again within 10 minutes is one), `cycle` the bounty's cycle; `name` can be `nil` when the game has not told a name for that GUID. Never the
 victims, the claims, the sightings, who added or took off an entry, nor any time.
 
 ### `handle:GetRankings([kind])`

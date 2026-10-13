@@ -146,13 +146,14 @@ local function Busy() return InCombatLockdown and InCombatLockdown() and true or
 -- What an addon may read: each built from the page's own functions, field by field
 ---------------------------------------------------------------------------
 
--- The Wanted tab's list: its active entries in its order (Wanted.Targets), each with what its row
+-- The Wanted tab's list: its entries in its order (Wanted.Targets, "listed": 1.2.4, a Horde player
+-- with a bounty or a kill of ours, never one with 0 points and 0 kills), each with what its row
 -- shows (the name, the bounty and the kills) and the cycle its page shows; the Horde player's GUID,
 -- which is who he is on the list (Wanted.lua). Never the victims, the claims, the sightings, who
 -- added or took off an entry, nor any time.
 function API.Wanted()
 	local out = {}
-	for i, t in ipairs(Call("Wanted", "Targets", true) or {}) do
+	for i, t in ipairs(Call("Wanted", "Targets", "listed") or {}) do
 		if #out >= API.MAX_WANTED then break end
 		if type(t) == "table" and t.active == true then
 			out[#out + 1] = { place = i, name = Plain(t.name, 72), guid = Plain(t.guid, 64),

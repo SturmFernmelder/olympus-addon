@@ -326,6 +326,10 @@ local function TargetDerived(t)
 		lastDeath = Whole(t.lastDeath, 0, 4294967295),
 		lastSighting = Sighting(t.lastSighting),
 		victimOverflow = Whole(t.victimOverflow, 0, Wanted.MAX_POINTS) or 0,
+		-- Older saved cycles counted every overflow death as a kill. New cycles keep the
+		-- counted part separately, so trimming a repeated death never inflates the letter.
+		victimKillOverflow = Whole(t.victimKillOverflow, 0, Wanted.MAX_POINTS)
+			or Whole(t.victimOverflow, 0, Wanted.MAX_POINTS) or 0,
 		victims = type(t.victims) == "table" and t.victims or {},
 		claims = type(t.claims) == "table" and t.claims or {},
 		paid = CopySlayers(t.paid),
@@ -587,11 +591,12 @@ end
 
 local function AddVictim(t, e)
 	local row = { name = e.victimName, guid = e.victimGuid, at = e.at, evidence = e.kind, id = e.id,
-		zone = e.zone, precision = e.precision, points = e.points }
+		zone = e.zone, precision = e.precision, points = e.points, again = e.again }
 	t.victims[#t.victims + 1] = row
 	if #t.victims > Wanted.MAX_VICTIMS then
-		table.remove(t.victims, 1)
+		local dropped = table.remove(t.victims, 1)
 		t.victimOverflow = (t.victimOverflow or 0) + 1
+		if not dropped.again then t.victimKillOverflow = (t.victimKillOverflow or 0) + 1 end
 	end
 end
 
@@ -606,8 +611,13 @@ local function ApplyEvidence(s, e)
 		-- 1.2.3 (Daniel's weights): what this death adds (Bounty.Death: the victim's office and level,
 		-- nothing inside the corpse-camping gap; 1 for a row without them), the cycle's bounty at
 		-- most BOUNTY_MAX; e.points is what it added.
-		local added = math.max(0, math.min(Bounty.Death(t, e), Bounty.SCORE.BOUNTY_MAX - t.current))
-		t.current, t.lifetimeKills, e.points = t.current + added, t.lifetimeKills + 1, added
+		-- 1.2.4 (the author's report: "3 kills, 18 points", one member killed three times in a few
+		-- minutes): the kills count as the points do. A death inside that gap (e.again) adds no kill
+		-- either; it stays among his victims, marked so. A death at the cap still counts its kill.
+		local worth, again = Bounty.Death(t, e)
+		local added = math.max(0, math.min(worth, Bounty.SCORE.BOUNTY_MAX - t.current))
+		t.current, e.points, e.again = t.current + added, added, again or nil
+		if not again then t.lifetimeKills = t.lifetimeKills + 1 end
 		AddVictim(t, e)
 	elseif e.action == "claim" then
 		-- 1.2.3: what the kill pays (Bounty.Claim: twice his level, the whole bounty and the revenge;
@@ -621,10 +631,11 @@ local function ApplyEvidence(s, e)
 		e.points, e.level, e.revenge = points, level, revenge or nil
 		local claim = { id = e.id, at = e.at, slayer = e.killerName, slayerGuid = e.killerGuid, points = points,
 			evidence = e.kind, cycle = t.cycle, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), overflow = t.victimOverflow or 0,
+			killOverflow = t.victimKillOverflow or 0,
 			bounty = t.current, level = level, revenge = revenge or nil }
 		t.claims[#t.claims + 1] = claim
 		TrimList(t.claims, Wanted.MAX_CLAIMS)
-		t.current, t.victims, t.victimOverflow = 0, {}, 0
+		t.current, t.victims, t.victimOverflow, t.victimKillOverflow = 0, {}, 0, 0
 		t.lastDeath, t.openSince, t.cycle = e.at, e.at, math.min(Wanted.MAX_POINTS, t.cycle + 1)
 		Bounty.Closed(t, e)
 		if points > 0 then
@@ -653,7 +664,8 @@ local function Rebuild(s)
 		local b = TargetDerived(type(t.base) == "table" and t.base or {})
 		t.current, t.lifetimeKills, t.cycle, t.openSince, t.lastDeath = b.current, b.lifetimeKills, b.cycle, b.openSince, b.lastDeath
 		t.lastSighting = b.lastSighting
-		t.victimOverflow, t.victims, t.claims = b.victimOverflow, CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
+		t.victimOverflow, t.victimKillOverflow = b.victimOverflow, b.victimKillOverflow
+		t.victims, t.claims = CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
 		t.paid, t.bounty = b.paid, b.bounty
 	end
 	s.slayers = CopySlayers(s.baseSlayers)
@@ -696,6 +708,7 @@ end
 local function Changed()
 	ns.Fire("WANTED_CHANGED")
 	if ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
+	if Wanted.RefreshPins then Wanted.RefreshPins() end
 end
 
 function Wanted.CanManage()
@@ -1367,7 +1380,8 @@ local function PublicTarget(t)
 		addedBy = t.addedBy, source = t.source, removedAt = t.removedAt, removedBy = t.removedBy,
 		current = t.current or 0, lifetimeKills = t.lifetimeKills or 0, cycle = t.cycle or 1,
 		openSince = t.openSince, lastDeath = t.lastDeath, lastSighting = t.lastSighting and CopyList({ t.lastSighting }, 1)[1] or nil,
-		victimOverflow = t.victimOverflow or 0, victims = CopyList(t.victims, Wanted.MAX_VICTIMS), claims = CopyList(t.claims, Wanted.MAX_CLAIMS) }
+		victimOverflow = t.victimOverflow or 0, victimKillOverflow = t.victimKillOverflow or 0,
+		victims = CopyList(t.victims, Wanted.MAX_VICTIMS), claims = CopyList(t.claims, Wanted.MAX_CLAIMS) }
 end
 
 function Wanted.Target(value, guid, realm)
@@ -1376,9 +1390,24 @@ function Wanted.Target(value, guid, realm)
 	return PublicTarget(t)
 end
 
+-- 1.2.4 (the author's report: "many with 0 points, 0 kills: with 0 points and 0 kills he should
+-- not be on the Most Wanted list"): an entry is wanted, on the list, while it is on the ledger (not
+-- taken off) with a bounty open or a kill of ours counted. A Horde player a member killed who
+-- killed none of ours keeps his entry, off the list: it holds the claim, what it paid its Slayer and
+-- the kill's gap, and its rows go to every member as before. So does one listed by hand before
+-- 1.2.3 that never counted anything, and one whose rows a reviewer voided.
+function Wanted.IsWanted(t)
+	return type(t) == "table" and t.active == true
+		and ((tonumber(t.current) or 0) > 0 or (tonumber(t.lifetimeKills) or 0) > 0)
+end
+
+-- The entries, in the list's order. activeOnly: true, those on the ledger (not taken off);
+-- "listed" (1.2.4), the Most Wanted list itself, as its tab shows it (Wanted.IsWanted).
 function Wanted.Targets(activeOnly)
 	local s, out = Store(false), {}
-	for _, t in pairs(s and s.targets or {}) do if not activeOnly or t.active then out[#out + 1] = PublicTarget(t) end end
+	for _, t in pairs(s and s.targets or {}) do
+		if not activeOnly or t.active and (activeOnly ~= "listed" or Wanted.IsWanted(t)) then out[#out + 1] = PublicTarget(t) end
+	end
 	table.sort(out, function(a, b)
 		if a.active ~= b.active then return a.active end
 		if a.current ~= b.current then return a.current > b.current end
@@ -1582,6 +1611,32 @@ local function EvidenceMember(sender, guild)
 	if type(guild) ~= "string" or guild == "" or not (ns.IsFederation and ns.IsFederation(guild)) then return false end
 	local ok, level, verified = pcall(C.VerifiedLevel, sender, guild)
 	return ok and type(level) == "number" and level >= 1 and verified == true
+end
+
+-- (1.2.4) Who may speak for his own death or killing blow here (Share.Take): a member as the
+-- [Olympus] chat takes one (Channels.VerifiedLevel 1 or more), true and whether he was proven.
+-- Proven first (EvidenceMember: this client's own guild's fresh roster, a rank the census or the
+-- signed manifest names). A plain member of another Olympus guild is in neither, and no client can
+-- prove more of him: the game gives a player's guild only for a unit of his (GetGuildInfo), the
+-- /who ask is a restricted call (C_FriendList.SendWho, HasRestrictions: Forever's
+-- FriendListDocumentation.lua) and an addon message carries no guild (CHAT_MSG_ADDON:
+-- ChatInfoDocumentation.lua). Until 1.2.4 every other client refused him for it, the reviewers'
+-- too, so nothing was relayed and Most Wanted stayed empty. Now his own word counts as the chat's
+-- does: for the Olympus guild the row names (guild, from Sight.GuildName), his one guild
+-- (Data.ClaimGuild: not another that his messages named within CLAIM_TTL, the signed manifest on
+-- or not), never a guildmate of ours speaking for another guild, nor one our own roster lacks
+-- naming ours (VerifiedLevel 0). A reviewer can still take off what such a member sends (WV).
+function Share.Member(sender, guild)
+	if EvidenceMember(sender, guild) then return true, true end
+	if type(guild) ~= "string" or guild == "" then return false end
+	local C, D = ns.Channels, ns.Data
+	if type(C) ~= "table" or C.missing or type(C.VerifiedLevel) ~= "function" then return false end
+	if type(D) == "table" and type(D.ClaimGuild) == "function" then
+		local ok, bound = pcall(D.ClaimGuild, sender, guild)
+		if not ok or not bound then return false end
+	end
+	local ok, level = pcall(C.VerifiedLevel, sender, guild)
+	return ok and type(level) == "number" and level >= 1, false
 end
 
 -- Whether a player GUID is the sender's character: true or false when this client can name it
@@ -2076,18 +2131,32 @@ local function EvidenceLabel(kind)
 	return kind == "PARTY_KILL" and L.WANTED_EVIDENCE_PARTY or kind == "SELF_DEATH" and L.WANTED_EVIDENCE_RECAP or L.WANTED_UNKNOWN
 end
 
+-- (1.2.4: the open cycle's deaths and how many counted, when one did not: the same member again
+-- inside the corpse-camping gap, Bounty.Death. The minutes are the gap's.)
+local function Repeats(t)
+	local counted = t.victimKillOverflow or 0
+	for _, v in ipairs(t.victims) do if not v.again then counted = counted + 1 end end
+	local deaths = #t.victims + (t.victimOverflow or 0)
+	if counted == deaths then return nil end
+	return L.WANTED_REPEATS:format(deaths, counted, math.floor(Bounty.SCORE.REPEAT_GAP / 60))
+end
+
 local function TargetTip(t)
 	return function(tt)
 		tt:AddLine(Display(t), 1, 0.82, 0)
 		tt:AddLine(L.WANTED_BOUNTY:format(t.current), 1, 1, 1)
 		tt:AddLine(L.WANTED_LIFETIME:format(t.lifetimeKills), 0.8, 0.8, 0.8)
+		local repeats = Repeats(t)
+		if repeats then tt:AddLine(repeats, 0.8, 0.8, 0.8, true) end
 		if t.lastSighting then
 			local precision = t.lastSighting.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE
 			tt:AddLine(L.WANTED_LAST_SIGHTING:format(t.lastSighting.zone or L.WANTED_UNKNOWN, precision, ns.Ago(t.lastSighting.at)), 0.8, 0.8, 0.8, true)
 		end
 		for _, v in ipairs(t.victims) do
-			tt:AddLine(L.WANTED_VICTIM_TIP:format(v.name and (ns.DisplayName(v.name) or v.name) or L.WANTED_UNKNOWN,
-				v.zone or L.WANTED_UNKNOWN, EvidenceLabel(v.evidence), ns.Ago(v.at)), 1, 1, 1, true)
+			local line = L.WANTED_VICTIM_TIP:format(v.name and (ns.DisplayName(v.name) or v.name) or L.WANTED_UNKNOWN,
+				v.zone or L.WANTED_UNKNOWN, EvidenceLabel(v.evidence), ns.Ago(v.at))
+			if v.again then tt:AddLine(line .. " · " .. L.WANTED_AGAIN_SHORT, 0.6, 0.6, 0.6, true)
+			else tt:AddLine(line, 1, 1, 1, true) end
 		end
 		if t.victimOverflow > 0 then tt:AddLine(L.WANTED_MORE_EVIDENCE:format(t.victimOverflow), 0.7, 0.7, 0.7) end
 	end
@@ -2185,7 +2254,7 @@ local function SignedLines(lines)
 end
 
 local function ListLines()
-	local lines, targets = {}, Wanted.Targets(true)
+	local lines, targets = {}, Wanted.Targets("listed")
 	lines[#lines + 1] = { header = true, text = L.WANTED_TARGETS, right = Grey(tostring(#targets)) }
 	if #targets == 0 then lines[#lines + 1] = { text = Grey(L.WANTED_EMPTY) } end
 	for _, t in ipairs(targets) do
@@ -2224,7 +2293,8 @@ local function TargetLines()
 	if not t then mode, opened = "list", nil return ListLines() end
 	t = PublicTarget(t)
 	local lines = { { text = Gold(L.WANTED_BACK), onClick = Wanted.Back },
-		{ header = true, text = Display(t), right = t.active and Green(L.WANTED_LISTED) or Grey(L.WANTED_REMOVED) },
+		{ header = true, text = Display(t), right = Wanted.IsWanted(t) and Green(L.WANTED_LISTED)
+			or Grey(t.active and L.WANTED_NOT_WANTED or L.WANTED_REMOVED) },
 		{ indent = 1, text = L.WANTED_GUID:format(t.guid or L.WANTED_UNKNOWN) },
 		{ indent = 1, text = L.WANTED_BOUNTY:format(t.current), right = L.WANTED_LIFETIME:format(t.lifetimeKills) },
 		{ indent = 1, text = L.WANTED_CYCLE:format(t.cycle, t.openSince and ns.Ago(t.openSince) or L.WANTED_UNKNOWN) },
@@ -2243,16 +2313,22 @@ local function TargetLines()
 	end
 	lines[#lines + 1] = { header = true, text = L.WANTED_OPEN_CYCLE }
 	if #t.victims == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_VICTIMS) } end
+	local repeats = Repeats(t)
+	if repeats then lines[#lines + 1] = { indent = 1, text = Grey(repeats) } end
+	local gap = math.floor(Bounty.SCORE.REPEAT_GAP / 60)
 	for _, v in ipairs(t.victims) do
 		local label = v.name and (ns.DisplayName(v.name) or v.name) or L.WANTED_UNKNOWN
-		-- (1.2.3: what each death added to his bounty, Bounty.Death.)
-		lines[#lines + 1] = { indent = 1, text = label, right = Grey(L.WANTED_VICTIM_POINTS:format(tonumber(v.points) or 0, ns.Ago(v.at))),
+		-- (1.2.3: what each death added to his bounty, Bounty.Death; 1.2.4: one inside the corpse-
+		-- camping gap says it counted neither points nor a kill.)
+		local right = v.again and L.WANTED_VICTIM_AGAIN:format(ns.Ago(v.at)) or L.WANTED_VICTIM_POINTS:format(tonumber(v.points) or 0, ns.Ago(v.at))
+		lines[#lines + 1] = { indent = 1, text = label, right = Grey(right),
 			onClick = CorrectClick(v.id, label),
 			tooltip = function(tt)
 				tt:AddLine(L.WANTED_EVIDENCE, 1, 0.82, 0)
 				tt:AddLine(EvidenceLabel(v.evidence), 1, 1, 1, true)
 				tt:AddLine(L.WANTED_LOCATION:format(v.zone or L.WANTED_UNKNOWN, v.precision == "consented" and L.WANTED_CONSENTED or L.WANTED_APPROXIMATE),
 					0.8, 0.8, 0.8, true)
+				if v.again then tt:AddLine(L.WANTED_VICTIM_AGAIN_TIP:format(gap), 0.8, 0.8, 0.8, true) end
 			end }
 	end
 	if t.victimOverflow > 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_MORE_EVIDENCE:format(t.victimOverflow)) } end
@@ -2608,7 +2684,7 @@ local function SightedUnit(unit)
 	if me and SameIdentity(me, ident) then return nil, "self" end
 	local s = Store(false)
 	local t = s and ResolveTarget(s, ident, false)
-	if t and t.active then return ident, true end
+	if Wanted.IsWanted(t) then return ident, true end
 	if Ask(UnitCanAttack, "player", unit) ~= true or Ask(UnitIsPVP, unit) ~= true then return nil, "unlisted" end
 	if type(GetGuildInfo) == "function" then
 		local ok, guild = pcall(GetGuildInfo, unit)
@@ -2619,6 +2695,13 @@ end
 
 local function SightLive(e, now)
 	return now - e.at <= Wanted.SIGHT_TTL and e.at <= now + Wanted.GLOBAL_SKEW
+end
+
+-- An observation may stay in the private history after its entry stops being wanted.
+-- Only entries on the current list can be sent or drawn.
+function Sight.Wanted(guid, name)
+	local s = Store(false)
+	return Wanted.IsWanted(s and ResolveTarget(s, Identity(name, guid), false))
 end
 
 -- The newest sighting of each Horde player, SIGHT_PINS of them at most (the oldest go first).
@@ -2676,6 +2759,7 @@ end
 -- When Comm is about to send one: still wanted, still allowed, still fresh, still taken.
 local function SightPermit(job)
 	if sightJobs[job.key] ~= job or job.cancelled then return false, "cancelled" end
+	if not Sight.Wanted(job.guid) then return false, "unlisted" end
 	local ok, why = Collects()
 	if not ok then return false, why end
 	if Sight.CrownHidden() then return false, "crown" end
@@ -2776,7 +2860,7 @@ local function SendSighting(e)
 		local toKey = ns.Fold(name)
 		local key = "wanted-sighting:" .. toKey .. ":" .. e.id
 		local target = ns.TellName and ns.TellName(name) or name
-		local job = { key = key, toKey = toKey, to = name, target = target, body = body, at = now }
+		local job = { key = key, toKey = toKey, to = name, target = target, body = body, at = now, guid = e.guid }
 		sightJobs[key], sightJobCount = job, sightJobCount + 1
 		local accepted = C.Whisper(target, body, nil, false, false, function(sent)
 			DropJob(job)
@@ -3013,7 +3097,7 @@ local function TakeSighting(dist, sender, text)
 	if not FromOlympian(sender, guild) then return Refuse("olympus") end
 	local listed = Store(false)
 	listed = listed and ResolveTarget(listed, ident, false)
-	if not (listed and listed.active) then return Refuse("unlisted") end
+	if not Wanted.IsWanted(listed) then return Refuse("unlisted") end
 	local key = ns.Fold(sender) .. "#" .. id
 	if sightSeen[key] then stats.sightReplay = stats.sightReplay + 1 return false, "replay" end
 	if not SightAdmit(sender, now) then stats.sightRate = stats.sightRate + 1 return false, "rate" end
@@ -3054,7 +3138,9 @@ end
 function Wanted.Sightings()
 	local now, out = math.floor(Clock()), {}
 	for _, e in pairs(pins) do
-		if SightLive(e, now) then local c = {} for k, v in pairs(e) do c[k] = v end out[#out + 1] = c end
+		if SightLive(e, now) and Sight.Wanted(e.guid, e.name) then
+			local c = {} for k, v in pairs(e) do c[k] = v end out[#out + 1] = c
+		end
 	end
 	table.sort(out, function(a, b)
 		if a.at ~= b.at then return a.at > b.at end
@@ -3075,15 +3161,15 @@ function Wanted.SightingTip(tt, e)
 	tt:AddLine(Display({ name = e.name }), 1, 0.82, 0)
 	local s = Store(false)
 	local t = s and ResolveTarget(s, Identity(e.name, e.guid), false)
-	if t and t.active then
+	if Wanted.IsWanted(t) then
 		tt:AddLine(L.WANTED_LIFETIME:format(t.lifetimeKills or 0), 1, 1, 1)
 		tt:AddLine(L.WANTED_BOUNTY:format(t.current or 0), 0.8, 0.8, 0.8)
-	elseif t then
+	elseif t and not t.active then
 		-- Taken off the list here: his kills stay a fact, no bounty is said.
 		tt:AddLine(L.WANTED_LIFETIME:format(t.lifetimeKills or 0), 1, 1, 1)
 		tt:AddLine(L.WANTED_SIGHT_REMOVED, 0.8, 0.8, 0.8, true)
 	else
-		tt:AddLine(L.WANTED_SIGHT_UNLISTED, 0.8, 0.8, 0.8, true)
+		tt:AddLine(t and L.WANTED_NOT_WANTED or L.WANTED_SIGHT_UNLISTED, 0.8, 0.8, 0.8, true)
 	end
 	tt:AddLine(L.WANTED_SIGHT_SEEN:format(SightAgo(e.at), e.own and L.WANTED_SIGHT_BY_YOU or IssuerName(e.observer)), 1, 1, 1, true)
 	if (e.layer or 0) > 0 then
@@ -3147,7 +3233,7 @@ local function RefreshPinsNow()
 	-- Members only, never in an instance.
 	local allowed = ns.IsMember ~= nil and ns.IsMember() == true and not InInstance()
 	for guid, f in pairs(pinFrames) do
-		if not (allowed and pins[guid]) then
+		if not (allowed and pins[guid] and Sight.Wanted(guid, pins[guid].name)) then
 			if world and f.onWorld then P:RemoveWorldMapIcon(Wanted, f.world) end
 			P:RemoveMinimapIcon(Wanted, f.mini)
 			f.world:Hide()
@@ -3159,22 +3245,24 @@ local function RefreshPinsNow()
 	end
 	if not allowed then return true end
 	for guid, e in pairs(pins) do
-		local f = pinFrames[guid]
-		if not f then
-			f = table.remove(spareFrames) or MakeFrames()
-			if not f then return false end
-			pinFrames[guid] = f
-		end
-		f.world.badge.sighting, f.mini.sighting, f.world.since = guid, guid, e.at
-		-- (With the gamepad UI ns.WorldMapIcons took this module's world icons off already.)
-		if not world then f.onWorld = nil end
-		if f.drawn ~= e or (world and not f.onWorld) then
-			if world then
-				P:AddWorldMapIconMap(Wanted, f.world, e.mapID, e.x / 1000, e.y / 1000, SIGHT_SHOW)
-				f.onWorld = true
+		if Sight.Wanted(guid, e.name) then
+			local f = pinFrames[guid]
+			if not f then
+				f = table.remove(spareFrames) or MakeFrames()
+				if not f then return false end
+				pinFrames[guid] = f
 			end
-			if f.drawn ~= e then P:AddMinimapIconMap(Wanted, f.mini, e.mapID, e.x / 1000, e.y / 1000, false, false) end
-			f.drawn = e
+			f.world.badge.sighting, f.mini.sighting, f.world.since = guid, guid, e.at
+			-- (With the gamepad UI ns.WorldMapIcons took this module's world icons off already.)
+			if not world then f.onWorld = nil end
+			if f.drawn ~= e or (world and not f.onWorld) then
+				if world then
+					P:AddWorldMapIconMap(Wanted, f.world, e.mapID, e.x / 1000, e.y / 1000, SIGHT_SHOW)
+					f.onWorld = true
+				end
+				if f.drawn ~= e then P:AddMinimapIconMap(Wanted, f.mini, e.mapID, e.x / 1000, e.y / 1000, false, false) end
+				f.drawn = e
+			end
 		end
 	end
 	return true
@@ -3239,17 +3327,19 @@ end
 -- GUIDs as WY writes them (server.id), <scope> the realm group and faction (Scope), <digest> the
 -- row's own (16 hex), <at> its time and <month> its month as the sender's client counted them.
 -- What a receiver takes (Share.Take): a row of its own realm group and faction, fresh (SHARE_AGE,
--- GLOBAL_SKEW), from a member it verifies (its own guild's fresh roster, a guild rank it can verify
--- for the guild the row names, or a reviewer), whom the moderators do not hide, about the
+-- GLOBAL_SKEW), from a member as the [Olympus] chat takes one (Share.Member, 1.2.4: its own guild's
+-- fresh roster, a guild rank it can verify for the guild the row names, a reviewer, else that
+-- Olympus guild as its sender's one claimed guild), whom the moderators do not hide, about the
 -- sender's own death or killing blow: the Olympian side is the sender, by the name the server
 -- stamps, his GUID only where this client proves it is his (GuidIsSender: a unit, or the game's
 -- lookup), refused where it proves it is someone else's. The Horde side as the sender's client
 -- proved it, refused where this client sees him as no Horde player (a unit, an Alliance race) or
 -- as an Olympian. Once (its id: the sender and the digest), unless voided, SHARE_RATE_MAX a window
 -- from one member and SHARE_TARGET_MAX about one Horde player from everyone. A relay only from a
--- reviewer (the King, a signed High Councillor, the author), on whose word a member this client
--- cannot verify (one of another guild, whose rank no census names) counts, SHARE_RELAY_MAX a
--- window from one. A mark (WV) only from a reviewer, on his own word. A client before 1.2.3 has
+-- reviewer (the King, a signed High Councillor, the author), on whose word a client before 1.2.4
+-- counts a member it cannot verify (one of another guild, whose rank no census names), unless this
+-- client knows him no member (Share.Disowned), SHARE_RELAY_MAX a window from one. A mark (WV) only
+-- from a reviewer, on his own word. A client before 1.2.3 has
 -- no handler for WK or WV, and ignores them.
 ---------------------------------------------------------------------------
 
@@ -3259,13 +3349,15 @@ Share.ALLIANCE_RACES = { Human = true, Dwarf = true, NightElf = true, Gnome = tr
 -- (This session's captures and refusals, the newest last, DIAG_MAX at most: /oly wanted status.)
 -- kind: "kill" (own killing blow), "death" (own death), "heard" (a member's row), "relay" (a
 -- reviewer's relay), "mark" (a reviewer's removal or void). why: the row recorded, or the reason.
-function Share.Note(kind, ok, why, who, from)
+-- guild (1.2.4): the guild a member's row names, shown after its sender.
+function Share.Note(kind, ok, why, who, from, guild)
 	local reason = ok and "ok" or tostring(why or "?")
 	Share.counts[kind] = (Share.counts[kind] or 0) + 1
 	if ok then Share.counts.counted = (Share.counts.counted or 0) + 1 else Share.why[reason] = (Share.why[reason] or 0) + 1 end
 	local e = ok and type(why) == "table" and why or nil
 	local row = { at = math.floor(Clock()), kind = kind, ok = ok == true, why = not ok and reason or nil, who = Clean(who, 72),
-		from = Clean(from, 72), action = e and e.action or nil, points = e and e.points or nil }
+		from = Clean(from, 72), guild = Clean(guild, 48), action = e and e.action or nil, points = e and e.points or nil,
+		again = e and e.again or nil }
 	Share.log[#Share.log + 1] = row
 	while #Share.log > Wanted.DIAG_MAX do table.remove(Share.log, 1) end
 	return row
@@ -3470,6 +3562,19 @@ function Share.SameGiven(a, b)
 	return given ~= "" and given == Given(b)
 end
 
+-- (1.2.4) A reviewer's relay counts on his word, as before, unless this client knows better: the
+-- guild its sender's own messages named here (Data.ClaimedGuild: his row, a chat line, a census
+-- report) makes him no member (Share.Member), as when he names our own guild and our roster lacks
+-- him. A reviewer now relays the rows of members he cannot prove either (Share.Member), so that a
+-- client before 1.2.4 counts them; his relay never overrules what this client proves.
+function Share.Disowned(sender)
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.ClaimedGuild) ~= "function" then return false end
+	local ok, claimed = pcall(D.ClaimedGuild, sender)
+	if not ok or type(claimed) ~= "string" then return false end
+	return not Share.Member(sender, Sight.GuildName(claimed))
+end
+
 -- One shared row (WK) taken into this client's ledger: true and the row recorded, or false, why.
 function Share.Take(dist, sender, row)
 	if dist ~= "CHANNEL" then return false, "lane" end
@@ -3488,16 +3593,21 @@ function Share.Take(dist, sender, row)
 	local now = math.floor(Clock())
 	if row.at > now + Wanted.GLOBAL_SKEW or now - row.at > Wanted.SHARE_AGE then return false, "stale" end
 	if not Whole(row.month, MonthNow() - Wanted.MAX_MONTHS + 1, MonthNow() + 1) then return false, "shape" end
+	-- (1.2.4: each refusal its own word in /oly wanted status, "olympus" for all three before:
+	-- "hidden", the moderators hide him, or the guild his row names; "stranger", no member here,
+	-- Share.Member; "olympian", the Horde side is a member.)
+	local guild = not relay and Sight.GuildName(row.guild) or nil
 	local M = ns.Moderation
 	if type(M) == "table" and not M.missing and type(M.Hides) == "function" then
-		local ok, hidden = pcall(M.Hides, from)
-		if not ok or hidden then return false, "olympus" end
+		local ok, hidden = pcall(M.Hides, from, guild, true)
+		if not ok or hidden then return false, "hidden" end
 	end
-	if not relay and not Wanted.CanPublish(from) and not EvidenceMember(from, Sight.GuildName(row.guild)) then return false, "olympus" end
+	if not relay and not Wanted.CanPublish(from) and not Share.Member(from, guild) then return false, "stranger" end
+	if relay and not Wanted.CanPublish(from) and Share.Disowned(from) then return false, "stranger" end
 	local horde = Identity(row.name, row.horde)
 	if not horde or not horde.name then return false, "shape" end
 	-- The Horde side as the sender's client proved it, unless this client sees him otherwise.
-	if VerifiedOlympian(horde) then return false, "olympus" end
+	if VerifiedOlympian(horde) then return false, "olympian" end
 	local seen, contradicted = KnownHorde(horde)
 	if contradicted then return false, "faction" end
 	if not seen and type(GetPlayerInfoByGUID) == "function" then
@@ -3514,7 +3624,7 @@ function Share.Take(dist, sender, row)
 		if not Share.SameGiven(known, horde.name) then return false, "identity" end
 		horde = Identity(known, horde.guid)
 		if not horde or not horde.name then return false, "shape" end
-		if VerifiedOlympian(horde) then return false, "olympus" end
+		if VerifiedOlympian(horde) then return false, "olympian" end
 	end
 	-- The Olympian side: the sender, his GUID only where this client proves it is his (or the
 	-- reviewer who relays it says his own client did).
@@ -3562,7 +3672,7 @@ function Wanted.HandleShared(dist, sender, text)
 	local ok, e = Share.Take(dist, sender, row)
 	-- (Not noted: our own row coming back, and a relay of a row held already.)
 	if ok or not (e == "own" or e == "replay" and row and row.via) then
-		Share.Note(row and row.via and "relay" or "heard", ok, e, row and row.name, row and row.from or sender)
+		Share.Note(row and row.via and "relay" or "heard", ok, e, row and row.name, row and row.from or sender, row and row.guild)
 	end
 	return ok, e
 end
@@ -3908,8 +4018,9 @@ function Bounty.Due(t, at)
 	return st
 end
 
--- What one death adds to the entry's bounty (before its cap), and what it sets going for the next
--- rows; called in the order of the deaths (ApplyEvidence).
+-- What one death adds to the entry's bounty (before its cap), and true when it is the same member's
+-- again inside REPEAT_GAP (it adds nothing, and 1.2.4, no kill either); what it sets going for the
+-- next rows. Called in the order of the deaths (ApplyEvidence).
 function Bounty.Death(t, e)
 	local at = Whole(e.at, 0, 4294967295) or 0
 	local st = Bounty.Due(t, at)
@@ -3920,7 +4031,7 @@ function Bounty.Death(t, e)
 		return Bounty.SCORE.LEGACY_DEATH
 	end
 	if not e.hf and Bounty.Level(e.hl) > (st.hl or 0) then st.hl = Bounty.Level(e.hl) end
-	if st.gap[who] then return 0 end
+	if st.gap[who] then return 0, true end
 	st.gap[who], st.grudge[who] = at, at
 	Bounty.Trim(st.gap)
 	Bounty.Trim(st.grudge)
@@ -4895,7 +5006,13 @@ function Bounty.LetterKey(e, claim, name)
 	local S, paid = Bounty.SCORE, Bounty.Level(e.level)
 	local level = paid > 0 and paid or Bounty.Level(e.hl)
 	local floor = level > 0 and e.hf == true and level == Bounty.Level(e.hl)
-	local kills = math.min(Wanted.MAX_POINTS, #(type(claim.victims) == "table" and claim.victims or {}) + (Whole(claim.overflow, 0, Wanted.MAX_POINTS) or 0))
+	-- (1.2.4, the author's report "3 kills, 18 points": the kills it names count as the bounty does,
+	-- a death inside the corpse-camping gap none: v.again, ApplyEvidence.)
+	local kills = Whole(claim.killOverflow, 0, Wanted.MAX_POINTS) or Whole(claim.overflow, 0, Wanted.MAX_POINTS) or 0
+	for _, v in ipairs(type(claim.victims) == "table" and claim.victims or {}) do
+		if type(v) == "table" and not v.again then kills = kills + 1 end
+	end
+	kills = math.min(Wanted.MAX_POINTS, kills)
 	return ("wanted@%s~%d~%d~%d~%d~%d~%d%s~%s"):format(digest, points, math.min(Wanted.MAX_POINTS, S.HORDE_LEVEL * paid),
 		Whole(claim.bounty, 0, Wanted.MAX_POINTS) or 0, e.revenge and S.REVENGE or 0, kills, level, floor and "+" or "", name)
 end
@@ -5363,13 +5480,17 @@ function Wanted.StatusText()
 	local out = {}
 	local function Add(text) out[#out + 1] = text end
 	local function Yes(v) return v and L.WANTED_STATUS_YES or L.WANTED_STATUS_NO end
-	local active, off, rows, mine, unsent = 0, 0, 0, 0, 0
-	for _, t in pairs(s and s.targets or {}) do if t.active then active = active + 1 else off = off + 1 end end
+	local active, held, off, rows, mine, unsent = 0, 0, 0, 0, 0, 0
+	-- (1.2.4: wanted, the entries on the list; held, those on the ledger off it, 0 points and 0
+	-- kills: Wanted.IsWanted.)
+	for _, t in pairs(s and s.targets or {}) do
+		if Wanted.IsWanted(t) then active = active + 1 elseif t.active then held = held + 1 else off = off + 1 end
+	end
 	for _, e in ipairs(s and s.evidence or {}) do
 		if not e.void then rows = rows + 1 end
 		if e.own then mine = mine + 1 if not e.shared then unsent = unsent + 1 end end
 	end
-	Add(L.WANTED_STATUS_STORE:format(tostring(ns.group or ns.realm or "?"), tostring(ns.faction or "?"), active, off, rows,
+	Add(L.WANTED_STATUS_STORE:format(tostring(ns.group or ns.realm or "?"), tostring(ns.faction or "?"), active, held, off, rows,
 		Count(s and s.slayers or {}), s and L.WANTED_STATUS_YES or L.WANTED_STATUS_NO))
 	local C = ns.Comm
 	Add(L.WANTED_STATUS_SOURCES:format(Yes(Share.partyKill), Yes(type(C_DeathRecap) == "table" and type(C_DeathRecap.GetRecapEvents) == "function"),
@@ -5411,9 +5532,11 @@ function Wanted.StatusText()
 	for i = #Share.log, 1, -1 do
 		local r = Share.log[i]
 		local when = type(dateFn) == "function" and dateFn("%H:%M:%S", r.at) or tostring(r.at)
-		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0) or L.WANTED_STATUS_BOUNTY:format(r.points or 0))
+		local result = r.ok and (r.action == "claim" and L.WANTED_STATUS_CLAIM:format(r.points or 0)
+			or r.again and L.WANTED_STATUS_AGAIN:format(math.floor(S.REPEAT_GAP / 60)) or L.WANTED_STATUS_BOUNTY:format(r.points or 0))
 			or L.WANTED_STATUS_REFUSAL:format(r.why or "?")
-		Add(("  %s  %s  %s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "", result))
+		Add(("  %s  %s  %s%s%s  %s"):format(when, kinds[r.kind] or r.kind, r.who or "?", r.from and (" · " .. r.from) or "",
+			r.guild and (" <" .. r.guild .. ">") or "", result))
 	end
 	if #Share.log == 0 then Add("  " .. L.WANTED_STATUS_EMPTY) end
 	Add("")
