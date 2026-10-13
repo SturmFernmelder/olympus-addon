@@ -39,9 +39,10 @@ local function Scan(w)
 	end
 end
 local function Setup()
-	local w = World.New({ council = false, arenaFiles = {}, compliance = "shipped" })
+	local w = World.New({ clock = World.CLOCK - 4 * 604800, council = false, arenaFiles = {}, compliance = "shipped" })
 	local t, king = w:Role("treasurer"), w:Role("king")
 	local p, other = w:Role("fighterA", { guild = t.guild }), w:Role("fighterB", { guild = t.guild })
+	local mail = w:Role("treasurerMail", { guild = t.guild })
 	for _, c in ipairs(w.clients) do Load(w, c) end
 	Scan(w)
 	w:As(t, function()
@@ -51,6 +52,12 @@ local function Setup()
 			b.opened, b.openedAt, b.opening = t.ns.Dues.WeekStart(t.ns.Dues.Week() - 4), t.ns.Dues.WeekStart(t.ns.Dues.Week() - 4), 0
 		end
 	end)
+	-- One account's two real pinned characters start the actual new native tracker;
+	-- an old opening date or a restored zero book is not coverage provenance.
+	mail.ns.rdb = t.ns.rdb
+	for _, actor in ipairs({ t, mail }) do w:As(actor, function() assert(actor.ns.Dues.StartNativePayerTracking()) end) end
+	local delta = World.CLOCK - w.clock; for _, timer in ipairs(w.timers) do timer.at = timer.at + delta end; w.clock = World.CLOCK
+	Scan(w)
 	return w, t, king, p, other
 end
 -- Jump between the two observed reset boundaries instead of simulating millions of
@@ -326,6 +333,37 @@ test("Dues grace: malformed native proof containers or payer proof never manufac
 			eq(t.ns.DuesGrace.Rows(p.name)[1].state, "unknown", mode)
 		end
 		b.duesPayerProofs = actual
+	end)
+	NoErrors(w)
+end)
+
+test("Dues grace: old opened books without the actual native tracking map never certify an empty or restored pre-tracker week", function()
+	local w, t, _, p = Setup(); TwoMisses(w, t)
+	w:As(t, function()
+		local b = t.ns.Treasury.BookOf(World.NAMES.treasurerMail)
+		b.duesNativeTracking = nil -- an old opening and empty map do not establish the native tracker
+		local progress = t.ns.DuesGrace.Progress(p.name)
+		eq(progress.misses, 0); eq(progress.latest.state, "unknown")
+		t.ns.DuesGrace.QueueNotices(t.ns.Dues.Week() - 1); eq(t.ns.DuesGrace.Pump(), false)
+	end)
+	NoErrors(w)
+end)
+
+test("Dues grace: tracker first started mid-week and a later restored ledger never certify absence retroactively", function()
+	local w, t, _, p = Setup(); local first = Week(w, t) - 2
+	Start(w, t, first)
+	w:As(t, function() t.ns.Treasury.BookOf(World.NAMES.treasurerMail).duesNativeTracking = nil end)
+	Jump(w, w:As(t, function() return t.ns.Dues.WeekStart(first) + 300 end))
+	local mail = assert(w:Find(World.NAMES.treasurerMail))
+	w:As(mail, function() assert(mail.ns.Dues.StartNativePayerTracking()) end)
+	Close(w, t, first)
+	eq(Progress(w, t, p).latest.state, "unknown", "midweek native start cannot prove an earlier empty half week")
+	Close(w, t, first + 1)
+	eq(Progress(w, t, p).latest.state, "unconfirmed", "the following genuinely tracked week has coverage")
+	w:As(t, function()
+		local b = t.ns.Treasury.BookOf(World.NAMES.treasurerMail)
+		b.restored = w.clock -- a real restore observation is later than the closed week
+		eq(t.ns.DuesGrace.Progress(p.name).latest.state, "unknown")
 	end)
 	NoErrors(w)
 end)

@@ -14,9 +14,9 @@ local function Same(a, b) return type(a) == "string" and type(b) == "string" and
 local function Preview()
 	return ns.King.Preview() or T.DevView() or ns.ViewAs and ns.ViewAs.Previewing and ns.ViewAs.Previewing()
 end
-local function Hidden(name)
+local function Hidden(name, guild)
 	local M = ns.Moderation
-	return M and M.Hides and M.Hides(name, GetGuildInfo("player")) ~= nil
+	return M and M.Hides and M.Hides(name, guild or GetGuildInfo("player")) ~= nil
 end
 function G.Keeper()
 	local W = ns.WatchChat
@@ -85,6 +85,7 @@ local function Books(week)
 			local opened = b.openedAt or b.opened
 			if not Whole(opened, T.MAX_COPPER) or opened > D.WeekStart(week)
 				or b.duesProofsCut ~= nil and (type(b.duesProofsCut) ~= "table" or b.duesProofsCut[week]) then covered = false end
+			if not D.NativePayerCoverage or D.NativePayerCoverage(b, week) ~= true then covered = false end
 			if b.duesPayerProofs ~= nil and (type(b.duesPayerProofs) ~= "table"
 				or b.duesPayerProofs[week] ~= nil and type(b.duesPayerProofs[week]) ~= "table") then covered = false end
 		end
@@ -108,22 +109,30 @@ local function Copper(books, week, name, guild)
 	return total, reliable
 end
 local batchTag = {}
-local function Batch(liveMembers)
+local function Batch(liveMembers, guild)
 	if type(liveMembers) == "table" and liveMembers.tag == batchTag then return liveMembers end
-	return { tag = batchTag, members = liveMembers or Members() or false, store = Store(), books = {}, links = {} }
+	guild = guild or GetGuildInfo("player")
+	local foreign = guild ~= GetGuildInfo("player") and ns.DuesRosterCheckpoints
+	return { tag = batchTag, guild = guild, foreign = foreign, rows = {},
+		members = liveMembers or (foreign and foreign.LatestMembers(guild) or not foreign and Members()) or false,
+		store = Store(), books = {}, links = {} }
 end
-local function Row(row, week)
-	return type(row) == "table" and row.closed == true and row.guild == GetGuildInfo("player")
+local function Row(row, week, guild)
+	return type(row) == "table" and row.closed == true and row.guild == guild
 		and Whole(row.amount, D.MAX_AMOUNT) and row.amount > 0 and type(row.members) == "table"
 		and Whole(row.at, T.MAX_COPPER) and row.at >= D.WeekStart(week) and row.at <= D.WeekStart(week) + G.BOUNDARY
 end
-function G.Rows(name, liveMembers)
+function G.Rows(name, liveMembers, guild)
 	if not G.Keeper() or type(name) ~= "string" or name == "" then return {} end
-	local batch, out = Batch(liveMembers), {}
+	local batch, out = Batch(liveMembers, guild), {}
 	local s, key = batch.store, ns.FullName(ns.Normal(name)):lower()
 	for week = D.Week() - G.WEEKS + 1, D.Week() - 1 do
 		local row = s and s.weeks[week]
-		if Row(row, week) then
+		if batch.foreign then
+			row = batch.rows[week]
+			if row == nil then row = batch.foreign.ValidatedWindow(batch.guild, week) or false; batch.rows[week] = row end
+		end
+		if Row(row, week, batch.guild) then
 			local member = row.members[key]
 			if type(member) == "string" and #member <= 96 and not member:find("[~|;%c]") and Same(member, name) then
 				local source = batch.books[week]
@@ -131,10 +140,17 @@ function G.Rows(name, liveMembers)
 				local books, covered = source[1], source[2]
 				local copper, reliable = Copper(books, week, member, row.guild)
 				local nowLinks = batch.links[key]
-				if nowLinks == nil then nowLinks = batch.members and Links(member, batch.members) or false; batch.links[key] = nowLinks end
+				if nowLinks == nil then
+					if batch.foreign then
+						local latest = batch.rows[D.Week() - 1]
+						if latest == nil then latest = batch.foreign.ValidatedWindow(batch.guild, D.Week() - 1) or false; batch.rows[D.Week() - 1] = latest end
+						nowLinks = latest and latest.endGroups[key] or false
+					else nowLinks = batch.members and Links(member, batch.members) or false end
+					batch.links[key] = nowLinks
+				end
 				local stable = type(row.groups) == "table" and type(row.endGroups) == "table" and nowLinks
 					and row.groups[key] == nowLinks and row.endGroups[key] == nowLinks
-				local main = not ns.Alts or not ns.Alts.Person or D.Key(ns.Alts.Person(member)) == D.Key(member)
+				local main = batch.foreign and row.mains[key] == key or not batch.foreign and (not ns.Alts or not ns.Alts.Person or D.Key(ns.Alts.Person(member)) == D.Key(member))
 				if main and stable then
 					for alias in nowLinks:gmatch("[^;]+") do if alias ~= key then
 						local extra, intact = Copper(books, week, alias, row.guild)
@@ -150,9 +166,9 @@ function G.Rows(name, liveMembers)
 	end
 	return out
 end
-function G.Progress(name, liveMembers)
+function G.Progress(name, liveMembers, guild)
 	local out = { kept = 0, misses = 0, unknown = 0, known = 0, latest = nil }
-	local rows = G.Rows(name, liveMembers)
+	local rows = G.Rows(name, liveMembers, guild)
 	out.unknown = G.WEEKS - 1 - #rows -- a retained gap never joins two proved weeks silently
 	for _, row in ipairs(rows) do
 		out.latest = row
@@ -167,6 +183,7 @@ function G.Progress(name, liveMembers)
 end
 function G.Observe()
 	if not G.Keeper() then observed = nil; return false end
+	if ns.DuesRosterCheckpoints then ns.DuesRosterCheckpoints.Observe() end
 	local s, members, now, week = Store(), Members(), Clock(), D.Week()
 	if not s then return false end
 	local old = observed
@@ -190,48 +207,56 @@ function G.Observe()
 	G.QueueNotices(week - 1)
 	return true
 end
-local function GM()
+local function GM(guild)
+	if guild and guild ~= GetGuildInfo("player") then return ns.DuesRosterCheckpoints and ns.DuesRosterCheckpoints.CurrentGM(guild) end
 	if not ns.Roster.Fresh(G.BOUNDARY) then return nil end
 	for _, m in ipairs(D.Roster()) do if m.rank == 0 and not Hidden(m.raw) then return ns.FullName(ns.Normal(m.raw)) end end
 end
 local function MayReceive()
 	return D.Available() and not Preview() and not Hidden(ns.me) and (D.Pays() or Same(GM(), ns.me))
 end
-local function NoticeText(week, name, officer, amount, copper, known)
-	return ("DG~1~N~%d~%s~%s~%d~%d~%d~%d"):format(week, GetGuildInfo("player"), name, officer and 1 or 0, amount, copper, known)
+local function NoticeText(week, name, officer, amount, copper, known, guild)
+	return ("DG~1~N~%d~%s~%s~%d~%d~%d~%d"):format(week, guild or GetGuildInfo("player"), name, officer and 1 or 0, amount, copper, known)
 end
 function G.QueueNotices(week)
 	if not G.Keeper() then return false end
 	local since = Clock() - D.WeekStart(D.Week())
 	if week ~= D.Week() - 1 or since < 0 or since > G.NOTICE_FOR then return false end
-	local s, members = Store(), Members()
-	if not s or not members then return false end
-	local batch = Batch(members)
-	for _, name in pairs(members) do
+	local nativeGuild = GetGuildInfo("player")
+	local s, scopes = Store(), { nativeGuild }
+	if not s then return false end
+	local R = ns.DuesRosterCheckpoints
+	for _, guild in ipairs(R and R.Scopes() or {}) do scopes[#scopes + 1] = guild end
+	for _, guild in ipairs(scopes) do
+	local batch = Batch(nil, guild)
+	for _, name in pairs(batch.members or {}) do
 		local p = G.Progress(name, batch)
 		if p.latest and p.latest.week == week and p.latest.state == "unconfirmed" and p.misses >= 2
-			and not Hidden(name) and not T.IsKeeperName(name, GetGuildInfo("player")) then
-			local key = week .. ":" .. name:lower()
+			and not Hidden(name, guild) and not T.IsKeeperName(name, guild) then
+			local key = week .. ":" .. name:lower() .. (guild ~= GetGuildInfo("player") and ":" .. guild or "")
 			if not s.sent[key] and not queue[key] then
-				queue[key] = { identity = Identity(), payer = name, week = week, at = Clock(), phase = s.sent[key .. ":self"] and 1 or 0 }
+				queue[key] = { identity = Identity(), payer = name, guild = guild, week = week, at = Clock(), phase = s.sent[key .. ":self"] and 1 or 0 }
 			end
 		end
+	end
 	end
 	return true
 end
 function G.Pump()
 	if Clock() < nextSend or not G.Keeper() or not T.CanSend() then return false end
-	local batch = Batch()
+	local batches = {}
 	for key, q in pairs(queue) do
+		local guild = q.guild or GetGuildInfo("player")
+		local batch = batches[guild]; if not batch then batch = Batch(nil, guild); batches[guild] = batch end
 		if not Current(q.identity) or q.week ~= D.Week() - 1 or Clock() - q.at < 0 or Clock() - q.at > G.NOTICE_FOR
-			or not batch.members or not batch.members[q.payer:lower()] or Hidden(q.payer) then queue[key] = nil
+			or not batch.members or not batch.members[q.payer:lower()] or Hidden(q.payer, guild) then queue[key] = nil
 		elseif not q.retryAt or Clock() >= q.retryAt then
 			local p = G.Progress(q.payer, batch)
 			if not p.latest or p.latest.week ~= q.week or p.latest.state ~= "unconfirmed" or p.misses < 2 then queue[key] = nil
 			else
-				local to = q.phase == 0 and q.payer or G.captainPolicy == "gm" and GM()
+				local to = q.phase == 0 and q.payer or G.captainPolicy == "gm" and GM(guild)
 				if to then -- an unavailable current GM never guesses or stalls another payer
-					local text = NoticeText(q.week, q.payer, q.phase == 1, p.latest.amount, p.latest.copper, p.known)
+					local text = NoticeText(q.week, q.payer, q.phase == 1, p.latest.amount, p.latest.copper, p.known, guild)
 					q.to, q.text = to, text
 					local ok = T.Private(to, "DG", text, "grace:" .. key .. ":" .. q.phase)
 					q.retryAt = Clock() + G.RETRY -- a blocked/recent target never starves another payer
@@ -270,12 +295,13 @@ T.OnPrivate("DG", {
 		if not G.Keeper() or not T.CanSend() then return false end
 		for _, q in pairs(queue) do
 			if Current(q.identity) and q.text == text and Same(q.to, to) and q.week == D.Week() - 1
-				and Clock() - q.at >= 0 and Clock() - q.at <= G.NOTICE_FOR and ns.Roster.Fresh(G.BOUNDARY)
-				and ns.Roster.RankOf(q.payer) ~= nil and not Hidden(q.payer) then
-				local p = G.Progress(q.payer)
+				and Clock() - q.at >= 0 and Clock() - q.at <= G.NOTICE_FOR and not Hidden(q.payer, q.guild) then
+				local guild = q.guild or GetGuildInfo("player")
+				if guild == GetGuildInfo("player") and (not ns.Roster.Fresh(G.BOUNDARY) or ns.Roster.RankOf(q.payer) == nil) then return false end
+				local p = G.Progress(q.payer, nil, guild)
 				return p.latest and p.latest.week == q.week and p.latest.state == "unconfirmed" and p.misses >= 2
-					and text == NoticeText(q.week, q.payer, q.phase == 1, p.latest.amount, p.latest.copper, p.known)
-					and (q.phase == 0 and Same(to, q.payer) or q.phase == 1 and G.captainPolicy == "gm" and Same(to, GM())) or false
+					and text == NoticeText(q.week, q.payer, q.phase == 1, p.latest.amount, p.latest.copper, p.known, guild)
+					and (q.phase == 0 and Same(to, q.payer) or q.phase == 1 and G.captainPolicy == "gm" and Same(to, GM(guild))) or false
 			end
 		end
 		return false
@@ -298,6 +324,16 @@ end
 function G.SummaryLines(lines)
 	if not G.Keeper() then return end
 	lines[#lines + 1] = { text = L.DUESGRACE_HINT, wrap = true }
+	local R = ns.DuesRosterCheckpoints
+	for _, guild in ipairs(R and R.Scopes() or {}) do
+		local batch = Batch(nil, guild)
+		lines[#lines + 1] = { header = true, text = L.DUESROSTER_FOREIGN:format(guild) }
+		local n = 0
+		for _, name in pairs(batch.members or {}) do
+			local p = G.Progress(name, batch); n = n + 1
+			if n <= shown and p.latest then lines[#lines + 1] = { indent = 1, text = ns.DisplayName(name), right = L.DUESGRACE_ROW:format(p.kept, p.known, p.unknown) } end
+		end
+	end
 	local members = Members()
 	if not members then return end
 	local batch = Batch(members)
