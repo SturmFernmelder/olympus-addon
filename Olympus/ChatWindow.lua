@@ -1302,8 +1302,8 @@ end
 function ChatWindow.SubtabEntries()
 	local out = { { kind = "global", label = L.CHATROOM_GLOBAL or "Olympus" } }
 	local R = ns.ChatRooms
-	local arena = { kind = "arena", label = ChatWindow.Localized("ARENA_CHAT_TAB", "Arena"), dropdown = true,
-		tip = ChatWindow.Localized("ARENA_CHAT_TAB_TIP", "Fight, event and matched-duel chats you opened or pinned.") }
+	local arena = { kind = "arena", label = ChatWindow.Localized("ARENA_CHAT_TAB", "Games"), dropdown = true,
+		tip = ChatWindow.Localized("ARENA_CHAT_TAB_TIP", "Arena and Bones chats, live games and your retained history.") }
 	local inserted = false
 	if type(R) == "table" and type(R.Tabs) == "function" then
 		for _, e in ipairs(R.Tabs()) do
@@ -1325,6 +1325,7 @@ end
 -- contracts. It discovers no events, participants or stakes of its own. Pinned rooms come first,
 -- then active and most recently used retained rooms; the list stays bounded to the menu's rows.
 function ChatWindow.ArenaOptions(includeEmpty)
+	if ChatWindow.SyncGameRooms then ChatWindow.SyncGameRooms() end
 	if ChatWindow.PruneDynamicRooms then ChatWindow.PruneDynamicRooms() end
 	local rooms = ChatWindow.DynamicRooms and ChatWindow.DynamicRooms() or {}
 	table.sort(rooms, function(a, b)
@@ -1340,14 +1341,22 @@ function ChatWindow.ArenaOptions(includeEmpty)
 	for i = 1, shown do
 		local room = rooms[i]
 		local title = room.spec and room.spec.title or room.id or "?"
-		if room.pinned then title = ChatWindow.Localized("ARENA_CHAT_MENU_PINNED", "Pinned: %s"):format(title)
-		elseif room.spec and room.spec.active then title = ChatWindow.Localized("ARENA_CHAT_MENU_ACTIVE", "Live: %s"):format(title) end
-		out[#out + 1] = { id = room.key, label = title, dynamic = true }
+		local bones = room.spec and room.spec.kind == "bones"
+		if not bones then title = "Arena — " .. title end
+		if room.pinned then title = ChatWindow.Localized("ARENA_CHAT_MENU_PINNED", "Pinned: %s"):format(title) end
+		if room.spec and room.spec.active then
+			title = "|cff33dd66•|r " .. ChatWindow.Localized("ARENA_CHAT_MENU_ACTIVE", "Live: %s"):format(title)
+		end
+		local note = room.spec and room.spec.active and ChatWindow.Localized("GAMES_CHAT_LIVE", "Live game")
+			or ChatWindow.Localized("GAMES_CHAT_HISTORY", "Retained game history")
+		if room.spec and room.spec.readOnly then note = note .. " — " .. ChatWindow.Localized("GAMES_CHAT_READ_ONLY", "Read only") end
+		out[#out + 1] = { id = room.key, label = title, dynamic = true, note = note,
+			gameKind = bones and "Bones" or "Arena", live = room.spec and room.spec.active == true }
 	end
 	if #rooms > cap then
-		out[#out + 1] = { label = ChatWindow.Localized("ARENA_CHAT_MENU_MORE", "More fights - open the Arena"), onClick = ChatWindow.OpenArenaFromChat }
+		out[#out + 1] = { label = ChatWindow.Localized("ARENA_CHAT_MENU_MORE", "More games - open the Arena"), onClick = ChatWindow.OpenArenaFromChat }
 	elseif #out == 0 and includeEmpty then
-		out[1] = { label = ChatWindow.Localized("ARENA_CHAT_MENU_EMPTY", "No fight chat open - open the Arena"), onClick = ChatWindow.OpenArenaFromChat }
+		out[1] = { label = ChatWindow.Localized("ARENA_CHAT_MENU_EMPTY", "No game chat open - open the Arena"), onClick = ChatWindow.OpenArenaFromChat }
 	end
 	return out
 end
@@ -2782,6 +2791,12 @@ end
 local function SelectRoom(key)
 	local r = Dynamic(key)
 	if not r then return false end
+	-- Listing a known live table does not open its transport. The player's actual choice does;
+	-- this also records the public audience locally before it can become retained history.
+	if r.spec and r.spec.kind == "bones" then
+		local A = ns.ArenaChat
+		if not A or not A.Open or not A.Open(r.id) then return false end
+	end
 	ChatWindow.SaveDraft()
 	tier = key
 	unread[key] = nil
@@ -3720,7 +3735,7 @@ local function RoomSpec(spec)
 	local id, key = spec.id, spec.key
 	if type(id) ~= "string" or id == "" or #id > 80 or id:find("[%s~|%c]") then return nil end
 	if type(key) ~= "string" or key ~= "arena:" .. id then return nil end
-	if spec.kind ~= "fight" and spec.kind ~= "event" and spec.kind ~= "match" then return nil end
+	if spec.kind ~= "fight" and spec.kind ~= "event" and spec.kind ~= "match" and spec.kind ~= "bones" then return nil end
 	if spec.audience ~= "duel" and spec.audience ~= "event" then return nil end
 	if spec.access ~= "members" and spec.access ~= "participants" then return nil end
 	if type(spec.title) ~= "string" or Trim(spec.title) == "" then return nil end
@@ -3845,6 +3860,28 @@ local function UpsertRoom(spec, pinned)
 	return r
 end
 
+-- The picker indexes only rooms the real Bones backend already admitted and saved locally. It
+-- never invents a table, opens the window, fetches spectators or bypasses transport permissions.
+function ChatWindow.SyncGameRooms()
+	local A = ns.ArenaChat
+	if not A or not A.GameRooms or not A.ChatRoom then return 0 end
+	local pins, count = SavedPins(false), 0
+	for _, room in ipairs(A.GameRooms()) do
+		local spec = RoomSpec(room)
+		if spec and RoomAlive(spec) and not RoomConflict(spec) then
+			UpsertRoom(spec, pins and pins[spec.key] == spec.id)
+			count = count + 1
+		end
+	end
+	-- Eviction at the backend's history cap also removes a stale picker entry, pinned or not.
+	local gone = {}
+	for key, r in pairs(dynamicRooms) do
+		if r.spec.kind == "bones" and not A.ChatRoom(r.id) then gone[#gone + 1] = key end
+	end
+	for _, key in ipairs(gone) do RemoveRoom(key, true) end
+	return count
+end
+
 -- The Arena deep-link's host. Opening transport first is deliberate: ArenaChat knows whether the
 -- event exists and owns all routing/permission checks. The main Chat page only adds/selects one
 -- stable local choice; no line is copied into Channels history and no global pin is touched.
@@ -3908,7 +3945,8 @@ function ChatWindow.RestoreDynamicRooms()
 	table.sort(pending, function(a, b) return a[1] < b[1] end)
 	local restored = 0
 	for _, one in ipairs(pending) do
-		local provider = one[2]:sub(1, 1) == "M" and ns.ArenaMatch or A
+		local prefix = one[2]:sub(1, 1)
+		local provider = prefix == "M" and ns.ArenaMatch or (prefix == "K" and ns.ArenaChat or A)
 		local get = provider and provider.ChatRoom
 		local ok, spec = false, nil
 		if type(get) == "function" then ok, spec = pcall(get, one[2]) end

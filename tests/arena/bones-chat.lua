@@ -224,7 +224,7 @@ test("Bones chat core: arbitrary canonical-host EM subjects are capped without e
 	eq(r.muted[("GuestAB-" .. a.realm):lower()], nil, "authorized lift still works at cap")
 end)
 
-test("Bones chat core: actual Concede sends the final existing state to its watcher before stopping relay", function()
+test("Bones chat core: actual Concede sends final state and retains the observed public history read only", function()
 	local w, a, b, s, id, rooms = Live(false)
 	eq(w:As(s, s.ns.FarkleTable.ChatSpec, id).live, true)
 	assert(w:As(a, a.ns.FarkleTable.Concede, id)); w:Run(3)
@@ -232,7 +232,8 @@ test("Bones chat core: actual Concede sends the final existing state to its watc
 	eq(Count(w, "KS") >= 1, true, "final existing watcher state")
 	for _, c in ipairs({ a, b, s }) do
 		eq(w:As(c, c.ns.ArenaChat.TableRooms, id), nil, c.name)
-		eq(w:As(c, c.ns.ArenaChat.MayRead, rooms.everyone), false)
+		eq(w:As(c, c.ns.ArenaChat.MayRead, rooms.everyone), true, "latest contract preserves observed history")
+		eq(w:As(c, c.ns.ArenaChat.MaySend, rooms.everyone), false, "ended public audience cannot write")
 		eq(#w:As(c, c.ns.ArenaChat.Lines, rooms.everyone), 0)
 	end
 end)
@@ -259,7 +260,8 @@ end)
 test("Bones chat core: real delayed Comm queue cancels revoked rules, ended table and spectator audience before native send", function()
 	for _, revoke in ipairs({ "rules", "end", "spectators", "member", "audience", "lane" }) do
 		local w, a, _, _, id, rooms = Live()
-		local room = revoke == "spectators" and rooms.everyone or rooms.players
+		-- Ending revokes public writing, not the two players' private conversation.
+		local room = (revoke == "spectators" or revoke == "end") and rooms.everyone or rooms.players
 		eq(w:As(a, a.ns.ArenaChat.Send, room, "queued then revoked"), true)
 		eq(Count(w, "EC"), 0, "not yet native")
 		if revoke == "rules" then a.Arena.SetRules(false)
@@ -310,4 +312,105 @@ test("Bones chat core: real Comm queue rejection does not claim a local delivere
 	end)
 	eq(w:As(a, a.ns.ArenaChat.Send, rooms.everyone, "not admitted"), false)
 	eq(#w:As(a, a.ns.ArenaChat.Lines, rooms.everyone), 0)
+end)
+
+test("Bones chat history: two real players continue after Concede and a spectator retains only observed public lines", function()
+	local w, a, b, s, id, rooms = Live()
+	assert(w:As(a, a.ns.ArenaChat.Send, rooms.players, "private before end")); Drain(w, a)
+	assert(w:As(s, s.ns.ArenaChat.Send, rooms.everyone, "public before end")); Drain(w, s)
+	assert(w:As(a, a.ns.FarkleTable.Concede, id)); w:Run(3); Drain(w, a, b, s)
+	eq(#w:As(s, s.ns.ArenaChat.Lines, rooms.everyone), 1)
+	eq(w:As(s, s.ns.ArenaChat.MaySend, rooms.everyone), false)
+	eq(w:As(s, s.ns.ArenaChat.Open, rooms.players), nil)
+	assert(w:As(a, a.ns.ArenaChat.Send, rooms.players, "private after end")); Drain(w, a)
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 2, "actual logged delivery to the original peer")
+	eq(s.ns.ArenaChat.Room(rooms.players), nil, "no private bytes for crowd")
+	local late = w:Player(N.bettor2)
+	eq(w:As(late, late.ns.ArenaChat.Open, rooms.everyone), nil, "unknown historical table cannot establish a new audience")
+	w.clock = w.clock + 3600
+	for _, c in ipairs({ a, b, s }) do w:As(c, c.ns.ArenaChat.Prune) end
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 2, "bounded history outlives legacy 30 minute event retention")
+	eq(#w:As(s, s.ns.ArenaChat.Lines, rooms.everyone), 1)
+end)
+
+test("Bones chat history: actual logout reload restores private peer routing and public read only without a live table", function()
+	local w, a, b, s, id, rooms = Live()
+	assert(w:As(a, a.ns.ArenaChat.Send, rooms.players, "saved private")); Drain(w, a)
+	assert(w:As(s, s.ns.ArenaChat.Send, rooms.everyone, "saved public")); Drain(w, s)
+	assert(w:As(a, a.ns.FarkleTable.Concede, id)); w:Run(3); Drain(w, a, b, s)
+	for _, c in ipairs({ a, b, s }) do w:Logout(c); w:Login(c); c.Arena.SetRules(true) end
+	for _, c in ipairs({ a, b, s }) do Roster(w, c); Native(w, c) end
+	eq(w:As(a, a.ns.FarkleTable.Get, id), nil, "real table is session only")
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 1)
+	eq(#w:As(s, s.ns.ArenaChat.Lines, rooms.everyone), 1)
+	eq(w:As(s, s.ns.ArenaChat.MaySend, rooms.everyone), false)
+	assert(w:As(a, a.ns.ArenaChat.Send, rooms.players, "saved peers still talk")); Drain(w, a)
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 2)
+	assert(w:As(s, s.ns.ArenaChat.Open, rooms.everyone))
+	w:As(a, a.globals.C_ChatInfo.SendAddonMessageLogged, a.ns.PREFIX,
+		"EC~L1~" .. rooms.everyone .. "~913~MA~" .. a.guild .. "~late public injection", "CHANNEL", 7)
+	eq(#w:As(s, s.ns.ArenaChat.Lines, rooms.everyone), 1, "archived public bytes cannot be extended by peers")
+	w:As(s, s.globals.C_ChatInfo.SendAddonMessageLogged, s.ns.PREFIX,
+		"EC~L1~" .. rooms.players .. "~914~MA~" .. s.guild .. "~late private injection", "WHISPER", b.short)
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 2, "server-stamped nonparticipant cannot use saved audience")
+	-- The same database on a different character/faction does not restore someone else's rooms.
+	a.ns.ArenaChat.Reset(); a.ns.me = s.name
+	eq(w:As(a, a.ns.ArenaChat.Restore), 0)
+	a.ns.me, a.ns.faction = a.name, "Horde"
+	eq(w:As(a, a.ns.ArenaChat.Restore), 0)
+end)
+
+test("Bones chat history: pending and failed native sends never become delivered history at reload", function()
+	local w, a, _, _, _, rooms = Live()
+	assert(w:As(a, a.ns.ArenaChat.Send, rooms.players, "still queued"))
+	local saved = a.rdb.bonesChats.Alliance[a.name].rooms[rooms.players]
+	eq(#saved.lines, 0, "not a delivery acknowledgement")
+	a.Arena.SetRules(false); Drain(w, a)
+	eq(#a.rdb.bonesChats.Alliance[a.name].rooms[rooms.players].lines, 0)
+	w:Logout(a); w:Login(a)
+	eq(#w:As(a, a.ns.ArenaChat.Lines, rooms.players), 0)
+end)
+
+test("Bones chat history: restore bounds corrupt saved data and keeps deletions hidden without granting private spectator access", function()
+	local w, a, _, s, _, rooms = Live(false)
+	assert(w:As(a, a.ns.ArenaChat.Open, rooms.players))
+	local data = a.rdb.bonesChats.Alliance[a.name]
+	data.rooms[rooms.players].lines = {}
+	for i = 1, 130 do data.rooms[rooms.players].lines[i] = { t = w.clock, sender = a.name, guild = a.guild, text = "line " .. i, id = i, del = i == 130 } end
+	for i = 1, 15 do
+		local id = "Kbounded" .. i
+		data.rooms[id] = { context = { tableId = id, everyone = false, host = a.name, guest = N.fighterB, mode = "L" }, lines = {}, used = w.clock + i }
+	end
+	data.rooms["Kunknown:players"] = { context = {}, lines = {} }
+	-- Keep the actual room newest, so the line cap and deleted line are both exercised.
+	data.rooms[rooms.players].used = w.clock + 100
+	a.ns.ArenaChat.Reset(); eq(w:As(a, a.ns.ArenaChat.Restore), 10)
+	eq(#a.ns.ArenaChat.Rooms(), 10)
+	eq(#a.ns.ArenaChat.Room(rooms.players).lines, 100)
+	eq(#w:As(a, a.ns.ArenaChat.Lines, rooms.players), 99)
+	local spectatorData = s.rdb.bonesChats.Alliance[s.name]
+	spectatorData.rooms[rooms.players] = data.rooms[rooms.players]
+	s.ns.ArenaChat.Reset(); w:As(s, s.ns.ArenaChat.Restore)
+	eq(s.ns.ArenaChat.Room(rooms.players), nil, "copied private metadata is not an audience grant")
+end)
+
+test("Bones chat history: Games picker indexes actual live Bones and retained read only rooms with kind and live marker", function()
+	local w, a, _, s, id, rooms = Live(false)
+	s.ns.ArenaChat.Reset()
+	w:As(s, function() assert(loadfile(H.ADDON_DIR .. "ChatWindow.lua"))("Olympus", s.ns) end)
+	local cw = s.ns.ChatWindow
+	local options = w:As(s, cw.ArenaOptions, false)
+	eq(#options, 1); eq(options[1].gameKind, "Bones"); eq(options[1].live, true)
+	eq(options[1].label:find("|cff33dd66", 1, true) ~= nil, true)
+	eq(s.ns.ArenaChat.Room(rooms.everyone), nil, "listing a real live game neither opens nor saves its audience")
+	assert(w:As(s, cw.SelectDynamicRoom, options[1].id))
+	eq(s.ns.ArenaChat.Room(rooms.everyone).open, true, "choosing Games establishes the actual readable room")
+	local games
+	for _, tab in ipairs(w:As(s, cw.SubtabEntries)) do if tab.kind == "arena" then games = tab end end
+	eq(games.label, "Games", "Games retains its stable internal destination after Guild")
+	assert(w:As(a, a.ns.FarkleTable.Concede, id)); w:Run(3)
+	options = w:As(s, cw.ArenaOptions, false)
+	eq(options[1].live, false); eq(options[1].note:find("Read only", 1, true) ~= nil, true)
+	eq(cw.DynamicRoom("arena:" .. rooms.everyone).spec.kind, "bones")
+	eq(w:As(s, s.ns.ArenaChat.Open, "Kpractice:all"), nil, "no fabricated or innkeeper peer chat")
 end)

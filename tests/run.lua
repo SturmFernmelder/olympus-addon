@@ -54210,7 +54210,7 @@ do
 				local arena = assert(Subtab("arena"), "the stable Arena subtab")
 				arena:Click()
 				assert(f.subMenu:IsShown(), "an empty Arena still explains where rooms come from")
-				eq(f.subMenu.rows[1].text:GetText(), "No fight chat open - open the Arena", "an updated ChatWindow has safe English fallbacks before a restart loads its new locale keys")
+				eq(f.subMenu.rows[1].text:GetText(), "No game chat open - open the Arena", "Games has safe English fallbacks before a restart loads its new locale keys")
 				f.subMenu.rows[1]:Click(); eq(pageOpens, 1)
 
 				local function Room(id, title, active)
