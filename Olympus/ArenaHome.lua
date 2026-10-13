@@ -1930,8 +1930,10 @@ function ArenaHome.MenuLines(target, menu)
 		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
 		n = n + 1
 	end
-	menu.Button(L.ARENA_MENU_PROFILE, function() ArenaHome.Open("profile", name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
-	n = n + 1
+	if not target.profileAdded then
+		menu.Button(L.ARENA_MENU_PROFILE, function() ns.PlayerMenu.OpenProfile(name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
+		n = n + 1
+	end
 	return n
 end
 -- The live table a player sits at that this client may watch (his table lets spectators in: it
