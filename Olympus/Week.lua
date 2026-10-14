@@ -1051,9 +1051,6 @@ function Week.SheetLines(lines, e)
 			end
 		end
 	end
-	-- An event's organizer-owned bracket and private arithmetic live beside that event's
-	-- signup sheet. EventNotebook loads after Week so older clients simply omit these rows.
-	if ns.EventNotebook and ns.EventNotebook.Lines then ns.EventNotebook.Lines(lines, e) end
 end
 
 -- The sheets heard, as this client holds them (tests).
