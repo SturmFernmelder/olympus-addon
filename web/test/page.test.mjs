@@ -7,14 +7,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { CONFIG } from '../public/config.js';
-import { createBackend, isConfigured, proofRequest, forgetRequest, authorizeUrl, redirectUri, newState, readSignIn, hasSignIn, DEMO_STATES, DEMO_DATA, TOKEN_LIFE_MAX } from '../public/backend.js';
+import { createBackend, isConfigured, isIdentityConfigured, proofRequest, forgetRequest, identityRequest, authorizeUrl, redirectUri, newState, readSignIn, hasSignIn, DEMO_STATES, DEMO_DATA, TOKEN_LIFE_MAX } from '../public/backend.js';
 import { strings, pickLang, fill } from '../public/i18n.js';
 import { checkBundle } from '../public/core.js';
 import { PROOF_REASONS } from '../worker/link-core.mjs';
 import { REPO, vectors } from './helpers.mjs';
 
 const PAGE = 'https://dnl-gentile.github.io/olympus-addon/';
-const READY = { ...CONFIG, PROOF_URL: 'https://bot.example.workers.dev/proof', DISCORD_CLIENT_ID: '300000000000000123', SITE_TOKEN: '' };
+const READY = { ...CONFIG, PROOF_URL: 'https://bot.example.workers.dev/proof', IDENTITY_URL: 'https://bot.example.workers.dev/api/link/identity', DISCORD_CLIENT_ID: '300000000000000123', SITE_TOKEN: '' };
 const TOKEN = 'dGVzdC1hY2Nlc3MtdG9rZW4tZm9yLXRoZS1wYWdl'; // a made-up access token
 const STATE = '0123456789abcdef0123456789abcdef';
 
@@ -29,7 +29,7 @@ function stubFetch(answer) {
 }
 
 test('config.js: the page\'s address is the addon\'s, and the bot\'s settings are placeholders or real ones', () => {
-	assert.deepEqual(Object.keys(CONFIG).sort(), ['DISCORD_CLIENT_ID', 'PAGE_URL', 'PROOF_URL', 'SITE_TOKEN', 'VERIFY_COMMAND']);
+	assert.deepEqual(Object.keys(CONFIG).sort(), ['DISCORD_CLIENT_ID', 'IDENTITY_URL', 'PAGE_URL', 'PROOF_URL', 'SITE_TOKEN', 'VERIFY_COMMAND']);
 	assert.equal(CONFIG.PAGE_URL, PAGE);
 	// The QR code and the copy box open the same address (Olympus/Link.lua), with the link after #.
 	const lua = readFileSync(join(REPO, 'Olympus', 'Link.lua'), 'utf8');
@@ -41,6 +41,7 @@ test('config.js: the page\'s address is the addon\'s, and the bot\'s settings ar
 	const placeholders = /^PASTE-/.test(CONFIG.PROOF_URL) && /^PASTE-/.test(CONFIG.DISCORD_CLIENT_ID);
 	assert.ok(placeholders || isConfigured(CONFIG), 'PROOF_URL (https) and DISCORD_CLIENT_ID (digits) together');
 	assert.equal(isConfigured(CONFIG), !placeholders);
+	assert.equal(isIdentityConfigured(CONFIG), !/^PASTE-/.test(CONFIG.IDENTITY_URL));
 });
 
 test('index.html: the Content-Security-Policy lets the page reach the bot\'s /proof and nothing else', () => {
@@ -141,6 +142,20 @@ test('"Delete my link": the same request to the same address, with {"forget": tr
 	}
 });
 
+test('identity publication is a separate explicit POST and stays hidden until its endpoint is configured', async () => {
+	assert.equal(isIdentityConfigured(READY), true);
+	assert.equal(isIdentityConfigured({ ...READY, IDENTITY_URL: 'PASTE-THE-IDENTITY-URL-HERE' }), false);
+	const request = identityRequest(READY, TOKEN);
+	assert.equal(request.url, READY.IDENTITY_URL);
+	assert.deepEqual(JSON.parse(request.init.body), { publish: true, discordToken: TOKEN });
+	const answer = { status: 'published', tokens: [{ character: 'Some Player-Realm', token: 'OLI1~x', command: '/oly discord identity OLI1~x' }] };
+	const s = stubFetch({ body: answer });
+	const backend = createBackend({ config: READY, fetchImpl: s.fetchImpl });
+	assert.equal(backend.identityConfigured, true);
+	assert.deepEqual(await backend.publishIdentity(TOKEN), { characters: [], ...answer });
+	assert.deepEqual(s.calls, [request]);
+});
+
 test('the sign-in: Discord\'s own page, the implicit grant, identify only, back to the page\'s folder with this tab\'s state', () => {
 	const u = new URL(authorizeUrl(READY, { state: STATE, redirect: PAGE }));
 	assert.equal(`${u.origin}${u.pathname}`, 'https://discord.com/oauth2/authorize');
@@ -238,7 +253,7 @@ test('every answer the bot\'s /proof can give has its words, in both languages',
 		assert.ok(strings.pt.errors[r], `pt: ${r}`);
 	}
 	// And every refusal or error the core and the reference Worker write is one of them, or a tool's.
-	const tools = new Set(['auth', 'method', 'username', 'unknown-key', 'key-id-used', 'public-key-used', 'owner-has-key', 'character-not-linked', 'revoked', 'replaced', 'too-early']);
+	const tools = new Set(['auth', 'method', 'username', 'unknown-key', 'key-id-used', 'public-key-used', 'owner-has-key', 'character-not-linked', 'not-linked', 'published', 'revoked', 'replaced', 'too-early']);
 	const src = ['link-core.mjs', 'link-worker.js'].map((f) => readFileSync(join(REPO, 'web', 'worker', f), 'utf8')).join('\n');
 	const reasons = new Set([...src.matchAll(/(?:reject|failure|fail)\('([a-z-]+)'/g), ...src.matchAll(/reason: '([a-z-]+)'/g)].map((m) => m[1]));
 	for (const r of ['tag', 'guild-unverified', 'not-enough', 'discord', 'server', 'login', 'origin', 'site', 'limit']) assert.ok(reasons.has(r), r);

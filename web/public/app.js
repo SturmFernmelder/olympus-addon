@@ -87,6 +87,7 @@ const state = {
 	copied: null,
 	demoPreview: false,
 	forget: null, // "Delete my link": { phase: 'ask' | 'sending' | 'done', result }
+	identity: null, // explicit identity publication: { phase: 'sending' | 'done', result }
 };
 
 const scanner = new Scanner({
@@ -917,7 +918,7 @@ function errorView() {
 function viewDone() {
 	const r = state.result || {};
 	const chars = (r.characters || []).map((c) => splitCharacter(c));
-	return [
+	const out = [
 		h('div', { class: 'done-mark', 'aria-hidden': 'true' }, icon('check', 'done-check')),
 		h('h2', { class: 'card-title center', tabindex: '-1', text: T.doneTitle }),
 		h('p', { class: 'lead center', text: r.reason === 'already' ? T.doneAlready : state.username ? fill(T.doneText, { user: state.username }) : T.doneTextAnon }),
@@ -926,6 +927,41 @@ function viewDone() {
 			: null,
 		h('p', { class: 'fine center', text: T.doneNote }),
 	];
+	if (backend.identityConfigured) out.push(identityView());
+	return out;
+}
+
+async function publishIdentity() {
+	if (!state.auth || state.identity?.phase === 'sending') return;
+	state.identity = { phase: 'sending', result: null };
+	render({ focus: 'identity' });
+	let result;
+	try {
+		result = await backend.publishIdentity(state.auth.token);
+	} catch {
+		result = { status: 'error', reason: 'server' };
+	}
+	state.identity = { phase: result.status === 'published' ? 'done' : 'error', result };
+	render({ focus: 'identity' });
+}
+
+function identityView() {
+	const item = state.identity;
+	if (!item) {
+		return h('div', { class: 'linked identity-optin' }, h('p', { class: 'field-label center', text: T.identityTitle }), h('p', { class: 'fine center', text: T.identityText }),
+			h('div', { class: 'actions actions-center' }, button(T.identityButton, { kind: 'ghost', onclick: publishIdentity, 'data-key': 'identity' })));
+	}
+	if (item.phase === 'sending') return h('p', { class: 'sending', role: 'status', 'data-key': 'identity', tabindex: '-1' }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('span', { text: T.identitySending }));
+	if (item.phase === 'error') {
+		return h('div', { class: 'result result-error', role: 'alert', 'data-key': 'identity', tabindex: '-1' }, h('p', { class: 'result-title', text: T.identityFailed }),
+			h('p', { text: item.result?.reason === 'not-linked' ? T.identityNotLinked : T.identityServer }),
+			h('div', { class: 'actions actions-center' }, button(T.retry, { kind: 'ghost', onclick: publishIdentity })));
+	}
+	const tokens = Array.isArray(item.result?.tokens) ? item.result.tokens : [];
+	return h('div', { class: 'linked identity-optin', 'data-key': 'identity', tabindex: '-1' }, h('p', { class: 'field-label center', text: T.identityReady }),
+		h('p', { class: 'fine center', text: T.identityReadyText }), h('ul', { class: 'identity-commands' }, tokens.map((entry, i) =>
+			h('li', {}, h('strong', { text: entry.character }), h('code', { text: entry.command }), button(state.copied === `identity-${i}` ? T.copied : T.identityCopy,
+				{ kind: 'ghost btn-sm', onclick: () => copyText(entry.command, `identity-${i}`), 'data-key': `identity-${i}` }, state.copied === `identity-${i}` ? 'check' : 'copy')))));
 }
 
 function viewForget() {

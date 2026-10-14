@@ -1,0 +1,56 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: olympus-link
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+    spec:
+      containerConcurrency: 1
+      serviceAccountName: olympus-link@PROJECT_ID.iam.gserviceaccount.com
+      timeoutSeconds: 30
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/olympus/olympus-link:TAG
+          env:
+            - name: PUBLIC_ORIGIN
+              value: https://olympus-link-PROJECT_NUMBER.REGION.run.app
+            - name: LINK_ORIGIN
+              value: https://dnl-gentile.github.io
+            - name: FIRESTORE_PREFIX
+              value: olympus_link
+            - name: LINK_BACKEND_PUBLIC
+              value: PASTE_BACKEND_PUBLIC_KEY_HEX
+            - name: DISCORD_PUBLIC_KEY
+              value: PASTE_DISCORD_APPLICATION_PUBLIC_KEY_HEX
+            - name: DISCORD_CLIENT_ID
+              value: PASTE_DISCORD_CLIENT_ID
+            - name: GUILD_ID
+              value: PASTE_OLYMPUS_DISCORD_GUILD_ID
+            - name: ROLE_ID
+              value: PASTE_LINKED_ROLE_ID
+            - name: LINK_BACKEND_SEED
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: olympus-link-backend-seed
+            - name: LINK_IDENTITY_SECRET
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: olympus-link-identity-secret
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: olympus-link-discord-token
+            - name: LINK_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: olympus-link-admin-token
+

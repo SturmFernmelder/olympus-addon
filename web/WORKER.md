@@ -1079,6 +1079,17 @@ CREATE TABLE IF NOT EXISTS members (
 );
 CREATE INDEX IF NOT EXISTS members_by_user ON members (discord_id);
 
+-- A consenting Discord account's opaque identity set. The stable subject is an HMAC of the
+-- Discord id with a separate Secret Manager key; only the signed OLI1 tokens leave the service.
+-- A publication advances the revision and emits one compact token per currently linked character.
+CREATE TABLE IF NOT EXISTS identity_snapshots (
+  discord_id TEXT PRIMARY KEY,
+  subject    TEXT NOT NULL UNIQUE                 -- 32 lowercase hex, never a Discord id
+             CHECK (length(subject) = 32 AND subject NOT GLOB '*[^0-9a-f]*'),
+  revision   INTEGER NOT NULL CHECK (revision > 0),
+  issued     INTEGER NOT NULL
+);
+
 -- Every bundle received, from the page ('site') or the watcher tool ('watcher'): the audit
 -- trail, and the page's rate limit.
 CREATE TABLE IF NOT EXISTS inbox_uploads (
@@ -1127,6 +1138,7 @@ CREATE TABLE IF NOT EXISTS limits (
 //   LINK_BACKEND_PUBLIC  its public key, 64 hex: the addon holds the same one (ns.LINK_BACKEND_KEYS)
 //   LINK_BACKEND_PREVIOUS  optional, while you rotate the backend key: the old public key, 64 hex. The
 //                        certificates it signed still count until their confirmers type the renewed ones
+//   LINK_IDENTITY_SECRET separate 32+ character secret: HMACs Discord ids into opaque OLI1 subjects
 //   LINK_CA_PUBLIC       the council authority's public key, 64 hex (two, comma-separated, while it
 //                        changes): the addon author's client certifies High Councillors' keys with it
 //   LINK_COUNCIL_CHARACTERS  the High Councillors' characters you accept from the council authority
@@ -1178,6 +1190,7 @@ export const LINK = {
 	CERT_DAYS_MAX: 3650, // ...up to this
 	CA_DAYS: 365, // the life of a council authority's certificate (the addon's Link.CA_DAYS): one
 	// ending at exp was signed at exp - this, which is how a character's revocation finds the older ones
+	IDENTITY_DAYS: 7, // consented identity assertions are relayed in game but expire quickly
 };
 
 // Every reason POST /proof can answer (web/public/i18n.js has words for each, in both languages).
@@ -1857,6 +1870,97 @@ export async function charactersOf(env, discordId) {
 	return rows.map((r) => r.character);
 }
 
+// ---------------------------------------------------------------------------
+// Consented one-human identity snapshots. A publication emits one short OLI1 line per linked
+// character so every `/oly discord identity <token>` command stays within WoW's chat limit. The
+// lines share one opaque, stable subject and revision; neither a Discord id nor username leaves
+// the service. Addons accept a pair only after both exact full names have their own unexpired,
+// backend-signed line with the same subject.
+//
+// OLI1~<subject32hex>~<revision>~<issued>~<expires>~1~<Name-Realm>~<signature>
+
+const IDENTITY_SUBJECT_RE = /^[0-9a-f]{32}$/;
+const IDENTITY_TOKEN_RE = /^OLI1~([0-9a-f]{32})~([1-9][0-9]{0,11})~([1-9][0-9]{0,11})~([1-9][0-9]{0,11})~(1)~([^~]+)~([A-Za-z0-9_-]{86})$/s;
+let identityHmac = null;
+
+export function parseIdentitySnapshot(text) {
+	const source = String(text || '').trim();
+	const m = IDENTITY_TOKEN_RE.exec(source);
+	if (!m || enc.encode(source).length > 255) return null;
+	const [, subject, revision, issued, expires, consent, character, sig] = m;
+	if (!IDENTITY_SUBJECT_RE.test(subject) || !validCharacter(character) || b64urlEncode(b64urlDecode(sig)) !== sig) return null;
+	return {
+		version: 1,
+		subject,
+		revision: Number(revision),
+		issued: Number(issued),
+		expires: Number(expires),
+		bothConsented: consent === '1',
+		character,
+		sig,
+		signed: source.slice(0, source.length - sig.length - 1),
+		text: source,
+	};
+}
+
+export async function verifyIdentitySnapshot(env, text, { t = now() } = {}) {
+	const proof = typeof text === 'string' ? parseIdentitySnapshot(text) : text;
+	if (
+		!proof ||
+		proof.version !== 1 ||
+		proof.bothConsented !== true ||
+		proof.issued > t + LINK.CLOCK_SKEW ||
+		proof.expires <= t ||
+		proof.expires <= proof.issued ||
+		proof.expires - proof.issued > LINK.IDENTITY_DAYS * 86400
+	) return null;
+	for (const publicHex of backendKeys(env)) {
+		if (await ed25519Verify(publicHex, b64urlDecode(proof.sig), enc.encode(proof.signed))) return proof;
+	}
+	return null;
+}
+
+async function identitySubject(env, discordId) {
+	const secret = String((env && env.LINK_IDENTITY_SECRET) || '');
+	if (secret.length < 32) throw new Error('Olympus Link: LINK_IDENTITY_SECRET must be at least 32 characters');
+	if (!identityHmac || identityHmac.secret !== secret) {
+		identityHmac = { secret, key: await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']) };
+	}
+	const digest = new Uint8Array(await crypto.subtle.sign('HMAC', identityHmac.key, enc.encode(`olympus-link-identity~${discordId}`)));
+	return bytesToHex(digest).slice(0, 32);
+}
+
+export async function issueIdentitySnapshots(env, discordId, { consent = false, t = now() } = {}) {
+	const id = String(discordId || '');
+	if (!DISCORD_ID_RE.test(id)) return failure('login', 'Sign in with Discord first.');
+	if (consent !== true) return failure('format', 'Explicit publication consent is required.');
+	const characters = (await charactersOf(env, id)).sort((a, b) => a.localeCompare(b, 'en'));
+	if (characters.length < 1) return failure('not-linked', 'Link at least one character before publishing an identity snapshot.');
+	if (characters.length > 32 || characters.some((name) => !validCharacter(name))) return failure('server', 'The linked character set cannot be published safely.');
+	const DB = database(env);
+	const subject = await identitySubject(env, id);
+	const previous = await DB.prepare('SELECT subject FROM identity_snapshots WHERE discord_id = ?').bind(id).first();
+	if (previous && previous.subject !== subject) throw new Error('LINK_IDENTITY_SECRET changed without an identity migration');
+	const row = await DB.prepare(
+		'INSERT INTO identity_snapshots (discord_id, subject, revision, issued) VALUES (?, ?, 1, ?) ' +
+			'ON CONFLICT(discord_id) DO UPDATE SET revision = identity_snapshots.revision + 1, issued = excluded.issued RETURNING subject, revision',
+	)
+		.bind(id, subject, t)
+		.first();
+	const revision = Number(row && row.revision);
+	if (!Number.isSafeInteger(revision) || revision < 1 || !row || row.subject !== subject) throw new Error('Could not allocate an identity revision');
+	const expires = t + LINK.IDENTITY_DAYS * 86400;
+	const tokens = [];
+	for (const character of characters) {
+		const signed = `OLI1~${subject}~${revision}~${t}~${expires}~1~${character}`;
+		const token = `${signed}~${await backendSign(env, signed)}`;
+		const command = `/oly discord identity ${token}`;
+		if (enc.encode(command).length > 255) throw new Error(`Identity command is too long for ${character}`);
+		tokens.push({ character, token, command });
+	}
+	return { ok: true, status: 'published', reason: 'published', revision, issued: t, expires, characters, tokens };
+}
+
 // The page's limits before Discord is asked who a sign-in is: IP_PER_MINUTE per IP address (on
 // Cloudflare, the CF-Connecting-IP header; an IPv6 address counts by its /64, limitAddress below),
 // SIGNIN_PER_HOUR per sign-in, PAGE_PER_MINUTE for the whole page, in that order (an address over
@@ -2078,6 +2182,36 @@ export async function handleProof(request, env, { promote, demote, fetchImpl } =
 		return reply(pageAnswer(result));
 	} catch (err) {
 		console.error('olympus-link: /proof', err && err.stack ? err.stack : err);
+		return reply(failure('server', 'Something went wrong on our side.'));
+	}
+}
+
+// POST /api/link/identity from the same static page. It is deliberately a separate, explicit
+// click after linking: merely signing in, linking a character, or loading the page publishes
+// nothing. The response contains one pasteable signed command per linked character.
+export async function handleIdentity(request, env, { fetchImpl } = {}) {
+	const cors = corsHeaders(request, env);
+	const reply = (answer) => respond(answer, cors || { Vary: 'Origin' });
+	try {
+		if (request.method === 'OPTIONS') {
+			return new Response(null, { status: cors ? 204 : 403, headers: cors ? { ...cors, 'Access-Control-Max-Age': '600' } : { Vary: 'Origin' } });
+		}
+		if (request.method !== 'POST') return reply(failure('method', 'POST only.'));
+		if (!cors) return reply(failure('origin', 'Wrong origin.'));
+		if (env.LINK_SITE_TOKEN && !(await sameSecret(bearer(request), env.LINK_SITE_TOKEN))) return reply(failure('site', 'This page is not allowed to publish identity snapshots right now.'));
+		const body = await readJson(request, 4 * 1024);
+		if (!body || body.publish !== true || typeof body.discordToken !== 'string') {
+			return reply(failure('format', 'Send {"publish": true, "discordToken": "<the Discord sign-in>"}.'));
+		}
+		const t = now();
+		if (await tooManyRequests(env, { ip: request.headers.get('CF-Connecting-IP'), discordToken: body.discordToken }, t)) {
+			return reply(failure('limit', 'Too many tries: wait a while and send it again.'));
+		}
+		const who = await discordUser(body.discordToken, { clientId: env.DISCORD_CLIENT_ID, fetchImpl });
+		if (!who.ok) return reply(who);
+		return reply(await issueIdentitySnapshots(env, who.user.id, { consent: true, t }));
+	} catch (err) {
+		console.error('olympus-link: /identity', err && err.stack ? err.stack : err);
 		return reply(failure('server', 'Something went wrong on our side.'));
 	}
 }
@@ -2453,6 +2587,7 @@ export async function forgetUser(env, discordId, t = now()) {
 		DB.prepare(`DELETE FROM council_keys WHERE character IN (${mine})`).bind(id),
 		DB.prepare('INSERT OR IGNORE INTO revoked_keys (key_id, revoked_at) SELECT key_id, COALESCE(revoked_at, ?) FROM keys WHERE owner_discord_id = ?').bind(t, id),
 		DB.prepare('DELETE FROM keys WHERE owner_discord_id = ?').bind(id),
+		DB.prepare('DELETE FROM identity_snapshots WHERE discord_id = ?').bind(id),
 		DB.prepare('DELETE FROM members WHERE discord_id = ?').bind(id),
 		DB.prepare('DELETE FROM codes WHERE discord_id = ?').bind(id),
 	]);
@@ -2623,6 +2758,7 @@ import {
 	codeError,
 	failure,
 	handleInbox,
+	handleIdentity,
 	handleKeys,
 	handleProof,
 	issueCode,
@@ -2665,6 +2801,9 @@ export {
 	councilCertificate,
 	manageKeys,
 	forgetUser,
+	issueIdentitySnapshots,
+	parseIdentitySnapshot,
+	verifyIdentitySnapshot,
 	pruneLink,
 	ed25519Verify,
 } from './link-core.mjs';
@@ -2706,6 +2845,9 @@ export async function handleLink(request, env, ctx, { getUser = sessionUser } = 
 			case 'OPTIONS /api/link/proof':
 			case 'POST /api/link/proof':
 				return await handleProof(request, env, roles);
+			case 'OPTIONS /api/link/identity':
+			case 'POST /api/link/identity':
+				return await handleIdentity(request, env);
 			case 'POST /api/link/inbox':
 				return await handleInbox(request, env, roles);
 			case 'POST /api/link/keys':

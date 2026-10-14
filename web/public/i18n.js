@@ -143,6 +143,16 @@ export const strings = {
 		doneAlready: 'This link had already reached the bot: nothing more to do.',
 		doneCharacters: 'Linked characters',
 		doneNote: 'It can take a minute to show in Discord. You can close this page.',
+		identityTitle: 'Let Olympus recognize your linked characters as one person',
+		identityText: 'Optional. This publishes only signed character names and an opaque id to the addon for governance counts. It never publishes your Discord id or username, and expires after 7 days.',
+		identityButton: 'Publish my linked-character identity',
+		identitySending: 'Signing your identity snapshot…',
+		identityReady: 'Signed identity commands',
+		identityReadyText: 'Paste each line into the WoW chat. Each exact character name is verified, then relayed once in game.',
+		identityCopy: 'Copy command',
+		identityFailed: 'Identity not published',
+		identityNotLinked: 'Link at least one character first.',
+		identityServer: 'The service could not sign the identity snapshot. Nothing was published; try again later.',
 
 		errorTitle: 'Not linked yet',
 		errors: {
@@ -318,6 +328,16 @@ export const strings = {
 		doneAlready: 'Este link já tinha chegado ao bot: não falta nada.',
 		doneCharacters: 'Personagens vinculados',
 		doneNote: 'Pode levar um minuto para aparecer no Discord. Pode fechar esta página.',
+		identityTitle: 'Deixe o Olympus reconhecer seus personagens vinculados como uma pessoa',
+		identityText: 'Opcional. Isso publica no addon apenas os nomes assinados dos personagens e um identificador opaco para contagens de governança. Seu id e seu usuário do Discord nunca são publicados, e a prova expira em 7 dias.',
+		identityButton: 'Publicar minha identidade de personagens',
+		identitySending: 'Assinando a sua identidade…',
+		identityReady: 'Comandos de identidade assinados',
+		identityReadyText: 'Cole cada linha no chat do WoW. Cada nome exato é verificado e então retransmitido uma vez no jogo.',
+		identityCopy: 'Copiar comando',
+		identityFailed: 'Identidade não publicada',
+		identityNotLinked: 'Vincule pelo menos um personagem primeiro.',
+		identityServer: 'O serviço não conseguiu assinar a identidade. Nada foi publicado; tente de novo mais tarde.',
 
 		errorTitle: 'Ainda não vinculado',
 		errors: {
