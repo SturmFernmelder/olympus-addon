@@ -506,7 +506,7 @@ local function Add(s, e, sign, now)
 	end
 	-- 1.2: the arena's fee (an "Arena fee <ref>" mail) is the guild's money: in the balance and the
 	-- day's gold in, never a donation, never dues, never a line on the channel (the design).
-	if e.kind == "fee" then
+	if e.kind == "fee" or e.kind == "event" then
 		if e.out then s.allOut = math.max(0, s.allOut + copper) else s.allIn = math.max(0, s.allIn + copper) end
 		DayCount(s, e, copper, now, true)
 		return
@@ -626,14 +626,22 @@ function Treasury.Record(name, copper, how, out, o)
 	local b = o.book or BookOf(ns.me, true)
 	if not b then return end
 	local excluded, kind = o.excluded, o.kind
-	local feeRef, feeTest
+	local feeRef, feeTest, eventRef
 	local CR = ns.CraftRequests
 	-- 1.2 (crafting requests, the guild fee): a mail titled "Olympus craft fee <request>" is a seller's
 	-- 6% of a direct sale, asked first: the fee desk books it against that seller's fee whoever sent
 	-- it, a keeper (the King's character) or one of the desk's own characters included
 	-- (CraftRequests.lua).
 	local craftFee = kind == nil and not item and type(CR) == "table" and type(CR.FeeMail) == "function" and CR.FeeMail(name, copper, o.note, how, out)
-	if Treasury.KeeperByName(name) and not SameChar(name, b.name) then
+	local EN = ns.EventNotebook
+	if kind == nil and not item and type(EN) == "table" and type(EN.TreasuryFlow) == "function" then
+		eventRef = EN.TreasuryFlow(name, out, copper, o.note, item, how)
+	end
+	if eventRef then
+		-- A pinned Treasurer's actual native receipt for an event cut: guild money, but never a
+		-- donation, dues payment, public book line, auction, or wager.
+		kind, craftFee = "event", nil
+	elseif Treasury.KeeperByName(name) and not SameChar(name, b.name) then
 		-- (A keeper's fee is the treasury's gold already: a transfer between keepers' books.)
 		excluded, kind, craftFee = nil, "transfer", nil
 	elseif craftFee then
@@ -669,7 +677,7 @@ function Treasury.Record(name, copper, how, out, o)
 	Sums(b) -- (built from the book as it was, before this line joins it)
 	local who = ns.DisplayName(ns.Normal(name)) or name
 	local e = { name = who, money = copper, how = how, t = ns.Now(), out = out or nil, excluded = excluded or nil, kind = kind,
-		item = item, count = item and count or nil }
+		item = item, count = item and count or nil, eventRef = eventRef }
 	-- 1.1: its week, and a gift's giver's guild (Dues.lua; kept here, never sent).
 	ns.Dues.Stamp(e, name, o)
 	b.lines[#b.lines + 1] = e
@@ -702,6 +710,8 @@ function Treasury.Record(name, copper, how, out, o)
 		local what = item and ItemText(item, count) or Treasury.Coins(copper)
 		if kind == "transfer" then
 			ns.Print((out and L.TREASURY_TRANSFER_OUT or L.TREASURY_TRANSFER_IN):format(who, what))
+		elseif kind == "event" then
+			ns.Print(L.EVENT_NOTEBOOK_TREASURY_BOOKED:format(what, who))
 		elseif craftFee then
 			ns.Print(L.TREASURY_CRAFT_FEE:format(who, what))
 		elseif e.excluded then
@@ -1519,7 +1529,7 @@ function Treasury.Message(b, parts)
 			local e = b.lines[i]
 			-- Counted lines and transfers; what he said was his (a sale, his own) stays home; the
 			-- arena's fee is the guild's money, never a line (1.2).
-			if not e.excluded and e.kind ~= "fee" and not DuesLine(b.name or ns.me, e) then
+			if not e.excluded and e.kind ~= "fee" and e.kind ~= "event" and not DuesLine(b.name or ns.me, e) then
 				local code = LineCode(e)
 				local line = ("%s:%d:%s:%s:%d"):format(code, U(e.money), Clean(e.name), e.how == "mail" and "m" or "t", SentDate(e.t))
 				if e.item then line = line .. (":%d:%d"):format(e.item, math.min(tonumber(e.count) or 1, Treasury.MAX_COUNT)) end
@@ -1571,7 +1581,7 @@ function Treasury.LegacyMessage(parts)
 		if #lines >= Treasury.LEGACY_BOOK then break end
 		local e = w.e
 		-- (1.1: never a line of someone's dues, as in TB: DuesLine.)
-		if not e.item and not e.excluded and e.kind ~= "transfer" and not DuesLine(w.keeper, e) then
+		if not e.item and not e.excluded and e.kind ~= "transfer" and e.kind ~= "event" and not DuesLine(w.keeper, e) then
 			lines[#lines + 1] = ("%s:%d:%s:%s:%d"):format(e.out and "o" or "i", U(e.money), Clean(e.name), e.how == "mail" and "m" or "t", math.floor(tonumber(e.t) or 0))
 		end
 	end

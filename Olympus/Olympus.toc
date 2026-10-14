@@ -43,6 +43,7 @@ Locales\CarryText.lua
 Locales\CarryMergerText.lua
 Locales\CampaignText.lua
 Locales\GuildFinanceText.lua
+Locales\EventNotebookText.lua
 Locales\RankingRulesText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
@@ -77,6 +78,7 @@ Court.lua
 Board.lua
 Week.lua
 Treasury.lua
+EventNotebook.lua
 Dues.lua
 DuesHistory.lua
 DuesGrace.lua
