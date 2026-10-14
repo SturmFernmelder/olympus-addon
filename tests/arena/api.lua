@@ -58,6 +58,55 @@ local function Do(w, c, handle, method, ...)
 	return w:As(c, handle[method], handle, ...)
 end
 
+-- The UI-side contract, kept deliberately generic here: it records the opaque owner slot API.lua
+-- routes and behaves like the window host without creating a frame in these API tests.
+local function SurfaceHost(c)
+	c.ns.UI = c.ns.UI or {}
+	c.ns.UI.API_SURFACE_LIMIT = 1
+	local state = { calls = {}, surfaces = {}, open = {}, count = 0 }
+	local function Called(op, owner, spec)
+		state.calls[#state.calls + 1] = { op = op, owner = owner, spec = spec }
+	end
+	function c.ns.UI.RegisterAPISurface(owner, spec)
+		Called("register", owner, spec)
+		if state.surfaces[owner] then return false, "registered" end
+		if state.count >= c.ns.UI.API_SURFACE_LIMIT then return false, "surface-full" end
+		if type(spec) ~= "table" then return false, "invalid-spec" end
+		if type(spec.label) ~= "string" or spec.label == "" or #spec.label > 96 then return false, "invalid-label" end
+		local icon = spec.icon
+		if not ((type(icon) == "string" and icon ~= "") or (type(icon) == "number" and icon > 0)) then
+			return false, "invalid-icon"
+		end
+		if type(spec.build) ~= "function" then return false, "invalid-build" end
+		state.surfaces[owner] = spec
+		state.count = state.count + 1
+		return true
+	end
+	function c.ns.UI.OpenAPISurface(owner)
+		Called("open", owner)
+		if not state.surfaces[owner] then return false, "unregistered" end
+		state.open[owner] = true
+		return true
+	end
+	function c.ns.UI.ToggleAPISurface(owner)
+		Called("toggle", owner)
+		if not state.surfaces[owner] then return false, "unregistered" end
+		state.open[owner] = not state.open[owner]
+		return true
+	end
+	function c.ns.UI.RefreshAPISurface(owner)
+		Called("refresh", owner)
+		if not state.surfaces[owner] then return false, "unregistered" end
+		return true
+	end
+	function c.ns.UI.IsAPISurfaceOpen(owner)
+		Called("shown", owner)
+		if not state.surfaces[owner] then return false, "unregistered" end
+		return state.open[owner] == true
+	end
+	return state
+end
+
 local function Keys(t)
 	local out = {}
 	for k in pairs(t or {}) do out[#out + 1] = tostring(k) end
@@ -142,11 +191,14 @@ end)
 
 test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once a session, never Olympus's own name; an unregistered addon has no way in", function()
 	local w, cast, viewer, API = Setup()
+	SurfaceHost(viewer)
 	local O = viewer.OlympusAPI
 	eq(O.VERSION, 1)
+	eq(O.SURFACE_LIMIT, 1)
 	eq(API.VERSION, 1)
+	eq(API.SURFACE_LIMIT, O.SURFACE_LIMIT)
 	for _, f in ipairs({ "wanted", "rankings", "rankings.slayers", "rankings.donors", "rankings.church", "rankings.games", "profile", "callbacks",
-		"WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "PERMISSION_CHANGED" }) do
+		"ui.surface", "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "PERMISSION_CHANGED" }) do
 		eq(w:As(viewer, O.Has, f), true, f)
 	end
 	eq(w:As(viewer, O.Has, "census"), false, "no census feature"); eq(w:As(viewer, O.Has, nil), false)
@@ -155,8 +207,9 @@ test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once
 	eq(ok, false, "OlympusAPI is read-only")
 	eq(getmetatable(O), false, "its metatable is locked")
 	-- Nothing but Register gives a way in: no data function on the global.
-	eq(O.GetWanted, nil); eq(O.GetRankings, nil); eq(O.GetProfile, nil); eq(O.On, nil)
-	local h, why = w:As(viewer, O.Register, "NoSuchAddon")
+	eq(O.GetWanted, nil); eq(O.GetRankings, nil); eq(O.GetProfile, nil); eq(O.On, nil); eq(O.RegisterSurface, nil); eq(O.UI, nil)
+	eq(w:As(viewer, function() return rawget(_G, "OlympusUI") end), nil, "no second UI global")
+	local h, why = w:As(viewer, O.Register, "MissingAddon")
 	eq(h, nil); eq(why, "unknown", "a name the game has not installed")
 	eq(select(2, w:As(viewer, O.Register, "Olympus")), "self")
 	eq(select(2, w:As(viewer, O.Register, "olympus_arena")), "self")
@@ -169,6 +222,7 @@ test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once
 	eq(Do(w, viewer, api, "Name"), "MapPins")
 	-- Its handle is its own and read-only; dot calls work as colon calls.
 	eq(pcall(function() api.GetWanted = function() return {} end end), false, "the handle is read-only")
+	eq(pcall(function() api.RegisterSurface = function() return true end end), false, "the surface methods are read-only too")
 	eq(w:As(viewer, api.Status), "pending")
 	h, why = w:As(viewer, O.Register, "mappins")
 	eq(h, nil); eq(why, "taken", "a second Register of that name this session gets nothing")
@@ -182,6 +236,81 @@ test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once
 	for i = 1, API.MAX_ADDONS - 1 do Install(viewer, "Extra" .. i) eq(type(w:As(viewer, O.Register, "Extra" .. i)), "table") end
 	Install(viewer, "OneTooMany")
 	eq(select(2, w:As(viewer, O.Register, "OneTooMany")), "full")
+	W3.NoErrors(w)
+end)
+
+test("1.2.4 the API: one shared UI surface, opaque ownership, retry after rejection, and lifecycle calls routed to its owner", function()
+	local w, cast, viewer = Setup()
+	local host = SurfaceHost(viewer)
+	local O = viewer.OlympusAPI
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "BountyBoard", "Bounty Board")
+	local first = w:As(viewer, O.Register, "MapPins")
+	local second = w:As(viewer, O.Register, "BountyBoard")
+
+	for _, method in ipairs({ "OpenSurface", "ToggleSurface", "RefreshSurface", "IsSurfaceOpen" }) do
+		local ok, why = Do(w, viewer, first, method)
+		eq(ok, false, method); eq(why, "unregistered", method)
+	end
+	eq(#host.calls, 0, "nothing reaches UI before that handle registers its surface")
+
+	local ok, why = Do(w, viewer, first, "RegisterSurface", { label = "" })
+	eq(ok, false); eq(why, "invalid-label", "host validation is returned")
+	eq(Do(w, viewer, first, "RegisterSurface", { label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end }), true,
+		"a rejected specification does not consume the handle's one surface")
+	local firstOwner = host.calls[2].owner
+	assert(type(firstOwner) == "string" and firstOwner ~= "", "an internal owner slot")
+	for _, private in ipairs({ "MapPins", "mappins", "api:mappins" }) do
+		eq(firstOwner:lower():find(private:lower(), 1, true), nil, "the owner does not identify its caller")
+	end
+	eq(first.surfaceOwner, nil, "the owner is not exposed by the handle")
+	local calls = #host.calls
+	ok, why = Do(w, viewer, first, "RegisterSurface", { label = "Another page" })
+	eq(ok, false); eq(why, "registered"); eq(#host.calls, calls, "a second surface is refused before UI")
+
+	ok, why = Do(w, viewer, second, "RegisterSurface", {
+		label = "Bounty tools", icon = "Interface\\Icons\\INV_Misc_Note_01", build = function() end,
+	})
+	eq(ok, false); eq(why, "surface-full", "data handles remain available after the one shared surface slot is used")
+	local secondOwner = host.calls[#host.calls].owner
+	assert(secondOwner ~= firstOwner, "each handle is still assigned a different opaque owner slot")
+	for _, private in ipairs({ "BountyBoard", "bountyboard", "api:bountyboard" }) do
+		eq(secondOwner:lower():find(private:lower(), 1, true), nil, "the refused owner's slot does not identify its caller")
+	end
+
+	eq(Do(w, viewer, first, "IsSurfaceOpen"), false)
+	eq(Do(w, viewer, first, "OpenSurface"), true)
+	eq(Do(w, viewer, first, "IsSurfaceOpen"), true)
+	eq(select(2, Do(w, viewer, second, "IsSurfaceOpen")), "unregistered", "the refused handle owns no surface")
+	eq(Do(w, viewer, first, "RefreshSurface"), true)
+	eq(Do(w, viewer, first, "ToggleSurface"), true)
+	eq(Do(w, viewer, first, "IsSurfaceOpen"), false)
+	for _, call in ipairs(host.calls) do
+		assert(call.owner == firstOwner or call.owner == secondOwner, "every call carries an assigned owner")
+	end
+	W3.NoErrors(w)
+end)
+
+test("1.2.4 the API: UI surfaces work while data consent is pending or refused; data reads remain blocked", function()
+	local w, cast, viewer = Setup()
+	SurfaceHost(viewer)
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	eq(Do(w, viewer, api, "Status"), "pending")
+	eq(Do(w, viewer, api, "RegisterSurface", { label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end }), true)
+	eq(Do(w, viewer, api, "OpenSurface"), true)
+	eq(Do(w, viewer, api, "IsSurfaceOpen"), true)
+	local data, why = Do(w, viewer, api, "GetProfile")
+	eq(data, nil); eq(why, "pending", "surface access does not grant data access")
+
+	eq(w:As(viewer, C.Choose, "api:mappins", false), true)
+	eq(Do(w, viewer, api, "Status"), "refused")
+	eq(Do(w, viewer, api, "RefreshSurface"), true)
+	eq(Do(w, viewer, api, "ToggleSurface"), true)
+	eq(Do(w, viewer, api, "IsSurfaceOpen"), false)
+	data, why = Do(w, viewer, api, "GetWanted")
+	eq(data, nil); eq(why, "refused", "refused data stays blocked")
 	W3.NoErrors(w)
 end)
 
@@ -626,8 +755,13 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	local api = Read(H.ADDON_DIR .. "API.lua")
 	for m in api:gmatch("\nfunction METHODS%.(%u%a+)%(") do assert(doc:find(":" .. m .. "(", 1, true), "docs/API.md: " .. m) end
 	for e in api:match("API%.EVENTS = (%b{})"):gmatch('"([%u_]+)"') do assert(doc:find(e, 1, true), "docs/API.md: " .. e) end
-	for _, f in ipairs({ "OlympusAPI.VERSION", "OlympusAPI.Has", "OlympusAPI.Register", "## OptionalDeps: Olympus", "/oly privacy" }) do
+	for _, f in ipairs({ "OlympusAPI.VERSION", "OlympusAPI.SURFACE_LIMIT", "OlympusAPI.Has", "OlympusAPI.Register", "## OptionalDeps: Olympus", "/oly privacy" }) do
 		assert(doc:find(f, 1, true), "docs/API.md: " .. f)
+	end
+	for _, word in ipairs({ '"ui.surface"', "one client-owned page", "availableWhenLocked", 'style = "old" or "hd"',
+		"OlympusAPI.SURFACE_LIMIT", '"surface-full"', "works while the answer is pending or refused",
+		"contains no addon name, consent key or" }) do
+		assert(doc:find(word, 1, true), "docs/API.md surface contract: " .. word)
 	end
 	local sections = {}
 	for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md" }) do
@@ -638,7 +772,8 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 		-- (Review of 1.2.4) Olympus's promise, and the other addon's doing its own.
 		eq(s:find("nothing is sent for you", 1, true), nil, path .. ": no promise for the other addon")
 		for _, word in ipairs({ "Olympus sends nothing for it", "no way to send anything for", "up to it", "addons you trust",
-			"while he shows the Treasury's ranking" }) do
+			"while he shows the Treasury's ranking", "one such page per session", "data handles still work",
+			"data answer is pending or refused", "hosting it grants no Olympus data" }) do
 			assert(s:find(word, 1, true), path .. ": " .. word)
 		end
 		local privacy = page:match("\n%*%*What waits for your yes%.%*%*(.-)\n\n")

@@ -6,8 +6,9 @@ local L = ns.L
 -- sees; his worry, someone using it to mine data). docs/API.md is its page for addon authors.
 --
 -- What it is, and what it never is:
---   - Read-only. Nothing here sends a chat line, a decree, a whisper or any message for the player,
---     nor changes anything of Olympus's: an addon reads, and Olympus never learns what it does.
+--   - Read-only data. Nothing here sends a chat line, a decree, a whisper or any message for the
+--     player, nor changes Olympus data. A registered addon may also contribute one page to the
+--     Olympus window; Olympus still owns that window and the page's lifecycle.
 --   - Only what this player already sees on Olympus's own pages, at no more detail: the Wanted list
 --     and its bounties (the Wanted tab's rows), the public rankings (the Slayers boards of the Wanted
 --     tab and the signed top three, the donors' top three while the King shows the army the
@@ -51,6 +52,7 @@ ns.API = API
 API.VERSION = 1
 API.CONSENT_VERSION = 1   -- a change in what a Yes lets an addon read asks every addon's line again
 API.MAX_ADDONS = 16       -- addons registered in one session
+API.SURFACE_LIMIT = 1     -- one client-owned page in the shared tab rail per session
 API.RATE_MAX = 20         -- data calls one addon makes...
 API.RATE_WINDOW = 10      -- ...in this many seconds
 API.MAX_CALLBACKS = 4     -- one addon's callbacks for one event
@@ -514,6 +516,20 @@ local function Read(c, needsGuild, build, ...)
 	return build(...)
 end
 
+-- Surface ownership is deliberately separate from the addon's name and consent key. UI.lua sees
+-- only this session-local slot, so its page context and lifecycle logs do not identify the caller.
+local function SurfaceCall(fn, owner, ...)
+	if not Has("UI", fn) then return false, "unavailable" end
+	local ok, result, why = pcall(ns.UI[fn], owner, ...)
+	if not ok then return false, "failed" end
+	return result, why
+end
+
+local function RegisteredSurfaceCall(c, fn, ...)
+	if not c.surfaceRegistered then return false, "unregistered" end
+	return SurfaceCall(fn, c.surfaceOwner, ...)
+end
+
 local METHODS = {}
 function METHODS.Status(c) return Status(c) end
 function METHODS.Name(c) return c.name end
@@ -523,6 +539,16 @@ function METHODS.GetRankings(c, kind)
 	return Read(c, true, API.Rankings, kind)
 end
 function METHODS.GetProfile(c) return Read(c, false, API.Profile) end
+function METHODS.RegisterSurface(c, spec)
+	if c.surfaceRegistered then return false, "registered" end
+	local ok, why = SurfaceCall("RegisterAPISurface", c.surfaceOwner, spec)
+	if ok == true then c.surfaceRegistered = true end
+	return ok, why
+end
+function METHODS.OpenSurface(c) return RegisteredSurfaceCall(c, "OpenAPISurface") end
+function METHODS.ToggleSurface(c) return RegisteredSurfaceCall(c, "ToggleAPISurface") end
+function METHODS.RefreshSurface(c) return RegisteredSurfaceCall(c, "RefreshAPISurface") end
+function METHODS.IsSurfaceOpen(c) return RegisteredSurfaceCall(c, "IsAPISurfaceOpen") end
 function METHODS.On(c, event, fn)
 	if not IS_EVENT[event] or type(fn) ~= "function" then return false end
 	local list = c.callbacks[event] or {}
@@ -544,9 +570,9 @@ end
 
 local function ReadOnly(_, k) error("OlympusAPI: read-only (" .. tostring(k) .. ")", 2) end
 
-local function NewClient(name, key, title)
+local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
-		rate = { at = -math.huge, n = 0 } }
+		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot) }
 	local methods = {}
 	for k, fn in pairs(METHODS) do methods[k] = Method(c, fn) end
 	c.handle = setmetatable({}, { __index = methods, __newindex = ReadOnly, __metatable = false })
@@ -565,7 +591,7 @@ function API.Register(name)
 	if #order >= API.MAX_ADDONS then return nil, "full" end
 	local title = Installed(name)
 	if not title then return nil, "unknown" end
-	local c = NewClient(name, key, title)
+	local c = NewClient(name, key, title, #order + 1)
 	if not Line(c) then return nil, "consent" end
 	clients[key] = c
 	order[#order + 1] = c
@@ -574,7 +600,7 @@ function API.Register(name)
 end
 
 -- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile",
--- "callbacks") or an event's name.
+-- "callbacks", "ui.surface") or an event's name.
 local FEATURES = {
 	wanted = function() return Has("Wanted", "Targets") end,
 	rankings = function() return true end,
@@ -584,6 +610,12 @@ local FEATURES = {
 	["rankings.games"] = function() return Has("ArenaHome", "RankingsPublic") end,
 	profile = function() return true end,
 	callbacks = function() return true end,
+	["ui.surface"] = function()
+		for _, fn in ipairs({ "RegisterAPISurface", "OpenAPISurface", "ToggleAPISurface", "RefreshAPISurface", "IsAPISurfaceOpen" }) do
+			if not Has("UI", fn) then return false end
+		end
+		return true
+	end,
 }
 for _, e in ipairs(API.EVENTS) do FEATURES[e] = FEATURES.callbacks end
 function API.Has(feature)
@@ -597,7 +629,7 @@ end
 -- The global other addons see: OlympusAPI.VERSION, .Has, .Register (read-only)
 ---------------------------------------------------------------------------
 
-local public = { VERSION = API.VERSION, Has = API.Has, Register = API.Register }
+local public = { VERSION = API.VERSION, SURFACE_LIMIT = API.SURFACE_LIMIT, Has = API.Has, Register = API.Register }
 OlympusAPI = setmetatable({}, { __index = public, __newindex = ReadOnly, __metatable = false })
 
 ---------------------------------------------------------------------------

@@ -759,6 +759,13 @@ you, nor your location, the census, other players' private data or Olympus's key
 gets its own copy, a limited number of calls at a time. What that addon then does with what it
 read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
 restarts (not on a `/reload`).
+
+The same registered handle can ask to contribute a client-owned page to the Olympus window when
+this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
+addons' data handles still work if that slot is occupied. Olympus keeps the window shell and puts
+the page in a fixed slot before Workshop; the addon builds and updates the content inside it. That
+page works while the data answer is pending or refused, and hosting it grants no Olympus data. Its
+behavior remains the responsibility of the addon that supplied it.
 For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
 
 ## Install

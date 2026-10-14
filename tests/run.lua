@@ -3787,6 +3787,312 @@ test("1.2 UI.AddTab: a tab joins at its canonical position with its list and but
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.4: a registered API handle may contribute one self-contained page to the Olympus shell.
+-- The public handle owns no placement or identity-bearing key: UI.lua receives only an opaque
+-- session slot, and Olympus keeps the window, portrait, help button and tab rail.
+test("1.2.4 API surface: validates one opaque owner in the fixed slot before Workshop", function()
+	WithUI(function()
+		local UI = LoadUI()
+		eq(UI.API_SURFACE_LIMIT, 1)
+		eq(select(2, UI.RegisterAPISurface(nil, {})), "invalid-owner")
+		eq(select(2, UI.RegisterAPISurface("census", {})), "reserved-owner")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", nil)), "invalid-spec")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", {})), "invalid-label")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", { label = "Map tools" })), "invalid-icon")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+		})), "invalid-build")
+		local n = #UI.TABS
+		local spec = {
+			label = "Map tools",
+			icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait",
+			availableWhenLocked = true,
+			visible = function() return true end,
+			build = function() end,
+			refresh = function() end,
+			help = function() end,
+		}
+		eq(UI.RegisterAPISurface("api-surface:1", spec), true)
+		eq(#UI.TABS, n + 1)
+		eq(UI.TABS[n].key, "api-surface:1", "the fixed slot is immediately before Workshop")
+		eq(UI.TABS[n].label, spec.label)
+		eq(UI.TABS[n].apiSurface, true)
+		eq(UI.TABS[n + 1].key, "workshop", "the built-in tail is not reordered")
+		eq(select(2, UI.RegisterAPISurface("API-SURFACE:1", spec)), "registered", "owner matching is folded")
+		eq(select(2, UI.RegisterAPISurface("api-surface:2", {
+			label = "Notes", icon = "Interface\\Icons\\INV_Misc_Note_01", build = function() end,
+		})), "surface-full", "the one shared rail slot has an explicit capacity result")
+		eq(UI.TABS[n].key, "api-surface:1", "owners retain registration order")
+		eq(UI.TABS[n + 1].key, "workshop")
+	end)
+end)
+
+test("1.2.4 API surface: one lazy canvas follows old and HD shells with portrait, help and lifecycle", function()
+	WithUI(function()
+		local UI = LoadUI()
+		local owner = "api-surface:lifecycle"
+		local phases, helped, visible = {}, 0, true
+		local spec = {
+			label = "Map tools",
+			icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait",
+			availableWhenLocked = true,
+			visible = function() return visible end,
+			build = function(parent, context)
+				phases[#phases + 1] = { "build", context.style, parent:IsShown(), context.apiVersion, context.key }
+			end,
+			refresh = function(parent, context)
+				phases[#phases + 1] = { "refresh", context.style, parent:IsShown(), context.apiVersion, context.key }
+			end,
+			help = function(parent, context)
+				helped = helped + 1
+				eq(parent, OlympusFrame.apiSurfaceViews[owner])
+				eq(context.style, "old"); eq(context.apiVersion, 1); eq(context.key, nil, "no owner key in callback context")
+			end,
+		}
+
+		-- Register after the old window exists to exercise late materialization.
+		UI.Toggle()
+		eq(UI.RegisterAPISurface(owner, spec), true)
+		local old = OlympusFrame
+		local function Tab(frame, key)
+			for i, candidate in ipairs(frame.tabs) do if candidate.key == key then return candidate, i end end
+		end
+		local surfaceTab, surfaceAt = Tab(old, owner)
+		local _, workshopAt = Tab(old, "workshop")
+		eq(surfaceAt, workshopAt - 1, "late registration keeps the fixed slot")
+		local oldCanvas = old.apiSurfaceViews[owner]
+		assert(oldCanvas and oldCanvas:GetParent() == old, "old canvas")
+		eq(oldCanvas:GetWidth(), old:GetWidth() - 12)
+		eq(oldCanvas:GetHeight(), old:GetHeight() - 64)
+		eq(#phases, 0, "build is lazy until the page opens")
+
+		eq(UI.OpenAPISurface(owner), true)
+		eq(UI.IsAPISurfaceOpen(owner), true)
+		eq(old.tab, owner)
+		eq(oldCanvas:IsShown(), true)
+		eq(old.portraitAsset, spec.portrait)
+		eq(phases[1][1] .. "/" .. phases[1][2], "build/old")
+		eq(phases[1][3], false); eq(phases[1][4], 1); eq(phases[1][5], nil, "no owner key in build context")
+		local last = phases[#phases]
+		eq(last[1] .. "/" .. last[2], "refresh/old")
+		eq(last[3], true); eq(last[4], 1); eq(last[5], nil, "no owner key in refresh context")
+		old.helpButton:Click()
+		eq(helped, 1)
+
+		UI.SelectTab("census")
+		eq(oldCanvas:IsShown(), false)
+		eq(old.portraitAsset, ns.LOGO)
+		visible = false
+		eq(UI.RefreshAPISurface(owner), true)
+		eq(surfaceTab:IsShown(), false, "refresh re-evaluates surface visibility")
+		visible = true
+		eq(UI.RefreshAPISurface(owner), true)
+		eq(surfaceTab:IsShown(), true)
+
+		local host = NewWidget("Frame", "OlympusSurfaceHost", UIParent)
+		host:SetSize(814, 426)
+		host:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -20)
+		UI.OpenDocked(host, owner, true, "hd")
+		local hd = OlympusFrameHD
+		local hdCanvas = hd.apiSurfaceViews[owner]
+		assert(hdCanvas and hdCanvas:GetParent() == hd, "HD canvas")
+		eq(hd.tab, owner); eq(hdCanvas:IsShown(), true); eq(hd.portraitAsset, spec.portrait)
+		local sawBuild, sawRefresh = false, false
+		for _, phase in ipairs(phases) do
+			if phase[1] == "build" and phase[2] == "hd" then sawBuild = phase[3] == false and phase[4] == 1 and phase[5] == nil end
+			if phase[1] == "refresh" and phase[2] == "hd" then sawRefresh = phase[3] == true and phase[4] == 1 and phase[5] == nil end
+		end
+		eq(sawBuild, true); eq(sawRefresh, true)
+		eq(UI.ToggleAPISurface(owner), true); eq(UI.IsAPISurfaceOpen(owner), false)
+		eq(UI.ToggleAPISurface(owner), true); eq(UI.IsAPISurfaceOpen(owner), true)
+	end)
+end)
+
+test("1.2.4 API surface: native parchment never leaks into its canvas", function()
+	WithUI(function()
+		local UI = LoadUI()
+		local owner = "api-surface:parchment"
+		local pageParchment, build, throneVisible = ns.Views.PageParchment, ns.Views.Build, ns.King.TabVisible
+		ns.Views.PageParchment = function() return true end
+		ns.Views.Build = function(key, ...)
+			if key == "throne" then return {} end
+			return build(key, ...)
+		end
+		ns.King.TabVisible = function() return true end
+		local ok, err = pcall(function()
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end,
+			}), true)
+			UI.Toggle()
+			local main = OlympusFrame
+			UI.SelectTab("realm")
+			assert(main.parchment and main.parchment:IsShown(), "Realm parchment is visible")
+			eq(UI.OpenAPISurface(owner), true)
+			eq(main.parchment:IsShown(), false, "the surface never inherits Realm parchment")
+			UI.SelectTab("realm")
+			eq(main.parchment:IsShown(), true, "Realm restores its parchment")
+			UI.SelectTab("throne")
+			eq(main.parchment:IsShown(), true)
+			eq(UI.OpenAPISurface(owner), true)
+			eq(main.parchment:IsShown(), false, "the surface never inherits Throne parchment")
+		end)
+		ns.Views.PageParchment, ns.Views.Build, ns.King.TabVisible = pageParchment, build, throneVisible
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("1.2.4 API surface: dense HD overflow balances both rails and clears the portrait", function()
+	local K, V, T, W = ns.King, ns.Vox, ns.Treasury, ns.Workshop
+	local saved = { K.Visible, V.Visible, T.Visible, W.Visible }
+	local function Yes() return true end
+	local ok, err = pcall(WithUI, function()
+		local w, UI = ForeverWorld(true)
+		local rightCount, gap = UI.SideTabColumns(13, 32, 426)
+		eq(rightCount, 7); eq(gap, 20, "thirteen tabs retain Blizzard's normal spacing")
+		rightCount, gap = UI.SideTabColumns(14, 32, 426)
+		eq(rightCount, 8); eq(gap, 16, "fourteen tabs share one balanced compact gap")
+		for i = 1, 4 do
+			eq(UI.AddTab({ key = "surface-fill-" .. i, label = "TAB_REALM",
+				icon = "Interface\\Icons\\INV_Misc_QuestionMark" }), true)
+		end
+		local owner = "api-surface:portrait-clear"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end,
+		}), true)
+		K.Visible, V.Visible, T.Visible, W.Visible = Yes, Yes, Yes, Yes
+		CommunitiesFrame:Show(); w.buttons[1]:Click()
+		local main = OlympusFrameHD
+		UI.Refresh()
+		local left, right, surfaceAt, workshopAt = {}, {}, nil, nil
+		for i, tab in ipairs(main.tabs) do
+			if tab:IsShown() then
+				if tab.onLeft then left[#left + 1] = tab else right[#right + 1] = tab end
+			end
+			if tab.key == owner then surfaceAt = i end
+			if tab.key == "workshop" then workshopAt = i end
+		end
+		eq(#right, 8); eq(#left, 6, "the dense overflow is redistributed rather than crushing the left rail")
+		for _, tab in ipairs(right) do eq(tab:GetHeight(), 32, "right tab size remains Blizzard's") end
+		for _, tab in ipairs(left) do eq(tab:GetHeight(), 32, "tab size remains Blizzard's") end
+		eq(right[2]:Anchor("TOPLEFT")[5], -16, "right rail uses the shared gap")
+		eq(left[2]:Anchor("BOTTOMRIGHT")[5], 16, "left rail uses the same gap")
+		local top = left[#left]
+		assert(top.Art:GetTop() <= main:GetTop() - 64,
+			("top overflow art clears the portrait: %.1f <= %.1f"):format(top.Art:GetTop(), main:GetTop() - 64))
+		eq(surfaceAt, workshopAt - 1, "the surface remains immediately before Workshop")
+	end)
+	K.Visible, V.Visible, T.Visible, W.Visible = saved[1], saved[2], saved[3], saved[4]
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.4 API surface: lock, visibility and provider failures leave Olympus usable", function()
+	for _, case in ipairs({
+		{ reason = "unavailable" },
+		{ reason = "hidden", availableWhenLocked = true, visible = function() return false end },
+		{ reason = "build-failed", availableWhenLocked = true, build = function() error("provider broke") end },
+	}) do
+		WithUI(function()
+			GetGuildInfo = function() return nil end
+			local UI = LoadUI()
+			local owner = "api-surface:failure"
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Provider", icon = "Interface\\Icons\\INV_Misc_QuestionMark",
+				availableWhenLocked = case.availableWhenLocked == true,
+				visible = case.visible or function() return true end,
+				build = case.build or function() end,
+			}), true)
+			eq(select(2, UI.OpenAPISurface(owner)), case.reason)
+			eq(UI.SelectTab("census"), true)
+			eq(UI.IsShown(), true); eq(OlympusFrame.tab, "census")
+		end)
+	end
+end)
+
+test("1.2.4 API surface: a locked page stays beside a visible route back to Join", function()
+	WithUI(function()
+		GetGuildInfo = function() return nil end
+		local UI = LoadUI()
+		local owner = "api-surface:locked-route"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+			availableWhenLocked = true, build = function() end,
+		}), true)
+		UI.Toggle()
+		local main = OlympusFrame
+		local function Tab(key)
+			for _, tab in ipairs(main.tabs) do if tab.key == key then return tab end end
+		end
+		eq(main.tab, "census")
+		eq(Tab("census"):IsShown(), true, "Join has a selector when a locked surface is offered")
+		eq(Tab(owner):IsShown(), true)
+		eq(UI.OpenAPISurface(owner), true)
+		eq(main.tab, owner)
+		eq(Tab("census"):IsShown(), true, "the surface keeps the route back to Join")
+		eq(UI.SelectTab("census"), true)
+		eq(main.tab, "census")
+		eq(main.apiSurfaceViews[owner]:IsShown(), false)
+	end)
+end)
+
+test("1.2.4 API surface: rejected destinations leave the current player profile untouched", function()
+	for _, case in ipairs({
+		{ reason = "hidden", visible = function() return false end },
+		{ reason = "build-failed", build = function() error("provider broke") end },
+		{ reason = "unavailable", lock = true },
+	}) do
+		WithUI(function()
+			local UI, uns = LoadUI()
+			assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+			local left = {}
+			uns.Fire = function(event, who) if event == "PLAYER_PROFILE_LEFT" then left[#left + 1] = who end end
+			local owner = "api-surface:rejected"
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+				visible = case.visible, build = case.build or function() end,
+			}), true)
+			UI.Toggle()
+			eq(UI.OpenPlayerProfile({ name = ns.me, source = "local", online = true }), true)
+			if case.lock then GetGuildInfo = function() return nil end end
+			local ok, why = UI.OpenAPISurface(owner)
+			eq(ok, false); eq(why, case.reason)
+			eq(UI.PlayerProfileShown(), true, case.reason .. " keeps the profile")
+			eq(#left, 0, case.reason .. " emits no PLAYER_PROFILE_LEFT")
+		end)
+	end
+end)
+
+test("1.2.4 API surface: leaving a profile clears its native chrome and profiles opened from it start at Census", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local left = {}
+		uns.Fire = function(event, who) if event == "PLAYER_PROFILE_LEFT" then left[#left + 1] = who end end
+		local owner = "api-surface:profile"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait", build = function() end,
+		}), true)
+		UI.Toggle()
+		local main = OlympusFrame
+		eq(UI.OpenPlayerProfile({ name = ns.me, source = "local", online = true }), true)
+		eq(UI.PlayerProfileShown(), true)
+		eq(UI.OpenAPISurface(owner), true)
+		eq(UI.PlayerProfileShown(), false)
+		eq(#left, 1); eq(left[1], ns.Fold(ns.me))
+		if main.ownPortrait then eq(main.ownPortrait.slot:IsShown(), false, "own portrait hides on the surface") end
+		for _, row in ipairs(main.pageNavRows or {}) do eq(row:IsShown(), false, "native page navigation hides") end
+		for _, holder in pairs(main.pageSearchHolders or {}) do eq(holder:IsShown(), false, "native page search hides") end
+		eq(main.apiSurfaceViews[owner]:IsShown(), true)
+
+		eq(UI.OpenPlayerProfile({ name = "Racer", source = "census", online = true }), true)
+		eq(main.tab, "census", "profile routing leaves a full-canvas surface through Census")
+		eq(UI.PlayerProfileShown(), true)
+		eq(main.apiSurfaceViews[owner]:IsShown(), false)
+	end)
+end)
+
 test("1.2 the person card: other files' rows after the rank (UI.personRows); on the player's own card, 'Edit my profile' (UI.profileEditors)", function()
 	WithUI(function()
 		local UI = LoadUI()

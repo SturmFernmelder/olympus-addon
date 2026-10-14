@@ -1,14 +1,19 @@
 # The Olympus API, for addon authors
 
 Olympus 1.2.4 lets other addons read, with the player's permission, what Olympus already shows
-that player on its own pages. This page is the whole contract of version 1 (`OlympusAPI.VERSION`).
+that player on its own pages. An addon can also contribute one page to the Olympus window without
+copying its shell. This page is the whole contract of version 1 (`OlympusAPI.VERSION`).
 
-- **Read-only.** No function sends a chat line, a decree, a whisper or any addon message for the
-  player, and none changes anything in Olympus.
+- **Read-only data.** No data function sends a chat line, a decree, a whisper or any addon message
+  for the player, and none changes anything in Olympus.
 - **Only what the player already sees, at no more detail.** The Wanted list and its bounties, the
   public rankings, the player's own frame and title, and his own Olympus guild, rank and role.
-- **One permission per addon.** Your addon calls `OlympusAPI.Register`, the player answers **Yes**
-  or **No** for it on Olympus's privacy page, and nothing comes back before a Yes.
+- **One permission per addon's data.** Your addon calls `OlympusAPI.Register`, the player answers
+  **Yes** or **No** for it on Olympus's privacy page, and no data comes back before a Yes.
+- **One shared client-owned page.** A registered handle may claim the one client-owned slot in
+  Olympus's tab rail. Olympus owns the window shell; your addon owns that page's frames and
+  callbacks. Hosting the page grants no data access and works while the data answer is pending or
+  refused.
 - **Copies.** Every table you get is built for that call. Changing it changes only your copy.
 - **Pushed, not polled.** Callbacks tell you when something changed.
 
@@ -45,6 +50,25 @@ if api:Status() == "granted" then
 end
 ```
 
+If your addon has a page of its own, register it through the same handle. This is independent of
+the player's data answer:
+
+```lua
+if OlympusAPI.Has("ui.surface") then
+	local ok, reason = api:RegisterSurface({
+		label = "Map tools",
+		icon = "Interface\\Icons\\INV_Misc_Map_01",
+		build = function(parent, context)
+			-- Make this page's frames as children of parent.
+			-- context is { style = "hd" or "old", apiVersion = 1 }.
+		end,
+		refresh = function(parent, context)
+			-- Optional: update the already-built page while it is selected.
+		end,
+	})
+end
+```
+
 `OlympusAPI` is `nil` when Olympus is not installed, is older than 1.2.4, or was just updated to
 1.2.4 and the game has not restarted since: a file an update adds is loaded only when the game
 starts, not on a `/reload`. Always check for it.
@@ -64,7 +88,8 @@ answer there at any time, and change the answer whenever he likes.
 The page's **Accept all** button never answers for an addon: only the player's own Yes on your
 line does. Each addon is asked on its own. The answer is kept for the player's account and stays
 across sessions. When a later API version gives more than version 1 does, every addon's line is
-asked again.
+asked again. This answer gates only the data methods and their data events. A registered UI surface
+works while the answer is pending or refused and receives no data from Olympus by doing so.
 
 ## Reference
 
@@ -72,6 +97,11 @@ asked again.
 
 A number: `1` for this contract. A change that breaks this contract raises it. New fields may be
 added to the tables below without raising it: ignore the fields you do not know.
+
+### `OlympusAPI.SURFACE_LIMIT`
+
+The number of client-owned pages the shared tab rail can host in one session: `1`. This is
+separate from the 16 addons that may register data handles.
 
 ### `OlympusAPI.Has(feature)`
 
@@ -84,6 +114,7 @@ added to the tables below without raising it: ignore the fields you do not know.
 | `"rankings.slayers"`, `"rankings.donors"`, `"rankings.church"`, `"rankings.games"` | that kind of ranking (a build without the games has no `"rankings.games"`) |
 | `"profile"` | `handle:GetProfile()` |
 | `"callbacks"`, and each event's name | `handle:On(...)` |
+| `"ui.surface"` | one page through `handle:RegisterSurface(...)` and its lifecycle methods |
 
 ### `OlympusAPI.Register(addonName)`
 
@@ -108,6 +139,72 @@ read-only tables. Every method works with `handle:Method(...)` and `handle.Metho
 ### `handle:Name()`
 
 The name you registered.
+
+### `handle:RegisterSurface(spec)`
+
+Registers this handle's one client-owned page in the Olympus tab rail. The shared rail has one
+client-owned slot per session (`OlympusAPI.SURFACE_LIMIT` is `1`); data handles remain available
+when that slot is already occupied. Olympus places the page immediately before the built-in
+Workshop tab. The caller cannot choose an internal key, replace an Olympus page or reorder the
+normal pages. Registration does not select or build the page by itself.
+
+`spec` is a table with these fields:
+
+| Field | Required | Contract |
+|---|---|---|
+| `label` | yes | non-empty string, at most 96 bytes; used for the tab tooltip or bottom-tab text |
+| `icon` | yes | non-empty texture path or positive file ID |
+| `build(parent, context)` | yes | creates the page as children of `parent`; runs once for each Olympus window style |
+| `portrait` | no | non-empty texture path or positive file ID shown in the shell while this page is selected |
+| `visible()` | no | return `false` to hide the page; may run repeatedly and should be idempotent |
+| `refresh(parent, context)` | no | updates the built page while selected; may run repeatedly and should be idempotent |
+| `help(parent, context)` | no | handles the yellow title-bar help button while selected; without it Olympus opens its normal help |
+| `availableWhenLocked` | no | boolean, `false` by default; `true` also offers the page beside the non-member Join screen |
+
+`parent` fills the content area below the title bar. Olympus retains the outer frame, close and
+help buttons, tab rails and portrait frame. Treat `context` as read-only. It has exactly the form
+`{ style = "old" or "hd", apiVersion = 1 }` and contains no addon name, consent key or internal
+owner key. The optional portrait applies only while this page is selected. Olympus's portrait
+returns on its own pages.
+
+The surface is independent of the data permission: registering, opening and refreshing it work
+while `Status()` is `"pending"` or `"refused"`, and do not change that status or grant a data read.
+The page's code still belongs to the calling addon. Olympus contains errors from its `visible`,
+`build`, `refresh` and `help` callbacks so one page cannot stop the window or another page.
+
+Returns `true`, or `false` and one of these reasons:
+
+| Reason | Why |
+|---|---|
+| `"registered"` | this handle already registered its one surface |
+| `"surface-full"` | the shared client-owned surface slot is already occupied; the handle remains usable for data and may retry later in another session |
+| `"invalid-spec"` | `spec` is not a table |
+| `"invalid-label"`, `"invalid-icon"`, `"invalid-portrait"` | that field has the wrong type or range |
+| `"invalid-build"`, `"invalid-refresh"`, `"invalid-visible"`, `"invalid-help"` | that callback is missing when required or is not a function |
+| `"invalid-locked-availability"` | `availableWhenLocked` is present and is not a boolean |
+| `"unavailable"` | this Olympus build cannot host API surfaces |
+| `"failed"` | the host rejected the call before it could return a more specific reason |
+
+### `handle:OpenSurface()` and `handle:ToggleSurface()`
+
+`OpenSurface` opens the Olympus window on this handle's registered page. `ToggleSurface` opens it,
+or hides the Olympus window when that page is already selected. They return `true`, or `false` and
+`"unregistered"`, `"unavailable"`, `"hidden"`, `"build-failed"` or `"failed"`. A `visible`
+callback that returns false or raises an error makes the page `"hidden"`; a `build` callback that
+raises an error makes it `"build-failed"` for that window style.
+
+### `handle:RefreshSurface()`
+
+Asks Olympus to re-evaluate this handle's registered page. If the page is selected, Olympus calls
+its optional `refresh`. It returns `true`, or `false` and `"unregistered"`, `"unavailable"` or
+`"failed"`. A refresh callback error is contained; the accepted refresh request still returns
+`true` so a broken callback cannot escape through the host.
+
+### `handle:IsSurfaceOpen()`
+
+Returns `true` only when this handle's page is selected in the visible Olympus window, `false` when
+it is not, or `false` and `"unregistered"`, `"unavailable"` or `"failed"` when the question could
+not be answered.
 
 ### `handle:GetWanted()`
 
