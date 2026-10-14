@@ -10,10 +10,9 @@ H.RECORDS, H.KEYS, H.FIELDS, H.TEXT = 256, 64, 16, 4096
 H.JOBS, H.SKEW = 4, 60
 local jobs = 0
 local requested = {}
--- Moderator declarations are private staff records. They never enter the subject-readable
--- collection/archive path; only the existing subject + source GM + destination GM route may
--- move them, and moving the declaration never reapplies its status.
-local KINDS = { L = true, C = true, P = true, D = true, M = true, W = true }
+-- Moderator identities never enter a subject-readable capsule. M stays unavailable until a
+-- separate protected staff-to-staff route exists; hiding its UI would not hide the payload.
+local KINDS = { L = true, C = true, P = true, D = true, W = true }
 local function Clock() return math.floor((GetServerTime and GetServerTime()) or ns.Now()) end
 local function Whole(n) return type(n) == "number" and n == n and n >= 0 and n <= 4294967295 and n % 1 == 0 end
 local function Name(s)
@@ -38,7 +37,6 @@ local function OwnRole(kind, subject, guild)
 	if kind == "C" or kind == "P" then return ns.King and ns.King.IsKing and ns.King.IsKing() == true end
 	if kind == "D" then return ns.IsTreasurer and ns.IsTreasurer(ns.me, GetGuildInfo("player")) == true end
 	if guild ~= GetGuildInfo("player") then return false end
-	if kind == "M" then return ns.Watch and ns.Watch.CanManage and ns.Watch.CanManage() == true end
 	local rank = ns.Roster.RankOf(ns.me)
 	local native = select(3, GetGuildInfo("player"))
 	return type(rank) == "number" and type(native) == "number"
@@ -249,7 +247,7 @@ function H.ReceiveOriginal(sender, capsule, done)
 	if not s or not r or not request or not Same(sender, r.issuer) or not Same(r.subject, ns.me)
 		or request.subject ~= ns.me or request.scope ~= Scope() or request.guild ~= GetGuildInfo("player")
 		or Clock() - request.at < 0 or Clock() - request.at > 300 or Preview() or not Fresh() or not Member(ns.me)
-		or r.kind == "L" or r.kind == "M" or r.kind == "W" then return false, "consent-or-private-material" end
+		or r.kind == "L" or r.kind == "W" then return false, "consent-or-private-material" end
 	if not IssuerRole(r) then return false, "issuer-authority" end
 	local pinKey, old = ns.Fold(sender), s.keys[ns.Fold(sender)]
 	if old and (old.pk ~= capsule.pk or old.guid ~= r.guid) then return false, "key-conflict" end
@@ -647,7 +645,7 @@ function H.StaffAccept(key, confirmed)
 	t.accepted = true
 	local list, seen, witnesses = {}, {}, {}
 	for _, c in ipairs(H.Originals(t.subject)) do local r = H.Parse(c.text)
-		if r.guild == t.sourceGuild and (r.kind == "L" or r.kind == "M" or r.kind == "W" and r.fields.sourceKind == "L") then
+		if r.guild == t.sourceGuild and (r.kind == "L" or r.kind == "W" and r.fields.sourceKind == "L") then
 			list[#list + 1] = c; seen[r.kind == "W" and r.fields.originalId or r.id] = true
 		end
 	end
@@ -695,8 +693,8 @@ local function ReceiptPage(sender, b, c, done)
 	local r = Capsule(c)
 	if not r or not Same(r.subject, b.subject) then return false end
 	if b.mode == "S" then
-		if not Same(r.issuer, sender) or r.guild ~= b.sourceGuild or not (r.kind == "L" or r.kind == "M" or r.kind == "W" and r.fields.sourceKind == "L") then return false end
-	elseif r.kind == "L" or r.kind == "M" or r.kind == "W" then return false end
+		if not Same(r.issuer, sender) or r.guild ~= b.sourceGuild or not (r.kind == "L" or r.kind == "W" and r.fields.sourceKind == "L") then return false end
+	elseif r.kind == "L" or r.kind == "W" then return false end
 	if b.mode == "C" then
 		if not Same(sender, r.issuer) then return false end
 		local ok, why = H.ReceiveOriginal(sender, c, done)
@@ -756,7 +754,7 @@ function H.Handle(dist, sender, text)
 		if f[5] == "C" then
 			local list = {}
 			for _, c in ipairs(H.Originals(sender)) do local r = H.Parse(c.text)
-				if r.kind ~= "L" and r.kind ~= "M" and r.kind ~= "W" and IssuerRole(r) then list[#list + 1] = c end
+				if r.kind ~= "L" and r.kind ~= "W" and IssuerRole(r) then list[#list + 1] = c end
 			end
 			if #list > 0 then return StartStream(sender, id, list, "C", guard) end
 		end

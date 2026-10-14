@@ -418,21 +418,6 @@ local function StatusNewer(a, e)
 	return TupleNewer(a.at, a.by, e.statusAt, e.statusBy)
 end
 
--- A staff archive declaration is an immutable observation, not an active sanction.  Keep the
--- deleted words out of it: only the action metadata needed to audit provenance may enter the
--- protected Carry staff route.  Failure to sign never changes whether the moderation action
--- itself applies.
-local function CaptureModeration(a, scope)
-	local H, guild = ns.CarryHistory, OwnGuild()
-	local name, actor = type(a) == "table" and Character(a.name), type(a) == "table" and Character(a.by)
-	if not H or not H.CaptureOriginal or not guild or not name or not actor or not Watch.CanManage() then return false end
-	return H.CaptureOriginal("M", name, ("moderation:%s:%d:%s"):format(a.op, tonumber(a.seq) or 0, actor),
-		math.floor(tonumber(a.at) or 0), guild, { action = a.op, actor = actor,
-			reason = CleanReason(a.reason), sequence = math.floor(tonumber(a.seq) or 0),
-			scope = scope or "guild", untilAt = math.max(0, math.floor(tonumber(a.untilAt) or 0)),
-			via = Character(a.via) or "" })
-end
-
 local function Apply(a)
 	local s = Store(true)
 	if not s then return false, "guild" end
@@ -478,7 +463,6 @@ local function Apply(a)
 	Trim(s.audit, Watch.MAX_AUDIT)
 	s.revision = s.revision + 1
 	ns.Fire("WATCH_CHANGED")
-	CaptureModeration(a, "watch")
 	return true
 end
 
@@ -513,8 +497,6 @@ function Watch.ApplyChat(a)
 	Trim(s.audit, Watch.MAX_AUDIT)
 	s.revision = s.revision + 1
 	ns.Fire("WATCH_CHANGED")
-	CaptureModeration({ op = a.op, name = name, by = by, via = via, at = at, seq = seq,
-		reason = reason, untilAt = a.untilAt }, a.scope == "O" and "olympus-chat" or "guild-chat")
 	return true
 end
 

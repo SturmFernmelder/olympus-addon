@@ -456,24 +456,6 @@ test("watch: only live local GM/Captains or a live signed roster moderator have 
 	end)
 end)
 
-test("watch: applied moderation signs only protected audit metadata and signing failure never blocks the action", function()
-	WithWatch(function(w, W, c)
-		local captured
-		c.CarryHistory = { CaptureOriginal = function(kind, subject, key, at, guild, fields)
-			captured = { kind = kind, subject = subject, key = key, at = at, guild = guild, fields = fields }
-			return false
-		end }
-		local ok, why = W.Send("V", "Member-Realm", "documented conduct")
-		eq(ok, true); eq(why, "local")
-		assert(W.Record("Member-Realm"), "the moderation action applies even when archive signing fails")
-		assert(captured, "the real Watch action invokes the protected Carry seam")
-		eq(captured.kind, "M"); eq(captured.subject, "Member-Realm"); eq(captured.guild, w.guild)
-		eq(captured.fields.action, "V"); eq(captured.fields.actor, c.me)
-		eq(captured.fields.reason, "documented conduct"); eq(captured.fields.scope, "watch")
-		eq(captured.fields.text, nil, "deleted chat words are never copied into merger history")
-	end)
-end)
-
 test("watch: private stores are isolated by faction, realm group and exact guild identity", function()
 	WithWatch(function(w, W, c)
 		-- Ambiguous account-wide data from the first implementation is deliberately not migrated.
