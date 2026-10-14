@@ -353,8 +353,15 @@ Do not claim the enabled/disabled comparison passed from a Lua fixture or a shor
    alt and replacement master grant no inherited copy. Offline withdrawal delivery is not
    guaranteed. See [history-carry.md](history-carry.md) for bounds and remaining limitations.
 
+   Test the named-heir route separately before release: the actual King and both current guild
+   masters must approve the same frozen index before any character is asked to consent. Confirm
+   that only consenting characters' historical records appear for the exact approving heir
+   master, that private Loot moves only keeper-to-keeper, and that no rank, key, payment, pardon
+   or moderation record is imported. Replacing a master, using an alt or replaying a withdrawn
+   consent must fail closed.
+
 Justice quality/composite scoring, other-honour normalization, unlinked Horde/account
-anti-farming, universally portable historical office proof, named merger inheritance and
-sister-guild negative dues coverage remain separate from the implemented original-signature
-archives, response metrics and own-guild private grace. Keep these limits distinct from
-every unobserved live gate above.
+anti-farming, universally portable historical office proof, linked-alt merger consent,
+moderation-record transport and complete sister-guild negative dues coverage remain separate
+from the implemented original-signature archives, named-heir route, response metrics and
+own-guild private grace. Keep these limits distinct from every unobserved live gate above.
