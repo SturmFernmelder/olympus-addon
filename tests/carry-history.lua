@@ -197,6 +197,9 @@ test("carry-history: private Loot requires subject token and two real GM consent
 	w:As(source, function()
 		assert(source.ns.CarryHistory.CaptureOriginal("L", member.name, "original-loot", w.clock, source.guild,
 			{ writer = source.name, words = "PRIVATE ORIGINAL NOTE", to = member.name }))
+		source.ns.Watch = { CanManage = function() return true end }
+		assert(source.ns.CarryHistory.CaptureOriginal("M", member.name, "moderation:W:1:" .. source.name, w.clock, source.guild,
+			{ action = "W", actor = source.name, reason = "conduct", sequence = 1, scope = "watch", untilAt = 0, via = "" }))
 		source.ns.Loot = { Notes = function() return { { key = "legacy-loot", n = { writer = "Previous Officer-Emberfall", t = w.clock - 900,
 			text = "PRIVATE OLDER NOTE", to = member.name } } } end }
 	end)
@@ -221,10 +224,12 @@ test("carry-history: private Loot requires subject token and two real GM consent
 		local all, staff = lord.ns.CarryHistory.Imports()
 		eq(#all, 2)
 		for _, e in ipairs(all) do if e.staff then staff = e end end
-		assert(staff); eq(#staff.capsules, 2)
+		assert(staff); eq(#staff.capsules, 3)
 		local kinds = {}
 		for _, c in ipairs(staff.capsules) do local r = lord.ns.CarryHistory.Parse(c.text); kinds[r.kind] = r end
-		assert(kinds.L); assert(kinds.W); eq(kinds.W.fields.scope, "retained-copy-observed-now")
+		assert(kinds.L); assert(kinds.M); assert(kinds.W); eq(kinds.W.fields.scope, "retained-copy-observed-now")
+		eq(kinds.M.fields.action, "W"); eq(kinds.M.fields.actor, source.name); eq(kinds.M.fields.reason, "conduct")
+		eq(kinds.M.fields.text, nil, "deleted chat text is never in the staff archive declaration")
 		eq(kinds.W.issuer, source.name); eq(kinds.W.fields.originalWriter, "Previous Officer-Emberfall")
 		assert(kinds.W.at > tonumber(kinds.W.fields.originalAt), "witness signing time is not forged old authorship")
 	end)

@@ -1,12 +1,8 @@
 local base, test, eq = ...
 local ROOT = debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]carry%-merger%.lua$") or "./"
 local World = assert(loadfile(ROOT .. "tests/arena/lib/world.lua"))({ ROOT = ROOT, ADDON_DIR = ROOT .. "Olympus/", ns = base })
-local function Setup()
-	local w = World.New({ council = false, compliance = "shipped", arenaFiles = { "ArenaMath", "ArenaNet", "ArenaMoney", "Debts" } })
-	local king, member = w:Role("king"), w:Role("fighterA")
-	local dest = w:Role("fighterB", { rank = 0, guild = "Olympus II" })
-	local source = w:Client("Source Warden-Emberfall", { rank = 0, guild = member.guild })
-	for _, c in ipairs({ king, member, dest, source }) do w:As(c, function()
+local function LoadClient(w, c)
+	w:As(c, function()
 		c.ns.Roster = { Fresh = function() return c.fresh ~= false and {} or nil end,
 			RankOf = function(name) for _, other in ipairs(w.clients) do if name == other.name and other.guild == c.guild then return other.rank end end end }
 		-- These verdicts model a fresh native roster and verified signed foreign authority,
@@ -29,7 +25,14 @@ local function Setup()
 		assert(loadfile(ROOT .. "Olympus/CarryHistory.lua"))("Olympus", c.ns)
 		assert(loadfile(ROOT .. "Olympus/Carry.lua"))("Olympus", c.ns)
 		assert(loadfile(ROOT .. "Olympus/CarryMerger.lua"))("Olympus", c.ns)
-	end) end
+	end)
+end
+local function Setup()
+	local w = World.New({ council = false, compliance = "shipped", arenaFiles = { "ArenaMath", "ArenaNet", "ArenaMoney", "Debts" } })
+	local king, member = w:Role("king"), w:Role("fighterA")
+	local dest = w:Role("fighterB", { rank = 0, guild = "Olympus II" })
+	local source = w:Client("Source Warden-Emberfall", { rank = 0, guild = member.guild })
+	for _, c in ipairs({ king, member, dest, source }) do LoadClient(w, c) end
 	w:Group({ king.name, member.name, dest.name, source.name })
 	for _, c in ipairs({ king, dest, source }) do w:As(c, function()
 		for _, other in ipairs({ king, dest, source }) do if other ~= c then assert(c.ns.CarryHistory.RequestKey(other.name)) end end
@@ -174,6 +177,40 @@ test("carry-merger: a source-GM subject explicitly consents without relying on a
 	w:As(dest, function() eq(#dest.ns.CarryMerger.Archives(), 1) end); Errors(w)
 end)
 
+test("carry-merger: an alt may consent only through a current explicit Olympus Link pair and provenance remains on the original subject", function()
+	local w, king, member, dest, source = Setup(); Notes(w, source, member)
+	local delegate = w:Client("Linked Delegate-Emberfall", { rank = 3, guild = member.guild })
+	LoadClient(w, delegate)
+	w:Group({ king.name, member.name, dest.name, source.name, delegate.name })
+	local id = Approved(w, king, dest, source)
+	for _, c in ipairs({ source, dest, delegate }) do
+		c.ns.Alts = { Linked = function() return { member.name, delegate.name } end }
+	end
+	w:As(dest, function()
+		eq(dest.ns.CarryMerger.RequestConsent(id, member.name, delegate.name), false,
+			"legacy alt lists are not identity or subject consent")
+	end)
+	local proof = { version = 1, id = string.rep("a", 32), issued = w.clock - 10,
+		expires = w.clock + 3600, revision = 1, bothConsented = true }
+	for _, c in ipairs({ source, dest, delegate }) do c.ns.LinkIdentity = { VerifiedPair = function(a, b)
+		if c.ns.Fold(a) == c.ns.Fold(member.name) and c.ns.Fold(b) == c.ns.Fold(delegate.name) then return proof end
+	end } end
+	w:As(dest, function() assert(dest.ns.CarryMerger.RequestConsent(id, member.name, delegate.name)) end); w:Run(3)
+	w:As(delegate, function()
+		assert(delegate.ns.CarryMerger.Consent(id)); assert(delegate.ns.CarryMerger.Consent(id, delegate.question))
+	end); w:Run(20)
+	w:As(dest, function()
+		local all = dest.ns.CarryMerger.Archives(); eq(#all, 1)
+		local record = dest.ns.CarryHistory.Parse(all[1].text)
+		eq(record.subject, member.name); eq(record.issuer, source.name)
+		local token = dest.ns.CarryMerger.Policies()[1].consents[dest.ns.Fold(member.name)]
+		eq(token.name, member.name); eq(token.signer, delegate.name); eq(token.identityId, proof.id)
+		proof.expires = w.clock - 1
+		eq(dest.ns.CarryMerger.Resume(id, member.name), false, "expired Link identity cannot authorize more transport")
+	end)
+	Errors(w)
+end)
+
 local function Wire(w, c, sender, id, lane, page, payload)
 	w:As(c, function()
 		local digest = c.ns.Ed25519.ToHex(c.ns.Sign.SHA256(payload)):sub(1, 16)
@@ -189,10 +226,12 @@ test("carry-merger: bad actual signature releases assembly for a corrected proof
 	local payload
 	w:As(member, function()
 		local p = member.ns.CarryMerger.Policies()[1]; local nonce = p.ownRequest.nonce
-		local text = "OLYCMC1~" .. p.data.scope .. "~" .. id .. "~" .. p.data.root .. "~" .. member.name .. "~" .. member.guid .. "~" .. nonce .. "~" .. dest.name .. "~" .. dest.guid
+		local text = "OLYCMC2~" .. p.data.scope .. "~" .. id .. "~" .. p.data.root .. "~" .. member.name .. "~" .. member.name
+			.. "~" .. member.guid .. "~" .. nonce .. "~-~" .. dest.name .. "~" .. dest.guid
 		member.ns.Ed25519.Run(function()
 			local _, pk = member.ns.Debts.MyKey()
 			return member.guid .. "^" .. nonce .. "^" .. member.ns.Ed25519.ToB64(pk) .. "^" .. member.ns.Ed25519.ToB64(member.ns.Debts.Sign(text))
+				.. "^" .. member.name .. "^-"
 		end, function(ok, result) if ok then payload = result end end)
 	end); w:Run(3); assert(payload)
 	Wire(w, dest, dest.name, id, "C", 1, payload); w:Run(2)

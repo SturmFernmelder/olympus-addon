@@ -50,6 +50,21 @@ end
 local function Bound(name, guid)
 	return Same(name, ns.me) and OwnGuid() == guid or ns.Debts.Bind(name, guid)
 end
+-- Olympus Link is the only accepted alt identity authority.  Legacy /oly alt links, names on a
+-- roster and forwarded keys are deliberately insufficient.  VerifiedPair is a narrow backend
+-- contract: it has already verified one signed, non-regressing OLI1 identity snapshot in which
+-- both exact characters opted in.  We still validate every bounded field and fail closed.
+local function IdentityPair(subject, delegate, expected)
+	subject, delegate = Name(subject), Name(delegate)
+	if not subject or not delegate then return nil end
+	if Same(subject, delegate) then return (expected == nil or expected == "-") and { id = "-", direct = true } or nil end
+	local L = ns.LinkIdentity
+	local p = L and type(L.VerifiedPair) == "function" and L.VerifiedPair(subject, delegate)
+	if type(p) ~= "table" or p.version ~= 1 or p.bothConsented ~= true or not Hex(p.id, 32)
+		or expected and p.id ~= expected or not Whole(p.issued) or not Whole(p.expires)
+		or not Whole(p.revision) or p.revision < 1 or p.issued > Clock() + 60 or p.expires < Clock() or p.expires <= p.issued then return nil end
+	return p
+end
 local function Store()
 	if type(ns.db) ~= "table" or not Name(ns.me) then return nil end
 	local root = ns.db.carryMerger
@@ -93,9 +108,15 @@ ValidPolicy = function(p, id)
 		if type(a) ~= "table" or type(a.pk) ~= "string" or #a.pk ~= 43 or type(a.sig) ~= "string" or #a.sig ~= 86 or not Guid(a.guid) then return false end
 	end
 	for _, a in pairs(p.pending or {}) do if type(a) ~= "table" or not Name(a.sender) or type(a.pk) ~= "string" or type(a.sig) ~= "string" then return false end end
-	for _, request in pairs(p.requests) do if type(request) ~= "table" or not Whole(request.at) or not Hex(request.nonce, 16) then return false end end
-	if p.ownRequest and (type(p.ownRequest) ~= "table" or not Whole(p.ownRequest.at) or not Hex(p.ownRequest.nonce, 16)) then return false end
-	for _, token in pairs(p.consents) do if type(token) ~= "table" or not Name(token.name) or not Guid(token.guid) or not Hex(token.nonce, 16) then return false end end
+	for _, request in pairs(p.requests) do if type(request) ~= "table" or not Whole(request.at) or not Hex(request.nonce, 16)
+		or request.name and not Name(request.name) or request.delegate and not Name(request.delegate)
+		or request.identityId and request.identityId ~= "-" and not Hex(request.identityId, 32) then return false end end
+	if p.ownRequest and (type(p.ownRequest) ~= "table" or not Whole(p.ownRequest.at) or not Hex(p.ownRequest.nonce, 16)
+		or p.ownRequest.subject and not Name(p.ownRequest.subject) or p.ownRequest.delegate and not Name(p.ownRequest.delegate)
+		or p.ownRequest.identityId and p.ownRequest.identityId ~= "-" and not Hex(p.ownRequest.identityId, 32)) then return false end
+	for _, token in pairs(p.consents) do if type(token) ~= "table" or not Name(token.name) or token.signer and not Name(token.signer)
+		or token.identityId and token.identityId ~= "-" and not Hex(token.identityId, 32)
+		or not Guid(token.guid) or not Hex(token.nonce, 16) then return false end end
 	for _, row in pairs(p.index) do
 		local fields = type(row) == "string" and H().ReadPayload(row)
 		if not fields or Count(fields) ~= 2 or not Hex(fields.hash, 64) or not Name(fields.subject) then return false end
@@ -333,31 +354,41 @@ local function NewPolicy(body, sender)
 		indexClosed = d.count == 0 and d.root == Sha("") }
 	s.policies[d.id] = p; Changed(); return p
 end
-local function ConsentText(p, name, guid, nonce) return "OLYCMC1~" .. p.data.scope .. "~" .. p.data.id .. "~" .. p.data.root .. "~" .. name .. "~" .. guid .. "~" .. nonce .. "~" .. p.data.destinationMaster .. "~" .. p.data.destinationGuid end
-function M.RequestConsent(id, name)
-	local s = Store(); local p = s and s.policies[id]; name = Name(name)
-	if not Target(p) or Clock() > p.data.expires or not name or not p.subjects[ns.Fold(name)] then return false end
+local function ConsentText(p, subject, signer, guid, nonce, identityId)
+	return "OLYCMC2~" .. p.data.scope .. "~" .. p.data.id .. "~" .. p.data.root .. "~" .. subject .. "~" .. signer
+		.. "~" .. guid .. "~" .. nonce .. "~" .. (identityId or "-") .. "~" .. p.data.destinationMaster .. "~" .. p.data.destinationGuid
+end
+function M.RequestConsent(id, name, delegate)
+	local s = Store(); local p = s and s.policies[id]; name, delegate = Name(name), Name(delegate or name)
+	local identity = name and delegate and IdentityPair(name, delegate)
+	if not Target(p) or Clock() > p.data.expires or not name or not identity or not p.subjects[ns.Fold(name)] then return false end
 	if Count(p.requests) >= M.ROWS and not p.requests[ns.Fold(name)] then return false end
 	s.seq = s.seq + 1
 	local nonce = Sha(ns.me .. Clock() .. s.seq):sub(1, 16)
-	p.requests[ns.Fold(name)] = { nonce = nonce, at = Clock(), name = name }
-	local payload = p.body .. "^" .. nonce
-	local guard = function() return Target(p) and p.requests[ns.Fold(name)].nonce == nonce and Clock() <= p.data.expires end
+	p.requests[ns.Fold(name)] = { nonce = nonce, at = Clock(), name = name, delegate = delegate, identityId = identity.id }
+	local payload = table.concat({ p.body, nonce, name, identity.id }, "^")
+	local guard = function()
+		local r = p.requests[ns.Fold(name)]
+		return Target(p) and r and r.nonce == nonce and IdentityPair(name, delegate, identity.id) and Clock() <= p.data.expires
+	end
 	-- The source independently expects the same solicited direct response. A destination
-	-- cannot fabricate a subject consent by forwarding a self-signed arbitrary public key.
-	return SendData(p.data.sourceMaster, id, "U", 1, Body({ subject = name, nonce = nonce }), guard, function(ok)
-		if ok and guard() then SendData(name, id, "Q", 1, payload, guard) end
+	-- cannot fabricate a subject consent by forwarding a self-signed arbitrary public key. A
+	-- linked delegate is accepted only while the same exact Link proof remains verified.
+	return SendData(p.data.sourceMaster, id, "U", 1, Body({ subject = name, delegate = delegate, identityId = identity.id, nonce = nonce }), guard, function(ok)
+		if ok and guard() then SendData(delegate, id, "Q", 1, payload, guard) end
 	end)
 end
 function M.Resume(id, name)
 	local s = Store(); local p = s and s.policies[id]; name = Name(name)
 	local token = name and p and p.consents[ns.Fold(name)]
 	local request = name and p and p.requests[ns.Fold(name)]
-	if not Target(p) or not token or not request or request.nonce ~= token.nonce then return false end
+	if not Target(p) or not token or not request or request.nonce ~= token.nonce
+		or not IdentityPair(name, token.signer or name, token.identityId or "-") then return false end
 	-- Reuse only the existing consent, and let the source independently require its
 	-- own firsthand token. Replaying full frozen pages is idempotent at their cursor.
 	return SendData(p.data.sourceMaster, id, "G", 1, Body({ subject = name, nonce = token.nonce }),
-		function() return Target(p) and p.consents[ns.Fold(name)] == token end)
+		function() return Target(p) and p.consents[ns.Fold(name)] == token
+			and IdentityPair(name, token.signer or name, token.identityId or "-") ~= nil end)
 end
 function M.Consent(id, confirmation)
 	local s = Store(); local p = s and s.policies[id]; local request = p and p.ownRequest
@@ -368,60 +399,75 @@ function M.Consent(id, confirmation)
 		return true
 	end
 	if type(confirmation) ~= "table" or confirmation.policy ~= p or confirmation.request ~= request or confirmation.id ~= id then return false end
-	local guid, actor = OwnGuid(), ns.me; if not guid then return false end
-	local text = ConsentText(p, actor, guid, request.nonce)
+	local guid, actor = OwnGuid(), ns.me; if not guid or not Same(request.delegate or request.subject or actor, actor) then return false end
+	local subject, identityId = Name(request.subject or actor), request.identityId or "-"
+	if not subject or not IdentityPair(subject, actor, identityId) then return false end
+	local text = ConsentText(p, subject, actor, guid, request.nonce, identityId)
 	return Run(function()
 		local _, pk = ns.Debts.MyKey(); if not pk then return nil end
 		return ns.Ed25519.ToB64(pk) .. "^" .. ns.Ed25519.ToB64(ns.Debts.Sign(text))
 	end, function(a)
 		if not a or not Live(actor, p.data.scope) or p.ownRequest ~= request or not Master(p.data.destinationMaster, p.data.destination) then return end
+		local payload = guid .. "^" .. request.nonce .. "^" .. a
+		if identityId ~= "-" or not Same(subject, actor) then payload = payload .. "^" .. subject .. "^" .. identityId end
 		for _, who in ipairs({ p.data.sourceMaster, p.data.destinationMaster }) do
-			SendData(who, id, "C", 1, guid .. "^" .. request.nonce .. "^" .. a,
-				function() return Live(actor, p.data.scope) and p.ownRequest == request and Clock() - request.at <= M.IDLE end)
+			SendData(who, id, "C", 1, payload,
+				function() return Live(actor, p.data.scope) and p.ownRequest == request and IdentityPair(subject, actor, identityId) and Clock() - request.at <= M.IDLE end)
 		end
 	end)
 end
 function M.Withdraw(id)
 	local s = Store(); local p = s and s.policies[id]; local request = p and p.ownRequest
 	if not request or not Live(p.actor, p.data.scope) or Clock() > p.data.expires then return false end
-	local actor, guid = ns.me, OwnGuid(); if not guid then return false end
-	local text = "OLYCMW1~" .. ConsentText(p, actor, guid, request.nonce)
+	local actor, guid = ns.me, OwnGuid(); if not guid or not Same(request.delegate or request.subject or actor, actor) then return false end
+	local subject, identityId = Name(request.subject or actor), request.identityId or "-"
+	if not subject then return false end
+	local text = "OLYCMW1~" .. ConsentText(p, subject, actor, guid, request.nonce, identityId)
 	return Run(function()
 		local _, pk = ns.Debts.MyKey()
 		return pk and ns.Ed25519.ToB64(pk) .. "^" .. ns.Ed25519.ToB64(ns.Debts.Sign(text))
 	end, function(a)
 		if not a or not Live(actor, p.data.scope) or p.ownRequest ~= request then return end
 		request.withdrawn = true
+		local payload = guid .. "^" .. request.nonce .. "^" .. a
+		if identityId ~= "-" or not Same(subject, actor) then payload = payload .. "^" .. subject .. "^" .. identityId end
 		for _, who in ipairs({ p.data.sourceMaster, p.data.destinationMaster }) do
-			SendData(who, id, "V", 1, guid .. "^" .. request.nonce .. "^" .. a,
+			SendData(who, id, "V", 1, payload,
 				function() return Live(actor, p.data.scope) and p.ownRequest == request end)
 		end
 		Changed()
 	end)
 end
 local function SendSubject(p, subject, token)
-	if not Serving(p) or not p.capsules then return false end
+	local signer, identityId = token and (token.signer or token.name), token and (token.identityId or "-")
+	if not Serving(p) or not p.capsules or not IdentityPair(subject, signer, identityId) then return false end
 	local selected = {}
 	for i, c in ipairs(p.capsules) do if Same(H().Parse(c.text).subject, subject) then selected[#selected + 1] = { page = i, capsule = c } end end
 	local i = 0
 	local function Next(ok)
-		if ok == false or not Serving(p) or p.consents[ns.Fold(subject)] ~= token then return end
+		if ok == false or not Serving(p) or p.consents[ns.Fold(subject)] ~= token
+			or not IdentityPair(subject, signer, identityId) then return end
 		i = i + 1; local row = selected[i]; if not row then return end
 		SendData(p.data.destinationMaster, p.data.id, "T", row.page, Pack(row.capsule),
-			function() return Serving(p) and p.consents[ns.Fold(subject)] == token end, Next)
+			function() return Serving(p) and p.consents[ns.Fold(subject)] == token
+				and IdentityPair(subject, signer, identityId) ~= nil end, Next)
 	end
 	Next(); return true
 end
-local function VerifyConsent(p, sender, guid, nonce, pk64, sig64, request, done)
+local function VerifyConsent(p, sender, subject, identityId, guid, nonce, pk64, sig64, request, done)
 	local pk, sig = ns.Ed25519.FromB64(pk64 or ""), ns.Ed25519.FromB64(sig64 or "")
-	if not Guid(guid) or not Hex(nonce, 16) or not pk or #pk ~= 32 or not sig or #sig ~= 64 or not p.subjects[ns.Fold(sender)] then return false end
+	subject = Name(subject)
+	if not subject or not Guid(guid) or not Hex(nonce, 16) or not pk or #pk ~= 32 or not sig or #sig ~= 64
+		or not p.subjects[ns.Fold(subject)] or not IdentityPair(subject, sender, identityId) then return false end
 	-- Both keepers first hear the solicited subject response themselves. A forwarded public
 	-- key and signature are not identity or consent evidence.
-	if request and (request.nonce ~= nonce or Clock() - request.at > M.IDLE or not Bound(sender, guid)) then return false end
-	return Run(function() return ns.Ed25519.Verify(pk, ConsentText(p, sender, guid, nonce), sig) == true end, function(ok)
+	if request and (request.nonce ~= nonce or not Same(request.delegate or subject, sender) or request.identityId ~= identityId
+		or Clock() - request.at > M.IDLE or not Bound(sender, guid)) then return false end
+	return Run(function() return ns.Ed25519.Verify(pk, ConsentText(p, subject, sender, guid, nonce, identityId), sig) == true end, function(ok)
 		if not ok or p.revoked or Clock() > p.data.expires then if done then done(false) end; return end
-		if p.consentFloors and p.consentFloors[ns.Fold(sender)] == nonce then if done then done(false) end; return end
-		if request and (not (Target(p) or Serving(p)) or p.requests[ns.Fold(sender)] ~= request or Clock() - request.at > M.IDLE or not Bound(sender, guid)) then if done then done(false) end; return end
+		if p.consentFloors and p.consentFloors[ns.Fold(subject)] == nonce then if done then done(false) end; return end
+		if request and (not (Target(p) or Serving(p)) or p.requests[ns.Fold(subject)] ~= request or Clock() - request.at > M.IDLE
+			or not Bound(sender, guid) or not IdentityPair(subject, sender, identityId)) then if done then done(false) end; return end
 		if done then done(true) end
 	end)
 end
@@ -476,68 +522,77 @@ Dispatch = function(sender, id, lane, page, payload, acknowledge)
 		end
 		acknowledge(); Changed(); return true
 	elseif lane == "Q" then
-		local d = #f == 2 and M.Parse(f[1])
-		if not d or d.id ~= id or not Hex(f[2], 16) or Clock() > d.expires or not Same(sender, d.destinationMaster) or not Master(sender, d.destination) then return false end
+		local d, subject, identityId = #f == 4 and M.Parse(f[1]), Name(f[3]), f[4]
+		if not d or d.id ~= id or not Hex(f[2], 16) or not subject or not IdentityPair(subject, ns.me, identityId)
+			or Clock() > d.expires or not Same(sender, d.destinationMaster) or not Master(sender, d.destination) then return false end
 		if not p then
 			if Count(s.policies) >= M.MAX or s.floors[id] then return false end
 			p = { actor = ns.me, body = f[1], data = d, approvals = {}, consents = {}, requests = {}, imported = {}, index = {}, subjects = {}, subjectOnly = true }; s.policies[id] = p
 		end
 		if p.body ~= f[1] or p.revoked or p.ownRequest and p.ownRequest.nonce == f[2] and p.ownRequest.withdrawn then return false end
-		p.ownRequest = { nonce = f[2], at = Clock() }; acknowledge(); Changed(); return true
+		p.ownRequest = { nonce = f[2], at = Clock(), subject = subject, delegate = ns.me, identityId = identityId }; acknowledge(); Changed(); return true
 	elseif lane == "C" then
-		local request = p and p.requests[ns.Fold(sender)]
-		if #f ~= 4 or not (Target(p) or Serving(p)) or not request then return false end
-		return VerifyConsent(p, sender, f[1], f[2], f[3], f[4], request, function(ok)
+		local subject, identityId = #f == 4 and sender or Name(f[5]), #f == 4 and "-" or f[6]
+		local request = subject and p and p.requests[ns.Fold(subject)]
+		if (#f ~= 4 and #f ~= 6) or not (Target(p) or Serving(p)) or not request then return false end
+		return VerifyConsent(p, sender, subject, identityId, f[1], f[2], f[3], f[4], request, function(ok)
 			if not ok then acknowledge(false); return end
-			local token = { name = sender, guid = f[1], nonce = f[2], pk = f[3], sig = f[4], at = Clock(), firsthand = true }
-			p.consents[ns.Fold(sender)] = token
-			if Serving(p) and request.ready then SendSubject(p, sender, token)
+			local token = { name = subject, signer = sender, identityId = identityId, guid = f[1], nonce = f[2], pk = f[3], sig = f[4], at = Clock(), firsthand = true }
+			p.consents[ns.Fold(subject)] = token
+			if Serving(p) and request.ready then SendSubject(p, subject, token)
 			elseif Target(p) then
 				-- Delivery is released only after both ends verified the subject themselves.
 				-- This is a readiness acknowledgement, never a forwarded identity proof.
-				SendData(p.data.sourceMaster, id, "G", 1, Body({ subject = sender, nonce = f[2] }), function() return Target(p) and p.consents[ns.Fold(sender)] == token end)
+				SendData(p.data.sourceMaster, id, "G", 1, Body({ subject = subject, nonce = f[2] }), function() return Target(p) and p.consents[ns.Fold(subject)] == token end)
 			end
 			acknowledge(); Changed()
 		end)
 	elseif lane == "G" then
 		local data = H().ReadPayload(payload)
 		local request = data and p and p.requests[ns.Fold(data.subject or "")]
-		if not data or Count(data) ~= 2 or not Serving(p) or not Same(sender, p.data.destinationMaster) or not request or request.nonce ~= data.nonce then return false end
+		if not data or Count(data) ~= 2 or not Serving(p) or not Same(sender, p.data.destinationMaster) or not request or request.nonce ~= data.nonce
+			or not IdentityPair(data.subject, request.delegate or data.subject, request.identityId or "-") then return false end
 		request.ready = true
 		local token = p.consents[ns.Fold(data.subject)]
 		if token and token.nonce == data.nonce then SendSubject(p, data.subject, token) end
 		acknowledge(); return true
 	elseif lane == "V" then
-		local request = p and p.requests[ns.Fold(sender)]
+		local subject, identityId = #f == 4 and sender or Name(f[5]), #f == 4 and "-" or f[6]
+		local request = subject and p and p.requests[ns.Fold(subject)]
 		local pk, sig = ns.Ed25519.FromB64(f[3] or ""), ns.Ed25519.FromB64(f[4] or "")
-		if #f ~= 4 or not (Target(p) or Serving(p)) or not request or request.nonce ~= f[2] or not Guid(f[1])
-			or not pk or #pk ~= 32 or not sig or #sig ~= 64 or not Bound(sender, f[1]) then return false end
-		return Run(function() return ns.Ed25519.Verify(pk, "OLYCMW1~" .. ConsentText(p, sender, f[1], f[2]), sig) == true end, function(ok)
-			if not ok or not (Target(p) or Serving(p)) or p.requests[ns.Fold(sender)] ~= request or not Bound(sender, f[1]) then acknowledge(false); return end
-			local token = p.consents[ns.Fold(sender)]
+		if (#f ~= 4 and #f ~= 6) or not (Target(p) or Serving(p)) or not request or request.nonce ~= f[2] or not Guid(f[1])
+			or not pk or #pk ~= 32 or not sig or #sig ~= 64 or not Bound(sender, f[1])
+			or not Same(request.delegate or subject, sender) or request.identityId ~= identityId then return false end
+		return Run(function() return ns.Ed25519.Verify(pk, "OLYCMW1~" .. ConsentText(p, subject, sender, f[1], f[2], identityId), sig) == true end, function(ok)
+			if not ok or not (Target(p) or Serving(p)) or p.requests[ns.Fold(subject)] ~= request or not Bound(sender, f[1]) then acknowledge(false); return end
+			local token = p.consents[ns.Fold(subject)]
 			if token and (token.pk ~= f[3] or token.guid ~= f[1]) then acknowledge(false); return end
-			p.consentFloors = p.consentFloors or {}; p.consentFloors[ns.Fold(sender)] = f[2]
-			p.consents[ns.Fold(sender)] = nil
-			for cursor, c in pairs(p.imported) do if Same(H().Parse(c.text).subject, sender) then p.imported[cursor] = nil end end
+			p.consentFloors = p.consentFloors or {}; p.consentFloors[ns.Fold(subject)] = f[2]
+			p.consents[ns.Fold(subject)] = nil
+			for cursor, c in pairs(p.imported) do if Same(H().Parse(c.text).subject, subject) then p.imported[cursor] = nil end end
 			acknowledge(); Changed()
 		end)
 	elseif lane == "U" then
 		local token = H().ReadPayload(payload)
-		if not token or Count(token) ~= 2 or not Serving(p) or not Same(sender, p.data.destinationMaster) or not Name(token.subject)
-			or not Hex(token.nonce, 16) or not p.subjects[ns.Fold(token.subject)] then return false end
-		p.requests[ns.Fold(token.subject)] = { nonce = token.nonce, at = Clock(), name = token.subject }
+		if not token or Count(token) ~= 4 or not Serving(p) or not Same(sender, p.data.destinationMaster) or not Name(token.subject)
+			or not Name(token.delegate) or not Hex(token.nonce, 16) or not IdentityPair(token.subject, token.delegate, token.identityId)
+			or not p.subjects[ns.Fold(token.subject)] then return false end
+		p.requests[ns.Fold(token.subject)] = { nonce = token.nonce, at = Clock(), name = token.subject,
+			delegate = token.delegate, identityId = token.identityId }
 		acknowledge(); return true
 	elseif lane == "T" then
 		if not Target(p) or not Same(sender, p.data.sourceMaster) or not p.indexClosed or page < 1 or page > p.data.count then return false end
 		local c, row = Capsule(payload), H().ReadPayload(p.index[page])
 		local r = c and H().Parse(c.text); local token = r and p.consents[ns.Fold(r.subject)]
 		if not r or not row or not token or not Same(r.subject, row.subject) or not Same(r.issuer, p.data.sourceMaster)
+			or not IdentityPair(r.subject, token.signer or token.name, token.identityId or "-")
 			or r.guid ~= p.data.sourceGuid or r.guild ~= p.data.source or Sha(payload) ~= row.hash then return false end
 		local pin = p.approvals.S
 		local pk, sig = ns.Ed25519.FromB64(c.pk), ns.Ed25519.FromB64(c.sig)
 		if not pin or pin.pk ~= c.pk or not pk or #pk ~= 32 or not sig or #sig ~= 64 then return false end
 		return Run(function() return ns.Ed25519.Verify(pk, c.text, sig) == true end, function(ok)
-			if not ok or not Target(p) or p.consents[ns.Fold(r.subject)] ~= token then acknowledge(false); return end
+			if not ok or not Target(p) or p.consents[ns.Fold(r.subject)] ~= token
+				or not IdentityPair(r.subject, token.signer or token.name, token.identityId or "-") then acknowledge(false); return end
 			p.imported[page] = Copy(c); acknowledge(); Changed()
 		end)
 	elseif lane == "R" then
