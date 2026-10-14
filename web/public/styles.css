@@ -1412,37 +1412,6 @@ textarea.input {
 	font-size: 13px;
 }
 
-.identity-optin {
-	width: 100%;
-	margin-top: 10px;
-	padding-top: 18px;
-	border-top: 1px solid var(--line);
-}
-
-.identity-commands {
-	display: grid;
-	gap: 12px;
-	width: 100%;
-	margin: 0;
-	padding: 0;
-	list-style: none;
-}
-
-.identity-commands li {
-	display: grid;
-	gap: 7px;
-	min-width: 0;
-}
-
-.identity-commands code {
-	overflow-wrap: anywhere;
-	padding: 10px;
-	border: 1px solid var(--line);
-	border-radius: 8px;
-	background: var(--inset);
-	font-size: 12px;
-}
-
 .card-done .actions {
 	justify-content: center;
 }

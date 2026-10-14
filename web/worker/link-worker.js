@@ -23,7 +23,6 @@ import {
 	codeError,
 	failure,
 	handleInbox,
-	handleIdentity,
 	handleKeys,
 	handleProof,
 	issueCode,
@@ -66,9 +65,6 @@ export {
 	councilCertificate,
 	manageKeys,
 	forgetUser,
-	issueIdentitySnapshots,
-	parseIdentitySnapshot,
-	verifyIdentitySnapshot,
 	pruneLink,
 	ed25519Verify,
 } from './link-core.mjs';
@@ -110,9 +106,6 @@ export async function handleLink(request, env, ctx, { getUser = sessionUser } = 
 			case 'OPTIONS /api/link/proof':
 			case 'POST /api/link/proof':
 				return await handleProof(request, env, roles);
-			case 'OPTIONS /api/link/identity':
-			case 'POST /api/link/identity':
-				return await handleIdentity(request, env);
 			case 'POST /api/link/inbox':
 				return await handleInbox(request, env, roles);
 			case 'POST /api/link/keys':

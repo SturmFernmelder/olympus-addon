@@ -7,9 +7,6 @@
 export const CONFIG = {
 	// The bot's POST /proof, the whole address (https://...). It gets {"text", "discordToken"}.
 	PROOF_URL: 'PASTE-THE-PROOF-URL-HERE',
-	// The same service's consented identity endpoint. Until this exact HTTPS URL is set, the page
-	// offers no identity publication control.
-	IDENTITY_URL: 'PASTE-THE-IDENTITY-URL-HERE',
 	// The bot's Discord application (Developer Portal > OAuth2 > Client ID): digits only. Its OAuth2
 	// redirects must list PAGE_URL exactly.
 	DISCORD_CLIENT_ID: 'PASTE-THE-DISCORD-CLIENT-ID-HERE',

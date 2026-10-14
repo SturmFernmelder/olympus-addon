@@ -49,8 +49,6 @@ local L = ns.L
 --   DC~1~<public key>    a councillor's addon asks the author's for a certificate (WHISPER; only
 --                        with ns.LINK_COUNCIL_AUTHORITY on, off by default)
 --   DE~<certificate>     the author's addon answers it (WHISPER; the same)
---   DI~<OLI1 token>      a consented, backend-signed one-human identity line (CHANNEL; it may be
---                        carried in Codec.Chunk pieces and is never echoed by a receiver)
 -- Certificate: OLK2.<keyId>.<public key, base64url>.<tier c|p>.<exp>.<Name-Realm>.<sig>, a
 -- signature over all but the last field (UTF-8) by one of the bot's keys, or, tier c only and for a
 -- key whose id is the first 12 hex of SHA-256(<its 32 bytes>), by one of the council authority's
@@ -168,7 +166,6 @@ local recent = {}          -- when our key confirmed, the last minute (every req
 local inboxTried = {}      -- watcher: [requester] = when their last link was checked
 local checking, nChecking = {}, 0 -- watcher: [requester] = true while their link is checked
 local inAsm = ns.Codec.NewAssembler() -- watcher: proofs arriving in pieces
-local identityJobs, nIdentityJobs = {}, 0 -- OLI1 signatures checked at once
 local bundleId = 0
 local stats = { confirmed = 0, refused = 0, kept = 0, badProofs = 0, badCerts = 0, badBundles = 0, certified = 0 }
 local lastAnnounce, lastWatch, lastPrune = -math.huge, -math.huge, -math.huge
@@ -252,21 +249,6 @@ function Link.ParseCert(s)
 		return nil
 	end
 	return { id = id, pub = pub, tier = tier, exp = tonumber(exp), name = name, sig = sig, signed = s:sub(1, #s - 87), text = s }
-end
-
--- One compact identity assertion. The backend emits one per exact full character name, all with
--- the same opaque subject and revision after the Discord account explicitly consents. Keeping
--- each line below 255 bytes lets the page give the player ordinary pasteable WoW commands.
-function Link.ParseIdentity(s)
-	if type(s) ~= "string" or #s > 255 then return nil end
-	s = s:match("^%s*(.-)%s*$")
-	local subject, revision, issued, expires, consent, character, sig =
-		s:match("^OLI1~([^~]*)~([^~]*)~([^~]*)~([^~]*)~([^~]*)~([^~]+)~([^~]*)$")
-	if not subject or not Hex(subject, 32) or not Time(revision) or not Time(issued) or not Time(expires)
-		or consent ~= "1" or not Link.ValidName(character) or not Sig(sig) then return nil end
-	return { version = 1, subject = subject, revision = tonumber(revision), issued = tonumber(issued),
-		expires = tonumber(expires), consent = true, character = character, sig = sig,
-		signed = s:sub(1, #s - #sig - 1), text = s }
 end
 
 -- The id of a key the council authority certifies: the first 12 hex of SHA-256 of its 32 bytes.
@@ -419,140 +401,12 @@ local function Store()
 	local db = ns.db
 	if type(db.discord) ~= "table" then db.discord = {} end
 	local d = db.discord
-	for _, k in ipairs({ "chars", "given", "inbox", "watch", "keys", "nokey", "identities", "identityRevisions" }) do
+	for _, k in ipairs({ "chars", "given", "inbox", "watch", "keys", "nokey" }) do
 		if type(d[k]) ~= "table" then d[k] = {} end
 	end
 	return d
 end
 Link.Store = Store
-
--- ---------------------------------------------------------------------------
--- Consented identity relay. Only a backend signature makes a record; the immutable subject is
--- opaque and a pair is exposed only at the newest revision this client has heard for it. A
--- received relay is stored but never echoed, so the channel cannot form a loop.
-
-Link.IDENTITY_DAYS = 7
-Link.IDENTITY_MAX = 2000
-Link.IDENTITY_JOBS = 4
-
-local function PruneIdentities(now, create)
-	local d = ns.db and ns.db.discord
-	if type(d) ~= "table" or type(d.identities) ~= "table" or type(d.identityRevisions) ~= "table" then
-		if not create then return nil end
-		d = Store()
-	end
-	local live, order = {}, {}
-	for name, rec in pairs(d.identities) do
-		if type(rec) ~= "table" or rec.version ~= 1 or not Link.ValidName(name) or rec.character ~= name
-			or not Hex(rec.subject, 32) or type(rec.revision) ~= "number" or rec.revision < 1
-			or type(rec.issued) ~= "number" or type(rec.expires) ~= "number" or rec.expires <= now
-			or rec.expires <= rec.issued or rec.expires - rec.issued > Link.IDENTITY_DAYS * 86400
-			or rec.consent ~= true or Link.ParseIdentity(rec.token) == nil then
-			d.identities[name] = nil
-		else
-			live[rec.subject] = math.max(live[rec.subject] or 0, rec.revision)
-			order[#order + 1] = rec
-		end
-	end
-	for subject, revision in pairs(d.identityRevisions) do
-		if not Hex(subject, 32) or type(revision) ~= "number" or not live[subject] then d.identityRevisions[subject] = nil
-		else d.identityRevisions[subject] = math.max(revision, live[subject]) end
-	end
-	for subject, revision in pairs(live) do d.identityRevisions[subject] = math.max(d.identityRevisions[subject] or 0, revision) end
-	if #order > Link.IDENTITY_MAX then
-		table.sort(order, function(a, b) return a.expires < b.expires end)
-		for i = 1, #order - Link.IDENTITY_MAX do d.identities[order[i].character] = nil end
-	end
-	return d
-end
-Link.PruneIdentities = PruneIdentities
-
-local function KeepIdentity(p, now)
-	local d = PruneIdentities(now, true)
-	local known = tonumber(d.identityRevisions[p.subject]) or 0
-	if p.revision < known then return false, "old" end
-	local old = d.identities[p.character]
-	if type(old) == "table" and old.expires > now then
-		if old.subject ~= p.subject then return false, "other" end
-		if old.revision > p.revision then return false, "old" end
-		if old.revision == p.revision and old.token ~= p.text then return false, "conflict" end
-		if old.token == p.text then return true, "same" end
-	end
-	d.identityRevisions[p.subject] = math.max(known, p.revision)
-	d.identities[p.character] = { version = 1, subject = p.subject, revision = p.revision, issued = p.issued,
-		expires = p.expires, consent = true, character = p.character, token = p.text }
-	return true, "new"
-end
-
-local Identity = {}
-ns.LinkIdentity = Identity
-
-function Identity.SubjectOf(name)
-	if type(name) ~= "string" then return nil end
-	local d = PruneIdentities(ServerTime())
-	if not d then return nil end
-	local rec = d.identities[name]
-	if type(rec) ~= "table" or rec.revision ~= d.identityRevisions[rec.subject] then return nil end
-	return rec.subject, rec
-end
-
-function Identity.VerifiedPair(a, b)
-	if type(a) ~= "string" or type(b) ~= "string" or a == b then return nil end
-	local d = PruneIdentities(ServerTime())
-	if not d then return nil end
-	local x, y = d.identities[a], d.identities[b]
-	if type(x) ~= "table" or type(y) ~= "table" or x.subject ~= y.subject or x.revision ~= y.revision
-		or x.revision ~= d.identityRevisions[x.subject] or x.consent ~= true or y.consent ~= true then return nil end
-	return { version = 1, id = x.subject, issued = math.max(x.issued, y.issued), expires = math.min(x.expires, y.expires),
-		revision = x.revision, bothConsented = true, names = { a, b } }
-end
-
-local function IdentityResult(localRequest, ok, why, character)
-	if not localRequest then return end
-	if ok and why == "new" then ns.Print(L.LINK_IDENTITY_IMPORTED:format(character))
-	elseif ok and why == "same" then ns.Print(L.LINK_IDENTITY_ALREADY:format(character))
-	elseif why == "old" then ns.Print(L.LINK_IDENTITY_OLD)
-	else ns.Print(L.LINK_IDENTITY_BAD) end
-end
-
-function Link.ImportIdentity(text, relay, quiet)
-	local p = Link.ParseIdentity(text)
-	local localRequest = quiet ~= true
-	if not p or not Link.BotReady() then IdentityResult(localRequest, false) return false end
-	local now = ServerTime()
-	if p.issued > now + Link.CLOCK_SKEW or p.expires <= now or p.expires <= p.issued
-		or p.expires - p.issued > Link.IDENTITY_DAYS * 86400 then IdentityResult(localRequest, false) return false end
-	if identityJobs[p.text] or nIdentityJobs >= Link.IDENTITY_JOBS then
-		if localRequest then ns.Print(L.LINK_BUSY) end
-		return false
-	end
-	identityJobs[p.text], nIdentityJobs = true, nIdentityJobs + 1
-	if localRequest then ns.Print(L.LINK_IDENTITY_CHECKING) end
-	local queued = Ed.Run(function() return BotSigned(p) end, function(ok, valid)
-		identityJobs[p.text], nIdentityJobs = nil, nIdentityJobs - 1
-		local current = ServerTime()
-		if not ok or not valid or p.issued > current + Link.CLOCK_SKEW or p.expires <= current then
-			IdentityResult(localRequest, false)
-			return
-		end
-		local kept, why = KeepIdentity(p, current)
-		IdentityResult(localRequest, kept, why, p.character)
-		if kept and why == "new" and relay == true then
-			ns.Comm.SendChunked("DI~" .. p.text, false, "CHANNEL")
-		end
-	end)
-	if not queued then
-		identityJobs[p.text], nIdentityJobs = nil, nIdentityJobs - 1
-		if localRequest then ns.Print(L.LINK_BUSY) end
-		return false
-	end
-	return true
-end
-
-function Link.HandleIdentity(dist, sender, text)
-	if dist ~= "CHANNEL" or type(text) ~= "string" or text:sub(1, 3) ~= "DI~" then return end
-	Link.ImportIdentity(text:sub(4), false, true)
-end
 
 -- This character's record, without making the store for a player who never used Olympus Link.
 local function MyRecord()
@@ -2372,8 +2226,6 @@ function Link.Slash(rest)
 		else
 			ns.Print(ns.IsHighCouncillor(ns.me) and L.LINK_WATCHER_OFF or L.LINK_WATCHER_ONLY)
 		end
-	elseif verb == "identity" then
-		if arg == "" then ns.Print(L.LINK_IDENTITY_USAGE) else Link.ImportIdentity(arg, true) end
 	else
 		Link.Enter(rest)
 	end
@@ -2501,7 +2353,6 @@ end
 function Link.Tick()
 	local now = ns.Now()
 	if now - lastPrune >= 60 then Prune(now) end
-	PruneIdentities(ServerTime())
 	Link.CouncilKeyStep(now)
 	Link.Announce()
 	Link.AnnounceWatcher()
@@ -2525,7 +2376,6 @@ ns.Comm.Handle("DB", function(...) Link.HandleBundle(...) end)
 ns.Comm.Handle("DK", function(...) Link.HandleAck(...) end)
 ns.Comm.Handle("DC", function(...) Link.HandleCertRequest(...) end)
 ns.Comm.Handle("DE", function(...) Link.HandleCertificate(...) end)
-ns.Comm.Handle("DI", function(...) Link.HandleIdentity(...) end)
 
 -- Tests start from a clean state.
 function Link.Request() return req end
@@ -2541,9 +2391,9 @@ function Link.Reset()
 	announced, making, auto, caPub = nil, nil, {}, nil
 	ca = { given = {}, hour = {} }
 	if ns.Comm.senderHook == Link.HeardFrom then ns.Comm.senderHook = nil end
-	wipe(announcers); wipe(watchers); wipe(recent); wipe(sentTo); wipe(inboxTried); wipe(certs); wipe(certJobs); wipe(certNewAt); wipe(checking); wipe(identityJobs)
+	wipe(announcers); wipe(watchers); wipe(recent); wipe(sentTo); wipe(inboxTried); wipe(certs); wipe(certJobs); wipe(certNewAt); wipe(checking)
 	inAsm = ns.Codec.NewAssembler()
-	nAnnouncers, nCerts, nCertJobs, nChecking, nIdentityJobs, lastAnnounce, lastWatch, lastPrune = 0, 0, 0, 0, 0, -math.huge, -math.huge, -math.huge
+	nAnnouncers, nCerts, nCertJobs, nChecking, lastAnnounce, lastWatch, lastPrune = 0, 0, 0, 0, -math.huge, -math.huge, -math.huge
 	for k in pairs(stats) do stats[k] = 0 end
 	qr = {}
 	if frame then frame:Hide() end

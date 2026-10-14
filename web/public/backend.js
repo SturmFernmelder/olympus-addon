@@ -24,17 +24,9 @@ export function isConfigured(config = CONFIG) {
 	return proofUrl(config) !== null && CLIENT_ID_RE.test(String(config.DISCORD_CLIENT_ID || ''));
 }
 
-export function isIdentityConfigured(config = CONFIG) {
-	return endpointUrl(config.IDENTITY_URL) !== null && CLIENT_ID_RE.test(String(config.DISCORD_CLIENT_ID || ''));
-}
-
 function proofUrl(config) {
-	return endpointUrl(config.PROOF_URL);
-}
-
-function endpointUrl(value) {
 	try {
-		const u = new URL(String(value || ''));
+		const u = new URL(String(config.PROOF_URL || ''));
 		const local = u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1');
 		return (u.protocol === 'https:' || local) && !u.username && !u.password && !u.hash ? u : null;
 	} catch {
@@ -53,16 +45,11 @@ export function forgetRequest(config, discordToken) {
 	return request(config, { forget: true, discordToken });
 }
 
-// Explicit opt-in: this is never called by linking, signing in or loading the page.
-export function identityRequest(config, discordToken) {
-	return request(config, { publish: true, discordToken }, endpointUrl(config.IDENTITY_URL));
-}
-
-function request(config, body, url = proofUrl(config)) {
+function request(config, body) {
 	const headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
 	if (config.SITE_TOKEN) headers.Authorization = `Bearer ${config.SITE_TOKEN}`;
 	return {
-		url: String(url || ''),
+		url: String(config.PROOF_URL),
 		init: {
 			method: 'POST',
 			mode: 'cors',
@@ -145,14 +132,11 @@ export function createBackend({ config = CONFIG, demo = null, fetchImpl = global
 	return {
 		demo: null,
 		configured: isConfigured(config),
-		identityConfigured: isIdentityConfigured(config),
 		loginUrl: (state, redirect) => authorizeUrl(config, { state, redirect }),
 		// { status: 'linked' | 'rejected' | 'error', reason, message, username, characters }
 		submit: (text, token) => answerOf(fetchImpl, proofRequest(config, text, token)),
 		// { status: 'forgotten' | 'error', reason, message, username, characters (the ones removed) }
 		forget: (token) => answerOf(fetchImpl, forgetRequest(config, token)),
-		// { status: 'published', tokens: [{ character, token, command }], expires }
-		publishIdentity: (token) => answerOf(fetchImpl, identityRequest(config, token)),
 	};
 }
 
@@ -175,7 +159,6 @@ function demoBackend(state) {
 	return {
 		demo: state,
 		configured: state !== 'closed',
-		identityConfigured: false,
 		loginUrl: () => '#demo-login',
 		async submit(bundle) {
 			if (state === 'found') return never(); // the screenshot shows it sending

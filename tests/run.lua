@@ -17531,13 +17531,12 @@ local function WithLink(fn)
 		discord = ns.db.discord, mine = ns.db.myCharacters, keys = ns.LINK_BACKEND_KEYS, after = Ed.after, slice = Ed.SLICE_MS,
 		owner = ns.LINK_WATCHER_OWNER, byName = ns.Roster.byName, rosterGuild = ns.Roster.guild, caKeys = ns.LINK_CA_KEYS,
 		caSeed = ns.LINK_CA_SEED, nextFrame = Link.nextFrame, sample = Link.EntropySample, hook = ns.Comm.senderHook,
-		caOn = ns.LINK_COUNCIL_AUTHORITY, Chunked = ns.Comm.SendChunked }
-	local w = { sent = {}, chunked = {}, whispered = {}, popups = {}, printed = {}, frames = {}, clock = 1799990000 }
+		caOn = ns.LINK_COUNCIL_AUTHORITY }
+	local w = { sent = {}, whispered = {}, popups = {}, printed = {}, frames = {}, clock = 1799990000 }
 	local ok, err = pcall(function()
 		Link.Reset(); Ed.Reset(); ns.Who.Reset()
 		ns.Now = function() return w.clock end
 		ns.Comm.Send = function(dist, msg, key) w.sent[#w.sent + 1] = { dist = dist, msg = msg, key = key } end
-		ns.Comm.SendChunked = function(msg) w.chunked[#w.chunked + 1] = msg return true end
 		ns.Comm.Whisper = function(to, msg, key) w.whispered[#w.whispered + 1] = { to = to, msg = msg, key = key } end
 		StaticPopup_Show = function(name, a, b, data) w.popups[#w.popups + 1] = { name = name, a = a, b = b, data = data } end
 		ns.Print = function(m) w.printed[#w.printed + 1] = tostring(m) end
@@ -17565,7 +17564,6 @@ local function WithLink(fn)
 	ns.LINK_WATCHER_OWNER, ns.Roster.byName, ns.Roster.guild = saved.owner, saved.byName, saved.rosterGuild
 	ns.LINK_CA_KEYS, ns.LINK_CA_SEED, Link.nextFrame, Link.EntropySample = saved.caKeys, saved.caSeed, saved.nextFrame, saved.sample
 	ns.LINK_COUNCIL_AUTHORITY = saved.caOn
-	ns.Comm.SendChunked = saved.Chunked
 	Link.Reset(); Ed.Reset(); ns.Who.Reset()
 	ns.Comm.senderHook = saved.hook
 	if not ok then error(err, 0) end
@@ -17657,49 +17655,6 @@ end
 local function MyBundle(name)
 	return (SAMPLE[name or "bundle_council"]:gsub("Some Player%-ClassicBetaPvP", "Some Player-Realm"))
 end
-
-local function IdentityToken(name, revision, issued, subject, seed)
-	local expires = issued + 7 * 86400
-	local signed = ("OLI1~%s~%d~%d~%d~1~%s"):format(subject or "0123456789abcdef0123456789abcdef", revision or 1, issued, expires, name)
-	return signed .. "~" .. Ed.ToB64(Ed.Sign(seed or BACKEND_SEED, signed))
-end
-
-test("Olympus Link: signed identity snapshots require consent, exact current names and one non-regressive revision", function()
-	WithLink(function(w)
-		local a, b = "Some Player-Realm", "Some Alt-Realm"
-		local ta = IdentityToken(a, 1, w.clock)
-		local tb = IdentityToken(b, 1, w.clock)
-		local parsed = Link.ParseIdentity(ta)
-		eq(parsed.character, a); eq(parsed.consent, true); eq(parsed.revision, 1)
-		eq(Link.ParseIdentity((ta:gsub("~1~([^~]+)~([^~]+)$", "~0~%1~%2"))), nil, "no consent")
-		eq(ns.LinkIdentity.VerifiedPair(a, b), nil, "no unsigned claim")
-
-		assert(Link.ImportIdentity(ta, true)); RunFrames(w)
-		eq(#w.chunked, 1); eq(w.chunked[1], "DI~" .. ta)
-		eq(ns.LinkIdentity.VerifiedPair(a, b), nil, "both exact names required")
-		assert(Link.ImportIdentity(tb, true)); RunFrames(w)
-		local proof = assert(ns.LinkIdentity.VerifiedPair(a, b))
-		eq(proof.version, 1); eq(proof.id, "0123456789abcdef0123456789abcdef")
-		eq(proof.revision, 1); eq(proof.bothConsented, true)
-		eq(ns.LinkIdentity.VerifiedPair(a:lower(), b), nil, "exact full name")
-
-		local bad = ta:sub(1, -2) .. (ta:sub(-1) == "A" and "B" or "A")
-		Link.HandleIdentity("CHANNEL", "Relay-Realm", "DI~" .. bad); RunFrames(w)
-		eq(ns.LinkIdentity.VerifiedPair(a, b).revision, 1, "a bad relay changes nothing")
-
-		local ta2 = IdentityToken(a, 2, w.clock + 10)
-		local tb2 = IdentityToken(b, 2, w.clock + 10)
-		Link.HandleIdentity("CHANNEL", "Relay-Realm", "DI~" .. ta2); RunFrames(w)
-		eq(ns.LinkIdentity.VerifiedPair(a, b), nil, "a partial newer snapshot fails closed")
-		Link.HandleIdentity("CHANNEL", "Relay-Realm", "DI~" .. tb2); RunFrames(w)
-		eq(ns.LinkIdentity.VerifiedPair(a, b).revision, 2)
-		Link.HandleIdentity("CHANNEL", "Relay-Realm", "DI~" .. ta); RunFrames(w)
-		eq(ns.LinkIdentity.VerifiedPair(a, b).revision, 2, "revision rollback refused")
-
-		w.clock = w.clock + 8 * 86400
-		eq(ns.LinkIdentity.VerifiedPair(a, b), nil, "expired proofs fail closed")
-	end)
-end)
 
 test("Olympus Link: SHA-512 against FIPS 180-4's examples and every padding boundary", function()
 	local cases = {

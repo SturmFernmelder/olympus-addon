@@ -1947,9 +1947,7 @@ The Olympus bot (Fernmelder's, on Discord) issues the codes, checks every proof 
 the Olympus Link page is a static page on this repository's GitHub Pages
 (<https://dnl-gentile.github.io/olympus-addon/>, from `web/public/`) that only reads the proof and
 sends it to the bot. The bot's side is in [`web/FERN.md`](web/FERN.md), every detail in
-[`web/WORKER.md`](web/WORKER.md). The production-shaped 1.2.4 deployment uses Cloud Run,
-Firestore and Secret Manager, without a VPS or Cloudflare; its fail-closed template and runbook
-are in [`web/gcp/README.md`](web/gcp/README.md).
+[`web/WORKER.md`](web/WORKER.md).
 
 1. **Get a code** from the Olympus bot on Discord (its `/verify` command, in the Olympus
    server: only you see the reply). It looks like
@@ -1995,19 +1993,6 @@ with Discord: the bot takes the role away and deletes everything it keeps about 
 account (your linked characters, codes and their history) except how many codes and links you
 used today, counted for a day at most. You can link again later with a new code (3 a day, the
 ones before the delete included).
-
-**Optional one-human proof (1.2.4).** After linking, the page offers a separate **Publish my
-linked-character identity** button. Nothing is published by signing in, opening the page or
-linking alone. With that explicit consent, the backend signs one compact `OLI1` command for each
-currently linked exact `Name-Realm`. The commands carry the same stable opaque subject, never a
-Discord id or username, and expire after seven days. Paste each command in game; the addon checks
-the backend signature before storing it and relays a new proof once on the Olympus channel.
-Receivers verify it independently and never echo it. `ns.LinkIdentity.VerifiedPair(a, b)` returns
-a proof only when both exact names have current signed lines of the same revision and subject;
-missing, malformed, expired, partially updated or unsigned data returns nothing. This is a narrow
-identity input for governance counts, not a rank, permission, punishment or automatic action.
-Until both the real endpoint and public key are configured, the page hides the control and the
-addon accepts no proof.
 
 **For confirmers and watchers.** A confirmer's key belongs to one character, and so does its
 certificate, which names it: another character of the same account confirms nothing with it.

@@ -94,17 +94,6 @@ CREATE TABLE IF NOT EXISTS members (
 );
 CREATE INDEX IF NOT EXISTS members_by_user ON members (discord_id);
 
--- A consenting Discord account's opaque identity set. The stable subject is an HMAC of the
--- Discord id with a separate Secret Manager key; only the signed OLI1 tokens leave the service.
--- A publication advances the revision and emits one compact token per currently linked character.
-CREATE TABLE IF NOT EXISTS identity_snapshots (
-  discord_id TEXT PRIMARY KEY,
-  subject    TEXT NOT NULL UNIQUE                 -- 32 lowercase hex, never a Discord id
-             CHECK (length(subject) = 32 AND subject NOT GLOB '*[^0-9a-f]*'),
-  revision   INTEGER NOT NULL CHECK (revision > 0),
-  issued     INTEGER NOT NULL
-);
-
 -- Every bundle received, from the page ('site') or the watcher tool ('watcher'): the audit
 -- trail, and the page's rate limit.
 CREATE TABLE IF NOT EXISTS inbox_uploads (
