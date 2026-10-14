@@ -124,7 +124,7 @@ test("Wanted last seen: an old zone stays dated on the list and map, focuses wit
 		c.Wanted.CanManage = function() return true end
 		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
 		local stored = assert(c.rdb.wanted.targets["g:" .. guid])
-		stored.base = { lifetimeKills = 1, lastSighting = { zone = "Elwynn Forest", at = 1799000000,
+		stored.base = { lifetimeKills = 1, lastSighting = { zone = "Bosque de Elwynn", mapID = 1429, at = 1799000000,
 			precision = "approximate", evidence = "SELF_DEATH" } }
 		c.Wanted.Rebuild()
 
@@ -135,7 +135,7 @@ test("Wanted last seen: an old zone stays dated on the list and map, focuses wit
 			if line.id == "wanted-location:g:" .. guid then location = line end
 		end
 		assert(target and location and location.onClick, "the list has a dated, actionable last-seen row")
-		assert(location.text:find("Elwynn Forest", 1, true), location.text)
+		assert(location.text:find("Bosque de Elwynn", 1, true), location.text)
 		assert(location.text:find(date("%Y-%m-%d %H:%M", 1799000000), 1, true), location.text)
 		assert(location.text:find("1000000s", 1, true), location.text)
 		assert(location.onClick())
@@ -166,6 +166,15 @@ test("Wanted last seen: an old zone stays dated on the list and map, focuses wit
 		end
 		assert(observed and observed.text:find(date("%Y-%m-%d %H:%M", 1800000000), 1, true),
 			"native in-game observation gets its own dated line")
+	end)
+end)
+
+test("Wanted map refresh: gamepad gate is checked before the periodic path reads WorldMapFrame", function()
+	WithMapWanted(function(c)
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		c.Gate.Allowed = function(key) return key ~= "wanted-map" end
+		WorldMapFrame.IsShown = function() error("WorldMapFrame was read outside the wanted-map gate") end
+		assert(c.Wanted.RefreshPins())
 	end)
 end)
 

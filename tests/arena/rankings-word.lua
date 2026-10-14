@@ -199,3 +199,16 @@ test("1.2.4 rankings word: a holder answers an ask on the channel at the army's 
 	eq(Public(w, late, "bones"), true)
 	NoErrors(w)
 end)
+
+test("1.2.4 rankings word: a refused catch-up ask may retry in the same session", function()
+	local w = World.New()
+	local late = w:Client("Parric Stowe")
+	local send = late.ns.Arena.Send
+	late.ns.Arena.Send = function() return false, "off" end
+	eq(w:As(late, late.ns.ArenaRoles.AskPublish), nil, "the refused ask was not accepted")
+	late.ns.Arena.Send = send
+	assert(w:As(late, late.ns.ArenaRoles.AskPublish), "the same session retries after transport returns")
+	w:Run(0)
+	eq(#AUs(w, late), 1)
+	NoErrors(w)
+end)

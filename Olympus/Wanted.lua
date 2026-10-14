@@ -326,7 +326,8 @@ local function Sighting(value)
 	local zone, at = Clean(value.zone, 80), Whole(value.at, 0, 4294967295)
 	if not zone or not at then return nil end
 	return { zone = zone, at = at, precision = value.precision == "consented" and "consented" or "approximate",
-		evidence = value.evidence == "SELF_DEATH" and "SELF_DEATH" or "PARTY_KILL" }
+		evidence = value.evidence == "SELF_DEATH" and "SELF_DEATH" or "PARTY_KILL",
+		mapID = Whole(value.mapID, 1, 9999999) }
 end
 
 local CopySlayers
@@ -680,7 +681,8 @@ local function ApplyEvidence(s, e)
 	else
 		return false
 	end
-	if e.zone then t.lastSighting = { zone = e.zone, at = e.at, precision = e.precision, evidence = e.kind } end
+	if e.zone then t.lastSighting = { zone = e.zone, at = e.at, precision = e.precision, evidence = e.kind,
+		mapID = Whole(e.mapID, 1, 9999999) } end
 	return true
 end
 
@@ -950,7 +952,12 @@ end
 local function Zone()
 	if type(GetRealZoneText) ~= "function" then return nil end
 	local ok, zone = pcall(GetRealZoneText)
-	return ok and Clean(zone, 80) or nil
+	local mapID
+	if type(C_Map) == "table" and type(C_Map.GetBestMapForUnit) == "function" then
+		local mapOK, value = pcall(C_Map.GetBestMapForUnit, "player")
+		if mapOK and not Secret(value) then mapID = Whole(value, 1, 9999999) end
+	end
+	return ok and Clean(zone, 80) or nil, mapID
 end
 
 local function InInstance()
@@ -1235,7 +1242,7 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	s.seq = s.seq + 1
 	local e = { id = id, seq = s.seq, at = now, month = peer and opts.month or MonthNow(), kind = kind, action = action,
 		targetKey = target.key, killerName = killer.name, killerGuid = killer.guid, victimName = victim.name, victimGuid = victim.guid,
-		zone = opts.zone, precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
+		zone = opts.zone, mapID = Whole(opts.mapID, 1, 9999999), precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
 		peer = peer or nil, own = opts.own == true or nil, earlier = earlier or nil }
 	if worth then e.office, e.ml, e.hl, e.hf = worth.office, worth.ml, worth.hl, worth.hf or nil end
 	-- (1.2.4 repair: a member's claim keeps the guild its row named, for the avenged notice's words
@@ -1281,8 +1288,9 @@ function Wanted.CaptureCombatLog(...)
 	if Secret(timestamp, subevent, sourceGuid, sourceName, destGuid, destName) then return false, "secret" end
 	if subevent ~= "PARTY_KILL" then return false, "event" end
 	if not sourceGuid or not sourceName or not destGuid or not destName then return false, "identities" end
+	local zone, mapID = Zone()
 	return RecordKill("PARTY_KILL", tostring(timestamp or ""), { name = sourceName, guid = sourceGuid },
-		{ name = destName, guid = destGuid }, { zone = Zone(), precision = "approximate" })
+		{ name = destName, guid = destGuid }, { zone = zone, mapID = mapID, precision = "approximate" })
 end
 
 -- Native frame event, distinct from the CLEU subevent: UnitDocumentation.lua, PartyKill (Forever
@@ -1303,8 +1311,9 @@ function Share.PartyKill(attackerGUID, targetGUID)
 	local horde, why = Share.HordeOf(victim)
 	if not horde then return false, why end
 	-- (1.2.3: what the kill is worth, frozen here: his level on his corpse, Bounty.Capture.)
+	local zone, mapID = Zone()
 	local ok, e = RecordKill("PARTY_KILL", "native:" .. tostring(math.floor(Clock())), mine, horde,
-		{ zone = Zone(), precision = "approximate", horde = "victim", own = true, bounty = Bounty.Capture(horde.guid) })
+		{ zone = zone, mapID = mapID, precision = "approximate", horde = "victim", own = true, bounty = Bounty.Capture(horde.guid) })
 	if ok then Share.Send(e) end
 	return ok, e, horde.name
 end
@@ -1359,8 +1368,9 @@ local function ReadSelfDeathRecap()
 	local horde, refusal = Bounty.Hostile(kb)
 	if not horde then return false, refusal, kb.name end
 	-- (Dated by its killing blow, not when it was read: RecordKill.)
+	local zone, mapID = Zone()
 	local ok, e = RecordKill("SELF_DEATH", "native:" .. tostring(kb.stamp), horde, mine,
-		{ zone = Zone(), precision = "approximate", horde = "killer", own = true, at = kb.at, bounty = Bounty.Capture(horde.guid) })
+		{ zone = zone, mapID = mapID, precision = "approximate", horde = "killer", own = true, at = kb.at, bounty = Bounty.Capture(horde.guid) })
 	-- (1.2.4: and the toast, at the death: a retry's second reading is a replay, so once a death.)
 	if ok then Share.Send(e) Bounty.DeathToast(e) end
 	return ok, e, horde.name
@@ -2216,7 +2226,7 @@ function Wanted.LastSeen(t)
 	if not Wanted.CanSeeLocations() or type(t) ~= "table" then return nil end
 	local old, live = t.lastSighting, Wanted.LiveSighting(t)
 	if type(old) == "table" and type(old.at) == "number" and (not live or old.at > live.at) then
-		return { source = "ledger", at = old.at, zone = old.zone, precision = old.precision, evidence = old.evidence }
+		return { source = "ledger", at = old.at, zone = old.zone, precision = old.precision, evidence = old.evidence, mapID = old.mapID }
 	end
 	if live then
 		local zone
@@ -3541,7 +3551,7 @@ end
 
 local SIGHT_SHOW = HBD_PINS_WORLDMAP_SHOW_PARENT or 1
 
-local function RefreshPinsNow(refreshPage)
+local function RefreshPinsNow(refreshPage) -- gp:wanted-map
 	local now = math.floor(Clock())
 	local pageChanged = refreshPage == true
 	for guid, e in pairs(pins) do
@@ -3603,8 +3613,13 @@ local function RefreshPinsNow(refreshPage)
 
 	-- Historical markers are relevant to the map currently being viewed. Restricting them to that
 	-- zone also keeps unrelated old sightings from competing with a fresh nearby marker.
-	local historyMap = historyFocus
-	if type(WorldMapFrame) == "table" and type(WorldMapFrame.IsShown) == "function"
+	local historyMap, mapAllowed = historyFocus, false
+	local G = ns.Gate
+	if type(G) == "table" and type(G.Allowed) == "function" then
+		local ok, allowedMap = pcall(G.Allowed, "wanted-map")
+		mapAllowed = ok and allowedMap == true
+	end
+	if mapAllowed and type(WorldMapFrame) == "table" and type(WorldMapFrame.IsShown) == "function"
 		and WorldMapFrame:IsShown() and type(WorldMapFrame.GetMapID) == "function" then
 		local ok, current = pcall(WorldMapFrame.GetMapID, WorldMapFrame)
 		if ok and tonumber(current) then historyMap = tonumber(current) end
@@ -6254,7 +6269,7 @@ function Wanted.Prune()
 			local digest = type(e.digest) == "string" and e.digest:match("^%x+$") and #e.digest == 16 and e.digest or nil
 			evidence[#evidence + 1] = { id = id, seq = Whole(e.seq, 0, 2147483647) or 0, at = math.floor(e.at), month = math.floor(e.month),
 				kind = e.kind, action = e.action, targetKey = targetKey, killerName = killer.name, killerGuid = killer.guid,
-				victimName = victim.name, victimGuid = victim.guid, zone = Clean(e.zone, 80),
+				victimName = victim.name, victimGuid = victim.guid, zone = Clean(e.zone, 80), mapID = Whole(e.mapID, 1, 9999999),
 				precision = e.precision == "consented" and "consented" or "approximate", void = e.void == true,
 				correctedAt = Whole(e.correctedAt, 0, 4294967295), correctedBy = CleanName(e.correctedBy),
 				correction = Clean(e.correction, 80), from = CleanName(e.from), digest = digest,

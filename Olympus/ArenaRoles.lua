@@ -982,12 +982,13 @@ function Roles.AskPublish()
 	local lack = ""
 	for _, game in ipairs(Roles.RANK_GAMES) do if not Standing(game) then lack = lack .. Roles.GAME_LETTER[game] end end
 	if lack == "" then return nil end
-	asked = true
-	ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "CHANNEL", key = "rankpub ask" })
+	local accepted = ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "CHANNEL", key = "rankpub ask" }) == true
 	local C = ns.Comm
 	if type(C) == "table" and type(C.SpansRealms) == "function" and C.SpansRealms() == true then
-		ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "GUILD", key = "rankpub ask guild" })
+		accepted = ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "GUILD", key = "rankpub ask guild" }) == true or accepted
 	end
+	if not accepted then return nil end
+	asked = true
 	return lack
 end
 

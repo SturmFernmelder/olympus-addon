@@ -66,7 +66,7 @@ local function WithWanted(fn)
 		"UnitCanAttack", "UnitIsPVP", "issecretvalue", "IsInInstance",
 		"UnitIsDeadOrGhost", "C_DateAndTime", "C_DeathInfo", "C_DeathRecap", "CombatLogGetCurrentEventInfo", "GetGameTime", "GetFileIDFromPath",
 		"ERR_CHAT_PLAYER_NOT_FOUND_S", "GetPlayerInfoByGUID", "UnitTokenFromGUID", "UnitLevel", "GetMaxPlayerLevel", "InCombatLockdown",
-		"C_DamageMeter" }
+		"C_DamageMeter", "C_Map" }
 	local saved = {}
 	for _, name in ipairs(globals) do saved[name] = _G[name] end
 	local dialogs = {}
@@ -93,6 +93,8 @@ local function WithWanted(fn)
 			if u then return u.guild, u.rank and "Rank" .. u.rank or nil, u.rank end
 		end
 		GetRealZoneText = function() return "Warsong Gulch" end
+		C_Map = { GetBestMapForUnit = function(unit) return unit == "player" and 489 or nil end,
+			GetMapInfo = function(mapID) return mapID == 489 and { mapType = 3 } or nil end }
 		-- (1.2.3: a battleground or an arena counts no kill nor death: w.inside.)
 		IsInInstance = function() return w.inside == true, w.inside and "pvp" or "none" end
 		C_DateAndTime = { GetCurrentCalendarTime = function() return { year = w.year, month = w.month } end }
@@ -539,7 +541,8 @@ test("wanted: the own-death recap needs our own death, a recent killing blow, a 
 		eq(W.Target("Ripper-Realm").current, 0, "a killing blow that was no damage")
 		w.die(w.forever("Ripper-Realm", targetGuid))
 		local t = W.Target("Ripper-Realm")
-		eq(t.current, 1); eq(t.lastSighting.zone, "Warsong Gulch"); eq(t.lastSighting.precision, "approximate")
+		eq(t.current, 1); eq(t.lastSighting.zone, "Warsong Gulch"); eq(t.lastSighting.mapID, 489, "the stable map ID is kept beside localized text")
+		eq(t.lastSighting.precision, "approximate")
 		eq(t.victims[1].name, c.me, "the victim is our own player unit")
 		w.advance(1)
 		local ok, why = w.kill("same-death", "Ripper-Realm", targetGuid, c.me, w.units.player.guid)
