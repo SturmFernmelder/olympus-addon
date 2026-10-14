@@ -24723,10 +24723,6 @@ end
 --   C_Texture.GetAtlasInfo (an atlas missing when w.noAtlas names it; its size w.atlasSize's, 1 x 1
 --   where that names none), issecretvalue (w.secret is the secret value) and the interface style
 --   (w.style: 0 mouse and keyboard, 1 the gamepad UI).
--- - Build 70205's Camelot PvP indicator overrides: the player's rendered small-circle icon is
---   PlayerFrameContent.PlayerFrameContentMain.PvpBackgroundIcon; target and focus use
---   TargetFrameContent.TargetFrameContentContextual.PvpBackgroundIcon. The dormant Mainline
---   PVPIcon/PvpIcon siblings coexist in the XML so the stand-in includes them too, hidden.
 -- - 1.1.5, PartyFrame (w.party(), none until then): Forever's (Shared/PartyFrame.lua), its four
 --   PartyMemberFrameTemplate buttons from a pool (PartyMemberFramePool). The game's
 --   InitializePartyMemberFrames (its OnShow, at the interface's load and whenever it is shown
@@ -24737,11 +24733,10 @@ end
 --   Its own regions, as Mainline/PartyFrameTemplates.xml lays them out (w.partyRegions): the
 --   Portrait (BACKGROUND, 37 x 37 at 7, -6), its ring Texture and the member's Name (both ARTWORK,
 --   sublevel 0; the Name 57 x 12 at 46, -6, UpdateNameTextAnchors), as plain data.
-local BORDER_GLOBALS = { "TargetFrame", "FocusFrame", "PlayerFrame", "PlayerFrame_UpdatePvPStatus", "hooksecurefunc", "UnitExists", "UnitIsPlayer", "UnitGUID",
+local BORDER_GLOBALS = { "TargetFrame", "FocusFrame", "PlayerFrame", "hooksecurefunc", "UnitExists", "UnitIsPlayer", "UnitGUID",
 	"UnitFactionGroup", "UnitFullName", "GetUnitName", "GetGuildInfo", "IsInGuild", "InCombatLockdown", "issecretvalue", "C_Texture",
 	"C_InputInterfaceStyle", "PartyFrame" }
-local CONTAINER_OF = { target = "TargetFrame.TargetFrameContainer", focus = "FocusFrame.TargetFrameContainer", player = "PlayerFrame.PlayerFrameContainer",
-	playerContextual = "PlayerFrame.PlayerFrameContent.PlayerFrameContentContextual" }
+local CONTAINER_OF = { target = "TargetFrame.TargetFrameContainer", focus = "FocusFrame.TargetFrameContainer", player = "PlayerFrame.PlayerFrameContainer" }
 
 -- A player as the unit functions give it; its GUID one of its own (the same character: the same GUID).
 local function BorderUnit(name, guild, rank, rankIndex, extra)
@@ -24776,25 +24771,18 @@ local function WithBorders(fn, setup)
 		function tex:SetTexture(file)
 			Rec("SetTexture")
 			if w.noFile[file] == "error" then error("cannot load " .. tostring(file)) end
-			if w.noFile[file] or w.noFileSub == self.sub then return false end
+			if w.noFile[file] then return false end
 			self.file = file
 			return true
 		end
 		function tex:SetSize(width, height) Rec("SetSize"); self.size = width .. " " .. height; self.dims = { width, height } end
 		function tex:SetTexCoord(...) Rec("SetTexCoord"); self.coord = table.concat({ ... }, " ") end
-		function tex:SetMask(mask) Rec("SetMask"); if w.noMask then error("cannot mask") end self.mask = mask end
 		function tex:SetPoint(p, rel, rp, x, y)
 			Rec("SetPoint"); self.point = ("%s %s %s %s %s"):format(p, rel and rel.label or "?", rp, x, y)
 			self.at = { p = p, rel = rel, rp = rp, x = x, y = y }
 		end
-		function tex:GetSize() local d = self.dims or {}; return d[1] or 0, d[2] or 0 end
-		function tex:GetWidth() return self.dims and self.dims[1] or 0 end
-		function tex:GetHeight() return self.dims and self.dims[2] or 0 end
-		function tex:GetAtlas() return self.atlas end
 		function tex:SetDesaturated(on) Rec("SetDesaturated"); self.desaturated = on end
 		function tex:SetVertexColor(r, g, b) Rec("SetVertexColor"); self.color = ("%s %s %s"):format(r, g, b) end
-		function tex:SetSnapToPixelGrid(on) Rec("SetSnapToPixelGrid"); self.snapToPixelGrid = on end
-		function tex:SetTexelSnappingBias(bias) Rec("SetTexelSnappingBias"); self.texelSnappingBias = bias end
 		-- (1.2: the masks an Olympus portrait puts on its own textures, Borders.NewPortrait)
 		function tex:AddMaskTexture(mask) Rec("AddMaskTexture"); self.masks = self.masks or {}; self.masks[#self.masks + 1] = mask end
 		function tex:Show() Rec("Show"); self.shown = true end
@@ -24830,12 +24818,6 @@ local function WithBorders(fn, setup)
 		TargetFrame = UnitFrameStandIn("TargetFrame", "TargetFrameContainer", true)
 		FocusFrame = UnitFrameStandIn("FocusFrame", "TargetFrameContainer", true)
 		PlayerFrame = UnitFrameStandIn("PlayerFrame", "PlayerFrameContainer", false)
-		local playerContextual = Logged(CONTAINER_OF.playerContextual, { label = CONTAINER_OF.playerContextual })
-		rawset(playerContextual, "CreateTexture", function(_, _, layer, _, sub)
-			w.log[#w.log + 1] = CONTAINER_OF.playerContextual .. ":CreateTexture"
-			return NewTexture(CONTAINER_OF.playerContextual, layer, sub)
-		end)
-		rawset(PlayerFrame, "PlayerFrameContent", { PlayerFrameContentContextual = playerContextual })
 		PartyFrame = nil
 		w.partyRegions = {
 			Portrait = { layer = "BACKGROUND", sub = 0, x = 7, y = -6, width = 37, height = 37 },
@@ -24882,18 +24864,6 @@ local function WithBorders(fn, setup)
 			return nil
 		end
 		hooksecurefunc = function(t, key, post)
-			if type(t) == "string" then
-				post = key
-				local original = _G[t]
-				assert(type(original) == "function", "hooksecurefunc on a global function")
-				w.hooks[#w.hooks + 1] = t
-				rawset(_G, t, function(...)
-					local r = { original(...) }
-					post(...)
-					return unpack(r)
-				end)
-				return
-			end
 			local original = t[key]
 			assert(type(original) == "function", "hooksecurefunc on a function")
 			w.hooks[#w.hooks + 1] = t.label .. "." .. key
@@ -24928,86 +24898,6 @@ local function WithBorders(fn, setup)
 		}
 		ns.Comm.loginAt = ns.Now() - ns.Data.CROWN_AFTER - 1
 		ns.rdb.council = { names = { ["sage owl"] = true } } -- (made-up names only)
-		-- Forever's native faction/PvP medallions. Only a test that asks for them gets these
-		-- children, so the established border texture counts remain about borders alone.
-		w.pvpFrames = function(noPlayerUpdater)
-			local alliance = "UI-HUD-UnitFrame-SmallCircle-Alliance"
-			local horde = "UI-HUD-UnitFrame-SmallCircle-Horde"
-			local mainlineAlliance = "UI-HUD-UnitFrame-Player-PVP-AllianceIcon"
-			local function Region(frame, contentKey, regionKey)
-				local content = rawget(frame, contentKey)
-				if type(content) ~= "table" then content = {}; rawset(frame, contentKey, content) end
-				local owner = frame.label .. "." .. contentKey .. "." .. regionKey
-				local region = Logged(owner, { label = owner })
-				rawset(region, "CreateTexture", function(_, _, layer, _, sub)
-					w.log[#w.log + 1] = owner .. ":CreateTexture"
-					return NewTexture(owner, layer, sub)
-				end)
-				rawset(content, regionKey, region)
-				return region, owner
-			end
-			local function Native(frame, contentKey, regionKey, iconKey, unit)
-				local region, owner = Region(frame, contentKey, regionKey)
-				local native = NewTexture(owner .. ".native", "OVERLAY", 1)
-				native.label, native.dims, native.size = owner .. "." .. iconKey, { 40, 40 }, "40 40"
-				native.atlas = alliance
-				native.shown = unit == "player"
-				rawset(region, iconKey, native)
-				w.pvpNative = w.pvpNative or {}
-				w.pvpNative[unit] = native
-				w.pvpOwner = w.pvpOwner or {}
-				w.pvpOwner[unit] = owner
-				return region, owner
-			end
-			local function MainlineSibling(region, owner, iconKey, unit)
-				local native = NewTexture(owner .. ".mainline", "OVERLAY", 2)
-				native.label, native.dims, native.size = owner .. "." .. iconKey, { 40, 40 }, "40 40"
-				native.atlas, native.shown = mainlineAlliance, false
-				rawset(region, iconKey, native)
-				w.pvpMainline = w.pvpMainline or {}
-				w.pvpMainline[unit] = native
-			end
-			local targetRegion, targetOwner = Native(TargetFrame, "TargetFrameContent", "TargetFrameContentContextual", "PvpBackgroundIcon", "target")
-			MainlineSibling(targetRegion, targetOwner, "PvpIcon", "target")
-			local focusRegion, focusOwner = Native(FocusFrame, "TargetFrameContent", "TargetFrameContentContextual", "PvpBackgroundIcon", "focus")
-			MainlineSibling(focusRegion, focusOwner, "PvpIcon", "focus")
-			Native(PlayerFrame, "PlayerFrameContent", "PlayerFrameContentMain", "PvpBackgroundIcon", "player")
-			local playerMainline, playerMainlineOwner = Region(PlayerFrame, "PlayerFrameContent", "PlayerFrameContentContextual")
-			MainlineSibling(playerMainline, playerMainlineOwner, "PVPIcon", "player")
-			local function NativeUpdate(frame, unit)
-				local native, u = w.pvpNative[unit], w.units[unit]
-				w.seq[#w.seq + 1] = frame.label .. ":CheckFaction (the game's)"
-				if not u or u.npc or u.pvp == false then
-					native.shown = false
-				else
-					native.atlas = u.pvpAtlas or (u.faction == "Horde"
-						and horde or alliance)
-					native.shown = true
-				end
-				return "the faction return"
-			end
-			rawset(TargetFrame, "CheckFaction", function(self) return NativeUpdate(self, "target") end)
-			rawset(FocusFrame, "CheckFaction", function(self) return NativeUpdate(self, "focus") end)
-			w.playerPvp = function(shown, atlas)
-				local native = w.pvpNative.player
-				w.playerPvpShown, w.playerPvpAtlas = shown, atlas or alliance
-				if type(PlayerFrame_UpdatePvPStatus) == "function" then
-					PlayerFrame_UpdatePvPStatus()
-				else
-					native.shown, native.atlas = shown, atlas or alliance
-					w.fire("PLAYER_FLAGS_CHANGED", "player")
-				end
-			end
-			if not noPlayerUpdater then
-				rawset(_G, "PlayerFrame_UpdatePvPStatus", function()
-					w.seq[#w.seq + 1] = "PlayerFrame_UpdatePvPStatus (the game's)"
-					local native = w.pvpNative.player
-					native.shown = w.playerPvpShown ~= false
-					native.atlas = w.playerPvpAtlas or alliance
-					return "the player PvP return"
-				end)
-			end
-		end
 		if setup then setup(w) end
 		local bns = setmetatable({}, { __index = ns })
 		bns.On = function(name, f) w.on[name] = w.on[name] or {}; table.insert(w.on[name], f) end
@@ -25033,28 +24923,8 @@ local function WithBorders(fn, setup)
 		w.target = function(unit, oursFirst)
 			w.units.target = unit
 			if oursFirst then w.fire("PLAYER_TARGET_CHANGED") end
-			if unit and type(TargetFrame) == "table" then
-				if rawget(TargetFrame, "CheckFaction") then TargetFrame:CheckFaction() end
-				if rawget(TargetFrame, "CheckClassification") then TargetFrame:CheckClassification() end
-			end
+			if unit and type(TargetFrame) == "table" and rawget(TargetFrame, "CheckClassification") then TargetFrame:CheckClassification() end
 			if not oursFirst then w.fire("PLAYER_TARGET_CHANGED") end
-		end
-		w.pvpBadge = function(unit)
-			for _, tex in ipairs(w.textures) do
-				if tex.owner == (w.pvpOwner and w.pvpOwner[unit]) and tex.file == w.ns.LOGO then return tex end
-			end
-			return nil
-		end
-		w.pauldron = function(which)
-			local sub = which == "outline" and 6 or 7
-			local found
-			for _, tex in ipairs(w.textures) do
-				if tex.owner == CONTAINER_OF.playerContextual and tex.layer == "OVERLAY" and tex.sub == sub then
-					assert(not found, "one reusable player pauldron " .. (which == "outline" and "outline" or "texture"))
-					found = tex
-				end
-			end
-			return found
 		end
 		-- The tier a texture draws (by its file; by its atlas, or the atlas it fell back to without
 		-- colour), "?" for none.
@@ -25077,7 +24947,7 @@ local function WithBorders(fn, setup)
 		w.shownTextureOn = function(owner)
 			local found
 			for _, tex in ipairs(w.textures) do
-				if owner ~= nil and tex.owner == owner and tex.layer == "ARTWORK" and tex.sub ~= 2 and tex.shown then
+				if owner ~= nil and tex.owner == owner and tex.sub ~= 2 and tex.shown then
 					assert(not found, "two borders at once on " .. owner)
 					found = tex
 				end
@@ -25148,137 +25018,6 @@ local function WithBorders(fn, setup)
 end
 
 assert(loadfile(ROOT .. "tests/treasurer-dragon.lua"))(ns, test, eq, WithBorders, BorderUnit, BORDER_KING)
-
-test("1.2.4 portrait badge: Forever 70205's rendered faction medallion keeps the game's ring and visibility, on player, target and focus, without stale art", function()
-	WithBorders(function(w)
-		w.internal("LOGIN")
-		local mask = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
-		local alliance = "UI-HUD-UnitFrame-SmallCircle-Alliance"
-		local horde = "UI-HUD-UnitFrame-SmallCircle-Horde"
-		local mainlineAlliance = "UI-HUD-UnitFrame-Player-PVP-AllianceIcon"
-		local ffa = "UI-HUD-UnitFrame-Player-PVP-FFAIcon"
-		local player = assert(w.pvpBadge("player"), "the Olympus logo on our faction medallion")
-		local playerHook
-		for _, hooked in ipairs(w.hooks) do if hooked == "PlayerFrame_UpdatePvPStatus" then playerHook = true end end
-		assert(playerHook, "the player's native PvP updater is followed")
-		eq(player.file, w.ns.LOGO, "the shipped Olympus logo")
-		eq(player.mask, mask, "round, never its opaque square")
-		eq(player.layer, "OVERLAY"); eq(player.sub, 3, "over the native crest")
-		eq(player.size, "29 29", "72% of the native 40px medallion, leaving its metal rim")
-		eq(player.point, "CENTER PlayerFrame.PlayerFrameContent.PlayerFrameContentMain.PvpBackgroundIcon CENTER 0 0")
-		eq(player.shown, true)
-		eq(w.pvpNative.player.atlas, alliance, "the game's Alliance atlas kept underneath")
-		eq(w.pvpNative.player.file, nil, "the native texture was not replaced")
-		eq(w.pvpNative.player.mask, nil, "the native texture was not changed")
-		eq(w.pvpMainline.player.atlas, mainlineAlliance, "the dormant Mainline sibling coexists")
-		eq(w.pvpMainline.player.shown, false, "the dormant Mainline sibling is not mistaken for Forever's icon")
-
-		local at = #w.seq
-		w.target(BorderUnit("Olympian", "Olympus Zeus", "Titan", 3))
-		local target = assert(w.pvpBadge("target"), "the target's Olympus medallion")
-		eq(target.shown, true)
-		eq(target.point, "CENTER TargetFrame.TargetFrameContent.TargetFrameContentContextual.PvpBackgroundIcon CENTER 0 0")
-		local gameAt, showAt
-		for i = at + 1, #w.seq do
-			if w.seq[i] == "TargetFrame:CheckFaction (the game's)" and not gameAt then gameAt = i end
-			if w.seq[i]:find("TargetFrameContentContextual#%d+:Show$") and not showAt then showAt = i end
-		end
-		assert(gameAt and showAt and showAt > gameAt, "the Olympus disc follows the game's faction update")
-		eq(w.pvpNative.target.atlas, alliance, "the native Alliance medallion remains")
-
-		w.target(BorderUnit("Visitor", "Stormwind Traders", "Member", 4))
-		eq(target.shown, false, "an Alliance stranger gets no Olympus logo")
-		eq(w.pvpNative.target.shown, true, "the game's own faction medallion remains visible")
-		w.target(BorderUnit("Olympian", "Olympus Zeus", "Titan", 3, { pvpAtlas = ffa }))
-		eq(target.shown, false, "free-for-all art is not covered")
-		eq(w.pvpNative.target.atlas, ffa)
-		local savedHides = ns.Moderation.Hides
-		ns.Moderation.Hides = function(who) if who == "Olympian-Realm" then return { kind = "c" } end end
-		w.target(BorderUnit("Olympian", "Olympus Zeus", "Titan", 3))
-		eq(target.shown, false, "a net-off member gets no Olympus logo")
-		ns.Moderation.Hides = savedHides
-		w.target(BorderUnit("Grunt", "Olympus Horde", "Grunt", 3, { faction = "Horde" }))
-		eq(target.shown, false, "the other faction is not marked on this Alliance client")
-		w.ns.faction = "Horde"
-		w.target(BorderUnit("Grunt", "Olympus Horde", "Grunt", 3, { faction = "Horde", pvpAtlas = horde }))
-		eq(target.shown, true, "the Horde small-circle atlas is recognized on a Horde client")
-		eq(w.pvpNative.target.atlas, horde)
-		w.ns.faction = "Alliance"
-		w.target(BorderUnit("Wolf", nil, nil, nil, { npc = true }))
-		eq(target.shown, false, "an NPC is not marked")
-		w.target(nil)
-		eq(target.shown, false, "no stale logo after the target goes")
-
-		w.units.focus = BorderUnit("Focused", "Olympus Zeus", "Titan", 3)
-		FocusFrame:CheckFaction()
-		w.fire("PLAYER_FOCUS_CHANGED")
-		local focus = assert(w.pvpBadge("focus"))
-		eq(focus.shown, true, "focus too")
-		eq(focus.point, "CENTER FocusFrame.TargetFrameContent.TargetFrameContentContextual.PvpBackgroundIcon CENTER 0 0")
-
-		local playerAt = #w.seq
-		w.playerPvp(false)
-		eq(player.shown, false, "the logo follows the game's hidden PvP indicator")
-		local nativeAt, hideAt
-		for i = playerAt + 1, #w.seq do
-			if w.seq[i] == "PlayerFrame_UpdatePvPStatus (the game's)" and not nativeAt then nativeAt = i end
-			if w.seq[i]:find("PlayerFrameContentMain#%d+:Hide$") and not hideAt then hideAt = i end
-		end
-		assert(nativeAt and hideAt and hideAt > nativeAt, "the Olympus disc follows the player's native updater")
-		w.playerPvp(true, ffa)
-		eq(player.shown, false, "the player's free-for-all indicator is left intact")
-		w.playerPvp(true, alliance)
-		eq(player.shown, true, "the player's Alliance medallion returns")
-		w.ns.db.borders = false
-		w.B.RefreshAll(true)
-		eq(player.shown, false, "/oly borders off hides the medallion with the portrait art")
-		w.ns.db.borders = true
-		w.B.RefreshAll(true)
-		eq(player.shown, true, "back with the portrait art")
-
-		-- Once made, combat changes only show or hide Olympus's texture; no geometry is touched.
-		w.combat = true
-		target.calls = {}
-		w.target(BorderUnit("Olympian", "Olympus Zeus", "Titan", 3))
-		w.target(BorderUnit("Visitor", "Stormwind Traders", "Member", 4))
-		assert(#target.calls > 0)
-		for _, method in ipairs(target.calls) do assert(method == "Show" or method == "Hide", "badge in combat: " .. method) end
-		w.combat = false
-	end, function(w) w.pvpFrames() end)
-
-	-- A gamepad login never creates the overlay; switching to mouse creates it, and switching back
-	-- parks it with the rest of Olympus's unit-frame art.
-	WithBorders(function(w)
-		w.internal("LOGIN")
-		eq(w.pvpBadge("player"), nil, "none made at a gamepad login")
-		w.style = 0
-		w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 0, 1)
-		local badge = assert(w.pvpBadge("player"), "made after switching to mouse and keyboard")
-		eq(badge.shown, true)
-		w.style = 1
-		w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 1, 0)
-		eq(badge.shown, false, "parked for the gamepad UI")
-	end, function(w) w.pvpFrames(); w.style = 1 end)
-
-	-- SetMask is proved by the Forever fixture, but if a client refuses it Olympus leaves only the
-	-- native medallion; it must never expose logo128's opaque square.
-	WithBorders(function(w)
-		w.internal("LOGIN")
-		local badge = assert(w.pvpBadge("player"), "the failed, hidden texture is kept once")
-		eq(badge.shown, false)
-		eq(badge.mask, nil)
-		eq(w.pvpNative.player.shown, true, "native art remains")
-	end, function(w) w.pvpFrames(); w.noMask = true end)
-
-	-- A client family without the named updater keeps the event-driven next-frame fallback.
-	WithBorders(function(w)
-		w.internal("LOGIN")
-		local badge = assert(w.pvpBadge("player"))
-		eq(badge.shown, true)
-		w.playerPvp(false)
-		eq(badge.shown, false, "the player-event fallback remains")
-	end, function(w) w.pvpFrames(true) end)
-end)
 
 -- 1.0.0, Max's final list: six tiers, highest first, each with its own art. Before it the King was
 -- gold, the High Council, Lords and Captains all silver, Veterans and Raiders a grey (the plain
@@ -26140,173 +25879,6 @@ do
 		C_ChatInfo, SendChatMessage, ns.Comm.Send, ns.Comm.Whisper = saved.info, saved.chat, saved.send, saved.whisper
 		if not ok then error(err, 0) end
 	end
-
-	test("1.2.4 pauldron preview: the eight shields use one 36px contextual texture without a duplicated outline, in order and by alias; off and a normal border preview clear it", function()
-		WithBorders(function(w)
-			ns.Borders = w.B
-			w.internal("LOGIN")
-			eq(w.pauldron(), nil, "no pauldron until the local preview is selected")
-			eq(w.pauldron("outline"), nil, "no pauldron outline either")
-			eq(w.B.PauldronPreview(), nil)
-
-			local media = "Interface\\AddOns\\Olympus\\media\\pauldrons\\"
-			local variants = {
-				{ "olympus", "olympus", "pauldron-olympus" },
-				{ "legate", "legate", "pauldron-legate" },
-				{ "federal-treasury", "federal-treasury", "pauldron-treasury" },
-				{ "department-of-war", "department-of-war", "pauldron-war" },
-				{ "council-of-justice", "council-of-justice", "pauldron-justice" },
-				{ "association-of-artisanry", "association-of-artisanry", "pauldron-artisanry" },
-				{ "department-of-heraldry", "department-of-heraldry", "pauldron-heraldry" },
-				{ "missionary-church-of-olympus", "missionary-church-of-olympus", "pauldron-church" },
-			}
-			local pauldron
-			for i, row in ipairs(variants) do
-				eq(w.B.SetPreview("pauldron-" .. i), true, "numeric preview " .. i)
-				eq(w.B.PauldronPreview(), row[1], "numeric order " .. i)
-				eq(w.B.Preview(), nil, "a pauldron is separate from the rank-border preview")
-				local tex = assert(w.pauldron(), "the player pauldron")
-				if pauldron then eq(tex, pauldron, "all variants reuse one texture") else pauldron = tex end
-				local contextualTextures = 0
-				for _, made in ipairs(w.textures) do
-					if made.owner == CONTAINER_OF.playerContextual and made.layer == "OVERLAY" then
-						contextualTextures = contextualTextures + 1
-					end
-				end
-				eq(contextualTextures, 1, "exactly one contextual pauldron texture is allocated")
-				eq(w.pauldron("outline"), nil, "no larger tinted duplicate roughens the asset rim")
-				eq(tex.owner, CONTAINER_OF.playerContextual, "above the health and mana frames")
-				eq(tex.layer, "OVERLAY"); eq(tex.sub, 7)
-				eq(tex.size, "36 36", "close to the native level-ring footprint")
-				eq(tex.point, "CENTER PlayerFrame.PlayerFrameContainer TOPLEFT 83 -72", "lower-right of the portrait")
-				eq(tex.file, media .. row[2], "asset " .. i)
-				eq(tex.color, nil, "the symbol and enamel keep their source colour")
-				eq(tex.snapToPixelGrid, false); eq(tex.texelSnappingBias, 0, "smooth resampling at 36 pixels")
-				eq(tex.coord, nil, "the full square asset canvas")
-				eq(tex.mask, nil, "the shield keeps its own alpha")
-				eq(tex.shown, true)
-			end
-			for _, row in ipairs(variants) do
-				eq(w.B.SetPreview(row[3]), true, row[3])
-				eq(w.B.PauldronPreview(), row[1], row[3])
-				eq(w.pauldron(), pauldron, row[3] .. ": still one texture")
-				eq(w.pauldron("outline"), nil, row[3] .. ": still no duplicate outline")
-				eq(pauldron.file, media .. row[2], row[3] .. ": its asset")
-			end
-
-			w.B.SetPreview("pauldron-8")
-			w.B.SetPreview("pauldron-next")
-			eq(w.B.PauldronPreview(), "olympus", "next wraps from eight to one")
-			w.B.SetPreview("pauldron-prev")
-			eq(w.B.PauldronPreview(), "missionary-church-of-olympus", "previous wraps from one to eight")
-
-			w.B.SetPreview("gold-elite")
-			eq(w.B.PauldronPreview(), nil, "a normal border preview ends the pauldron preview")
-			eq(pauldron.shown, false, "no stale pauldron beside the normal preview")
-			eq(w.pauldron("outline"), nil, "no outline was allocated")
-			eq(w.B.Preview(), "gold-elite")
-			eq(w.shown("player"), "gold-elite", "the normal border preview remains independent")
-
-			w.B.SetPreview("pauldron-justice")
-			eq(w.B.Preview(), nil, "selecting a pauldron clears a normal border preview")
-			eq(w.B.PauldronPreview(), "council-of-justice")
-			eq(pauldron.shown, true)
-			w.B.SetPreview("off")
-			eq(w.B.Preview(), nil); eq(w.B.PauldronPreview(), nil)
-			eq(pauldron.shown, false, "off ends both kinds of preview")
-		end, AsAuthor)
-	end)
-
-	test("1.2.4 pauldron preview: missing art never leaves the previous shield; borders-off and gamepad park it; combat defers creation and texture changes", function()
-		local media = "Interface\\AddOns\\Olympus\\media\\pauldrons\\"
-		WithBorders(function(w)
-			w.internal("LOGIN")
-			w.B.SetPreview("pauldron-1")
-			local tex = assert(w.pauldron())
-			eq(tex.file, media .. "olympus")
-			eq(tex.shown, true)
-			eq(w.pauldron("outline"), nil, "the preview never allocates a tinted duplicate")
-
-			w.noFile[media .. "legate"] = true
-			eq(w.B.SetPreview("pauldron-2"), true)
-			eq(w.B.PauldronPreview(), "legate")
-			eq(tex.file, media .. "olympus", "the mock retains the old path when SetTexture returns false")
-			eq(tex.shown, false, "but the old shield is never left visible")
-			w.noFile[media .. "legate"] = nil
-			w.B.RefreshAll(true)
-			eq(tex.file, media .. "legate")
-			eq(tex.shown, true, "a later refresh can load it")
-
-			w.noFile[media .. "federal-treasury"] = "error"
-			eq(w.B.SetPreview("pauldron-3"), true, "a client texture-load error is contained")
-			eq(tex.file, media .. "legate")
-			eq(tex.shown, false, "an error cannot leave stale art")
-			w.noFile[media .. "federal-treasury"] = nil
-			w.B.RefreshAll(true)
-			eq(tex.file, media .. "federal-treasury")
-			eq(tex.shown, true)
-
-			w.noFileSub = 7
-			w.B.SetPreview("pauldron-4")
-			eq(tex.file, media .. "federal-treasury", "a main-art failure retains its last path")
-			eq(tex.shown, false, "the single texture still fails closed")
-			w.noFileSub = nil
-			w.B.RefreshAll(true)
-			eq(tex.file, media .. "department-of-war")
-			eq(tex.shown, true)
-		end, AsAuthor)
-
-		WithBorders(function(w)
-			w.style = 1
-			w.internal("LOGIN")
-			w.B.SetPreview("pauldron-1")
-			eq(w.B.PauldronPreview(), "olympus", "the session choice is kept")
-			eq(w.pauldron(), nil, "a gamepad login creates no player-frame preview")
-			eq(w.pauldron("outline"), nil)
-			w.style = 0
-			w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 0, 1)
-			local tex = assert(w.pauldron(), "made after returning to mouse and keyboard")
-			eq(tex.shown, true)
-			eq(w.pauldron("outline"), nil)
-			w.B.SetEnabled(false)
-			eq(tex.shown, false, "borders off parks the pauldron")
-			eq(w.B.PauldronPreview(), "olympus", "without persisting or losing the session choice")
-			w.B.SetEnabled(true)
-			eq(tex.shown, true, "back with the unit-frame art")
-			w.style = 1
-			w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 1, 0)
-			eq(tex.shown, false, "parked on a switch to the gamepad UI")
-		end, AsAuthor)
-
-		WithBorders(function(w)
-			w.combat = true
-			w.internal("LOGIN")
-			w.B.SetPreview("pauldron-1")
-			eq(w.pauldron(), nil, "not created or anchored in combat")
-			eq(w.pauldron("outline"), nil)
-			w.fire("PLAYER_REGEN_ENABLED")
-			eq(w.pauldron(), nil, "still deferred while combat remains")
-			eq(w.pauldron("outline"), nil)
-			w.combat = false
-			w.fire("PLAYER_REGEN_ENABLED")
-			local tex = assert(w.pauldron(), "created when combat ends")
-			eq(tex.file, media .. "olympus")
-			eq(tex.shown, true)
-			eq(w.pauldron("outline"), nil)
-
-			w.combat = true
-			tex.calls = {}
-			w.B.SetPreview("pauldron-2")
-			eq(w.B.PauldronPreview(), "legate", "the requested variant is remembered")
-			eq(tex.file, media .. "olympus", "SetTexture waits for combat to end")
-			eq(tex.shown, false, "the previous variant is hidden while waiting")
-			for _, method in ipairs(tex.calls) do eq(method, "Hide", "only hiding the existing pauldron is safe in combat") end
-			w.combat = false
-			w.fire("PLAYER_REGEN_ENABLED")
-			eq(tex.file, media .. "legate")
-			eq(tex.shown, true, "the deferred variant appears after combat")
-		end, AsAuthor)
-	end)
 
 	test("1.0.0 borders preview: the author's /oly borders test <tier> shows it round his own portrait (turned round) and on his target or focus while that is himself, at the tier's art, size and offsets; off ends it", function()
 		WithBorders(function(w)
@@ -28297,49 +27869,6 @@ do
 	end)
 end
 
-test("1.2.4 pauldron preview: all eight ordered shields ship as 256 x 256 uncompressed RGBA TGAs with a smooth level-ring bronze rim", function()
-	local stems = {
-		"olympus", "legate", "federal-treasury", "department-of-war", "council-of-justice",
-		"association-of-artisanry", "department-of-heraldry", "missionary-church-of-olympus",
-	}
-	for i, stem in ipairs(stems) do
-		local path = ADDON_DIR .. "media/pauldrons/" .. stem .. ".tga"
-		local data = ReadFile(path)
-		assert(data, "missing pauldron " .. i .. ": " .. path)
-		local function byte(at) return data:byte(at) end
-		local function u16(at) return data:byte(at) + data:byte(at + 1) * 256 end
-		local idLength, width, height, descriptor = byte(1), u16(13), u16(15), byte(18)
-		eq(byte(2), 0, path .. ": no colour map")
-		eq(byte(3), 2, path .. ": uncompressed true colour")
-		eq(width, 256, path .. ": width"); eq(height, 256, path .. ": height")
-		eq(byte(17), 32, path .. ": 32 bits a pixel")
-		eq(descriptor, 8, path .. ": an 8-bit alpha channel and the addon's bottom-left TGA origin")
-		local start = 19 + idLength
-		assert(#data >= start - 1 + width * height * 4, path .. ": all its pixels")
-		local clear, opaque, strong, feathered, visible = 0, 0, 0, 0, 0
-		local rimBronze, rimDark = 0, 0
-		for pixel = 0, width * height - 1 do
-			local at = start + pixel * 4
-			local blue, green, red, alpha = data:byte(at, at + 3)
-			if alpha == 0 then clear = clear + 1 else visible = visible + 1 end
-			if alpha == 255 then opaque = opaque + 1 end
-			if alpha >= 192 then strong = strong + 1 end
-			if alpha > 0 and alpha < 255 then feathered = feathered + 1 end
-			if alpha >= 192 and red == 0x8F and green == 0x5A and blue == 0x2C then rimBronze = rimBronze + 1 end
-			if alpha >= 192 and red == 0x4A and green == 0x30 and blue == 0x1C then rimDark = rimDark + 1 end
-		end
-		assert(clear > 1000, path .. ": transparent canvas around the shield (" .. clear .. " clear pixels)")
-		assert(visible > 1000, path .. ": visible shield art (" .. visible .. " pixels)")
-		assert(strong > 1000, path .. ": strongly visible shield art (" .. strong .. " pixels at alpha 192 or higher)")
-		assert(feathered > 1000, path .. ": antialiased alpha around and within the shield (" .. feathered .. " pixels)")
-		assert(opaque > 0, path .. ": alpha reaches fully opaque (" .. opaque .. " pixels)")
-		assert(rimBronze >= 9500 and rimBronze <= 10500,
-			path .. ": the smooth 14-source-pixel #8F5A2C bronze band (" .. rimBronze .. " strong pixels)")
-		assert(rimDark >= 4800 and rimDark <= 5500,
-			path .. ": the smooth 7-source-pixel #4A301C outside edge (" .. rimDark .. " strong pixels)")
-	end
-end)
-
 test("1.0.1 borders: Max's frames ship as 256 x 256 32-bit TGAs with alpha, the art within each tier's texture coordinates; his PNGs kept, README credits him", function()
 	WithBorders(function(w)
 		local files = 0
@@ -30205,9 +29734,9 @@ do
 		end
 		assert(n >= 15, "the ids asked: " .. n)
 		assert(asked["communities-button"], "GuildFrame.lua's, through its GATE constant")
-		-- Loaded after the core and its pure ranking-rules helper, before every file that asks it.
+		-- Loaded right after Core.lua (the list first), before every file that asks it.
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("\nCore%.lua\r?\nRankingRules%.lua\r?\nGamepadRegistry%.lua\r?\nGamepad%.lua\r?\nDiagnostics%.lua"), "the toc's order")
+		assert(toc:find("\nCore%.lua\r?\nGamepadRegistry%.lua\r?\nGamepad%.lua\r?\nDiagnostics%.lua"), "the toc's order")
 		WithStyle(function(style)
 			local w = NewGate(nil, style)
 			local G = w.G
@@ -45365,10 +44894,7 @@ test("1.2 craft requests: every line the requests show is in English and Portugu
 	local src = assert(ReadFile(ADDON_DIR .. "CraftRequests.lua"))
 	local savedLocale, pt = GetLocale, {}
 	GetLocale = function() return "ptBR" end
-	local ok, err = pcall(function()
-		assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt)
-		assert(loadfile(ADDON_DIR .. "Locales/RankingRulesText.lua"))("Olympus", pt)
-	end)
+	local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
 	GetLocale = savedLocale
 	if not ok then error(err, 0) end
 	local keys, n = {}, 0
@@ -63801,20 +63327,18 @@ end)()
 			if known[template] ~= n then bad["template:" .. template] = true end
 		end
 		for template in pairs(known) do if not variables[template] then bad["template:" .. template] = true end end
-		-- The portrait's code and the logo: the Olympus window's, the minimap button's, and exactly
-		-- one use in Borders.lua for the verified native faction-medallion overlay.
+		-- The portrait's code and the logo: the Olympus window's (and the minimap button's).
 		for _, word in ipairs({ "PortraitContainer", "SetPortraitToAsset", "ButtonFrameTemplate_ShowPortrait" }) do
 			if file ~= "UI.lua" and src:find(word, 1, true) then bad[word] = true end
 		end
-		local _, logos = src:gsub("ns%.LOGO", "")
-		if file ~= "UI.lua" and file ~= "Core.lua" and not (file == "Borders.lua" and logos == 1) and logos > 0 then bad["ns.LOGO"] = true end
+		if file ~= "UI.lua" and file ~= "Core.lua" and src:find("ns.LOGO", 1, true) then bad["ns.LOGO"] = true end
 		local out = {}
 		for name in pairs(bad) do out[#out + 1] = name end
 		table.sort(out)
 		return table.concat(out, " ")
 	end
 
-	test("1.1.5 guard: only the Olympus window has a portrait frame; the native medallion overlay is the one extra logo use; every other window is ns.Window's metal, the plain silver frame only as its fallback; a window in any other template, a template in a variable, or a border of its own fails here", function()
+	test("1.1.5 guard: only the Olympus window has a portrait frame (and the logo in it); every other window is ns.Window's metal, the plain silver frame only as its fallback; a window in any other template, a template in a variable, or a border of its own fails here", function()
 		local toc, at = {}, {}
 		for line in io.lines(ADDON_DIR .. "Olympus.toc") do
 			local entry = line:match("^%s*(.-)%s*$")
@@ -63847,8 +63371,6 @@ end)()
 		eq(Refused("New.lua", NewWindow("BasicFrameTemplateWithInset")), "BasicFrameTemplateWithInset")
 		eq(Refused("New.lua", NewWindow("PortraitFrameTemplate")), "PortraitFrameTemplate")
 		eq(Refused("New.lua", NewWindow("ButtonFrameTemplate")), "ButtonFrameTemplate")
-		eq(Refused("Borders.lua", "local badge = ns.LOGO\n"), "", "the one native medallion overlay")
-		eq(Refused("Borders.lua", "local a, b = ns.LOGO, ns.LOGO\n"), "ns.LOGO", "no second Borders logo use")
 		eq(Refused("New.lua", 'local b = pcall(CreateFrame, "Frame", nil, f, "DialogBorderDarkTemplate")'), "DialogBorderDarkTemplate")
 		eq(Refused("New.lua", NewWindow("DefaultPanelTemplate")), "DefaultPanelTemplate")
 		eq(Refused("New.lua", "f.PortraitContainer.portrait:SetTexture(ns.LOGO)"), "PortraitContainer ns.LOGO")

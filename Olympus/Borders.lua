@@ -204,50 +204,10 @@ end
 -- game's updates. Your own portrait sits on the left, so there the art is mirrored. (The party's
 -- frames come from a pool, not globals: MapParty and PartyRig below.)
 local RIGS = {
-	{ unit = "target", frame = "TargetFrame", container = "TargetFrameContainer", hook = "CheckClassification", pvpHook = "CheckFaction",
-		content = "TargetFrameContent", pvpRegion = "TargetFrameContentContextual", pvpIcon = "PvpBackgroundIcon" },
-	{ unit = "focus", frame = "FocusFrame", container = "TargetFrameContainer", hook = "CheckClassification", pvpHook = "CheckFaction",
-		content = "TargetFrameContent", pvpRegion = "TargetFrameContentContextual", pvpIcon = "PvpBackgroundIcon" },
+	{ unit = "target", frame = "TargetFrame", container = "TargetFrameContainer", hook = "CheckClassification" },
+	{ unit = "focus", frame = "FocusFrame", container = "TargetFrameContainer", hook = "CheckClassification" },
 	{ unit = "player", frame = "PlayerFrame", container = "PlayerFrameContainer", mirror = true },
 }
--- Forever 1.60.1 build 70205's Camelot override points UnitFrameUtil at the small-circle
--- PvpBackgroundIcon regions. The Mainline PVPIcon/PvpIcon regions coexist in the XML, but this
--- client does not render its faction indicator through them.
-local PVP_FACTION_ATLAS = {
-	Alliance = "UI-HUD-UnitFrame-SmallCircle-Alliance",
-	Horde = "UI-HUD-UnitFrame-SmallCircle-Horde",
-}
-local PVP_BADGES = {
-	target = RIGS[1],
-	focus = RIGS[2],
-	player = { unit = "player", frame = "PlayerFrame", content = "PlayerFrameContent",
-		pvpRegion = "PlayerFrameContentMain", pvpIcon = "PvpBackgroundIcon" },
-}
-local PVP_BADGE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
-local PVP_BADGE_SCALE = 0.72 -- the Olympus disc inside the native faction medallion's metal rim
-local PVP_BADGE_FALLBACK = 40 -- the faction atlas is square; used only before it reports its size
--- The author's session-only right-shoulder preview. These are deliberately not assigned to
--- ranks yet: `/oly borders test pauldron-<number or name>` lets the eight supplied candidates be
--- judged in the real client first. Their transparent 256-square canvases are drawn whole.
-local PAULDRON_MEDIA = "Interface\\AddOns\\Olympus\\media\\pauldrons\\"
-local PAULDRONS = {
-	{ key = "olympus", file = PAULDRON_MEDIA .. "olympus", label = "Olympus", alias = "olympus" },
-	{ key = "legate", file = PAULDRON_MEDIA .. "legate", label = "Legate", alias = "legate" },
-	{ key = "federal-treasury", file = PAULDRON_MEDIA .. "federal-treasury", label = "Federal Treasury", alias = "treasury" },
-	{ key = "department-of-war", file = PAULDRON_MEDIA .. "department-of-war", label = "Department of War", alias = "war" },
-	{ key = "council-of-justice", file = PAULDRON_MEDIA .. "council-of-justice", label = "Council of Justice", alias = "justice" },
-	{ key = "association-of-artisanry", file = PAULDRON_MEDIA .. "association-of-artisanry", label = "Association of Artisanry", alias = "artisanry" },
-	{ key = "department-of-heraldry", file = PAULDRON_MEDIA .. "department-of-heraldry", label = "Department of Heraldry", alias = "heraldry" },
-	{ key = "missionary-church-of-olympus", file = PAULDRON_MEDIA .. "missionary-church-of-olympus", label = "Missionary Church of Olympus", alias = "church" },
-}
-local PAULDRON_BY_TOKEN = {}
-for i, p in ipairs(PAULDRONS) do
-	p.index = i
-	PAULDRON_BY_TOKEN["pauldron-" .. i] = p
-	PAULDRON_BY_TOKEN["pauldron-" .. p.alias] = p
-	PAULDRON_BY_TOKEN["pauldron-" .. p.key] = p
-end
-local PAULDRON_SIZE, PAULDRON_X, PAULDRON_Y = 36, 83, -72
 -- The party's places (see the top of the file), and where its portraits sit against the target's.
 local PARTY = { "party1", "party2", "party3", "party4" }
 local IN_PARTY = { party1 = true, party2 = true, party3 = true, party4 = true }
@@ -259,13 +219,10 @@ local TRACKED = { target = true, focus = true, player = true, party1 = true, par
 
 local rigs = {}  -- [unit] = { tex = { [tier name] = texture }, honor = { [shape or sized family] = texture } (not the party's), shown = key or nil }
 local partyRigs = {} -- [a party member frame of the game's] = its rig, made once (rigs[party<i>]: the one showing party<i>)
-local pvpBadges = {} -- [target/focus/player] = { native, tex, size }, false where this client cannot mask it round
-local playerPvpHooked = false -- the native player-medallion updater, where this client exposes it
 local known = {} -- [unit] = { guid, tier, guild, report, rt, council }: the last worked out
 local installed, waiting = false, false
 local forever = false -- Forever's unit frames found at Install (the party's borders only then)
 local preview    -- the author's preview: a tier's name while on (this session only, never saved)
-local pauldronPreview, pauldronRig -- the selected candidate and its lazy player-frame texture
 Borders.stats = { computed = 0 } -- (tests, /oly status)
 
 -- Values the client hides from addons (secret values) count as none.
@@ -348,14 +305,6 @@ local function Facts(unit)
 		f.leader = rank == 0
 	end
 	return f
-end
-
--- A unit whose server guild is one of Olympus's on our faction, unless moderation took the
--- character or guild off the network. Portrait decorations use the same secret/faction/name
--- checks as the borders, without awarding a rank frame.
-function Borders.IsOlympusUnit(unit)
-	local f = Facts(unit)
-	return f ~= nil and f.olympus == true and not f.off
 end
 
 -- marked: the tiers with a mark of their own alone (Borders.MARK_OF: the dev's silver has none,
@@ -506,156 +455,6 @@ function Borders.Enabled() return not (ns.db and ns.db.borders == false) end
 -- nothing but the Join Olympus screen).
 local function Active()
 	return Borders.Enabled() and not ns.GamepadUI() and ns.IsMember() == true
-end
-
-local function HidePauldron() -- gp:borders
-	if pauldronRig then
-		pauldronRig.tex:Hide()
-	end
-end
-
-local function SmoothPauldron(tex) -- gp:borders
-	if type(tex.SetSnapToPixelGrid) == "function" then pcall(tex.SetSnapToPixelGrid, tex, false) end
-	if type(tex.SetTexelSnappingBias) == "function" then pcall(tex.SetTexelSnappingBias, tex, 0) end
-end
-
--- One texture, made and positioned only out of combat, for the selected candidate. It belongs to
--- the player's contextual layer (above the health and mana child frames) but stays anchored to the
--- native portrait container. The asset supplies its own rim; duplicating and tinting it underneath
--- makes that edge look rough and too thick. Failed new files are hidden before SetTexture, so stale
--- art cannot remain.
-local function MakePauldron() -- gp:borders
-	if pauldronRig then return pauldronRig end
-	if InCombatLockdown and InCombatLockdown() then waiting = true return nil end
-	local frame = _G.PlayerFrame
-	local container = type(frame) == "table" and frame.PlayerFrameContainer or nil
-	local content = type(frame) == "table" and frame.PlayerFrameContent or nil
-	local owner = type(content) == "table" and content.PlayerFrameContentContextual or nil
-	if type(container) ~= "table" or type(owner) ~= "table" or type(owner.CreateTexture) ~= "function" then return nil end
-	local ok, tex = pcall(owner.CreateTexture, owner, nil, "OVERLAY", nil, 7)
-	if not ok or type(tex) ~= "table" then return nil end
-	tex:Hide()
-	tex:SetSize(PAULDRON_SIZE, PAULDRON_SIZE)
-	tex:SetPoint("CENTER", container, "TOPLEFT", PAULDRON_X, PAULDRON_Y)
-	SmoothPauldron(tex)
-	pauldronRig = { tex = tex }
-	return pauldronRig
-end
-
-function Borders.RefreshPauldron() -- gp:borders
-	if not pauldronPreview or not Active() then HidePauldron() return false end
-	-- Do not create, resize, anchor or change a game-frame texture during combat. Hide the old
-	-- candidate now; PLAYER_REGEN_ENABLED runs RefreshAll and applies the requested one afterwards.
-	if InCombatLockdown and InCombatLockdown() then
-		HidePauldron()
-		waiting = true
-		return false
-	end
-	local rig = MakePauldron()
-	if not rig then return false end
-	if rig.key ~= pauldronPreview.key then
-		HidePauldron()
-		local textureOK, textureLoaded = pcall(rig.tex.SetTexture, rig.tex, pauldronPreview.file)
-		if not textureOK or textureLoaded == false then
-			rig.key = nil
-			return false
-		end
-		rig.key = pauldronPreview.key
-	end
-	rig.tex:Show()
-	return true
-end
-
--- The native faction/PvP medallion on Forever's target, focus and player frames. Olympus never
--- changes that texture: a smaller, round copy of its logo sits over the faction crest, leaving
--- the game's own metal rim and its visibility rules intact. Missing fields mean another client
--- family; it gets no badge.
-local function PvpBadgeObjects(spec) -- gp:borders
-	local frame = spec and _G[spec.frame]
-	local content = type(frame) == "table" and frame[spec.content] or nil
-	local region = type(content) == "table" and content[spec.pvpRegion] or nil
-	local native = type(region) == "table" and region[spec.pvpIcon] or nil
-	if type(region) ~= "table" or type(region.CreateTexture) ~= "function"
-		or type(native) ~= "table" or type(native.IsShown) ~= "function" then return nil end
-	return region, native
-end
-
-local function PvpBadgeOuterSize(native) -- gp:borders
-	local width, height
-	if type(native.GetSize) == "function" then
-		local ok, w, h = pcall(native.GetSize, native)
-		if ok and type(w) == "number" and type(h) == "number" then width, height = w, h end
-	end
-	if (not width or width <= 0) and type(native.GetWidth) == "function" then
-		local ok, value = pcall(native.GetWidth, native)
-		if ok and type(value) == "number" then width = value end
-	end
-	if (not height or height <= 0) and type(native.GetHeight) == "function" then
-		local ok, value = pcall(native.GetHeight, native)
-		if ok and type(value) == "number" then height = value end
-	end
-	if not width or width <= 0 then width = PVP_BADGE_FALLBACK end
-	if not height or height <= 0 then height = PVP_BADGE_FALLBACK end
-	return math.min(width, height)
-end
-
-local function SizePvpBadge(rig) -- gp:borders
-	if InCombatLockdown and InCombatLockdown() then return end
-	local size = math.floor(PvpBadgeOuterSize(rig.native) * PVP_BADGE_SCALE + 0.5)
-	if size == rig.size then return end
-	rig.tex:SetSize(size, size)
-	rig.size = size
-end
-
-local function MakePvpBadge(unit) -- gp:borders
-	if pvpBadges[unit] ~= nil then return pvpBadges[unit] or nil end
-	local spec = PVP_BADGES[unit]
-	local region, native = PvpBadgeObjects(spec)
-	if not region then return nil end
-	if InCombatLockdown and InCombatLockdown() then waiting = true return nil end
-	local ok, tex = pcall(region.CreateTexture, region, nil, "OVERLAY", nil, 3)
-	if not ok or type(tex) ~= "table" then return nil end
-	tex:Hide()
-	local loaded, value = pcall(tex.SetTexture, tex, ns.LOGO)
-	local masked = type(tex.SetMask) == "function" and pcall(tex.SetMask, tex, PVP_BADGE_MASK)
-	if not loaded or value == false or not masked then
-		pvpBadges[unit] = false -- never leave the opaque square logo over the portrait
-		return nil
-	end
-	tex:SetPoint("CENTER", native, "CENTER", 0, 0)
-	local rig = { native = native, tex = tex }
-	pvpBadges[unit] = rig
-	SizePvpBadge(rig)
-	return rig
-end
-
-local function NativeFactionBadgeShown(rig) -- gp:borders
-	local ok, shown = pcall(rig.native.IsShown, rig.native)
-	if not ok or Secret(shown) or shown ~= true then return false end
-	-- Do not cover free-for-all or another faction's badge. On clients that expose no atlas name,
-	-- the native shown state remains the authority, as it was before the atlas API existed.
-	if type(rig.native.GetAtlas) == "function" then
-		local atlasOK, atlas = pcall(rig.native.GetAtlas, rig.native)
-		if not atlasOK or Secret(atlas) then return false end
-		if type(atlas) == "string" and atlas ~= "" then
-			local expected = PVP_FACTION_ATLAS[ns.faction or "Alliance"]
-			return atlas == expected
-		end
-	end
-	return true
-end
-
-function Borders.RefreshOlympusBadge(unit) -- gp:borders
-	if not PVP_BADGES[unit] then return end
-	local kept = pvpBadges[unit]
-	if not Active() or not Borders.IsOlympusUnit(unit) then
-		if type(kept) == "table" then kept.tex:Hide() end
-		return
-	end
-	local rig = type(kept) == "table" and kept or MakePvpBadge(unit)
-	if not rig then return end
-	SizePvpBadge(rig)
-	if NativeFactionBadgeShown(rig) then rig.tex:Show() else rig.tex:Hide() end
 end
 
 local function AtlasExists(atlas)
@@ -867,22 +666,8 @@ function Borders.Install() -- gp:borders
 				local unit, where = spec.unit, "borders " .. spec.unit
 				hooksecurefunc(frame, spec.hook, function() ns.SafeCall(where, Borders.Refresh, unit) end)
 			end
-			if spec.pvpHook and PvpBadgeObjects(spec) and type(frame[spec.pvpHook]) == "function" and type(hooksecurefunc) == "function" then
-				local unit, where = spec.unit, "Olympus portrait badge " .. spec.unit
-				hooksecurefunc(frame, spec.pvpHook, function() ns.SafeCall(where, Borders.RefreshOlympusBadge, unit) end)
-			end
 			forever = true
 		end
-	end
-	-- Forever redraws the player's PvP icon for more than UNIT_FACTION: entering the world and an
-	-- honour/prestige change run this updater too. Follow the final native state so our sibling
-	-- overlay cannot remain over a newly shown prestige portrait.
-	local playerPvpUpdater = rawget(_G, "PlayerFrame_UpdatePvPStatus")
-	if type(playerPvpUpdater) == "function" and type(hooksecurefunc) == "function" then
-		local ok = pcall(hooksecurefunc, "PlayerFrame_UpdatePvPStatus", function()
-			ns.SafeCall("Olympus portrait badge player", Borders.RefreshOlympusBadge, "player")
-		end)
-		playerPvpHooked = ok
 	end
 	-- The party's frames there now, and the hook that follows PartyFrame handing them out anew
 	-- (none without Forever's unit frames: PartyFrameOf).
@@ -928,10 +713,8 @@ local function ShowHonor(rig, key, metal)
 	Present(rig, tex, key, metal, true)
 	return true
 end
-local function HideAll() -- gp:borders
+local function HideAll()
 	for _, rig in pairs(rigs) do Show(rig, nil) end -- (a party frame showing nobody is hidden already: MapParty)
-	for _, rig in pairs(pvpBadges) do if type(rig) == "table" then rig.tex:Hide() end end
-	HidePauldron()
 end
 
 -- The author's preview on a rig (see the top of the file): a tier's border, an honour's frame (none
@@ -1206,11 +989,9 @@ end
 function Borders.Refresh(unit, fresh)
 	if not Active() then
 		if rigs[unit] then Show(rigs[unit], nil) end
-		Borders.RefreshOlympusBadge(unit)
 		return
 	end
 	if not installed and not Borders.Install() then return end
-	Borders.RefreshOlympusBadge(unit)
 	local rig = rigs[unit]
 	-- (A party place's frame forgotten while the borders were off: which frame shows it now.)
 	if not rig and IN_PARTY[unit] then
@@ -1280,7 +1061,6 @@ end
 function Borders.RefreshAll(fresh)
 	for _, spec in ipairs(RIGS) do Borders.Refresh(spec.unit, fresh) end
 	Borders.RefreshParty(fresh)
-	Borders.RefreshPauldron()
 end
 
 -- The census, the High Council's list, our roster or the council's names hidden or shown on the
@@ -1339,18 +1119,6 @@ function Borders.PreviewAllowed()
 	return type(W) == "table" and type(W.Visible) == "function" and W.Visible() == true
 end
 function Borders.Preview() return preview end
-function Borders.PauldronPreview() return pauldronPreview and pauldronPreview.key or nil end
-
-local function PauldronNamed(word)
-	local p = PAULDRON_BY_TOKEN[word]
-	if p then return p end
-	local step
-	if word == "pauldron" or word == "pauldron-next" then step = 1
-	elseif word == "pauldron-prev" then step = -1
-	else return nil end
-	local i = pauldronPreview and pauldronPreview.index or (step > 0 and 0 or 1)
-	return PAULDRONS[((i - 1 + step) % #PAULDRONS) + 1]
-end
 
 -- The marks' own preview tier (Nameplates.lua): the star of any other member. No border has it,
 -- so his portrait shows none while it is on.
@@ -1362,24 +1130,14 @@ Borders.MEMBER = "member"
 function Borders.SetPreview(word)
 	if not Borders.PreviewAllowed() then return false end
 	word = type(word) == "string" and word:lower() or ""
-	local pauldron = PauldronNamed(word)
-	local pauldronWasOn = pauldronPreview ~= nil
 	if word == "off" then
 		preview = nil
-		pauldronPreview = nil
-		ns.Print(pauldronWasOn and "Pauldron preview off." or L.BORDERS_PREVIEW_OFF)
-	elseif pauldron then
-		preview = nil
-		pauldronPreview = pauldron
-		ns.Print(("Pauldron preview: %s (%d/%d). On your screen only; /oly borders test off ends it."):format(
-			pauldron.label, pauldron.index, #PAULDRONS))
+		ns.Print(L.BORDERS_PREVIEW_OFF)
 	elseif TierNamed(word) or HonorNamed(word) then
-		pauldronPreview = nil
 		preview = word
 		-- (1.1: with the marks off, it says no mark shows with the border.)
 		ns.Print(ns.Nameplates.Enabled() == false and L.BORDERS_PREVIEW_ON_NO_MARK:format(word) or L.BORDERS_PREVIEW_ON:format(word))
 	elseif word == Borders.MEMBER then
-		pauldronPreview = nil
 		preview = word
 		-- (With the marks off it only waits: NAMEPLATES_PREVIEW_WHEN_OFF below says so.)
 		if ns.Nameplates.Enabled() ~= false then ns.Print(L.BORDERS_PREVIEW_ON_MEMBER) end
@@ -1393,15 +1151,7 @@ function Borders.SetPreview(word)
 	ns.Nameplates.RefreshAll()
 	PreviewChanged()
 	-- Why it doesn't show yet, if it doesn't: the same rules as a real border.
-	if pauldronPreview then
-		if not Borders.Enabled() then ns.Print(L.BORDERS_PREVIEW_WHEN_OFF)
-		elseif ns.GamepadUI() then ns.Print(L.BORDERS_GAMEPAD)
-		elseif ns.IsMember() ~= true then ns.Print(L.BORDERS_PREVIEW_NOT_MEMBER)
-		elseif InCombatLockdown and InCombatLockdown() then ns.Print(L.BORDERS_PREVIEW_COMBAT)
-		elseif not (pauldronRig and pauldronRig.key == pauldronPreview.key) then
-			ns.Print("That pauldron texture is not available in this client build.")
-		end
-	elseif preview then
+	if preview then
 		if not Borders.Enabled() then ns.Print(L.BORDERS_PREVIEW_WHEN_OFF)
 		elseif ns.GamepadUI() then ns.Print(L.BORDERS_GAMEPAD)
 		elseif ns.IsMember() ~= true then ns.Print(L.BORDERS_PREVIEW_NOT_MEMBER)
@@ -1480,9 +1230,8 @@ function Borders.StatusLine()
 	else
 		where = waiting and "set up after combat" or "not set up yet"
 	end
-	local sessionPreview = preview or (pauldronPreview and ("pauldron-" .. pauldronPreview.key))
 	return ("%s  |  %s  |  worked out %d times%s"):format(state, where, Borders.stats.computed,
-		sessionPreview and ("  |  preview " .. sessionPreview) or "")
+		preview and ("  |  preview " .. preview) or "")
 end
 
 ---------------------------------------------------------------------------
@@ -1779,18 +1528,6 @@ end)
 ns.RegisterEvent("PLAYER_REGEN_ENABLED", function() if waiting then Borders.RefreshAll(true) end end)
 -- Not on every client: registered where the game has them.
 pcall(ns.RegisterEvent, "PLAYER_FOCUS_CHANGED", function() Borders.Refresh("focus") end)
--- Older client families may not expose the player updater above. There, let the game's earlier
--- event handler update it, then mirror its final shown/atlas state on the next frame.
-pcall(ns.RegisterEvent, "PLAYER_FLAGS_CHANGED", function()
-	if not playerPvpHooked then
-		ns.After(0, "Olympus portrait badge player", function() Borders.RefreshOlympusBadge("player") end)
-	end
-end)
-pcall(ns.RegisterEvent, "UNIT_FACTION", function(unit)
-	if PVP_BADGES[unit] and (unit ~= "player" or not playerPvpHooked) then
-		ns.After(0, "Olympus portrait badge " .. unit, function() Borders.RefreshOlympusBadge(unit) end)
-	end
-end)
 -- A switch between mouse and keyboard and the gamepad UI (1.1.5: the gamepad gate, Gamepad.lua, on
 -- the next frame): to the gamepad UI every border hides, and the game's chat marks stop; back, the
 -- borders are looked at again and the chat marks come back (registered on the first switch to mouse
