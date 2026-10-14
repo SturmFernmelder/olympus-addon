@@ -125,7 +125,7 @@ local function PlantWanted(w, c)
 	local month = w:As(c, W.MonthNow)
 	local at = w.clock - 600
 	c.rdb.wanted = {
-		version = W.VERSION, group = c.ns.group, faction = c.ns.faction, seq = 3, aliases = {}, slayerAliases = {}, baseSlayers = {},
+		version = W.VERSION, scoreVersion = W.SCORE_VERSION, group = c.ns.group, faction = c.ns.faction, seq = 3, aliases = {}, slayerAliases = {}, baseSlayers = {},
 		evidence = {}, seen = {}, seenOrder = {}, recent = {}, audit = {}, voids = {},
 		targets = {
 			["g:" .. HORDE.guid] = { key = "g:" .. HORDE.guid, name = HORDE.name, realm = "Emberfall", guid = HORDE.guid, active = true,

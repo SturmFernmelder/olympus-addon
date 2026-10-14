@@ -28,7 +28,7 @@ local function WithWanted(w, c)
 	return c.ns.Wanted
 end
 -- A Slayer letter's key as a kill makes it (Bounty.LetterKey): two of ours slain, his bounty 90,
--- his level 60 (120 points), 210 in all; the Horde player of the client c's realm.
+-- his level 60 (6 points under score version 2), 210 in all; the Horde player of the client c's realm.
 local function Key(W, c, digest)
 	return W.Bounty.LetterKey({ digest = digest or "00000000000a1b2c", points = 210, level = 60, hl = 60 },
 		{ victims = { {}, {} }, bounty = 90 }, "Grimtooth Gorefang-" .. c.realm)
@@ -59,7 +59,7 @@ test("1.2.4 the Slayer letter is the King's letter: its window, with Wanted's wo
 	local f = HN.LetterFrame()
 	eq(f.key, key)
 	local text, title = w:As(A, WA.LetterText, key)
-	eq(text, L.WANTED_LETTER:format("Grimtooth Gorefang", "60", 2, 90, L.WANTED_LETTER_LEVEL:format(120), 210))
+	eq(text, L.WANTED_LETTER:format("Grimtooth Gorefang", "60", 2, 90, L.WANTED_LETTER_LEVEL:format(6), 210))
 	eq(f.body:GetText(), text, "Wanted's words in the King's letter")
 	eq(w:As(A, HN.LetterText, key), text, "through HonorsNet's own entry point")
 	eq(title, L.WANTED_LETTER_TITLE:format("Grimtooth Gorefang"))

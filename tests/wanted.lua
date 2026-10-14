@@ -2247,7 +2247,10 @@ test("wanted 1.2.3 locales: every line Wanted.lua names, and its buttons' labels
 	f:close()
 	local pt, savedLocale = {}, GetLocale
 	GetLocale = function() return "ptBR" end
-	local ok, err = pcall(function() assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", pt) end)
+	local ok, err = pcall(function()
+		assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", pt)
+		assert(loadfile(ROOT .. "Olympus/Locales/RankingRulesText.lua"))("Olympus", pt)
+	end)
 	GetLocale = savedLocale
 	if not ok then error(err, 0) end
 	local keys, n = {}, 0

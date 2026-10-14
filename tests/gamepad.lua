@@ -2705,6 +2705,12 @@ test("gamepad pass 6: the Arena's integrations: restricted calls from a click al
 	eq(ns.ArenaMatch.ShowOnMap(), false, "no waypoint with the gamepad UI")
 	eq(#A.Since(before), 0, "nothing of the game's map")
 	GP.Covers("map-waypoint")
+	-- A Wanted last-seen row follows the same boundary: its text remains available, but a gamepad
+	-- session never opens or focuses the game's map from Olympus code.
+	before = A.Mark()
+	eq(ns.Wanted.OpenSightingMap({ mapID = 1429 }), false, "no Wanted map focus with the gamepad UI")
+	eq(#A.Since(before), 0, "a Wanted row touches none of the game's map")
+	GP.Covers("wanted-map")
 	-- A Farkle table's rolls hidden from the chat: no filter with the gamepad UI; registered once
 	-- back with mouse and keyboard; doing nothing from its first line after a switch back.
 	local FT = ns.FarkleTable

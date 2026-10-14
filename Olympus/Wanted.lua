@@ -2230,11 +2230,11 @@ function Wanted.LastSeen(t)
 	return nil
 end
 
-function Wanted.CanOpenSighting(sighting)
+function Wanted.CanOpenSighting(sighting) -- gp:wanted-map
 	if not Wanted.CanSeeLocations() or InInstance() or ns.db and ns.db.showWanted == false then return nil end
 	local G = ns.Gate
 	if type(G) == "table" and type(G.Allowed) == "function" then
-		local ok, allowed = pcall(G.Allowed, "worldmap-icons")
+		local ok, allowed = pcall(G.Allowed, "wanted-map")
 		if not ok or allowed ~= true then return nil end
 	end
 	if type(WorldMapFrame) ~= "table" or type(WorldMapFrame.SetMapID) ~= "function"
@@ -2242,7 +2242,12 @@ function Wanted.CanOpenSighting(sighting)
 	return Wanted.SightingMapID(sighting)
 end
 
-function Wanted.OpenSightingMap(sighting)
+function Wanted.OpenSightingMap(sighting) -- gp:wanted-map
+	local G = ns.Gate
+	if type(G) == "table" and type(G.Allowed) == "function" then
+		local ok, allowed = pcall(G.Allowed, "wanted-map")
+		if not ok or allowed ~= true then return false end
+	end
 	local mapID = Wanted.CanOpenSighting(sighting)
 	if not mapID then return false end
 	local shown = pcall(ShowUIPanel, WorldMapFrame)
@@ -3478,20 +3483,24 @@ function Wanted.HistoryTip(tt, group)
 	return true
 end
 
+function Sight.ShowTip(self, fill, value)
+	if type(GameTooltip) ~= "table" or type(fill) ~= "function" then return false end
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	fill(GameTooltip, value)
+	GameTooltip:Show()
+	return true
+end
+
 function Sight.HistoryEnter(self)
 	local group = self and self.history
-	if not group or type(GameTooltip) ~= "table" then return end
-	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	Wanted.HistoryTip(GameTooltip, group)
-	GameTooltip:Show()
+	if not group then return end
+	return Sight.ShowTip(self, Wanted.HistoryTip, group)
 end
 
 local function PinEnter(self)
 	local e = self and self.sighting and pins[self.sighting]
-	if not e or type(GameTooltip) ~= "table" then return end
-	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-	Wanted.SightingTip(GameTooltip, e)
-	GameTooltip:Show()
+	if not e then return end
+	return Sight.ShowTip(self, Wanted.SightingTip, e)
 end
 local function PinLeave() if type(GameTooltip) == "table" then GameTooltip:Hide() end end
 
