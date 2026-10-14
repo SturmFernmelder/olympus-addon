@@ -133,7 +133,7 @@ ns.GAMEPAD = {
 		why = "Olympus's lines in the game's right-click player menus (Menu.ModifyMenu; 1.2: the Arena's lines, through PlayerMenu.lua's list, and a row's own context menu, MenuUtil.CreateContextMenu, and the Arena window's button menus, ArenaUI.Menu, Olympus's own pop-up in their place with the gamepad UI): the gamepad's player menu runs its interact target state while the menu is built; not registered at a gamepad login, and a callback registered before does nothing." },
 	{ id = "borders", kind = "unit-frame-art", files = { "Borders.lua" },
 		guard = "gate", toPad = "park", toMouse = "install", safe = "off",
-		why = "Olympus's border textures and hooks on the target, focus, player and party frames (CheckClassification on TargetFrame/FocusFrame; InitializePartyMemberFrames on PartyFrame, whose member frames get textures)." },
+		why = "Olympus's border textures and hooks on the target, focus, player and party frames, the native faction-medallion overlays, and the author's session-only player pauldron preview (CheckClassification and CheckFaction on TargetFrame/FocusFrame; InitializePartyMemberFrames on PartyFrame, whose member frames get textures)." },
 	{ id = "chat-marks", kind = "chat-filter", files = { "Borders.lua" },
 		guard = "gate", toPad = "inert", toMouse = "install", safe = "off",
 		why = "Olympus's marks before names in the game's chat, through its sender name filter (called isolated); off from its first line under the gamepad UI." },
