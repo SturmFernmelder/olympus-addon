@@ -47,10 +47,10 @@ Locales\RankingRulesText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Core.lua
-RankingRules.lua
 GamepadRegistry.lua
 Gamepad.lua
 Diagnostics.lua
+RankingRules.lua
 Perf.lua
 Dialog.lua
 PlayerMenu.lua
