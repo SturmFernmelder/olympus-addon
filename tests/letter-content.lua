@@ -73,8 +73,9 @@ test("1.2.4 letter content: Wanted pagination, sightings, score migration and ga
 	}
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
 		local raw = Language(locale).L.LETTER_1_2_4
-		assert(not raw:find(locale == "enUS" and "Legate badge" or "distintivo próprio dos Legates", 1, true),
-			locale .. ": unapproved portrait-badge work is absent")
+		assert(raw:find(locale == "enUS" and "A distinct Legate badge still awaits its chosen artwork"
+			or "O distintivo próprio dos Legates ainda aguarda a arte escolhida", 1, true),
+			locale .. ": deferred Legate badge is stated honestly")
 		local previous
 		for _, phrase in ipairs(expected[locale]) do
 			local position = assert(raw:find(phrase, 1, true), locale .. ": " .. phrase)
