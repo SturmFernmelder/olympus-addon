@@ -324,6 +324,7 @@ test("hop adversarial (1.2.0): a stranger on the channel gets no offer, and his 
 		w.strangers["Stranger-Realm"] = true
 		H.HandleAsk("CHANNEL", "Stranger-Realm", "LQ~42~1453~7")
 		eq(#w.whispered, 0, "no offer to a stranger")
+		eq(H.Crowd(1453, 7, w.clock), 0, "a stranger cannot inflate the layer crowd or its backoff")
 		H.HandleRequest("WHISPER", "Stranger-Realm", "LR~42")
 		eq(#w.invited, 0); eq(#w.popups, 0)
 		-- A member of another federation guild the channel verified (Channels.VerifiedLevel's

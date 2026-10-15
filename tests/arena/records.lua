@@ -199,6 +199,43 @@ test("1.2.4 records: a relay cannot bootstrap identity; pending records survive 
 	Errors(w)
 end)
 
+test("1.2.4 records review: one relayer cannot evict every other player's pending records", function()
+	local w, a, b, c = Setup()
+	local R = c.ns.Records
+	for i = 1, R.PENDING_EACH do
+		local _, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krpend" .. i), N.bettor1, "relay")
+		eq(why, "pending")
+	end
+	local _, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krpendover"), N.bettor1, "relay")
+	eq(why, "pending-sender", "the sender is capped before it can consume the global store")
+	_, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krpendpeer"), N.bettor2, "relay")
+	eq(why, "pending", "another relayer still has room")
+	eq(Do(w, c, "Pending", "b"), R.PENDING_EACH + 1)
+	Errors(w)
+end)
+
+test("1.2.4 records review: one relayer cannot monopolize the signature wait queue", function()
+	local w, a, b, c = Setup() Keys(w, a, b)
+	local R, original = c.ns.Records, c.ns.Arena.Check
+	R.TYPES.b.DAY_MAX = 1000
+	c.ns.Arena.Check = function() end -- keep the real Records inflight slots occupied
+	for i = 1, R.CHECKS_EACH do
+		local ok, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krcheck" .. i), N.bettor1, "relay")
+		eq(ok, true); eq(why, "checking")
+	end
+	for i = 1, R.WAIT_EACH do
+		local _, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krwait" .. i), N.bettor1, "relay")
+		eq(why, "waiting")
+	end
+	local _, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krwaitover"), N.bettor1, "relay")
+	eq(why, "busy-sender")
+	local ok
+	ok, why = Do(w, c, "Take", "b", Pair(w, a, b, "Krwaitpeer"), N.bettor2, "relay")
+	eq(ok, true); eq(why, "checking", "another relayer retains an active verifier slot")
+	c.ns.Arena.Check = original
+	Errors(w)
+end)
+
 test("1.2.4 records: asynchronous callbacks recheck per-player capacity before storing results", function()
 	local w, a, b, c = Setup() Keys(w, a, b)
 	c.ns.Records.TYPES.b.DAY_MAX = 1

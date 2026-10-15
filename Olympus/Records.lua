@@ -74,8 +74,11 @@ R.PUSH_GAP = 120         -- our own digest sent back to one that lacks something
 R.OUT_MAX = 400          -- messages waiting on the low lane at most
 R.FROM_DAY_MAX = 500     -- new records (kept or waiting for a key) one relayer brings in a server day
 R.PENDING_MAX = 500      -- records waiting for a key
+R.PENDING_EACH = 24      -- ...from one relayer, so one peer cannot evict everybody else's
 R.CHECKS_MAX = 20        -- records whose signatures are checked at once (FarkleTable's HALVES_CHECKS)
+R.CHECKS_EACH = 4        -- ...from one relayer, leaving active verifier slots for other peers
 R.WAIT_MAX = 200         -- ...and waiting for their turn
+R.WAIT_EACH = 8          -- ...from one relayer, preserving room for independent peers
 R.LATER = 30             -- the signature queue full: checked again this much later
 R.KEYS_MAX = 5000        -- players' keys kept
 R.KEYS_EACH = 3          -- keys of one player kept (a new account key after a wiped saved data)
@@ -486,7 +489,7 @@ local function FromCount(sender, add)
 	return from[k] or 0
 end
 
-local checking, inflight, waitq = {}, 0, {}
+local checking, checkingBy, inflight, waitq = {}, {}, 0, {}
 local PumpWait -- (below)
 
 local function Clash(letter, s, rec, body)
@@ -513,17 +516,20 @@ end
 local function Pend(letter, s, rec, body, d, sender)
 	local key = rec.id .. "|" .. A().Hash36(body, 8)
 	if s.pend[key] then return false, "pending" end
-	local n, oldest, at = 0, nil, nil
+	local by = Low(sender) or "?"
+	local n, same, oldest, at = 0, 0, nil, nil
 	for id, p in pairs(s.pend) do
 		n = n + 1
+		if type(p) == "table" and p.by == by then same = same + 1 end
 		local t = type(p) == "table" and tonumber(p.at) or 0
 		if not at or t < at then oldest, at = id, t end
 	end
+	if same >= R.PENDING_EACH then return Count("pending-sender") end
 	if n >= R.PENDING_MAX and oldest then
 		s.pend[oldest] = nil
 		Count("pending-out")
 	end
-	s.pend[key] = { id = rec.id, b = body, d = d, at = Now(), by = Low(sender) }
+	s.pend[key] = { id = rec.id, b = body, d = d, at = Now(), by = by }
 	stats.pending = stats.pending + 1
 	EnsureTicker()
 	return false, "pending"
@@ -577,15 +583,20 @@ end
 local function Check(letter, rec, body, sender, how)
 	local key = letter .. "|" .. rec.id
 	if checking[key] then return false, "checking" end
-	if inflight >= R.CHECKS_MAX then
-		if #waitq >= R.WAIT_MAX then
-			table.remove(waitq, 1)
-			Count("busy")
-		end
+	local by = Low(sender) or "?"
+	local function Queue()
+		local same = 0
+		for _, w in ipairs(waitq) do if (Low(w[3]) or "?") == by then same = same + 1 end end
+		if same >= R.WAIT_EACH then return Count("busy-sender") end
+		if #waitq >= R.WAIT_MAX then return Count("busy") end
 		waitq[#waitq + 1] = { letter, body, sender, how }
 		return false, "waiting"
 	end
-	checking[key] = true
+	if inflight >= R.CHECKS_MAX or (checkingBy[by] or 0) >= R.CHECKS_EACH then
+		return Queue()
+	end
+	checking[key] = by
+	checkingBy[by] = (checkingBy[by] or 0) + 1
 	inflight = inflight + 1
 	local left, bad, later = #rec.parts, false, false
 	for _, p in ipairs(rec.parts) do
@@ -594,13 +605,17 @@ local function Check(letter, rec, body, sender, how)
 			left = left - 1
 			if left > 0 then return end
 			checking[key] = nil
+			checkingBy[by] = math.max(0, (checkingBy[by] or 1) - 1)
+			if checkingBy[by] == 0 then checkingBy[by] = nil end
 			inflight = inflight - 1
 			if bad then
 				Count("signature")
 			elseif later then
-				if #waitq < R.WAIT_MAX then waitq[#waitq + 1] = { letter, body, sender, how } else Count("busy") end
-				A().After(R.LATER, "records later", function() PumpWait() end)
-				return -- a full verifier must not synchronously retry its own deferred work
+				local _, why = Queue()
+				if why == "waiting" then
+					A().After(R.LATER, "records later", function() PumpWait() end)
+					return -- a full verifier must not synchronously retry its own deferred work
+				end
 			else
 				Keep(letter, rec, body, sender, how)
 			end
@@ -610,7 +625,11 @@ local function Check(letter, rec, body, sender, how)
 	return true, "checking"
 end
 PumpWait = function()
-	while waitq[1] and inflight < R.CHECKS_MAX do
+	-- Examine each queued row at most once in this pass. A sender already at CHECKS_EACH is
+	-- appended again by Check; a bounded pass reaches another sender behind it without spinning.
+	local remaining = #waitq
+	while remaining > 0 and waitq[1] and inflight < R.CHECKS_MAX do
+		remaining = remaining - 1
 		local w = table.remove(waitq, 1)
 		Take(w[1], w[2], w[3], w[4])
 	end
@@ -1333,7 +1352,7 @@ StaticPopupDialogs["OLYMPUS_RECORDS_SEAL"] = {
 
 -- Tests only: a clean state (a new world's client starts clean anyway).
 function R.Reset()
-	idx, checking, inflight, waitq = {}, {}, 0, {}
+	idx, checking, checkingBy, inflight, waitq = {}, {}, {}, 0, {}
 	outq, outSet = {}, {}
 	lastDigest, heardDigest, askedAt, heardAsk, answeredAt, answering, askCursor = {}, {}, {}, {}, {}, {}, {}
 	askedSeal, heardSealAsk, asm = {}, {}, {}

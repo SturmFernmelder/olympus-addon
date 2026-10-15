@@ -3163,7 +3163,7 @@ test("wanted 1.2.4 world: a member of another guild whom this client cannot prov
 		eq(#t.claims, 1, "the King's relay: a replay"); eq(t.claims[1].points, revenge)
 		eq(world:As(here, here.W.Rankings).all[1].guid, far.guid, "this client's lookup proved the GUID his")
 		local relays = 0
-		for _, m in ipairs(world.log) do if m.from == king and m.text:find("^WK~R~2~") then relays = relays + 1 end end
+		for _, m in ipairs(world.log) do if m.from == king and m.text:find("^WK~R~4~") then relays = relays + 1 end end
 		eq(relays, 2, "the death and the kill, once each")
 		-- The King takes him off; a member offline then gets it in the catch-up.
 		world:Offline(here)
@@ -4471,7 +4471,7 @@ test("wanted 1.2.3 repair: a live death read a moment after it (the recap came l
 	end)
 end)
 
-test("wanted 1.2.3 repair world: the strict offices count the same on every client (a guild master only his own client and his guild's roster verify counts as a member everywhere, one the signed leadership manifest names as a guild master everywhere); 1.2.3 ships Daniel's LOCAL_OFFICES (option b), each client counting what it verifies, so they may differ", function()
+test("wanted office provenance: deterministic mode counts the same on every client; the old local-office option demonstrates why it must not feed shared scores", function()
 	WithWorld(function(world)
 		local master = world:Client("Master-Realm", "Player-1-0A0000F1", nil, nil, "Olympus II")
 		local mate = world:Client("Mate-Realm", "Player-1-0A0000F2", nil, nil, "Olympus II")
@@ -4509,8 +4509,9 @@ test("wanted 1.2.3 repair world: the strict offices count the same on every clie
 			world.epoch = world.epoch + 60
 			return out
 		end
-		-- (1.2.3 ships option b, Daniel's choice "Contar GM e centurião já"; the strict mode first.)
-		eq(master.W.Bounty.LOCAL_OFFICES, true, "1.2.3: option b by default")
+		-- 1.2.4 ships strict deterministic offices; the old local option remains exercised below to
+		-- prove the divergent outcome that must never feed a shared score.
+		eq(master.W.Bounty.LOCAL_OFFICES, false, "1.2.4: deterministic shared offices by default")
 		for _, cl in ipairs(everyone) do cl.W.Bounty.LOCAL_OFFICES = false end
 		Manifest(false)
 		local got = Die()

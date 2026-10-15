@@ -344,6 +344,10 @@ local function TargetDerived(t)
 		cycle = Whole(t.cycle, 1, Wanted.MAX_POINTS) or 1,
 		openSince = Whole(t.openSince, 0, 4294967295) or (tonumber(t.addedAt) or 0),
 		lastDeath = Whole(t.lastDeath, 0, 4294967295),
+		-- Whether every row in the open bounty cycle came from membership this client could
+		-- independently verify.  Old stores predate self-claimed cross-guild membership and are
+		-- therefore trusted; a new unverified row flips the current cycle until it closes.
+		cycleVerified = t.cycleVerified ~= false,
 		lastSighting = Sighting(t.lastSighting),
 		victimOverflow = Whole(t.victimOverflow, 0, Wanted.MAX_POINTS) or 0,
 		-- Older saved cycles counted every overflow death as a kill. New cycles keep the
@@ -387,9 +391,17 @@ CopySlayers = function(rows)
 				monthAt[m] = Whole(type(r.monthAt) == "table" and r.monthAt[m], 0, 4294967295) or 0
 				monthClaims[m] = Whole(type(r.monthClaims) == "table" and r.monthClaims[m], 0, Wanted.MAX_POINTS) or 0
 			end
-			out[key] = { key = key, name = CleanName(r.name), guid = Guid(r.guid), total = Whole(r.total, 0, Wanted.MAX_POINTS) or 0,
+			local total = Whole(r.total, 0, Wanted.MAX_POINTS) or 0
+			local verifiedTotal = Whole(r.verifiedTotal, 0, total)
+			if verifiedTotal == nil then verifiedTotal = total end -- rows saved before membership provenance
+			out[key] = { key = key, name = CleanName(r.name), guid = Guid(r.guid), total = total,
 				claims = Whole(r.claims, 0, Wanted.MAX_POINTS) or 0, reachedAt = Whole(r.reachedAt, 0, 4294967295) or 0,
-				lastAt = Whole(r.lastAt, 0, 4294967295) or 0, months = months, monthAt = monthAt, monthClaims = monthClaims }
+				lastAt = Whole(r.lastAt, 0, 4294967295) or 0, months = months, monthAt = monthAt, monthClaims = monthClaims,
+				verifiedTotal = verifiedTotal,
+				verifiedClaims = Whole(r.verifiedClaims, 0, Wanted.MAX_POINTS)
+					or Whole(r.claims, 0, Wanted.MAX_POINTS) or 0,
+				verifiedReachedAt = Whole(r.verifiedReachedAt, 0, 4294967295)
+					or Whole(r.reachedAt, 0, 4294967295) or 0 }
 		end
 	end
 	return out
@@ -398,6 +410,9 @@ end
 local function MergeSlayer(into, from)
 	into.total = math.min(Wanted.MAX_POINTS, (into.total or 0) + (from.total or 0))
 	into.claims = math.min(Wanted.MAX_POINTS, (into.claims or 0) + (from.claims or 0))
+	into.verifiedTotal = math.min(Wanted.MAX_POINTS, (into.verifiedTotal or 0) + (from.verifiedTotal or 0))
+	into.verifiedClaims = math.min(Wanted.MAX_POINTS, (into.verifiedClaims or 0) + (from.verifiedClaims or 0))
+	into.verifiedReachedAt = math.max(into.verifiedReachedAt or 0, from.verifiedReachedAt or 0)
 	into.reachedAt = math.max(into.reachedAt or 0, from.reachedAt or 0)
 	into.lastAt = math.max(into.lastAt or 0, from.lastAt or 0)
 	into.months, into.monthAt, into.monthClaims = into.months or {}, into.monthAt or {}, into.monthClaims or {}
@@ -430,6 +445,7 @@ function Share.AddPaid(s, rows, r)
 	if not into then
 		-- (A GUID's key names his GUID, though the row was folded when his name alone was known.)
 		into = { key = key, name = r.name, guid = r.guid or Guid(key:match("^g:(.+)$")), total = 0, claims = 0,
+			verifiedTotal = 0, verifiedClaims = 0, verifiedReachedAt = 0,
 			months = {}, monthAt = {}, monthClaims = {} }
 		rows[key] = into
 	end
@@ -465,6 +481,7 @@ local function ResolveSlayer(s, value, create, upgrade)
 		key = gk or nk
 		if not key then return nil, "identity" end
 		r = { key = key, name = ident.name, guid = ident.guid, total = 0, claims = 0,
+			verifiedTotal = 0, verifiedClaims = 0, verifiedReachedAt = 0,
 			months = {}, monthAt = {}, monthClaims = {} }
 		s.slayers[key] = r
 	end
@@ -610,12 +627,17 @@ local function TrimMonths(r, current)
 end
 
 -- One paid claim on a Slayers-shaped row: the Slayer's own, or what one entry paid him.
-function Share.Pay(r, points, at, month)
+function Share.Pay(r, points, at, month, verified)
 	r.months, r.monthAt, r.monthClaims = r.months or {}, r.monthAt or {}, r.monthClaims or {}
 	r.total, r.claims, r.reachedAt, r.lastAt = math.min(Wanted.MAX_POINTS, (r.total or 0) + points),
 		math.min(Wanted.MAX_POINTS, (r.claims or 0) + 1), at, at
 	r.months[month], r.monthAt[month] = math.min(Wanted.MAX_POINTS, (r.months[month] or 0) + points), at
 	r.monthClaims[month] = math.min(Wanted.MAX_POINTS, (r.monthClaims[month] or 0) + 1)
+	if verified then
+		r.verifiedTotal = math.min(Wanted.MAX_POINTS, (r.verifiedTotal or 0) + points)
+		r.verifiedClaims = math.min(Wanted.MAX_POINTS, (r.verifiedClaims or 0) + 1)
+		r.verifiedReachedAt = at
+	end
 	TrimMonths(r, MonthNow())
 end
 
@@ -647,12 +669,14 @@ local function ApplyEvidence(s, e)
 		local worth, again = Bounty.Death(t, e)
 		local added = math.max(0, math.min(worth, Bounty.SCORE.BOUNTY_MAX - t.current))
 		t.current, e.points, e.again = t.current + added, added, again or nil
+		if e.memberVerified == false then t.cycleVerified = false end
 		if not again then t.lifetimeKills = t.lifetimeKills + 1 end
 		AddVictim(t, e)
 	elseif e.action == "claim" then
 		-- 1.2.4: what the kill pays (Bounty.Claim: the small level base, the whole bounty and the revenge;
 		-- the bounty alone for a row without the fields), then a new cycle.
 		local points, level, revenge = Bounty.Claim(t, e)
+		local rankVerified = e.memberVerified ~= false and t.cycleVerified ~= false
 		local r
 		if points > 0 then
 			r = ResolveSlayer(s, { name = e.killerName, guid = e.killerGuid }, true)
@@ -670,14 +694,15 @@ local function ApplyEvidence(s, e)
 		Bounty.Closed(t, e)
 		if points > 0 then
 			r.name, r.guid = e.killerName or r.name, e.killerGuid or r.guid
-			Share.Pay(r, points, e.at, e.month)
+			Share.Pay(r, points, e.at, e.month, rankVerified)
 			-- (And on this entry's own account of what it paid him: Rebuild, Checkpoint.)
 			if type(t.paid) ~= "table" then t.paid = {} end
 			local p = t.paid[r.key]
 			if not p then p = { key = r.key } t.paid[r.key] = p end
 			p.name, p.guid = r.name, r.guid
-			Share.Pay(p, points, e.at, e.month)
+			Share.Pay(p, points, e.at, e.month, rankVerified)
 		end
+		t.cycleVerified = true
 	else
 		return false
 	end
@@ -694,6 +719,7 @@ local function Rebuild(s)
 	for _, t in pairs(s.targets) do
 		local b = TargetDerived(type(t.base) == "table" and t.base or {})
 		t.current, t.lifetimeKills, t.cycle, t.openSince, t.lastDeath = b.current, b.lifetimeKills, b.cycle, b.openSince, b.lastDeath
+		t.cycleVerified = b.cycleVerified
 		t.lastSighting = b.lastSighting
 		t.victimOverflow, t.victimKillOverflow = b.victimOverflow, b.victimKillOverflow
 		t.victims, t.claims = CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
@@ -1243,11 +1269,14 @@ local function RecordKill(kind, rawId, killer, victim, opts)
 	local e = { id = id, seq = s.seq, at = now, month = peer and opts.month or MonthNow(), kind = kind, action = action,
 		targetKey = target.key, killerName = killer.name, killerGuid = killer.guid, victimName = victim.name, victimGuid = victim.guid,
 		zone = opts.zone, mapID = Whole(opts.mapID, 1, 9999999), precision = opts.precision, from = peer and opts.from or CleanName(ns.me),
-		peer = peer or nil, own = opts.own == true or nil, earlier = earlier or nil }
+		peer = peer or nil, own = opts.own == true or nil, earlier = earlier or nil,
+		-- Own rows are native observations. A received row retains whether membership was proven
+		-- independently; false rows remain visible locally but cannot contribute to a signed board.
+		memberVerified = not peer or opts.memberVerified == true }
 	if worth then e.office, e.ml, e.hl, e.hf = worth.office, worth.ml, worth.hl, worth.hf or nil end
 	-- (1.2.4 repair: a member's claim keeps the guild its row named, for the avenged notice's words
 	-- when a death before it is heard after it: Bounty.Grieve.)
-	if peer and action == "claim" then e.guild = Clean(opts.guild, 48) end
+	if peer then e.guild = Clean(opts.guild, 48) end
 	e.digest = peer and opts.digest or Digest(table.concat({ e.id, e.at, e.kind, e.action, e.killerGuid or "", e.victimGuid or "" }, "|"))
 	Remember(s, id, fingerprint, now, e.seq)
 	-- In the order of the deaths: a shared row may come after a later one (a relay, a catch-up),
@@ -1463,7 +1492,10 @@ local function Ranked(rows, month)
 		if (tonumber(points) or 0) > 0 then
 			out[#out + 1] = { key = r.key, name = r.name, guid = r.guid, points = points,
 				claims = month and (r.monthClaims and r.monthClaims[month] or 0) or r.claims or 0,
-				reachedAt = month and (r.monthAt and r.monthAt[month] or 0) or r.reachedAt or 0, lastAt = r.lastAt or 0 }
+				reachedAt = month and (r.monthAt and r.monthAt[month] or 0) or r.reachedAt or 0, lastAt = r.lastAt or 0,
+				verifiedPoints = month and points or tonumber(r.verifiedTotal) or 0,
+				verifiedClaims = month and (r.monthClaims and r.monthClaims[month] or 0) or tonumber(r.verifiedClaims) or 0,
+				verifiedReachedAt = month and (r.monthAt and r.monthAt[month] or 0) or tonumber(r.verifiedReachedAt) or 0 }
 		end
 	end
 	table.sort(out, function(a, b)
@@ -1653,7 +1685,7 @@ local function EvidenceMember(sender, guild)
 end
 
 -- (1.2.4) Who may speak for his own death or killing blow here (Share.Take): a member as the
--- [Olympus] chat takes one (Channels.VerifiedLevel 1 or more), true and whether he was proven.
+-- [Olympus] chat takes one (Channels.VerifiedLevel 1 or more), plus whether he was proven.
 -- Proven first (EvidenceMember: this client's own guild's fresh roster, a rank the census or the
 -- signed manifest names). A plain member of another Olympus guild is in neither, and no client can
 -- prove more of him: the game gives a player's guild only for a unit of his (GetGuildInfo), the
@@ -1661,7 +1693,8 @@ end
 -- FriendListDocumentation.lua) and an addon message carries no guild (CHAT_MSG_ADDON:
 -- ChatInfoDocumentation.lua). Until 1.2.4 every other client refused him for it, the reviewers'
 -- too, so nothing was relayed and Most Wanted stayed empty. Now his own word counts as the chat's
--- does: for the Olympus guild the row names (guild, from Sight.GuildName), his one guild
+-- does for the local ledger: for the Olympus guild the row names (guild, from Sight.GuildName),
+-- his one guild
 -- (Data.ClaimGuild: not another that his messages named within CLAIM_TTL, the signed manifest on
 -- or not), never a guildmate of ours speaking for another guild, nor one our own roster lacks
 -- naming ours (VerifiedLevel 0). A reviewer can still take off what such a member sends (WV).
@@ -1714,10 +1747,18 @@ end
 function Wanted.SignableRankings()
 	local rows = {}
 	for _, r in ipairs(Wanted.Rankings().all) do
-		if Guid(r.guid) and #rows < Wanted.GLOBAL_ROWS then
-			rows[#rows + 1] = { guid = r.guid, points = math.min(r.points, Wanted.MAX_POINTS), claims = r.claims or 0, reachedAt = r.reachedAt or 0 }
+		local points = Whole(r.verifiedPoints, 1, Wanted.MAX_POINTS)
+		if Guid(r.guid) and points then
+			rows[#rows + 1] = { guid = r.guid, points = points, claims = r.verifiedClaims or 0,
+				reachedAt = r.verifiedReachedAt or 0 }
 		end
 	end
+	table.sort(rows, function(a, b)
+		if a.points ~= b.points then return a.points > b.points end
+		if a.reachedAt ~= b.reachedAt then return a.reachedAt < b.reachedAt end
+		return a.guid < b.guid
+	end)
+	while #rows > Wanted.GLOBAL_ROWS do table.remove(rows) end
 	return CanonicalRows(rows) or {}
 end
 
@@ -3707,6 +3748,10 @@ end
 --       1.2.3's bounty: the same rows with what each is worth, frozen where it was observed (the
 --       Olympian's office and level, the Horde player's level, "+" when it is a floor: the section
 --       "The bounty" below); a client reads both, and a WK~1 row counts as one without them.
+--   WK~R~3~...~<bound>~<member>~... and WK~R~4~...~<bound>~<member>~...~<worth>~...
+--       1.2.4 relays keep GUID binding and independently verified membership as separate facts;
+--       3 has no frozen worth, 4 has it.  Unverified rows remain in the perennial local ledger,
+--       but cannot contribute points to a signed global board until a verified relay promotes it.
 --   WV~T~1~<scope>~<horde guid>~<at>            channel: a reviewer took that Horde player off
 --   WV~V~1~<scope>~<from>~<digest>~<at>         channel: a reviewer voided that member's row
 -- GUIDs as WY writes them (server.id), <scope> the realm group and faction (Scope), <digest> the
@@ -3887,7 +3932,11 @@ function Share.Relay(e, via)
 	local scope = Scope()
 	-- (1.2.3: what his client froze for the row, as it counts it: Bounty.Wire.)
 	local worth = Bounty.Wire(e)
-	local fields = { "WK", via, worth and 2 or 1, scope, from, WireGuid(own) and 1 or 0, e.digest, e.at, e.month,
+	-- Relay v3 keeps two independent facts: whether this client bound the character GUID and
+	-- whether it independently verified the sender's Olympus membership.  Recipients may keep an
+	-- unverified event for the local/perennial history, but never promote its points into WY.
+	local fields = { "WK", via, worth and 4 or 3, scope, from, WireGuid(own) and 1 or 0, e.memberVerified ~= false and 1 or 0,
+		e.digest, e.at, e.month,
 		e.kind == "SELF_DEATH" and "S" or "P", WireGuid(horde), WireGuid(own) or "-" }
 	if worth then fields[#fields + 1] = worth end
 	fields[#fields + 1] = name
@@ -3899,8 +3948,8 @@ function Share.Relay(e, via)
 end
 
 -- A reviewer relays a row he took from a member (once, SHARE_RELAY_DELAY and a part of 8 s of his
--- own later, unless another reviewer's relay of it came first), so that the members whose clients
--- cannot verify its sender (other guilds') count it on his word.
+-- own later, unless another reviewer's relay of it came first), so current clients can retain it
+-- across guilds and distinguish a roster-backed confirmation from a self-asserted membership.
 function Share.RelaySoon(e)
 	local function Go()
 		if Share.relayed[e.id] or e.void or not Wanted.CanPublish(ns.me) then return end
@@ -3910,7 +3959,8 @@ function Share.RelaySoon(e)
 end
 
 -- WK's fields, or nil. (1.2.3: WK~2 and its relays carry what the row is worth after the GUIDs,
--- <office>~<level>~<Horde level>[+]: Bounty.Wire, Bounty.Unwire; WK~1 is a row without it.)
+-- <office>~<level>~<Horde level>[+]: Bounty.Wire, Bounty.Unwire; WK~1 is a row without it.
+-- 1.2.4: relay v3/v4 also carries the independent membership bit; v4 carries worth.)
 function Share.Parse(text)
 	if type(text) ~= "string" or #text > 255 then return nil end
 	local r, worth = {}, nil
@@ -3920,6 +3970,12 @@ function Share.Parse(text)
 	elseif text:sub(1, 5) == "WK~2~" then
 		r.scope, r.guild, r.digest, r.at, r.month, r.kind, r.horde, r.own, worth, r.name =
 			text:match("^WK~2~(%x+)~([^~]+)~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~(%u~%d+~%d+%+?)~([^~]+)$")
+	elseif text:sub(5, 7) == "~4~" then
+		r.via, r.scope, r.from, r.bound, r.member, r.digest, r.at, r.month, r.kind, r.horde, r.own, worth, r.name =
+			text:match("^WK~([RC])~4~(%x+)~([^~]+)~([01])~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~(%u~%d+~%d+%+?)~([^~]+)$")
+	elseif text:sub(5, 7) == "~3~" then
+		r.via, r.scope, r.from, r.bound, r.member, r.digest, r.at, r.month, r.kind, r.horde, r.own, r.name =
+			text:match("^WK~([RC])~3~(%x+)~([^~]+)~([01])~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~([^~]+)$")
 	elseif text:sub(5, 7) == "~2~" then
 		r.via, r.scope, r.from, r.bound, r.digest, r.at, r.month, r.kind, r.horde, r.own, worth, r.name =
 			text:match("^WK~([RC])~2~(%x+)~([^~]+)~([01])~(%x+)~(%d+)~(%d+)~([PS])~([^~]+)~([^~]+)~(%u~%d+~%d+%+?)~([^~]+)$")
@@ -3947,17 +4003,39 @@ function Share.SameGiven(a, b)
 	return given ~= "" and given == Given(b)
 end
 
--- (1.2.4) A reviewer's relay counts on his word, as before, unless this client knows better: the
+-- (1.2.4) A reviewer's relay restores the row unless this client knows better; only a current
+-- relay that separately marks membership verified can contribute it to the signed global board. The
 -- guild its sender's own messages named here (Data.ClaimedGuild: his row, a chat line, a census
 -- report) makes him no member (Share.Member), as when he names our own guild and our roster lacks
--- him. A reviewer now relays the rows of members he cannot prove either (Share.Member), so that a
--- client before 1.2.4 counts them; his relay never overrules what this client proves.
+-- him. A reviewer still relays rows he cannot prove, so every current client retains the local
+-- history; his relay never overrules what this client proves.
 function Share.Disowned(sender)
 	local D = ns.Data
 	if type(D) ~= "table" or type(D.ClaimedGuild) ~= "function" then return false end
 	local ok, claimed = pcall(D.ClaimedGuild, sender)
 	if not ok or type(claimed) ~= "string" then return false end
 	return not Share.Member(sender, Sight.GuildName(claimed))
+end
+
+-- A later roster-backed relay may confirm a row this client already retained on the member's own
+-- word.  Change provenance in place and rebuild the derived boards; the evidence id, notices and
+-- local score do not change.
+local function PromoteMembership(s, id, ownGuid)
+	for _, held in ipairs(s.evidence) do
+		if held.id == id then
+			local changed = false
+			if held.memberVerified == false then held.memberVerified, changed = true, true end
+			-- The same confirming relay may be the first receiver-side proof of the sender's GUID.
+			-- Bind only the Olympian side; the Horde side was already required independently.
+			if ownGuid then
+				if held.action == "claim" and not held.killerGuid then held.killerGuid, changed = ownGuid, true end
+				if held.action == "bounty" and not held.victimGuid then held.victimGuid, changed = ownGuid, true end
+			end
+			if changed then Rebuild(s) Changed() end
+			return changed
+		end
+	end
+	return false
 end
 
 -- One shared row (WK) taken into this client's ledger: true and the row recorded, or false, why.
@@ -3987,7 +4065,16 @@ function Share.Take(dist, sender, row)
 		local ok, hidden = pcall(M.Hides, from, guild, true)
 		if not ok or hidden then return false, "hidden" end
 	end
-	if not relay and not Wanted.CanPublish(from) and not Share.Member(from, guild) then return false, "stranger" end
+	local memberVerified = Wanted.CanPublish(from) == true
+	if not relay and not memberVerified then
+		local member, verified = Share.Member(from, guild)
+		if not member then return false, "stranger" end
+		memberVerified = verified == true
+	elseif relay then
+		-- Only v3/v4 can carry the relayer's independent membership result. Older relay formats still
+		-- restore the visible history, but cannot silently become points in a newly signed board.
+		memberVerified = row.member == "1"
+	end
 	if relay and not Wanted.CanPublish(from) and Share.Disowned(from) then return false, "stranger" end
 	local horde = Identity(row.name, row.horde)
 	if not horde or not horde.name then return false, "shape" end
@@ -4024,7 +4111,10 @@ function Share.Take(dist, sender, row)
 	local key = ns.Fold(from) .. "#" .. row.digest
 	if s.voids[key] then return false, "void" end
 	local id = "p:" .. key
-	if s.seen[id] then return false, "replay" end
+	if s.seen[id] then
+		if memberVerified then PromoteMembership(s, id, ownGuid) end
+		return false, "replay"
+	end
 	local admitted, why = Share.Admit(relay and sender or from, horde.guid, now, relay)
 	if not admitted then return false, why end
 	local olympian = Identity(from, ownGuid)
@@ -4037,7 +4127,12 @@ function Share.Take(dist, sender, row)
 	-- RecordKill, Bounty.AvengeOpen.)
 	local ok, e = RecordKill(row.kind == "S" and "SELF_DEATH" or "PARTY_KILL", id, killer, victim,
 		{ peer = true, from = from, digest = row.digest, id = id, at = row.at, month = row.month, horde = side, wire = wire, bounty = worth,
-			guild = Sight.GuildName(row.guild) })
+			guild = Sight.GuildName(row.guild), memberVerified = memberVerified })
+	-- A client may have kept the direct row before a roster-backed reviewer repeats it. Promote the
+	-- existing evidence in place and rebuild; never add a second death/kill or a second notice.
+	if not ok and e == "replay" and memberVerified then
+		PromoteMembership(s, id, ownGuid)
+	end
 	-- (A reviewer relays what he took from a member; another reviewer's own row every client takes
 	-- from him directly.)
 	if ok and not relay and Wanted.CanPublish(ns.me) and not Wanted.CanPublish(from) then Share.RelaySoon(e) end
@@ -4418,7 +4513,7 @@ function Wanted.MigrateScoring(s)
 								months = {}, monthAt = {}, monthClaims = {} }
 							newPaid[key] = row
 						end
-						Share.Pay(row, points, at, month)
+						Share.Pay(row, points, at, month, true)
 					end
 					archive.recalculatedClaims = archive.recalculatedClaims + 1
 				else
@@ -4647,17 +4742,14 @@ function Bounty.Seen(raw)
 	return 0, false
 end
 
--- 1.2.3 (Daniel's choice to confirm): every client counts a death's office the same way, so only
--- offices every client verifies from the same signed or pinned source count (false): the pinned
+-- Every client counts a death's office the same way: only offices every client verifies from the
+-- same signed or pinned source count.  Local roster/census appointments may still be shown by the
+-- role UI, but never enter a relayed score because another honest client may not hold that session
+-- evidence.  The base level, bounty and revenge remain unchanged.
+-- The deterministic sources are: the pinned
 -- King, the signed High Council list, the signed titles (a Steward, an arbiter), the Treasurer's
 -- and the author's characters, and for a guild master the signed leadership manifest (Authority).
--- true also counts the offices a client verifies from what it alone holds (option b): a guild
--- master's game rank on his own client, the roster or the census elsewhere (Data.AuthorizedRank), a
--- centurion's or a correspondent's master's list (Nominees, heard this session), the King's Hands
--- (his list, heard lately); then two clients may count one death differently (a client that
--- cannot verify him counts a member's 0). 1.2.3: true, Daniel's choice ("Contar GM e centurião
--- já"), until the signed leadership manifest is switched on.
-Bounty.LOCAL_OFFICES = true
+Bounty.LOCAL_OFFICES = false
 -- (A member's level on this client's own guild's roster, which is at most Roster.AUTHORITY_FRESH
 -- old, may be this many levels behind the level his own client gave: the clamp leaves them.)
 Bounty.ROSTER_SLACK = 1
@@ -6274,9 +6366,11 @@ function Wanted.Prune()
 				correctedAt = Whole(e.correctedAt, 0, 4294967295), correctedBy = CleanName(e.correctedBy),
 				correction = Clean(e.correction, 80), from = CleanName(e.from), digest = digest,
 				peer = peer or nil, own = e.own == true and not peer or nil, shared = e.shared == true or nil,
+				-- Absence means a row saved before the 1.2.4 self-claim path and remains trusted.
+				memberVerified = not peer or e.memberVerified ~= false,
 				earlier = e.earlier == true and not peer or nil,
-				-- (1.2.4 repair: a member's claim, the guild its row named: Bounty.Grieve.)
-				guild = peer and e.action == "claim" and Sight.GuildName(e.guild) or nil }
+				-- Keep the claimed guild for later membership promotion and deterministic office checks.
+				guild = peer and Sight.GuildName(e.guild) or nil }
 			-- (1.2.3: what it is worth, as frozen; a malformed one is none: it counts as a row without it.)
 			local worth = Bounty.Fields(e)
 			if worth then

@@ -352,6 +352,11 @@ for _, enforced in ipairs({ false, true }) do
 				assert(t, ns.ShortName(cl.name) .. " has his kill")
 				eq(t.claims[1].slayer, sender.name, ns.ShortName(cl.name)); eq(t.claims[1].points, 6, "one rounded base point per ten levels")
 			end
+			-- The author's client cannot independently prove this cross-guild membership. It keeps
+			-- the complete local/perennial ranking, but cannot turn self-asserted rows into a signed
+			-- global board. A roster-backed reviewer can later promote the same row without replaying it.
+			eq(world:As(author, author.W.Rankings).all[1].name, sender.name, "the local ranking remains visible")
+			eq(#world:As(author, author.W.SignableRankings), 0, "unverified membership is not globally signed")
 			-- The author's /oly wanted status: counted, and the guild the row names.
 			local line = assert(world:Line(author, "Wgganker" .. tag), "a line about the death")
 			assert(line:find(ns.L.WANTED_STATUS_BOUNTY:format(60), 1, true), line)
@@ -360,17 +365,50 @@ for _, enforced in ipairs({ false, true }) do
 	end)
 end
 
-test("wanted 1.2.4 guilds: the author's client relays such a row once, the relay a 1.2.3 client takes, so a client that has not updated counts it too", function()
+test("wanted 1.2.4 guilds: the author's client relays such a row once with separate GUID and membership provenance, and every current client keeps it locally", function()
 	WithGuilds(function(world)
 		local sender, _, author, third = Scene(world, "r")
 		world:Death(sender, "Wgrelayed-Realm", "Player-1-0F00B001")
-		world:Run(15)
+		world:Run(30)
 		eq(world:Relays(author), 1, "one relay, the reviewer's")
 		local relay
 		for _, m in ipairs(world.log) do if m.from == author and m.text:find("^WK~R~") then relay = m.text end end
-		-- (The relay's wire is the 1.2.3 one: WK~R~2~<scope>~<from>~<bound>~<digest>~..., Share.Parse.)
-		assert(relay:find("^WK~R~2~%x+~" .. sender.name:gsub("%-", "%%-") .. "~[01]~%x+~"), relay)
+		-- Relay v4: bound GUID and verified membership are independent. This cross-guild row is
+		-- retained but explicitly carries member=0 until a roster-backed reviewer confirms it.
+		assert(relay:find("^WK~R~4~%x+~" .. sender.name:gsub("%-", "%%-") .. "~[01]~0~%x+~"), relay)
 		eq(world:As(third, third.W.Target, nil, "Player-1-0F00B001").current, 60, "once, the relay a replay here")
+	end)
+end)
+
+test("wanted 1.2.4 guilds review: a later roster-backed relay promotes the same local claim into the signed board without duplicating it", function()
+	WithGuilds(function(world)
+		local sender, _, author = Scene(world, "p")
+		local horde = "Player-1-0F00B101"
+		assert(world:Kill(sender, "Wgpromoted-Realm", horde))
+		eq(world:As(author, author.W.Rankings).all[1].points, 6, "the unverified local claim is visible")
+		eq(#world:As(author, author.W.SignableRankings), 0, "but is not signed yet")
+		local direct
+		for _, m in ipairs(world.log) do
+			if m.from == sender and m.text:find("^WK~2~") and m.text:find("~P~", 1, true) then direct = m.text end
+		end
+		assert(direct, "the original signed claim row")
+		local council = world:Client("Wgcouncilp-Realm", G1, { role = "council" })
+		council.cache[sender.guid] = { name = sender.name, race = "Human" }
+		local ok, why = world:As(council, council.handlers.WK, "CHANNEL", sender.name, direct)
+		assert(ok, tostring(why))
+		world:Run(30)
+		local confirming
+		for _, m in ipairs(world.log) do if m.from == council and m.text:find("^WK~R~") then confirming = m.text end end
+		assert(confirming and confirming:find("^WK~R~4~%x+~" .. sender.name:gsub("%-", "%%-") .. "~[01]~1~"),
+			tostring(confirming or "no confirming relay"))
+		local evidence = assert(author.rdb.wanted.evidence[1])
+		eq(evidence.memberVerified, true, "the replay promotes membership provenance")
+		eq(evidence.killerGuid, sender.guid, "the replay promotes the independently bound GUID")
+		local signed = world:As(author, author.W.SignableRankings)
+		eq(#signed, 1); eq(signed[1].guid, sender.guid); eq(signed[1].points, 6)
+		local target = world:Target(author, horde)
+		eq(#target.claims, 1, "the confirming relay does not duplicate the kill")
+		eq(world:As(author, author.W.Rankings).all[1].points, 6, "nor its points")
 	end)
 end)
 
