@@ -16,6 +16,7 @@ fixture() {
 	printf '## Interface: 16001\r\n\r\nMain.lua\r\nnested folder\\Extra.lua\r\n' > "$case_root/Olympus/Olympus.toc"
 	printf 'print("fixture suite ran")\n' > "$case_root/tests/run.lua"
 	printf 'printf "fixture round trip ran\\n"\n' > "$case_root/tests/sign-roundtrip.sh"
+	printf 'printf "fixture records seal round trip ran\\n"\n' > "$case_root/tests/records-seal-roundtrip.sh"
 }
 
 expect_failure() {

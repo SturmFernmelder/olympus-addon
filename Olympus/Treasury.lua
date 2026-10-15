@@ -108,6 +108,7 @@ local itemPending = {}       -- mail items asked for, until the bags hold them: 
 local lastMoney              -- the character's gold as last seen while takes wait
 local bookShown = Treasury.BOOK_SHOWN
 local rankShown = Treasury.RANK_PAGE
+local rulesReturn -- exact in-tab state before a ranking's explanation page
 
 local function Grey(s) return "|cff9d9d9d" .. s .. "|r" end
 local function Gold(s) return "|cffffd200" .. s .. "|r" end
@@ -351,7 +352,10 @@ end
 -- Who has the tab: the keepers, the King and his Steward (where a Treasurer can be, or once a
 -- book came; the author's view always), and every member once the King shows the army something.
 function Treasury.Visible()
+	if ns.GuildFinance and not ns.GuildFinance.missing and ns.GuildFinance.Visible() then return true end
 	if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then return true end
+	local campaign = ns.Campaign and not ns.Campaign.missing and ns.Campaign.State()
+	if campaign and not campaign.closed and ns.IsMember() then return true end
 	if Treasury.IsKeeper() or ns.King.Preview() then return true end
 	-- (1.1: the King, his Steward or a Hand holding a sister guild's bank, 1.2: any of the Guild
 	-- treasuries' audience, and a Lord or Captain with a request to the treasury: Bank.lua.)
@@ -688,6 +692,7 @@ function Treasury.Record(name, copper, how, out, o)
 		if type(A) == "table" and type(A.KeeperLine) == "function" then A.KeeperLine(name, copper, how, out) end
 	end
 	Touch(b)
+	if ns.Dues.PayerBooked then ns.Dues.PayerBooked(b, e, name, o.observed == true) end
 	-- 1.1: an item given (a counted payment) to a player who asked the treasury for it closes his
 	-- request once he got its count (Bank.lua).
 	if item and out and not e.excluded and kind ~= "transfer" and ns.Bank and ns.Bank.Paid then ns.Bank.Paid(name, item, count) end
@@ -718,6 +723,8 @@ function Treasury.Record(name, copper, how, out, o)
 	ns.Fire("TREASURY_CHANGED")
 	-- 1.2: the fee's receipt (ZF) goes from the arena's side (Debts.lua), by its ref.
 	if kind == "fee" and feeRef then ns.Fire("TREASURY_FEE", name, copper, feeRef, feeTest) end
+	-- Campaign candidates come only from native confirmed intake, never manual Record edits.
+	if o.observed == true then ns.Fire("TREASURY_RECEIPT", e, b) end
 	return e
 end
 
@@ -820,6 +827,10 @@ local function Merge(list, id, n)
 	end
 	list[#list + 1] = { id = id, n = n }
 end
+local function KnownItemCount(n)
+	n = tonumber(n)
+	return n ~= nil and n >= 1 and n <= Treasury.MAX_COUNT and n == math.floor(n)
+end
 local function TradeItems(info, link, first, last)
 	local list = {}
 	if not info then return list end
@@ -827,7 +838,13 @@ local function TradeItems(info, link, first, last)
 		local name, _, n = info(i)
 		if name and name ~= "" then
 			local id = LinkId(link and link(i))
-			if id then Merge(list, id, math.max(1, math.floor(tonumber(n) or 1))) end
+			if id then
+				-- Preserve the old book's fallback count, but do not turn missing/fractional
+				-- native quantity into confirmed campaign evidence. One unknown merged slot
+				-- makes the combined item quantity unconfirmed too.
+				Merge(list, id, math.max(1, math.floor(tonumber(n) or 1)))
+				for _, it in ipairs(list) do if it.id == id then it.nativeCount = it.nativeCount ~= false and KnownItemCount(n); break end end
+			end
 		end
 	end
 	return list
@@ -867,14 +884,14 @@ function Treasury.Info(a, b)
 	local net = done.got - done.gave
 	if net > 0 then
 		Treasury.Record(done.name, net, "trade", nil, { book = book, excluded = done.gaveItems or nil, kind = done.gaveItems and "sale" or nil,
-			guild = done.guild })
+			guild = done.guild, observed = true })
 	elseif net < 0 then
-		Treasury.Record(done.name, -net, "trade", true, { book = book, excluded = done.gotItems or nil, kind = done.gotItems and "purchase" or nil })
+		Treasury.Record(done.name, -net, "trade", true, { book = book, excluded = done.gotItems or nil, kind = done.gotItems and "purchase" or nil, observed = true })
 	end
 	-- Items: given with nothing back, a donation (or a payment); in a deal, part of it (not counted).
 	for _, it in ipairs(done.gotList or {}) do
 		local deal = (net < 0 and "purchase") or (done.gaveItems and "sale") or nil
-		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal })
+		Treasury.Record(done.name, 0, "trade", nil, { book = book, item = it.id, count = it.n, excluded = deal and true or nil, kind = deal, observed = it.nativeCount == true })
 	end
 	for _, it in ipairs(done.gaveList or {}) do
 		local deal = (net > 0 and "sale") or (done.gotItems and "purchase") or nil
@@ -889,6 +906,7 @@ end
 -- Mail sent with gold or items: counted once the game says it went. Items sent cash on
 -- delivery are sold (not counted).
 function Treasury.MailSending(to, subject)
+	if ns.Dues.PayerMailSending then ns.Dues.PayerMailSending(to, subject) end
 	if not Treasury.IsKeeper() then return end
 	Treasury.OpenBook()
 	local money = GetSendMailMoney and tonumber(GetSendMailMoney()) or 0
@@ -908,10 +926,11 @@ function Treasury.MailSending(to, subject)
 		subject = type(subject) == "string" and subject or nil } or nil
 end
 function Treasury.MailSent()
+	if ns.Dues.PayerMailSent then ns.Dues.PayerMailSent() end
 	local m = mailOut
 	mailOut = nil
 	if not m then return end
-	if m.money > 0 then Treasury.Record(m.to, m.money, "mail", true, { book = m.book, note = m.subject }) end
+	if m.money > 0 then Treasury.Record(m.to, m.money, "mail", true, { book = m.book, note = m.subject, observed = true }) end
 	for _, it in ipairs(m.items) do
 		local sold = m.cod > 0
 		Treasury.Record(m.to, 0, "mail", true, { book = m.book, item = it.id, count = it.n, excluded = sold or nil, kind = sold and "sale" or nil })
@@ -995,16 +1014,17 @@ local function Returned(b, sender, money, item, count)
 end
 
 local function MailClock() return GetTime and GetTime() or ns.Now() end
-local function Settle(p)
+local function Settle(p, observed)
 	if p.returned then return Returned(p.book, p.sender, p.money) end
 	-- (1.1: the mail's subject, the dues' note: its week and guild, Dues.lua.)
-	Treasury.Record(p.sender, p.money, "mail", nil, { book = p.book, note = p.note })
+	Treasury.Record(p.sender, p.money, "mail", nil, { book = p.book, note = p.note, observed = observed == true })
 end
-local function SettleItem(p)
+local function SettleItem(p, observed)
 	if p.returned then return Returned(p.book, p.sender, 0, p.id, p.n) end
 	-- Cash on delivery: bought, not given.
 	local bought = p.cod > 0
-	Treasury.Record(p.sender, 0, "mail", nil, { book = p.book, item = p.id, count = p.n, excluded = bought or nil, kind = bought and "purchase" or nil })
+	Treasury.Record(p.sender, 0, "mail", nil, { book = p.book, item = p.id, count = p.n, excluded = bought or nil, kind = bought and "purchase" or nil,
+		observed = observed == true })
 end
 local function DropStale(list, now)
 	for i = #list, 1, -1 do if now - list[i].t >= Treasury.PENDING_FOR then table.remove(list, i) end end
@@ -1044,14 +1064,14 @@ function Treasury.MoneyChanged()
 	for i, p in ipairs(pending) do
 		if p.money == gained then
 			table.remove(pending, i)
-			return Settle(p)
+			return Settle(p, true)
 		end
 	end
 	local i = 1
 	while pending[i] do
 		if pending[i].money <= gained then
 			gained = gained - pending[i].money
-			Settle(table.remove(pending, i))
+			Settle(table.remove(pending, i), true)
 		else
 			i = i + 1
 		end
@@ -1083,10 +1103,11 @@ function Treasury.MailItemTaking(i, a)
 	for k = first, last do
 		local name, itemID, _, n = GetInboxItem(i, k)
 		local id = name and (LinkId(GetInboxItemLink and GetInboxItemLink(i, k)) or tonumber(itemID))
+		local nativeCount = KnownItemCount(n)
 		n = math.max(1, math.floor(tonumber(n) or 1))
 		if id then
 			local p = { key = ("%d|%d|%s|%s|%d|%d"):format(i, k, m.sender, tostring(m.subject or ""), id, n), sender = m.sender, id = id, n = n,
-				returned = m.returned, cod = m.cod, t = now, book = book }
+				returned = m.returned, cod = m.cod, t = now, book = book, nativeCount = nativeCount }
 			local known = false
 			for _, q in ipairs(itemPending) do if q.key == p.key then known = true end end
 			if not known then
@@ -1117,7 +1138,7 @@ function Treasury.ItemsChanged()
 			for _, r in ipairs(itemPending) do
 				if r.id == id then r.have = math.max(r.have, q.have + q.n) break end
 			end
-			SettleItem(q)
+			SettleItem(q, q.nativeCount == true) -- both attachment quantity and bag arrival must be known
 		end
 	end
 end
@@ -1380,6 +1401,7 @@ function Treasury.HandleWithdraw(dist, sender, text)
 	for _, from in ipairs(gone) do reports[from] = nil end
 	local bank = ns.rdb.bankReport
 	if type(bank) == "table" and SameChar(bank.by, sender) then ns.rdb.bankReport = nil end
+	if ns.GuildFinance and not ns.GuildFinance.missing and type(ns.GuildFinance.Withdrawn) == "function" then ns.GuildFinance.Withdrawn(sender) end
 	ns.Fire("TREASURY_CHANGED")
 	ns.Fire("DATA_CHANGED")
 end
@@ -2188,6 +2210,7 @@ local function PumpPrivate()
 	local waited = 0
 	local function Finish(ok)
 		if sending ~= o then return end
+		local dispatched = ok and PrivateValid(o) and privateKinds[o.kind].dispatched
 		if ok then
 			sentTo[o.to] = sentTo[o.to] or {}
 			sentTo[o.to][o.key] = { msg = o.msg, at = ns.Now(), kind = o.kind }
@@ -2195,6 +2218,9 @@ local function PumpPrivate()
 			held = true -- the normal share tick can retry; failed bytes were never delivered whole
 		end
 		sending = nil
+		-- Transport completion only, not the recipient's acknowledgement. A kind can
+		-- advance its bounded private delivery workflow while the original guard holds.
+		if dispatched then ns.SafeCall("treasury private dispatched", dispatched, o.to, o.msg) end
 		if outbox[1] then ns.After(Treasury.PRIVATE_PACE, "treasury private", PumpPrivate) end
 	end
 	local function Next()
@@ -3031,7 +3057,10 @@ ns.On("LOGIN", function()
 	end
 	ns.RegisterEvent("MAIL_SEND_SUCCESS", function() ns.SafeCall("treasury mail", Treasury.MailSent) end)
 	ns.RegisterEvent("MAIL_FAILED", function(itemID)
-		if not itemID then mailOut = nil end
+		if not itemID then
+			mailOut = nil
+			if ns.Dues.PayerMailFailed then ns.Dues.PayerMailFailed() end
+		end
 		Treasury.MailFailed(itemID)
 	end)
 	ns.RegisterEvent("PLAYER_MONEY", function() ns.SafeCall("treasury mail", Treasury.MoneyChanged) end)
@@ -3257,6 +3286,22 @@ function Treasury.Show(mode)
 	ns.Fire("TREASURY_CHANGED")
 end
 
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	rulesReturn = { key = key, mode = Treasury.mode, guild = guildShown, tab = Treasury.sisterTab }
+	Treasury.mode = "rules"
+	ns.Fire("TREASURY_CHANGED")
+	return true
+end
+
+local function CloseRules()
+	local back = rulesReturn or { mode = "summary" }
+	rulesReturn = nil
+	Treasury.mode, guildShown, Treasury.sisterTab = back.mode or "summary", back.guild, back.tab
+	ns.Fire("TREASURY_CHANGED")
+end
+
 -- The ranking and the book from their first page again (the tab's search changed, Views.lua).
 function Treasury.FirstPage() bookShown, rankShown = Treasury.BOOK_SHOWN, Treasury.RANK_PAGE end
 
@@ -3300,6 +3345,8 @@ local function RankLines(lines, rank, q)
 		tt:AddLine(L.TREASURY_RANKING, 1, 0.82, 0)
 		if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(tt, "count-treasury-donors") end
 	end }
+	local rules = ns.RankingRules and ns.RankingRules.Link("treasury-donors", function() ShowRules("treasury-donors") end)
+	if rules then lines[#lines + 1] = rules end
 	if #rank == 0 then lines[#lines + 1] = { text = Grey(L.TREASURY_NONE) } end
 	local n = #found
 	for k = 1, math.min(n, rankShown) do
@@ -3490,8 +3537,8 @@ end
 -- Who sees the guild bank: the keepers and the King always, the army with the King's "book".
 local function BankVisible(role) return role ~= "member" or Treasury.Shows("book") end
 
--- Counts are taken only from the snapshot already held: item units and occupied stacks. There is
--- deliberately no item-to-gold estimate; no verified valuation exists in the addon.
+-- Counts are taken only from the snapshot already held: item units and occupied stacks. (1.2.4:
+-- the items' value, Bank.Value, is their vendor price over Olympus's table, not their market value.)
 local function BankSnapshotTotals(snap)
 	local units, stacks = 0, 0
 	for _, tab in ipairs(type(snap) == "table" and type(snap.tabs) == "table" and snap.tabs or {}) do
@@ -3513,7 +3560,7 @@ local function SnapshotLines(lines, b, opts)
 	lines[#lines + 1] = { text = L.TREASURY_BANK_GOLD, right = Treasury.Coins(b.money or 0) }
 	local units, stacks = BankSnapshotTotals(b)
 	lines[#lines + 1] = { text = L.TREASURY_GUILD_ITEMS:format(units, stacks), tooltip = opts.valueTip and function(tt)
-		tt:AddLine(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, 1, 1, true)
+		Treasury.ValueTip(tt, ns.Bank.Value and ns.Bank.Value(b))
 	end or nil }
 	-- 1.1: what left the bank since the snapshot before (counts only, never who: the bank's log is
 	-- never read), and in the grid the slots those stacks sat in, faded.
@@ -3668,10 +3715,16 @@ Treasury.DirectoryShown = DirectoryShown
 
 -- The banks the list shows, rebuilt from what Bank.lua holds now (it rechecks the viewer and the
 -- current authority): { key, guild, snap, by, home, money, units, stacks, t, old }, <Olympus>'s
--- first, then the most gold first. A viewer who is of another Olympus guild finds his own guild's
--- bank there too, as his own client last read it (no one whispers him his own: Treasury.Private),
--- or a newer snapshot of it an officer of his shared; one bank a guild.
-local function DirectoryBanks(role)
+-- first. A viewer who is of another Olympus guild finds his own guild's bank there too, as his own
+-- client last read it (no one whispers him his own: Treasury.Private), or a newer snapshot of it an
+-- officer of his shared; one bank a guild. 1.2.4 (the author's ranking of the treasuries): with each
+-- its items' value (value, pending, unpriced: Bank.Value), its total (gold + value), its Federal
+-- Treasury correspondent (corr, corrKept: Bank.Correspondent; none for <Olympus>, the Federal
+-- Treasury itself), its average level (level: the census) and its place (pos; <Olympus> has none,
+-- outside the race): the highest total first, then the higher average level, then the name. Only
+-- for the ranking drawn (`ranked`): a search's keystroke, the tab's visibility, a guild's page by
+-- name work out no value (their totals are the gold) and ask the game for no item's data.
+local function DirectoryBanks(role, ranked)
 	local out = {}
 	if not DirectoryShown() then return out end
 	local B = ns.Bank
@@ -3693,25 +3746,66 @@ local function DirectoryBanks(role)
 	if type(mine) == "table" and type(guild) == "string" and mine.guild == guild then Add(mine) end
 	for _, s in ipairs(B.Sisters()) do Add(s) end
 	local now = ns.Now()
+	if ranked and B.PriceAsks then B.PriceAsks() end
 	for _, b in ipairs(out) do
 		local x = B.Index(b.snap)
 		b.units, b.stacks = x and x.units or 0, x and x.stacks or 0
 		b.money, b.t = math.max(0, math.floor(tonumber(b.snap.money) or 0)), tonumber(b.snap.t) or 0
 		b.old = now - b.t > (B.SISTER_OLD or math.huge)
+		local v = ranked and B.Value and B.Value(b.snap)
+		b.value, b.pending, b.unpriced, b.ranked = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0, ranked and true or nil
+		b.total = b.money + b.value
+		if ranked and not b.home and B.Correspondent then b.corr, b.corrKept = B.Correspondent(b.guild) end
+		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(b.guild)
+		b.level, b.folded = type(g) == "table" and tonumber(g.avgLevel) or 0, ns.Fold(b.guild)
 	end
 	table.sort(out, function(a, c)
 		if a.home ~= c.home then return a.home == true end
-		if a.money ~= c.money then return a.money > c.money end
+		if a.total ~= c.total then return a.total > c.total end
+		if a.level ~= c.level then return a.level > c.level end
+		if a.folded ~= c.folded then return a.folded < c.folded end
 		return a.key < c.key
 	end)
+	local pos = 0
+	for _, b in ipairs(out) do
+		if not b.home then pos = pos + 1; b.pos = pos end
+	end
 	return out
 end
 
+-- 1.2.4: the ranking of the Guild treasuries as numbers alone: { federal = <Olympus>'s row or nil,
+-- rows = { { pos, guild, correspondent, money, units, stacks, value, pending, unpriced, total, t, old,
+-- level }, ... } }, in its order. What the Treasury tab draws in place of the banks' rows, for their
+-- audience alone. Sharing it with everyone, its numbers without any bank's items, is for later (the
+-- author's "depois"): a message of these fields would go from here. Nothing sends it in 1.2.4.
+function Treasury.Ranking(role)
+	local out = { rows = {} }
+	for _, b in ipairs(DirectoryBanks(role, true)) do
+		local row = { pos = b.pos, guild = b.guild, correspondent = b.corr or nil, money = b.money, units = b.units, stacks = b.stacks,
+			value = b.value, pending = b.pending, unpriced = b.unpriced, total = b.total, t = b.t, old = b.old, level = b.level }
+		if b.home then out.federal = row else out.rows[#out.rows + 1] = row end
+	end
+	return out
+end
+
+-- An amount of the ranking: "at least" while some of the bank's items wait for their data.
+local function AtLeast(b, text) return b.pending > 0 and L.TREASURY_RANK_ATLEAST:format(text) or text end
+-- What a bank's items are worth, said (v: Bank.Value's).
+function Treasury.ValueTip(tt, v)
+	if type(v) == "table" then
+		local text = Treasury.GoldText(v.value)
+		tt:AddLine(L.TREASURY_RANK_VALUE:format(v.pending > 0 and L.TREASURY_RANK_ATLEAST:format(text) or text), 1, 0.82, 0)
+		if v.pending > 0 then tt:AddLine(L.TREASURY_RANK_PENDING:format(v.pending), 1, 1, 1, true) end
+		if v.unpriced > 0 then tt:AddLine(L.TREASURY_RANK_UNPRICED:format(v.unpriced), 1, 1, 1, true) end
+	end
+	tt:AddLine(L.TREASURY_GUILD_VALUE_TIP, 0.8, 0.8, 0.8, true)
+end
+
 -- One of them by name, as the list would show it now (nil: not authorized, or no longer held).
-local function DirectoryBank(name)
+local function DirectoryBank(name, ranked)
 	if type(name) ~= "string" or name == "" then return nil end
 	local key = name:lower()
-	for _, b in ipairs(DirectoryBanks()) do if b.key == key then return b end end
+	for _, b in ipairs(DirectoryBanks(nil, ranked)) do if b.key == key then return b end end
 end
 
 -- Its ledger: the Treasury books' balance (<Olympus>'s alone), as this viewer sees it. Returns its
@@ -3740,21 +3834,35 @@ local function DirTip(b, click)
 		tt:AddLine(L.TREASURY_GUILD_TITLE:format(b.guild), 1, 0.82, 0)
 		tt:AddLine(L.TREASURY_GUILD_SHARED_BY:format(DirWho(b), ns.Ago(b.t)), 1, 1, 1, true)
 		if b.old then tt:AddLine(L.TREASURY_DIR_STATE_OLD, 1, 0.4, 0.4, true) else tt:AddLine(L.TREASURY_DIR_STATE_SHARED, 0.6, 1, 0.6, true) end
+		-- (A search's rows are not ranked: their correspondent and value are worked out here, at the
+		-- hover alone, as the ranking's are: the branch's review.)
+		local B = ns.Bank
+		local corr, kept = b.corr, b.corrKept
+		if not b.ranked and not b.home and B.Correspondent then corr, kept = B.Correspondent(b.guild) end
+		if not b.home then
+			local who = corr and ns.DisplayName(corr) or nil
+			tt:AddLine(not who and L.TREASURY_RANK_CORR_NONE or (kept and L.TREASURY_RANK_CORR_KEPT or L.TREASURY_RANK_CORR):format(who), 1, 1, 1, true)
+		end
+		tt:AddLine(L.TREASURY_GUILD_ITEMS:format(b.units or 0, b.stacks or 0), 1, 1, 1, true)
 		tt:AddLine(b.home and L.TREASURY_DIR_LEDGER_TIP or L.TREASURY_GUILD_BOOK_UNAVAILABLE, 0.8, 0.8, 0.8, true)
-		tt:AddLine(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 0.8, 0.8, 0.8, true)
+		local v = b.ranked and { value = b.value or 0, pending = b.pending or 0, unpriced = b.unpriced or 0 } or (B.Value and B.Value(b.snap))
+		Treasury.ValueTip(tt, v)
 		if click then tt:AddLine(click, 0.6, 1, 0.6, true) end
 	end
 end
 
--- Its line under its name: its ledger and its items; who took it and when on the right.
+-- Its line under its name: its gold, its items and their value (1.2.4; <Olympus>'s ledger first);
+-- who took it and when on the right (an old one in red).
 local function DirDetail(b)
-	return { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(b.units, b.stacks)),
+	local text = L.TREASURY_RANK_DETAIL:format(Treasury.GoldText(b.money), b.units, AtLeast(b, Treasury.GoldText(b.value)))
+	if b.home then text = L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. text end
+	return { indent = 1, text = Grey(text),
 		right = (b.old and Red or Grey)(L.TREASURY_DIR_WHEN:format(DirWho(b), ns.Ago(b.t))), tooltip = DirTip(b) }
 end
 
 -- The census's Olympus guilds (but the King's) whose bank this client holds none of: no snapshot
--- received, which is no refusal (snapshots live in memory and come only while a sharer is online;
--- a yes may be the King's alone, 1.1's).
+-- received, which is no refusal (a snapshot comes only while a sharer is online, kept since 1.2.4
+-- until a newer one or his no; a yes may be the King's alone, 1.1's).
 local function Unheld(banks)
 	local have, out = {}, {}
 	for _, b in ipairs(banks) do have[b.key] = true end
@@ -3792,7 +3900,7 @@ local function SisterLines(lines, role)
 		end
 		return false
 	end
-	local banks = DirectoryBanks(role)
+	local banks = DirectoryBanks(role, true)
 	lines[#lines + 1] = { header = true, text = L.TREASURY_GUILDS, tooltip = function(tt)
 		tt:AddLine(L.TREASURY_GUILDS, 1, 0.82, 0)
 		tt:AddLine(L.TREASURY_GUILDS_TIP, 1, 1, 1, true)
@@ -3814,10 +3922,14 @@ local function SisterLines(lines, role)
 		lines[#lines + 1] = { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format(ledger) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(units, stacks)),
 			tooltip = TotalTip, gapAfter = true }
 	end
-	for _, bank in ipairs(banks) do
-		local b = bank
+	-- 1.2.4: the ranking in place of the banks' rows (the author's ask): <Olympus> apart, the Federal
+	-- Treasury, outside the race; then each guild in its place, its correspondent, its gold, its
+	-- items, their value and its total; a click opens its bank as before.
+	local function Row(b)
 		local opened = dirOpen == b.key
-		lines[#lines + 1] = { text = (opened and Gold or tostring)((opened and "[-] " or "[+] ") .. "<" .. b.guild .. ">"), right = Treasury.Coins(b.money),
+		local label = b.home and L.TREASURY_RANK_FEDERAL:format("<" .. b.guild .. ">")
+			or L.TREASURY_RANK_ROW:format(b.pos, b.corr and ns.DisplayName(b.corr) or L.TREASURY_RANK_NO_CORR, "<" .. b.guild .. ">")
+		lines[#lines + 1] = { text = (opened and Gold or tostring)((opened and "[-] " or "[+] ") .. label), right = AtLeast(b, Treasury.Coins(b.total)),
 			key = "sister:" .. b.guild, tooltip = DirTip(b, L.TREASURY_DIR_EXPAND_TIP),
 			onClick = function()
 				dirOpen = dirOpen ~= b.key and b.key or nil
@@ -3828,6 +3940,21 @@ local function SisterLines(lines, role)
 			SnapshotLines(lines, b.snap, { byLine = (b.home and L.TREASURY_BANK_AS_OF or L.TREASURY_GUILD_SHARED_BY):format(DirWho(b), ns.Ago(b.t)),
 				gone = true, open = dirTabs[b.key], setOpen = function(i) dirTabs[b.key] = i end, key = "dirtab:" .. b.key .. ":", valueTip = true })
 			lines[#lines].gapAfter = true
+		end
+	end
+	local ranked = 0
+	for _, b in ipairs(banks) do
+		if b.home then Row(b) else ranked = ranked + 1 end
+	end
+	if ranked > 0 then
+		lines[#lines + 1] = { text = Grey(L.TREASURY_RANK_HEAD), right = Grey(L.TREASURY_RANK_TOTAL), key = "dir:ranking", tooltip = function(tt)
+			tt:AddLine(L.TREASURY_RANK_HEAD, 1, 0.82, 0)
+			tt:AddLine(L.TREASURY_RANK_TIP, 1, 1, 1, true)
+		end }
+		local rules = ns.RankingRules and ns.RankingRules.Link("treasury-guilds", function() ShowRules("treasury-guilds") end)
+		if rules then lines[#lines + 1] = rules end
+		for _, b in ipairs(banks) do
+			if not b.home then Row(b) end
 		end
 	end
 	local others = Unheld(banks)
@@ -3850,7 +3977,7 @@ end
 -- the item lit.
 local function GuildLines()
 	local lines = { { text = Gold("< " .. L.TREASURY_TITLE), onClick = function() Treasury.Show("summary") end, gapAfter = true } }
-	local b = DirectoryBank(guildShown)
+	local b = DirectoryBank(guildShown, true)
 	if not b then
 		lines[#lines + 1] = { header = true, text = L.TREASURY_GUILDS }
 		Para(lines, L.TREASURY_GUILD_SNAPSHOT_GONE)
@@ -4261,6 +4388,17 @@ end
 
 function Treasury.Build(q)
 	local role = Treasury.Role()
+	if Treasury.mode == "rules" then
+		local key = rulesReturn and rulesReturn.key
+		local lines = ns.RankingRules and ns.RankingRules.Lines(key, CloseRules)
+		if lines then return lines, L.TAB_TREASURY, L.RANK_RULES_NOTE end
+		-- Access can change while this page is open. Restore in place while Build is already
+		-- drawing; firing another refresh here would recursively enter the renderer.
+		local back = rulesReturn or { mode = "summary" }
+		rulesReturn = nil
+		Treasury.mode, guildShown, Treasury.sisterTab = back.mode or "summary", back.guild, back.tab
+	end
+	if Treasury.mode == "guild-finance" and ns.GuildFinance and not ns.GuildFinance.missing then return ns.GuildFinance.Build(q) end
 	if Treasury.mode == "own-guild" then
 		return OwnGuildLines(), L.TAB_TREASURY, L.TREASURY_GUILD_TITLE:format(GetGuildInfo("player") or "?")
 	end
@@ -4282,6 +4420,11 @@ function Treasury.Build(q)
 	elseif Treasury.mode == "keepers" then lines = KeeperLines()
 	else
 		lines = SummaryLines(role, q)
+		if ns.GuildFinance and not ns.GuildFinance.missing then
+			local link = ns.GuildFinance.Link()
+			if link then lines[#lines + 1] = link end
+		end
+		if ns.Campaign and not ns.Campaign.missing and (q == nil or q == "") then ns.Campaign.Lines(lines) end
 		if ns.Bank and ns.Bank.OwnGuildView and ns.Bank.OwnGuildView() then
 			table.insert(lines, 1, { text = Gold("> " .. L.TREASURY_OWN_LINK), onClick = Treasury.OpenOwnGuild, gapAfter = true })
 		end
@@ -4298,6 +4441,7 @@ end
 
 -- A list of donors shows on the tab (the book, or the ranking): its search box too (Views.lua).
 function Treasury.Searchable()
+	if Treasury.mode == "rules" then return false end
 	if Treasury.mode == "own-guild" then return false end
 	if Treasury.mode == "wallet" or Treasury.mode == "money" then return false end
 	if Treasury.mode == "guild" then return false end
@@ -4460,6 +4604,35 @@ function Treasury.RestoreWord(flags, keepers)
 end
 Treasury.FlagDigits = FlagDigits
 
+if ns.RankingRules then
+	ns.RankingRules.Register("treasury-donors", {
+		title = L.RANK_RULE_DONORS_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Coin_01",
+		allowed = function() return Treasury.MaySee("ranking") end,
+		sections = function()
+			return {
+				{ topic = "score", text = { L.RANK_RULE_DONORS_SCORE, L.RANK_RULE_DONORS_DUES } },
+				{ topic = "order", text = L.RANK_RULE_DONORS_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_DONORS_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_DONORS_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("treasury-guilds", {
+		title = L.RANK_RULE_GUILD_TREASURY_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Coin_02",
+		allowed = DirectoryShown,
+		sections = function()
+			return {
+				{ topic = "score", text = L.RANK_RULE_GUILD_TREASURY_SCORE },
+				{ topic = "order", text = L.RANK_RULE_GUILD_TREASURY_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_GUILD_TREASURY_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_GUILD_TREASURY_VISIBILITY },
+			}
+		end,
+	})
+end
+
 -- Tests start from a clean state.
 function Treasury.Reset()
 	Treasury.CancelShares()
@@ -4478,7 +4651,7 @@ function Treasury.Reset()
 	earlyOpen, guildShown, Treasury.sisterTab = false, nil, nil
 	dirOpen, dirOthers, guildHit = nil, false, nil
 	wipe(dirTabs)
-	Treasury.mode = "summary"
+	Treasury.mode, rulesReturn = "summary", nil
 	if ns.rdb then
 		ns.rdb.treasuryReports, ns.rdb.treasuryBooks, ns.rdb.treasuryKeepers, ns.rdb.treasuryArchive = nil, nil, nil, nil
 		ns.rdb.treasuryEarly = nil

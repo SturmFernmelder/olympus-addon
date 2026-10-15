@@ -2,7 +2,7 @@
 ## Title: |cffe6c35cOlympus|r
 ## Notes: Live census of every Olympus guild: army size, leaders and where everyone is on the map.
 ## Author: Olympus addon contributors
-## Version: 1.2.3
+## Version: 1.2.4
 ## SavedVariables: OlympusDB
 ## IconTexture: Interface\AddOns\Olympus\media\logo64
 ## X-License: MIT
@@ -29,17 +29,28 @@ Locales\ArenaLotteryText.lua
 Locales\ArenaMatchText.lua
 Locales\ComplianceText.lua
 Locales\ChurchText.lua
+Locales\ChurchFullnessText.lua
 Locales\WeeklyBriefText.lua
 Locales\GuildCharterText.lua
 Locales\MainKeyText.lua
 Locales\WatchCouncilText.lua
 Locales\OfficerMusterText.lua
 Locales\DuesHistoryText.lua
+Locales\DuesGraceText.lua
+Locales\DuesRosterText.lua
+Locales\JusticeResponseText.lua
+Locales\CarryText.lua
+Locales\CarryMergerText.lua
+Locales\CampaignText.lua
+Locales\GuildFinanceText.lua
+Locales\RankingRulesText.lua
 Locales\PerfText.lua
+Locales\APIText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
 Diagnostics.lua
+RankingRules.lua
 Perf.lua
 Dialog.lua
 PlayerMenu.lua
@@ -68,10 +79,13 @@ Week.lua
 Treasury.lua
 Dues.lua
 DuesHistory.lua
+DuesGrace.lua
 Bank.lua
 Backup.lua
 Acts.lua
 Chronicle.lua
+Campaign.lua
+GuildFinance.lua
 Moderation.lua
 Alts.lua
 Keys.lua
@@ -94,15 +108,18 @@ UI.lua
 MainKey.lua
 Watch.lua
 Judgment.lua
+JusticeTasks.lua
 KingArrow.lua
 Consent.lua
 WeeklyBrief.lua
+Carry.lua
 ChatRooms.lua
 WarSquads.lua
 CraftRequests.lua
 ViewAs.lua
 Church.lua
 ChurchCount.lua
+ChurchFullness.lua
 ChurchView.lua
 TabardsV2.lua
 Letters.lua
@@ -114,6 +131,7 @@ WatchChat.lua
 OfficerMuster.lua
 Bridge.lua
 Wanted.lua
+API.lua
 ArenaMath.lua
 Compliance.lua
 ArenaRating.lua
@@ -126,6 +144,10 @@ ArenaNet.lua
 ArenaRoles.lua
 ArenaMoney.lua
 Debts.lua
+DuesRosterCheckpoints.lua
+CarryHistory.lua
+CarryMerger.lua
+Records.lua
 Wallet.lua
 Stakes.lua
 Markets.lua

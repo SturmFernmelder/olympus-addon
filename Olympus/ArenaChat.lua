@@ -12,8 +12,9 @@ ns.ArenaChat = ArenaChat
 local L = ns.L
 
 -- One room per event (the design): its id is the event's (a fight, a card, a
--- tournament, a Farkle table), and it lives in memory only (10 rooms of 100 lines, dropped 30
--- minutes after the event ended). Nothing is encrypted: anyone on the lane receives the bytes, as
+-- tournament, a Farkle table). Bones keeps this character's observed rooms across reloads (10
+-- rooms of 100 lines); other events still expire 30 minutes after ending. Nothing is encrypted:
+-- anyone on the lane receives the bytes, as
 -- for the Olympus chats (Channels.lua). What this client does with them:
 -- - Who may write, checked by every receiver against the name the server stamps: a public room,
 --   any verified member of an Olympus guild (level 2 or more while a bout of it is live); a 1v1
@@ -57,6 +58,22 @@ local nextLine = math.random and math.random(0, 9999) or 0
 local function Now() return GetTime and GetTime() or ns.Now() end
 local function Lower(name) return type(name) == "string" and ns.FullName(name):lower() or "" end
 local function Same(a, b) return type(a) == "string" and type(b) == "string" and Lower(a) == Lower(b) end
+local Persist
+
+-- Only locally observed real tables establish a retained audience. EC never supplies names or
+-- opens a saved room; practice against the innkeeper has no ChatSpec and cannot enter here.
+local function Context(ev)
+	if not ev or ev.kind ~= "farkle" then return nil end
+	return { tableId = ev.tableId, everyone = ev.everyone == true, host = ns.FullName(ev.fighters.A),
+		guest = ns.FullName(ev.fighters.B), arbiter = ev.arbiter, mode = ev.mode }
+end
+local function KeptEvent(context)
+	if not context then return nil end
+	return { kind = "farkle", tableId = context.tableId, everyone = context.everyone, public = context.everyone,
+		fighters = { A = context.host, B = context.guest }, arbiter = context.arbiter,
+		opener = context.arbiter or context.host, mode = context.mode, live = false, over = true, state = "done",
+		chatSpec = { model = context, host = context.host, guest = context.guest, live = false, spectators = false } }
+end
 
 -- The event behind a room (Arena.EventOf: a fight, a card, a tournament, a Farkle table), or nil.
 local function Event(room)
@@ -66,12 +83,19 @@ local function Event(room)
 	if tableId then
 		local FT = ns.FarkleTable
 		local spec = FT and FT.ChatSpec and FT.ChatSpec(tableId)
-		if not spec then return nil end
 		local everyone = room ~= tableId
-		if everyone and not spec.spectators then return nil end
-		return { kind = "farkle", tableId = tableId, everyone = everyone, chatSpec = spec, public = everyone,
+		local r = rooms[room]
+		if not spec then return KeptEvent(r and r.context) end
+		if everyone and not spec.spectators then
+			-- A live audience revocation still closes the public transport. After the real table
+			-- ended, only a client which actually retained it can read its old public lines.
+			return not spec.live and KeptEvent(r and r.context) or nil
+		end
+		local ev = { kind = "farkle", tableId = tableId, everyone = everyone, chatSpec = spec, public = everyone,
 			fighters = { A = spec.host, B = spec.guest }, arbiter = spec.arbiter, opener = spec.arbiter or spec.host,
 			mode = spec.mode, live = spec.live, over = not spec.live, state = spec.live and "L" or "done" }
+		if r and spec.live then r.context = Context(ev) end
+		return ev
 	end
 	return A.EventOf(room)
 end
@@ -131,7 +155,6 @@ function ArenaChat.MayRead(room, name)
 	local ev = Event(room)
 	if not ev then return false, "room" end
 	if not ns.IsMember() then return false, "member" end
-	if ev.kind == "farkle" and not ev.live then return false, "ended" end
 	if ev.public or InParty(ev, name or ns.me) then return true end
 	return false, "party"
 end
@@ -142,7 +165,7 @@ function ArenaChat.TakesPart(room)
 end
 
 ---------------------------------------------------------------------------
--- Rooms (memory only)
+-- Rooms (Bones history is local, per character and faction/realm store)
 ---------------------------------------------------------------------------
 
 local function Count(map) local n = 0 for _ in pairs(map) do n = n + 1 end return n end
@@ -169,7 +192,7 @@ local function Prune()
 		else
 			r.endedAt = nil
 		end
-		if r.endedAt and now - r.endedAt >= ArenaChat.KEEP_AFTER then
+		if not r.context and r.endedAt and now - r.endedAt >= ArenaChat.KEEP_AFTER then
 			rooms[id] = nil
 			if current == id then current = nil end
 		else
@@ -178,12 +201,16 @@ local function Prune()
 	end
 	-- Past the cap: the least recently used go first.
 	if #list > ArenaChat.ROOMS_MAX then
-		table.sort(list, function(a, b) return (a.used or 0) < (b.used or 0) end)
+		table.sort(list, function(a, b)
+			local aa, bb = a.usedAt or 0, b.usedAt or 0
+			return aa == bb and a.id < b.id or aa < bb
+		end)
 		for i = 1, #list - ArenaChat.ROOMS_MAX do
 			rooms[list[i].id] = nil
 			if current == list[i].id then current = nil end
 		end
 	end
+	if Persist then Persist() end
 end
 ArenaChat.Prune = Prune
 
@@ -191,7 +218,8 @@ local function Room(id, make)
 	local r = rooms[id]
 	if r then Housekeep(r, Now()); return r end
 	if not make then return nil end
-	r = { id = id, lines = {}, muted = {}, buckets = {}, seen = {}, mine = {}, heard = {}, sent = {}, stats = {}, used = Now() }
+	r = { id = id, lines = {}, muted = {}, buckets = {}, seen = {}, mine = {}, heard = {}, sent = {}, stats = {}, used = Now(), usedAt = ns.Now() }
+	r.context = Context(Event(id))
 	rooms[id] = r
 	Prune()
 	return rooms[id]
@@ -213,6 +241,8 @@ function ArenaChat.Open(room)
 	local r = Room(room, true)
 	if not r then return nil end
 	r.open, r.used = true, Now()
+	r.usedAt = ns.Now()
+	if Persist then Persist() end
 	current = room
 	ns.Fire("ARENA_CHAT", room)
 	return r
@@ -283,7 +313,7 @@ end
 function ArenaChat.MayWrite(room, name, guild)
 	local ev = Event(room)
 	if not ev then return false, "room" end
-	if ev.kind == "farkle" and not ev.live then return false, "ended" end
+	if ev.kind == "farkle" and ev.everyone and not ev.live then return false, "ended" end
 	local r = rooms[room]
 	if r and r.muted[Lower(name)] then return false, "muted" end
 	if ev.kind == "farkle" and ev.everyone and not VerifiedMember(name, guild) then return false, "member" end
@@ -352,6 +382,8 @@ local function Keep(r, e)
 	r.lines[#r.lines + 1] = e
 	while #r.lines > ArenaChat.LINES_MAX do table.remove(r.lines, 1) end
 	r.used = Now()
+	r.usedAt = ns.Now()
+	if Persist then Persist() end
 end
 local function AlsoInChat(room, e)
 	local ui = ns.db and ns.db.arenaUI
@@ -374,7 +406,7 @@ local function TableSend(kind, room, ev, body, target, done)
 	local model, audience = ev.chatSpec.model, table.concat(Party(ev), "~"):lower()
 	local function Guard()
 		local live = Event(room)
-		if not live or not live.live or live.chatSpec.model ~= model or live.public ~= ev.public
+		if not live or (ev.public and not live.live) or live.chatSpec.model ~= model or live.public ~= ev.public
 			or A.Mode(live) ~= mode or table.concat(Party(live), "~"):lower() ~= audience
 			or (target and not InParty(live, target)) or (not target and A.Lane(mode, true) ~= dist)
 			or A.Refusal(kind, mode, opts) then return false end
@@ -443,6 +475,7 @@ function ArenaChat.Send(room, text)
 			e.sendFailed = true
 			ns.Print(L.ARENA_CHAT_NOT_SENT)
 		end
+		if Persist then Persist() end
 		if not quiet then ns.Fire("ARENA_CHAT", room) end
 	end
 	local function QueueTable(target)
@@ -611,6 +644,7 @@ function ArenaChat.Mute(room, name, on)
 		end
 	end
 	r.muted[Lower(name)] = on and true or nil
+	if Persist then Persist() end
 	ns.Fire("ARENA_CHAT", room)
 	return true
 end
@@ -630,6 +664,7 @@ local function OnMute(dist, sender, mode, body)
 	local r = Room(room, true)
 	if flag == "1" and not r.muted[Lower(name)] and Count(r.muted) >= ArenaChat.MUTES_MAX then return Drop("cap") end
 	r.muted[Lower(name)] = flag == "1" or nil
+	if Persist then Persist() end
 	ns.Fire("ARENA_CHAT", room)
 	return true
 end
@@ -661,7 +696,155 @@ ns.Arena.Slash("chat", function(args)
 	end
 end, L.ARENA_HELP_CHAT)
 
-function ArenaChat.Reset() rooms, current = {}, nil end -- (tests)
+-- SavedVariables contain plain snapshots, never a live game model, pending native send, timer or
+-- permission claimed by a peer. Realm store + faction + full character name isolate the history.
+local function Saved(make)
+	local db = ns.rdb
+	if not db or not ns.me then return nil end
+	local faction = ns.faction or "Alliance"
+	if type(db.bonesChats) ~= "table" then
+		if not make then return nil end
+		db.bonesChats = {}
+	end
+	if type(db.bonesChats[faction]) ~= "table" then
+		if not make then return nil end
+		db.bonesChats[faction] = {}
+	end
+	local characters = db.bonesChats[faction]
+	if type(characters[ns.me]) ~= "table" then
+		if not make then return nil end
+		characters[ns.me] = { version = 1, rooms = {} }
+	end
+	return characters[ns.me]
+end
+
+Persist = function()
+	local saved = Saved(true)
+	if not saved or (saved.version ~= nil and saved.version ~= 1) then return end
+	local out = {}
+	for id, r in pairs(rooms) do
+		if r.context then
+			local lines, muted = {}, {}
+			for _, e in ipairs(r.lines) do
+				-- An enqueued line isn't delivered. A reload must not turn it into a success.
+				if not e.sendPending and not e.sendFailed then
+					lines[#lines + 1] = { chat = id, t = e.t, sender = e.sender, guild = e.guild,
+						class = e.class, text = e.text, id = e.id, mine = e.mine, del = e.del, hidden = e.hidden }
+				end
+			end
+			for name, on in pairs(r.muted) do if on then muted[name] = true end end
+			local context = {}
+			for k, v in pairs(r.context) do context[k] = v end
+			out[id] = { context = context, lines = lines, muted = muted, used = r.usedAt or ns.Now() }
+		end
+	end
+	saved.version, saved.rooms = 1, out
+end
+ArenaChat.Save = Persist
+
+function ArenaChat.Restore()
+	local saved = Saved(false)
+	if not saved or saved.version ~= 1 or type(saved.rooms) ~= "table" then return 0 end
+	local pending = {}
+	for id, one in pairs(saved.rooms) do
+		if type(id) == "string" and #id <= 24 and type(one) == "table" then pending[#pending + 1] = { id, one } end
+	end
+	table.sort(pending, function(a, b) return (tonumber(a[2].used) or 0) > (tonumber(b[2].used) or 0) end)
+	local restored = 0
+	for _, item in ipairs(pending) do
+		if restored >= ArenaChat.ROOMS_MAX then break end
+		local id, one = item[1], item[2]
+		local context = one.context
+		local tableId = id:match("^(K[0-9a-z]+):all$") or id:match("^(K[0-9a-z]+)$")
+		local function Name(name)
+			return type(name) == "string" and #name <= 80 and ns.Arena.Name(name) or nil
+		end
+		local host, guest = type(context) == "table" and Name(context.host), type(context) == "table" and Name(context.guest)
+		if not rooms[id] and tableId and type(context) == "table" and context.tableId == tableId and host and guest and not Same(host, guest)
+			and (context.mode == "L" or context.mode == "T") and context.everyone == (id ~= tableId)
+			and (context.everyone or Same(host, ns.me) or Same(guest, ns.me)) then
+			local r = rooms[id] or { id = id, lines = {}, muted = {}, buckets = {}, seen = {}, mine = {}, heard = {}, sent = {}, stats = {} }
+			r.context = { tableId = tableId, everyone = context.everyone, host = host, guest = guest,
+				arbiter = Name(context.arbiter), mode = context.mode }
+			r.used, r.usedAt = Now(), math.min(tonumber(one.used) or ns.Now(), ns.Now())
+			if type(one.lines) == "table" then
+				for i = math.max(1, #one.lines - ArenaChat.LINES_MAX + 1), #one.lines do
+					local e = one.lines[i]
+					if type(e) == "table" and Name(e.sender) and type(e.text) == "string" and #e.text <= ArenaChat.TEXT_MAX
+						and type(e.guild) == "string" and #e.guild <= 100 and ns.IsFederation(e.guild)
+						and (context.everyone or Same(e.sender, host) or Same(e.sender, guest)) then
+						local line = { chat = id, t = tonumber(e.t) or 0, sender = Name(e.sender), guild = e.guild,
+							class = type(e.class) == "string" and e.class:match("^%u%u$") and e.class or nil,
+							text = ArenaChat.Clean(e.text), id = tonumber(e.id), mine = e.mine == true, del = e.del == true, hidden = e.hidden == true }
+						r.lines[#r.lines + 1] = line
+						local age = ns.Now() - line.t
+						if age >= 0 and age <= 120 then
+							r.seen[line.sender .. "#" .. tostring(line.id) .. "#" .. line.text] = Now() - age
+						end
+					end
+				end
+			end
+			if type(one.muted) == "table" then
+				for name, on in pairs(one.muted) do
+					if Count(r.muted) >= ArenaChat.MUTES_MAX then break end
+					if on == true and Name(name) then r.muted[Lower(name)] = true end
+				end
+			end
+			rooms[id], restored = r, restored + 1
+		end
+	end
+	Prune()
+	return restored
+end
+
+-- Canonical descriptions for Games. Historical public rooms remain readable only where this
+-- character kept them. A private room remains exactly the original two human participants.
+function ArenaChat.ChatRoom(id)
+	local ev = Event(id)
+	if not ev or ev.kind ~= "farkle" or not ArenaChat.MayRead(id) then return nil end
+	local audience = ev.everyone and (L.BONES_CHAT_EVERYONE or "Everyone") or (L.BONES_CHAT_PLAYERS or "Players")
+	local title = (L.BONES_CHAT_TITLE or "Bones - %s: %s & %s"):format(audience,
+		ns.DisplayName(ev.fighters.A) or "?", ns.DisplayName(ev.fighters.B) or "?")
+	return { key = "arena:" .. id, id = id, kind = "bones", eventKind = "farkle", title = title,
+		audience = ev.everyone and "event" or "duel", access = ev.everyone and "members" or "participants",
+		active = ev.live == true, recoverable = true, phase = ev.live and "playing" or "complete",
+		supportsComments = true, supportsBets = false, participants = Party(ev), readOnly = ev.everyone and not ev.live }
+end
+function ArenaChat.GameRooms()
+	local ids, out = {}, {}
+	for id in pairs(rooms) do ids[id] = true end
+	local FT = ns.FarkleTable
+	if FT and FT.Tables and FT.LiveTables then
+		for _, t in ipairs(FT.Tables()) do ids[t.id], ids[t.id .. ":all"] = true, true end
+		for _, t in ipairs(FT.LiveTables()) do ids[t.id], ids[t.id .. ":all"] = true, true end
+	end
+	for id in pairs(ids) do
+		local spec = ArenaChat.ChatRoom(id)
+		if spec then out[#out + 1] = spec end
+	end
+	local F, A = ns.ArenaFights, ns.Arena
+	if F and F.List and A and A.ChatRoom then
+		for _, fight in ipairs(F.List()) do
+			local spec = A.ChatRoom(fight.fid)
+			if spec and spec.active and ArenaChat.MayRead(fight.fid) then out[#out + 1] = spec end
+		end
+	end
+	return out
+end
+local function ChangedTable(id)
+	for _, room in ipairs({ id, id and id .. ":all" }) do
+		if rooms[room] then
+			local spec = ArenaChat.ChatRoom(room)
+			if spec then ns.Fire("ARENA_CHAT_ROOM", spec) end
+		end
+	end
+	Persist()
+end
+ns.On("FARKLE_TABLE", ChangedTable)
+ns.On("FARKLE_EVENT", ChangedTable)
+ns.On("LOGIN", ArenaChat.Restore)
+ns.RegisterEvent("PLAYER_LOGOUT", function() Persist() end)
+function ArenaChat.Reset() rooms, current = {}, nil end -- (tests; saved history is deliberately untouched)
 
 local WC = rawget(ns, "WatchChat")
 if WC and WC.RegisterSurface then
@@ -674,5 +857,5 @@ if WC and WC.RegisterSurface then
 		return out
 	end, Lines = function(id)
 		return ArenaChat.MayRead(id) and rooms[id] and rooms[id].lines or {}
-	end, Changed = function(id) ns.Fire("ARENA_CHAT", id) end })
+	end, Changed = function(id) Persist(); ns.Fire("ARENA_CHAT", id) end })
 end

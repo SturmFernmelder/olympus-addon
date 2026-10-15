@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Core", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -599,14 +599,16 @@ test("1.1.5 Census and Realm default guild order puts OLYMPUS first on a size ti
 		eq(table.concat(realmRows, ","), "OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Alpha Olympus,Beta Olympus,Olympus Old",
 			"the Realm uses the same default order")
 
-		-- A Members click the other way is the plain column: smallest first, a tie by name.
+		-- A Members click the other way is the plain column: smallest first, no standard-bearer.
+		-- (Changed on purpose, 1.2.4, the author's ask: a tie goes to the higher average level
+		-- first, whichever way the column runs, then the name; before, to the name alone.)
 		ns.Views.SortBy("members")
 		guildRows = {}
 		for _, line in ipairs(ns.Views.Build("census")) do
 			if line.cols then guildRows[#guildRows + 1] = line.cols[1] end
 		end
-		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,OLYMPUS,Olympus II,Olympus III,Olympus Old",
-			"an ascending Members sort keeps its header's meaning")
+		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,Olympus III,Olympus II,OLYMPUS,Olympus Old",
+			"an ascending Members sort keeps its header's meaning, a tie by average level")
 	end)
 	ns.rdb.guilds, ns.rdb.seen, ns.Views.sort, ns.UI, ns.rdb.realmKey = savedGuilds, savedSeen, savedSort, savedUI, savedKey
 	if not ok then error(err, 0) end
@@ -1537,6 +1539,22 @@ test("map refresh runs end to end with a map library (continent totals included)
 	GameTooltip = savedTip
 	assert(okTip, errTip)
 	assert(table.concat(tip, "\n"):find(ns.Answers.Find("count-map-zones").text, 1, true), table.concat(tip, "\n"))
+	-- 1.2.4: its guilds, as many soldiers there, the higher average level first, then the name (no
+	-- tie-break before: the order the table gave).
+	ns.rdb.guilds = { ["Olympus Low"] = { total = 50, avgLevel = 20, t = os.time() }, ["Olympus High"] = { total = 50, avgLevel = 50, t = os.time() },
+		["Olympus Many"] = { total = 50, avgLevel = 10, t = os.time() } }
+	rawset(pin, "guilds", { ["Olympus Low"] = 4, ["Olympus High"] = 4, ["Olympus Many"] = 9, ["Olympus Unknown"] = 4, ["Olympus Also"] = 4 })
+	tip = {}
+	GameTooltip = setmetatable({ AddLine = function() end,
+		AddDoubleLine = function(_, a, b) tip[#tip + 1] = tostring(a) .. " " .. tostring(b) end }, { __index = function() return function() end end })
+	okTip, errTip = pcall(pin.scriptOnEnter, pin)
+	GameTooltip = savedTip
+	ns.rdb.guilds = {}
+	assert(okTip, errTip)
+	-- (Changed on purpose, 1.2.4's review: each guild's average level after its count, where its
+	-- report has one, so that order is seen; before, the count alone.)
+	for i, line in ipairs(tip) do tip[i] = line:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") end
+	eq(table.concat(tip, ","), "Olympus Many 9  (avg lvl 10.0),Olympus High 4  (avg lvl 50.0),Olympus Low 4  (avg lvl 20.0),Olympus Also 4,Olympus Unknown 4")
 end)
 
 ---------------------------------------------------------------------------
@@ -2222,6 +2240,9 @@ local TEMPLATES = {
 	ColumnDisplayButtonNoScriptsTemplate = function(w)
 		w.h = 24
 		for _, key in ipairs({ "Left", "Middle", "Right" }) do w[key] = NewWidget("Texture", nil, w) end
+		-- (1.2.4's review: its title's font, as Forever 1.60.1's SharedUIPanelTemplates.xml gives it,
+		-- <NormalFont style="GameFontHighlightSmall"/>: the titles are measured in it, UI.Layout.)
+		w.normalFont = "GameFontHighlightSmall"
 	end,
 	ScrollFrameTemplate = function(w)
 		w.ScrollBar = NewWidget("EventFrame", nil, w)
@@ -3766,6 +3787,312 @@ test("1.2 UI.AddTab: a tab joins at its canonical position with its list and but
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.4: a registered API handle may contribute one self-contained page to the Olympus shell.
+-- The public handle owns no placement or identity-bearing key: UI.lua receives only an opaque
+-- session slot, and Olympus keeps the window, portrait, help button and tab rail.
+test("1.2.4 API surface: validates one opaque owner in the fixed slot before Workshop", function()
+	WithUI(function()
+		local UI = LoadUI()
+		eq(UI.API_SURFACE_LIMIT, 1)
+		eq(select(2, UI.RegisterAPISurface(nil, {})), "invalid-owner")
+		eq(select(2, UI.RegisterAPISurface("census", {})), "reserved-owner")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", nil)), "invalid-spec")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", {})), "invalid-label")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", { label = "Map tools" })), "invalid-icon")
+		eq(select(2, UI.RegisterAPISurface("api-surface:1", {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+		})), "invalid-build")
+		local n = #UI.TABS
+		local spec = {
+			label = "Map tools",
+			icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait",
+			availableWhenLocked = true,
+			visible = function() return true end,
+			build = function() end,
+			refresh = function() end,
+			help = function() end,
+		}
+		eq(UI.RegisterAPISurface("api-surface:1", spec), true)
+		eq(#UI.TABS, n + 1)
+		eq(UI.TABS[n].key, "api-surface:1", "the fixed slot is immediately before Workshop")
+		eq(UI.TABS[n].label, spec.label)
+		eq(UI.TABS[n].apiSurface, true)
+		eq(UI.TABS[n + 1].key, "workshop", "the built-in tail is not reordered")
+		eq(select(2, UI.RegisterAPISurface("API-SURFACE:1", spec)), "registered", "owner matching is folded")
+		eq(select(2, UI.RegisterAPISurface("api-surface:2", {
+			label = "Notes", icon = "Interface\\Icons\\INV_Misc_Note_01", build = function() end,
+		})), "surface-full", "the one shared rail slot has an explicit capacity result")
+		eq(UI.TABS[n].key, "api-surface:1", "owners retain registration order")
+		eq(UI.TABS[n + 1].key, "workshop")
+	end)
+end)
+
+test("1.2.4 API surface: one lazy canvas follows old and HD shells with portrait, help and lifecycle", function()
+	WithUI(function()
+		local UI = LoadUI()
+		local owner = "api-surface:lifecycle"
+		local phases, helped, visible = {}, 0, true
+		local spec = {
+			label = "Map tools",
+			icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait",
+			availableWhenLocked = true,
+			visible = function() return visible end,
+			build = function(parent, context)
+				phases[#phases + 1] = { "build", context.style, parent:IsShown(), context.apiVersion, context.key }
+			end,
+			refresh = function(parent, context)
+				phases[#phases + 1] = { "refresh", context.style, parent:IsShown(), context.apiVersion, context.key }
+			end,
+			help = function(parent, context)
+				helped = helped + 1
+				eq(parent, OlympusFrame.apiSurfaceViews[owner])
+				eq(context.style, "old"); eq(context.apiVersion, 1); eq(context.key, nil, "no owner key in callback context")
+			end,
+		}
+
+		-- Register after the old window exists to exercise late materialization.
+		UI.Toggle()
+		eq(UI.RegisterAPISurface(owner, spec), true)
+		local old = OlympusFrame
+		local function Tab(frame, key)
+			for i, candidate in ipairs(frame.tabs) do if candidate.key == key then return candidate, i end end
+		end
+		local surfaceTab, surfaceAt = Tab(old, owner)
+		local _, workshopAt = Tab(old, "workshop")
+		eq(surfaceAt, workshopAt - 1, "late registration keeps the fixed slot")
+		local oldCanvas = old.apiSurfaceViews[owner]
+		assert(oldCanvas and oldCanvas:GetParent() == old, "old canvas")
+		eq(oldCanvas:GetWidth(), old:GetWidth() - 12)
+		eq(oldCanvas:GetHeight(), old:GetHeight() - 64)
+		eq(#phases, 0, "build is lazy until the page opens")
+
+		eq(UI.OpenAPISurface(owner), true)
+		eq(UI.IsAPISurfaceOpen(owner), true)
+		eq(old.tab, owner)
+		eq(oldCanvas:IsShown(), true)
+		eq(old.portraitAsset, spec.portrait)
+		eq(phases[1][1] .. "/" .. phases[1][2], "build/old")
+		eq(phases[1][3], false); eq(phases[1][4], 1); eq(phases[1][5], nil, "no owner key in build context")
+		local last = phases[#phases]
+		eq(last[1] .. "/" .. last[2], "refresh/old")
+		eq(last[3], true); eq(last[4], 1); eq(last[5], nil, "no owner key in refresh context")
+		old.helpButton:Click()
+		eq(helped, 1)
+
+		UI.SelectTab("census")
+		eq(oldCanvas:IsShown(), false)
+		eq(old.portraitAsset, ns.LOGO)
+		visible = false
+		eq(UI.RefreshAPISurface(owner), true)
+		eq(surfaceTab:IsShown(), false, "refresh re-evaluates surface visibility")
+		visible = true
+		eq(UI.RefreshAPISurface(owner), true)
+		eq(surfaceTab:IsShown(), true)
+
+		local host = NewWidget("Frame", "OlympusSurfaceHost", UIParent)
+		host:SetSize(814, 426)
+		host:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 20, -20)
+		UI.OpenDocked(host, owner, true, "hd")
+		local hd = OlympusFrameHD
+		local hdCanvas = hd.apiSurfaceViews[owner]
+		assert(hdCanvas and hdCanvas:GetParent() == hd, "HD canvas")
+		eq(hd.tab, owner); eq(hdCanvas:IsShown(), true); eq(hd.portraitAsset, spec.portrait)
+		local sawBuild, sawRefresh = false, false
+		for _, phase in ipairs(phases) do
+			if phase[1] == "build" and phase[2] == "hd" then sawBuild = phase[3] == false and phase[4] == 1 and phase[5] == nil end
+			if phase[1] == "refresh" and phase[2] == "hd" then sawRefresh = phase[3] == true and phase[4] == 1 and phase[5] == nil end
+		end
+		eq(sawBuild, true); eq(sawRefresh, true)
+		eq(UI.ToggleAPISurface(owner), true); eq(UI.IsAPISurfaceOpen(owner), false)
+		eq(UI.ToggleAPISurface(owner), true); eq(UI.IsAPISurfaceOpen(owner), true)
+	end)
+end)
+
+test("1.2.4 API surface: native parchment never leaks into its canvas", function()
+	WithUI(function()
+		local UI = LoadUI()
+		local owner = "api-surface:parchment"
+		local pageParchment, build, throneVisible = ns.Views.PageParchment, ns.Views.Build, ns.King.TabVisible
+		ns.Views.PageParchment = function() return true end
+		ns.Views.Build = function(key, ...)
+			if key == "throne" then return {} end
+			return build(key, ...)
+		end
+		ns.King.TabVisible = function() return true end
+		local ok, err = pcall(function()
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end,
+			}), true)
+			UI.Toggle()
+			local main = OlympusFrame
+			UI.SelectTab("realm")
+			assert(main.parchment and main.parchment:IsShown(), "Realm parchment is visible")
+			eq(UI.OpenAPISurface(owner), true)
+			eq(main.parchment:IsShown(), false, "the surface never inherits Realm parchment")
+			UI.SelectTab("realm")
+			eq(main.parchment:IsShown(), true, "Realm restores its parchment")
+			UI.SelectTab("throne")
+			eq(main.parchment:IsShown(), true)
+			eq(UI.OpenAPISurface(owner), true)
+			eq(main.parchment:IsShown(), false, "the surface never inherits Throne parchment")
+		end)
+		ns.Views.PageParchment, ns.Views.Build, ns.King.TabVisible = pageParchment, build, throneVisible
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("1.2.4 API surface: dense HD overflow balances both rails and clears the portrait", function()
+	local K, V, T, W = ns.King, ns.Vox, ns.Treasury, ns.Workshop
+	local saved = { K.Visible, V.Visible, T.Visible, W.Visible }
+	local function Yes() return true end
+	local ok, err = pcall(WithUI, function()
+		local w, UI = ForeverWorld(true)
+		local rightCount, gap = UI.SideTabColumns(13, 32, 426)
+		eq(rightCount, 7); eq(gap, 20, "thirteen tabs retain Blizzard's normal spacing")
+		rightCount, gap = UI.SideTabColumns(14, 32, 426)
+		eq(rightCount, 8); eq(gap, 16, "fourteen tabs share one balanced compact gap")
+		for i = 1, 4 do
+			eq(UI.AddTab({ key = "surface-fill-" .. i, label = "TAB_REALM",
+				icon = "Interface\\Icons\\INV_Misc_QuestionMark" }), true)
+		end
+		local owner = "api-surface:portrait-clear"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01", build = function() end,
+		}), true)
+		K.Visible, V.Visible, T.Visible, W.Visible = Yes, Yes, Yes, Yes
+		CommunitiesFrame:Show(); w.buttons[1]:Click()
+		local main = OlympusFrameHD
+		UI.Refresh()
+		local left, right, surfaceAt, workshopAt = {}, {}, nil, nil
+		for i, tab in ipairs(main.tabs) do
+			if tab:IsShown() then
+				if tab.onLeft then left[#left + 1] = tab else right[#right + 1] = tab end
+			end
+			if tab.key == owner then surfaceAt = i end
+			if tab.key == "workshop" then workshopAt = i end
+		end
+		eq(#right, 8); eq(#left, 6, "the dense overflow is redistributed rather than crushing the left rail")
+		for _, tab in ipairs(right) do eq(tab:GetHeight(), 32, "right tab size remains Blizzard's") end
+		for _, tab in ipairs(left) do eq(tab:GetHeight(), 32, "tab size remains Blizzard's") end
+		eq(right[2]:Anchor("TOPLEFT")[5], -16, "right rail uses the shared gap")
+		eq(left[2]:Anchor("BOTTOMRIGHT")[5], 16, "left rail uses the same gap")
+		local top = left[#left]
+		assert(top.Art:GetTop() <= main:GetTop() - 64,
+			("top overflow art clears the portrait: %.1f <= %.1f"):format(top.Art:GetTop(), main:GetTop() - 64))
+		eq(surfaceAt, workshopAt - 1, "the surface remains immediately before Workshop")
+	end)
+	K.Visible, V.Visible, T.Visible, W.Visible = saved[1], saved[2], saved[3], saved[4]
+	if not ok then error(err, 0) end
+end)
+
+test("1.2.4 API surface: lock, visibility and provider failures leave Olympus usable", function()
+	for _, case in ipairs({
+		{ reason = "unavailable" },
+		{ reason = "hidden", availableWhenLocked = true, visible = function() return false end },
+		{ reason = "build-failed", availableWhenLocked = true, build = function() error("provider broke") end },
+	}) do
+		WithUI(function()
+			GetGuildInfo = function() return nil end
+			local UI = LoadUI()
+			local owner = "api-surface:failure"
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Provider", icon = "Interface\\Icons\\INV_Misc_QuestionMark",
+				availableWhenLocked = case.availableWhenLocked == true,
+				visible = case.visible or function() return true end,
+				build = case.build or function() end,
+			}), true)
+			eq(select(2, UI.OpenAPISurface(owner)), case.reason)
+			eq(UI.SelectTab("census"), true)
+			eq(UI.IsShown(), true); eq(OlympusFrame.tab, "census")
+		end)
+	end
+end)
+
+test("1.2.4 API surface: a locked page stays beside a visible route back to Join", function()
+	WithUI(function()
+		GetGuildInfo = function() return nil end
+		local UI = LoadUI()
+		local owner = "api-surface:locked-route"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+			availableWhenLocked = true, build = function() end,
+		}), true)
+		UI.Toggle()
+		local main = OlympusFrame
+		local function Tab(key)
+			for _, tab in ipairs(main.tabs) do if tab.key == key then return tab end end
+		end
+		eq(main.tab, "census")
+		eq(Tab("census"):IsShown(), true, "Join has a selector when a locked surface is offered")
+		eq(Tab(owner):IsShown(), true)
+		eq(UI.OpenAPISurface(owner), true)
+		eq(main.tab, owner)
+		eq(Tab("census"):IsShown(), true, "the surface keeps the route back to Join")
+		eq(UI.SelectTab("census"), true)
+		eq(main.tab, "census")
+		eq(main.apiSurfaceViews[owner]:IsShown(), false)
+	end)
+end)
+
+test("1.2.4 API surface: rejected destinations leave the current player profile untouched", function()
+	for _, case in ipairs({
+		{ reason = "hidden", visible = function() return false end },
+		{ reason = "build-failed", build = function() error("provider broke") end },
+		{ reason = "unavailable", lock = true },
+	}) do
+		WithUI(function()
+			local UI, uns = LoadUI()
+			assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+			local left = {}
+			uns.Fire = function(event, who) if event == "PLAYER_PROFILE_LEFT" then left[#left + 1] = who end end
+			local owner = "api-surface:rejected"
+			eq(UI.RegisterAPISurface(owner, {
+				label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+				visible = case.visible, build = case.build or function() end,
+			}), true)
+			UI.Toggle()
+			eq(UI.OpenPlayerProfile({ name = ns.me, source = "local", online = true }), true)
+			if case.lock then GetGuildInfo = function() return nil end end
+			local ok, why = UI.OpenAPISurface(owner)
+			eq(ok, false); eq(why, case.reason)
+			eq(UI.PlayerProfileShown(), true, case.reason .. " keeps the profile")
+			eq(#left, 0, case.reason .. " emits no PLAYER_PROFILE_LEFT")
+		end)
+	end
+end)
+
+test("1.2.4 API surface: leaving a profile clears its native chrome and profiles opened from it start at Census", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local left = {}
+		uns.Fire = function(event, who) if event == "PLAYER_PROFILE_LEFT" then left[#left + 1] = who end end
+		local owner = "api-surface:profile"
+		eq(UI.RegisterAPISurface(owner, {
+			label = "Map tools", icon = "Interface\\Icons\\INV_Misc_Map_01",
+			portrait = "Interface\\AddOns\\SurfaceFixture\\Media\\Portrait", build = function() end,
+		}), true)
+		UI.Toggle()
+		local main = OlympusFrame
+		eq(UI.OpenPlayerProfile({ name = ns.me, source = "local", online = true }), true)
+		eq(UI.PlayerProfileShown(), true)
+		eq(UI.OpenAPISurface(owner), true)
+		eq(UI.PlayerProfileShown(), false)
+		eq(#left, 1); eq(left[1], ns.Fold(ns.me))
+		if main.ownPortrait then eq(main.ownPortrait.slot:IsShown(), false, "own portrait hides on the surface") end
+		for _, row in ipairs(main.pageNavRows or {}) do eq(row:IsShown(), false, "native page navigation hides") end
+		for _, holder in pairs(main.pageSearchHolders or {}) do eq(holder:IsShown(), false, "native page search hides") end
+		eq(main.apiSurfaceViews[owner]:IsShown(), true)
+
+		eq(UI.OpenPlayerProfile({ name = "Racer", source = "census", online = true }), true)
+		eq(main.tab, "census", "profile routing leaves a full-canvas surface through Census")
+		eq(UI.PlayerProfileShown(), true)
+		eq(main.apiSurfaceViews[owner]:IsShown(), false)
+	end)
+end)
+
 test("1.2 the person card: other files' rows after the rank (UI.personRows); on the player's own card, 'Edit my profile' (UI.profileEditors)", function()
 	WithUI(function()
 		local UI = LoadUI()
@@ -4272,6 +4599,218 @@ test("1.2 normal player profile: /oly profile opens a named player's page, your 
 		end)
 		ns.PlayerProfile, ns.Print, GetGuildInfo = saved.profile, saved.print, saved.guild
 		if not ok then error(err, 0) end
+	end)
+end)
+
+-- 1.2.4: "My profile" (ProfileEdit.lua) is the player's own person page in this window. The harness
+-- loads no Arena file, so a stand-in of ProfileEdit gives the wiring its page (ProfileEdit.Page's
+-- shape: lines with the section strip first, the detail box's title and text, the buttons, the
+-- portrait's art), its section (ProfileEdit.Section) and its portrait's dressing; the real page's
+-- own tests are tests/arena/profile-edit.lua's. HonorsNet.NewPortrait's portrait is Borders.lua's.
+local function MyProfileStandIn(uns)
+	local pe = { section = "look", dressed = {} }
+	function pe.Section() return pe.section end
+	local function Go(key) return function() pe.section = key uns.UI.Refresh() end end
+	function pe.Page(details, facts)
+		pe.details, pe.facts = details, facts
+		local lines = { { pageNav = true, nav = {
+			{ text = "Look", selected = pe.section == "look", onClick = Go("look") },
+			{ text = "Icons", selected = pe.section == "icons", onClick = Go("icons") } } },
+			{ text = "a row of " .. pe.section } }
+		local buttons = { { "PLAYER_PROFILE_BACK", function() uns.UI.BackFromPlayerProfile() end } }
+		if pe.section == "icons" then buttons[2] = { "COUNCIL_ICON_DEFAULT", function() end } end
+		return lines, "As others see you", "Title: none", buttons, { frame = "rank", emblem = pe.emblem }
+	end
+	function pe.DressPortrait(rig, art) pe.dressed[#pe.dressed + 1] = { rig = rig, art = art } end
+	uns.ProfileEdit = pe
+	local bns = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+	assert(loadfile(ADDON_DIR .. "Borders.lua"))("Olympus", bns)
+	uns.Borders = bns.Borders
+	uns.HonorsNet = { NewPortrait = function(parent, size) pe.made = (pe.made or 0) + 1 return bns.Borders.NewPortrait(parent, size) end }
+	-- PLAYER_PROFILE_LEFT as UI.lua fires it (whose page, folded), every other event as before.
+	pe.left = {}
+	uns.Fire = function(name, ...)
+		if name == "PLAYER_PROFILE_LEFT" then pe.left[#pe.left + 1] = (...) end
+		return ns.Fire(name, ...)
+	end
+	return pe
+end
+
+test("1.2.4 My profile in the Olympus window: his own person page draws ProfileEdit's page: its section strip as page chrome (none on another player's page), the detail box's words, its buttons by section; each section a page of its own; Back goes back; no side card, no panel", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		UI.SelectTab("realm")
+		local main = OlympusFrame
+		local tabPage = UI.PageId()
+		UI.ShowPerson({ name = ns.me })
+		eq(UI.OwnProfileShown(), true)
+		eq(pe.details.full, ns.me, "PlayerProfile.Build hands his page to ProfileEdit.Page")
+		eq(type(pe.facts), "table", "with his facts as the person page makes them")
+		eq(main.pageNavRows[1]:IsShown(), true, "the section strip, page chrome")
+		eq(main.pageNavRows[1].line.nav[1].text, "Look")
+		assert(ShownRowWith(main, "a row of look"), "the section's rows in the list")
+		eq(main.detailTitle:GetText(), "As others see you"); eq(main.detailText:GetText(), "Title: none")
+		eq(main.buttons[1]:GetText(), ns.L.PLAYER_PROFILE_BACK); eq(main.buttons[2]:IsShown(), false)
+		eq(UI.PageId(), "player-profile:" .. ns.me .. "#look")
+		-- A section of its own: its page id (each starts at the top), its buttons.
+		main.pageNavRows[1].nav[2]:Click()
+		eq(UI.PageId(), "player-profile:" .. ns.me .. "#icons")
+		assert(ShownRowWith(main, "a row of icons"))
+		eq(main.buttons[2]:IsShown(), true); eq(main.buttons[2]:GetText(), ns.L.COUNCIL_ICON_DEFAULT)
+		-- Another player's page (from his own: a step): no strip.
+		UI.ShowPerson({ name = "Racer" })
+		eq(UI.OwnProfileShown(), false)
+		eq(main.pageNavRows[1]:IsShown(), false, "no strip on another player's page")
+		eq(main.detailTitle:GetText(), ns.L.PLAYER_PROFILE_TITLE)
+		-- Back: his own page, then the tab.
+		main.buttons[1]:Click()
+		eq(UI.OwnProfileShown(), true); eq(main.pageNavRows[1]:IsShown(), true)
+		main.buttons[1]:Click()
+		eq(UI.PlayerProfileShown(), false); eq(UI.PageId(), tabPage, "the tab's page")
+		eq(rawget(_G, "OlympusPersonFrame"), nil, "no side card"); eq(rawget(_G, "OlympusProfileEdit"), nil, "no panel")
+		-- Without ProfileEdit (a client updated without a restart): his page as before, its privacy route.
+		uns.ProfileEdit = nil
+		UI.ShowPerson({ name = ns.me })
+		assert(ShownRowWith(main, ns.L.PROFILE_VISIBILITY_BTN), "the plain page")
+		eq(UI.PageId(), "player-profile:" .. ns.me)
+	end)
+end)
+
+test("1.2.4 My profile's portrait: in the detail box, made once, inside it (its art's reach above and below too), the box's words to its right, dressed with the page's art at each redraw; hidden on another page, the words back; PLAYER_PROFILE_LEFT on Back, another person, a tab and the window closed", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		UI.SelectTab("census")
+		local main = OlympusFrame
+		eq(main.ownPortrait, nil, "nothing made before his page")
+		UI.ShowPerson({ name = ns.me })
+		local rig = main.ownPortrait
+		assert(rig and rig.container and not rig.plain, "HonorsNet.NewPortrait's (Borders') portrait")
+		eq(pe.made, 1)
+		eq(rig.slot:IsShown(), true)
+		eq(rig.size + rig.reach.top + rig.reach.bottom <= 78 - 8, true, "inside the detail box, its art too: " .. rig.size)
+		eq(rig.size >= 30, true, "not a speck")
+		local at = rig.slot.points[1]
+		eq(at[2], main.detail); eq(at[4] - rig.reach.left >= 4, true, "clear of the box's left edge")
+		eq(-at[5] - rig.reach.top >= 2, true, "below the box's top")
+		local title = main.detailTitle.points[1]
+		eq(title[1], "TOPLEFT"); eq(title[2], main.detail); eq(title[4] >= at[4] + rig.size + rig.reach.right, true, "the words right of the art")
+		local dressed = #pe.dressed
+		eq(pe.dressed[dressed].rig, rig); eq(pe.dressed[dressed].art.frame, "rank")
+		pe.emblem = 134400
+		UI.Refresh()
+		eq(main.ownPortrait, rig, "made once"); eq(pe.made, 1)
+		eq(#pe.dressed, dressed + 1, "dressed again"); eq(pe.dressed[#pe.dressed].art.emblem, 134400)
+		-- Another player's page: hidden, the title back in its place.
+		local me = ns.Fold(ns.me)
+		UI.ShowPerson({ name = "Racer" })
+		eq(rig.slot:IsShown(), false)
+		eq(main.detailTitle.points[1][4], 8, "the title back in its place")
+		eq(pe.left[#pe.left], me, "left: another person")
+		main.buttons[1]:Click()
+		eq(rig.slot:IsShown(), true, "his page again")
+		local n = #pe.left
+		main.buttons[1]:Click()
+		eq(#pe.left, n + 1, "left: Back"); eq(pe.left[#pe.left], me); eq(rig.slot:IsShown(), false)
+		UI.ShowPerson({ name = ns.me })
+		n = #pe.left
+		UI.SelectTab("realm")
+		eq(#pe.left, n + 1, "left: a tab"); eq(rig.slot:IsShown(), false)
+		UI.ShowPerson({ name = ns.me })
+		n = #pe.left
+		main:Hide()
+		eq(#pe.left, n + 1, "left: the window closed")
+	end)
+end)
+
+-- 1.2.4 (the author in game: "design dos icons na pagina nao ta aproveitando bem espaco vazio da
+-- window"): "My profile"'s Icons lays its grid out for the room the window gives his page's list
+-- (UI.ListRoom; the grid itself, ProfileEdit.IconGrid, is tests/arena/profile-edit.lua's). That room
+-- is his page's list as UI.Layout places it (one strip of sections, no column titles), in both
+-- looks; a window resized (the Communities window it docks to minimized, or maximized) draws his
+-- page again for its new room. Fails on 1.2.4's first: no UI.ListRoom; a resize only laid it out.
+test("1.2.4 My profile: UI.ListRoom is his page's list as the window lays it out (its width, the height in sight under the section strip), in both looks and after a resize; a resize draws his page again, another page is only laid out", function()
+	WithUI(function()
+		local UI, uns = LoadUI()
+		assert(loadfile(ADDON_DIR .. "PlayerProfile.lua"))("Olympus", uns)
+		local pe = MyProfileStandIn(uns)
+		local drawn, page = 0, pe.Page
+		pe.Page = function(...) drawn = drawn + 1 return page(...) end
+		local queued = {}
+		uns.After = function(_, _, fn) queued[#queued + 1] = fn end
+		local function RunQueued() local q = queued queued = {} for _, fn in ipairs(q) do fn() end return #q end
+		eq(UI.ListRoom(1), nil, "no window yet")
+		-- The list his page has: the list's width (UI.Layout sets the list's views to it) and the
+		-- height of the scroll frame in sight.
+		local function Same(main, why)
+			local w, h, hd = UI.ListRoom(1)
+			local _, _, _, sh = main.scroll:GetRect()
+			eq(#main.pageNavLines, 1, why .. ": his page's one strip"); eq(main.colHeader:IsShown(), false, why .. ": no column titles")
+			eq(w, main.views[main.tab]:GetWidth(), why .. ": the list's width"); eq(h, sh, why .. ": the height in sight")
+			eq(hd, main.style == "hd", why)
+			return w, h
+		end
+		-- The old look, at its own place: 338 x 424.
+		UI.SelectTab("realm")
+		local main = OlympusFrame
+		UI.ShowPerson({ name = ns.me })
+		eq(UI.OwnProfileShown(), true)
+		local w, h = Same(main, "the old look")
+		eq(w, 296); eq(h, 211)
+		RunQueued()
+		local before = drawn
+		main:SetSize(338, 524)
+		eq(RunQueued(), 1, "a redraw asked"); eq(drawn, before + 1, "his page drawn again")
+		w, h = Same(main, "the old look, taller")
+		eq(h, 311)
+		-- Another page: laid out, not drawn again.
+		main.buttons[1]:Click()
+		eq(UI.PlayerProfileShown(), false)
+		RunQueued()
+		before = drawn
+		main:SetSize(338, 424)
+		eq(RunQueued(), 0, "no redraw for another page"); eq(drawn, before)
+		main:Hide()
+		-- Forever's: the HD look docked to the Communities window (the Social window's 385 wide, its
+		-- 426 tall), then minimized (406).
+		FriendsFrame = FakeFrame("FriendsFrame", UIParent, 385, 424)
+		CommunitiesFrame = FakeFrame("CommunitiesFrame", UIParent, 814, 426)
+		CommunitiesFrame.rect, CommunitiesFrame.shown = { 0, 150, 814, 426 }, true
+		UI.OpenDocked(CommunitiesFrame, "realm", true, "hd")
+		main = OlympusFrameHD
+		eq(main:GetWidth(), 385); eq(main:GetHeight(), 426)
+		UI.ShowPerson({ name = ns.me })
+		w, h = Same(main, "Forever")
+		eq(w, 352); eq(h, 223)
+		RunQueued()
+		before = drawn
+		CommunitiesFrame.h = 406
+		UI.FollowHost(CommunitiesFrame)
+		eq(main:GetHeight(), 406)
+		eq(RunQueued(), 1); eq(drawn, before + 1, "his page drawn again for the minimized window")
+		w, h = Same(main, "Forever, minimized")
+		eq(w, 352); eq(h, 203)
+	end)
+end)
+
+-- 1.2.4: an item slot that is no item ("My profile"'s icon picker in the list: a texture and its name).
+-- Fails on 1.2.3: the tooltip said "#nil".
+test("1.2.4 Views: a slot of an items row with a label and no item id: its tooltip's first line is its label", function()
+	WithUI(function()
+		LoadUI()
+		local content = CreateFrame("Frame")
+		content.w = 300
+		local picked
+		ns.Views.Render(content, { { items = { { icon = "Interface\\Icons\\Spell_Holy_SealOfMight", label = "Spell_Holy_SealOfMight" } }, columns = 7,
+			onItem = function(it) picked = it end } })
+		local slot = content.rows[1].items[1]
+		slot:Fire("OnEnter")
+		eq(GameTooltip.lines[1], "Spell_Holy_SealOfMight")
+		slot:Click()
+		eq(picked and picked.label, "Spell_Holy_SealOfMight", "the line's own click")
 	end)
 end)
 end
@@ -4886,7 +5425,8 @@ test("census: guilds only seen with /who are grey rows after the reported ones",
 		eq(lines[3].cols[3], Grey("30")); eq(lines[3].dim, nil)
 		eq(lines[4].cols[1], Grey("OLYMPUS VII")); eq(lines[4].cols[2], Grey("?"))
 		eq(lines[4].cols[3], Grey("12+"), "capped: at least")
-		eq(lines[4].cols[4], Grey(L.NO_ADDON))
+		-- (Changed on purpose, 1.2.4: the average level's column before the Lord's, unknown too.)
+		eq(lines[4].cols[4], Grey("?"), "no average level known"); eq(lines[4].cols[5], Grey(L.NO_ADDON))
 		eq(lines[5].text, Grey(L.SEEN_HINT)); eq(#lines, 5)
 		local tip = {}
 		local tt = { AddLine = function(_, text) tip[#tip + 1] = text end,
@@ -7514,12 +8054,15 @@ end)
 
 test("Throne: the King's map button fits its label, says whether he is shown, and changes at once", function()
 	WithUI(function()
-		local savedGuild, savedSend, savedPos, savedMe = GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, ns.me
+		local savedGuild, savedSend, savedPos, savedMap, savedMe = GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, C_Map.GetBestMapForUnit, ns.me
 		local ok, err = pcall(function()
 			ns.db.throneLocation = nil
 			GetGuildInfo = function() return "Olympus", "King", 0 end
 			ns.me = "Asmongold Asmongler-Realm"
 			ns.Comm.Send = function() end
+			-- A genuinely publishable map needs both the real API's map id and coordinates.
+			-- The old UI-only fixture supplied coordinates without a map, while the sender refused it.
+			C_Map.GetBestMapForUnit = function() return 1453 end
 			C_Map.GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end
 			local w, UI = ForeverWorld(true)
 			CommunitiesFrame:Show(); w.buttons[1]:Click()
@@ -7559,7 +8102,7 @@ test("Throne: the King's map button fits its label, says whether he is shown, an
 			b:Click()
 			eq(ns.db.throneLocation, false)
 		end)
-		GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, ns.me = savedGuild, savedSend, savedPos, savedMe
+		GetGuildInfo, ns.Comm.Send, C_Map.GetPlayerMapPosition, C_Map.GetBestMapForUnit, ns.me = savedGuild, savedSend, savedPos, savedMap, savedMe
 		ns.db.throneLocation = nil
 		ns.King.Reset()
 		if not ok then error(err, 0) end
@@ -8029,7 +8572,7 @@ local function WithThrone(fn)
 		K.Reset(); ns.Vox.Reset(); ns.Court.Reset(); ns.Acts.Reset(); ns.Treasury.Reset(); ns.Bank.Reset()
 		ns.rdb.writs, ns.rdb.writsSent, ns.rdb.pardons, ns.rdb.treasury, ns.rdb.treasurySeen = nil, nil, nil, nil, nil
 		ns.rdb.kingHands, ns.rdb.gates, ns.rdb.pardonsGiven = nil, nil, nil
-		ns.rdb.stewardHands = nil
+		ns.rdb.stewardHands, ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil, nil
 		ns.rdb.treasurySums, ns.rdb.treasuryReport, ns.rdb.treasuryFlags, ns.rdb.treasuryOpening = nil, nil, nil, nil
 		ns.rdb.treasuryToldWho, ns.db.previewTreasuryFlags, ns.db.myCharacters = nil, nil, nil
 	end
@@ -8143,9 +8686,11 @@ test("Hands of the King: he names them, they use the tools he lends them, nothin
 		K.HandleCommand("CHANNEL", "Helper-Realm", "T1~H~5~Olympus II~Other-Realm")
 		eq(K.IsHand(), false, "a Hand names nobody")
 		for _, kind in ipairs({ "W", "F", "C", "P" }) do eq(K.Authorized(kind, "Helper-Realm", "Olympus II"), false, kind) end
-		-- The King stopped repeating his list (offline): it ends.
+		-- (1.2.4, the author's ask: lists are not erased) The King stopped repeating his list
+		-- (offline): it stands until his newer list (it ended after 20 minutes; a /reload keeps it:
+		-- "1.2.4 the Hands" below).
 		w.clock = w.clock + K.HANDS_FRESH + 1
-		eq(K.Authorized("A", "Helper-Realm", "Olympus II"), false, "an old list ends")
+		eq(K.Authorized("A", "Helper-Realm", "Olympus II"), true, "his list stands until his newer one")
 		-- He takes the title back: the list goes out without the name.
 		AsKing()
 		K.RemoveHand("Helper-Realm")
@@ -9722,6 +10267,56 @@ test("Royal Writs to the whole army: every member gets the parchment, nobody ack
 			eq(StaticPopupDialogs.OLYMPUS_WRIT_TO.noCancelOnEscape, true, "Escape sends nothing")
 			StaticPopupDialogs.OLYMPUS_WRIT.OnAccept({ editBox = { GetText = function() return "x" end } })
 			eq(w.popups[#w.popups].name, "OLYMPUS_WRIT_TO", "too short: no second step"); eq(w.popups[#w.popups].data, "Hold the bridge")
+		end)
+	end)
+end)
+
+-- 1.2.4, the author's ask (announcements are not lost): a writ went out once, so a member offline
+-- then never got it. The King's client says each writ of the last seven days again, one each
+-- WRIT_REPEAT, the least lately said first; a member's login asks for them (T7) and the King's
+-- client answers, once per WRIT_ANSWER_GAP; a writ held already never takes the next one's turn.
+test("1.2.4 Royal Writs: each writ of the week said again, one at a time; a member away gets each once; a login asks and the King's client answers; nothing past seven days", function()
+	WithUI(function()
+		LoadUI()
+		WithThrone(function(w, K)
+			local A = ns.Acts
+			local KING = ns.KingCharacter() .. "-Realm"
+			AsKing()
+			A.SendWrit("E", "Hold the northern pass")
+			local first = LastSent(w)
+			w.clock = w.clock + 120
+			A.SendWrit("E", "Muster at dawn")
+			local second = LastSent(w)
+			eq(A.RepeatWrits(), nil, "both said less than WRIT_REPEAT ago")
+			w.clock = w.clock + A.WRIT_REPEAT
+			assert(A.RepeatWrits()); eq(LastSent(w), first, "the least lately said first")
+			assert(A.RepeatWrits()); eq(LastSent(w), second)
+			eq(A.RepeatWrits(), nil, "each once per WRIT_REPEAT")
+			-- A soldier who was away: the repeats bring both, each kept once; one held already never
+			-- takes the next one's turn (WRIT_SHOW_GAP).
+			AsSoldier("Away")
+			K.HandleCommand("CHANNEL", KING, first)
+			w.clock = w.clock + A.WRIT_SHOW_GAP + 1
+			K.HandleCommand("CHANNEL", KING, first) -- (its repeat: held already)
+			w.clock = w.clock + 10
+			K.HandleCommand("CHANNEL", KING, second)
+			local held = {}
+			for _, x in ipairs(ns.rdb.writs or {}) do held[#held + 1] = x.text end
+			eq(table.concat(held, " | "), "Hold the northern pass | Muster at dawn", "both, once each")
+			-- His login asks; the King's client answers with the week's writs, once per WRIT_ANSWER_GAP.
+			local n = #w.sent
+			eq(A.AskWrits(), true)
+			eq(w.sent[n + 1].dist, "CHANNEL"); eq(w.sent[n + 1].msg, "T7~1")
+			AsKing()
+			eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 2, "the week's two")
+			eq(LastSent(w), first, "said again at once, the next after WRIT_SPACING")
+			eq(A.HandleAsk("CHANNEL", "Later-Realm", "T7~1"), 0, "once per WRIT_ANSWER_GAP")
+			eq(A.HandleAsk("WHISPER", "Later-Realm", "T7~1"), 0, "on the channel alone")
+			-- Past seven days: no more.
+			w.clock = w.clock + A.WRIT_DAYS * 86400 + 1
+			eq(A.RepeatWrits(), nil)
+			w.clock = w.clock + A.WRIT_ANSWER_GAP
+			eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 0)
 		end)
 	end)
 end)
@@ -13611,7 +14206,7 @@ test("0.9.8 the Realm tab: a councillor's own button for their icon, next to Ask
 	end)
 end)
 
-test("1.2 the Realm tab's council icon button opens the profile's Edit once ProfileEdit.lua gives one (the icon picker moved there)", function()
+test("1.2 the Realm tab's council icon button opens the profile's Edit once ProfileEdit.lua gives one (the icon picker moved there); 1.2.4: /oly council icon too", function()
 	WithUI(function()
 		WithCouncil(function()
 			local w, UI = ForeverWorld(true)
@@ -13627,6 +14222,18 @@ test("1.2 the Realm tab's council icon button opens the profile's Edit once Prof
 				btn:Click()
 				eq(opened, "icon")
 				eq(rawget(_G, "OlympusCouncilIconFrame"), nil, "not the picker's own window")
+				-- 1.2.4: /oly council icon takes the same way (My profile's Icons, on the council icon),
+				-- a councillor's alone as the picker's window was. (It opened that window directly.)
+				opened = nil
+				SlashCmdList.OLYMPUS("council icon")
+				eq(opened, "icon", "/oly council icon")
+				eq(rawget(_G, "OlympusCouncilIconFrame"), nil)
+				local savedPrint, printed = ns.Print, nil
+				ns.Print = function(msg) printed = msg end
+				ns.me, opened = "Random Guy-Realm", nil
+				SlashCmdList.OLYMPUS("council icon")
+				ns.Print, ns.me = savedPrint, "Test Councillor-Realm"
+				eq(opened, nil, "anyone else: nothing opened"); eq(printed, ns.L.COUNCIL_ICON_ONLY)
 				-- Without it (a client updated without a restart): the picker's own window, as before.
 				ns.ProfileEdit = nil
 				btn:Click()
@@ -13638,106 +14245,22 @@ test("1.2 the Realm tab's council icon button opens the profile's Edit once Prof
 	end)
 end)
 
-test("1.2 Workshop.IconPickerHost: the council icon picker inside a host (the profile's Edit): the list given first, OK hands the choice back and never sets a councillor's icon; its own window again after", function()
-	WithUI(function()
-		WithCouncil(function()
-			local W = ns.Workshop
-			local saved = { GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons }
-			local ok, err = pcall(function()
-				local sent = {}
-				ns.Comm.Send = function(_, msg) sent[#sent + 1] = msg end
-				GamepadStyle(false) -- (1.1.5: the input style, never ns.GamepadUI replaced)
-				GetLooseMacroIcons, GetLooseMacroItemIcons = nil, nil
-				GetMacroIcons = function(t) for i = 1, 50 do t[#t + 1] = 200000 + i end end
-				GetMacroItemIcons = function() end
-				-- Anyone's Edit may host it (the Edit decides what it lists): here not a councillor.
-				ns.me = "Random Guy-Realm"
-				local host = CreateFrame("Frame", "OlympusProfileEditHost", UIParent)
-				local picked
-				local f = W.IconPickerHost(host, { "Spell_Holy_SealOfMight", 134400, "bad|name", 134400 }, function(icon) picked = icon or false end, 134400)
-				eq(f.parent, host); eq(f:IsShown(), true); eq(f.close:IsShown(), false)
-				eq(W.IconPickerHosted(), true)
-				eq(f.cells[1].icon, "Spell_Holy_SealOfMight"); eq(f.cells[2].art.texture, 134400); eq(f.cells[3]:IsShown(), false, "junk and repeats left out")
-				eq(f.preview.texture, 134400, "the icon it had")
-				assert(not f.sample:GetText():find(ns.HIGH_COUNCIL_MARK, 1, true), "no council mark for a player who is none")
-				-- 1.2.3: hosted it picks the emblem: its title and words say so, never the council's
-				-- (which promised a silver dragon in the chat to anyone who opened it).
-				eq(f.titleText, ns.L.EMBLEM_ICON_TITLE); eq(f.hint:GetText(), ns.L.EMBLEM_ICON_HINT)
-				f.cells[1]:Click(); f.ok:Click()
-				eq(picked, "Spell_Holy_SealOfMight"); eq(f:IsShown(), false)
-				eq(ns.db.councilIcons, nil, "never a councillor's icon"); eq(#sent, 0, "nothing said")
-				-- No list: the game's icons.
-				W.IconPickerHost(host, nil, function() end)
-				eq(f.cells[1].art.texture, 200001)
-				eq(W.IconPickerHost(nil, {}, function() end), nil); eq(W.IconPickerHost(host, {}, nil), nil)
-				-- A councillor's own picker takes it back to its window.
-				ns.me = "Test Councillor-Realm"
-				eq(W.ShowIconPicker(), true)
-				eq(f.parent, UIParent); eq(f.close:IsShown(), true); eq(W.IconPickerHosted(), false)
-				eq(f.titleText, ns.L.COUNCIL_ICON_TITLE, "the council's own title again"); eq(f.hint:GetText(), ns.L.COUNCIL_ICON_HINT)
-			end)
-			GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons = saved[1], saved[2], saved[3], saved[4]
-			if not ok then error(err, 0) end
-		end)
-	end)
-end)
-
-test("1.2 review: the hosted icon picker lists honour marks (Olympus's own textures, keys with hyphens) first and hands the key back; hosted it is part of the Edit (not movable, the host's strata, off the Escape list), its own window again after", function()
-	WithUI(function()
-		WithCouncil(function()
-			local W = ns.Workshop
-			local saved = { GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons }
-			local ok, err = pcall(function()
-				GamepadStyle(false) -- (1.1.5: the input style, never ns.GamepadUI replaced)
-				GetLooseMacroIcons, GetLooseMacroItemIcons = nil, nil
-				GetMacroIcons = function(t) for i = 1, 50 do t[#t + 1] = 200000 + i end end
-				GetMacroItemIcons = function() end
-				-- The standalone picker once opened (a councillor's): on the Escape list.
-				ns.me = "Test Councillor-Realm"
-				eq(W.ShowIconPicker(), true)
-				local f = W.IconPicker()
-				local function Listed() for _, n in ipairs(UISpecialFrames) do if n == "OlympusCouncilIconFrame" then return true end end return false end
-				eq(Listed(), true); eq(f:IsMovable(), true); eq(f:GetFrameStrata(), "DIALOG")
-				f:Hide()
-				local host = CreateFrame("Frame", "OlympusProfileEditHost", UIParent)
-				host:SetFrameStrata("MEDIUM")
-				local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
-				local picked
-				local list = {
-					{ key = "gryphon-gold-mark", texture = MEDIA .. "gryphon-gold-mark", label = "Arena Champion" },
-					{ key = "koi-silver-mark", texture = MEDIA .. "koi-silver-mark", label = "Silver Hand" },
-					{ key = "bad-mark", texture = "Interface\\Icons\\X" }, { key = "bad mark", texture = MEDIA .. "x" }, { key = "gryphon-gold-mark", texture = MEDIA .. "again" },
-					"Spell_Holy_SealOfMight", 134400,
-				}
-				eq(W.IconPickerHost(host, list, function(v) picked = v end, "koi-silver-mark"), f)
-				eq(f.cells[1].art.texture, MEDIA .. "gryphon-gold-mark"); eq(f.cells[2].art.texture, MEDIA .. "koi-silver-mark")
-				eq(f.cells[3].icon, "Spell_Holy_SealOfMight"); eq(f.cells[4].icon, 134400); eq(f.cells[5]:IsShown(), false, "a texture elsewhere, a bad key, a repeat: left out")
-				eq(f.cells[2].chosen:IsShown(), true, "its current mark shown chosen"); eq(f.preview.texture, MEDIA .. "koi-silver-mark")
-				eq(f.chosenName:GetText(), "Silver Hand")
-				-- Hosted: part of the Edit.
-				eq(f:IsMovable(), false); eq(f:GetScript("OnDragStart"), nil); eq(f:IsToplevel(), false)
-				eq(f:GetFrameStrata(), "MEDIUM"); eq(Listed(), false, "Escape closes the Olympus window, the Edit with it")
-				-- The filter finds a mark by its label.
-				W.FilterIcons("champion")
-				eq(f.cells[1].icon.key, "gryphon-gold-mark"); eq(f.cells[2]:IsShown(), false)
-				W.FilterIcons("")
-				f.cells[1]:Click(); f.ok:Click()
-				eq(picked, "gryphon-gold-mark", "the key handed back"); eq(ns.db.councilIcons, nil)
-				-- A game icon still hands its value back.
-				W.IconPickerHost(host, list, function(v) picked = v end)
-				f.cells[4]:Click(); f.ok:Click()
-				eq(picked, 134400)
-				-- Out of a host, a mark is no choice.
-				eq(W.IconEntry({ key = "a-b", texture = MEDIA .. "a-b" }).key, "a-b"); eq(W.IconEntry({ key = "a-b", texture = "Interface\\AddOns\\Other\\x" }), nil)
-				-- Its own window again: movable, above the others, on the Escape list.
-				eq(W.ShowIconPicker(), true)
-				eq(f.parent, UIParent); eq(f:IsMovable(), true); eq(f:IsToplevel(), true); eq(f:GetFrameStrata(), "DIALOG"); eq(Listed(), true)
-				assert(f:GetScript("OnDragStart"), "dragged again")
-			end)
-			GetMacroIcons, GetMacroItemIcons, GetLooseMacroIcons, GetLooseMacroItemIcons = saved[1], saved[2], saved[3], saved[4]
-			if not ok then error(err, 0) end
-		end)
-	end)
+-- 1.2.4: the hosted picker (Workshop.IconPickerHost) went with the profile's Edit panel: "My profile"
+-- draws its own Icons section in the Olympus window (tests/arena/profile-edit.lua). Its two tests
+-- went with it; what the page still takes from Workshop.lua is the entry check of its list, here.
+test("1.2.4 Workshop.IconEntry: a council icon value, or an honour mark of Olympus's own textures (a key of letters, digits, _ and -; a file number or a path under Interface\\AddOns\\Olympus\\media\\; a plain label), nothing else", function()
+	local W = ns.Workshop
+	local MEDIA = "Interface\\AddOns\\Olympus\\media\\honors\\"
+	eq(W.IconEntry(134400), 134400); eq(W.IconEntry("Spell_Holy_SealOfMight"), "Spell_Holy_SealOfMight"); eq(W.IconEntry("bad|name"), nil)
+	local mark = W.IconEntry({ key = "gryphon-gold", texture = MEDIA .. "gryphon-gold-mark", label = "Arena Champion" })
+	eq(mark.key, "gryphon-gold"); eq(mark.texture, MEDIA .. "gryphon-gold-mark"); eq(mark.label, "Arena Champion")
+	eq(W.IconEntry({ key = "a-b", texture = MEDIA .. "a-b" }).key, "a-b")
+	eq(W.IconEntry({ key = "a-b", texture = "Interface\\AddOns\\Other\\x" }), nil, "a texture elsewhere")
+	eq(W.IconEntry({ key = "bad mark", texture = MEDIA .. "x" }), nil, "a bad key")
+	eq(W.IconEntry({ key = "a-b", texture = "Interface\\Icons\\X" }), nil)
+	eq(W.IconEntry({ key = "a-b", texture = 2147483648 }), nil); eq(W.IconEntry({ key = "a-b", texture = 1.5 }), nil)
+	eq(W.IconEntry({ key = "a-b", texture = 134400, label = "|cffff0000x" }).label, nil, "a label with a code dropped")
+	eq(W.IconPickerHost, nil, "no hosted mode any more"); eq(W.IconPickerHosted, nil)
 end)
 
 -- 0.9.8: review of the merge
@@ -25457,26 +25980,27 @@ do
 			local head, rows = Section()
 			-- (1.0.0, the nameplate marks: a row for the marks' own member star, after the borders; it was
 			-- one row per border tier. 1.1.5: five tiers. 1.2: honours add five representative Workshop
-			-- previews between the rank borders and the member star.)
-			eq(#rows, 12, "rank and honour previews, then the member star at the foot of the tab")
+			-- previews between the rank borders and the member star. 1.2.4: four more, the crook, the
+			-- cross, the charm and the slayers' horse, worn now.)
+			eq(#rows, 16, "rank and honour previews, then the member star at the foot of the tab")
 			assert(head.right:find(ns.L.BORDERS_PREVIEW_NONE, 1, true), "off")
 			for i, t in ipairs(w.B.TIERS) do
 				assert(rows[i].text:find(t.name, 1, true), t.name)
 				assert(rows[i].text:find(ns.L["BORDERS_WHO_" .. t.name:upper():gsub("%-", "_")], 1, true), t.name .. ": who holds it")
 				eq(type(rows[i].onClick), "function"); eq(type(rows[i].tooltip), "function"); eq(rows[i].right, nil)
 			end
-			assert(rows[12].text:find("member", 1, true) and rows[12].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[12].text)
+			assert(rows[16].text:find("member", 1, true) and rows[16].text:find(ns.L.BORDERS_WHO_MEMBER, 1, true), rows[16].text)
 			local tip = {}
-			rows[12].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+			rows[16].tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
 			eq(tip[2], ns.L.BORDERS_PREVIEW_TIP_MEMBER, "the star's own tooltip")
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member"); eq(w.shown("player"), nil, "the star: no border round his portrait")
 			eq(w.printed[#w.printed], ns.L.BORDERS_PREVIEW_ON_MEMBER)
-			rows[12].onClick()
+			rows[16].onClick()
 			eq(w.B.Preview(), "member", "the lines were built before the click: a fresh click shows it again")
 			head, rows = Section()
-			assert(rows[12].right and rows[12].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
-			rows[12].onClick()
+			assert(rows[16].right and rows[16].right:find(ns.L.BORDERS_PREVIEW_SHOWN, 1, true), "marked shown")
+			rows[16].onClick()
 			eq(w.B.Preview(), nil, "clicked again: off")
 			head, rows = Section()
 			rows[5].onClick()
@@ -26358,7 +26882,8 @@ do
 	local N = ns.Nominees
 	local OURS, THEIRS = "Olympus II", "Olympus Zeus"
 	local MASTER = "Boss Hammer-Realm" -- our guild's master, as our roster gives him
-	local CENTURIONS = { "Ada", "Bea", "Cid", "Dax", "Eve", "Fay", "Gus", "Hal", "Ivy", "Jon", "Kit" } -- (eleven)
+	-- 25 manually named Legates plus one overflow candidate; legacy centurion ids remain on the wire.
+	local CENTURIONS = { "Ada", "Bea", "Cid", "Dax", "Eve", "Fay", "Gus", "Hal", "Ivy", "Jon", "Kit", "Lars", "Moss", "Nash", "Orrin", "Penn", "Quin", "Rell", "Seth", "Tate", "Ulric", "Venn", "Wade", "Xara", "Yara", "Zane" }
 	local OTHERS = { "Lux", "Mia", "Ned", "Ora", "Pam", "Nemo" } -- (more members of our guild)
 	local MEDIA = "Interface\\AddOns\\Olympus\\media\\borders\\"
 	-- The High Council's signed titles list: its unnamed part, then seven named departments (one more
@@ -26372,14 +26897,14 @@ do
 			Fire = ns.Fire, Show = StaticPopup_Show, guilds = ns.rdb.guilds, nominees = ns.rdb.nominees, titles = ns.rdb.councilTitles,
 			byName = ns.Roster.byName, rguild = ns.Roster.guild, stats = ns.Roster.lastStats, loginAt = ns.Comm.loginAt,
 			isPlayer = UnitIsPlayer, unitFull = UnitFullName, main = ns.rdb.mainNominees, previewMain = ns.db.previewMainNominees,
-			council = ns.rdb.council, UI = ns.UI, kingView = ns.db.devKingView, gmView = ns.db.devGMView }
+			council = ns.rdb.council, UI = ns.UI, kingView = ns.db.devKingView, gmView = ns.db.devGMView, heard = ns.rdb.nomineesHeard }
 		local w = { sent = {}, printed = {}, popups = {}, logged = {}, timers = {}, clock = 1800000000, changed = 0 }
 		-- (The departments as the tests' made-up council titles name them; the shipped six are the author's.)
 		local savedDepts = N.DEPARTMENTS
 		N.DEPARTMENTS = { "Events", "Lore", "Trade", "War", "Craft", "Watch" }
 		local ok, err = pcall(function()
 			N.Reset()
-			ns.rdb.nominees, ns.rdb.mainNominees, ns.db.previewMainNominees = nil, nil, nil
+			ns.rdb.nominees, ns.rdb.mainNominees, ns.db.previewMainNominees, ns.rdb.nomineesHeard = nil, nil, nil, nil
 			ns.db.devKingView, ns.db.devGMView = nil, nil
 			-- (1.1.5: the High Council's signed names, made up; the tab the window opens.)
 			ns.rdb.council = { names = { ["vera councillor"] = true } }
@@ -26423,23 +26948,24 @@ do
 		ns.rdb.mainNominees, ns.db.previewMainNominees, ns.rdb.council, ns.UI = saved.main, saved.previewMain, saved.council, saved.UI
 		ns.db.devKingView, ns.db.devGMView = saved.kingView, saved.gmView
 		N.Reset()
+		ns.rdb.nomineesHeard = saved.heard
 		if not ok then error(err, 0) end
 	end
 
-	test("1.1.5 nominees: a guild master names up to 10 centurions and one correspondent per High Council department (6 at most), members of his own guild alone; the 11th centurion, a second correspondent for a department, one name twice, himself and anyone outside his roster refused, each with its reason", function()
+	test("1.2.4 nominees: a guild master manually names up to 25 Legates and six department correspondents; the 26th, duplicate, outside member or second department correspondent is refused", function()
 		WithNominees(function(w)
 			local L = ns.L
 			w.as(MASTER, 0)
 			eq(N.IsMaster(), true)
-			eq(N.MAX_CENTURIONS, 10); eq(N.MAX_DEPTS, 6); eq(N.MAX, 16)
+			eq(N.MAX_CENTURIONS, 25); eq(N.MAX_LEGATES, 25); eq(N.MAX_DEPTS, 6); eq(N.MAX, 31)
 			-- The correspondents' departments: the signed list's named ones, in its order, six at most.
 			eq(table.concat(N.Departments(), ","), "Events,Lore,Trade,War,Craft,Watch")
-			for i = 1, 10 do eq(N.Name("centurion", CENTURIONS[i]), true, CENTURIONS[i]) end
-			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Jon", L.NOMINEE_ROLE_CENTURION))
-			-- The 11th: refused, saying why; nothing kept.
-			eq(N.Name("centurion", "Kit"), false, "an 11th centurion")
-			eq(w.printed[#w.printed], L.NOMINEES_FULL:format(10))
-			eq(N.RoleOf("Kit-Realm", OURS), nil)
+			for i = 1, 25 do eq(N.Name("legate", CENTURIONS[i]), true, CENTURIONS[i]) end
+			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Yara", L.NOMINEE_ROLE_CENTURION))
+			-- The 26th: refused, saying why; nothing kept.
+			eq(N.Name("centurion", "Zane"), false, "a 26th Legate")
+			eq(w.printed[#w.printed], L.NOMINEES_FULL:format(25))
+			eq(N.RoleOf("Zane-Realm", OURS), nil)
 			-- Anyone outside his roster, himself, someone named already (whatever the case), a name that
 			-- can't be a character's: refused.
 			eq(N.Name("correspondent", "Stranger", "Events"), false, "not of his guild")
@@ -26449,19 +26975,19 @@ do
 			eq(w.printed[#w.printed], L.NOMINEES_ALREADY:format("Ada", L.NOMINEE_ROLE_CENTURION))
 			eq(N.Name("centurion", "Bad|cffff0000Name"), false, "no free text for a name"); eq(w.printed[#w.printed], L.NOMINEES_WHO)
 			-- One correspondent per department (its name whatever the case); none past the six.
-			eq(N.Name("correspondent", "Kit", "events"), true)
-			local role, dept = N.RoleOf("Kit-Realm", OURS)
+			eq(N.Name("correspondent", "Zane", "events"), true)
+			local role, dept = N.RoleOf("Zane-Realm", OURS)
 			eq(role, "correspondent"); eq(dept, "Events")
-			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Kit", L.NOMINEE_ROLE_CORRESPONDENT:format("Events")))
+			eq(w.printed[#w.printed], L.NOMINEES_ADDED:format("Zane", L.NOMINEE_ROLE_CORRESPONDENT:format("Events")))
 			eq(N.Name("correspondent", "Nemo", "Events"), false, "a second for a department")
-			eq(w.printed[#w.printed], L.NOMINEES_DEPT_TAKEN:format("Events", "Kit"))
+			eq(w.printed[#w.printed], L.NOMINEES_DEPT_TAKEN:format("Events", "Zane"))
 			eq(N.Name("correspondent", "Nemo", "Seventh"), false, "a seventh department")
 			eq(w.printed[#w.printed], L.NOMINEES_NO_DEPT:format("Seventh"))
 			local depts = N.Departments()
 			for i = 2, 6 do eq(N.Name("correspondent", OTHERS[i - 1], depts[i]), true, depts[i]) end
-			eq(N.Count(), 16, "16 at most: 10 and 6")
+			eq(N.Count(), 31, "25 Legates and six correspondents")
 			-- Kept across sessions, under his character, for the guild he leads.
-			eq(ns.rdb.nominees[MASTER].guild, OURS); eq(#ns.rdb.nominees[MASTER].list, 16)
+			eq(ns.rdb.nominees[MASTER].guild, OURS); eq(#ns.rdb.nominees[MASTER].list, 31)
 			-- He takes a title back (by name, any case): the 11th fits then.
 			eq(N.Remove("ada"), true)
 			eq(w.printed[#w.printed], L.NOMINEES_REMOVED:format("Ada", L.NOMINEE_ROLE_CENTURION))
@@ -26651,21 +27177,21 @@ do
 			-- What a proven list may name: 10 centurions and 6 departments at most (the first ones), each
 			-- name once, an older list never over a newer one.
 			local c, d = {}, {}
-			for i = 1, 11 do c[i] = "c=" .. CENTURIONS[i] end
+			for i = 1, 26 do c[i] = "c=" .. CENTURIONS[i] end
 			c[#c + 1] = "c=Ada"
 			for i = 1, 7 do d[i] = ("d=Dept%s=%s"):format(("abcdefg"):sub(i, i), OTHERS[i] or "Zed") end
 			N.Handle("CHANNEL", MASTER, Msg(OURS, rev + 10, table.concat(c, ";"), 1, 2))
 			N.Handle("CHANNEL", MASTER, Msg(OURS, rev + 10, table.concat(d, ";"), 2, 2))
 			local l = N.ListOf(OURS)
-			eq(#l.entries, 16, "10 and 6")
-			eq(N.RoleOf("Kit-Realm", OURS), nil, "the 11th centurion left out")
+			eq(#l.entries, 31, "25 and 6")
+			eq(N.RoleOf("Zane-Realm", OURS), nil, "the 26th Legate left out")
 			eq(N.RoleOf("Zed-Realm", OURS), nil, "the 7th department left out")
 			N.Handle("CHANNEL", MASTER, parts[1])
-			eq(#N.ListOf(OURS).entries, 16, "his older list, late: not taken")
+			eq(#N.ListOf(OURS).entries, 31, "his older list, late: not taken")
 		end)
 	end)
 
-	test("1.1.5 nominees: a list ends when its sender is no longer that guild's master (our roster; another guild's census proving another), when he stops repeating it, or when it names nobody; the new guild master's is taken", function()
+	test("1.2.4 nominees: an accepted list ends on an authoritative master change or explicit removal, never merely because its master is offline", function()
 		WithNominees(function(w)
 			local L = ns.L
 			w.as("Ada-Realm", 3)
@@ -26690,11 +27216,11 @@ do
 				"W1-Realm", "W2-Realm")
 			eq(N.Prune(), true)
 			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "dropped")
-			-- He stopped repeating it (logged off): it lasts FRESH, then ends.
+			-- He stopped repeating it (logged off): no age-only loss.
 			w.clock = w.clock + N.FRESH
 			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "still fresh")
 			w.clock = w.clock + 1
-			eq(N.RoleOf("Bea-Realm", OURS), nil, "gone quiet")
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "offline silence is not removal")
 			-- A new list naming nobody: dropped at once; the one no longer named is told.
 			N.Handle("CHANNEL", "Nemo-Realm", Msg(OURS, w.clock, "c=Ada"))
 			eq(w.printed[#w.printed], L.NOMINEES_YOU:format("Nemo", L.NOMINEE_ROLE_CENTURION, OURS))
@@ -26707,6 +27233,133 @@ do
 			N.Name("centurion", "Ada"); w.flush()
 			N.Remove("Ada"); w.flush()
 			eq(w.parts()[#w.parts()], Msg(OURS, ns.rdb.nominees[MASTER].rev, ""), "the empty list")
+		end)
+	end)
+
+	-- (1.2.4, the author's ask: "if the GM isn't online ... it has to be kept".) Fails before: a list heard
+	-- lived in memory 6 hours, so a guild master offline since the evening, or any /reload, left his guild
+	-- with no centurion, no correspondent and no bronze until he logged in again.
+	test("1.2.4 nominees: accepted offline lists persist beyond thirty days and reload, with bounded validated restoration and explicit authoritative revocation", function()
+		WithNominees(function(w)
+			w.as("Ada-Realm", 3)
+			N.Handle("CHANNEL", MASTER, Msg(OURS, w.clock, "c=Ada;c=Bea;d=Lore=Cid"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, w.clock, "c=Zed;d=War=Wyn"))
+			local heardAt = w.clock
+			-- Seven hours later, nobody repeating them (both masters offline): kept.
+			w.clock = w.clock + 7 * 3600
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "kept past the old six hours")
+			eq(select(2, N.RoleOf("Wyn-Realm", THEIRS)), "War")
+			-- A /reload (or a login the next day): the session's memory goes, the saved lists come back.
+			assert(type(ns.rdb.nomineesHeard) == "table" and ns.rdb.nomineesHeard[OURS:lower()], "saved")
+			N.Reset(true)
+			w.clock = w.clock + 86400
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "kept across a reload")
+			eq(select(2, N.RoleOf("Cid-Realm", OURS)), "Lore")
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion")
+			eq(N.ListOf(OURS).by, MASTER)
+			assert(N.StatusLine():find("<Olympus II> 3 by Boss Hammer", 1, true), N.StatusLine())
+			-- His repeat (he logged in) counts from then; the other guild's last word stays where it was.
+			N.Handle("CHANNEL", MASTER, Msg(OURS, heardAt, "c=Ada;c=Bea;d=Lore=Cid"))
+			local repeated = w.clock
+			w.clock = heardAt + N.FRESH - 60
+			N.Reset(true)
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion", "29 days and some")
+			w.clock = heardAt + N.FRESH + 1
+			eq(N.Prune(), false)
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion", "silence is not removal")
+			assert(ns.rdb.nomineesHeard[THEIRS:lower()], "accepted historical snapshot remains saved")
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion", "his repeat counts")
+			-- Another master proven, after a reload: the restored list ends at once.
+			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Zeusy", officers = { { name = "Capt" } }, realm = "Realm", t = w.clock },
+				"W1-Realm", "W2-Realm")
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, w.clock, "c=Zed"))
+			eq(N.RoleOf("Zed-Realm", THEIRS), "centurion")
+			N.Reset(true)
+			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Newboss", officers = { { name = "Zeusy" } }, realm = "Realm", t = w.clock },
+				"W1-Realm", "W2-Realm")
+			eq(N.Prune(), true)
+			eq(N.RoleOf("Zed-Realm", THEIRS), nil, "deposed: dropped")
+			eq(ns.rdb.nomineesHeard[THEIRS:lower()], nil)
+			-- An empty list from him: dropped, saved nowhere.
+			N.Handle("CHANNEL", MASTER, Msg(OURS, repeated + 10, ""))
+			eq(N.ListOf(OURS), nil)
+			eq(ns.rdb.nomineesHeard[OURS:lower()], nil)
+			-- The saved lists are read as lists that came: a bad name, another guild than its key, a guild
+			-- that is not Olympus, a time ahead or of no number: none comes back. An old valid list does.
+			local now = w.clock
+			ns.rdb.nomineesHeard = {
+				[OURS:lower()] = { g = OURS, by = "Bad|Name-Realm", rev = 1, at = now, body = "c=Ada" },
+				[THEIRS:lower()] = { g = OURS, by = MASTER, rev = 1, at = now, body = "c=Ada" },
+				["stormwind traders"] = { g = "Stormwind Traders", by = "Sw Boss-Realm", rev = 1, at = now, body = "c=Ada" },
+				["olympus three"] = { g = "Olympus Three", by = "Three Boss-Realm", rev = 1, at = now + 3600, body = "c=Ada" },
+				["olympus four"] = { g = "Olympus Four", by = "Four Boss-Realm", rev = 1, at = now - N.FRESH - 1, body = "c=Ada" },
+				["olympus five"] = { g = "Olympus Five", by = "Five Boss-Realm", rev = "x", at = now, body = "c=Ada" },
+				["olympus six"] = { g = "Olympus Six", by = "Six Boss-Realm", rev = 1, at = now, body = "c=Ada;c=Ada;c=" .. table.concat(CENTURIONS, ";c=") },
+			}
+			N.Reset(true)
+			for _, g in ipairs({ OURS, THEIRS, "Stormwind Traders", "Olympus Three", "Olympus Five" }) do
+				eq(N.ListOf(g), nil, g)
+			end
+			eq(N.RoleOf("Ada-Realm", "Olympus Four"), "centurion", "age alone does not invalidate an accepted save")
+			eq(#N.ListOf("Olympus Six").entries, N.MAX_CENTURIONS, "25 Legates, each name once")
+			eq(N.RoleOf("Ada-Realm", "Olympus Six"), "centurion"); eq(N.RoleOf("Zane-Realm", "Olympus Six"), nil, "the 26th left out")
+			local left = {}
+			for k in pairs(ns.rdb.nomineesHeard) do left[#left + 1] = k end
+			table.sort(left)
+			eq(table.concat(left, ","), "olympus four,olympus six", "only bounded valid snapshots remain")
+			-- SAVED_MAX at most, the one heard longest ago let go.
+			for i = 1, N.SAVED_MAX + 1 do
+				ns.rdb.guilds["Olympus G" .. i] = Vouched({ guild = "Olympus G" .. i, leader = "Boss" .. i, officers = {}, realm = "Realm", t = w.clock },
+					"W1-Realm", "W2-Realm")
+				w.clock = w.clock + 1
+				N.Handle("CHANNEL", "Boss" .. i .. "-Realm", Msg("Olympus G" .. i, w.clock, "c=Ada"))
+			end
+			local n = 0
+			for _ in pairs(ns.rdb.nomineesHeard) do n = n + 1 end
+			eq(n, N.SAVED_MAX)
+			eq(ns.rdb.nomineesHeard["olympus six"], nil, "the oldest heard let go")
+			assert(ns.rdb.nomineesHeard["olympus g" .. (N.SAVED_MAX + 1)], "the newest kept")
+		end)
+	end)
+
+	-- (1.2.4, the review.) Fails before: a list now lasts 30 days, and one from the same master of an older
+	-- revision was refused that long, so a master back on another computer, its saved copy of his list
+	-- older, was ignored everywhere until he changed it (6 hours before 1.2.4). And the saved lists kept
+	-- the 64 heard last, our own guild's among those let go: after a /reload, with more guilds heard since,
+	-- its members had no centurion, correspondent or department until he repeated it.
+	test("1.2.4 nominees: an older revision from the same master is his word again once the list held went 6 hours unheard; the saved lists keep as many guilds as the census, our own guild's always", function()
+		WithNominees(function(w)
+			w.as("Ada-Realm", 3)
+			N.Handle("CHANNEL", MASTER, Msg(OURS, w.clock, "c=Ada;c=Bea"))
+			local newer = w.clock
+			-- While he plays, a late part of an older revision: refused.
+			w.clock = w.clock + 60
+			N.Handle("CHANNEL", MASTER, Msg(OURS, newer - 600, "c=Cid"))
+			eq(N.RoleOf("Bea-Realm", OURS), "centurion")
+			eq(N.RoleOf("Cid-Realm", OURS), nil, "an older one, late: refused")
+			-- Back the next day from another computer, whose copy of his list is older: his word now.
+			w.clock = newer + N.REV_QUIET + 1
+			N.Handle("CHANNEL", MASTER, Msg(OURS, newer - 600, "c=Cid"))
+			eq(N.RoleOf("Cid-Realm", OURS), "centurion", "the list his client sends now")
+			eq(N.RoleOf("Bea-Realm", OURS), nil)
+			eq(N.ListOf(OURS).rev, newer - 600)
+			-- As many lists heard after ours as the saved lists keep, each from a guild its census proves:
+			-- ours, heard longest ago, stays; the oldest of the others goes.
+			eq(N.SAVED_MAX >= ns.Data.MAX_GUILDS, true, "as many guilds as the census keeps")
+			for i = 1, N.SAVED_MAX do
+				local g = "Olympus H" .. i
+				ns.rdb.guilds[g] = Vouched({ guild = g, leader = "Boss" .. i, officers = {}, realm = "Realm", t = w.clock }, "W1-Realm", "W2-Realm")
+				w.clock = w.clock + 1
+				N.Handle("CHANNEL", "Boss" .. i .. "-Realm", Msg(g, w.clock, "c=Ada"))
+			end
+			local n = 0
+			for _ in pairs(ns.rdb.nomineesHeard) do n = n + 1 end
+			eq(n, N.SAVED_MAX)
+			assert(ns.rdb.nomineesHeard[OURS:lower()], "our own guild's kept")
+			eq(ns.rdb.nomineesHeard["olympus h1"], nil, "the oldest of the others let go")
+			assert(ns.rdb.nomineesHeard["olympus h2"] and ns.rdb.nomineesHeard["olympus h" .. N.SAVED_MAX], "the rest kept")
+			N.Reset(true)
+			eq(N.RoleOf("Cid-Realm", OURS), "centurion", "after a /reload")
 		end)
 	end)
 
@@ -26729,7 +27382,7 @@ do
 		assert(comm:find("Nominees NM", 1, true), "in Comm.lua's list")
 	end)
 
-	test("1.1.5 nominees' border: Max's bronze without wings round a nominee's portrait (target, focus, the party, your own) while the server gives him the guild whose master named him; the bronze mark on his nameplate and in the game's chat; nobody can borrow it; gone with his title", function()
+	test("1.2.4 nominees' border: a Legate keeps native rank and earned honours, with no extra portrait; a guild-verified correspondent retains the bronze, removed with its title", function()
 		local savedRoster = ns.Roster.byName
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
@@ -26740,8 +27393,8 @@ do
 			w.party()
 			w.units.party1 = BorderUnit("Ada", THEIRS, "Member", 4)
 			w.internal("LOGIN")
-			eq(w.shown("party1"), "bronze", "a centurion in the party")
-			eq(w.shown("player"), "bronze", "your own: your guild master named you")
+			eq(w.shown("party1"), nil, "a manual Legate has no added portrait border")
+			eq(w.shown("player"), nil, "the appointment itself does not change your portrait")
 			w.target(BorderUnit("Bea", THEIRS, "Member", 4))
 			eq(w.shown("target"), "bronze", "a correspondent")
 			local tex = w.shownTexture("target")
@@ -26752,7 +27405,8 @@ do
 			eq(w.shown("focus"), "bronze")
 			eq(w.B.MarkOf("target"), "bronze", "the nameplate's bronze, a guild master's mark")
 			eq(w.B.MarkOfName("Bea-Realm", THEIRS), "bronze", "the game's chat: the bronze")
-			eq(w.B.MarkOfName("Ada-Realm", OURS), "bronze", "named in our guild, in our roster")
+			eq(N.RoleOf("Ada-Realm", OURS), "centurion", "the legitimate manual appointment is actually accepted")
+			eq(w.B.MarkOfName("Ada-Realm", OURS), "bronze", "existing nomination identity mark is not a portrait border")
 			-- Nobody can borrow it: the same name in another guild, guildless, on another realm.
 			w.target(BorderUnit("Bea", OURS, "Member", 4))
 			eq(w.shown("target"), nil, "in another guild"); eq(w.B.MarkOf("target"), "member", "the star")
@@ -26778,7 +27432,7 @@ do
 			N.Prune()
 			w.internal("DATA_CHANGED")
 			eq(w.shown("focus"), nil, "her master's list ended")
-			eq(w.shown("player"), "bronze", "ours still")
+			eq(w.shown("player"), nil, "still no appointment-specific Legate portrait")
 			local status = ns.StatusText()
 			assert(status:find("\nnominees: <Olympus II> 2 by Boss Hammer (heard ", 1, true), status)
 		end)
@@ -26787,7 +27441,7 @@ do
 		if not ok then error(err, 0) end
 		-- Max's plain bronze not loaded: the game's plain gold it was drawn over, without colour.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
 			w.noFile[MEDIA .. "bronze-plain"] = true
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
@@ -26799,7 +27453,7 @@ do
 		if not ok then error(err, 0) end
 		-- The gamepad UI: none, as every border.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
 			w.style = 1
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
@@ -26812,23 +27466,21 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	test("1.1.5 the King's guild's centurions' border: Max's bronze without wings while the server gives them the King's guild, from the King's or a councillor's list alone", function()
+	-- Manual Legates have the bronze chat identity, not a bronze portrait. The High Council's
+	-- own silver portrait still wins. The legacy c= wire is retained for compatible nominations.
+	test("1.2.4 the King's guild's Legates: a manual authorized list gives bronze chat identity but no bronze portrait; a High Councillor wears silver", function()
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
 			ns.rdb.council.names["vera councillor"] = true
-			-- A list from someone who is neither: nothing.
-			N.Handle("CHANNEL", "Nemo-Realm", Msg("Olympus", ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", "Vera Councillor-Realm", Msg("Olympus", ns.Now(), "c=Ada"))
+			N.Handle("CHANNEL", ns.KING_CHARACTER.Alliance .. "-Realm", Msg("Olympus", ns.Now() + 1, "c=Ada"))
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", "Olympus", "Member", 4))
-			eq(w.shown("target"), nil, "not from him")
-			-- A signed councillor's: the bronze, in the King's guild alone.
-			N.Handle("CHANNEL", "Vera Councillor-Realm", Msg("Olympus", ns.Now(), "c=Ada"))
-			w.internal("DATA_CHANGED")
-			w.target(nil); w.target(BorderUnit("Ada", "Olympus", "Member", 4))
-			eq(w.shown("target"), "bronze", "a centurion of the King's guild")
-			eq(w.B.MarkOfName("Ada-Realm", "Olympus"), "bronze", "the game's chat: the bronze")
-			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
-			eq(w.shown("target"), nil, "in another guild: none")
+			eq(w.shown("target"), nil, "no bronze from a list in the King's guild")
+			eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "actual compatible manual nomination")
+			eq(w.B.MarkOfName("Ada-Realm", "Olympus"), "bronze", "the game's chat keeps the Legate identity mark")
+			w.target(nil); w.target(BorderUnit("Vera Councillor", "Olympus", "Member", 4))
+			eq(w.shown("target"), "silver-elite", "a High Councillor of the King's guild: one of the King's centurions, in his silver")
 			ns.rdb.council.names["vera councillor"] = nil
 		end)
 		N.Reset()
@@ -26842,11 +27494,11 @@ do
 			local AUTHOR_REALM = ns.AUTHOR_REALM
 			local dev = ns.AUTHOR .. "-" .. AUTHOR_REALM
 			ns.Roster.byName = { [MASTER] = 0, ["Tester-Realm"] = 2 }
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada;c=Zeusy;c=" .. dev))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada;c=Zeusy;c=" .. dev))
 			w.internal("LOGIN")
 			local function Tier(unit) w.target(nil); w.target(unit) return w.shown("target"), w.B.MarkOf("target") end
 			local ada = BorderUnit("Ada", THEIRS, "Member", 4)
-			eq(Tier(ada), "bronze", "a nominee")
+			eq(Tier(ada), "bronze", "a correspondent retains the plain bronze portrait")
 			-- A guild master before a nominee (named in a list of his own guild's).
 			local border, mark = Tier(BorderUnit("Zeusy", THEIRS, "Zeus", 0))
 			eq(border, "bronze-elite"); eq(mark, "bronze")
@@ -26914,13 +27566,15 @@ do
 				eq(lines[1].text, L.GUILD_TAB_TITLE:format(OURS)); eq(lines[1].font, K.TITLE)
 				local head, at = Find(lines, L.NOMINEES_TITLE)
 				eq(head.font, K.TITLE, "the title")
-				-- (One row of the parchment's, King.WRAP letters: shortened to stay one line there.)
-				assert(#L.NOMINEES_HINT <= K.WRAP, "one row")
-				eq(lines[at + 1].text, L.NOMINEES_HINT, "a one-line hint"); eq(lines[at + 1].font, K.INK); eq(lines[at + 1].gapAfter, true)
-				local add = lines[at + 2]
-				eq(add.text, "+ " .. L.NOMINEES_ADD_CENTURION); eq(add.right, "0/10")
-				eq(lines[at + 3].text, L.NOMINEES_NONE)
-				eq(L.NOMINEES_ADD_CENTURION, "Name a centurion (your target, or type a name)")
+				-- The current duty explanation is a real wrapped paragraph, no longer the old short hint.
+				local add, addAt = Find(lines, "+ " .. L.NOMINEES_ADD_CENTURION)
+				local hint = {}
+				for i = at + 1, addAt - 1 do hint[#hint + 1] = lines[i].text; eq(lines[i].font, K.INK) end
+				eq(table.concat(hint, " "), L.NOMINEES_HINT, "complete purpose, not truncated")
+				eq(lines[addAt - 1].gapAfter, true)
+				eq(add.text, "+ " .. L.NOMINEES_ADD_CENTURION); eq(add.right, "0/25")
+				eq(lines[addAt + 1].text, L.NOMINEES_NONE)
+				eq(L.NOMINEES_ADD_CENTURION, "Name a legate (your target, or type a name)")
 				for _, d in ipairs(N.Departments()) do
 					local row = Find(lines, d .. ": ")
 					assert(row and row.onClick, d .. ": its line")
@@ -26928,12 +27582,12 @@ do
 				end
 				eq(Find(lines, "Seventh: "), nil, "six departments")
 				-- Naming guidance is retained before the guild's department panels.
-				local note = L.NOMINEES_NOTE:format(N.FRESH / 3600)
+				local note = L.NOMINEES_NOTE
 				local words = {}; for _, line in ipairs(lines) do words[#words + 1] = line.text or "" end
 				assert(table.concat(words, " "):find(note, 1, true), "the complete naming guidance remains")
-				assert(note:find("6 hours", 1, true), note)
+				assert(not note:find("30 days", 1, true), "no invented thirty-day removal")
 				-- None of the Throne's: no Throne Room, no King's guild's centurions.
-				eq(Find(lines, L.THRONE_ROOM), nil); eq(Find(lines, L.NOMINEES_MAIN_TITLE:format("Olympus")), nil)
+				eq(Find(lines, L.THRONE_ROOM), nil); eq(Find(lines, L.NOMINEES_MAIN_TITLE), nil)
 				-- Naming: + asks for a name (his target in the box), the box names.
 				add.onClick()
 				local p = w.popups[#w.popups]
@@ -26965,10 +27619,10 @@ do
 				for _, name in ipairs(CENTURIONS) do N.Name("centurion", name) end
 				lines = K.Build()
 				add = Find(lines, L.NOMINEES_ADD_CENTURION)
-				eq(add.text, ns.Views.Grey("+ " .. L.NOMINEES_ADD_CENTURION)); eq(add.right, "10/10")
+				eq(add.text, ns.Views.Grey("+ " .. L.NOMINEES_ADD_CENTURION)); eq(add.right, "25/25")
 				local n = #w.popups
 				add.onClick()
-				eq(#w.popups, n, "no box"); eq(w.printed[#w.printed], L.NOMINEES_FULL:format(10))
+				eq(#w.popups, n, "no box"); eq(w.printed[#w.printed], L.NOMINEES_FULL:format(25))
 				-- Someone who left the guild since: said so on his line.
 				ns.Roster.byName["Jon-Realm"] = nil
 				for _, l in ipairs(K.Build()) do if l.key == "Jon" then eq(l.right, ns.Views.Grey(L.NOMINEES_NOT_IN_ROSTER)) end end
@@ -26987,10 +27641,9 @@ do
 		end)
 	end)
 
-	-- (1.1.5, the author's calls: the Throne for the King and the councillors is almost the guild
-	-- master's page, the King's guild's centurions, with the Throne's Hands, crown on the map, agenda,
-	-- court and army key; the treasury out, it has its own tab.)
-	test("1.1.5 the tab in the Throne's place: the King, his Hands and the High Council have the Throne with the King's guild's centurions (no treasury); a guild master of another Olympus guild his Guild tab; one who is both, both; the King's guild has no guild master's Guild tab; a member none", function()
+	-- Main-guild Legates are named manually by King/High Council. A Hand may read that list,
+	-- but the Hand appointment grants no nomination authority. Treasury remains its own tab.
+	test("1.2.4 the tab in the Throne's place: King and High Council manually appoint main-guild Legates, Hands read only; guild masters retain their Guild tab and ordinary members neither", function()
 		WithNominees(function(w)
 			local L, K = ns.L, ns.King
 			local savedHands = ns.rdb.kingHands
@@ -26998,16 +27651,16 @@ do
 				local function Has(lines, text)
 					for _, l in ipairs(lines) do if tostring(l.text):find(text, 1, true) then return l end end
 				end
-				local MAIN = L.NOMINEES_MAIN_TITLE:format("Olympus")
-				-- The King: the Throne Room, his army's key, then his guild's centurions, his to name.
+				local MAIN = L.NOMINEES_MAIN_TITLE
+				-- The King: the Throne Room, his army's key and manually appointed Legates.
 				w.asKing()
 				eq(K.TabVisible(), true); eq(K.ThroneShown(), true); eq(K.TabLabel(), "TAB_THRONE")
 				eq((N.IsMaster()), false, "the King's guild: no guild master's Guild tab")
 				local lines, title, detail = K.Build()
 				eq(title, L.TAB_THRONE); eq(detail, L.THRONE_YOU_ARE_KING)
 				eq(lines[1].text, L.THRONE_ROOM)
-				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_MAIN_HINT:sub(1, 20)), "his guild's centurions")
-				assert(Has(lines, "+ " .. L.NOMINEES_ADD_CENTURION).onClick, "his to name")
+				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_MAIN_HINT:sub(1, 20)), "his centurions")
+				assert(Has(lines, L.NOMINEES_ADD_CENTURION), "the King may manually name a Legate")
 				eq(Has(lines, L.TREASURY_TITLE), nil, "no treasury on the Throne")
 				eq(Has(lines, L.NOMINEES_CORRESPONDENTS), nil, "no correspondents for the King's guild (1.1.6: its department heads)")
 				eq(Has(lines, L.NOMINEES_TITLE), nil, "no guild master's section")
@@ -27015,23 +27668,22 @@ do
 				w.asIn("Other Boss-Realm", "Olympus", 0)
 				eq(K.GuildShown(), false, "no guild master's Guild tab in the King's guild")
 				eq(K.TabVisible(), false, "and no Throne (the King is his character alone)")
-				-- A High Councillor, a member of another guild: the Throne for the King's guild's centurions.
+				-- A real High Councillor may name main-guild Legates, but is not automatically one.
 				w.asIn("Vera Councillor-Realm", OURS, 3)
 				eq(K.TabVisible(), true); eq(K.ThroneShown(), true); eq(K.TabLabel(), "TAB_THRONE")
 				lines, title, detail = K.Build()
 				eq(lines[1].text, L.THRONE_ROOM_COUNCIL); eq(detail, L.THRONE_YOU_ARE_COUNCILLOR)
 				assert(Has(lines, L.THRONE_COUNCIL_HINT:sub(1, 20)), "what is hers here")
-				assert(Has(lines, MAIN) and Has(lines, "+ " .. L.NOMINEES_ADD_CENTURION), "hers to name, with the King")
+				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_ADD_CENTURION), "real Council may name a main-guild Legate")
 				eq(Has(lines, L.TREASURY_TITLE), nil)
 				-- A councillor who leads another Olympus guild: the Throne, his Guild tab's section after it.
 				w.asIn("Vera Councillor-Realm", OURS, 0)
 				eq(K.TabLabel(), "TAB_THRONE"); eq(K.GuildShown(), true)
 				lines = K.Build()
 				assert(Has(lines, MAIN) and Has(lines, L.NOMINEES_TITLE) and Has(lines, L.NOMINEES_CORRESPONDENTS), "both")
-				-- A Hand of the King (no councillor): the Throne, the King's guild's centurions to read.
+				-- A Hand (not Council) reads the same manual list, without nomination controls.
 				w.asKing(); K.AddHand("Helper"); K.SendHands(true)
 				local hands = w.sent[#w.sent].msg
-				N.NameMain("Ada")
 				w.asIn("Helper-Realm", OURS, 3)
 				K.HandleCommand("CHANNEL", "Asmongold Asmongler-Realm", hands)
 				eq(K.IsHand(), true); eq(K.ThroneShown(), true)
@@ -27039,10 +27691,11 @@ do
 				N.Handle("CHANNEL", "Asmongold Asmongler-Realm", part)
 				lines, _, detail = K.Build()
 				eq(lines[1].text, L.THRONE_ROOM_HAND:format("Asmon")); eq(detail, L.THRONE_YOU_ARE_HAND:format("Asmon"))
-				assert(Has(lines, MAIN), "the King's guild's centurions")
-				local ada = Has(lines, "Ada")
-				assert(ada and ada.onClick == nil, "to read: no click")
-				eq(Has(lines, "+ " .. L.NOMINEES_ADD_CENTURION), nil, "not his to name")
+				assert(Has(lines, MAIN), "the King's centurions")
+				eq(#N.KingsCenturions(), 1, "the accepted manual list has one Legate, not automatic councillors")
+				eq(Has(lines, "vera"), nil, "the manual list does not expose the Council as Legates")
+				assert(Has(lines, "Ada"), "the accepted manual nominee is visible to a Hand")
+				eq(Has(lines, L.NOMINEES_ADD_CENTURION), nil, "not his to name")
 				-- A member of another guild, of the King's guild: none.
 				w.asIn("Plain Pip-Realm", OURS, 3)
 				eq(K.TabVisible(), false)
@@ -27054,153 +27707,23 @@ do
 		end)
 	end)
 
-	test("1.1.5 the King's guild's centurions: the King or a High Councillor names up to 10 (twice, himself, past the cap, outside the King's guild's roster where it is ours: refused); every client takes the list from the King's character or a signed councillor alone, the newest one; their clients take it as theirs and repeat it in turn; it ends with its sender's seat", function()
-		WithNominees(function(w)
-			local L = ns.L
-			local savedHands = ns.rdb.kingHands
-			local ok, err = pcall(function()
-				local KING = "Asmongold Asmongler-Realm"
-				-- The King's client: his roster is the King's guild's.
-				w.asKing()
-				ns.Roster.guild = "Olympus"
-				eq(N.MainEditor(), true)
-				for i = 1, 10 do eq(N.NameMain(CENTURIONS[i]), true, CENTURIONS[i]) end
-				eq(w.printed[#w.printed], L.NOMINEES_MAIN_ADDED:format("Jon", "Olympus"))
-				eq(N.NameMain("Kit"), false, "an 11th"); eq(w.printed[#w.printed], L.NOMINEES_MAIN_FULL:format("Olympus", 10))
-				N.RemoveMain("Jon")
-				eq(w.printed[#w.printed], L.NOMINEES_MAIN_REMOVED:format("Jon", "Olympus"))
-				eq(N.NameMain("ada"), false, "twice"); eq(w.printed[#w.printed], L.NOMINEES_MAIN_ALREADY:format("Ada", "Olympus"))
-				eq(N.NameMain("Stranger"), false, "outside the King's guild's roster")
-				eq(w.printed[#w.printed], L.NOMINEES_MAIN_NOT_MEMBER:format("Stranger", "Olympus"))
-				ns.Roster.byName[KING] = 0
-				eq(N.NameMain("Asmongold Asmongler"), false, "himself"); eq(w.printed[#w.printed], L.NOMINEES_MAIN_SELF)
-				eq(N.RemoveMain("Nobody"), false); eq(w.printed[#w.printed], L.NOMINEES_MAIN_NOT_NAMED:format("Nobody", "Olympus"))
-				-- His client sends it: once, a few seconds after the changes; centurions alone.
-				eq(#w.parts(), 0, "not at once")
-				w.flush()
-				local rev = ns.rdb.mainNominees.rev
-				local parts = w.parts()
-				eq(#parts, 1); eq(parts[1], Msg("Olympus", rev, "c=Ada;c=Bea;c=Cid;c=Dax;c=Eve;c=Fay;c=Gus;c=Hal;c=Ivy"))
-				eq(N.SendMain(), false, "not again so soon")
-				-- Anyone but the King or a councillor: refused, his guild's guild master too.
-				w.asIn("Ada-Realm", "Olympus", 3)
-				eq(N.MainEditor(), false)
-				eq(N.NameMain("Bea"), false); eq(w.printed[#w.printed], L.NOMINEES_ONLY_MAIN)
-				N.Handle("CHANNEL", KING, parts[1])
-				eq(N.RoleOf("Bea-Realm", "Olympus"), "centurion")
-				eq(w.printed[#w.printed], L.NOMINEES_YOU:format(ns.DisplayName(KING), L.NOMINEE_ROLE_CENTURION, "Olympus"))
-				for _, forged in ipairs({ "Nemo-Realm", "Pip Officer-Realm", MASTER }) do
-					N.Handle("CHANNEL", forged, Msg("Olympus", rev + 5, "c=Nemo"))
-					eq(N.RoleOf("Nemo-Realm", "Olympus"), nil, forged)
-					eq(N.RoleOf("Bea-Realm", "Olympus"), "centurion", "the real list kept")
-				end
-				-- A signed councillor's newer list: taken (no correspondents in it, 10 at most); Ada told.
-				local c = {}
-				for i = 2, 11 do c[#c + 1] = "c=" .. CENTURIONS[i] end
-				c[#c + 1] = "c=Nemo"
-				N.Handle("CHANNEL", "Vera Councillor-Realm", Msg("Olympus", rev + 10, table.concat(c, ";") .. ";d=Lore=Pam"))
-				eq(#N.ListOf("Olympus").entries, 10, "10 at most")
-				eq(N.RoleOf("Nemo-Realm", "Olympus"), nil, "the 11th left out"); eq(N.RoleOf("Pam-Realm", "Olympus"), nil, "no correspondent")
-				eq(N.RoleOf("Kit-Realm", "Olympus"), "centurion")
-				eq(w.printed[#w.printed], L.NOMINEES_NO_LONGER:format(L.NOMINEE_ROLE_CENTURION, "Olympus"))
-				-- The King's older list, late: never over the newer one.
-				N.Handle("CHANNEL", KING, parts[1])
-				eq(N.RoleOf("Ada-Realm", "Olympus"), nil, "the older one: not taken")
-				-- Another guild's list is no business of it, and the King's guild's isn't another's.
-				eq(N.RoleOf("Kit-Realm", OURS), nil)
-				-- A councillor's client: takes the newest as hers, names on from it (her roster is another
-				-- guild's: the name as typed), and repeats it in turn.
-				w.asIn("Vera Councillor-Realm", OURS, 3)
-				ns.Roster.guild = OURS
-				eq(N.MainEditor(), true)
-				N.Handle("CHANNEL", KING, Msg("Olympus", rev + 20, "c=Ada;c=Bea"))
-				eq(ns.rdb.mainNominees.rev, rev + 20, "hers now"); eq(#N.ListOf("Olympus").entries, 2)
-				eq(N.NameMain("Zed"), true, "a name as typed")
-				w.flush()
-				local mine = ns.rdb.mainNominees.rev
-				eq(w.parts()[#w.parts()], Msg("Olympus", mine, "c=Ada;c=Bea;c=Zed"))
-				local sent = #w.parts()
-				-- The King repeats the same list: her turn waits; nobody repeats it: she does.
-				w.clock = w.clock + N.EVERY
-				N.Handle("CHANNEL", KING, Msg("Olympus", mine, "c=Ada;c=Bea;c=Zed"))
-				eq(N.SendMain(), false, "another repeated it"); eq(#w.parts(), sent)
-				w.clock = w.clock + N.EVERY
-				eq(N.SendMain(), true, "her turn"); eq(#w.parts(), sent + 1)
-				-- An older list reaches her: hers goes out again soon.
-				N.Handle("CHANNEL", KING, Msg("Olympus", rev + 20, "c=Ada"))
-				eq(#N.ListOf("Olympus").entries, 3, "hers kept"); eq(#w.timers, 1, "sent again soon")
-				w.flush()
-				-- Emptied: the empty list goes out (and ends it everywhere).
-				N.RemoveMain("Ada"); N.RemoveMain("Bea"); N.RemoveMain("Zed")
-				w.flush()
-				eq(w.parts()[#w.parts()], Msg("Olympus", ns.rdb.mainNominees.rev, ""))
-				-- A member's client: a councillor no longer on the signed list, her list ends.
-				w.asIn("Ada-Realm", "Olympus", 3)
-				N.Handle("CHANNEL", "Vera Councillor-Realm", Msg("Olympus", w.clock + 100, "c=Ada"))
-				eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion")
-				ns.rdb.council = { names = {} }
-				eq(N.Prune(), true)
-				eq(N.RoleOf("Ada-Realm", "Olympus"), nil, "her seat gone, her list with it")
-				-- /oly status: the list held.
-				N.Handle("CHANNEL", KING, Msg("Olympus", w.clock + 200, "c=Ada"))
-				assert(N.StatusLine():find("<Olympus> 1 by Asmon", 1, true), N.StatusLine())
-			end)
-			ns.King.Reset(); ns.rdb.kingHands = savedHands
-			if not ok then error(err, 0) end
-		end)
-	end)
-
-	test("1.1.5 the King's guild's centurions: the King or a councillor names them from the Throne's page (+ asks for a name, a click takes a title back, asked first); /oly nominees opens the Throne for them; with the gamepad UI, Olympus's own dialogs", function()
+	-- Detailed manual King/Council nomination and gamepad coverage lives in king-centurions.lua.
+	-- The old centurion command remains a compatible alias, not automatic Council membership.
+	test("1.2.4 /oly nominees opens the Throne and manually names or removes Legates for the King's authorized council; legacy centurion command remains compatible", function()
 		WithNominees(function(w)
 			local L, K = ns.L, ns.King
 			w.asIn("Vera Councillor-Realm", OURS, 3)
-			local function Find(lines, text)
-				for _, l in ipairs(lines) do if tostring(l.text):find(text, 1, true) then return l end end
-			end
-			Find(K.Build(), "+ " .. L.NOMINEES_ADD_CENTURION).onClick()
-			local p = w.popups[#w.popups]
-			eq(p.name, "OLYMPUS_NOMINEE"); eq(p.a, L.NOMINEE_ROLE_CENTURION); eq(p.b, "Olympus"); eq(p.data.main, true)
-			StaticPopupDialogs.OLYMPUS_NOMINEE.OnAccept({ editBox = { GetText = function() return "Ada" end } }, p.data)
-			eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion")
-			local row
-			for _, l in ipairs(K.Build()) do if l.key == "Ada" then row = l end end
-			assert(row and row.onClick, "her line")
-			row.onClick()
-			p = w.popups[#w.popups]
-			eq(p.name, "OLYMPUS_NOMINEE_REMOVE"); eq(p.a, "Ada"); eq(p.b, L.NOMINEES_MAIN_ROLE:format("Olympus"))
-			StaticPopupDialogs.OLYMPUS_NOMINEE_REMOVE.OnAccept(nil, p.data)
-			eq(N.RoleOf("Ada-Realm", "Olympus"), nil)
-			-- From the chat: /oly nominees opens the Throne; centurion and remove name in the King's guild.
 			SlashCmdList.OLYMPUS("nominees")
 			eq(w.tab, "throne"); eq(K.TabLabel(), "TAB_THRONE")
-			SlashCmdList.OLYMPUS("nominees centurion Bea")
-			eq(N.RoleOf("Bea-Realm", "Olympus"), "centurion")
+			SlashCmdList.OLYMPUS("nominees legate Bea")
+			eq(N.RoleOf("Bea-Realm", "Olympus"), "centurion", "manual appointment, not automatic HC")
 			SlashCmdList.OLYMPUS("nominees remove Bea")
-			eq(N.RoleOf("Bea-Realm", "Olympus"), nil)
-		end)
-		WithUI(function()
-			LoadUI()
-			WithGamepadUI(true, function(game)
-				WithNominees(function(w)
-					w.asIn("Vera Councillor-Realm", OURS, 3)
-					N.Prompt("centurion", nil, true)
-					eq(#game.shown, 0, "never the game's popup"); eq(#w.popups, 0)
-					local f = ns.Dialog.Find("OLYMPUS_NOMINEE")
-					assert(f and f:IsShown() and f.editBox:IsShown(), "our dialog, with its box")
-					f.editBox:SetText("Ada")
-					f.buttons[1]:Click()
-					eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion")
-					N.AskRemove({ role = "centurion", name = "Ada-Realm" }, true)
-					f = ns.Dialog.Find("OLYMPUS_NOMINEE_REMOVE")
-					assert(f and f:IsShown(), "our dialog")
-					f.buttons[1]:Click()
-					eq(N.RoleOf("Ada-Realm", "Olympus"), nil); eq(#game.shown, 0)
-				end)
-			end)
+			w.flush()
+			eq(N.RoleOf("Bea-Realm", "Olympus"), nil); eq(#w.parts(), 1, "the explicit empty revocation goes out")
 		end)
 	end)
 
-	test("1.1.5 View as: Guild Master shows the guild master's Guild tab (even to a councillor author), King the Throne with the King's guild's centurions; what either names stays on the author's screen, nothing sent, gone with the view", function()
+	test("1.1.5 View as: Guild Master shows the guild master's Guild tab (even to a councillor author), King the Throne with the King's centurions (1.2.4: nobody to name there, nothing kept or sent)", function()
 		WithNominees(function(w)
 			local L, K, V = ns.L, ns.King, ns.ViewAs
 			local saved = { vis = ns.Workshop.Visible, author = ns.Workshop.IsAuthor }
@@ -27217,16 +27740,16 @@ do
 				eq(K.ThroneShown(), true); eq(K.TabLabel(), "TAB_THRONE")
 				lines = K.Build()
 				local has = false
-				for _, l in ipairs(lines) do if l.text == L.NOMINEES_MAIN_TITLE:format("Olympus") then has = true end end
-				assert(has, "the King's guild's centurions")
-				eq(N.MainEditor(), false); eq(N.MainNames(), true, "his preview's to name")
-				eq(N.NameMain("Ada"), true)
-				eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "on his screen")
+				for _, l in ipairs(lines) do if l.text == L.NOMINEES_MAIN_TITLE then has = true end end
+				assert(has, "the King's centurions")
+				-- (1.2.4: was "his preview's to name", on his screen alone. The High Council are the
+				-- King's centurions: nobody named, in the preview neither.)
+				SlashCmdList.OLYMPUS("nominees centurion Ada")
+				eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "preview sample only")
 				w.flush()
-				eq(#w.parts(), 0, "nothing sent"); eq(N.SendMain(true), false)
-				eq(ns.rdb.mainNominees, nil, "not the real list")
+				eq(#w.parts(), 0, "nothing sent")
+				eq(ns.rdb.mainNominees, nil, "no real list"); assert(ns.db.previewMainNominees, "local sample only")
 				eq(V.Set("my"), true)
-				eq(ns.db.previewMainNominees, nil, "gone with the view"); eq(N.RoleOf("Ada-Realm", "Olympus"), nil)
 				-- An author who is a High Councillor: his Guild Master view is a guild master's Guild tab alone.
 				w.as("Vera Councillor-Realm", 3)
 				eq(K.TabLabel(), "TAB_THRONE", "his own seat")
@@ -27327,7 +27850,10 @@ do
 			if type(key) == "string" and (key:find("^NOMINEE") or key == "HELP_NOMINEES") then
 				n = n + 1
 				local br = rawget(pt.L, key)
-				assert(type(br) == "string" and br ~= en, "pt-BR: " .. key)
+				-- "Legate" is the human's exact public rank name in both languages; the prose is translated.
+				assert(type(br) == "string" and (br ~= en
+					or (key == "NOMINEE_ROLE_CENTURION" and br:lower() == "legate")
+					or (key == "NOMINEES_MAIN_COUNT" and br == "Legates: %d")), "pt-BR: " .. key)
 				local function Codes(s) local out = {} for c in s:gmatch("%%[sd]") do out[#out + 1] = c end return table.concat(out) end
 				eq(Codes(br), Codes(en), key .. ": the same format codes")
 			end
@@ -30452,12 +30978,15 @@ do
 				Logged("Baron-Realm", "MUSTER", "Olympus")
 				eq(#cns.Decree.Active(), 3, "nor his Muster")
 				eq(Line("Baron-Realm", "L", "Olympus"), "rank")
-				-- And a list the King stopped repeating ends (King.HANDS_FRESH).
+				-- (1.2.4) A list the King stopped repeating stands until his newer one (it ended after
+				-- King.HANDS_FRESH): his newer list without the name ends it.
 				K.HandleCommand("CHANNEL", KING, "T1~H~11~Olympus~Baron-Realm")
 				eq(Line("Baron-Realm", "L", "Olympus"), "shown")
 				s.clock = s.clock + K.HANDS_FRESH + 1
+				eq(K.IsHandName("Baron-Realm"), true, "his list stands")
+				K.HandleCommand("CHANNEL", KING, "T1~H~12~Olympus~")
 				eq(K.IsHandName("Baron-Realm"), false)
-				assert(Line("Baron-Realm", "L", "Olympus") ~= "shown", "not once the list ended")
+				assert(Line("Baron-Realm", "L", "Olympus") ~= "shown", "not once his newer list leaves him out")
 			end)
 			StaticPopup_Show = savedShow
 			K.Reset()
@@ -30615,9 +31144,9 @@ do
 					eq(lines[1].text, "|T" .. ns.CROWN_ICON .. ":0|t " .. L.STEWARD_ACTING, "acting for the King, on top")
 					eq(detail, L.THRONE_YOU_ARE_STEWARD:format("Asmon"))
 					-- (1.1.5, the author's call: no treasury on the Throne any more, its own tab has it all; under
-					-- the Throne Room, the King's guild's centurions, his to read: he is no councillor here.)
+					-- the Throne Room, the King's centurions (1.2.4: the High Council), his to read.)
 					assert(Texts(lines):find(L.THRONE_ROOM, 1, true) and not Texts(lines):find(L.TREASURY_TITLE, 1, true), Texts(lines))
-					assert(Texts(lines):find(L.NOMINEES_MAIN_TITLE:format("Olympus"), 1, true), Texts(lines))
+					assert(Texts(lines):find(L.NOMINEES_MAIN_TITLE, 1, true), Texts(lines))
 					assert(Texts(lines):find(L.THRONE_STEWARD_HINT:sub(1, 20), 1, true), "what is his to do")
 					eq(K.StewardStatusLine():find("you, acting for the King", 1, true) ~= nil, true, K.StewardStatusLine())
 					assert(ns.StatusText():find("steward: you, acting for the King", 1, true), "in /oly status")
@@ -30797,7 +31326,7 @@ do
 	-- Another client, from nothing (every list it kept or heard gone): `as` plays who it is.
 	local function Fresh(as, ...)
 		ns.King.Reset()
-		ns.rdb.kingHands, ns.rdb.stewardHands = nil, nil
+		ns.rdb.kingHands, ns.rdb.stewardHands, ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil, nil, nil
 		as(...)
 	end
 
@@ -30945,7 +31474,11 @@ do
 		end)
 	end)
 
-	test("1.0.0 the Hands: each list lapses 20 minutes after its own owner's client stopped repeating it, and never on its owner's client; each owner's client repeats its own every 5 minutes, across a /reload", function()
+	-- (1.2.4, the author's ask: lists of people are not erased; provisional, his to confirm) Each
+	-- list stood 20 minutes after its owner's client stopped repeating it, then lapsed on every
+	-- other client: his Hands lost the Throne's tools as soon as he logged out. It now stands until
+	-- its owner's newer list, kept in the saved data across a /reload.
+	test("1.2.4 the Hands: each list stands until its own owner's newer one, also once his client stopped repeating it and across a /reload; each owner's client repeats its own every 5 minutes, across a /reload", function()
 		WithThrone(function(w, K)
 			WithStewardList(STEWARD_E, function()
 				local KING = ns.KingCharacter() .. "-Realm"
@@ -30955,17 +31488,17 @@ do
 				w.clock = t0 + 600
 				K.HandleCommand("CHANNEL", STEWARD, "T1~N~12~Olympus II~Helper-Realm")
 				K.HandleCommand("CHANNEL", SECOND, "T1~N~13~Olympus II~Aide-Realm")
-				w.clock = t0 + K.HANDS_FRESH
-				eq(K.IsHandName("Kingsman-Realm"), true, "20 minutes: still")
-				w.clock = t0 + K.HANDS_FRESH + 1
-				eq(K.IsHandName("Kingsman-Realm"), false, "the King's: ended 20 minutes after he was last heard")
+				w.clock = t0 + 10 * K.HANDS_FRESH
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's: stands while he is away")
 				eq(K.IsHandName("Helper-Realm"), true); eq(K.IsHandName("Aide-Realm"), true)
-				-- The second Steward's client keeps repeating his; the first's stopped.
-				K.HandleCommand("CHANNEL", SECOND, "T1~N~14~Olympus II~Aide-Realm")
-				w.clock = t0 + 600 + K.HANDS_FRESH + 1
-				eq(K.IsHandName("Helper-Realm"), false, "that Steward's: ended 20 minutes after his last repeat")
-				eq(K.IsHandName("Aide-Realm"), true, "the other's, repeated, stands")
-				-- The King back: his list again, whatever the Stewards' did.
+				-- A /reload: the lists heard come back from the saved data.
+				K.Reset(); K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's, kept")
+				eq(K.IsHandName("Helper-Realm"), true, "each Steward's, kept"); eq(K.IsHandName("Aide-Realm"), true)
+				-- A newer list ends a name: each owner's for his own list alone.
+				K.HandleCommand("CHANNEL", STEWARD, "T1~N~14~Olympus II~")
+				eq(K.IsHandName("Helper-Realm"), false, "that Steward's newer list")
+				eq(K.IsHandName("Aide-Realm"), true, "the other's stands")
 				K.HandleCommand("CHANNEL", KING, "T1~H~15~Olympus~Kingsman-Realm")
 				eq(K.IsHandName("Kingsman-Realm"), true)
 				-- On its owner's own client a list never lapses: the King's, a Steward's.
@@ -30973,12 +31506,12 @@ do
 				K.HandleCommand("CHANNEL", STEWARD, "T1~N~16~Olympus II~Helper-Realm")
 				w.clock = w.clock + 10 * K.HANDS_FRESH
 				eq(K.IsHandName("Kingsman-Realm"), true, "his own list, on his client")
-				eq(K.IsHandName("Helper-Realm"), false, "a Steward's lapses on the King's client too")
+				eq(K.IsHandName("Helper-Realm"), true, "a Steward's stands on the King's client too")
 				Fresh(AsSteward); K.AddHand("Helper")
 				K.HandleCommand("CHANNEL", KING, "T1~H~17~Olympus~Kingsman-Realm")
 				w.clock = w.clock + 10 * K.HANDS_FRESH
 				eq(K.IsHandName("Helper-Realm"), true, "his own list, on his client")
-				eq(K.IsHandName("Kingsman-Realm"), false, "the King's lapses on a Steward's client")
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's stands on a Steward's client")
 				-- A /reload: his own list back from what his client kept; repeated every 5 minutes
 				-- (HANDS_EVERY), never the King's.
 				K.Reset(); K.LoadHands()
@@ -30999,6 +31532,77 @@ do
 				eq(#w.sent, n + 2, "nothing from a soldier's client")
 				eq(K.IsHandName("Helper-Realm"), false, "and what it kept names nobody there")
 				eq(K.IsHandName("Kingsman-Realm"), false)
+			end, Signed2)
+		end)
+	end)
+
+	-- (1.2.4, the review of the lists kept) A list heard stands until its owner's newer one, so that
+	-- newer one must reach the members who were away: an owner who emptied his list said nothing
+	-- at his later sessions ("nobody named yet"), and every client that missed the empty list kept
+	-- his former Hands, with the Throne's tools and the guild banks' snapshots, for good. And the
+	-- King's list counts while its sender is the King: kept in the saved data, a list from a King
+	-- an update no longer names would stand for good too.
+	test("1.2.4 the Hands: an owner who emptied his list says it again, empty, at his later sessions, and a member who missed it drops his former Hands; a list from a King no longer the King names nobody", function()
+		WithThrone(function(w, K)
+			WithStewardList(STEWARD_E, function()
+				local KING = ns.KingCharacter() .. "-Realm"
+				-- The King names Kingsman, a Steward names Helper; a member hears both.
+				Fresh(AsKing); K.AddHand("Kingsman"); K.SendHands(true)
+				local kingList = LastSent(w)
+				local kingSaved = ns.rdb.kingHands
+				ns.rdb.kingHands = nil
+				Fresh(AsSteward); K.AddHand("Helper"); K.SendStewardHands(true)
+				local stewardList = LastSent(w)
+				local stewardSaved = ns.rdb.stewardHands
+				Fresh(AsSoldier, "Other")
+				K.HandleCommand("CHANNEL", KING, kingList)
+				K.HandleCommand("CHANNEL", STEWARD, stewardList)
+				eq(K.IsHandName("Kingsman-Realm"), true); eq(K.IsHandName("Helper-Realm"), true)
+				local heard, stewardHeard = ns.rdb.handsHeard, ns.rdb.stewardHandsHeard
+				-- The member logs out. Each owner empties his list in a session of his own, then plays
+				-- another one later.
+				local function EmptiedThenLater(as, saved, key, remove, send)
+					K.Reset()
+					ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = nil, nil
+					ns.rdb.kingHands, ns.rdb.stewardHands = nil, nil
+					ns.rdb[key] = saved
+					as(); K.LoadHands()
+					K.RemoveHand(remove)
+					K.Reset(); K.LoadHands() -- (his later session)
+					local n = #w.sent
+					send()
+					eq(#w.sent, n + 1, "his emptied list said again at his later session")
+					return LastSent(w)
+				end
+				local kingEmpty = EmptiedThenLater(AsKing, kingSaved, "kingHands", "Kingsman-Realm", function() K.SendHands() end)
+				assert(kingEmpty:find("^T1~H~%d+~Olympus~$"), kingEmpty)
+				local stewardEmpty = EmptiedThenLater(AsSteward, stewardSaved, "stewardHands", "Helper-Realm", function() K.SendStewardHands() end)
+				assert(stewardEmpty:find("^T1~N~%d+~Olympus II~$"), stewardEmpty)
+				-- The member's next session: the lists he kept, then each owner's newer, empty one.
+				Fresh(AsSoldier, "Other")
+				ns.rdb.handsHeard, ns.rdb.stewardHandsHeard = heard, stewardHeard
+				K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "the King's, as he kept it"); eq(K.IsHandName("Helper-Realm"), true)
+				K.HandleCommand("CHANNEL", KING, kingEmpty)
+				K.HandleCommand("CHANNEL", STEWARD, stewardEmpty)
+				eq(K.IsHandName("Kingsman-Realm"), false, "the King's newer list leaves him out")
+				eq(K.IsHandName("Helper-Realm"), false, "the Steward's newer list leaves him out")
+				-- A list from a King an update no longer names: nobody's Hand, kept or heard.
+				Fresh(AsSoldier, "Other")
+				K.HandleCommand("CHANNEL", KING, kingList)
+				eq(K.IsHandName("Kingsman-Realm"), true)
+				local pinned = ns.KING_CHARACTER.Alliance
+				local ok, err = pcall(function()
+					ns.KING_CHARACTER.Alliance = "Other Monarch"
+					eq(K.IsHandName("Kingsman-Realm"), false, "the former King's list names nobody")
+					eq(#K.OthersHands(), 0, "nor shows on the Hands page")
+					K.Reset(); K.LoadHands()
+					eq(K.IsHandName("Kingsman-Realm"), false, "nor once kept")
+				end)
+				ns.KING_CHARACTER.Alliance = pinned
+				if not ok then error(err, 0) end
+				K.Reset(); K.LoadHands()
+				eq(K.IsHandName("Kingsman-Realm"), true, "his again while he is the King")
 			end, Signed2)
 		end)
 	end)
@@ -31247,9 +31851,10 @@ do
 				assert(page:find(L.HANDS_HINT_STEWARD, 1, true), "his hint"); assert(page:find(L.HANDS_NOTE_STEWARD, 1, true), "his note")
 				assert(L.HANDS_HINT_STEWARD:find("The King can't take your Hands back: you do, or the author, by removing you as Steward.", 1, true), L.HANDS_HINT_STEWARD)
 				assert(L.HANDS_HINT_STEWARD:find("The King's Hands and the other Stewards' (below) are theirs to remove, not yours.", 1, true), L.HANDS_HINT_STEWARD)
-				-- A list nobody repeats any more leaves the page with its Hands (20 minutes).
+				-- (1.2.4) A list nobody repeats any more stays on the page with its Hands until its
+				-- owner's newer list (it left after 20 minutes).
 				w.clock = w.clock + K.HANDS_FRESH + 1
-				eq(Section(K.Build(), L.HANDS_NAMED_BY_KING), nil, "the King's lapsed")
+				eq(Section(K.Build(), L.HANDS_NAMED_BY_KING), D("Kingsman-Realm"), "the King's stands")
 				-- pt-BR: the same rule on both pages.
 				local pt = { L = setmetatable({}, { __index = ns.L }) }
 				local savedLocale = GetLocale
@@ -34124,7 +34729,9 @@ test("1.1 census search (Fern #16): a zone lists its soldiers, its guilds most s
 		eq(head.right, nil, "no trend before tonight's first sample")
 		assert(Fern.Tip(head):find(ns.L.SEARCH_ZONE_TIP, 1, true), "what it counts")
 		local _, at = Fern.Find(lines, "Stormwind City")
-		eq(Fern.Bare(lines[at + 1].text), "<Olympus>"); eq(lines[at + 1].right, "120")
+		-- (Changed on purpose, 1.2.4's review: a guild's average level after its count, where its
+		-- report has one: the order's tie-break, seen.)
+		eq(Fern.Bare(lines[at + 1].text), "<Olympus>"); eq(Fern.Bare(lines[at + 1].right), "120  (avg lvl 14.0)")
 		eq(Fern.Bare(lines[at + 2].text), "<Olympus II>"); eq(lines[at + 2].right, "30")
 		-- A click opens that guild in the Realm.
 		lines[at + 2].onClick()
@@ -34161,8 +34768,9 @@ test("1.1 census search (Fern #16): 'recruiting' lists every guild with room, th
 			names[#names + 1] = Fern.Bare(lines[i].text) .. " " .. Fern.Bare(lines[i].right)
 		end
 		-- Olympus (990) and Olympus II (500) of SampleGuilds count too; Olympus R8 is full.
+		-- (Changed on purpose, 1.2.4: a guild's average level after its free slots, where its report has one.)
 		eq(table.concat(names, ","), "<Olympus R6> 500 free,<Olympus R1> 900 free,<Olympus R2> 800 free,<Olympus R3> 700 free,<Olympus R4> 600 free,"
-			.. "<Olympus R5> 550 free,<Olympus II> 500 free,<Olympus R7> 50 free,<Olympus> 10 free", "all nine, not five")
+			.. "<Olympus R5> 550 free,<Olympus II> 500 free,<Olympus R7> 50 free,<Olympus> 10 free  (avg lvl 14.0)", "all nine, not five")
 		assert(lines[at + 1].text:find("LeaderIcon", 1, true), "the gates' guild wears the crown")
 		eq(head.right, "|cff9d9d9d" .. ns.L.SEARCH_RECRUITING_COUNT:format(9) .. "|r")
 		-- At least 600 free.
@@ -39002,6 +39610,24 @@ end)
 		end)
 	end)
 
+	-- 1.2.4, the author's ask (lists of people are not erased): a link heard was forgotten 30 days
+	-- after its characters were last heard, so a player away a month split in two again in the census,
+	-- the dues and the rankings. It stays 180 days now.
+	test("1.2.4 alt links: a link heard stays 180 days after its characters were last heard (it was 30)", function()
+		WithAlts(function(w, K)
+			AsSoldier("Watcher")
+			local t = w.clock
+			Pair("Main Four", "Alt Four", t)
+			eq(Names(A.Linked("Main Four-Realm")), "Alt Four")
+			w.clock = t + 31 * 86400
+			A.Prune()
+			eq(Names(A.Linked("Main Four-Realm")), "Alt Four", "a month away: still one player")
+			w.clock = t + 181 * 86400
+			A.Prune()
+			eq(A.Group("Alt Four-Realm"), nil, "half a year away: forgotten")
+		end)
+	end)
+
 	test("1.1 alt links (#21): the census counts people: a player's characters in the guilds counted count once, each guild's size stays its roster's", function()
 		WithAlts(function(w, K)
 			AsSoldier("Watcher")
@@ -39666,11 +40292,13 @@ end)
 			local before = ns.Hop.Crowd(1453, 8, w.clock)
 			ns.Hop.HandleAsk("CHANNEL", "Innocent Guy-Realm", "LQ~51~1453~8")
 			ns.Hop.HandleAsk("CHANNEL", "Streamer Friend-Realm", "LQ~52~1453~8")
-			eq(ns.Hop.Crowd(1453, 8, w.clock), before + 2, "their hop asks are heard")
+			-- Names merely written in a rejected census have no membership provenance.  They stay
+			-- unhidden, but their public-channel packets cannot change layer-hop contention.
+			eq(ns.Hop.Crowd(1453, 8, w.clock), before, "their unverified hop asks are ignored")
 			-- Its sender (the server's name) speaks for that guild: his own ask is not.
 			assert(M.Hides("Troll Guy-Realm"), "the sender")
 			ns.Hop.HandleAsk("CHANNEL", "Troll Guy-Realm", "LQ~53~1453~8")
-			eq(ns.Hop.Crowd(1453, 8, w.clock), before + 2)
+			eq(ns.Hop.Crowd(1453, 8, w.clock), before)
 		end)
 	end)
 
@@ -40227,6 +40855,38 @@ do
 		end)
 	end)
 
+	-- 1.2.4's review: the table's guilds, as much gold in from as many members, go to the higher
+	-- average level first (Data.SortGuildCounts); no test held that order (reverting it left the
+	-- suite green), nor said it where the order is read.
+	test("1.2.4's review: the dues table, as much gold from as many members: the higher average level first, said in its row's hover", function()
+		WithDues(function(w, K, T, mail)
+			AsTreasurer()
+			local week = D.Week()
+			for name, avg in pairs({ ["Olympus Alpha"] = 20, ["Olympus Beta"] = 50, ["Olympus Gamma"] = false }) do
+				ns.rdb.guilds[name] = Vouched({ total = 100, online = 1, zones = {}, t = w.clock, leader = "Lead", realm = "Realm",
+					avgLevel = avg or nil }, "W7-Realm", "W8-Realm")
+			end
+			Mail(mail, "Payera", 10000, D.Note(week, "Olympus Alpha"))
+			Mail(mail, "Payerb", 10000, D.Note(week, "Olympus Gamma"))
+			Mail(mail, "Payerc", 10000, D.Note(week, "Olympus Beta"))
+			D.Open()
+			local _, lines = Page(T)
+			local order = {}
+			for _, l in ipairs(lines) do
+				local name = tostring(l.text):match("^<(Olympus %a+)>$")
+				if name == "Olympus Alpha" or name == "Olympus Beta" or name == "Olympus Gamma" then order[#order + 1] = name end
+			end
+			eq(table.concat(order, ","), "Olympus Beta,Olympus Alpha,Olympus Gamma", "50.0, 20.0, none (by the name alone: Alpha first)")
+			local function Hover(name)
+				local tip = {}
+				Row(lines, "<" .. name .. ">").tooltip({ AddLine = function() end, AddDoubleLine = function(_, a, b) tip[a] = b end })
+				return tip[ns.L.AVG_LEVEL]
+			end
+			eq(Hover("Olympus Beta"), "50.0"); eq(Hover("Olympus Alpha"), "20.0")
+			eq(Hover("Olympus Gamma"), nil, "none: no line")
+		end)
+	end)
+
 	test("1.1 dues (#37): the King and the Treasurer see every guild (members, paid this week, gold in, percent); a Captain his own guild alone (name, last payment, gold this week, above or below), by whisper", function()
 		WithDues(function(w, K, T, mail)
 			AsTreasurer()
@@ -40706,12 +41366,12 @@ do
 		WithDues(function(w, K, T, mail, trade)
 			WithWindows(function(g)
 				-- The events Dues.lua listens to, loaded again on its own: the game refusing the trade's
-				-- gold, nothing else (no MAIL_SHOW, TRADE_SHOW or CHAT_MSG_LOOT: no fill-in, no popup).
+				-- gold, plus F26-10's local inbox/trade reminder observations: no fill-in or popup.
 				local alone = {}
 				LoadAlone(alone)
 				alone.on.LOGIN()
 				table.sort(alone.events)
-				eq(table.concat(alone.events, ","), "ADDON_ACTION_BLOCKED,ADDON_ACTION_FORBIDDEN")
+				eq(table.concat(alone.events, ","), "ADDON_ACTION_BLOCKED,ADDON_ACTION_FORBIDDEN,MAIL_INBOX_UPDATE,TRADE_SHOW")
 				-- The mailbox and a trade with the Treasurer open, as a payer: the Treasury's own hooks fill nothing.
 				AsSoldier("Payer")
 				MailFrame:Show(); SendMailFrame:Show(); TradeFrame:Show(); trade.npc = "Pyralis Ashandar"
@@ -43905,6 +44565,36 @@ test("1.1 crafters (#24): Classic Era's windows: the trade skill's items and rec
 	end)
 end)
 
+-- 1.2.4, the author's ask (lists are not erased): the board was this session's memory alone and
+-- forgot a crafter 100 minutes after his last listing (a /reload emptied it). It is the saved
+-- data's now, and keeps a crafter a week after he was last heard.
+test("1.2.4 crafters: the board is the saved data's: a crafter heard stays a week after his last listing, also across a /reload", function()
+	WithCraft(function(w, Cr)
+		Cr.HandleListing("CHANNEL", "Smith-Realm", "W1~Olympus Zeus~164:Blacksmithing:150:300:12")
+		eq(#Cr.Board(), 1)
+		eq(type(ns.rdb.craftersBoard and ns.rdb.craftersBoard["Smith-Realm"]), "table", "in the saved data")
+		w.clock = w.clock + 6 * 86400
+		eq(#Cr.Board(), 1, "six days on: still listed")
+		-- A /reload: the saved data as the game gives it back (another table), the board taken up again.
+		local rdb = ns.rdb
+		local copy = {}
+		for k, v in pairs(rdb) do copy[k] = v end
+		local board = {}
+		for name, e in pairs(rdb.craftersBoard) do board[name] = { guild = e.guild, profs = e.profs, t = e.t } end
+		copy.craftersBoard = board
+		ns.rdb = copy
+		local ok, err = pcall(function()
+			local b = Cr.Board()
+			eq(#b, 1, "kept across the /reload"); eq(b[1] and b[1].name, "Smith-Realm")
+			w.clock = w.clock + 86400 + 1
+			eq(#Cr.Board(), 0, "a week and a day after his last listing: gone")
+		end)
+		ns.rdb = rdb
+		Cr.Reset()
+		if not ok then error(err, 0) end
+	end)
+end)
+
 test("1.1 crafters (#24): the board takes listings from the channel alone, Olympus guilds only, forgets who went quiet or left", function()
 	WithCraft(function(w, Cr)
 		Cr.HandleListing("CHANNEL", "Smith-Realm", "W1~Olympus Zeus~164:Blacksmithing:150:300:12,Bad Entry,185:Cooking:x:300:4")
@@ -44207,6 +44897,7 @@ test("1.2 craft requests: every line the requests show is in English and Portugu
 	local savedLocale, pt = GetLocale, {}
 	GetLocale = function() return "ptBR" end
 	local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
+	if ok then ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales/RankingRulesText.lua"))("Olympus", pt) end) end
 	GetLocale = savedLocale
 	if not ok then error(err, 0) end
 	local keys, n = {}, 0
@@ -44905,7 +45596,8 @@ test("1.1 sister guilds' banks (Fern): their treasurer's yes, whispered to the K
 			-- page, with the line on its Book, is where the search leads, ShowGuild.)
 			lines = T.Build()
 			page = Texts(lines)
-			assert(page:find("[-] <Olympus Zeus>", 1, true) and page:find("Tab 1", 1, true), page)
+			-- (1.2.4: the ranking's row, its place and its correspondent before the guild; changed on purpose.)
+			assert(page:find("[-] " .. ns.L.TREASURY_RANK_ROW:format(1, ns.L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true) and page:find("Tab 1", 1, true), page)
 			eq(Grid(lines)[3].id, 2589, "its grid in the list, where the stack sits")
 			eq(T.ShowGuild("Olympus Zeus"), true)
 			lines = T.Build()
@@ -45009,6 +45701,7 @@ do
 		for i = from or 1, #lines do if tostring(lines[i].text):find(text, 1, true) then return i, lines[i] end end
 	end
 	local function Key(lines, key) for _, l in ipairs(lines) do if l.key == key then return l end end end
+	local function KeyAt(lines, key) for i, l in ipairs(lines) do if l.key == key then return i end end end
 	local function Grids(lines)
 		local out = {}
 		for i, l in ipairs(lines) do if l.items then out[#out + 1] = i end end
@@ -45052,7 +45745,8 @@ do
 		local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
-		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true } -- (punctuation alone)
+		local same = { TREASURY_DIR_WHO = true, TREASURY_DIR_WHEN = true, TREASURY_DIR_PLACE = true, -- (punctuation alone)
+			TREASURY_RANK_ROW = true, TREASURY_RANK_TOTAL = true } -- (1.2.4: and "Total", one word in both)
 		for _, key in ipairs({ "TREASURY_DIR_TOTAL", "TREASURY_DIR_TOTAL_TIP", "TREASURY_DIR_LEDGER", "TREASURY_DIR_LEDGER_NONE",
 			"TREASURY_DIR_LEDGER_HIDDEN", "TREASURY_DIR_LEDGER_TIP", "TREASURY_DIR_WHO", "TREASURY_DIR_GM", "TREASURY_DIR_OFFICER",
 			"TREASURY_DIR_KEEPER", "TREASURY_DIR_WHEN", "TREASURY_DIR_STATE_SHARED", "TREASURY_DIR_STATE_OLD", "TREASURY_DIR_EXPAND_TIP",
@@ -45060,7 +45754,11 @@ do
 			"TREASURY_DIR_FOUND_TIP", "TREASURY_DIR_FOUND_IN", "TREASURY_DIR_PLACE", "TREASURY_DIR_PLACES_MORE", "TREASURY_DIR_LIT",
 			"SEARCH_TIP_TREASURY_GUILDS", "BANK_SISTER_WIDER", "BANK_SISTER_WIDER_YES", "BANK_SISTER_WIDER_NO", "BANK_SISTER_KING_KEPT",
 			"TREASURY_GUILDS_TIP", "TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_BOOK_UNAVAILABLE", "BANK_SISTER_ASK", "BANK_SISTER_ON",
-			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK" }) do
+			"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK",
+			-- 1.2.4: the ranking of the treasuries.
+			"TREASURY_RANK_HEAD", "TREASURY_RANK_TOTAL", "TREASURY_RANK_TIP", "TREASURY_RANK_FEDERAL", "TREASURY_RANK_ROW",
+			"TREASURY_RANK_NO_CORR", "TREASURY_RANK_DETAIL", "TREASURY_RANK_ATLEAST", "TREASURY_RANK_VALUE", "TREASURY_RANK_PENDING",
+			"TREASURY_RANK_UNPRICED", "TREASURY_RANK_CORR", "TREASURY_RANK_CORR_KEPT", "TREASURY_RANK_CORR_NONE", "TREASURY_GUILD_VALUE_TIP" }) do
 			assert(type(rawget(ns.L, key)) == "string", "English " .. key)
 			assert(type(rawget(pt.L, key)) == "string" and (same[key] or pt.L[key] ~= ns.L[key]), "Portuguese " .. key)
 			eq(select(2, pt.L[key]:gsub("%%[ds]", "")), select(2, ns.L[key]:gsub("%%[ds]", "")), key)
@@ -45386,13 +46084,21 @@ do
 			eq(lines[total].right, T.Coins(424242 + 424242 + 900000))
 			assert(lines[total + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[total + 1].text)
 			assert(lines[total + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85 + 85 + 200, 7), 1, true), lines[total + 1].text)
-			-- <Olympus> first, then the most gold first.
-			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), Find(lines, "[+] <Olympus Hera>", total), Find(lines, "[+] <Olympus Zeus>", total)
+			-- <Olympus> first, then the most first. (1.2.4, changed on purpose: the ranking's rows, found
+			-- by their keys; the most gold plus the items' value first. This client holds no item data:
+			-- each total is its gold, "at least".)
+			local home, hera, zeus = Find(lines, "[+] <Olympus>", total), KeyAt(lines, "sister:Olympus Hera"), KeyAt(lines, "sister:Olympus Zeus")
 			assert(home and hera and zeus and home < hera and hera < zeus, page)
-			-- Each row: its gold; the ledger apart (<Olympus>'s books alone), its items, who shared it, when.
-			eq(lines[zeus].right, T.Coins(424242))
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
-			assert(lines[zeus + 1].text:find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), lines[zeus + 1].text)
+			-- Each row: its total; the ledger apart (<Olympus>'s books alone: no "none kept" on another
+			-- guild's row any more), its gold, items and their value, who shared it, when; its stacks in
+			-- the tooltip.
+			eq(lines[zeus].right, ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
+			assert(not lines[zeus + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_NONE), 1, true), lines[zeus + 1].text)
+			eq(lines[zeus + 1].text, "|cff9d9d9d" .. ns.L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 85, ns.L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+			local stacks = { lines = {} }
+			function stacks:AddLine(s) self.lines[#self.lines + 1] = s end
+			lines[zeus].tooltip(stacks)
+			assert(table.concat(stacks.lines, "\n"):find(ns.L.TREASURY_GUILD_ITEMS:format(85, 3), 1, true), table.concat(stacks.lines, "\n"))
 			assert(lines[zeus + 1].right:find(ns.L.TREASURY_DIR_WHO:format("Zed", ns.L.TREASURY_DIR_GM), 1, true), lines[zeus + 1].right)
 			assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 3600), 1, true), lines[zeus + 1].right)
 			assert(lines[home + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(T.GoldText(r.balance)), 1, true), lines[home + 1].text)
@@ -45419,8 +46125,8 @@ do
 			-- A click opens Olympus Zeus in place: what the guild bank above shows of its own, line for line.
 			Key(T.Build(), "sister:Olympus Zeus").onClick()
 			lines = T.Build()
-			local open = Find(lines, "[-] <Olympus Zeus>")
-			assert(open, Texts(lines))
+			local open = KeyAt(lines, "sister:Olympus Zeus")
+			assert(open and lines[open].text:find("[-] ", 1, true), Texts(lines))
 			local grids = Grids(lines)
 			eq(#grids, 2, "the bank above, and Olympus Zeus's")
 			local function Portrait(at)
@@ -45721,8 +46427,10 @@ do
 			w.clock = w.clock + T.PRIVATE_REPEAT + 60
 			T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); T.FlushPrivate(); Run()
 			eq(Got(w, SAGE), 0, "a routine ask")
-			-- The Hand holds the bank; the King is offline longer than HANDS_FRESH, so the Hand's
-			-- client drops it. The King comes back: the Hand's next ask says he holds nothing, once.
+			-- The Hand holds the bank; the King's newer list leaves him out (1.2.4: a list stands until
+			-- its owner's newer one; before, the King offline longer than HANDS_FRESH ended it), so the
+			-- Hand's client drops it. The King names him again: the Hand's next ask says he holds
+			-- nothing, once.
 			-- (The King's list heard again first: an hour went by above.)
 			AsKing(); K.SendHands(true)
 			hands = LastSent(w)
@@ -45738,8 +46446,12 @@ do
 			eq(#B.Sisters(), 1)
 			T.Ask(false); eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~1", "holding it, his routine asks")
 			w.clock = w.clock + ns.King.HANDS_FRESH + 1
+			eq(#B.Sisters(), 1, "the King away: his list stands (1.2.4)")
+			AsKing(); K.RemoveHand("Helper-Realm"); K.SendHands(true)
+			hands = LastSent(w)
+			AsSoldier("Helper"); K.HandleCommand("CHANNEL", KING, hands)
 			eq(#B.Sisters(), 0, "no longer a Hand here: dropped")
-			AsKing(); K.SendHands(true)
+			AsKing(); K.AddHand("Helper"); K.SendHands(true)
 			hands = LastSent(w)
 			AsSoldier("Helper"); K.HandleCommand("CHANNEL", KING, hands)
 			eq(B.SeesSisters(), true)
@@ -45778,8 +46490,9 @@ do
 			eq(T.Private(SAGE, "TS", B.Message(ns.rdb.bank, "TS")), false, "never whispered to himself")
 			T.Show("summary")
 			local lines = T.Build()
-			local zeus = Find(lines, "[+] <Olympus Zeus>")
-			assert(zeus and lines[zeus].right == T.Coins(31337), Texts(lines))
+			-- (1.2.4: its row in the ranking, its gold the total while this client holds no item data.)
+			local zeus = Key(lines, "sister:Olympus Zeus")
+			assert(zeus and zeus.right == ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(31337)), Texts(lines))
 			-- The others the census knows: no snapshot received (Hera, Ares, Olympus II), never Zeus.
 			local others = Key(lines, "dir:others")
 			assert(others and others.text:find(ns.L.TREASURY_DIR_UNHELD:format(3), 1, true), Texts(lines))
@@ -45806,9 +46519,11 @@ do
 			AsKing()
 			Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 41414, { { i = 1, items = { { id = 2770, n = 13, s = 2 } } } }, 60), "Zora-Realm")
 			As(SAGE, "Olympus Zeus", 0)
-			eq(Row(), T.Coins(41414), "the officer's, newer")
+			-- (1.2.4: the row's total, gold plus the items' value; no item data here: "at least".)
+			local AtLeast = function(c) return ns.L.TREASURY_RANK_ATLEAST:format(T.Coins(c)) end
+			eq(Row(), AtLeast(41414), "the officer's, newer")
 			ns.rdb.bank = Snap(w, "Olympus Zeus", SAGE, 51515, { { i = 1, name = "Our Tab", items = { { id = 2770, n = 14, s = 2 } } } })
-			eq(Row(), T.Coins(51515), "his own read, newer")
+			eq(Row(), AtLeast(51515), "his own read, newer")
 			-- Another guild's master outside the audience: his own bank is no directory of his.
 			B.Reset()
 			As(HERA, "Olympus Hera", 0)
@@ -45963,6 +46678,809 @@ do
 			AsZed()
 			B.Reset()
 			eq(B.SisterConsent(), false); eq(B.AskSister(), false); eq(B.SisterMessage(), nil)
+		end)
+	end)
+
+	-- 1.2.4 (the author's report: other guilds' treasuries he had seen were gone, <Olympus>'s alone
+	-- stayed). A snapshot heard while the census could not judge its sender yet (the viewer's first
+	-- Data.CROWN_AFTER after a login or a /reload, when every guild master is refused, or that guild's
+	-- report missing or older than Data.FRESH) was dropped without a word, and its sender's client,
+	-- which took it as delivered, sent it again only SISTER_REPEAT (3 hours) later. The viewer's first
+	-- ask goes ASK_AFTER (40 s) after login and is answered at once: a guild master online before him
+	-- always landed in that window.
+	test("1.2.4 Guild treasuries: a snapshot the census cannot judge yet (the viewer's login window, a stale report) is held and taken once the census confirms its sender; meanwhile his 15-minute ask names nothing on the channel", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin = ns.Comm.loginAt
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Pieces(to)
+					local out = {}
+					for _, x in ipairs(w.whispered) do if x.to == to and x.msg:find("^TW~TS~") then out[#out + 1] = x.msg end end
+					return out
+				end
+				local function Deliver(pieces, from) for _, m in ipairs(pieces) do T.HandlePrivate("WHISPER", from or "Zed-Realm", m) end end
+				-- Zed, the guild master of Olympus Zeus, says yes. Sage logs in; his addon's first ask is answered.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } })
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				local bank, when = ns.rdb.bank, math.floor(ns.rdb.bank.t)
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				local pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				-- It reaches Sage's client 60 s after his login, inside the census's window: not shown yet.
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				Deliver(pieces)
+				eq(#B.Sisters(), 0, "not shown before the census can confirm its sender")
+				-- The window over, the census confirms Zed: taken, with nothing sent again (before 1.2.4:
+				-- nothing for 3 hours).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Census(w)
+				Run() -- (the check due once the window is over)
+				local s = B.Sisters()
+				eq(#s, 1, "taken once the census confirms him"); eq(s[1].money, 424242); eq(s[1].by, "Zed-Realm"); eq(s[1].t, when)
+				-- An officer's snapshot while his guild's report is older than Data.FRESH (no window): held,
+				-- taken when a fresh report comes (DATA_CHANGED).
+				B.Reset()
+				AsSage(); ns.Comm.loginAt = w.clock - 3600
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60
+				Hear(Snap(w, "Olympus Zeus", "Zora-Realm", 1111, { { i = 1, items = { { id = 2589, n = 5, s = 1 } } } }), "Zora-Realm")
+				eq(#B.Sisters(), 0, "a stale report: not yet")
+				Census(w)
+				CoreFire("DATA_CHANGED") -- (the harness keeps ns.Fire quiet: the real one, as a report heard fires it)
+				s = B.Sisters()
+				eq(#s, 1, "a fresh report confirms her"); eq(s[1].by, "Zora-Realm"); eq(s[1].money, 1111)
+				-- Refused for good: the census, fresh and settled, does not name the sender. Nothing held.
+				B.Reset()
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(#B.Sisters(), 0); eq(B.Held(), 0, "a sender the census does not name: dropped as before")
+				-- Inside the window he is held (the census can say nothing yet), and dropped once it says no.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1)
+				ns.Comm.loginAt = w.clock - 3600
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 0, "never shown"); eq(B.Held(), 0, "dropped once the census says no")
+				-- Bounded: one held snapshot a sender (his newest), of Olympus guilds alone.
+				ns.Comm.loginAt = w.clock - 60
+				Hear(Snap(w, "Olympus Zeus", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				Hear(Snap(w, "Olympus Hera", "Faker Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Faker Guy-Realm")
+				eq(B.Held(), 1, "one a sender: his newest")
+				-- (Changed on purpose, the branch's review: inside the window an Olympus guild no report has
+				-- named yet this session is held too. The census forgets at login the rows it has not heard for
+				-- Data.KEEP, so after a week away every guild is such a one until its report comes.)
+				Hear(Snap(w, "Olympus Nowhere", "Other Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Other Guy-Realm")
+				eq(B.Held(), 2, "a guild the census has not heard of yet: held too")
+				Hear(Snap(w, "Sons of Nothing", "Third Guy-Realm", 9, { { i = 1, items = { { id = 2589, n = 1, s = 1 } } } }), "Third Guy-Realm")
+				eq(B.Held(), 2, "no Olympus guild: never held")
+				-- The 15-minute ask while one is held names nothing, and Zed's client sends nothing again for it.
+				-- (Changed on purpose, the branch's review: its first draft named the held snapshot's time on
+				-- the channel, and Zed's client sent the same text again at every ask; the census's next report,
+				-- DATA_CHANGED, is what takes it, the text held already.)
+				B.Reset(); T.ResetPrivate()
+				AsZed(); ns.rdb.bank = bank
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				pieces = Pieces(SAGE)
+				assert(#pieces > 0, "whispered to Sage")
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - ns.Data.FRESH - 60 -- (and his guild's report stale)
+				Deliver(pieces)
+				eq(B.Held(), 1)
+				Run() -- (Sage's client's own timers, before this test plays Zed's: still held)
+				eq(B.Held(), 1)
+				w.sent = {}
+				eq(T.Ask(true), true); eq(LastSent(w), "TA~Olympus II~0", "his login's ask: he holds nothing")
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true)
+				local ask = LastSent(w)
+				eq(ask, "TA~Olympus II~1", "a routine ask, as 1.2.3's: no snapshot's time on the channel")
+				AsZed()
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, ask); Run()
+				eq(#Pieces(SAGE), 0, "a routine ask: nothing again for SISTER_REPEAT")
+				AsSage(); Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 1, "taken once his guild's report is fresh"); eq(B.Held(), 0)
+				eq(B.Sisters()[1].t, when)
+			end)
+			ns.Comm.loginAt = savedLogin
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4 (the author's call: "Não precisa ser temporário... As guildas podem ser definitivas, iguais à
+	-- guilda principal"): each guild's latest snapshot a viewer took is kept across logouts, as
+	-- <Olympus>'s own is. Before 1.2.4 it lived in memory alone ("it is never saved", README.md).
+	test("1.2.4 Guild treasuries: each guild's latest snapshot is kept across a logout (saved, bounded: one a guild, Olympus guilds, a size cap), never dropped for its age; its sharer's no takes it from the save too; a viewer who leaves the audience drops them at once", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			local savedLogin, savedCap = ns.Comm.loginAt, B.SISTERS_SAVED_BYTES
+			local ok, err = pcall(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				local function Stored(name)
+					local all = ns.rdb.sisterBanks
+					local mine = type(all) == "table" and all[name:lower()] or nil
+					local n = 0
+					for _ in pairs(mine or {}) do n = n + 1 end
+					return n, mine
+				end
+				ns.Comm.loginAt = w.clock - 3600
+				AsSage()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }, 3600), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 2, items = { { id = 2770, n = 20, s = 7 } } } }), HERA)
+				eq(#B.Sisters(), 2)
+				eq(Stored(SAGE), 2, "both in the saved variables")
+				-- A /reload or a logout: memory gone, both back as they came, its items too.
+				B.Reload()
+				local s = B.Sisters()
+				eq(#s, 2, "kept across the reload")
+				eq(s[1].guild, "Olympus Hera"); eq(s[1].money, 900000); eq(s[1].by, HERA)
+				eq(s[1].tabs[1].name, "Tab 2"); eq(s[1].tabs[1].items[1].id, 2770); eq(s[1].tabs[1].items[1].s, 7)
+				eq(s[2].guild, "Olympus Zeus"); eq(s[2].t, w.clock - 3600); eq(s[2].money, 424242)
+				T.Show("summary")
+				Key(T.Build(), "sister:Olympus Zeus").onClick()
+				local lines = T.Build()
+				eq(#Grids(lines), 1, "its bank opens as before"); eq(lines[Grids(lines)[1]].items[1].id, 2589)
+				Key(lines, "sister:Olympus Zeus").onClick()
+				-- The newest of a guild replaces the older, in the save too (one a guild).
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 2)
+				B.Reload()
+				s = B.Sisters()
+				eq(s[2].money, 525252); eq(s[2].tabs[1].items[1].n, 61)
+				-- No age takes one away: a month later it is still there, marked old.
+				w.clock = w.clock + 30 * 86400
+				Census(w)
+				B.Reload()
+				eq(#B.Sisters(), 2, "never dropped for its age")
+				lines = T.Build()
+				local zeus = Key(lines, "sister:Olympus Zeus")
+				assert(zeus, Texts(lines))
+				for i, l in ipairs(lines) do if l == zeus then assert(lines[i + 1].right:find("ff6060", 1, true), "marked old: " .. lines[i + 1].right) end end
+				-- His no takes it back, from the save too: from whoever sent it, whatever the census says now.
+				ns.rdb.guilds["Olympus Zeus"].t = w.clock - 2 * ns.Data.FRESH
+				B.HandleSister("WHISPER", "Faker Guy-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 2, "not from anyone")
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				eq(#B.Sisters(), 1, "his own no")
+				eq(Stored(SAGE), 1, "gone from the save")
+				B.Reload()
+				eq(#B.Sisters(), 1, "and after a reload")
+				-- His addon tells it to the viewer's ask after a login too (a fresh one): before 1.2.4 such
+				-- an ask held nothing, now it may hold his snapshot from an earlier session.
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 525252, { { i = 1, items = { { id = 2589, n = 61, s = 3 } } } })
+				ns.db.sisterBankShares, ns.db.sisterBankSent = { ["zed-realm"] = false }, { ["zed-realm"] = "Olympus Zeus" }
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				eq(#w.whispered, 1, "the no, to an ask after a login"); eq(w.whispered[1].to, SAGE); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 1, "once a session")
+				ns.db.sisterBankShares, ns.db.sisterBankSent = nil, nil
+				-- A guild gone from the census stays in the save. (Changed on purpose, the branch's review: the
+				-- census forgets at a viewer's login every row it has not heard for Data.KEEP, so after a week
+				-- away every saved snapshot went.) Its sender's no still takes it.
+				AsSage()
+				ns.rdb.guilds["Olympus Hera"] = nil
+				B.Reload()
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1, "kept, the census's row forgotten")
+				B.HandleSister("WHISPER", HERA, "TS~Olympus Hera~0~0~")
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 0, "its sender's no")
+				-- Leaving the audience: what he held goes at once, the save too.
+				Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1)
+				local council = ns.rdb.council
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				eq(#B.Sisters(), 0, "no longer a viewer"); eq(Stored(SAGE), 0, "the save too, at once")
+				ns.rdb.council = council
+				B.Reload()
+				eq(#B.Sisters(), 0, "dropped, not hidden")
+				-- Taken off while offline: at his next login nothing shows, and once his role is known for
+				-- ROLE_SETTLE of that session (a Hand's waits for the King's list), the save goes too.
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				eq(Stored(SAGE), 1)
+				B.Reload()
+				ns.rdb.council = { at = 2, names = { other = "Other" } }
+				ns.Comm.loginAt = w.clock
+				eq(#B.Sisters(), 0); eq(Stored(SAGE), 1, "not yet: his role may come")
+				w.clock = w.clock + B.ROLE_SETTLE
+				Census(w)
+				B.Holding()
+				eq(Stored(SAGE), 0, "a session outside the audience: gone")
+				ns.rdb.council = council
+				ns.Comm.loginAt = w.clock - 3600
+				-- Another character of the account, never of the audience, neither sees nor drops them.
+				B.Reload()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Zed-Realm")
+				B.Reload()
+				AsSoldier()
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				Census(w)
+				eq(#B.Sisters(), 0); B.Holding()
+				eq(Stored(SAGE), 1, "a soldier's session leaves Sage's alone"); eq(Stored("Soldier-Realm"), 0)
+				B.Reload(); AsSage()
+				eq(#B.Sisters(), 1, "Sage's again")
+				-- The size cap: past SISTERS_SAVED_BYTES of text for the realm group, the one heard longest
+				-- ago leaves the save (still shown this session).
+				local _, mine = Stored(SAGE)
+				local one = #mine["olympus zeus"].text
+				B.SISTERS_SAVED_BYTES = one * 2 + 10
+				w.clock = w.clock + 1
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), HERA)
+				w.clock = w.clock + 1
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm" }, "W11-Realm", "W12-Realm")
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 1, { { i = 1, items = { { id = 2589, n = 60, s = 3 } } } }), "Hermy-Realm")
+				eq(#B.Sisters(), 3, "all three shown")
+				local n
+				n, mine = Stored(SAGE)
+				eq(n, 2, "two fit"); eq(mine["olympus zeus"], nil, "the one heard longest ago left the save")
+				B.Reload()
+				eq(#B.Sisters(), 2)
+			end)
+			ns.Comm.loginAt, B.SISTERS_SAVED_BYTES = savedLogin, savedCap
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4 (the author's ask: "eu quero um ranking dos tesouros com mais gold, com mais itens... Esse
+	-- ranking vai ser no lugar desses bancos aqui. Teria que ter: o nome do correspondente, o nome da
+	-- guilda, a quantidade de gold, a quantidade de itens, o valor dos itens... Em ordem, em ranking
+	-- mesmo"; a guild's average level breaks a tie, his rule everywhere).
+	test("1.2.4 Guild treasuries: the ranking in the banks' place (position, correspondent, guild, gold, items, the items' value, total, when); <Olympus> apart as the Federal Treasury; by total, then average level, then name; items still loading say 'at least'; a click opens the bank; nothing sent", function()
+		WithDirectory(function(w, K, Run)
+			local T, B, L, N = ns.Treasury, ns.Bank, ns.L, ns.Nominees
+			local savedValues, savedLogin = B.ITEM_VALUES, ns.Comm.loginAt
+			local ok, err = pcall(function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- The game's item data as C_Item gives it, its 11th return what a vendor pays, in copper
+				-- (made-up prices: this is no price list). Linen Cloth's data not loaded yet.
+				local SELL = { [2589] = 10, [2770] = 25, [929] = 0, [2996] = 100 }
+				local cached = { [2589] = false, [2770] = true, [929] = true, [2996] = true }
+				local requested = {}
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function(id) return cached[id] == true end,
+					RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+					GetItemInfo = function(id)
+						if not cached[id] then return nil end
+						return NAMES[id], "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, SELL[id]
+					end,
+				}
+				-- The census's average levels: Olympus Hermes 55, Olympus Hera and Olympus Zeus 40.
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				ns.rdb.guilds["Olympus Hermes"] = Vouched({ total = 50, online = 3, zones = {}, t = w.clock, leader = "Hermy", realm = "Realm", avgLevel = 55 }, "W11-Realm", "W12-Realm")
+				ns.rdb.guilds["Olympus Apollo"] = Vouched({ total = 70, online = 3, zones = {}, t = w.clock, leader = "Apo", realm = "Realm", avgLevel = 10 }, "W13-Realm", "W14-Realm")
+				-- Zed names Olympus Zeus's Federal Treasury correspondent (his list, the census proving him).
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				N.Handle("CHANNEL", "Hermy-Realm", ("NM~1~Olympus Hermes~%d~1~1~d=Department of War=Warry"):format(w.clock))
+				-- <Olympus>'s bank (the King's own read), and four guilds'. After the data comes, Hermes,
+				-- Hera and Zeus are alike in total (10g 6s), Apollo ahead.
+				ns.rdb.bank = Snap(w, "Olympus", KING, 5000000, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } })
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, { { i = 1, items = { { id = 2589, n = 60, s = 3 }, { id = 929, n = 5, s = 4 } } } }, 7200), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 100500, { { i = 1, items = { { id = 2770, n = 4, s = 1 } } } }, 60), HERA)
+				Hear(Snap(w, "Olympus Hermes", "Hermy-Realm", 100400, { { i = 1, items = { { id = 2996, n = 2, s = 1 } } } }), "Hermy-Realm")
+				Hear(Snap(w, "Olympus Apollo", "Apo-Realm", 200000, { { i = 1, items = {} } }), "Apo-Realm")
+				w.sent, w.whispered = {}, {}
+				T.Show("summary")
+				local lines = T.Build()
+				local page = Texts(lines)
+				-- <Olympus> apart, the Federal Treasury: no position, outside the race.
+				local fed = Key(lines, "sister:Olympus")
+				assert(fed and fed.text:find(L.TREASURY_RANK_FEDERAL:format("<Olympus>"), 1, true), page)
+				eq(fed.right, T.Coins(5000000 + 100), "its gold and its items' value")
+				local head = Key(lines, "dir:ranking")
+				assert(head and head.text:find(L.TREASURY_RANK_HEAD, 1, true) and head.right:find(L.TREASURY_RANK_TOTAL, 1, true), page)
+				local tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				head.tooltip(tip)
+				eq(tip.lines[2], L.TREASURY_RANK_TIP)
+				-- In order: the most first; alike, the higher average level; then the name.
+				local function At(key) for i, l in ipairs(lines) do if l.key == key then return i, l end end end
+				local apollo, hermes, hera, zeus = At("sister:Olympus Apollo"), At("sister:Olympus Hermes"), At("sister:Olympus Hera"), At("sister:Olympus Zeus")
+				assert(At("sister:Olympus") < At("dir:ranking") and At("dir:ranking") < apollo, page)
+				assert(apollo < hermes and hermes < hera and hera < zeus, "Zeus's items still loading: " .. page)
+				eq(lines[apollo].text, "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Apollo>"))
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				eq(lines[hermes].text, "[+] " .. L.TREASURY_RANK_ROW:format(2, L.TREASURY_RANK_NO_CORR, "<Olympus Hermes>"), "another department's correspondent is none of the treasury's")
+				-- Zeus: its gold, its items (stacks in the tooltip), their value "at least" while Linen Cloth's
+				-- data loads (asked of the game once), the potions no vendor buys counted in the items alone.
+				eq(lines[zeus].right, L.TREASURY_RANK_ATLEAST:format(T.Coins(100000)))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))) .. "|r")
+				assert(lines[zeus + 1].right:find(ns.Ago(w.clock - 7200), 1, true), lines[zeus + 1].right)
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				local said = table.concat(tip.lines, "\n")
+				for _, want in ipairs({ L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), L.TREASURY_GUILD_ITEMS:format(65, 2),
+					L.TREASURY_RANK_PENDING:format(60), L.TREASURY_RANK_UNPRICED:format(5), L.TREASURY_GUILD_VALUE_TIP }) do
+					assert(said:find(want, 1, true), want .. " in " .. said)
+				end
+				eq(#requested, 1); eq(requested[1], 2589)
+				T.Build(); eq(#requested, 1, "asked once")
+				-- Its data arrives: the value fills in by itself (one redraw), no "at least" left.
+				cached[2589] = true
+				eq(B.ItemInfoReceived(2589), true)
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].right, T.Coins(100600))
+				eq(lines[zeus + 1].text, "|cff9d9d9d" .. L.TREASURY_RANK_DETAIL:format(T.GoldText(100000), 65, T.GoldText(600)) .. "|r")
+				hermes, hera = At("sister:Olympus Hermes"), At("sister:Olympus Hera")
+				assert(hermes < hera and hera < zeus, "alike: the higher average level, then the name: " .. Texts(lines))
+				eq(lines[hera].right, T.Coins(100600)); eq(lines[hermes].right, T.Coins(100600))
+				-- The guilds with no snapshot here, below.
+				local others = At("dir:others")
+				assert(others and others > zeus and lines[others].text:find(L.TREASURY_DIR_UNHELD:format(2), 1, true), Texts(lines))
+				-- A click opens that guild's bank, as before.
+				lines[zeus].onClick()
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				assert(lines[zeus].text:find("[-] ", 1, true), lines[zeus].text)
+				eq(#Grids(lines), 2, "the bank above, and Olympus Zeus's")
+				lines[zeus].onClick()
+				-- The ranking as numbers alone (the seam for sharing it later): no item, no tab.
+				local r = T.Ranking()
+				eq(r.federal.guild, "Olympus"); eq(r.federal.total, 5000100); eq(r.federal.pos, nil)
+				eq(#r.rows, 4)
+				local z = r.rows[4]
+				eq(z.pos, 4); eq(z.guild, "Olympus Zeus"); eq(z.correspondent, "Zcorr-Realm"); eq(z.money, 100000); eq(z.units, 65); eq(z.stacks, 2)
+				eq(z.value, 600); eq(z.pending, 0); eq(z.unpriced, 5); eq(z.total, 100600); eq(z.level, 40); eq(z.t, w.clock - 7200)
+				for _, row in ipairs(r.rows) do
+					for k, v in pairs(row) do assert(type(v) ~= "table", "a table in the ranking's row: " .. k) end
+				end
+				-- Nothing of it was sent anywhere (sharing it is for later).
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+				-- His guild master offline beyond thirty days: the accepted correspondent still shows,
+				-- with the save, after a reload too.
+				w.clock = w.clock + N.FRESH + 60
+				Census(w)
+				ns.rdb.guilds["Olympus Zeus"].avgLevel, ns.rdb.guilds["Olympus Hera"].avgLevel = 40, 40
+				lines = T.Build()
+				zeus = At("sister:Olympus Zeus")
+				eq(lines[zeus].text, "[+] " .. L.TREASURY_RANK_ROW:format(4, ns.DisplayName("Zcorr-Realm"), "<Olympus Zeus>"))
+				tip = { lines = {} }
+				function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+				lines[zeus].tooltip(tip)
+				assert(table.concat(tip.lines, "\n"):find(L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), 1, true), table.concat(tip.lines, "\n"))
+				B.Reload()
+				eq(T.Ranking().rows[4].correspondent, "Zcorr-Realm", "kept with the snapshot")
+				-- Olympus's own table, where it names an item, over its vendor price (empty as shipped).
+				eq(next(savedValues), nil, "shipped empty: no price is guessed")
+				B.ITEM_VALUES = { [929] = 50 }
+				B.Reload()
+				r = T.Ranking()
+				eq(r.rows[2].guild, "Olympus Zeus", "now ahead of the guilds alike")
+				eq(r.rows[2].value, 600 + 250); eq(r.rows[2].unpriced, 0); eq(r.rows[2].pos, 2)
+				eq(#w.sent, 0); eq(#w.whispered, 0)
+			end)
+			B.ITEM_VALUES, ns.Comm.loginAt = savedValues, savedLogin
+			N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- 1.2.4, the branch's review (each case below failed before its fix). The names are made up.
+	local function Stored(name)
+		local all = ns.rdb.sisterBanks
+		local mine = type(all) == "table" and all[name:lower()] or nil
+		local n = 0
+		for _ in pairs(mine or {}) do n = n + 1 end
+		return n, mine
+	end
+	local function Bank1(item, n) return { { i = 1, items = { { id = item or 2589, n = n or 60, s = 3 } } } } end
+	local function KeepLogin(fn)
+		local saved = ns.Comm.loginAt
+		local ok, err = pcall(fn)
+		ns.Comm.loginAt = saved
+		if not ok then error(err, 0) end
+	end
+	local function TipText(line)
+		local tip = { lines = {} }
+		function tip:AddLine(s) self.lines[#self.lines + 1] = s end
+		line.tooltip(tip)
+		return table.concat(tip.lines, "\n")
+	end
+
+	test("1.2.4 Guild treasuries (review): a guild master only his own census report names yet is held past the login window and taken once another report names him; of two senders held for one guild, the newer snapshot is shown whichever came last", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				local function AsSage() As(SAGE, "Olympus II", 3) end
+				-- Olympus Zeus's report as Zed's addon alone has sent it so far: he is its reporter, and its
+				-- runner-up answers a login's census request 5 minutes apart at most (Comm.lua).
+				local function Reported(...)
+					ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm",
+						officers = { { name = "Zora", online = true, days = 0 } } }, ...)
+				end
+				AsSage(); ns.Comm.loginAt = w.clock - 60
+				Reported("Zed-Realm")
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 0); eq(B.Held(), 1)
+				-- The window over, his own report still the only one: held, unseen (before: dropped at the
+				-- window's end, and his addon, which took it as delivered, sent it again 3 hours later).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Reported("Zed-Realm")
+				Run()
+				eq(#B.Sisters(), 0, "never shown on his own word"); eq(B.Held(), 1, "still held after the window")
+				w.sent = {}
+				eq(T.Ask(true), true)
+				w.clock = w.clock + 120
+				eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~1", "nothing held is named on the channel")
+				-- The runner-up's report comes: taken.
+				Reported("Zed-Realm", "W3-Realm")
+				CoreFire("DATA_CHANGED")
+				local s = B.Sisters()
+				eq(#s, 1, "taken once another report names him"); eq(s[1].money, 424242); eq(B.Held(), 0)
+				-- Two senders of one guild, neither confirmed yet (the row kept from the last session is stale
+				-- at login): the newer snapshot is shown once both are, whichever came last (before: the last
+				-- to come, and the newer one's sender waited 3 hours).
+				for _, order in ipairs({ { "Zed-Realm", "Zora-Realm" }, { "Zora-Realm", "Zed-Realm" } }) do
+					B.Reset(); AsSage(); ns.Comm.loginAt = w.clock - 60
+					Census(w)
+					ns.rdb.guilds["Olympus Zeus"].t = w.clock - 3600
+					local snaps = { ["Zed-Realm"] = Snap(w, "Olympus Zeus", "Zed-Realm", 2222, Bank1(2589, 2)),
+						["Zora-Realm"] = Snap(w, "Olympus Zeus", "Zora-Realm", 1111, Bank1(2589, 1), 7200) }
+					Hear(snaps[order[1]], order[1]); Hear(snaps[order[2]], order[2])
+					eq(B.Held(), 2, "one a sender")
+					w.clock = w.clock + ns.Data.CROWN_AFTER
+					Census(w)
+					Run()
+					s = B.Sisters()
+					eq(#s, 1); eq(s[1].by, "Zed-Realm", "the newer, " .. order[2] .. "'s last"); eq(s[1].money, 2222); eq(B.Held(), 0)
+				end
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a viewer away more than a week keeps every snapshot saved (the census forgets its rows at his login, before any report); one sent again at his login, its guild not reported yet, is held and taken once its report comes", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				As(SAGE, "Olympus II", 3)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(Stored(SAGE), 2)
+				-- Eight days later he logs in: the census's rows older than Data.KEEP went at INIT.
+				w.clock = w.clock + 8 * 86400
+				for name in pairs(ns.rdb.guilds) do ns.rdb.guilds[name] = nil end
+				B.Reload(); ns.Comm.loginAt = w.clock - 40
+				eq(#B.Sisters(), 2, "both shown (before: both deleted)"); eq(Stored(SAGE), 2, "both still saved")
+				-- Zed's addon answers his login's ask with a newer one, Olympus Zeus not reported yet: held.
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 525252, Bank1(2589, 61)), "Zed-Realm")
+				eq(B.Held(), 1)
+				-- The window over before that report comes: still held (before: dropped, 3 hours to wait).
+				w.clock = w.clock + ns.Data.CROWN_AFTER
+				Run()
+				eq(B.Held(), 1)
+				Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(B.Held(), 0)
+				local zeus
+				for _, x in ipairs(B.Sisters()) do if x.guild == "Olympus Zeus" then zeus = x end end
+				eq(zeus and zeus.money, 525252, "the newer one, taken")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): accepted Hand authority and snapshots survive the King's offline duration and reload; explicit removal still revokes Hand-only data while councillor data remains", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				local HELPER = "Helper-Realm"
+				local function KingSends(add, remove)
+					AsKing()
+					if add then K.AddHand(add) end
+					if remove then K.RemoveHand(remove) end
+					K.SendHands(true)
+					return LastSent(w)
+				end
+				local function AsHelper() As(HELPER, "Olympus II", 3) end
+				local function Heard(list) AsHelper(); K.HandleCommand("CHANNEL", KING, list) end
+				local function Lapse() w.clock = w.clock + K.HANDS_FRESH + 1; Census(w); AsHelper() end
+				-- Helper, a Hand alone (not on the council), takes Olympus Zeus's bank.
+				Heard(KingSends("Helper"))
+				eq(K.IsHand(), true); eq(B.SeesSisters(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(HELPER), 1)
+				-- Silence is not revocation: the accepted appointment and snapshots stay available.
+				Lapse()
+				eq(K.IsHand(), true, "the King's absence does not erase his accepted appointment")
+				eq(#B.Sisters(), 1, "retained appointment remains readable"); eq(Stored(HELPER), 1, "kept")
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				Census(w)
+				B.Holding(); eq(Stored(HELPER), 1, "however long the King is away")
+				-- A /reload while he is still away, then his list again: back as it was.
+				B.Reload()
+				eq(#B.Sisters(), 1, "offline appointment survives the viewer's reload")
+				Heard(KingSends())
+				local s = B.Sisters()
+				eq(#s, 1, "back with the King's list"); eq(s[1].money, 424242)
+				-- The King takes him off: his list, heard, does not name him. Gone, the save too.
+				Heard(KingSends(nil, HELPER))
+				eq(K.IsHand(), false)
+				eq(#B.Sisters(), 0); eq(Stored(HELPER), 0, "his list says he is no Hand: gone")
+				-- Helper on the council too, and a Hand again. Zed's snapshot comes to him as a Hand (Zed's yes
+				-- may be 1.1's, the King's alone: his addon knows, ours cannot), Hera's while he is a
+				-- councillor alone.
+				ns.rdb.council = { at = 1, names = { ["sage elder"] = "Sage Elder", helper = "Helper" } }
+				Heard(KingSends("Helper"))
+				eq(K.IsHand(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				Lapse()
+				eq(K.IsHand(), true); eq(B.SeesSisters(), true)
+				-- To receive a council-only snapshot he must actually cease to be a Hand;
+				-- silence cannot manufacture that different audience anymore.
+				Heard(KingSends(nil, HELPER))
+				eq(K.IsHand(), false); eq(#B.Sisters(), 0, "explicit removal clears Hand-only Zeus")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(#B.Sisters(), 1, "Hera was received under council authority alone")
+				Heard(KingSends("Helper"))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 2, "this session: both, as 1.2.3 showed them")
+				-- His next session, the King away: both still held with the accepted appointment.
+				B.Reload()
+				s = B.Sisters()
+				eq(#s, 2, "both accepted audiences persist until an explicit change")
+				eq(Stored(HELPER), 2)
+				-- The King's list names him again: shown.
+				Heard(KingSends())
+				eq(#B.Sisters(), 2)
+				eq(T.Ask(true), true)
+				-- The King takes him off: what came to him as a Hand goes, the save too; his next ask says he
+				-- holds nothing, so that whoever's yes covers a councillor sends his again.
+				Heard(KingSends(nil, HELPER))
+				s = B.Sisters()
+				eq(#s, 1); eq(s[1].guild, "Olympus Hera"); eq(Stored(HELPER), 1)
+				w.sent = {}
+				w.clock = w.clock + T.ASK_EVERY
+				eq(T.Ask(false), true); eq(LastSent(w), "TA~Olympus II~0", "his next ask: afresh")
+				-- A no from its sender reaches a copy kept unseen.
+				Heard(KingSends("Helper"))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424243, Bank1()), "Zed-Realm")
+				eq(Stored(HELPER), 2)
+				Lapse()
+				B.Reload()
+				eq(#B.Sisters(), 2, "silence leaves both retained snapshots readable")
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				local _, mine = Stored(HELPER)
+				eq(mine["olympus zeus"], nil, "his no, unseen as it was"); assert(mine["olympus hera"], "Hera's stays")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a search's guild row says the same correspondent and items' value as the ranking's", function()
+		WithDirectory(function(w, K, Run)
+			local T, L, N = ns.Treasury, ns.L, ns.Nominees
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function() return true end,
+					RequestLoadItemDataByID = function() end,
+					GetItemInfo = function(id) return NAMES[id], "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, 10 end,
+				}
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, Bank1()), "Zed-Realm")
+				T.Show("summary")
+				local ranked = TipText(Key(T.Build(), "sister:Olympus Zeus"))
+				ns.Views.SetFilter("treasury", "zeus")
+				local found = Key(ns.Views.Build("treasury"), "found:olympus zeus")
+				assert(found, "the search finds the guild")
+				local said = TipText(found)
+				for _, want in ipairs({ L.TREASURY_RANK_CORR:format(ns.DisplayName("Zcorr-Realm")), L.TREASURY_RANK_VALUE:format(T.GoldText(600)) }) do
+					assert(ranked:find(want, 1, true), want .. " in the ranking's: " .. ranked)
+					assert(said:find(want, 1, true), want .. " in the search's: " .. said)
+				end
+				assert(not said:find(L.TREASURY_RANK_CORR_NONE, 1, true), said)
+			end)
+			ns.Views.ClearFilters(); N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): the correspondent kept with a guild's snapshot goes once the census names another guild master", function()
+		WithDirectory(function(w, K, Run)
+			local T, B, N = ns.Treasury, ns.Bank, ns.Nominees
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				AsKing()
+				N.Handle("CHANNEL", "Zed-Realm", ("NM~1~Olympus Zeus~%d~1~1~d=Federal Treasury=Zcorr"):format(w.clock))
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, Bank1()), "Zed-Realm")
+				eq(B.Correspondent("Olympus Zeus"), "Zcorr-Realm")
+				-- Zed logs off: his accepted list still counts, not merely the bank's historical fallback.
+				w.clock = w.clock + N.FRESH + 60
+				Census(w)
+				local name, kept = B.Correspondent("Olympus Zeus")
+				eq(name, "Zcorr-Realm"); eq(kept, false, "still the accepted nomination")
+				B.Reload()
+				eq(T.Ranking().rows[1].correspondent, "Zcorr-Realm", "kept across a reload")
+				-- Zora leads Olympus Zeus now, as the census says: the name Zed gave goes, the save too
+				-- (before: shown "as its guild master last named him" for good).
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zora", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				eq(B.Correspondent("Olympus Zeus"), nil, "not his to answer for under another guild master")
+				eq(T.Ranking().rows[1].correspondent, nil)
+				B.Reload()
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				eq(T.Ranking().rows[1].correspondent, nil, "gone from the save too")
+			end)
+			N.Reset()
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a sharer's no whispered to a viewer who had just logged off reaches him at his login's ask (his addon keeps the snapshot saved now), once", function()
+		WithDirectory(function(w, K, Run)
+			local T = ns.Treasury
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				AsZed()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 424242, Bank1())
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				assert(#w.whispered > 0, "sent to Sage")
+				local function Nos()
+					local n = 0
+					for _, x in ipairs(w.whispered) do if x.to == SAGE and x.msg == "TS~Olympus Zeus~0~0~" then n = n + 1 end end
+					return n
+				end
+				-- Sage logs off. Ten minutes later Zed says no: whispered to Sage, offline, so lost.
+				w.clock = w.clock + 600
+				w.whispered = {}
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(Nos(), 1)
+				-- An hour later Sage logs in, Zed's session the same: his login's ask is told it again.
+				w.clock = w.clock + 3600
+				w.whispered = {}
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				eq(Nos(), 1, "told at his login's ask (before: never, all of Zed's session)")
+				w.clock = w.clock + T.ASK_EVERY
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~1"); Run()
+				eq(Nos(), 1, "not at his routine asks")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): an officer demoted since she shared her guild's bank still takes it back with /oly bank share off, from the viewers' saves too; a yes stays a guild master's or an officer's", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- Zora, an officer, says yes; Sage's addon asks and takes it.
+				AsZora()
+				ns.rdb.bank = Snap(w, "Olympus Zeus", ns.me, 777777, Bank1())
+				StaticPopupDialogs.OLYMPUS_SISTER_BANK.OnAccept()
+				local msg = B.Message(ns.rdb.bank, "TS")
+				T.HandleAsk("CHANNEL", SAGE, "TA~Olympus II~0"); Run()
+				As(SAGE, "Olympus II", 3)
+				B.HandleSister("WHISPER", "Zora-Realm", msg)
+				eq(#B.Sisters(), 1); eq(Stored(SAGE), 1)
+				-- She is demoted: the server's rank 3, the census names her no officer now.
+				ns.rdb.guilds["Olympus Zeus"] = Vouched({ total = 100, online = 9, zones = {}, t = w.clock, leader = "Zed", realm = "Realm" }, "W3-Realm", "W4-Realm")
+				As("Zora-Realm", "Olympus Zeus", 3)
+				w.whispered = {}
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(B.SisterConsent(), false, "her no, taken (before: refused, her yes kept)")
+				local no
+				for _, x in ipairs(w.whispered) do if x.to == SAGE then no = x.msg end end
+				eq(no, "TS~Olympus Zeus~0~0~", "told to Sage, whose addon asked within 18 minutes")
+				As(SAGE, "Olympus II", 3)
+				B.HandleSister("WHISPER", "Zora-Realm", no)
+				eq(#B.Sisters(), 0, "taken back"); eq(Stored(SAGE), 0, "from the save too")
+				-- A yes is still a guild master's or an officer's alone.
+				As("Zora-Realm", "Olympus Zeus", 3)
+				SlashCmdList.OLYMPUS("bank share on")
+				eq(B.SisterConsent(), false)
+				-- Who never shared and is no officer has no answer to give.
+				As("Plain Member-Realm", "Olympus Zeus", 3)
+				SlashCmdList.OLYMPUS("bank share off")
+				eq(ns.db.sisterBankShares["plain member-realm"], nil)
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): a loading screen's moment with no guild's name (in a guild) takes nothing away: what is shown and saved stays, a snapshot heard then is held and taken after it, and its sender's no heard then still counts", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			local savedInGuild = IsInGuild
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				-- The Treasurer is of the audience through his guild, <Olympus>, which a loading screen hides.
+				AsTreasurer()
+				eq(B.SeesSisters(), true)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, Bank1()), "Zed-Realm")
+				eq(#B.Sisters(), 1); eq(Stored(ns.me), 1)
+				IsInGuild = function() return true end
+				GetGuildInfo = function() return nil end
+				eq(B.Holding(), false, "unseen meanwhile")
+				Hear(Snap(w, "Olympus Hera", HERA, 900000, Bank1(2770, 20)), HERA)
+				eq(B.Held(), 1, "heard on the loading screen: held")
+				w.clock = w.clock + B.ROLE_SETTLE + 1
+				eq(B.Holding(), false); eq(Stored(ns.me), 1, "nothing dropped, however long it lasts")
+				CoreFire("DATA_CHANGED")
+				eq(B.Held(), 1, "not handled while it lasts")
+				AsTreasurer()
+				Census(w)
+				CoreFire("DATA_CHANGED")
+				eq(#B.Sisters(), 2, "both, Hera's heard on the loading screen too"); eq(Stored(ns.me), 2)
+				-- Zed's no heard on a loading screen: still taken (from the sender of the copy kept).
+				GetGuildInfo = function() return nil end
+				B.HandleSister("WHISPER", "Zed-Realm", "TS~Olympus Zeus~0~0~")
+				AsTreasurer()
+				local s = B.Sisters()
+				eq(#s, 1); eq(s[1].guild, "Olympus Hera"); eq(Stored(ns.me), 1)
+			end)
+			IsInGuild = savedInGuild
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): the items' value asks the game for VALUE_ASKS items' data a draw at most, the rest at the next draws, none twice, and fills in once their data comes", function()
+		WithDirectory(function(w, K, Run)
+			local T, B = ns.Treasury, ns.Bank
+			KeepLogin(function()
+				ns.Comm.loginAt = w.clock - 3600
+				local cached, requested = {}, {}
+				C_Item = {
+					GetItemNameByID = function(id) return NAMES[id] end,
+					IsItemDataCachedByID = function(id) return cached[id] == true end,
+					RequestLoadItemDataByID = function(id) requested[#requested + 1] = id end,
+					GetItemInfo = function(id)
+						if not cached[id] then return nil end
+						return "Item " .. id, "|Hitem:" .. id .. "|h", 1, 1, 1, "Trade Goods", "Cloth", 20, "", 134400, 2
+					end,
+				}
+				-- 150 items no client of this test has loaded, over two tabs (made-up item numbers).
+				local tabs = { { i = 1, items = {} }, { i = 2, items = {} } }
+				for k = 1, 150 do
+					local tab = tabs[k <= 75 and 1 or 2]
+					tab.items[#tab.items + 1] = { id = 30000 + k, n = 1, s = #tab.items + 1 }
+				end
+				AsKing()
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 100000, tabs), "Zed-Realm")
+				T.Show("summary")
+				T.Build()
+				eq(#requested, B.VALUE_ASKS, "a draw asks VALUE_ASKS at most")
+				T.Build()
+				eq(#requested, 150, "the rest at the next draw")
+				local seen = {}
+				for _, id in ipairs(requested) do assert(not seen[id], "asked twice: " .. id); seen[id] = true end
+				eq(T.Ranking().rows[1].pending, 150)
+				for k = 1, 150 do cached[30000 + k] = true; B.ItemInfoReceived(30000 + k) end
+				local r = T.Ranking().rows[1]
+				eq(r.pending, 0); eq(r.value, 300); eq(r.total, 100300)
+				eq(#requested, 150, "nothing asked once loaded")
+			end)
+		end)
+	end)
+
+	test("1.2.4 Guild treasuries (review): one character's save keeps SISTERS_MAX guilds at most, the one heard longest ago leaving first", function()
+		WithDirectory(function(w, K, Run)
+			local B = ns.Bank
+			local savedMax = B.SISTERS_MAX
+			local ok, err = pcall(KeepLogin, function()
+				ns.Comm.loginAt = w.clock - 3600
+				As(SAGE, "Olympus II", 3)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 1, Bank1()), "Zed-Realm")
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Hera", HERA, 2, Bank1()), HERA)
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 3, Bank1(2589, 61)), "Zed-Realm") -- (Zeus's newer: heard last)
+				eq(Stored(SAGE), 2)
+				B.SISTERS_MAX = 1
+				w.clock = w.clock + 1; Census(w)
+				Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 4, Bank1(2589, 62)), "Zed-Realm")
+				local n, mine = Stored(SAGE)
+				eq(n, 1); assert(mine["olympus zeus"] and not mine["olympus hera"], "Hera's, heard longest ago, left the save")
+			end)
+			B.SISTERS_MAX = savedMax
+			if not ok then error(err, 0) end
 		end)
 	end)
 end
@@ -46740,12 +48258,16 @@ do
 			local row = Find(lines, "sister:Olympus Zeus")
 			assert(row and row.onClick, Texts(lines))
 			-- (1.2's directory: a click opens the bank in place; its page is a search's way to an item.)
-			eq(Plain(row.text), "[+] <Olympus Zeus>"); eq(row.right, T.Coins(424242))
+			-- (1.2.4, changed on purpose: the ranking's row, its place and correspondent, its total; its
+			-- gold, items and their value under it, the stacks in its tooltip. No item data here: "at least".)
+			eq(Plain(row.text), "[+] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"))
+			eq(row.right, L.TREASURY_RANK_ATLEAST:format(T.Coins(424242)))
 			local tip = Tip(row)
-			assert(tip:find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true) and tip:find("Zed", 1, true), tip)
+			assert(tip:find(L.TREASURY_GUILD_VALUE_TIP, 1, true) and tip:find("Zed", 1, true) and tip:find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), tip)
 			local under
 			for i, l in ipairs(lines) do if l == row then under = lines[i + 1] end end
-			eq(under.indent, 1); assert(Plain(under.text):find(L.TREASURY_GUILD_ITEMS:format(60, 1), 1, true), under.text)
+			eq(under.indent, 1)
+			assert(Plain(under.text):find(L.TREASURY_RANK_DETAIL:format(T.GoldText(424242), 60, L.TREASURY_RANK_ATLEAST:format(T.GoldText(0))), 1, true), under.text)
 			assert(Plain(under.right):find("Zed", 1, true), under.right)
 			-- Its page: the way back, its title, the same portrait (no stacks gone, nothing to ask for), its Book not shared.
 			eq(T.ShowGuild("Olympus Zeus"), true)
@@ -46766,7 +48288,8 @@ do
 			for _, l in ipairs(page) do
 				if Plain(l.text) == L.TREASURY_BANK_GOLD then eq(l.right, T.Coins(424242)) end
 				if Plain(l.text) == L.TREASURY_GUILD_ITEMS:format(60, 1) then
-					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_UNAVAILABLE, 1, true), "no gold estimate, said so")
+					-- (1.2.4: the items' value is the vendor's price, said so; before, no estimate at all.)
+					assert(Tip(l):find(L.TREASURY_GUILD_VALUE_TIP, 1, true), "what the value is, said so")
 				end
 				if l.items then eq(l.onItem, nil, "nothing to ask for from another guild's bank") end
 			end
@@ -46946,7 +48469,7 @@ do
 			-- (1.2: a click opens its bank in place; its page is ShowGuild's, a search's way to an item.)
 			row.onClick()
 			local open = Texts(Summary())
-			assert(open:find("[-] <Olympus Zeus>", 1, true), open)
+			assert(open:find("[-] " .. L.TREASURY_RANK_ROW:format(1, L.TREASURY_RANK_NO_CORR, "<Olympus Zeus>"), 1, true), open) -- (1.2.4: the ranking's row)
 			eq(T.ShowGuild("Olympus Zeus"), true); eq(T.mode, "guild")
 			assert(Texts((T.Build())):find(L.TREASURY_GUILD_TITLE:format("Olympus Zeus"), 1, true), "its page")
 			T.Show("summary")
@@ -46997,7 +48520,7 @@ test("1.1 the treasury's new lines (bank, sister guilds, requests, donations, ba
 		"BANK_SISTERS_TIP", "BANK_SISTER_OF", "BANK_SISTER_TAB", "BANK_SISTER_ASK", "BANK_SISTER_YES", "BANK_SISTER_NO", "BANK_SISTER_ON",
 		"BANK_SISTER_OFF", "BANK_SISTER_ONLY", "HELP_BANK", "TREASURY_GUILDS", "TREASURY_GUILDS_TIP", "TREASURY_GUILDS_NONE",
 		"TREASURY_GUILDS_APPROVAL", "TREASURY_GUILD_TITLE", "TREASURY_GUILD_ITEMS", "TREASURY_GUILD_SHARED_BY",
-		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_UNAVAILABLE", "TREASURY_GUILD_BOOK_UNAVAILABLE",
+		"TREASURY_GUILD_SHARED_SHORT", "TREASURY_GUILD_VALUE_TIP", "TREASURY_GUILD_BOOK_UNAVAILABLE",
 		"TREASURY_GUILD_SNAPSHOT_GONE", "TREASURY_EARLY_COLLAPSE_TIP",
 		"BANK_REQUESTS", "BANK_REQUESTS_TIP", "BANK_MY_REQUESTS", "BANK_REQUEST_HOLDS", "BANK_REQUEST_CLICK", "BANK_REQUEST_CLICK_ANSWER",
 		"BANK_REQUEST_NEW_LINE", "BANK_REQUEST_PROMPT", "BANK_REQUEST_ANY_PROMPT", "BANK_REQUEST_ASK", "BANK_REQUEST_ANSWER", "BANK_REQUEST_MARK_DONE",
@@ -50393,15 +51916,19 @@ do
 				eq(#w.whispered, 1, "the no"); eq(w.whispered[1].to, KING); eq(w.whispered[1].msg, "TS~Olympus Zeus~0~0~")
 				AsKing(); B.HandleSister("WHISPER", "Zed-Realm", w.whispered[1].msg)
 				eq(#B.Sisters(), 0, "withdrawn")
-				-- Once a session: his asks after that cost nothing; a Hand's addon asking afresh (after its
-				-- login: it holds nothing) is not told either.
+				-- Once a session: his asks after that cost nothing. (1.2.4, changed on purpose: a Hand's
+				-- addon asking afresh, after its login, is told too, once: a viewer's addon keeps a
+				-- guild's snapshot across logouts now, so an ask after a login may hold his.)
 				AsLord(); w.clock = w.clock + T.ASK_EVERY
 				T.HandleAsk("CHANNEL", KING, "TA~Olympus~1"); Run()
 				eq(#w.whispered, 1, "told once")
 				AsKing(); K.AddHand("Helper"); K.SendHands(true); local hands = LastSent(w)
 				AsLord(); K.HandleCommand("CHANNEL", KING, hands)
 				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~0"); Run()
-				eq(#w.whispered, 1, "a fresh ask holds nothing")
+				eq(#w.whispered, 2, "an ask after a login: told too")
+				eq(w.whispered[2].to, "Helper-Realm"); eq(w.whispered[2].msg, "TS~Olympus Zeus~0~0~")
+				T.HandleAsk("CHANNEL", "Helper-Realm", "TA~Olympus II~1"); Run()
+				eq(#w.whispered, 2, "once")
 				-- The Lord's addon reloads (its session's memory gone) while the King still holds his bank
 				-- (sent before the no): remembered, the King's next ask gets the no.
 				B.Reset(); Holds()
@@ -50990,7 +52517,8 @@ do
 				Pages(function(path, doc)
 					assert(doc:find("from each one whose addon asked in the last 18 minutes", 1, true), path)
 					assert(doc:find("from the others at their next ask", 1, true), path)
-					assert(doc:find("keeps it on his screen until that player logs out", 1, true), path)
+					-- (1.2.4, changed on purpose: a viewer's addon keeps it across logouts now.)
+					assert(doc:find("keeps it, saved (1.2.4), until his no reaches that viewer's addon at a later ask", 1, true), path)
 					assert(doc:find("your no takes it back from their screens: at once from those whose addon asked in the last 18 minutes", 1, true), path)
 				end)
 			end)
@@ -52771,7 +54299,7 @@ do
 		end)
 	end
 
-	assert(loadfile(ROOT .. "tests/chat-role-window.lua"))(ns, test, eq, WithWindow)
+	assert(loadfile(ROOT .. "tests/chat-role-window.lua"))(ns, test, eq, WithWindow, WithGamepadUI)
 	assert(loadfile(ROOT .. "tests/chat-picker-anchor.lua"))(ns, test, eq, WithWindow, ForeverWorld)
 	assert(loadfile(ROOT .. "tests/chat-role-badges.lua"))(ns, test, eq, WithWindow)
 	assert(loadfile(ROOT .. "tests/chat-guild-labels.lua"))(ns, test, eq, WithWindow)
@@ -53000,7 +54528,7 @@ do
 				local arena = assert(Subtab("arena"), "the stable Arena subtab")
 				arena:Click()
 				assert(f.subMenu:IsShown(), "an empty Arena still explains where rooms come from")
-				eq(f.subMenu.rows[1].text:GetText(), "No fight chat open - open the Arena", "an updated ChatWindow has safe English fallbacks before a restart loads its new locale keys")
+				eq(f.subMenu.rows[1].text:GetText(), "No game chat open - open the Arena", "Games has safe English fallbacks before a restart loads its new locale keys")
 				f.subMenu.rows[1]:Click(); eq(pageOpens, 1)
 
 				local function Room(id, title, active)
@@ -54100,7 +55628,7 @@ do
 				local shown = {}
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() then shown[#shown + 1] = b.item.entry.kind end end
 				eq(table.concat(shown, ","), "global,guild,arena", "Arena follows the defaults; authorized tabs follow it")
-				eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Arena") .. mark, "the pickers' mark")
+				eq(arena.label:GetText(), w.CW.Localized("ARENA_CHAT_TAB", "Games") .. mark, "the Games picker keeps its stable arena room key")
 				eq(global.underline:IsShown(), true); eq(guild.underline:IsShown(), false)
 				eq(global:GetHeight(), ns.Views.SUBTAB_STYLE.height, "Chat and Realm tabs use the same height")
 				eq(global.label:Anchor("CENTER")[5], ns.Views.SUBTAB_STYLE.labelY)
@@ -54464,7 +55992,7 @@ do
 			local function Cell(kind)
 				for _, b in ipairs(f.subtabs.nav) do if b:IsShown() and b.item.entry.kind == kind then return b end end
 			end
-			local PICKERS = { arena = w.CW.Localized("ARENA_CHAT_TAB", "Arena") } -- (1.2.3: Race and Class gone)
+			local PICKERS = { arena = w.CW.Localized("ARENA_CHAT_TAB", "Games") } -- Games label; stable arena key, no Race/Class tabs
 			local savedTexture = rawget(_G, "C_Texture")
 			C_Texture = nil
 			w.CW.Render()
@@ -54671,7 +56199,7 @@ do
 			eq(calls, 1, "drawn once")
 			f:Fire("OnUpdate", 0.3)
 			eq(calls, 1, "nothing new: not again")
-			-- The census: at most once every 5 seconds.
+			-- 1.2.4: background census marks refresh once a minute, not every five seconds.
 			local clock = 100
 			GetTime = function() return clock end
 			w.fire("DATA_CHANGED")
@@ -54680,8 +56208,8 @@ do
 			w.fire("DATA_CHANGED")
 			clock = 102
 			f:Fire("OnUpdate", 0.3)
-			eq(calls, 2, "not within 5 s")
-			clock = 105
+			eq(calls, 2, "not within 60 s")
+			clock = 160
 			f:Fire("OnUpdate", 0.3)
 			eq(calls, 3, "then once")
 			-- Unread counts start again when it opens.
@@ -55298,7 +56826,12 @@ test("watch: chat moderation: the Chat tab: a deleted line keeps its greyed name
 			"CHATS_TAB_ADD_TIP", "CHATS_TAB_STEPS", "CHATTAB_POINTER_TITLE", "CHATTAB_POINTER", "CHATS_TAB_AWAY", "CHATS_TAB_AWAY_TIP",
 			"CHATWIN_NEW_IN", "CHATSET_TITLE", "CHATSET_TIP", "CHATSET_SWITCH_TIP", "CHATSET_BACK", "CHATSET_CHATS_ON", "CHATSET_CHATS_OFF",
 			"CHATSET_SHOWN", "CHATSET_MUTED", "CHATSET_MUTE_TIP", "CHATSET_WHERE", "CHATSET_WHERE_NEXT", "CHATSET_WHERE_TIP", "CHATSET_TAB",
-			"CHATSET_GUILDS_SHOWN", "CHATSET_GUILDS_HIDDEN", "CHATSET_GUILDS_TIP" }) do
+			"CHATSET_GUILDS_SHOWN", "CHATSET_GUILDS_HIDDEN", "CHATSET_GUILDS_TIP",
+			-- (1.2.4: a room's line refused or lost, and why; one of ours still sending.)
+			"CHATWIN_WHY_ALONE", "CHATWIN_WHY_FAST", "CHATWIN_WHY_BUSY", "CHATWIN_WHY_QUEUE", "CHATWIN_WHY_CANCELLED",
+			"CHATWIN_WHY_REVOKED", "CHATWIN_WHY_ACCESS", "CHATWIN_WHY_OFF", "CHATWIN_WHY_NETOFF", "CHATWIN_WHY_TIMEOUT",
+			"CHATWIN_WHY_SEVERE", "CHATWIN_WHY_LOCKDOWN", "CHATWIN_WHY_GUILD", "CHATWIN_WHY_EMPTY", "CHATWIN_WHY_SIZE",
+			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING", "CHATWIN_PART_SENT" }) do
 			assert(type(rawget(ns.L, k)) == "string" and rawget(ns.L, k) ~= "", "English: " .. k)
 			assert(type(rawget(pt.L, k)) == "string" and rawget(pt.L, k) ~= rawget(ns.L, k), "pt-BR: " .. k)
 			eq(Codes(rawget(pt.L, k)), Codes(rawget(ns.L, k)), "codes: " .. k)
@@ -60524,9 +62057,9 @@ end)()
 	end)
 
 	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.3") -- (1.2.2: the same files, a new version, since 1.2.1 was already published; 1.2.3 next)
+		eq(ns.VERSION, "1.2.4") -- the consolidated correction candidate has one identity in both folders
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.3", 1, true))
+		assert(toc:find("## Version: 1.2.4", 1, true))
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -60587,9 +62120,9 @@ test("hop sighting mixed versions: a client without LY ignores the new word", fu
 end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
-		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-sightings", "map-wanted", "king-arrow",
-		"church", "church-count", "church-view", "church-head", "department-access", "watch-council-view", "innkeeper-arrow", "squads", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
-		"chat-channel-links", "perf", "roster" }
+		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
+		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -60598,7 +62131,9 @@ for _, name in ipairs(focused) do
 		or name == "guild-charter" and { WithGamepadUI = WithGamepadUI, WithUI = WithUI, FreshComm = FreshComm }
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
+		or name == "campaign" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
+		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,
@@ -60867,11 +62402,12 @@ end)()
 	-- the minute's. The account has played before (an update) unless a test says otherwise. The
 	-- portrait frame as the client's, with its portrait texture (1.1.5: the letter's window must not
 	-- be one, Harness.Win.Metal).
-	local function WithLetters(fn)
+	local function WithLetters(fn, version)
 		WithUI(function()
-			local saved = { letters = ns.Letters, read = ns.db.lettersRead, baseline = ns.db.lettersAutoVersion, sessions = ns.db.sessions, combat = rawget(_G, "InCombatLockdown"),
+			local saved = { version = ns.VERSION, letters = ns.Letters, read = ns.db.lettersRead, baseline = ns.db.lettersAutoVersion, sessions = ns.db.sessions, combat = rawget(_G, "InCombatLockdown"),
 				instance = IsInInstance, gamepad = ns.GamepadUI, member = ns.IsMember, log = ns.Log, print = ns.Print, chat = ns.db.addonChat,
 				template = TEMPLATES.PortraitFrameTemplate }
+			if version then ns.VERSION = version end -- reproduce a historical release without changing the running candidate
 			local w = { on = {}, after = {}, every = {}, printed = {} }
 			saved.fire = ns.Fire
 			local ok, err = pcall(function()
@@ -60908,6 +62444,7 @@ end)()
 				fn(w, saved)
 			end)
 			TEMPLATES.PortraitFrameTemplate = saved.template
+			ns.VERSION = saved.version
 			ns.Letters, ns.db.lettersRead, ns.db.sessions = saved.letters, saved.read, saved.sessions
 			ns.db.lettersAutoVersion = saved.baseline
 			InCombatLockdown, IsInInstance, ns.IsMember = saved.combat, saved.instance, saved.member; GamepadStyle(nil)
@@ -60922,8 +62459,8 @@ end)()
 		return n
 	end
 
-	test("1.2.3 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.3")
+	test("1.2.4 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.4")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -60953,22 +62490,23 @@ end)()
 			ns.db.lettersRead = { ["1.1.6"] = true, ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true)
-			eq(w.Letters.Frame().version, "1.2.3")
-			eq(ns.db.lettersRead["1.2.3"], true)
+			eq(w.Letters.Frame().version, ns.VERSION)
+			eq(ns.db.lettersRead[ns.VERSION], true)
 			eq(w.Letters.Ask("update"), false, "shown once per release")
 		end)
-		-- A reader of the published 1.2.2 letter gets 1.2.3's alone.
+		-- A reader of all previous published letters gets the new candidate's alone.
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true }
 			ns.Consent.Show():Hide()
-			eq(w.Letters.Ask("update"), true, "a reader of the published 1.2.2 letter gets 1.2.3's")
-			eq(w.Letters.Frame().version, "1.2.3")
-			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text("1.2.3")), "and only 1.2.3's")
+			eq(w.Letters.Ask("update"), true, "a reader of the previous published letter gets the new one's")
+			eq(w.Letters.Frame().version, ns.VERSION)
+			eq(w.Letters.Frame().body:GetText(), select(2, w.Letters.Text(ns.VERSION)), "only the current letter")
 		end)
 	end)
 
 	test("1.2.3 version letters: unread 1.2.2 comes before 1.2.3 on the update parchment, both are marked shown, but history remains individual", function()
-		WithLetters(function(w)
+		local function LegacyLetters(fn) return WithLetters(fn, "1.2.3") end
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			local _, oldBody = Lt.Text("1.2.2")
 			local _, newBody = Lt.Text("1.2.3")
@@ -60996,7 +62534,7 @@ end)()
 			eq(Lt.Show("1.2.2"), true)
 			eq(Lt.Frame().body:GetText(), oldBody)
 		end)
-		WithLetters(function(w)
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.2"] = true }
 			ns.Consent.Show():Hide()
@@ -61004,7 +62542,7 @@ end)()
 			eq(Lt.Frame().body:GetText(), select(2, Lt.Text("1.2.3")), "read old release is not repeated")
 		end)
 		-- An account whose 1.2.0 letter was never shown, nor 1.2.2's: both, the oldest first.
-		WithLetters(function(w)
+		LegacyLetters(function(w)
 			local Lt = w.Letters
 			local _, b120 = Lt.Text("1.2.0")
 			local _, b122 = Lt.Text("1.2.2")
@@ -61349,7 +62887,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)

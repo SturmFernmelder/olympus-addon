@@ -73,6 +73,13 @@ local function Agreed(w, cast, opts)
 	w:Run(0)
 	return oid
 end
+-- (1.2.3) Both fighters in combat for `secs` (the game's PLAYER_REGEN_DISABLED): the duel's own
+-- clock, which a counted round needs (at least ArenaLedger.MIN_RATED_DUR, the triple check's bug 8).
+local function Fought(w, cast, secs)
+	w:Combat(cast.A, true)
+	w:Combat(cast.B, true)
+	w:Run(secs or 20)
+end
 
 print("the fights part review: the money (blocker and majors)")
 
@@ -201,9 +208,11 @@ test("1.2 the fights part review: the currency, the live switch and the caps (th
 	w:Run(0)
 	cast.B.ns.ArenaRoles.Currency = cur
 	eq(cast.A.ns.ArenaFights.challenges[oid].state, "no"); eq(cast.A.ns.ArenaFights.challenges[oid].why, "c")
-	-- An L challenge answered where the live switch is off (its mode, not the answerer's NewMode).
+	-- An L challenge with gold on it answered where the live switch is off (its mode, not the
+	-- answerer's NewMode). (1.2.3, the owner's decision: the switch is the bets' alone, so this is now
+	-- a staked one; a free L challenge is answered whatever it says, tests/arena/duels-count.lua.)
 	w:Run(5)
-	oid = assert(Fights(w, cast.A).Challenge(cast.B.name, { bo = 1 }))
+	oid = assert(Fights(w, cast.A).Challenge(cast.B.name, { bo = 1, stake = 10000, how = "d", cur = "g" }))
 	w:Run(0)
 	local live = cast.B.ns.ArenaRoles.Live
 	cast.B.ns.ArenaRoles.Live = function() return false end
@@ -215,9 +224,10 @@ test("1.2 the fights part review: the currency, the live switch and the caps (th
 	local can = W3.M(w, cast.A, "Arena").Can
 	ok, why = can("fights.challenge", cast.B.name, { stake = 10000, how = "a", arbiter = cast.spectator.name, cur = "g" })
 	eq(ok, false); eq(why, "arbiter-cap")
-	-- A Judge whose money side is missing refuses the stake (no book, no unchecked stake). (A minute on:
-	-- the unanswered challenge above still holds the challenger off until then.)
-	w:Run(60)
+	-- A Judge whose money side is missing refuses the stake (no book, no unchecked stake). (Once the
+	-- unanswered challenge above lapsed: it holds the challenger off until then, 1.2.3's
+	-- CHALLENGE_TIME and CHALLENGE_SLACK, F.OpenDuel.)
+	w:Run(cast.A.ns.ArenaFights.CHALLENGE_TIME + cast.A.ns.ArenaFights.CHALLENGE_SLACK)
 	oid = Agreed(w, cast, { how = "a", arbiter = cast.arbiter.name, stake = 10000, cur = "g" })
 	cast.arbiter.ns.Stakes.Open = nil
 	ok, why = Fights(w, cast.arbiter).Judge(oid, true)
@@ -300,6 +310,8 @@ test("free duel qualification: native local completion and both reports retain g
 	cast.A.level, cast.B.level = 40, 47
 	cast.B.guild = "Olympus Other"
 	local oid = Agreed(w, cast, { bo = 1 })
+	-- (1.2.3: a round needs its known length, at least 15 s, for points: bug 8's limits.)
+	Fought(w, cast)
 	W3.Duel(w, { cast.A, cast.B }, cast.A, cast.B)
 	w:Run(0)
 	eq(#Fights(w, cast.A).Qualification(), 0, "a nearby system line alone is not participation")
@@ -319,7 +331,14 @@ test("free duel qualification: native local completion and both reports retain g
 	W3.Duel(w, { cast.A, cast.B }, cast.A, cast.B)
 	w:Run(0)
 	eq(#Fights(w, cast.A).Qualification(), 1, "duplicate finish and line do not count again")
-	eq(#Ledger(w, cast.A).Entries(), 0, "qualification does not create an arbiter's ranking")
+	-- (1.2.4, the author's ask: the ledger is the core's, so the duel's own two halves make its entry
+	-- here without the companion too; it is a direct duel's, never an arbiter's.)
+	local entries = Ledger(w, cast.A).Entries()
+	eq(#entries, 1, "the duel once, its own two halves' entry")
+	for _, e in ipairs(entries) do
+		eq(e.gkArb, nil, "qualification does not create an arbiter's ranking")
+		eq(cast.A.ns.ArenaFights.Has(e.fl, "d"), true, "the duel's own two halves")
+	end
 	W3.NoErrors(w)
 end)
 
@@ -330,7 +349,10 @@ test("free duel qualification: one physical native completion across challenges;
 		cast.A.level, cast.B.level = row[1], row[2]
 		Agreed(w, cast, { bo = 1 })
 		w:Run(4)
-		Agreed(w, cast, { bo = 1 })
+		-- (1.2.3, the triple check's bug 3: a second challenge between the pair no longer opens
+		-- while the first is open, F.OpenDuel; one duel is still one record.)
+		eq(select(2, Fights(w, cast.A).Challenge(cast.B.name, { bo = 1 })), "busy")
+		Fought(w, cast)
 		w:Fire(cast.A, "DUEL_FINISHED")
 		W3.Duel(w, { cast.A, cast.B }, cast.A, cast.B)
 		w:Run(0)
@@ -364,10 +386,13 @@ test("free duel qualification: retained evidence cap folds points and replay bou
 	cast.A.ns.ArenaFights.KEEP = 1
 	for _ = 1, 2 do
 		Agreed(w, cast, { bo = 1 })
+		Fought(w, cast) -- (1.2.3: a known length of 15 s or more, bug 8)
 		W3.Duel(w, { cast.A, cast.B }, cast.A, cast.B)
 		w:Run(0)
 		w:Fire(cast.A, "DUEL_FINISHED")
 		w:Run(4)
+		w:Combat(cast.A, false)
+		w:Combat(cast.B, false)
 	end
 	local q = Fights(w, cast.A).Qualification()
 	eq(#q, 1); eq(q.pointsTenths, 26); eq(q.wins, 2)
@@ -1022,7 +1047,9 @@ test("1.2 the fights part review: under the gamepad UI the King's letter never o
 	eq(letter == nil or not letter:IsShown(), true, "not by itself")
 	eq(Printed(A, A.ns.L.HONOR_LETTER_WAITING), true)
 	eq(#A.ns.HonorsNet.QueuedLetters(), 1)
-	w:As(A, A.ns.ProfileEdit.Open)
+	-- (1.2.4: his profile is "My profile" in the Olympus window, stood in here: W3.PageUI.)
+	W3.PageUI(w, A)
+	eq(w:As(A, A.ns.ProfileEdit.Open), true)
 	letter = A.ns.HonorsNet.LetterFrame()
 	eq(letter ~= nil and letter:IsShown(), true, "the player's click opened it")
 	W3.NoErrors(w)
@@ -1044,11 +1071,12 @@ test("1.2 the fights part review: in the chat icon picker an honour's mark picks
 	local list = PE.IconList("icon")
 	eq(type(list[1]), "table"); eq(list[1].key, "gryphon-gold")
 	eq(#list > 1, true, "a councillor: the game's icons after his marks")
-	-- The picker's OK with his honour's mark (Workshop.IconPickerHost's onPick, as the game calls it).
-	local onPick
-	hc.ns.Workshop.IconPickerHost = function(parent, l, fn) onPick = fn return {} end
-	PE.IconPicker("icon", {})
-	w:As(hc, onPick, "gryphon-gold")
+	-- His honour's mark chosen and used in "My profile"'s Icons section (1.2.4: the picker the Edit
+	-- hosted, Workshop.IconPickerHost, is the page's own section now; its Use, as the game calls it).
+	W3.PageUI(w, hc)
+	eq(PE.Open("icon"), true)
+	eq(PE.ChooseIcon("gryphon-gold"), true)
+	eq(PE.UseIcon(), true)
 	eq(hc.ns.ArenaProfile.Pick().frame, "arena-champion", "the honour picked")
 	eq(hc.ns.CouncilIcon(hc.name), "", "his own icon taken away: the mark shows")
 	-- A non-councillor: his marks only.

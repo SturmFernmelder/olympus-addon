@@ -146,7 +146,12 @@ function Court.Call(name, words)
 		ns.Comm.Whisper(name, ("T5~%d"):format(holding.id), "court call " .. name)
 		words = CleanNote(words)
 		if words ~= "" then
-			ns.Comm.Whisper(name, ("T5~%d~%d~%s"):format(holding.id, ServerNow(), words), "court note " .. name)
+			local originalAt = ServerNow()
+			ns.Comm.Whisper(name, ("T5~%d~%d~%s"):format(holding.id, originalAt, words), "court note " .. name)
+			local history = ns.CarryHistory
+			if history and history.CaptureOriginal then history.CaptureOriginal("C", name,
+				tostring(holding.id) .. ":" .. originalAt .. ":" .. name, originalAt, GetGuildInfo("player"),
+				{ court = holding.id, words = words, to = name }) end
 		end
 	end
 	ns.Print(L.COURT_CALLING:format(ns.DisplayName(name)))

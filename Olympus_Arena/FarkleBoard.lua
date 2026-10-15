@@ -2787,7 +2787,12 @@ function Board.ShowAsk(kind, id)
 		ask.lines[1]:SetText(T("FARKLE_B_ASK_INVITES", Name(t.host)))
 		ask.lines[2]:SetText(T("FARKLE_B_ASK_TERMS", Num(t.target), t.secs or 60))
 		ask.lines[3]:SetText(StakeLine(t))
-		ask.lines[4]:SetText(t.mode == "T" and L.FARKLE_B_ASK_REHEARSAL or L.FARKLE_B_ASK_TAVERN) -- (every game that counts: a tavern or a camp)
+		-- (1.2.3, decision 1: a free game in T counts for the history and the ranking, the live
+		-- switch off, and says so; a rehearsal is only a table that really does not: one asked for,
+		-- a test build's, a 1.2.2 host's. Every game that counts: a tavern or a camp.)
+		local line = L.FARKLE_B_ASK_TAVERN
+		if t.mode == "T" then line = FT().Counted(id) == true and L.FARKLE_B_ASK_COUNTS or L.FARKLE_B_ASK_REHEARSAL end
+		ask.lines[4]:SetText(line)
 		ask.lines[5]:SetText(h1); ask.lines[6]:SetText(h2)
 		ask.sober:SetShown(t.hic == true); ask.sober:SetOn(false)
 		ask.spec:Show(); ask.spec:SetOn(true)

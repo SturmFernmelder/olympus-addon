@@ -50,6 +50,15 @@ local ADDON, ns = ...
 --                by the author's alone, ChurchCount.SendTop, while it is online with the public
 --                ranking open), held while that word names him and is no older than its own 30
 --                days (the shepherd's crook with its sleeping lamb).
+--   apostle      (1.2.4) the Church's top 3 Apostles over the last 30 days: the same NR~1~t word
+--                as the missionaries' (its first list), held as theirs (the cross: gold, silver,
+--                bronze).
+--   bones        (1.2.4) the top 3 players of Bone Throw of the last month (FarkleTable.Best, the
+--                games both players' halves agree on, as this client holds them; at least one win),
+--                held through the month after it, as donor-month is (the lucky charm).
+--   wanted-slayer (1.2.4) the Slayers' signed top 3 (Wanted.GlobalSnapshot's rows: all time, by
+--                verified GUID), by his GUID alone, never a name (the skeletal horse; it was the
+--                orc's wolf, the arena's, until 1.2.4).
 -- Gone with the design: the week's top donor (Donors still works the week out, for the race
 -- views; no honour comes of it) and the phoenix.
 -- The guild-rank frames (Borders.TIERS, and Borders.MarkOf's marks) stay as they are: "rank" is
@@ -69,16 +78,18 @@ local ADDON, ns = ...
 --   donor-top-<1-3> (cornucopia-gold/-silver/-bronze), donor-month-<1-3> (koi-...),
 --   oracle-<1-3> (raven-...), guild-top-leader (owl-gold, winged);
 --   (1.2.3) missionary-<1-3> (crook-gold/-silver/-bronze, plain);
+--   (1.2.4) apostle-<1-3> (cross-gold/-silver/-bronze), bones-<1-3> (charm-...), wanted-slayer-<1-3>
+--     (skeletal-horse-...), all plain;
 --   level-race-<milestone> (level-race-20: comet-bronze, -40 comet-silver, -60 comet-gold; the
 --     milestone written on it);
 --   the tier's badge: arena-tier-<bronze|silver|gold> (the crossed swords of the arena's
 --     division, a badge in the arena's screens: no frame, no mark, no title).
 --   A pick's frame may also be "rank" (the Olympus rank's frame) or "none".
 --   1.2.1, a preview only (Honors.PREVIEWS: the author's /oly borders test <key>; no honour has
---   these keys, so nobody holds, wears or is awarded them): apostle-<1-3> (cross-gold/-silver/
---   -bronze), bones-<1-3> (charm-...), arena-race-skyborn (owlcat-gold; -2, -3 silver and bronze),
---   all plain; and apostle-red (cross-red, plain, on the black underlay: its metal "black"), also
---   a signed Apostle's own look on his own screen (Borders.OwnLook), never anyone's honour.
+--   these keys, so nobody holds, wears or is awarded them): arena-race-skyborn (owlcat-gold; -2, -3
+--   silver and bronze), plain; and apostle-red (cross-red, plain, on the black underlay: its metal
+--   "black"), also a signed Apostle's own look on his own screen (Borders.OwnLook), never anyone's
+--   honour. (The Apostles' crosses and the Bones' charms were previews too until 1.2.4.)
 --
 -- API
 --   Honors.Key(name) -> key or nil
@@ -208,13 +219,17 @@ local ADDON, ns = ...
 --       clerk's words), tiers = { [guid] = "bronze"|"silver"|"gold" }, donors = Donors(), levels
 --       = LevelRace()'s book, guild = GuildTop(), oracle = { month = Oracle()'s top (or the
 --       bank's word: { name, place }), monthNo }, church = { missionaries = { { name, place } },
---       at } (1.2.3: ChurchCount.Top3's, its time on the server's clock), now, offset, anchor }.
+--       apostles (1.2.4, the same), at } (1.2.3: ChurchCount.Top3's, its time on the server's
+--       clock), bones = { month = { { name, place } }, monthNo } (1.2.4: FarkleTable.Best's top 3
+--       of that month), wanted = { rows = { { guid } } } (1.2.4: Wanted.GlobalSnapshot's, in
+--       order), now, offset, anchor }.
 --       now (optional; offset and anchor as MonthOf and WeekOf take them): a closed period's list
---       holds only while it is the last one: donors.month and oracle.month when their monthNo is
---       the month before now's; the Church's top 3 while it is no older than CHURCH_MAX_AGE
---       (Honors.ChurchFresh). Without now the lists are taken as they are. (donors.week gives
---       no honour since the design.) A missionary's honour's period is now's month: its letter is
---       told once per place per calendar month he holds it in (the koi's clock, MonthOf).
+--       holds only while it is the last one: donors.month, oracle.month and bones.month when their
+--       monthNo is the month before now's; the Church's top 3 while it is no older than
+--       CHURCH_MAX_AGE (Honors.ChurchFresh). Without now the lists are taken as they are.
+--       (donors.week gives no honour since the design.) A missionary's and an Apostle's honour's
+--       period is now's month: its letter is told once per place per calendar month he holds it
+--       in (the koi's clock, MonthOf). The slayers' go by his GUID alone (none without one).
 --       Belts, podium and level places go by GUID when both sides have one, else by name; the
 --       rest by name. A GUID may come in the game's form ("Player-<serverID>-<8 hex>", as
 --       UnitGUID gives it) or the arena's short one (gk, "<serverID>-<8 hex>", as the AV words
@@ -236,7 +251,7 @@ local ADDON, ns = ...
 --       without seen (a new profile) gets it from what he holds now, so the next Update finds
 --       nothing new and keeps his choice. What a viewer shows of a pick that does not hold (the
 --       fallback to the rank's frame and no title) is Shown's.
---   Honors.Update(pick, held, known, told) -> pick, earned, lost
+--   Honors.Update(pick, held, known, told, opts) -> pick, earned, lost
 --       After his honours changed: an honour newly earned (its family not held before, or held at
 --       a lower place) switches on (frame and title), the first by ORDER when several come at
 --       once, unless the player locked his pick (pick.locked = true: set by the caller, kept by
@@ -266,16 +281,50 @@ local ADDON, ns = ...
 --       else his rank's.
 --       Otherwise a pick no longer held stays as it is (Shown shows the rank's frame and no title
 --       meanwhile): a gap in the inputs (a source not loaded) or a locked pick is never undone.
---       known: the sources loaded, { belt, tier, donor, level, guild, oracle, missionary } = true
---       (or true: all; belt covers the podium). A family is forgotten (lost) only when its source is
+--       known: the sources loaded, { belt, tier, donor, level, guild, oracle, missionary, apostle,
+--       bones, wanted } = true (or true: all; belt covers the podium; 1.2.4: apostle, bones and
+--       wanted, the Apostles', the Bones' and the slayers' families). A family is forgotten (lost) only when its source is
 --       loaded and it is not held; until its source arrives it stays in seen as it was, so its
 --       return is not "new".
---       pick.seen remembers each family held ({ [family] = { place, frame, title } }) for the
---       next call; a pick without it (a new profile) takes every honour held as newly earned.
+--       pick.seen remembers each family held ({ [family] = { place, frame, title, c } }, c: its
+--       honour's period) for the next call; a pick without it (a new profile) takes every honour
+--       held as newly earned.
+--       (1.2.4) opts: { now, offset } (as Moves takes them). A closed month's list (Honors.CYCLE:
+--       the koi, the charm, the raven) not held at now because its month is over (its remembered
+--       period not CycleOf's at now; none remembered, over too), no word leaving him out, is lost
+--       as above (worn: stood in for, back when his again) and stays in seen at the place it
+--       ended (ended = true): the next month's list naming him at that place, or a lower one, is
+--       not newly earned and switches nothing on (his pick sticks: the cornucopia or "none" he
+--       picked stays); a better place is. A word of the same month without him (a correction) is
+--       a loss as before. Without opts.now no month is over.
 --   Honors.Shown(pick, held) -> frame, mark, title, honour
 --       What a pick shows, checked against the honours held: its frame and mark when held, "none"
 --       (and the rank's mark) when so picked, else "rank" and "rank"; its title when held, else
 --       nil; and the honour whose frame shows (its art and milestone draw it), or nil.
+--   Honors.Moves(standing, held, known, opts) -> moves, places
+--       (1.2.4) Where the player stands on each family's list against what he was last told
+--       (HonorsNet: the King's letter the first time he reaches a place, a notice for any other
+--       change). standing: { [family] = { p = place (0: off its list), c = cycle } }, kept by the
+--       caller; held and known as Update takes them; opts: { now, offset } (a closed month's list
+--       over: CycleOf). A family's cycle (Honors.CYCLE): its honour's period (the month a closed
+--       list ranks, the calendar month a rolling one is told in), nil for life.
+--       moves: each family whose place or cycle now differs from standing's, by ORDER: { family,
+--       kind, from, to (places, 0 off the list), cycle, honour (held now; nil off the list) };
+--       kind:
+--         seed   not in standing (a first look: a new profile, a family new to this version);
+--         cycle  held in another cycle than standing's: the new month's list, or a rolling list's
+--                new calendar month; its place is reached anew there;
+--         up, down   another place in the same cycle (up: a better one);
+--         back   on the list again (the same cycle, or for life) after it was off;
+--         out    off the list: its source loaded and naming him no more (a rolling list's, for
+--                life or in any month);
+--         end    off a closed month's list because that month's turn is over (no word left him
+--                out): nothing to say.
+--       A family he does not hold whose source is not loaded has no move: unknown is not lost.
+--       places: each family as it stands now ({ p, c }); standing's for one not known.
+--   Honors.CycleOf(family, now, offset) -> cycle or nil
+--       (1.2.4) The cycle a family's list stands in at now: a closed list's month (the month
+--       before now's), a rolling list's (now's), nil for life (or without now).
 --   Honors.ArtOf(key) -> art, shape, metal | nil
 --       An honour key's art stem (its frame "<art>.tga", its mark "<art>-mark.tga"), the frame's
 --       shape ("winged" or "plain") and its metal; nil for a key with no art (rank, none, a tier's
@@ -310,11 +359,20 @@ Honors.ORACLE_PLACES = 3        -- the Oracle's gold, silver and bronze
 Honors.ORACLE_MIN_MARKETS = 10  -- settled public markets a bettor needs in the month to be ranked
 Honors.MISSIONARY_PLACES = 3    -- (1.2.3) the Church's top 3 missionaries: gold, silver and bronze crook
 Honors.CHURCH_MAX_AGE = 30 * 86400 -- (1.2.3) a top 3 older than this names nobody (the last 30 days it ranks are over)
+Honors.APOSTLE_PLACES = 3       -- (1.2.4) the Church's top 3 Apostles: gold, silver and bronze cross
+Honors.BONES_PLACES = 3         -- (1.2.4) the last month's top 3 of Bone Throw: gold, silver and bronze charm
+Honors.SLAYER_PLACES = 3        -- (1.2.4) the Slayers' signed top 3 (Wanted.GLOBAL_ROWS): the skeletal horse
 -- Which honour comes first: in lists, and when several are earned at once (the one switched on).
-Honors.ORDER = { "belt", "podium", "guild", "donor-top", "missionary", "level", "oracle", "donor-month", "tier" }
+-- (1.2.4: the Apostles beside the missionaries, the slayers after them, the Bones after the koi.)
+Honors.ORDER = { "belt", "podium", "guild", "donor-top", "apostle", "missionary", "wanted-slayer", "level", "oracle", "donor-month",
+	"bones", "tier" }
 Honors.DEV_TITLE = "the-dev" -- (1.2.3) the author's own title, a title alone (Honors.Holdings)
 -- Where each family's honours come from (Update's known): a family's first word.
-Honors.SOURCES = { "belt", "tier", "donor", "level", "guild", "oracle", "missionary" }
+Honors.SOURCES = { "belt", "tier", "donor", "level", "guild", "oracle", "missionary", "apostle", "bones", "wanted" }
+-- (1.2.4) How each family's list turns over, for its letter and notices (Honors.Moves): "closed", a
+-- closed month's list held through the month after it (told once a month it ranks); "month", a
+-- rolling ranking told once per calendar month (the Church's last 30 days); any other, for life.
+Honors.CYCLE = { ["donor-month"] = "closed", bones = "closed", oracle = "closed", missionary = "month", apostle = "month" }
 
 local MAX_COPPER = 2147483647
 local MAX_TIME = 4294967295
@@ -345,14 +403,16 @@ Honors.RACE_ART = { human = "lion", dwarf = "ram", nightelf = "nightsaber", gnom
 	undead = "skeletal-horse", tauren = "kodo", troll = "raptor", skyborn = "owlcat" }
 Honors.WINGED = { gryphon = true, owl = true }
 -- The families' beasts: donors of all time, the month's, the Oracle, the level race. (1.2.1, a
--- preview only: the Apostles' cross and the Bones' charm; Holdings never names those families.)
--- (1.2.3: the missionaries' shepherd's crook with its sleeping lamb.)
+-- preview only: the Apostles' cross and the Bones' charm; 1.2.4: both honours.) (1.2.3: the
+-- missionaries' shepherd's crook with its sleeping lamb.) (1.2.4, the owner's note of 10-11: the
+-- slayers' skeletal horse, "for whoever killed most", the arena's Undead mount; the orc's wolf until
+-- then.)
 Honors.FAMILY_ART = { ["donor-top"] = "cornucopia", ["donor-month"] = "koi", oracle = "raven", level = "comet",
-	["wanted-slayer"] = "orc-wolf", apostle = "cross", bones = "charm", missionary = "crook" }
+	["wanted-slayer"] = "skeletal-horse", apostle = "cross", bones = "charm", missionary = "crook" }
 -- 1.2.1: the new frames' keys, a preview only (see the top of the file): out of FRAMES_SHIPPED and
--- of every honour, so nobody can wear them or be awarded them.
-Honors.PREVIEWS = { "apostle-1", "apostle-2", "apostle-3", "apostle-red", "bones-1", "bones-2", "bones-3",
-	"arena-race-skyborn", "arena-race-skyborn-2", "arena-race-skyborn-3" }
+-- of every honour, so nobody can wear them or be awarded them. (1.2.4: the crosses and the charms
+-- are honours now, out of this list.)
+Honors.PREVIEWS = { "apostle-red", "arena-race-skyborn", "arena-race-skyborn-2", "arena-race-skyborn-3" }
 -- The red cross: its own art, plain, on the plain underlay tinted black (Borders.lua's UNDERLAY).
 Honors.RED_CROSS = "apostle-red"
 -- The level race's metal by milestone: bronze the first to 20, silver to 40, gold to 60.
@@ -733,8 +793,10 @@ function Honors.GuildRanking(rows, opts)
 			if guild and fresh and leader and members and members == floor(members) and members >= Honors.GUILD_MIN_MEMBERS
 				and avg and avg >= 1 and avg <= Honors.MAX_LEVEL and not (skip and skip(guild, r)) then
 				-- To the tenth, as the census carries it (Codec: avgLevel10): no tie lost to a rounding.
-				list[#list + 1] = { guild = guild, leader = leader, members = members, avgLevel = floor(avg * 10 + 0.5) / 10,
-					tenths = floor(avg * 10 + 0.5) }
+				-- (1.2.4: cut down as the census carries it and shows it, Data.AvgTenths, not rounded:
+				-- our own guild's unrounded 47.96 ranked as 48.0 on our client, 47.9 on every other.)
+				local tenths = floor(avg * 10 + 1e-6)
+				list[#list + 1] = { guild = guild, leader = leader, members = members, avgLevel = tenths / 10, tenths = tenths }
 			end
 		end
 	end
@@ -972,7 +1034,7 @@ function Honors.ArtFiles()
 		Add((ArtOf(k)))
 		if k ~= "guild-top-leader" then Add((ArtOf(k .. "-2"))); Add((ArtOf(k .. "-3"))) end
 	end
-	for _, family in ipairs({ "donor-top", "donor-month", "oracle", "missionary" }) do
+	for _, family in ipairs({ "donor-top", "donor-month", "oracle", "missionary", "apostle", "bones", "wanted-slayer" }) do
 		for n = 1, 3 do Add((ArtOf(family .. "-" .. n))) end
 	end
 	for _, m in ipairs(Honors.MILESTONES) do Add((ArtOf("level-race-" .. m))) end
@@ -1118,7 +1180,27 @@ function Honors.Holdings(player, inputs)
 		-- month he holds it in (period: now's month).
 		local church = type(inputs.church) == "table" and inputs.church or nil
 		if church and ChurchFresh(church, now) then
-			Listed(church.missionaries, "missionary", Honors.MISSIONARY_PLACES, key, now and Honors.MonthOf(now, inputs.offset), held)
+			local month = now and Honors.MonthOf(now, inputs.offset)
+			Listed(church.missionaries, "missionary", Honors.MISSIONARY_PLACES, key, month, held)
+			-- (1.2.4) ...and its top 3 Apostles, the cross: the same word, the same clock.
+			Listed(church.apostles, "apostle", Honors.APOSTLE_PLACES, key, month, held)
+		end
+		-- (1.2.4) Bone Throw's last month (the koi's clock): its top 3, the charm, through this month.
+		local bones = type(inputs.bones) == "table" and inputs.bones or {}
+		if Current(bones.monthNo, lastMonth) then
+			Listed(bones.month, "bones", Honors.BONES_PLACES, key, bones.monthNo, held)
+		end
+	end
+	-- (1.2.4) The Slayers' signed top 3 (in its order: 1st, 2nd, 3rd): the skeletal horse, by his GUID
+	-- alone, as the Most Wanted frames always went (a name alone is never enough).
+	local wanted = type(inputs.wanted) == "table" and inputs.wanted or nil
+	if guid and wanted then
+		for i, r in ipairs(type(wanted.rows) == "table" and wanted.rows or {}) do
+			if i > Honors.SLAYER_PLACES then break end
+			if type(r) == "table" and GuidKey(r.guid) == guid then
+				held[#held + 1] = Honour("wanted-slayer", 0, i, "wanted-slayer-" .. i)
+				break
+			end
 		end
 	end
 	local levels = type(inputs.levels) == "table" and inputs.levels or {}
@@ -1183,7 +1265,8 @@ local function Best(held)
 	end
 	return best
 end
-local function Seen(h) return { place = h.place, frame = h.frame, title = h.title } end
+-- (1.2.4: c, its honour's period: a closed month's list over is told from one left, Update's Over.)
+local function Seen(h) return { place = h.place, frame = h.frame, title = h.title, c = tonumber(h.period) } end
 
 -- A family's source is loaded (Update's known): true for all, or { [source] = true }.
 local function Known(known, family)
@@ -1203,7 +1286,8 @@ local function Copy(pick)
 		seen = {}
 		for family, s in pairs(pick.seen) do
 			if type(family) == "string" and type(s) == "table" and tonumber(s.place) then
-				seen[family] = { place = tonumber(s.place), frame = Str(s.frame), title = Str(s.title) }
+				seen[family] = { place = tonumber(s.place), frame = Str(s.frame), title = Str(s.title), c = tonumber(s.c),
+					ended = s.ended == true or nil }
 			end
 		end
 	end
@@ -1213,9 +1297,12 @@ end
 -- 1.2.0 (the owner's call): the only honours' frames worn are the all-time donors'. The level race's
 -- comet waits for the game's launch; the month's donors, the Arena's, the Oracle's raven, the games',
 -- the Church's and the slayers' come later. Their frames stay in the code, worn by nobody here.
--- 1.2.3 (the owner's call, "Cajado entra na 1.2.3"): the missionaries' crook is worn too. The koi,
--- the owl, the comet, the raven, the Arena's, the Apostles' cross and the Bones' charm still wait.
-Honors.FRAMES_SHIPPED = { ["donor-top"] = true, missionary = true }
+-- 1.2.3 (the owner's call, "Cajado entra na 1.2.3"): the missionaries' crook is worn too.
+-- 1.2.4 (the owner's calls): the month's donors' koi, the best guild's owl, the Apostles' cross, the
+-- Bones' charm and the slayers' skeletal horse too. The level race's comet (the launch), the Arena's
+-- (its tournaments) and the Oracle's raven (2.0's bets) still wait.
+Honors.FRAMES_SHIPPED = { ["donor-top"] = true, missionary = true, ["donor-month"] = true, guild = true, apostle = true, bones = true,
+	["wanted-slayer"] = true }
 -- (nil: every family's frame, as the honours' own tests and 2.0 have them.)
 local function Shipped(h)
 	local s = Honors.FRAMES_SHIPPED
@@ -1258,6 +1345,7 @@ end
 -- (1.2.3) The frame worn in place of one the pick can't show: the first by ORDER this version wears
 -- that he holds; with none, while a family this version wears is remembered in seen with its source
 -- not loaded (a login, a gap), the frame as it is (a later Update finds that one); else his rank's.
+-- (1.2.4: a closed month's list remembered over, ended, waits for no source: never one of those.)
 local function StandIn(held, seen, best, frame)
 	local first
 	for _, h in ipairs(held) do
@@ -1265,7 +1353,7 @@ local function StandIn(held, seen, best, frame)
 	end
 	if first then return first.frame end
 	for family, s in pairs(seen) do
-		if not best[family] and s.frame and Shipped({ family = family }) then return frame end
+		if not best[family] and not s.ended and s.frame and Shipped({ family = family }) then return frame end
 	end
 	return "rank"
 end
@@ -1278,9 +1366,18 @@ local function StandInTitle(held, seen, best, title)
 	end
 	if first then return first.title end
 	for family, s in pairs(seen) do
-		if not best[family] and s.title then return title end
+		if not best[family] and not s.ended and s.title then return title end
 	end
 	return nil
+end
+-- (1.2.4) A closed month's list (Honors.CYCLE) remembered in seen whose month is no longer the one
+-- held at opts.now (CycleOf): its month's turn is over, no word left him out (Moves' "end"). A place
+-- remembered without its month (1.2.3 kept none) is over too, on the side of his pick. Without
+-- opts.now, never.
+local function Over(family, was, opts)
+	local now = type(opts) == "table" and Time(opts.now) or nil
+	if not now or Honors.CYCLE[family] ~= "closed" then return false end
+	return was.c ~= Honors.CycleOf(family, now, opts.offset)
 end
 -- (1.2.3) Update's memory of a frame or title stood in for: { frame = family, title = family }.
 local function Back(pick)
@@ -1304,7 +1401,7 @@ function Honors.Choose(pick, held, frame, title)
 	return new
 end
 
-function Honors.Update(pick, held, known, told)
+function Honors.Update(pick, held, known, told, opts)
 	held = type(held) == "table" and held or {}
 	local old = Copy(pick)
 	local new = { frame = old.frame, title = old.title, seen = {}, locked = old.locked }
@@ -1326,8 +1423,21 @@ function Honors.Update(pick, held, known, told)
 	end
 	for family, was in pairs(seen) do
 		if not best[family] then
-			if Known(known, family) then
+			if was.ended then
+				-- (1.2.4) A closed month's list over, lost already (below): remembered at the place it
+				-- ended, so the next month's list naming him there is no new honour, nor one a place down.
+				new.seen[family] = was
+			elseif Known(known, family) then
 				lost[#lost + 1] = { family = family, place = was.place, frame = was.frame, title = was.title }
+				-- (1.2.4) Its month's turn over (the koi, the charm: Over), no word leaving him out: lost
+				-- now as any family is (worn, it is stood in for and comes back), and remembered, ended.
+				-- (Forgotten, the next month's list naming him at his place again was a new honour: it
+				-- switched on by itself over the cornucopia or "none" he picked, every month, wherever a
+				-- look fell between the month's turn and the list's first word of it, as HonorsNet's own
+				-- look at the month's turn makes sure of.)
+				if Over(family, was, opts) then
+					new.seen[family] = { place = was.place, frame = was.frame, title = was.title, c = was.c, ended = true }
+				end
 			else
 				-- Its source not loaded yet (a login, a relay's gap): remembered as it was.
 				new.seen[family] = was
@@ -1386,4 +1496,65 @@ function Honors.Shown(pick, held)
 	end
 	local title = HeldBy("title", pick.title, held) and pick.title or nil
 	return frame, mark, title, honour
+end
+
+---------------------------------------------------------------------------
+-- (1.2.4) The places told: where he stands against what he was last told
+---------------------------------------------------------------------------
+
+function Honors.CycleOf(family, now, offset)
+	local how = type(family) == "string" and Honors.CYCLE[family] or nil
+	now = Time(now)
+	if not how or not now then return nil end
+	local month = Honors.MonthOf(now, offset)
+	return how == "closed" and month - 1 or month
+end
+
+-- A move's place in ORDER: its honour's, else its family's kind (belt-<cat> and level-<m> by their
+-- first word), then the family's name.
+local function MoveOrder(m)
+	if m.honour and tonumber(m.honour.order) then return m.honour.order end
+	local kind = KIND_ORDER[m.family] and m.family or m.family:match("^(%a+)")
+	return (KIND_ORDER[kind] or #Honors.ORDER + 1) * 100000
+end
+
+function Honors.Moves(standing, held, known, opts)
+	opts = type(opts) == "table" and opts or {}
+	standing = type(standing) == "table" and standing or {}
+	local best = Best(held)
+	local moves, places = {}, {}
+	for family, h in pairs(best) do
+		local cycle = tonumber(h.period)
+		local was = type(standing[family]) == "table" and standing[family] or nil
+		local from, wasCycle = was and tonumber(was.p), was and tonumber(was.c)
+		places[family] = { p = h.place, c = cycle }
+		local kind
+		if not from then kind = "seed"
+		elseif cycle ~= wasCycle then kind = "cycle"
+		elseif from == 0 then kind = "back"
+		elseif h.place < from then kind = "up"
+		elseif h.place > from then kind = "down" end
+		if kind then
+			moves[#moves + 1] = { family = family, kind = kind, from = from or 0, to = h.place, cycle = cycle, honour = h }
+		end
+	end
+	for family, was in pairs(standing) do
+		local from = type(was) == "table" and tonumber(was.p) or nil
+		if not best[family] and type(family) == "string" and from then
+			local cycle = tonumber(was.c)
+			places[family] = { p = from, c = cycle }
+			if from > 0 and Known(known, family) then
+				-- A closed month's list whose month is no longer the one held: over, not lost.
+				local over = Honors.CYCLE[family] == "closed" and cycle ~= Honors.CycleOf(family, opts.now, opts.offset)
+				places[family] = { p = 0, c = cycle }
+				moves[#moves + 1] = { family = family, kind = over and "end" or "out", from = from, to = 0, cycle = cycle }
+			end
+		end
+	end
+	table.sort(moves, function(a, b)
+		local oa, ob = MoveOrder(a), MoveOrder(b)
+		if oa ~= ob then return oa < ob end
+		return a.family < b.family
+	end)
+	return moves, places
 end

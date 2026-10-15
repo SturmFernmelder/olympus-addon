@@ -397,8 +397,8 @@ function Data.MyTable()
 	if type(t) == "table" and t.id then return Call("FarkleTable", "View", t.id) or t end
 	return t
 end
--- This player's own games, both modes, newest first (while the King's live switch is off, as in
--- 1.1.6, every game is a rehearsal's).
+-- This player's own games, both modes, newest first (1.2.3: a free game counts in L whatever the
+-- King's live switch says, Arena.GameMode; a rehearsal's and a test build's are T).
 function Data.BoneHistory()
 	local sim = From("BoneHistory")
 	if sim ~= false then return sim or {} end
@@ -434,6 +434,15 @@ function Data.GamesRanking(game)
 	if game == "bones" then return Call("FarkleTable", "Best", "L") or {} end
 	if game == "lottery" then return Call("Lottery", "Winners") or {} end
 	return {}
+end
+-- (1.2.4) Bones' list of a month (last month by default): { month, rows, champion, kept }, kept for
+-- good once the month closed (FarkleTable.Month), or nil.
+function Data.BonesMonth(month)
+	local sim = From("BonesMonth", month)
+	if sim ~= false then return sim end
+	local Hs = ns.Honors
+	month = month or (type(Hs) == "table" and type(Hs.MonthOf) == "function" and Hs.MonthOf(Now()) - 1) or nil
+	return month and Call("FarkleTable", "Month", month) or nil
 end
 function Data.Arbiters()
 	local sim = From("Arbiters")
@@ -725,9 +734,22 @@ end
 
 -- The Arena tab's lines (Views.Register): a summary, each line a click into the Arena window.
 function ArenaHome.TabLines()
+	if ArenaHome.rulesKey then
+		local key = ArenaHome.rulesKey
+		local function Back()
+			local back = ArenaHome.rulesReturn or {}
+			ArenaHome.rulesKey, ArenaHome.rulesReturn = nil, nil
+			ArenaHome.rankGame, ArenaHome.staffShown = back.rankGame or ArenaHome.rankGame, back.staffShown
+			if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+		end
+		local ruleLines = ns.RankingRules and ns.RankingRules.Lines(key, Back)
+		if ruleLines then return ruleLines, L.ARENA_TAB_TITLE, L.RANK_RULES_NOTE end
+		ArenaHome.rulesKey, ArenaHome.rulesReturn = nil, nil
+	end
 	local lines = {}
 	local kind, banner = ArenaHome.Banner()
 	if banner then lines[#lines + 1] = { text = (kind == "sim" and "|cffc080ff" or "|cffff6060") .. banner .. "|r", gapAfter = true } end
+	-- (1.2.3: the switch is the bets' alone; the line says the games count without it.)
 	local R = ns.ArenaRoles
 	if not (R and R.Live and R.Live()) and not ns.Arena.TestBuild() then
 		lines[#lines + 1] = { text = Grey(L.ARENA_TAB_LIVE_OFF), gapAfter = true }
@@ -752,10 +774,17 @@ function ArenaHome.TabLines()
 	lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.ARENA_GAMES_MINE), right = Grey(L.ARENA_GAMES_MINE_DESC),
 		onClick = function() ArenaHome.Open("games.mine") end,
 		tooltip = function(tt) tt:AddLine(L.ARENA_GAMES_MINE, 1, 0.82, 0) tt:AddLine(L.ARENA_GAMES_MINE_TIP, 1, 1, 1, true) end }
+	-- (1.2.4: his frame, title, nickname and emblem: "My profile", his own page in this window.)
+	if type(ns.ProfileEdit) == "table" and type(ns.ProfileEdit.Open) == "function" then
+		lines[#lines + 1] = { indent = 1, text = Gold("> " .. L.MYPROFILE_TITLE), onClick = function() ns.ProfileEdit.Open() end }
+	end
 	lines[#lines].gapAfter = true
 	-- The games' rankings (the staff always; everyone once the King switches them on), then the
 	-- staff's own section.
 	local staff = ArenaHome.GamesStaff()
+	-- (1.2.4: a member holding no publish word for a game asks the members who hold one, once a
+	-- session: ArenaRoles.AskPublish; the tab shows it as it comes.)
+	if not staff then Call("ArenaRoles", "AskPublish") end
 	if staff or ArenaHome.RankingsPublic() then ArenaHome.RankingLines(lines) end
 	if staff then ArenaHome.StaffLines(lines) end
 	ArenaHome.ArbiterLines(lines)
@@ -822,12 +851,21 @@ function ArenaHome.GamesStaff()
 	return ns.Workshop ~= nil and type(ns.Workshop.Visible) == "function" and ns.Workshop.Visible() == true
 end
 ArenaHome.rankGame = "arena"
-local RANK_GAMES = { "arena", "bones", "lottery" }
+local RANK_GAMES = { "arena", "bones" } -- Lottery is private draw history, never a ranking.
 local RANK_WORDS = { arena = "ARENA_SECTION_ARENA", bones = "ARENA_SECTION_BONE", lottery = "ARENA_SECTION_LOTTERY" }
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	ArenaHome.rulesReturn = { rankGame = ArenaHome.rankGame, staffShown = ArenaHome.staffShown }
+	ArenaHome.rulesKey = key
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+	return true
+end
 -- The games' rankings for everyone, one game at a time (the owner's answer, 2026-10-04: the King
 -- and the councillors he names publish, per game): each game's publish word (ArenaRoles.RankPublic),
 -- else the King's settings' rankPub. game nil: any of them.
 function ArenaHome.RankingsPublic(game)
+	if game == "lottery" then return false end
 	local R = ns.ArenaRoles
 	if type(R) ~= "table" or type(R.RankPublic) ~= "function" then return false end
 	if game then return R.RankPublic(game) == true end
@@ -837,10 +875,12 @@ end
 -- Who may flip a game's switch (the shown one by default): the King, or a councillor the King names
 -- for that game (ArenaRoles.MayPublish). The rest of the staff see it read-only.
 function ArenaHome.MaySetRankings(game)
+	if (game or ArenaHome.rankGame) == "lottery" then return false end
 	local R = ns.ArenaRoles
 	return type(R) == "table" and type(R.MayPublish) == "function" and R.MayPublish(ns.me, game or ArenaHome.rankGame) == true
 end
 function ArenaHome.SetRankingsPublic(on, game)
+	if (game or ArenaHome.rankGame) == "lottery" then return false, "private" end
 	local ok, why = Call("ArenaRoles", "Publish", game or ArenaHome.rankGame, on)
 	if not ok then ns.Print(L.ARENA_GAMES_SWITCH_REFUSED:format(tostring(why or "?"))) end
 	ns.Fire("ARENA_CHANGED")
@@ -852,6 +892,7 @@ function ArenaHome.NamesPublishers()
 end
 -- The King names a councillor for game, or no more (on false): his T1~J again, that one changed.
 function ArenaHome.SetPublisher(name, game, on)
+	if game == "lottery" then return false, "private" end
 	local R = ns.ArenaRoles
 	if type(R) ~= "table" or type(R.Publishers) ~= "function" then return false end
 	local list, found = {}, false
@@ -898,6 +939,9 @@ local function RankingLines(lines)
 			if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
 		end,
 		tooltip = function(tt) tt:AddLine(L.ARENA_GAMES_RANKINGS, 1, 0.82, 0) tt:AddLine(L.ARENA_GAMES_RANKINGS_TIP, 1, 1, 1, true) end }
+	local rulesKey = game == "bones" and "bones-ranking" or "arena-rating"
+	local rules = ns.RankingRules and ns.RankingRules.Link(rulesKey, function() ShowRules(rulesKey) end)
+	if rules then lines[#lines + 1] = rules end
 	local n0 = #lines
 	if game == "arena" then
 		local view = Data.Rankings("all", "A", 1) or {}
@@ -906,11 +950,25 @@ local function RankingLines(lines)
 				right = (x.rating and tostring(math.floor(x.rating + 0.5)) or "-") .. "  " .. Grey(("%d-%d"):format(tonumber(x.wins) or 0, tonumber(x.losses) or 0)) }
 		end
 	elseif game == "bones" then
+		local function Row(i, x, indent)
+			local games, won = tonumber(x.games) or 0, tonumber(x.won) or 0
+			lines[#lines + 1] = { indent = indent, text = ("#%d  %s"):format(i, ArenaHome.Name(x.name or "?")),
+				right = L.ARENA_GAMES_BONES_ROW:format(won, games > 0 and math.floor(won * 100 / games + 0.5) or 0, games) }
+		end
 		for i, x in ipairs(Data.GamesRanking("bones") or {}) do
 			if i > 10 then break end
-			local games, won = tonumber(x.games) or 0, tonumber(x.won) or 0
-			lines[#lines + 1] = { indent = 1, text = ("#%d  %s"):format(i, ArenaHome.Name(x.name or "?")),
-				right = L.ARENA_GAMES_BONES_ROW:format(won, games > 0 and math.floor(won * 100 / games + 0.5) or 0, games) }
+			Row(i, x, 1)
+		end
+		-- (1.2.4) Last month's, kept for good once it closed: its champion and podium.
+		local last = Data.BonesMonth()
+		if type(last) == "table" and type(last.rows) == "table" and last.rows[1] then
+			if #lines == n0 then lines[#lines + 1] = { indent = 1, text = Grey(L.ARENA_GAMES_RANK_EMPTY) } end
+			lines[#lines + 1] = { indent = 1, text = Gold(L.ARENA_GAMES_BONES_LAST),
+				right = last.champion and Grey(L.ARENA_GAMES_BONES_CHAMPION:format(ArenaHome.Name(last.champion))) or nil }
+			for i, x in ipairs(last.rows) do
+				if i > 3 then break end
+				Row(i, x, 2)
+			end
 		end
 	else
 		local lot = Data.GamesRanking("lottery") or {}
@@ -1063,6 +1121,46 @@ local function ArbiterLines(lines)
 	for _, line in ipairs(own) do lines[#lines + 1] = line end
 end
 ArenaHome.RankingLines, ArenaHome.StaffLines, ArenaHome.ArbiterLines = RankingLines, StaffLines, ArbiterLines
+
+if ns.RankingRules then
+	ns.RankingRules.Register("arena-rating", {
+		title = L.RANK_RULE_ARENA_TITLE,
+		icon = function() return ArenaHome.HonorIcon and ArenaHome.HonorIcon() or "Interface\\Icons\\INV_Sword_04" end,
+		allowed = function() return ArenaHome.GamesStaff() or ArenaHome.RankingsPublic("arena") end,
+		sections = function()
+			local R, G = ns.ArenaRating or {}, ns.ArenaLedger or {}
+			return {
+				{ topic = "score", text = {
+					L.RANK_RULE_ARENA_SCORE:format(R.START or 1500, R.START or 1500, R.K_NEW or 40,
+						R.NEW_FIGHTS or 10, R.START or 1500, R.K or 24, R.K_HIGH or 16,
+						R.HIGH_RATING or 2000, R.LEVEL_POINTS or 50, R.GAP_CAP or 800),
+					L.RANK_RULE_ARENA_REPEAT:format(math.floor((R.PAIR_WINDOW or 86400) / 3600)),
+				} },
+				{ topic = "limits", text = L.RANK_RULE_ARENA_LIMITS:format(G.MIN_RATED_DUR or 15, G.DAY_MAX or 10, G.PAIR_MAX or 3, G.PAIR_DAYS or 7) },
+				{ topic = "order", text = L.RANK_RULE_ARENA_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_ARENA_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_ARENA_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("bones-ranking", {
+		title = L.RANK_RULE_BONES_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_Dice_02",
+		allowed = function() return ArenaHome.GamesStaff() or ArenaHome.RankingsPublic("bones") end,
+		sections = function()
+			local caps = ns.FarkleTable and ns.FarkleTable.RANK_CAPS or {}
+			local G = ns.ArenaLedger or {}
+			return {
+				{ topic = "score", text = L.RANK_RULE_BONES_SCORE },
+				{ topic = "limits", text = L.RANK_RULE_BONES_LIMITS:format(G.MIN_RATED_DUR or caps.MIN_RATED_DUR or 15,
+					G.DAY_MAX or caps.DAY_MAX or 10, G.PAIR_MAX or caps.PAIR_MAX or 3, G.PAIR_DAYS or caps.PAIR_DAYS or 7) },
+				{ topic = "order", text = L.RANK_RULE_BONES_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_BONES_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_BONES_VISIBILITY },
+			}
+		end,
+	})
+end
 
 -- The games (the Games tab's rows and buttons, the owner's call 2026-09-30): Arena, Bones, the
 -- Lottery, and the Wallet (Treasury > My money, the design). Icons as the lab's games window's,
@@ -1441,7 +1539,11 @@ local function OnChallenge(oid)
 	local mine = type(F) == "table" and type(F.challenges) == "table" and F.challenges[oid] or nil
 	if type(mine) == "table" and not mine.incoming and mine.state ~= "asked" and answered[oid] ~= mine.state then
 		answered[oid] = mine.state
-		local key = ({ no = "ARENA_CHALLENGE_NO", yes = "ARENA_CHALLENGE_YES", set = "ARENA_CHALLENGE_SET", ["arbiter-no"] = "ARENA_CHALLENGE_ARBITER_NO" })[mine.state]
+		local key = ({ no = "ARENA_CHALLENGE_NO", yes = "ARENA_CHALLENGE_YES", set = "ARENA_CHALLENGE_SET", ["arbiter-no"] = "ARENA_CHALLENGE_ARBITER_NO",
+			expired = "ARENA_CHALLENGE_EXPIRED" })[mine.state]
+		-- (1.2.3) A no that says why: a duel between them still open, or gold while bets are off.
+		if mine.state == "no" and mine.why == "b" then key = "ARENA_CHALLENGE_BUSY"
+		elseif mine.state == "no" and mine.why == "live" then key = "ARENA_CHALLENGE_LIVE" end
 		if key then ArenaHome.Toast(L[key]:format(ArenaHome.Name(mine.state == "arbiter-no" and mine.arbiter or mine.B))) end
 	end
 	return false
@@ -1895,8 +1997,10 @@ function ArenaHome.MenuLines(target, menu)
 		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
 		n = n + 1
 	end
-	menu.Button(L.ARENA_MENU_PROFILE, function() ArenaHome.Open("profile", name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
-	n = n + 1
+	if not target.profileAdded then
+		menu.Button(L.ARENA_MENU_PROFILE, function() ns.PlayerMenu.OpenProfile(name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
+		n = n + 1
+	end
 	return n
 end
 -- The live table a player sits at that this client may watch (his table lets spectators in: it

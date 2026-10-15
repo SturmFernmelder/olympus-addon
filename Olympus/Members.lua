@@ -79,6 +79,8 @@ end
 -- The question answered: the game removes that one member. From the player's click only.
 function Members.Remove(m)
 	if not (Members.CanRemove() and Members.Removable(m)) then return false end
+	-- A Justice request references this exact manual click, never a new removal permission.
+	if m.justiceTask and not (ns.JusticeTasks and ns.JusticeTasks.MayRemove(m)) then return false end
 	local now = GetTime()
 	if now - lastRemove < Members.REMOVE_GAP then
 		ns.Print(L.MEMBERS_REMOVE_WAIT)
@@ -88,6 +90,7 @@ function Members.Remove(m)
 	if type(uninvite) ~= "function" then return false end
 	lastRemove = now
 	uninvite(m.raw)
+	ns.Fire("MEMBER_REMOVAL_ATTEMPT", m, GetGuildInfo("player"))
 	removed[m.raw] = true
 	ns.Log("members: removed %s (%s, %.1f days offline)", tostring(m.raw), tostring(m.rank), m.days or 0)
 	ns.Print(L.MEMBERS_REMOVED_LINE:format(Plain(m.name)))

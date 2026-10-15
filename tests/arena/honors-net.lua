@@ -601,8 +601,8 @@ test("1.2 the fights part: Borders and Nameplates show the verified honour's fra
 	viewer.target = cast.A.name
 	r.B.Refresh("target", true)
 	eq(r.Shown("target"), "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold", "the gryphon")
-	eq(r.Underlay("target").shown, true, "its metal underlay")
-	eq(r.Underlay("target").atlas, "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Gold")
+	-- (1.2.4, the author's call: no plain dragon under an honour, the portrait's own ring alone.)
+	eq(r.Underlay("target").shown, false, "no metal underlay under an honour")
 	r.NP.Added("nameplate1")
 	eq(r.Shown("plate"), "Interface\\AddOns\\Olympus\\media\\honors\\gryphon-gold-mark", "its mark")
 	-- B, no belt, and a forged pick of it: his rank's (1.1.5: the bronze wings of a guild master).
@@ -793,6 +793,7 @@ test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-
 		{ "arena-race-skyborn", "owlcat-gold" }, { "arena-race-skyborn-2", "owlcat-silver" }, { "arena-race-skyborn-3", "owlcat-bronze" },
 		{ "apostle-red", "cross-red", "0.24 0.24 0.27 1" },
 	}
+	local CROSSES = { ["apostle-1"] = true, ["apostle-2"] = true, ["apostle-3"] = true, ["apostle-red"] = true }
 	for _, row in ipairs(want) do
 		local key, art, color = row[1], row[2], row[3]
 		eq(r.B.SetPreview(key), true, key)
@@ -802,14 +803,13 @@ test("1.2.1 the new frames: /oly borders test apostle-1/2/3, bones-1/2/3, arena-
 		local t
 		for _, x in ipairs(r.textures) do if x.owner == "player" and x.sublevel ~= 2 and x.shown then t = x end end
 		eq(t.coord, "0.78125 0 0 0.78125", key .. ": the plain box, turned round on his own frame")
-		eq(t.size, "100x100")
+		-- (1.2.4, the author's ask of the red cross, "um pouco maior": the crosses' box 110 across,
+		-- 10% bigger than a plain honour's; the charm and the owlcat as ever: tests/arena/honors-own-look.lua.)
+		eq(t.size, CROSSES[key] and "110x110" or "100x100", key)
+		-- (1.2.4, the author's call: no plain dragon under any honour, the red cross's black one
+		-- too; the portrait's own ring alone.)
 		local under = r.Underlay("player")
-		eq(under.shown, true, key .. ": on its plain metal")
-		if color then eq(under.color, color, key .. "'s underlay") end
-		if key == "apostle-red" then
-			eq(under.atlas, "ui-hud-unitframe-target-portraiton-boss-rare-silver", "the plain underlay...")
-			eq(under.desaturated, true, "...tinted black")
-		end
+		eq(under.shown, false, key .. ": no plain metal under it")
 		r.NP.RefreshAll(true)
 		eq(r.Shown("plate"), MEDIA .. art .. "-mark", key .. "'s mark")
 	end
@@ -881,20 +881,30 @@ test("1.2 the King's letter: his portrait drawn as his own on his unit frame (Bo
 	W3.NoErrors(w)
 end)
 
-test("1.2 the profile's Edit: its preview is his portrait drawn as his own on his unit frame (Borders.NewPortrait): the honour picked, his rank's border for the rank's frame, nothing for none, each as round his own portrait", function()
+-- 1.2.4: the panel's preview is "My profile"'s detail box now (the Olympus window's, UI.lua: made
+-- with HonorsNet.NewPortrait, dressed by ProfileEdit.DressPortrait with the art the page gives).
+-- The same assertions on that portrait; its place inside the detail box is UI.lua's, tested in
+-- tests/run.lua (the Olympus window's own harness).
+test("1.2 the profile's Edit: its preview is his portrait drawn as his own on his unit frame (Borders.NewPortrait): the honour picked, his rank's border for the rank's frame, nothing for none, each as round his own portrait (1.2.4: My profile's detail box, from the page's art)", function()
 	local w, cast = W3.New()
 	local A = cast.A
 	local r = Frames(w, A)
-	local points, pictures = Placed(A)
+	local _, pictures = Placed(A)
 	Belt(w, cast, A, cast.B, { A })
 	w:Run(3)
 	w:As(A, A.ns.HonorsNet.CloseLetter, false)
 	A.rank, A.rankName = 0, "Guild Master" -- (his rank's frame: Max's bronze wings, a guild master's since 1.1.5)
+	W3.PageUI(w, A)
 	eq(w:As(A, A.ns.ProfileEdit.Open), true)
-	local f = A.ns.ProfileEdit.frame
-	local rig = f.rig
+	local rig = w:As(A, function() return A.ns.HonorsNet.NewPortrait(CreateFrame("Frame"), 42) end)
 	assert(type(rig) == "table" and rig.container and rig.box and not rig.plain, "Borders.NewPortrait's rig")
-	eq(rig.size, A.ns.ProfileEdit.PORTRAIT); eq(rig.mirror, true)
+	eq(rig.size, 42); eq(rig.mirror, true)
+	-- The page's art, as UI.Refresh dresses the detail box's portrait with it.
+	local function Draw()
+		local _, _, _, _, art = w:As(A, A.ns.ProfileEdit.Page, { full = A.name }, {})
+		return w:As(A, A.ns.ProfileEdit.DressPortrait, rig, art)
+	end
+	eq(Draw(), "honour")
 	local last = pictures[#pictures]
 	eq(last.tex, rig.portrait); eq(last.unit, "player"); eq(last.square, true)
 	-- What his own portrait shows (his unit frame's rig) and what the preview shows: the same art.
@@ -905,16 +915,11 @@ test("1.2 the profile's Edit: its preview is his portrait drawn as his own on hi
 	local function Own() r.B.Refresh("player", true) return r.Shown("player") end
 	eq(rig.shown, "arena-champion"); eq(Preview(), GRYPHON); eq(Own(), GRYPHON)
 	eq(w:As(A, A.ns.ProfileEdit.PickFrame, "rank"), true)
+	eq(Draw(), "rank")
 	eq(rig.shown, "bronze-elite", "his rank's border"); eq(Preview(), "Interface\\AddOns\\Olympus\\media\\borders\\bronze-winged"); eq(Own(), Preview())
 	eq(w:As(A, A.ns.ProfileEdit.PickFrame, "none"), true)
+	eq(Draw(), nil)
 	eq(rig.shown, nil); eq(Preview(), nil); eq(Own(), nil)
-	-- Its words clear of the art: inside the panel, below its title, the preview's line right of it,
-	-- the rows (from 104 down) below it.
-	local at, seen = points[rig.slot].TOPLEFT, points[f.seen].TOPLEFT
-	eq(at[2] - rig.reach.left >= 12, true, "inside the panel")
-	eq(-at[3] - rig.reach.top >= 28, true, "below the title")
-	eq(-at[3] + rig.size + rig.reach.bottom <= 104, true, "above the rows")
-	eq(seen[2], rig.slot); eq(seen[3], "TOPRIGHT"); eq(seen[4] >= rig.reach.right, true, "the line right of the art")
 	W3.NoErrors(w)
 end)
 
@@ -997,5 +1002,18 @@ test("1.2 the fights part: the words of fights and honours exist in English and 
 	for _, p in ipairs({ "TODAY", "WEEK", "MONTH", "ALL" }) do used["ARENA_PERIOD_" .. p] = true end
 	for _, m in ipairs({ "GOLD", "SILVER", "BRONZE" }) do used["HONOR_METAL_" .. m] = true end
 	used.ARENA_CONSENT_HISTORY, used.ARENA_CONSENT_HISTORY_TEXT = true, true
-	for k in pairs(used) do assert(rawget(E, k) ~= nil, "not defined: " .. k) end
+	-- (1.2.4: "My profile"'s Icons section reuses the council icon picker's words, which are the
+	-- core's own, Locales.lua's: defined there counts; both languages are checked for every file by
+	-- "every locale key the code names", tests/arena/net.lua.)
+	local base = {}
+	local saved = GetLocale
+	GetLocale = function() return "enUS" end
+	local ok, err = pcall(function() assert(loadfile(H.ADDON_DIR .. "Locales.lua"))("Olympus", base) end)
+	-- (1.2.4: the history's Consent line, which ArenaProfile.lua names by its keys, is defined in
+	-- ArenaHomeText.lua alone, the file that loads after this one and so always won: defined there
+	-- counts. tests/arena/profile-edit.lua checks its words as the TOC loads them.)
+	if ok then ok, err = pcall(function() assert(loadfile(H.ADDON_DIR .. "Locales/ArenaHomeText.lua"))("Olympus", base) end) end
+	GetLocale = saved
+	assert(ok, err)
+	for k in pairs(used) do assert(rawget(E, k) ~= nil or rawget(base.L, k) ~= nil, "not defined: " .. k) end
 end)

@@ -19,6 +19,7 @@ World.COUNCILLOR = "Brin Tallow-Realm"
 World.COUNCIL = assert(loadfile(ROOT .. "tests/fixtures/church-council.lua"))()
 -- The Church's words, into the harness's locale table, as the game loads Locales/ChurchText.lua.
 assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", ns)
+assert(loadfile(ROOT .. "Olympus/Locales/ChurchFullnessText.lua"))("Olympus", ns)
 
 local GLOBALS = { "GetGuildInfo", "IsInGuild", "InCombatLockdown", "QueryGuildEventLog", "GetNumGuildEvents", "GetGuildEventInfo",
 	"UnitIsPlayer", "GetTime", "C_ChatInfo", "GetServerTime" }
@@ -76,10 +77,22 @@ function World:Client(name, opts)
 		db = { chatRooms = true, addonChat = true } }, { __index = ns })
 	cl.ns = c
 	c.Now = function() return w.clock end
+	-- Another guild's ranks as Data.AuthorizedRank gives them: the census (w.census, a rank by guild and
+	-- name; w.leaders, a guild's leader as its report names him) until this client's signed leadership is
+	-- enforced (its ns.Authority.Enforced), that list's Rank alone from then on.
 	c.Data = setmetatable({ ServerTime = function() return w.clock end,
 		AuthorizedRank = function(who, guild)
+			local A = c.Authority
+			if type(A) == "table" and type(A.Enforced) == "function" and A.Enforced() then
+				local r = A.Rank and A.Rank(ns.FullName(who), guild)
+				return r, r ~= nil and "signed" or "enforced"
+			end
 			local r = w.census[ns.Fold(guild) .. ":" .. Key(who)]
-			return r
+			return r, r ~= nil and "census" or nil
+		end,
+		Guild = function(guild)
+			local lead = w.leaders and w.leaders[ns.Fold(guild)]
+			return lead and { leader = ns.ShortName(lead), realm = ns.RealmOf(lead), t = w.clock } or nil
 		end,
 		Summary = function()
 			local out = { guilds = {} }
@@ -155,9 +168,11 @@ function World:Client(name, opts)
 		-- (1.2.3: ChatRooms.lua no longer defines a dialog in the game's global table, the race and class
 		-- rooms' request warning gone with them: nothing of the harness's to put back after it.)
 		w:As(cl, function()
+			assert(loadfile(ROOT .. "Olympus/RankingRules.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/Church.lua"))("Olympus", c)
 			assert(loadfile(ROOT .. "Olympus/ChurchCount.lua"))("Olympus", c)
+			assert(loadfile(ROOT .. "Olympus/ChurchFullness.lua"))("Olympus", c)
 			if opts.view then assert(loadfile(ROOT .. "Olympus/ChurchView.lua"))("Olympus", c) end
 		end)
 		c.Church.after = function(seconds, _, fn) w:Later(cl, seconds, fn) end
@@ -189,6 +204,8 @@ function World:RefreshRosters()
 		end
 		local R = cl.c.Roster
 		R.members, R.byName, R.guild, R.snapshotAt = rows, byName, cl.guild, self.clock
+		R.serverAt = self.clock
+		R.lastStats = { numTotal = #rows, seen = #rows, t = self.clock }
 		R.generation = (R.generation or 0) + 1
 	end
 end

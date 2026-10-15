@@ -17,6 +17,8 @@ ns.Views = Views
 local ROW_H = 16
 local ROW_H_HD = 20 -- the Guild & Communities roster's rows (CommunitiesMemberList.xml)
 local ROW_H_INPUT = 24 -- a row with a text box (line.input): the box and its border
+-- A table row's cells at most (line.cols): the Census's five (1.2.4: its average level), the others' four.
+Views.MAX_COLS = 5
 -- The in-page tabs' look (Views.DrawNav, the one component of the Realm's Guilds / Classes /
 -- Races / Professions and of the Chat tab's destinations): white inactive words, gold selected
 -- words and the same white underline at the strip's bottom. pad: a cell's room beside its words;
@@ -27,6 +29,8 @@ Views.SUBTAB_STYLE = {
 }
 local ROW_H_NAV = Views.SUBTAB_STYLE.height -- the Realm's Guilds / Classes / Races / Professions
 local ITEM, ITEM_GAP = 30, 2 -- an item on an items row (line.items) without the game's button template (37 with it)
+local ITEM_GAME = 37 -- the game's item button (ItemButtonTemplate)
+Views.ITEM_SLOT = ITEM_GAME -- (1.2.4: the slot a grid that fits its room is laid out for, ProfileEdit.IconGrid)
 local expanded = {}
 local CROWN = "|TInterface\\GroupFrame\\UI-Group-LeaderIcon:13:13|t "
 local ASSIST = "|TInterface\\GroupFrame\\UI-Group-AssistantIcon:12:12|t "
@@ -107,12 +111,22 @@ end
 -- Column layouts, as fractions of the list width (so they follow the window size)
 ---------------------------------------------------------------------------
 
+-- (1.2.4, the author's ask: the guild's average level in a column of its own, sorted by its title
+-- like the others; its title is short, "Avg lvl" / "Nv. méd.". The Online column gives up some room,
+-- its numbers being the smaller, and the Guild and Lord columns some; before, the four columns
+-- were 0.40, 0.20, 0.16 and 0.24.)
+-- (1.2.4's review: the Online and Avg lvl titles a little more room, from the Guild's, and the three
+-- numbers' a short title each, `short`: a title wider than its column takes it, and one still too
+-- wide is cut inside its own (UI.Layout), never drawn over the next; the German, Spanish and French
+-- titles are longer. The old window's columns are then 90, 54, 45, 54 and 57 wide; the HD one's
+-- 106, 64, 53, 64 and 67.)
 Views.COLUMNS = {
 	census = {
-		{ key = "COL_GUILD", sort = "name", x = 0.00, w = 0.40 },
-		{ key = "COL_MEMBERS", sort = "members", x = 0.40, w = 0.20, justify = "RIGHT" },
-		{ key = "COL_ONLINE", sort = "online", x = 0.60, w = 0.16, justify = "RIGHT" },
-		{ key = "COL_LORD", sort = "lord", x = 0.76, w = 0.24 },
+		{ key = "COL_GUILD", sort = "name", x = 0.00, w = 0.30 },
+		{ key = "COL_MEMBERS", short = "COL_MEMBERS_SHORT", sort = "members", x = 0.30, w = 0.18, justify = "RIGHT" },
+		{ key = "COL_ONLINE", short = "COL_ONLINE_SHORT", sort = "online", x = 0.48, w = 0.15, justify = "RIGHT" },
+		{ key = "COL_AVG_LEVEL", short = "COL_AVG_LEVEL_SHORT", sort = "level", x = 0.63, w = 0.18, justify = "RIGHT" },
+		{ key = "COL_LORD", sort = "lord", x = 0.81, w = 0.19 },
 	},
 	heraldry = {
 		{ key = "COL_NAME", x = 0.00, w = 0.30 },
@@ -157,7 +171,7 @@ local function Row(content, i)
 	r.right:SetJustifyH("RIGHT")
 	r.right:SetWordWrap(false)
 	r.cols = {}
-	for c = 1, 4 do
+	for c = 1, Views.MAX_COLS do
 		local fs = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 		fs:SetWordWrap(false)
 		r.cols[c] = fs
@@ -218,7 +232,7 @@ local function ItemButton(r, k)
 	local ok, b = pcall(CreateFrame, "Button", nil, r, "ItemButtonTemplate")
 	if ok and b and b.icon and SetItemButtonTexture then
 		b.blizzard = true
-		r.itemSize = 37
+		r.itemSize = ITEM_GAME
 	else
 		if ok and b then b:Hide() end
 		b = CreateFrame("Button", nil, r)
@@ -262,7 +276,8 @@ local function ItemButton(r, k)
 		local ok = false
 		if it.link and GameTooltip.SetHyperlink then ok = pcall(GameTooltip.SetHyperlink, GameTooltip, it.link) end
 		if not ok and it.id and GameTooltip.SetItemByID then ok = pcall(GameTooltip.SetItemByID, GameTooltip, it.id) end
-		if not ok then GameTooltip:AddLine("#" .. tostring(it.id), 1, 1, 1) end
+		-- (1.2.4: a slot that is no item, an icon of "My profile"'s picker: its name, never "#nil".)
+		if not ok then GameTooltip:AddLine(it.label or ("#" .. tostring(it.id)), 1, 1, 1) end
 		if (it.n or 0) > 1 then GameTooltip:AddLine("x" .. it.n, 0.8, 0.8, 0.8) end
 		if it.gone then GameTooltip:AddLine(L.BANK_GONE_SLOT, 1, 0.4, 0.4, true) end
 		local row = self.GetParent and self:GetParent()
@@ -719,14 +734,57 @@ end
 -- Games tab's Arena and Wallet rows, their descriptions longer than the row, showed "." and ".."
 -- where their icon and name are. A right text up to a third of the row keeps its words whole, as
 -- before: a long name still gives way to a short count.
+-- (1.2.4) A line with `rightWide` keeps its right text whole up to half the row: the Realm's guilds,
+-- whose right text is their Lord's online or offline and their average level after it, a long
+-- guild name and Lord giving way to both.
 local RIGHT_INSET, RIGHT_GAP = 2, 6
-local function FitRight(r, width, leftX)
+local function FitRight(r, width, leftX, share)
 	local rw = math.ceil(StringWidth(r.right))
 	if rw == 0 then return end
 	local room, lw = width - leftX - RIGHT_GAP - RIGHT_INSET, math.ceil(StringWidth(r.left))
 	if lw + rw <= room then return end
-	local keep = math.max(room - lw, math.min(rw, math.floor(room / 3)))
+	local keep = math.max(room - lw, math.min(rw, math.floor(room / (share or 3))))
 	r.right:SetPoint("LEFT", r, "RIGHT", -RIGHT_INSET - keep, 0)
+end
+
+-- An items row's grid (line.items), for its buttons of `own` px in a list `width` wide: a slot's
+-- cell, the step from one slot to the next, how many a row holds, the room between two and where
+-- the first sits. As ever: the buttons' size, ITEM_GAP after each, from 4 px in. 1.2.4, line.gap
+-- (with line.slot, a cell's size, and line.left, where the first cell starts): cells that many px
+-- apart both ways, each button in the middle of its cell (the game's, 37, or ours, 30), "My
+-- profile"'s Icons laid out for the room its window gives (ProfileEdit.IconGrid).
+local function ItemGrid(line, own, width)
+	local gap = tonumber(line.gap)
+	local slot = gap and tonumber(line.slot) or own
+	local step = slot + (gap or ITEM_GAP)
+	local columns = line.columns or math.max(1, math.floor((width - 8) / step))
+	return slot, step, columns, gap, tonumber(line.left) or 4
+end
+-- Its height: 2 px above its first row of slots, 2 below its last (the gap after it too, without line.gap).
+local function GridHeight(rows, slot, step, gap)
+	if gap then return rows * slot + (rows - 1) * gap + 4 end
+	return rows * step + 4
+end
+
+-- A small meter beneath an ordinary row's numeric label. Own textures only; if a client lacks
+-- color textures the existing white texture fallback is used, and the numeric label remains.
+function Views.DrawMeter(r, meter, width, left)
+	if type(meter) ~= "table" then if r.meterBack then r.meterBack:Hide(); r.meterFill:Hide() end return end
+	if not r.meterBack then
+		r.meterBack, r.meterFill = r:CreateTexture(nil, "BACKGROUND"), r:CreateTexture(nil, "ARTWORK")
+		for _, texture in ipairs({ r.meterBack, r.meterFill }) do
+			if texture.SetColorTexture then texture:SetColorTexture(1, 1, 1, 1) else texture:SetTexture("Interface\\Buttons\\WHITE8X8") end
+		end
+		r.meterBack:SetVertexColor(0.2, 0.2, 0.2, 0.7); r.meterFill:SetVertexColor(0.8, 0.62, 0.18, 0.9)
+	end
+	local value, total = tonumber(meter.value), tonumber(meter.total)
+	local ratio = value and total and value == value and total == total and total > 0 and math.max(0, math.min(1, value / total)) or 0
+	local size = math.max(1, width - left - RIGHT_INSET)
+	for _, texture in ipairs({ r.meterBack, r.meterFill }) do
+		texture:ClearAllPoints(); texture:SetPoint("BOTTOMLEFT", r, "BOTTOMLEFT", left, 2); texture:SetHeight(4)
+	end
+	r.meterBack:SetWidth(size); r.meterBack:Show()
+	r.meterFill:SetWidth(math.max(0.01, size * ratio)); r.meterFill:SetShown(ratio > 0)
 end
 
 function Views.Render(content, lines, layout)
@@ -749,10 +807,11 @@ function Views.Render(content, lines, layout)
 			-- another, as many per row as fit. The row grows to hold them all.
 			r.left:Hide()
 			r.right:Hide()
-			for c = 1, 4 do r.cols[c]:Hide() end
+			for c = 1, #r.cols do r.cols[c]:Hide() end
 			if not (r.items and r.items[1]) then ItemButton(r, 1) end
-			local size = (r.itemSize or ITEM) + ITEM_GAP
-			local columns = line.columns or math.max(1, math.floor((width - 8) / size))
+			local own = r.itemSize or ITEM
+			local slot, step, columns, gap, left = ItemGrid(line, own, width)
+			local inset = math.floor((slot - own) / 2)
 			local slots = line.slots or #line.items
 			local bySlot = {}
 			for k, it in ipairs(line.items) do
@@ -763,30 +822,30 @@ function Views.Render(content, lines, layout)
 				local b = r.items[k] or ItemButton(r, k)
 				SetSlot(b, bySlot[k])
 				b:ClearAllPoints()
-				b:SetPoint("TOPLEFT", 4 + ((k - 1) % columns) * size, -2 - math.floor((k - 1) / columns) * size)
+				b:SetPoint("TOPLEFT", left + inset + ((k - 1) % columns) * step, -2 - inset - math.floor((k - 1) / columns) * step)
 				b:Show()
 			end
 			for k = slots + 1, #r.items do r.items[k]:Hide() end
-			height = math.ceil(math.max(1, slots) / columns) * size + 4
+			height = GridHeight(math.ceil(math.max(1, slots) / columns), slot, step, gap)
 		elseif line.filters then
 			r.left:Hide()
 			r.right:Hide()
-			for c = 1, 4 do r.cols[c]:Hide() end
+			for c = 1, #r.cols do r.cols[c]:Hide() end
 			height = Views.DrawFilters(r, line.filters, width)
 		elseif line.nav then
 			r.left:Hide()
 			r.right:Hide()
-			for c = 1, 4 do r.cols[c]:Hide() end
+			for c = 1, #r.cols do r.cols[c]:Hide() end
 			height = Views.DrawNav(r, line.nav, width)
 		elseif line.cols then
 			r.left:Hide()
 			r.right:Hide()
 			Views.LayoutColumns(r.cols, layout, width - 4, 4)
-			for c = 1, 4 do r.cols[c]:SetText(line.cols[c] or "") end
+			for c = 1, #r.cols do r.cols[c]:SetText(line.cols[c] or "") end
 			local a = line.dim and 0.45 or 1
-			for c = 1, 4 do r.cols[c]:SetAlpha(a) end
+			for c = 1, #r.cols do r.cols[c]:SetAlpha(a) end
 		else
-			for c = 1, 4 do r.cols[c]:Hide() end
+			for c = 1, #r.cols do r.cols[c]:Hide() end
 			r.left:Show()
 			r.right:Show()
 			-- line.font: a font object by name (the Throne's dark ink on parchment), if the client has it.
@@ -795,19 +854,21 @@ function Views.Render(content, lines, layout)
 			r.right:SetFontObject(font or "GameFontHighlightSmall")
 			local leftX = 4 + (line.indent or 0) * 12
 			r.left:ClearAllPoints()
-			r.left:SetPoint("LEFT", leftX, 0)
+			r.left:SetPoint("LEFT", leftX, line.meter and 4 or 0)
 			r.left:SetText(line.text or "")
 			r.right:SetText(line.right or "")
 			r.right:ClearAllPoints()
-			r.right:SetPoint("RIGHT", -RIGHT_INSET, 0)
+			r.right:SetPoint("RIGHT", -RIGHT_INSET, line.meter and 4 or 0)
 			-- A text box's line: its text as wide as it is, the box after it (PlaceInput).
 			if line.input and not inputRow then
 				inputRow, height = r, ROW_H_INPUT
 			else
 				r.left:SetPoint("RIGHT", r.right, "LEFT", -RIGHT_GAP, 0)
-				FitRight(r, width, leftX)
+				FitRight(r, width, leftX, line.rightWide and 2 or 3)
 			end
+			if line.meter then height = height + 8 end
 		end
+		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and line.meter or nil, width, 4 + (line.indent or 0) * 12)
 		if not line.items then for k = 1, #(r.items or {}) do r.items[k]:Hide() end end
 		if not line.nav then for k = 1, #(r.nav or {}) do r.nav[k]:Hide() end end
 		if not line.filters then for k = 1, #(r.filters or {}) do r.filters[k]:Hide() end end
@@ -825,6 +886,33 @@ function Views.Render(content, lines, layout)
 	PlaceInput(content, inputRow)
 	content.lineCount = #lines
 	content:SetHeight(-y + 8)
+end
+
+-- 1.2.4: how tall Render makes `lines` in a list `width` wide (hd: the HD look's rows), its room
+-- above the first row and below the last included, measured without drawing: a page that fits its
+-- window ("My profile"'s Icons, ProfileEdit.lua) asks it. An items row is measured as the game's
+-- buttons (ITEM_GAME) unless line.gap gives its cells (line.slot). nil for a row of filters (its
+-- buttons' height is theirs).
+function Views.LinesHeight(lines, hd, width)
+	local rowH = hd and ROW_H_HD or ROW_H
+	local y, input = 2, false
+	for _, line in ipairs(lines or {}) do
+		local height
+		if line.items then
+			local slot, step, columns, gap = ItemGrid(line, ITEM_GAME, tonumber(width) or 0)
+			height = GridHeight(math.ceil(math.max(1, line.slots or #line.items) / columns), slot, step, gap)
+		elseif line.filters then
+			return nil
+		elseif line.nav then
+			height = ROW_H_NAV
+		elseif line.input and not line.cols and not input then
+			input, height = true, ROW_H_INPUT
+		else
+			height = rowH
+		end
+		y = y + height + (line.header and 4 or 0) + (line.gapAfter and 6 or 0)
+	end
+	return y + 8
 end
 
 -- The last row clicked in `content` ({ index, top, lines, t }: where it started, how many lines
@@ -1020,7 +1108,9 @@ local function GuildTooltip(e)
 		tt:AddDoubleLine(L.COL_ONLINE, ns.FormatNumber(g.online), 1, 0.82, 0, 1, 1, 1)
 		tt:AddDoubleLine(L.LORD, Plain(g.leader or "?"), 1, 0.82, 0, 1, 1, 1)
 		tt:AddDoubleLine(L.VACANCIES, ns.FormatNumber(math.max(0, 1000 - (g.total or 0))), 1, 0.82, 0, 1, 1, 1)
-		if g.avgLevel and g.avgLevel > 0 then tt:AddDoubleLine(L.AVG_LEVEL, ("%.1f"):format(g.avgLevel), 1, 0.82, 0, 1, 1, 1) end
+		-- (1.2.4: to the tenth as every client has it, Data.AvgLevelText: the Census's column too.)
+		local avg = ns.Data.AvgLevelText(g)
+		if avg then tt:AddDoubleLine(L.AVG_LEVEL, avg, 1, 0.82, 0, 1, 1, 1) end
 		tt:AddDoubleLine(L.INACTIVE_30, ns.FormatNumber(g.inactive30 or 0), 1, 0.82, 0, 1, 1, 1)
 		local classes = {}
 		for code, n in pairs(g.classes or {}) do classes[#classes + 1] = { code, n } end
@@ -1150,18 +1240,36 @@ end
 
 Views.sort = { key = "members", desc = true }
 
+-- 1.2.4: a guild's average level as its rows show it (Data.AvgLevelText: to the tenth, as every
+-- client has it). The Census's cell, "-" for none (no report of it yet, an older version's); and
+-- in parentheses after another number or word (the Realm: its Lord's online or offline, the
+-- free slots), the number white and its words grey, all grey for an old report; nothing for none.
+local function AvgCell(g) return ns.Data.AvgLevelText(g) or Grey("-") end
+local function AvgTag(g, dim)
+	local text = ns.Data.AvgLevelText(g)
+	if not text then return "" end
+	local before, after = L.AVG_LEVEL_TAG:match("^(.-)%%s(.*)$")
+	if dim or not before then return "  " .. Grey(L.AVG_LEVEL_TAG:format(text)) end
+	return "  " .. Grey(before) .. text .. (after ~= "" and Grey(after) or "")
+end
+-- (1.2.4's review: the same words where other files list guilds by a count and break its ties by
+-- the average level: the Throne's inspection, the map's pins.)
+Views.AvgTag = AvgTag
+
 local SORTERS = {
 	name = function(e) return e.name:lower() end,
 	members = function(e) return e.g.total or 0 end,
 	online = function(e) return e.g.online or 0 end,
+	level = function(e) return ns.Data.AvgTenths(e.g) or 0 end, -- (1.2.4; 0: none, last whichever way)
 	lord = function(e) return (e.g.leader or ""):lower() end,
 }
 
+-- A first click on a count's title, the highest first (1.2.4: the average level's too); on a name's, A to Z.
 function Views.SortBy(key)
 	if Views.sort.key == key then
 		Views.sort.desc = not Views.sort.desc
 	else
-		Views.sort = { key = key, desc = key == "members" or key == "online" }
+		Views.sort = { key = key, desc = key == "members" or key == "online" or key == "level" }
 	end
 end
 
@@ -1171,7 +1279,7 @@ local function CensusRow(e)
 	local g = e.g
 	local leader = g.leader and ((g.leaderOnline and "|cff40ff40" or "|cff9d9d9d") .. Plain(g.leader) .. "|r") or Grey("?")
 	return {
-		cols = { Views.DisputeMark(g) .. Plain(e.name), ns.FormatNumber(g.total), Green(ns.FormatNumber(g.online)), leader },
+		cols = { Views.DisputeMark(g) .. Plain(e.name), ns.FormatNumber(g.total), Green(ns.FormatNumber(g.online)), AvgCell(g), leader },
 		dim = not e.fresh,
 		tooltip = GuildTooltip(e),
 		onClick = function()
@@ -1184,26 +1292,43 @@ local function CensusRow(e)
 end
 
 -- A guild seen with /who that nobody reports: grey, after every reported guild, and in no
--- total (Data.Summary keeps them apart). Members and Lord are unknown.
+-- total (Data.Summary keeps them apart). Members, average level and Lord are unknown.
 local function SeenRow(e)
 	local online = ns.FormatNumber(e.online) .. (e.capped and "+" or "")
-	return { cols = { Grey(e.name), Grey("?"), Grey(online), Grey(L.NO_ADDON) }, tooltip = SeenTooltip(e) }
+	return { cols = { Grey(e.name), Grey("?"), Grey(online), Grey("?"), Grey(L.NO_ADDON) }, tooltip = SeenTooltip(e) }
 end
 
--- The reported guilds in the order the column titles say, fresh reports first.
-local function SortedGuilds(list)
-	local get = SORTERS[Views.sort.key] or SORTERS.members
+-- The reported guilds in the order the column titles say, fresh reports first; `sort` (1.2.4's
+-- review): another order of the same kind, { key, desc } (the Realm's own, Views.realmSort).
+-- A tie: the higher average level first (1.2.4, the author's ask: one of the first tie-breaks,
+-- whichever way the column runs), then the name. The average level's own column: a guild without
+-- one last whichever way, a tie the larger guild first, then the name.
+local function SortedGuilds(list, sort)
+	sort = sort or Views.sort
+	local key, desc = sort.key, sort.desc
+	local get = SORTERS[key] or SORTERS.members
+	local level = key == "level"
 	local guilds = {}
 	for i, e in ipairs(list) do guilds[i] = e end
 	table.sort(guilds, function(a, b)
 		-- The default Census order is the Realm's order exactly. Explicit column choices keep
 		-- behaving as labelled by their header, including an ascending Members click.
-		if Views.sort.key == "members" and Views.sort.desc then return ns.Data.GuildDefaultLess(a, b) end
+		if key == "members" and desc then return ns.Data.GuildDefaultLess(a, b) end
 		if a.fresh ~= b.fresh then return a.fresh end
 		local va, vb = get(a), get(b)
-		if va == vb then return a.name < b.name end
-		if Views.sort.desc then return va > vb end
-		return va < vb
+		if level and (va == 0) ~= (vb == 0) then return vb == 0 end
+		if va ~= vb then
+			if desc then return va > vb end
+			return va < vb
+		end
+		if level then
+			local ta, tb = a.g.total or 0, b.g.total or 0
+			if ta ~= tb then return ta > tb end
+		else
+			local la, lb = ns.Data.AvgTenths(a.g) or 0, ns.Data.AvgTenths(b.g) or 0
+			if la ~= lb then return la > lb end
+		end
+		return a.name < b.name
 	end)
 	return guilds
 end
@@ -1216,11 +1341,8 @@ function Views.OpenGuilds(s, min)
 		local free = 1000 - (e.g.total or 0)
 		if e.fresh and free > 0 and free >= (min or 1) then open[#open + 1] = { name = e.name, free = free, e = e } end
 	end
-	table.sort(open, function(a, b)
-		if a.free ~= b.free then return a.free > b.free end
-		return a.name < b.name
-	end)
-	return open
+	-- (1.2.4: as many free, the higher average level first, then the name.)
+	return ns.Data.SortGuildCounts(open, "free")
 end
 
 -- How a count moved tonight (Data.ZoneTrend): "+120" green, "-30" red, "=" grey.
@@ -1294,8 +1416,11 @@ local function RecruitingLines(lines, s, min)
 	end
 	if first then table.insert(open, 1, table.remove(open, first)) end
 	for _, o in ipairs(open) do
-		lines[#lines + 1] = GuildLink(o.name, L.FREE_SLOTS:format(ns.FormatNumber(o.free)),
+		lines[#lines + 1] = GuildLink(o.name, L.FREE_SLOTS:format(ns.FormatNumber(o.free)) .. AvgTag(o.e.g),
 			(gates and o.name == gates.guild and CROWN or "") .. Views.DisputeMark(o.e.g))
+		-- (1.2.4's review: its free slots and average level kept whole up to half the row, a long
+		-- name giving way, as the Realm's guilds; a third cut the average off.)
+		lines[#lines].rightWide = true
 	end
 	if #open == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.ALL_FULL) } end
 	lines[#lines].gapAfter = true
@@ -1319,13 +1444,16 @@ local function ZoneLines(lines, s, lq)
 					Why(tt, "count-map-zones")
 				end,
 			}
+			-- (1.2.4: as many there, the higher average level first, then the name; 1.2.4's review:
+			-- its average level shown after its count, so that order is seen, both kept whole up to
+			-- half the row.)
 			local guilds = {}
 			for guild, n in pairs(s.zoneGuilds[z.key] or {}) do guilds[#guilds + 1] = { name = guild, n = n } end
-			table.sort(guilds, function(a, b)
-				if a.n ~= b.n then return a.n > b.n end
-				return a.name < b.name
-			end)
-			for _, g in ipairs(guilds) do lines[#lines + 1] = GuildLink(g.name, ns.FormatNumber(g.n)) end
+			ns.Data.SortGuildCounts(guilds, "n")
+			for _, g in ipairs(guilds) do
+				lines[#lines + 1] = GuildLink(g.name, ns.FormatNumber(g.n) .. AvgTag(ns.Data.Guild(g.name)))
+				lines[#lines].rightWide = true
+			end
 			lines[#lines].gapAfter = true
 		end
 	end
@@ -1824,6 +1952,39 @@ local function GuildMatches(e, ctx, rows)
 	return found
 end
 
+-- (1.2.4's review) The Realm's own order of its guilds: by default the shared order (Data.Summary's,
+-- the Census's own by default), else by one of the Census's columns, a count the highest first, a
+-- name A to Z, as a first click on its title; chosen on its own line above its guilds, the Realm
+-- having no column titles, and never by a title clicked in the Census (the Realm followed it
+-- unseen). The author's ask: its guilds sorted by their average level too.
+Views.realmSort = "members"
+Views.REALM_ORDERS = {
+	{ key = "members", label = "COL_MEMBERS" }, { key = "online", label = "COL_ONLINE" }, { key = "level", label = "AVG_LEVEL" },
+	{ key = "name", label = "COL_GUILD" }, { key = "lord", label = "COL_LORD" },
+}
+local function RealmOrder()
+	for _, o in ipairs(Views.REALM_ORDERS) do if o.key == Views.realmSort then return o end end
+	return Views.REALM_ORDERS[1]
+end
+-- `guilds` (Data.Summary's, in the shared order) in the Realm's order.
+function Views.RealmOrdered(guilds)
+	local key = RealmOrder().key
+	if key == "members" then return guilds end
+	return SortedGuilds(guilds, { key = key, desc = key ~= "name" and key ~= "lord" })
+end
+local function RealmOrderLine()
+	local current, options = RealmOrder(), {}
+	for _, o in ipairs(Views.REALM_ORDERS) do
+		local key = o.key
+		options[#options + 1] = { text = L[o.label], selected = key == current.key,
+			onClick = key ~= current.key and function()
+				Views.realmSort = key
+				ns.UI.Refresh()
+			end or nil }
+	end
+	return { id = "realm-order", filters = { { label = L.REALM_ORDER, value = L[current.label], options = options, understated = true } } }
+end
+
 -- `q`, the search (Views.Query): the High Council's names (for whoever may see it), then each
 -- guild whose name holds it, whole, and each whose Lord, Captains or members seen do, opened on
 -- those alone; "No match" for none. The chats' link stays (the Chat tab it opens has a search of
@@ -1932,7 +2093,10 @@ local function RealmLines(s, q)
 		lines[#lines + 1] = {
 			id = Views.GuildId(e.name),
 			text = (open and "[-] " or "[+] ") .. Views.DisputeMark(g) .. Green("<" .. Plain(e.name) .. ">") .. " " .. Plain(g.leader or "?"),
-			right = Presence(lordOn, lordDays, lordDim, lordAt),
+			-- (1.2.4, the author's ask: its average level too, in parentheses after its Lord's online
+			-- or offline, both kept whole up to half the row.)
+			right = Presence(lordOn, lordDays, lordDim, lordAt) .. AvgTag(g, not e.fresh),
+			rightWide = true,
 			onClick = function()
 				if folds then
 					folded[e.name] = not folded[e.name] or nil
@@ -2058,7 +2222,10 @@ local function RealmLines(s, q)
 		local own = GetGuildInfo("player")
 		ctx, rows, more = { q = q, own = own, hits = SeenHits(q, own) }, 0, 0
 	end
-	for _, e in ipairs(s.guilds) do
+	-- (1.2.4's review: in the Realm's own order, chosen on its line above its guilds; by default
+	-- Data.Summary's own, the shared order, as before. A search's guilds in it too.)
+	if not q and #s.guilds > 1 then lines[#lines + 1] = RealmOrderLine() end
+	for _, e in ipairs(Views.RealmOrdered(s.guilds)) do
 		if not q or NameHolds(q, e.name) then
 			-- (Found by its name: the guild as ever, opened or not.)
 			if q then found = found + 1 end
@@ -2104,6 +2271,8 @@ local function RealmLines(s, q)
 		return a.name < b.name
 	end)
 	lines[#lines + 1] = { header = true, text = L.LEVEL_RACE }
+	local rules = ns.RankingRules and ns.RankingRules.Link("realm-level", function() ns.RankingRules.OpenRealm("realm-level") end)
+	if rules then lines[#lines + 1] = rules end
 	if #racers == 0 then lines[#lines + 1] = { text = Grey(L.NONE_REPORTED) } end
 	-- The top 100, shown 25 at a time (0.9.7): the window stays light.
 	local shownRacers = math.min(#racers, Views.RACE_MAX, Views.raceShown)
@@ -2152,7 +2321,8 @@ local function RealmLines(s, q)
 		-- (Its census mark too, 1.1: the gates open on its size, Fern's #30.)
 		local mark, d = Views.DisputeMark(open[i].e.g)
 		lines[#lines + 1] = {
-			text = mark .. Green("<" .. name .. ">"), right = L.FREE_SLOTS:format(ns.FormatNumber(open[i].free)),
+			text = mark .. Green("<" .. name .. ">"), right = L.FREE_SLOTS:format(ns.FormatNumber(open[i].free)) .. AvgTag(open[i].e.g),
+			rightWide = true, -- (1.2.4's review: its average level kept whole, a long name giving way)
 			-- The King and his Hands open a guild's gates from here.
 			onClick = commands and function() ns.Acts.GatesClick(name) end or nil,
 			tooltip = function(tt)
@@ -2626,6 +2796,22 @@ Views.RACE_MAX, Views.RACE_PAGE = 100, 25 -- the level race: its top 100, 25 at 
 Views.RECRUIT_SHOWN = 5 -- guilds with room shown in the Realm's Recruiting, the rest on a click (1.1)
 Views.raceShown = Views.RACE_PAGE
 Views.INSPECT_ROWS = 200 -- inspected players listed on the Tabards page
+
+if ns.RankingRules then
+	ns.RankingRules.Register("realm-level", {
+		title = L.RANK_RULE_LEVEL_TITLE,
+		icon = "Interface\\Icons\\Achievement_Level_60",
+		allowed = function() return ns.IsMember() == true end,
+		sections = function()
+			return {
+				{ topic = "score", text = L.RANK_RULE_LEVEL_SCORE },
+				{ topic = "order", text = L.RANK_RULE_LEVEL_ORDER:format(Views.RACE_MAX, Views.RACE_PAGE) },
+				{ topic = "evidence", text = L.RANK_RULE_LEVEL_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_LEVEL_VISIBILITY },
+			}
+		end,
+	})
+end
 
 -- 1.1 (Fern's #28): the gear an officer's click kept (Inspect.InspectGear), newest first, the
 -- players whose name or guild holds `q`: a click shows or hides the items, in their slots, each

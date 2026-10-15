@@ -154,7 +154,8 @@ local function ParseBody(body, realmGroup, epoch, issued, expires)
 			n, total = n + 1, total + 1
 			if n > Authority.MAX_PEOPLE or total > Authority.MAX_TOTAL then return nil, "player-limit" end
 			roles[key] = n == 1 and 0 or 1
-			manifest.people[key] = { guild = guild, rank = roles[key] }
+			-- (1.2.4: the name as signed too, the role rooms' recipients: ChatRooms.lua.)
+			manifest.people[key] = { guild = guild, rank = roles[key], name = name }
 		end
 		manifest.guilds[guildKey] = { name = guild, roles = roles }
 	end
@@ -400,6 +401,86 @@ local function SaveBundle(bundle)
 	return true
 end
 
+-- Historical evidence is deliberately NOT an authority import. Recheck the author's
+-- original bytes against the capture-time window, without AcceptTitles/SetBoundary,
+-- active verification caches, current ranks, or SavedVariables writes. One RSA part
+-- per scheduled step keeps a large archival proof off a single gameplay frame.
+function Authority.VerifyHistoricalRoleProof(proof, actor, guild, at, faction, done)
+	local function Finish(result, why)
+		if done then done(result, why) end
+		return result, why
+	end
+	if type(proof) ~= "table" or type(proof.blobs) ~= "table" or type(actor) ~= "string" or type(guild) ~= "string"
+		or type(at) ~= "number" or at % 1 ~= 0 or at < Authority.RELEASE_FLOOR
+		or not FACTIONS[faction] or proof.realm ~= ns.group or not CurrentRealmIn(proof.realm) then return Finish(nil, "scope") end
+	local scope, ownFaction = ns.group, ns.faction
+	local parts, first, manifest, index = {}, nil, nil, 1
+	if proof.kind == "HT" then
+		local blob = proof.blobs and proof.blobs[1]
+		local text, sig; if type(blob) == "string" then text, sig = blob:match("^(HT1~.*)~(%x+)$") end
+		local stamp, realm, list = ListParts(blob)
+		if not text or #blob > Authority.MAX_TEXT or #proof.blobs ~= 1 or not stamp or stamp > at or realm ~= proof.realm
+			or not ns.Sign.Plausible(sig) or not ns.Sign.Verify(text, sig) then return Finish(nil, "signature") end
+		local parsed = Authority.Read(list, realm, at)
+		manifest = parsed and parsed[faction]
+		first = { at = stamp, epoch = manifest and manifest.epoch or 0, kind = "HT" }
+	elseif proof.kind == "HA" then
+		if type(proof.blobs) ~= "table" or #proof.blobs < 1 or #proof.blobs > Authority.MAX_PARTS then return Finish(nil, "parts") end
+	else return Finish(nil, "kind") end
+	local function Result()
+		if scope ~= ns.group or ownFaction ~= ns.faction then return Finish(nil, "identity") end
+		if not manifest or manifest.issued < Authority.RELEASE_FLOOR or manifest.issued > at or manifest.expires < at then return Finish(nil, "window") end
+		local boundary = Record(faction, proof.realm)
+		-- A revocation already known to precede this observation defeats an older raw
+		-- grant. A genuinely later revocation does not rewrite earlier archival facts.
+		if boundary and boundary.at <= at and (first.at < boundary.at or first.epoch < boundary.epoch
+			or first.at == boundary.at and (boundary.kind ~= proof.kind or boundary.kind == "HA" and boundary.root ~= first.root)) then return Finish(nil, "superseded") end
+		local p = manifest.people[Fold(actor)]
+		if not p or p.rank ~= 0 or p.name ~= actor or p.guild ~= guild then return Finish(nil, "role") end
+		return Finish({ actor = actor, guild = guild, at = at, published = first.at, epoch = manifest.epoch, issued = manifest.issued,
+			expires = manifest.expires, realm = proof.realm, faction = faction })
+	end
+	local function Step()
+		if scope ~= ns.group or ownFaction ~= ns.faction then return Finish(nil, "identity") end
+		if proof.kind == "HT" then return Result() end
+		local p = Part(proof.blobs[index])
+		if not p or p.at > at or p.realm ~= proof.realm or p.faction ~= faction or not ns.Sign.Plausible(p.sig)
+			or not ns.Sign.Verify(p.text, p.sig) then return Finish(nil, "signature") end
+		first = first or p
+		if p.at ~= first.at or p.epoch ~= first.epoch or p.root ~= first.root or p.count ~= first.count
+			or p.issued ~= first.issued or p.expires ~= first.expires or parts[p.index] then return Finish(nil, "set") end
+		parts[p.index], index = p, index + 1
+		if index <= #proof.blobs then
+			if done then ns.After(0.02, "historical authority part", Step); return true end
+			return Step()
+		end
+		if #proof.blobs ~= first.count then return Finish(nil, "partial") end
+		local bodies = {}; for i = 1, first.count do if not parts[i] then return Finish(nil, "partial") end; bodies[i] = parts[i].body end
+		local body = table.concat(bodies, "!")
+		if Hex(ns.Sign.SHA256(body)) ~= first.root then return Finish(nil, "digest") end
+		manifest = ParseBody(body, proof.realm, first.epoch, first.issued, first.expires)
+		return Result()
+	end
+	if done then ns.After(0.02, "historical authority proof", Step); return true end
+	return Step()
+end
+
+-- Only the original material matching the CURRENT accepted boundary may be exported.
+-- Reading an old proof later never grants active office, even when its past role is genuine.
+function Authority.ExportOriginalRoleProof()
+	local r, blobs, kind = Record(ns.faction, ns.group), nil, nil
+	if r and r.kind == "HA" then
+		local b = StoredBundle(ns.faction, ns.group)
+		if b and b.at == r.at and b.epoch == r.epoch and b.root == r.root then blobs, kind = b.blobs, "HA" end
+	elseif r and r.kind == "HT" then
+		local t, at = CurrentTitles()
+		if t and at == r.at then blobs, kind = { t.blob }, "HT" end
+	end
+	if type(blobs) ~= "table" then return nil end
+	local copy = {}; for i, blob in ipairs(blobs) do if type(blob) ~= "string" then return nil end; copy[i] = blob end
+	return { kind = kind, realm = ns.group, blobs = copy }
+end
+
 local function BundleManifest(faction, realm)
 	local record = Record(faction, realm)
 	if not record or record.kind ~= "HA" or type(record.root) ~= "string" then return nil end
@@ -527,6 +608,17 @@ function Authority.Enforced(faction)
 	faction = faction or ns.faction or "Alliance"
 	local _, _, _, realm = Parsed()
 	return Record(faction, realm) ~= nil
+end
+
+-- 1.2.4 (/oly status): whether the author's signed leadership list counts on this client, and until
+-- when. Another guild's guild masters and officers are verified from it alone (the role rooms that
+-- reach other guilds, ChatRooms.lua, among every cross-guild check).
+function Authority.StatusLine()
+	local faction = ns.faction or "Alliance"
+	if not Authority.Enforced(faction) then return "off" end
+	local m = Authority.Manifest(faction)
+	if not m then return ("on, %s, no current list: other guilds' leaders count nowhere"):format(faction) end
+	return ("on, %s, expires %s"):format(faction, date and date("!%Y-%m-%d %H:%M UTC", m.expires) or tostring(m.expires))
 end
 
 function Authority.Valid(manifest, now)

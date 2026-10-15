@@ -404,6 +404,8 @@ function Roster.Scan()
 	-- capability, never a value sent over the wire.
 	Roster.group, Roster.faction = ns.group, ns.faction or ns.Faction()
 	Roster.snapshotAt = ns.Now()
+	-- The Church reuses this native scan: a pre-midnight cache must not prove the next UTC day.
+	Roster.serverAt = type(GetServerTime) == "function" and GetServerTime() or nil
 	Roster.generation = math.max(0, math.floor(tonumber(Roster.generation) or 0)) + 1
 	-- A GUILD_ROSTER_UPDATE can be observed while Blizzard is still filling the rows.  Such a
 	-- partial scan remains useful to the census, but it must never authorize a third party or make

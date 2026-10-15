@@ -389,6 +389,8 @@ function Roles.Settings(realm)
 	return out
 end
 -- The live switch of this realm (a test build is never live: Arena.Mode gives T there anyway).
+-- 1.2.3 (the owner's decision): the bets' switch alone, off until 2.0. A free game (a duel or a
+-- Bones game with no gold on it) counts without it (Arena.GameMode); nothing here turns it on.
 function Roles.Live(realm) return Roles.Settings(realm).live == 1 end
 function Roles.Currency(realm) return Roles.Settings(realm).cur == "p" and "p" or "g" end
 -- The King's published stream delay for this realm, while fresh (it lapses DELAY_LAPSE after his
@@ -717,6 +719,12 @@ end
 -- whose word stands repeats it every REPEAT while it may still publish. The King revokes by naming
 -- a councillor no more: his words stop counting at once on every client, and that game falls back
 -- to the settings' rankPub (all three at once, the switch from before).
+-- (1.2.4, the author's ask: rankings and what shows them are never lost.) The words are the realm
+-- group's (GroupWords), and any client holding one tells it (a copy: the same fields and its giver,
+-- AU~L1~<a|b|l>~<1|0>~<time>~<Giver-Realm>), in answer alone: to a client that asks, once a
+-- session as its Games tab opens, for the games it lacks (AU~L1~q~<letters>), on the channel and,
+-- where its guild spans the group's realms, over GUILD (the King's channel is his realm's alone).
+-- A 1.2.3 client reads neither form.
 
 local function PublishersOf(realm)
 	local w = WordsOf(realm).publishers
@@ -756,42 +764,103 @@ function Roles.MayPublish(name, game, realm)
 	end
 	return false
 end
--- The word standing for game, while its giver may still publish it; nil otherwise.
-local function Standing(game, realm)
-	local w = WordsOf(realm or ns.realm).rankPub
-	local e = type(w) == "table" and w[game]
-	if type(e) ~= "table" or not Roles.MayPublish(e.from, game, realm) then return nil end
+-- (1.2.4) The publish words of the realm group: ns.rdb.arena.rankPub[game] = { on, at, from (its
+-- giver), t (heard), copy (true: another holder told it) }, their log ns.rdb.arena.rankLog. The
+-- build before kept each under its giver's realm (WordsOf(realm).rankPub), so a member on another
+-- realm of the group never saw one: those are taken in here once, the newest per game.
+local groupFor -- the saved data whose realms' words were taken in this session
+local function GroupWords()
+	local rdb = ns.rdb
+	if type(rdb) ~= "table" then return nil end
+	local a = rdb.arena
+	if type(a) ~= "table" then a = {} rdb.arena = a end
+	if type(a.rankPub) ~= "table" then a.rankPub = {} end
+	if type(a.rankLog) ~= "table" then a.rankLog = {} end
+	if groupFor ~= rdb then
+		groupFor = rdb
+		local moved = false
+		for _, r in pairs(type(a.realms) == "table" and a.realms or {}) do
+			local roles = type(r) == "table" and r.roles
+			if type(roles) == "table" and (roles.rankPub ~= nil or roles.rankLog ~= nil) then
+				for game, e in pairs(type(roles.rankPub) == "table" and roles.rankPub or {}) do
+					local at = type(e) == "table" and tonumber(e.at)
+					if Roles.GAME_LETTER[game] and at and type(e.from) == "string" and Replaces(a.rankPub[game], at, e.from) then
+						a.rankPub[game] = { on = e.on == true, at = at, from = e.from, t = tonumber(e.t) or at }
+					end
+				end
+				for _, x in ipairs(type(roles.rankLog) == "table" and roles.rankLog or {}) do
+					if type(x) == "table" then a.rankLog[#a.rankLog + 1] = x end
+				end
+				roles.rankPub, roles.rankLog = nil, nil
+				moved = true
+			end
+		end
+		if moved then
+			table.sort(a.rankLog, function(x, y) return (tonumber(x.at) or 0) < (tonumber(y.at) or 0) end)
+			while #a.rankLog > Roles.PUBLISH_LOG_MAX do table.remove(a.rankLog, 1) end
+		end
+	end
+	return a
+end
+-- The word standing for game, while its giver may still publish it (whom the King names on the
+-- giver's realm); nil otherwise.
+local function Standing(game)
+	local g = GroupWords()
+	local e = g and g.rankPub[game]
+	if type(e) ~= "table" or type(e.from) ~= "string" or not Roles.MayPublish(e.from, game, ns.Arena.RealmOf(e.from)) then return nil end
 	return e
 end
-function Roles.PublishWord(game, realm)
-	local e = Standing(game, realm)
-	return e and { on = e.on == true, at = e.at, from = e.from } or nil
+function Roles.PublishWord(game)
+	local e = Standing(game)
+	return e and { on = e.on == true, at = e.at, from = e.from, copy = e.copy == true or nil } or nil
 end
 -- Whether game's ranking shows to everyone: its standing word, else the settings' rankPub.
 function Roles.RankPublic(game, realm)
-	local e = Standing(game, realm)
+	local e = Standing(game)
 	if e then return e.on == true end
 	return Roles.Settings(realm).rankPub == 1
 end
 -- The publish words taken, newest last: { { game, on, at, from }, ... }.
-function Roles.PublishLog(realm)
-	local log = WordsOf(realm or ns.realm).rankLog
+function Roles.PublishLog()
+	local g = GroupWords()
 	local out = {}
-	for i, e in ipairs(type(log) == "table" and log or {}) do out[i] = { game = e.game, on = e.on == true, at = e.at, from = e.from } end
+	for i, e in ipairs(g and g.rankLog or {}) do out[i] = { game = e.game, on = e.on == true, at = e.at, from = e.from } end
 	return out
 end
 
-local function TakePublish(sender, game, on, at, realm)
-	local words = WordsOf(realm)
-	if type(words.rankPub) ~= "table" then words.rankPub = {} end
-	if not Replaces(words.rankPub[game], at, sender) then return false, "older" end
-	local from = ns.FullName(sender)
-	words.rankPub[game] = { on = on, at = at, from = from, t = Now() }
-	if type(words.rankLog) ~= "table" then words.rankLog = {} end
-	local log = words.rankLog
+-- A word for game from its giver (the sender), or a copy another holder told (giver: not the
+-- sender). A copy can't be told from one a modified client made up (no signature of the giver's
+-- travels with it: Konig's rule for the treasury's switches), so it only fills: a game with no word
+-- here, or with an older copy; never over a word heard from a giver himself. A giver's own word
+-- replaces any copy, whichever giver it names and whatever its time (the review: a copy made up in
+-- another publisher's name, dated after the King's word, refused the King's own repeats for good),
+-- else the newest stands, the King's own on the same second (the words' rule). True, or false and
+-- why.
+local function TakePublish(sender, game, on, at, giver)
+	local g = GroupWords()
+	if not g then return false, "store" end
+	giver = giver or sender
+	local copy = not Same(sender, giver)
+	local held = g.rankPub[game]
+	if type(held) == "table" then
+		local was = tonumber(held.at) or 0
+		if copy then
+			if not held.copy or at <= was then return false, "older" end
+		elseif not held.copy and not Replaces(held, at, giver) then
+			return false, "older"
+		end
+		if not copy and held.copy and was == at and (held.on == true) == (on == true) and Same(held.from, giver) then
+			-- (the same word, from its giver now: his own heard)
+			held.copy, held.t = nil, Now()
+			return false, "again"
+		end
+	end
+	local from = ns.FullName(giver)
+	g.rankPub[game] = { on = on, at = at, from = from, t = Now(), copy = copy or nil }
+	local log = g.rankLog
 	log[#log + 1] = { game = game, on = on, at = at, from = from }
 	while #log > Roles.PUBLISH_LOG_MAX do table.remove(log, 1) end
-	ns.Log("rankings: %s %s by %s", game, on and "shown" or "hidden", from)
+	ns.Log("rankings: %s %s by %s%s", game, on and "shown" or "hidden", from, copy and (" (told by " .. ns.FullName(sender) .. ")") or "")
 	ns.Arena.Changed()
 	return true
 end
@@ -799,13 +868,19 @@ local function SendPublish(game, e)
 	if not MaySend() or type(e) ~= "table" then return end
 	ns.Arena.Send("AU", "L", ("%s~%d~%d"):format(Roles.GAME_LETTER[game], e.on and 1 or 0, math.floor(e.at)), { dist = "CHANNEL", key = "rankpub " .. game })
 end
+-- (1.2.4) A word as any holder tells it: its giver named after it; on dist (the channel, or GUILD).
+local function SendCopy(game, e, dist)
+	if not MaySend() or type(e) ~= "table" then return false end
+	return ns.Arena.Send("AU", "L", ("%s~%d~%d~%s"):format(Roles.GAME_LETTER[game], e.on and 1 or 0, math.floor(e.at), ns.FullName(e.from)),
+		{ dist = dist or "CHANNEL", key = "rankpub copy " .. game .. " " .. tostring(dist or "CHANNEL") }) == true
+end
 -- The games whose standing word this client gave, and may still give.
 local function OwnPublish()
 	local out = {}
-	local w = WordsOf(ns.realm).rankPub
-	for _, g in ipairs(Roles.RANK_GAMES) do
-		local e = type(w) == "table" and w[g]
-		if type(e) == "table" and Same(e.from, ns.me) and Roles.MayPublish(ns.me, g) then out[#out + 1] = g end
+	local g = GroupWords()
+	for _, game in ipairs(Roles.RANK_GAMES) do
+		local e = g and g.rankPub[game]
+		if type(e) == "table" and not e.copy and Same(e.from, ns.me) and Roles.MayPublish(ns.me, game) then out[#out + 1] = game end
 	end
 	return out
 end
@@ -817,8 +892,8 @@ function Roles.PublishRepeating()
 end
 function Roles.PublishRepeat()
 	if MaySend() then
-		local w = WordsOf(ns.realm).rankPub
-		for _, g in ipairs(OwnPublish()) do SendPublish(g, w[g]) end
+		local g = GroupWords()
+		for _, game in ipairs(OwnPublish()) do SendPublish(game, g.rankPub[game]) end
 	end
 	return Roles.PublishRepeating()
 end
@@ -828,29 +903,118 @@ end
 function Roles.Publish(game, on)
 	if not Roles.GAME_LETTER[game] then return false, "game" end
 	if not Roles.MayPublish(ns.me, game) then return false, "publisher" end
-	local w = WordsOf(ns.realm).rankPub
-	local kept = type(w) == "table" and w[game] or nil
+	local g = GroupWords()
+	if not g then return false, "store" end
+	local kept = g.rankPub[game]
 	local at = math.max(Now(), (type(kept) == "table" and tonumber(kept.at) or 0) + 1)
-	local ok, why = TakePublish(ns.me, game, on == true, at, ns.realm)
+	local ok, why = TakePublish(ns.me, game, on == true, at)
 	if not ok then return false, why end
-	SendPublish(game, WordsOf(ns.realm).rankPub[game])
+	SendPublish(game, g.rankPub[game])
 	Roles.PublishRepeating()
 	return true
 end
 
+-- (1.2.4) Told by any holder. A member who opens the Games tab holding no word for a game asks
+-- for those once a session (AskPublish: on the channel, and to his guild where it spans the
+-- group's realms); a holder answers on that lane with each of them it holds (its own as its
+-- giver's word, any other as a copy) ANSWER_MIN to ANSWER_MIN + ANSWER_SPREAD seconds later,
+-- leaving out a word that went out meanwhile, once per ANSWER_GAP at most; about RELAYS holders
+-- take an ask up, whatever the army's size: on the channel, which joins every Olympus guild, in the
+-- army's addon users (the census's, King.AddonsOnline, as the signed authority's answers draw; the
+-- review: our guild's alone drew about RELAYS holders of each guild), over the guild in our
+-- guild's (Comm's count). Nothing goes unasked: an idle member sends nothing and runs no clock for
+-- it (the weight rule).
+Roles.RELAYS = 3
+Roles.ANSWER_MIN, Roles.ANSWER_SPREAD = 2, 10
+Roles.random = math.random
+local wordHeard = {} -- [game] = { key, at }: the word last heard told, by anyone
+local answering, lastAnswerAt = nil, -math.huge
+local function WordKey(game, on, at, from) return ("%s|%s|%d|%s"):format(game, on and "1" or "0", math.floor(tonumber(at) or 0), ns.FullName(from or "?"):lower()) end
+local function Drawn(dist)
+	local C, K = ns.Comm, ns.King
+	local peers = type(C) == "table" and type(C.PeerCount) == "function" and tonumber(C.PeerCount(dist ~= "GUILD")) or 0
+	local users = peers + 1
+	if dist ~= "GUILD" and type(K) == "table" and type(K.AddonsOnline) == "function" then
+		local ok, n = pcall(K.AddonsOnline)
+		if ok and tonumber(n) then users = math.max(users, tonumber(n)) end
+	end
+	return Roles.random() <= math.min(1, Roles.RELAYS / users)
+end
+-- This client's words for those games (all: nil) told on dist; since: one told by anyone after it
+-- is left out. The number told.
+local function Tell(dist, games, since)
+	local n = 0
+	for _, game in ipairs(Roles.RANK_GAMES) do
+		local e = (not games or games[game]) and Standing(game) or nil
+		local heard = e and wordHeard[game]
+		if e and not (since and heard and heard.key == WordKey(game, e.on == true, e.at, e.from) and heard.at > since) then
+			if dist == "CHANNEL" and not e.copy and Same(e.from, ns.me) then
+				SendPublish(game, e)
+				n = n + 1
+			elseif SendCopy(game, e, dist) then
+				n = n + 1
+			end
+		end
+	end
+	return n
+end
+Roles.TellPublish = Tell
+local function HeardAsk(dist, letters)
+	if answering or Now() - lastAnswerAt < Roles.ANSWER_GAP or not MaySend() then return end
+	local games, any = {}, false
+	for l in tostring(letters or ""):gmatch("[abl]") do
+		local game = Roles.LETTER_GAME[l]
+		if Standing(game) then games[game], any = true, true end
+	end
+	if not any or not Drawn(dist) then return end
+	local since = Now()
+	answering = games
+	ns.Arena.After(Roles.ANSWER_MIN + Roles.random() * Roles.ANSWER_SPREAD, "rankings answer", function()
+		answering, lastAnswerAt = nil, Now()
+		Tell(dist, games, since)
+	end)
+end
+-- The ask for the games this client holds no word of (the Games tab, ArenaHome.TabLines), once a
+-- session: the letters asked, or nil (nothing lacking, a test build, asked already).
+local asked = false
+function Roles.AskPublish()
+	if asked or not MaySend() then return nil end
+	local lack = ""
+	for _, game in ipairs(Roles.RANK_GAMES) do if not Standing(game) then lack = lack .. Roles.GAME_LETTER[game] end end
+	if lack == "" then return nil end
+	local accepted = ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "CHANNEL", key = "rankpub ask" }) == true
+	local C = ns.Comm
+	if type(C) == "table" and type(C.SpansRealms) == "function" and C.SpansRealms() == true then
+		accepted = ns.Arena.Send("AU", "L", "q~" .. lack, { dist = "GUILD", key = "rankpub ask guild" }) == true or accepted
+	end
+	if not accepted then return nil end
+	asked = true
+	return lack
+end
+
 local function OnPublish(dist, sender, mode, body)
-	if dist ~= "CHANNEL" or mode ~= "L" then return end
-	local letter, on, at = tostring(body or ""):match("^([abl])~([01])~(%d+)$")
+	if (dist ~= "CHANNEL" and dist ~= "GUILD") or mode ~= "L" then return end
+	body = tostring(body or "")
+	local M = ns.Moderation
+	if M and not M.missing and M.Hides and M.Hides(sender) then return end
+	local ask = body:match("^q~([abl]+)$")
+	if ask then return HeardAsk(dist, ask) end
+	local letter, on, at, giver = body:match("^([abl])~([01])~(%d+)$")
+	if not letter then letter, on, at, giver = body:match("^([abl])~([01])~(%d+)~([^~]+)$") end
 	local game = letter and Roles.LETTER_GAME[letter]
 	at = at and #at <= 12 and tonumber(at) or nil
 	if not game or not at or at > Now() + ns.King.DATE_AHEAD then return end
-	local M = ns.Moderation
-	if M and not M.missing and M.Hides and M.Hides(sender) then return end
-	local realm = ns.Arena.RealmOf(sender)
-	if not Roles.MayPublish(sender, game, realm) then
-		return ns.Log("rankings: %s's word for %s ignored: not a publisher", tostring(sender), game)
+	if giver then
+		giver = giver:find("-", 1, true) and ns.Arena.Name(giver) or nil
+		if not giver then return end
+	else
+		giver = ns.FullName(sender)
 	end
-	TakePublish(sender, game, on == "1", at, realm)
+	wordHeard[game] = { key = WordKey(game, on == "1", at, giver), at = Now() }
+	if not Roles.MayPublish(giver, game, ns.Arena.RealmOf(giver)) then
+		return ns.Log("rankings: %s's word for %s ignored: not a publisher", tostring(giver), game)
+	end
+	TakePublish(sender, game, on == "1", at, giver)
 end
 ns.Comm.Handle("AU", ns.Arena.Handle("AU", OnPublish))
 
@@ -912,10 +1076,10 @@ ns.On("LOGIN", function()
 	-- whose client this is.
 	if Roles.Repeating(true) then ns.Arena.After(Roles.LOGIN_REPEAT, "roles login repeat", Roles.Repeat) end
 	-- A client whose publish word stands repeats it too, once the guild says who it is.
-	local w = WordsOf(ns.realm).rankPub
-	for _, g in ipairs(Roles.RANK_GAMES) do
-		local e = type(w) == "table" and w[g]
-		if type(e) == "table" and Same(e.from, ns.me) then
+	local g = GroupWords()
+	for _, game in ipairs(Roles.RANK_GAMES) do
+		local e = g and g.rankPub[game]
+		if type(e) == "table" and not e.copy and Same(e.from, ns.me) then
 			ns.Arena.After(Roles.LOGIN_REPEAT, "rankings login repeat", Roles.PublishRepeat)
 			break
 		end

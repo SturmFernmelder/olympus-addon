@@ -503,6 +503,23 @@ test("honours: the best guild is the highest average level; ties go to more memb
 	eq(Honors.GuildTop(nil), nil)
 end)
 
+-- 1.2.4: the average level the census carries is cut down to the tenth (Codec: math.floor(avgLevel
+-- * 10)), and every client shows it so (Data.AvgTenths). A guild master's own client has his guild's
+-- unrounded, from his roster: rounded here, his 47.96 was 48.0 on his client and 47.9 on every other,
+-- so his client alone could give him the owl, its title and its letter at a near tie.
+test("honours: 1.2.4 the best guild's average level is cut down to the tenth as the census carries it, our own unrounded one too", function()
+	local rows = {
+		{ guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 47.96 }, -- (ours, from our roster)
+		{ guild = "Olympus Alpha", leader = "Ann", members = 100, avgLevel = 47.9 },  -- (theirs, from their report)
+	}
+	local list = Honors.GuildRanking(rows)
+	eq(Keys(list, "guild"), "Olympus Alpha,Olympus Zeta", "a tie at 47.9: by the name, as on every client")
+	eq(list[2].avgLevel, 47.9)
+	eq(Honors.GuildTop({ { guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 59.99 },
+		{ guild = "Olympus Alpha", leader = "Ann", members = 101, avgLevel = 59.9 } }).guild, "Olympus Alpha", "59.9 each: the more members")
+	eq(Honors.GuildTop({ { guild = "Olympus Zeta", leader = "Zed", members = 100, avgLevel = 59.99 } }).avgLevel, 59.9, "never 60.0")
+end)
+
 test("honours: the best guild from the census as it is kept: one faction, the guilds the caller leaves out, and only fresh reports", function()
 	local now = 1790000000
 	local guilds = {
@@ -569,25 +586,35 @@ local function Everything()
 	}
 end
 
--- (1.2.3, the owner's call "Cajado entra na 1.2.3": the missionaries' crook is worn too; the koi, the
--- owl and the rest still wait. The list below was the donors' alone until then.)
-test("1.2.0 honours: the release wears the all-time donors' frames alone (1.2.3: and the missionaries' crook); the level race's comet, the month's, the arena's and the rest wait (the owner's call)", function()
+-- (1.2.3, the owner's call "Cajado entra na 1.2.3": the missionaries' crook is worn too. 1.2.4, the
+-- owner's calls: the koi, the owl, the Apostles' cross, the Bones' charm and the slayers' skeletal
+-- horse too; the comet waits for the launch, the Arena's for its tournaments, the raven for 2.0's
+-- bets. The list below was the donors' alone until 1.2.3, and theirs and the crook's in 1.2.3.)
+test("1.2.0 honours: the release wears the all-time donors' frames alone (1.2.3: and the missionaries' crook; 1.2.4: the koi, the owl, the cross, the charm and the skeletal horse); the level race's comet, the arena's and the Oracle's wait (the owner's call)", function()
 	local saved = Honors.FRAMES_SHIPPED
 	local families = {}
 	for family in pairs(SHIPPED or {}) do families[#families + 1] = family end
 	table.sort(families)
-	eq(table.concat(families, ","), "donor-top,missionary", "Honors.lua ships the all-time donors' and the missionaries' frames alone")
+	eq(table.concat(families, ","), "apostle,bones,donor-month,donor-top,guild,missionary,wanted-slayer",
+		"Honors.lua ships the donors', the owl's, the Church's, the Bones' and the slayers' frames alone")
 	Honors.FRAMES_SHIPPED = SHIPPED
 	local ok, err = pcall(function()
 		local inputs = Everything()
-		inputs.church = { missionaries = { { name = "Aldric", place = 1 } } }
+		inputs.church = { missionaries = { { name = "Aldric", place = 1 } }, apostles = { { name = "Aldric", place = 2 } } }
+		inputs.bones = { month = { { name = "Aldric", place = 3 } }, monthNo = inputs.donors.monthNo }
+		inputs.wanted = { rows = { { guid = "Player-1-A" } } }
+		inputs.oracle = { month = { { name = "Aldric", place = 1 } }, monthNo = inputs.donors.monthNo }
 		local held = Honors.Holdings(ME, inputs)
 		-- Held as before: the honours themselves are untouched, only the frames worn.
 		assert(Keys(held):find("level-race-60", 1, true) and Keys(held):find("donor-top-1", 1, true), Keys(held))
 		eq((Honors.Shown({ frame = "donor-top-1" }, held)), "donor-top-1", "the all-time donors' frame is worn")
 		eq((Honors.Shown({ frame = "missionary-1" }, held)), "missionary-1", "(1.2.3) the missionaries' crook is worn")
 		assert(Honors.Choose({}, held, "missionary-1"), "(1.2.3) the crook can be picked")
-		for _, key in ipairs({ "level-race-60", "donor-month-1", "arena-champion", "arena-class-mage", "guild-top-leader" }) do
+		for _, key in ipairs({ "donor-month-1", "guild-top-leader", "apostle-2", "bones-3", "wanted-slayer-1" }) do
+			eq((Honors.Shown({ frame = key }, held)), key, "(1.2.4) " .. key .. " is worn")
+			assert(Honors.Choose({}, held, key), "(1.2.4) " .. key .. " can be picked")
+		end
+		for _, key in ipairs({ "level-race-60", "oracle-1", "arena-champion", "arena-class-mage" }) do
 			eq((Honors.Shown({ frame = key }, held)), "rank", key .. ": his rank's frame instead")
 			eq(select(2, Honors.Choose({}, held, key)), "frame", key .. ": not offered to pick")
 		end
@@ -639,7 +666,9 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 		["arena-race-undead-2"] = "skeletal-horse-silver", ["arena-race-tauren"] = "kodo-gold", ["arena-race-troll-3"] = "raptor-bronze",
 		["donor-top-1"] = "cornucopia-gold", ["donor-top-3"] = "cornucopia-bronze", ["donor-month-2"] = "koi-silver",
 		["oracle-1"] = "raven-gold", ["oracle-3"] = "raven-bronze", ["guild-top-leader"] = "owl-gold",
-		["wanted-slayer-1"] = "orc-wolf-gold", ["wanted-slayer-2"] = "orc-wolf-silver", ["wanted-slayer-3"] = "orc-wolf-bronze",
+		-- (1.2.4, the owner's note of 10-11: the slayers' skeletal horse, the orc's wolf until then.)
+		["wanted-slayer-1"] = "skeletal-horse-gold", ["wanted-slayer-2"] = "skeletal-horse-silver", ["wanted-slayer-3"] = "skeletal-horse-bronze",
+		["apostle-1"] = "cross-gold", ["apostle-3"] = "cross-bronze", ["bones-2"] = "charm-silver",
 		["level-race-20"] = "comet-bronze", ["level-race-40"] = "comet-silver", ["level-race-60"] = "comet-gold",
 		["missionary-1"] = "crook-gold", ["missionary-2"] = "crook-silver", ["missionary-3"] = "crook-bronze",
 	}
@@ -655,8 +684,9 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 	end
 	-- Every file the honours can name: 3 gryphons, 9 classes and 8 races in three metals, three
 	-- cornucopias, koi and ravens, three comets and the gold owl; (1.2.1) the ten preview frames
-	-- nobody holds (three crosses, three charms, three owlcats and the red cross); and (1.2.3) the
-	-- missionaries' three crooks.
+	-- (three crosses, three charms, three owlcats and the red cross: 1.2.4, the crosses and the
+	-- charms honours, the four others previews nobody holds); and (1.2.3) the missionaries' three
+	-- crooks. (1.2.4: the slayers' horses are the Undead's, counted with the races.)
 	local files = Honors.ArtFiles()
 	eq(#files, 3 + 27 + 24 + 9 + 3 + 1 + 10 + 3)
 	local listed = {}
@@ -686,7 +716,10 @@ test("honours: every honour's art is the design's beast in its metal (gold, silv
 	local inputs = { belts = belts, podium = podium, donors = Honors.Donors(gifts, NOW),
 		levels = Honors.LevelRace({}, claims, 100000), oracle = { month = oracle, monthNo = Honors.MonthOf(SEP_1) },
 		guild = { guild = "Olympus Aurora", leader = "Una", members = 100, avgLevel = 40 },
-		church = { missionaries = oracle } } -- (1.2.3: the same three, the Church's top 3)
+		-- (1.2.3: the same three, the Church's top 3; 1.2.4: its Apostles, the Bones' month and the
+		-- slayers' signed top 3 too)
+		church = { missionaries = oracle, apostles = oracle }, bones = { month = oracle, monthNo = Honors.MonthOf(SEP_1) },
+		wanted = { rows = { { guid = "Player-8-1" }, { guid = "Player-8-2" }, { guid = "Player-8-3" } } } }
 	local got = {}
 	for _, p in ipairs(players) do
 		for _, h in ipairs(Honors.Holdings(p, inputs)) do
@@ -703,11 +736,11 @@ end)
 
 -- 1.2.1 (the author's ask): the new frames ship as a preview only. Their keys name their art for
 -- /oly borders test, and no honour has them: everyone holding everything holds none of them, none
--- can be picked, and a pick naming one shows the rank's frame.
-test("1.2.1 honours: the new frames are a preview only: apostle-1/2/3 the cross, bones-1/2/3 the charm, arena-race-skyborn the owlcat, apostle-red the red cross on the black; held by nobody, never picked or shown", function()
+-- can be picked, and a pick naming one shows the rank's frame. (1.2.4, the owner's call: the
+-- Apostles' crosses and the Bones' charms are honours now, their keys and art the same; the
+-- skyborn's owlcats and the red cross stay previews.)
+test("1.2.1 honours: the new frames are a preview only: arena-race-skyborn the owlcat, apostle-red the red cross on the black (1.2.4: apostle-1/2/3 the cross and bones-1/2/3 the charm are honours, the same art); held by nobody, never picked or shown", function()
 	local want = {
-		["apostle-1"] = { "cross-gold", "gold" }, ["apostle-2"] = { "cross-silver", "silver" }, ["apostle-3"] = { "cross-bronze", "bronze" },
-		["bones-1"] = { "charm-gold", "gold" }, ["bones-2"] = { "charm-silver", "silver" }, ["bones-3"] = { "charm-bronze", "bronze" },
 		["arena-race-skyborn"] = { "owlcat-gold", "gold" }, ["arena-race-skyborn-2"] = { "owlcat-silver", "silver" },
 		["arena-race-skyborn-3"] = { "owlcat-bronze", "bronze" }, ["apostle-red"] = { "cross-red", "black" },
 	}
@@ -718,11 +751,16 @@ test("1.2.1 honours: the new frames are a preview only: apostle-1/2/3 the cross,
 		assert(want[key], "a preview key: " .. key)
 		eq(art, want[key][1], key) eq(shape, "plain", key .. ": the plain box") eq(metal, want[key][2], key .. "'s underlay")
 	end
-	eq(n, 10)
+	eq(n, 4)
 	eq(Honors.RACE_ART.skyborn, "owlcat")
+	-- (1.2.4) The crosses and the charms, honours with the previews' art.
+	local honours = { ["apostle-1"] = "cross-gold", ["apostle-2"] = "cross-silver", ["apostle-3"] = "cross-bronze",
+		["bones-1"] = "charm-gold", ["bones-2"] = "charm-silver", ["bones-3"] = "charm-bronze" }
+	for key, art in pairs(honours) do eq((Honors.ArtOf(key)), art, key) end
 	for _, key in ipairs({ "apostle-4", "apostle", "bones-red", "apostle-red-2", "arena-race-skyborn-4" }) do eq(Honors.ArtOf(key), nil, key) end
 	-- Out of the frames worn, as Honors.lua ships them.
-	for family in pairs(SHIPPED) do assert(family ~= "apostle" and family ~= "bones" and family ~= "belt-R" and not family:find("skyborn"), family) end
+	for family in pairs(SHIPPED) do assert(family ~= "belt-R" and not family:find("skyborn"), family) end
+	eq(SHIPPED.apostle, true, "(1.2.4) the cross is worn") eq(SHIPPED.bones, true, "(1.2.4) the charm is worn")
 	-- Everyone holding everything (every belt, every class and race, every donor and level place):
 	-- none of them.
 	local inputs = Everything()
@@ -1524,60 +1562,72 @@ end)
 -- The owner (1.2.3): "se a pessoa tem cornucopia e ganha koi pode até mudar quando ganha mas a pessoa
 -- pode escolher no perfil entre elas". 1.2.2's Update switched on the first frame newly earned, worn
 -- or not: the koi took the cornucopia's place, and Shown (the koi not worn) gave his rank's frame.
-test("1.2.3 honours: as Honors.lua ships them, a newly earned frame not worn yet (the koi, the comet, the owl) leaves the cornucopia worn, its title switching on; the crook, worn, switches on; the cornucopia picked back stays; a pick 1.2.2 left on the koi wears the cornucopia again (locked or not, the koi held or not), else his rank's", function()
+-- (1.2.4, the owner's calls: the koi and the owl are worn now, so they switch on as the crook does;
+-- the raven, the comet and the Arena's belts still wait, and the raven stands in for the koi of
+-- 1.2.3 below: the same rule, a frame this version does not wear.)
+test("1.2.3 honours: as Honors.lua ships them, a newly earned frame not worn yet (1.2.4: the raven, the comet, an arena belt) leaves the cornucopia worn, its title switching on; the crook, worn, switches on; the cornucopia picked back stays; a pick 1.2.2 left on a frame not worn (the raven) wears the cornucopia again (locked or not, held or not), else his rank's; (1.2.4) the koi and the owl, worn now, switch on", function()
 	local saved = Honors.FRAMES_SHIPPED
 	Honors.FRAMES_SHIPPED = SHIPPED
 	local ok, err = pcall(function()
 		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW) -- 1st of all time and of September
-		local cornucopia = Honors.Holdings(ME, { donors = { all = donors.all } })
+		local all = { all = donors.all }
+		local oracle = { month = { { name = "Aldric", place = 1 } }, monthNo = Honors.MonthOf(NOW) - 1 } -- September's best predictor
+		local cornucopia = Honors.Holdings(ME, { donors = all })
 		local p = Honors.Update(nil, cornucopia, true)
 		eq(p.frame, "donor-top-1") eq(Honors.Shown(p, cornucopia), "donor-top-1")
-		-- The koi earned: not worn in this version. The cornucopia stays; the koi's title switches on.
-		local koi = Honors.Holdings(ME, { donors = donors })
-		eq(Keys(koi), "donor-top-1,donor-month-1")
-		local q, earned = Honors.Update(p, koi, true)
-		eq(Keys(earned), "donor-month-1", "still new (its letter)")
+		-- The raven earned: not worn in this version. The cornucopia stays; the raven's title switches on.
+		local raven = Honors.Holdings(ME, { donors = all, oracle = oracle, now = NOW })
+		eq(Keys(raven), "donor-top-1,oracle-1")
+		local q, earned = Honors.Update(p, raven, true)
+		eq(Keys(earned), "oracle-1", "still new (its letter)")
 		eq(q.frame, "donor-top-1", "the cornucopia stays worn")
-		eq(q.title, "donor-month-1", "the koi's title switches on")
-		eq(Honors.Shown(q, koi), "donor-top-1", "and shows")
-		-- The same for the comet and the owl.
+		eq(q.title, "oracle-1", "the raven's title switches on")
+		eq(Honors.Shown(q, raven), "donor-top-1", "and shows")
+		-- The same for the comet and an arena belt.
 		for _, extra in ipairs({ { levels = { [60] = { { guid = "Player-1-A", name = "Aldric", t = 1 } } } },
-			{ guild = { guild = "Olympus Aurora", leader = "Aldric", members = 100, avgLevel = 40 } } }) do
-			extra.donors = { all = donors.all }
+			{ belts = { { cat = "A", guid = "Player-1-A", name = "Aldric" } } } }) do
+			extra.donors = all
 			local held = Honors.Holdings(ME, extra)
 			local r = Honors.Update(p, held, true)
 			eq(r.frame, "donor-top-1", Keys(held) .. ": the cornucopia stays")
 			eq(Honors.Shown(r, held), "donor-top-1")
 		end
+		-- (1.2.4) The koi and the owl, worn now: each switches on by itself, frame and title.
+		for _, extra in ipairs({ { donors = donors }, { donors = all, guild = { guild = "Olympus Aurora", leader = "Aldric", members = 100, avgLevel = 40 } } }) do
+			local held = Honors.Holdings(ME, extra)
+			local key = extra.guild and "guild-top-leader" or "donor-month-1"
+			local r = Honors.Update(p, held, true)
+			eq(r.frame, key, key .. ": worn now, switched on") eq(r.title, key) eq(Honors.Shown(r, held), key)
+		end
 		-- The crook earned: worn, so it switches on by itself.
-		local crook = Honors.Holdings(ME, { donors = donors, church = Church({ "Aldric" }, NOW), now = NOW })
-		eq(Keys(crook), "donor-top-1,missionary-1,donor-month-1")
+		local crook = Honors.Holdings(ME, { donors = all, oracle = oracle, church = Church({ "Aldric" }, NOW), now = NOW })
+		eq(Keys(crook), "donor-top-1,missionary-1,oracle-1")
 		local c = Honors.Update(q, crook, true)
 		eq(c.frame, "missionary-1", "a worn frame newly earned switches on") eq(c.title, "missionary-1")
 		eq(Honors.Shown(c, crook), "missionary-1")
 		-- He picks the cornucopia back: it shows and stays, whatever comes that is not new.
-		local back = Honors.Choose(c, crook, "donor-top-1", "donor-month-1")
+		local back = Honors.Choose(c, crook, "donor-top-1", "oracle-1")
 		eq(back.frame, "donor-top-1")
 		local again = Honors.Update(back, crook, true)
-		eq(again.frame, "donor-top-1", "his pick sticks") eq(again.title, "donor-month-1")
+		eq(again.frame, "donor-top-1", "his pick sticks") eq(again.title, "oracle-1")
 		eq(Honors.Update(again, crook, true).frame, "donor-top-1")
 		eq(Honors.Shown(again, crook), "donor-top-1")
 		-- Choose never takes a frame not worn; Shown never shows one.
-		eq(select(2, Honors.Choose(again, crook, "donor-month-1")), "frame")
-		-- A pick 1.2.2 left on the koi (it switched it on by itself): the first frame by ORDER this
-		-- version wears that he holds, the cornucopia; with none worn, his rank's; locked, as it is.
-		local stuck = { frame = "donor-month-1", title = "donor-month-1", seen = again.seen }
+		eq(select(2, Honors.Choose(again, crook, "oracle-1")), "frame")
+		-- A pick 1.2.2 left on a frame not worn (it switched it on by itself): the first frame by ORDER
+		-- this version wears that he holds, the cornucopia; with none worn, his rank's; locked, as it is.
+		local stuck = { frame = "oracle-1", title = "oracle-1", seen = again.seen }
 		eq(Honors.Shown(stuck, crook), "rank", "(1.2.2: his rank's frame showed)")
 		local fixed = Honors.Update(stuck, crook, true)
-		eq(fixed.frame, "donor-top-1", "the cornucopia again") eq(fixed.title, "donor-month-1", "his title as it was")
-		local koiOnly = Without(Honors.Holdings(ME, { donors = donors }), "key", "donor-top-1")
-		eq(Honors.Update({ frame = "donor-month-1", seen = again.seen }, koiOnly, true).frame, "rank", "none worn: his rank's")
-		-- (After review: a locked pick, or one whose koi is not held now, is mended too, below: Choose
+		eq(fixed.frame, "donor-top-1", "the cornucopia again") eq(fixed.title, "oracle-1", "his title as it was")
+		local ravenOnly = Without(Honors.Holdings(ME, { donors = all, oracle = oracle, now = NOW }), "key", "donor-top-1")
+		eq(Honors.Update({ frame = "oracle-1", seen = again.seen }, ravenOnly, true).frame, "rank", "none worn: his rank's")
+		-- (After review: a locked pick, or one whose frame is not held now, is mended too, below: Choose
 		-- never took a frame not released, so only 1.2.2's switch-on put it there. Both were left as
 		-- they were, and his rank's frame showed.)
-		local locked = Honors.Update({ frame = "donor-month-1", seen = again.seen, locked = true }, crook, true)
+		local locked = Honors.Update({ frame = "oracle-1", seen = again.seen, locked = true }, crook, true)
 		eq(locked.frame, "donor-top-1", "locked: mended") eq(locked.locked, true, "and still locked")
-		eq(Honors.Update({ frame = "donor-month-1", seen = again.seen }, cornucopia, true).frame, "donor-top-1", "the koi not held now")
+		eq(Honors.Update({ frame = "oracle-1", seen = again.seen }, cornucopia, true).frame, "donor-top-1", "the raven not held now")
 	end)
 	Honors.FRAMES_SHIPPED = saved
 	if not ok then error(err, 0) end
@@ -1703,8 +1753,9 @@ end)
 
 -- 1.2.2 switched a frame not released on by itself; 1.2.3's first mend took only one held now, on an
 -- unlocked pick: the koi after its month, the owl after his guild lost first, or a pick locked since
--- showed his rank's frame, the cornucopia held.
-test("1.2.3 honours: a pick 1.2.2 left on a frame not released (the owl, the koi, the comet, an arena belt), held or not, locked or not, wears the first released frame he holds; with none, his rank's, unless a released family waits for its source; a released frame not held stays", function()
+-- showed his rank's frame, the cornucopia held. (1.2.4: the koi and the owl are released now, so a
+-- pick on them is a released frame's, below; the raven, the comet and the Arena's still wait.)
+test("1.2.3 honours: a pick 1.2.2 left on a frame not released (1.2.4: the raven, the comet, an arena belt), held or not, locked or not, wears the first released frame he holds; with none, his rank's, unless a released family waits for its source; a released frame not held stays (1.2.4: the owl's, the koi's)", function()
 	local saved = Honors.FRAMES_SHIPPED
 	Honors.FRAMES_SHIPPED = SHIPPED
 	local ok, err = pcall(function()
@@ -1712,35 +1763,40 @@ test("1.2.3 honours: a pick 1.2.2 left on a frame not released (the owl, the koi
 		local cornucopia = Honors.Holdings(ME, { donors = { all = donors.all } })
 		eq(Keys(cornucopia), "donor-top-1")
 		local seen = Honors.Update(nil, cornucopia, true).seen
-		for _, key in ipairs({ "guild-top-leader", "donor-month-1", "donor-month-3", "level-race-60", "oracle-2", "arena-champion",
-			"arena-champion-2", "arena-class-mage-3", "arena-race-nightelf" }) do
+		for _, key in ipairs({ "level-race-60", "oracle-1", "oracle-2", "arena-champion", "arena-champion-2", "arena-class-mage-3",
+			"arena-race-nightelf" }) do
 			local p = Honors.Update({ frame = key, title = "donor-top-1", seen = seen }, cornucopia, true)
 			eq(p.frame, "donor-top-1", key .. ", not held: the cornucopia") eq(p.title, "donor-top-1")
 			eq(Honors.Shown(p, cornucopia), "donor-top-1")
 			local l = Honors.Update({ frame = key, seen = seen, locked = true }, cornucopia, true)
 			eq(l.frame, "donor-top-1", key .. ", locked") eq(l.locked, true)
 		end
-		-- The koi and the cornucopia held, locked on the koi.
-		local both = Honors.Holdings(ME, { donors = donors })
-		eq(Keys(both), "donor-top-1,donor-month-1")
-		local l = Honors.Update({ frame = "donor-month-1", title = "donor-month-1", seen = Honors.Update(nil, both, true).seen, locked = true }, both, true)
-		eq(l.frame, "donor-top-1") eq(l.title, "donor-month-1", "his title as it was") eq(Honors.Shown(l, both), "donor-top-1")
+		-- The raven and the cornucopia held, locked on the raven.
+		local both = Honors.Holdings(ME, { donors = { all = donors.all }, oracle = { month = { { name = "Aldric", place = 1 } },
+			monthNo = Honors.MonthOf(NOW) - 1 }, now = NOW })
+		eq(Keys(both), "donor-top-1,oracle-1")
+		local l = Honors.Update({ frame = "oracle-1", title = "oracle-1", seen = Honors.Update(nil, both, true).seen, locked = true }, both, true)
+		eq(l.frame, "donor-top-1") eq(l.title, "oracle-1", "his title as it was") eq(Honors.Shown(l, both), "donor-top-1")
 		-- With no released frame held: his rank's; but while the cornucopia waits for the donors' word
 		-- (remembered, its source not loaded: a login), as it is, and mended once it is in.
-		eq(Honors.Update({ frame = "guild-top-leader", seen = {} }, {}, true).frame, "rank")
-		local wait = Honors.Update({ frame = "guild-top-leader", seen = seen }, {}, { guild = true })
-		eq(wait.frame, "guild-top-leader", "left for a later Update") eq(wait.seen["donor-top"].place, 1)
+		eq(Honors.Update({ frame = "level-race-60", seen = {} }, {}, true).frame, "rank")
+		local wait = Honors.Update({ frame = "level-race-60", seen = seen }, {}, { level = true })
+		eq(wait.frame, "level-race-60", "left for a later Update") eq(wait.seen["donor-top"].place, 1)
 		eq(Honors.Update(wait, cornucopia, true).frame, "donor-top-1")
 		-- A released frame not held, with its source not loaded: stays (a gap never undoes a pick).
 		eq(Honors.Update({ frame = "donor-top-1", seen = seen }, {}, nil).frame, "donor-top-1")
 		eq(Honors.Update({ frame = "missionary-2", seen = seen }, cornucopia, true).frame, "missionary-2", "a crook not held, not seen: as it is")
+		-- (1.2.4) The owl's and the koi's are released frames now: not held and never seen, as they are.
+		for _, key in ipairs({ "guild-top-leader", "donor-month-1", "donor-month-3" }) do
+			eq(Honors.Update({ frame = key, seen = seen }, cornucopia, true).frame, key, key .. ", released: as it is")
+		end
 		-- Rank, none and a key no honour has stay.
 		for _, key in ipairs({ "rank", "none", "comet-gold" }) do
 			eq(Honors.Update({ frame = key, seen = seen }, cornucopia, true).frame, key)
 		end
 		-- Every family worn (2.0, the machinery's tests): nothing is mended.
 		Honors.FRAMES_SHIPPED = nil
-		eq(Honors.Update({ frame = "guild-top-leader", seen = seen }, cornucopia, true).frame, "guild-top-leader")
+		eq(Honors.Update({ frame = "level-race-60", seen = seen }, cornucopia, true).frame, "level-race-60")
 	end)
 	Honors.FRAMES_SHIPPED = saved
 	if not ok then error(err, 0) end
@@ -1748,22 +1804,216 @@ end)
 
 -- The title's click in the profile and the King's letter's "Wear it" pick a title with the frame as
 -- it is (SetPick(Pick().frame, title)): Choose refused a frame not held now, or not released, and
--- nothing happened.
+-- nothing happened. (1.2.4: the koi is released now; the raven stands in for it, not released.)
 test("1.2.3 honours: Choose takes the pick's own frame unchanged whatever it is (a title alone picked); any other frame still only when held and released; it keeps no back", function()
 	local saved = Honors.FRAMES_SHIPPED
 	Honors.FRAMES_SHIPPED = SHIPPED
 	local ok, err = pcall(function()
 		local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW)
-		local both = Honors.Holdings(ME, { donors = donors })
-		local koi = Honors.Choose({ frame = "donor-month-1", seen = {} }, both, "donor-month-1", "donor-month-1")
-		assert(koi, "a title alone, on a pick 1.2.2 left on the koi")
-		eq(koi.frame, "donor-month-1") eq(koi.title, "donor-month-1")
+		local both = Honors.Holdings(ME, { donors = { all = donors.all }, oracle = { month = { { name = "Aldric", place = 1 } },
+			monthNo = Honors.MonthOf(NOW) - 1 }, now = NOW })
+		local raven = Honors.Choose({ frame = "oracle-1", seen = {} }, both, "oracle-1", "oracle-1")
+		assert(raven, "a title alone, on a pick 1.2.2 left on a frame not released")
+		eq(raven.frame, "oracle-1") eq(raven.title, "oracle-1")
 		local crook = Honors.Choose({ frame = "missionary-3", seen = {}, locked = true }, both, "missionary-3", "donor-top-1")
 		assert(crook, "a crook not held now") eq(crook.title, "donor-top-1") eq(crook.locked, true)
-		eq(select(2, Honors.Choose({ frame = "donor-top-1" }, both, "donor-month-1")), "frame", "the koi, not his pick: refused")
+		eq(select(2, Honors.Choose({ frame = "donor-top-1" }, both, "oracle-1")), "frame", "the raven, not his pick: refused")
+		-- (1.2.4) The koi, released now, held: taken.
+		local koi = Honors.Holdings(ME, { donors = donors })
+		eq(Honors.Choose({ frame = "donor-top-1" }, koi, "donor-month-1").frame, "donor-month-1", "the koi, released: taken")
 		eq(select(2, Honors.Choose({ frame = "donor-top-1" }, both, "missionary-3")), "frame", "a crook not held: refused")
 		eq(select(2, Honors.Choose({ frame = "missionary-3" }, both, "missionary-3", "missionary-3")), "title", "a title not held: refused")
 		eq(Honors.Choose({ frame = "donor-top-1", back = { frame = "missionary" } }, both, "donor-top-1").back, nil)
+	end)
+	Honors.FRAMES_SHIPPED = saved
+	if not ok then error(err, 0) end
+end)
+
+---------------------------------------------------------------------------
+-- 1.2.4: the new families (the Apostles' cross, the Bones' charm, the slayers' skeletal horse) and
+-- the places told (Honors.Moves: the King's letter the first time, a notice after)
+---------------------------------------------------------------------------
+
+local OCT = Honors.MonthOf(NOW)
+local function Places(names)
+	local out = {}
+	for i, n in ipairs(names) do out[i] = { name = n, place = i } end
+	return out
+end
+
+test("1.2.4 honours: the Church's top 3 Apostles hold the cross (gold, silver, bronze), from the same word as the missionaries' and as fresh, told for now's month; the last month's top 3 of Bone Throw hold the charm through the month after (the koi's clock); the signed Slayers top 3 hold the skeletal horse by GUID alone, in its order", function()
+	local inputs = { church = { missionaries = Places({ "Cato" }), apostles = Places({ "Brenna", "Aldric", "Cato", "Dara" }), at = NOW - DAY },
+		bones = { month = Places({ "Aldric", "Elric" }), monthNo = OCT - 1 },
+		wanted = { rows = { { guid = "Player-1-B" }, { guid = "Player-1-0000000A" }, { guid = "Player-1-C" }, { guid = "Player-1-D" } } },
+		now = NOW }
+	local me = { name = "Aldric", guid = "Player-1-0000000a" } -- (the GUID in any case)
+	local held = Honors.Holdings(me, inputs)
+	eq(Keys(held), "apostle-2,wanted-slayer-2,bones-1", "in ORDER: the Church's, the slayers', the Bones' after the koi")
+	local cross, horse, charm = held[1], held[2], held[3]
+	eq(cross.family, "apostle") eq(cross.art, "cross-silver") eq(cross.shape, "plain") eq(cross.frame, "apostle-2") eq(cross.title, "apostle-2")
+	eq(cross.period, OCT, "the cross: told for October, as the crook")
+	eq(horse.family, "wanted-slayer") eq(horse.art, "skeletal-horse-silver") eq(horse.mark, "skeletal-horse-silver") eq(horse.metal, "silver")
+	eq(horse.period, nil, "the horse: for life")
+	eq(charm.family, "bones") eq(charm.art, "charm-gold") eq(charm.period, OCT - 1, "the charm: told for September, the month it ranks")
+	-- The cross's 4th and the horse's 4th: nothing; nor the horse by a name alone.
+	eq(#Honors.Holdings({ name = "Dara", guid = "Player-1-D" }, inputs), 0, "4th of both lists: nothing")
+	eq(Keys(Honors.Holdings({ name = "Aldric" }, inputs)), "apostle-2,bones-1", "no GUID: no horse")
+	eq(Keys(Honors.Holdings({ name = "Brenna", guid = "Player-1-B" }, inputs)), "apostle-1,wanted-slayer-1")
+	-- The Church's word stale: no cross (nor crook); the Bones' month over: no charm.
+	inputs.church.at = NOW - Honors.CHURCH_MAX_AGE - 1
+	eq(Keys(Honors.Holdings(me, inputs)), "wanted-slayer-2,bones-1")
+	inputs.bones.monthNo = OCT - 2
+	eq(Keys(Honors.Holdings(me, inputs)), "wanted-slayer-2", "the charm of August: over in October")
+	-- Their sources: apostle, bones and wanted (Update's known), and the titles' and letters' keys.
+	eq(Honors.ArtOf("wanted-slayer-3"), "skeletal-horse-bronze")
+	local pick = Honors.Choose(nil, held, "wanted-slayer-2", "apostle-2")
+	eq(pick.frame, "wanted-slayer-2")
+	local kept = Honors.Update(pick, {}, { donor = true })
+	eq(kept.seen["wanted-slayer"].place, 2, "the slayers' word not loaded: remembered")
+	eq(kept.seen.apostle.place, 2) eq(kept.seen.bones.place, 1)
+	local lost = select(3, Honors.Update(pick, {}, { wanted = true, apostle = true, bones = true }))
+	eq(Keys(lost, "family"), "apostle,bones,wanted-slayer", "each source loaded without him: lost")
+end)
+
+test("1.2.4 honours: Moves: a family's first look (seed), a place up or down, off the list (out), on it again (back), each against what he was last told; a family whose source is not loaded has no move and keeps its place", function()
+	local donors = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY), Gift("Brenna", 40, SEP_1 + DAY) }, NOW)
+	local first = Honors.Holdings(ME, { donors = { all = donors.all } })
+	local moves, places = Honors.Moves(nil, first, true, { now = NOW })
+	eq(#moves, 1) eq(moves[1].family, "donor-top") eq(moves[1].kind, "seed") eq(moves[1].from, 0) eq(moves[1].to, 1)
+	eq(moves[1].honour.key, "donor-top-1") eq(moves[1].cycle, nil, "for life")
+	eq(places["donor-top"].p, 1)
+	-- Nothing moved: nothing.
+	eq(#Honors.Moves(places, first, true, { now = NOW }), 0)
+	local second = Honors.Holdings(ME, { donors = { all = { { name = "Brenna", place = 1 }, { name = "Aldric", place = 2 } } } })
+	local m = Honors.Moves(places, second, true, { now = NOW })
+	eq(m[1].kind, "down") eq(m[1].from, 1) eq(m[1].to, 2) eq(m[1].honour.key, "donor-top-2")
+	local up = Honors.Moves({ ["donor-top"] = { p = 2 } }, first, true, { now = NOW })
+	eq(up[1].kind, "up") eq(up[1].to, 1)
+	local out, after = Honors.Moves(places, {}, { donor = true }, { now = NOW })
+	eq(out[1].kind, "out") eq(out[1].from, 1) eq(out[1].to, 0) eq(out[1].honour, nil)
+	eq(after["donor-top"].p, 0, "off the list: kept as such, so his return is 'back'")
+	eq(Honors.Moves(after, second, true, { now = NOW })[1].kind, "back")
+	-- Unknown is not lost: the donors' word not loaded, no move, the place kept.
+	local none, kept = Honors.Moves(places, {}, { church = true }, { now = NOW })
+	eq(#none, 0) eq(kept["donor-top"].p, 1)
+	eq(#Honors.Moves(after, {}, { donor = true }, { now = NOW }), 0, "off the list and still off: nothing")
+end)
+
+test("1.2.4 honours: Moves and the cycles: a closed month's list (the koi, the charm) reached in a new month at the same place is a new cycle (its letter again: 1.2.3 gave none), and its month over is an end, never 'out'; a rolling list (the crook, the cross) told per calendar month, its new month a cycle, off it 'out' in any month; for life, never a cycle", function()
+	eq(Honors.CYCLE["donor-month"], "closed") eq(Honors.CYCLE.bones, "closed") eq(Honors.CYCLE.missionary, "month") eq(Honors.CYCLE.apostle, "month")
+	eq(Honors.CYCLE["donor-top"], nil) eq(Honors.CYCLE["wanted-slayer"], nil) eq(Honors.CYCLE.guild, nil)
+	eq(Honors.CycleOf("donor-month", NOW), OCT - 1) eq(Honors.CycleOf("apostle", NOW), OCT) eq(Honors.CycleOf("donor-top", NOW), nil)
+	local NOV = OCT_1 + 31 * DAY + 12 * HOUR
+	-- The koi: September's 1st, then October's 1st (told in November): the same place, a new cycle.
+	local sep = Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT - 1 }, now = NOW })
+	local _, places = Honors.Moves(nil, sep, true, { now = NOW })
+	eq(places["donor-month"].c, OCT - 1)
+	local oct = Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT }, now = NOV })
+	local m = Honors.Moves(places, oct, true, { now = NOV })
+	eq(#m, 1) eq(m[1].kind, "cycle", "the same place, a new month") eq(m[1].cycle, OCT) eq(m[1].to, 1) eq(m[1].from, 1)
+	-- September's list over, October's not in yet: an end, said nothing.
+	local gap = Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT - 1 }, now = NOV })
+	eq(#gap, 0, "September's koi is over in November")
+	local over = Honors.Moves(places, gap, { donor = true }, { now = NOV })
+	eq(over[1].kind, "end")
+	-- ...but a word for the same month without him (a correction): out.
+	eq(Honors.Moves(places, {}, { donor = true }, { now = NOW })[1].kind, "out")
+	-- The cross: October's 2nd, then November's 2nd: a new cycle; off it in November: out.
+	local cross = Honors.Holdings(ME, { church = { apostles = Places({ "Brenna", "Aldric" }), at = NOW }, now = NOW })
+	local _, cp = Honors.Moves(nil, cross, true, { now = NOW })
+	local crossNov = Honors.Holdings(ME, { church = { apostles = Places({ "Brenna", "Aldric" }), at = NOV }, now = NOV })
+	eq(Honors.Moves(cp, crossNov, true, { now = NOV })[1].kind, "cycle")
+	eq(Honors.Moves(cp, {}, { apostle = true }, { now = NOV })[1].kind, "out", "a rolling list: off it is out, whatever the month")
+	-- For life (the cornucopia, the horse): the month never matters.
+	local horse = Honors.Holdings(ME, { wanted = { rows = { { guid = "Player-1-A" } } } })
+	local _, hp = Honors.Moves(nil, horse, true, { now = NOW })
+	eq(#Honors.Moves(hp, horse, true, { now = NOV }), 0)
+	eq(Honors.Moves(hp, {}, { wanted = true }, { now = NOV })[1].kind, "out")
+	-- Several at once: in ORDER (the guild's owl first, the Bones' last).
+	local all = Honors.Holdings(ME, { guild = { guild = "Olympus Aurora", leader = "Aldric" }, bones = { month = Places({ "Aldric" }), monthNo = OCT - 1 },
+		church = { apostles = Places({ "Aldric" }), at = NOW }, now = NOW })
+	eq(Keys(Honors.Moves(nil, all, true, { now = NOW }), "family"), "guild,apostle,bones")
+end)
+
+-- 1.2.4's first cut: a closed month's list over at its month's turn was lost (forgotten in seen), so
+-- the next month's list naming him at his place again was a new honour: it switched on by itself over
+-- the cornucopia or "none" he picked, every month (HonorsNet's own look at the month's turn makes sure
+-- a look falls in between).
+test("1.2.4 honours: Update with now: a closed month's list over at its turn (the koi, the charm) is remembered where it ended: the next month's list naming him there, or a place down, switches nothing on (the cornucopia or none he picked stays, and his title), a place up does; worn, it is stood in for (his rank's with nothing else) and comes back; a correction of its own month without him is lost as before; a place 1.2.3 remembered without its month is over too; without now, as before", function()
+	local saved = Honors.FRAMES_SHIPPED
+	Honors.FRAMES_SHIPPED = SHIPPED
+	local ok, err = pcall(function()
+		local NOV = OCT_1 + 31 * DAY + 12 * HOUR
+		local all = Honors.Donors({ Gift("Aldric", 50, SEP_1 + DAY) }, NOW).all
+		-- The month closed's donors (September's held in October, October's in November), all time's too.
+		local function Koi(names, monthNo, now)
+			return Honors.Holdings(ME, { donors = { all = all, month = Places(names), monthNo = monthNo }, now = now })
+		end
+		local p0 = Honors.Update(nil, Honors.Holdings(ME, { donors = { all = all } }), true)
+		local sep = Koi({ "Aldric" }, OCT - 1, NOW)
+		eq(Keys(sep), "donor-top-1,donor-month-1")
+		local p = Honors.Update(p0, sep, true, nil, { now = NOW })
+		eq(p.frame, "donor-month-1", "the koi switches on")
+		-- November: September's koi over, October's list not in yet.
+		local gap = Koi({ "Aldric" }, OCT - 1, NOV)
+		eq(Keys(gap), "donor-top-1")
+		local oct = Koi({ "Aldric" }, OCT, NOV)
+		for _, frame in ipairs({ "donor-top-1", "none" }) do
+			local mine = Honors.Choose(p, sep, frame, "donor-top-1")
+			local q, earned, lost = Honors.Update(mine, gap, true, nil, { now = NOV })
+			eq(Keys(lost, "family"), "donor-month", frame) eq(#earned, 0)
+			eq(q.frame, frame) eq(q.back, nil, "not worn: nothing stood in for")
+			-- The next look, still over: lost once.
+			local q2, e2, l2 = Honors.Update(q, gap, true, nil, { now = NOV + 60 })
+			eq(#e2, 0) eq(#l2, 0, frame .. ": lost once")
+			-- October's list naming him 1st: no new honour; his pick stays, his title too.
+			local r, again = Honors.Update(q2, oct, true, nil, { now = NOV })
+			eq(r.frame, frame, frame .. ": his pick stays") eq(r.title, "donor-top-1") eq(#again, 0, frame .. ": the same place, no new honour")
+			-- (seen: the place it ended, then October's.)
+			eq(q2.seen["donor-month"].ended, true, frame .. ": remembered where it ended") eq(q2.seen["donor-month"].place, 1)
+			eq(r.seen["donor-month"].ended, nil, "held again") eq(r.seen["donor-month"].c, OCT)
+			-- ...nor 2nd.
+			eq(Honors.Update(q2, Koi({ "Brenna", "Aldric" }, OCT, NOV), true, nil, { now = NOV }).frame, frame, frame .. ": a place down")
+		end
+		-- 2nd in September, 1st in October: a place up, new, switches on.
+		local sep2 = Koi({ "Brenna", "Aldric" }, OCT - 1, NOW)
+		local second = Honors.Choose(Honors.Update(p0, sep2, true, nil, { now = NOW }), sep2, "donor-top-1")
+		local ended = Honors.Update(second, gap, true, nil, { now = NOV })
+		local up, upEarned = Honors.Update(ended, oct, true, nil, { now = NOV })
+		eq(Keys(upEarned), "donor-month-1") eq(up.frame, "donor-month-1", "a place up switches on")
+		-- Worn at the turn: the cornucopia stands in; October's list naming him, his koi again.
+		local worn = Honors.Update(p, gap, true, nil, { now = NOV })
+		eq(worn.frame, "donor-top-1", "the cornucopia stands in") eq(worn.back.frame, "donor-month")
+		eq(Honors.Update(worn, oct, true, nil, { now = NOV }).frame, "donor-month-1", "his koi back")
+		-- The koi alone held: his rank's meanwhile (an ended list waits for no source).
+		local koiOnly = Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT - 1 }, now = NOW })
+		local k = Honors.Update(nil, koiOnly, true, nil, { now = NOW })
+		eq(k.frame, "donor-month-1")
+		local kGap = Honors.Update(k, {}, true, nil, { now = NOV })
+		eq(kGap.frame, "rank", "nothing else held: his rank's") eq(kGap.back.frame, "donor-month")
+		eq(Honors.Update(kGap, Honors.Holdings(ME, { donors = { month = Places({ "Aldric" }), monthNo = OCT }, now = NOV }), true, nil,
+			{ now = NOV }).frame, "donor-month-1")
+		-- A correction of September's list without him, in October: lost as before (forgotten).
+		local mine = Honors.Choose(p, sep, "donor-top-1")
+		eq(Honors.Update(mine, Koi({ "Brenna" }, OCT - 1, NOW), true, nil, { now = NOW }).seen["donor-month"], nil, "its own month without him: lost")
+		-- A place 1.2.3 remembered (no month): over, on the side of his pick.
+		local old = { frame = "donor-top-1", seen = { ["donor-top"] = { place = 1, frame = "donor-top-1", title = "donor-top-1" },
+			["donor-month"] = { place = 1, frame = "donor-month-1", title = "donor-month-1" } } }
+		local o = Honors.Update(old, gap, true, nil, { now = NOV })
+		eq(o.seen["donor-month"].ended, true, "1.2.3's place: over")
+		eq(Honors.Update(o, oct, true, nil, { now = NOV }).frame, "donor-top-1")
+		-- Without now: lost, as before.
+		eq(Honors.Update(mine, gap, true).seen["donor-month"], nil, "without now: as 1.2.3")
+		-- The Bones' charm the same (its "none" picked); a list for life (the cornucopia) is never over.
+		local function Charm(names, monthNo, now)
+			return Honors.Holdings(ME, { donors = { all = all }, bones = { month = Places(names), monthNo = monthNo }, now = now })
+		end
+		local charm = Charm({ "Aldric" }, OCT - 1, NOW)
+		local c = Honors.Choose(Honors.Update(p0, charm, true, nil, { now = NOW }), charm, "none")
+		local cGap = Honors.Update(c, Charm({ "Aldric" }, OCT - 1, NOV), true, nil, { now = NOV })
+		eq(cGap.seen.bones.ended, true)
+		eq(Honors.Update(cGap, Charm({ "Aldric" }, OCT, NOV), true, nil, { now = NOV }).frame, "none", "the charm: none stays")
+		eq(Honors.Update(p0, {}, true, nil, { now = NOV }).seen["donor-top"], nil, "for life: lost")
 	end)
 	Honors.FRAMES_SHIPPED = saved
 	if not ok then error(err, 0) end

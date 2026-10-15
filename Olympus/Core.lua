@@ -2,7 +2,7 @@ local ADDON, ns = ...
 local L = ns.L
 
 ns.NAME = "Olympus"
-ns.VERSION = "1.2.3"
+ns.VERSION = "1.2.4"
 ns.PREFIX = "OLYMPUS"        -- addon message prefix (max 16 chars)
 ns.CHANNEL = "OlympusNet"    -- hidden chat channel shared by every Olympus guild (Alliance)
 ns.CHANNEL_HORDE = "OlympusNetH" -- the Horde's: the two factions never see each other's guilds
@@ -1038,6 +1038,7 @@ function ns.CouncilTitle(name)
 		for _, m in ipairs(type(d) == "table" and type(d.members) == "table" and d.members or {}) do
 			if type(m) == "table" and type(m.name) == "string" and m.name:lower() == short then
 				local dept = type(d.name) == "string" and d.name ~= "" and d.name or nil
+				if dept and dept:lower() == "department of heritage" then dept = "Department of Heraldry" end
 				local title = type(m.title) == "string" and m.title ~= "" and m.title or nil
 				return { title = title, dept = dept, icon = dept and ns.CouncilIconValue(d.icon) or nil }
 			end
@@ -1774,10 +1775,12 @@ StandIn("Moderation", { "Slash" })
 StandIn("Alts", { "Slash" })
 StandIn("Keys", { "RotatePrompt" })
 StandIn("Loot", { "Show" }) -- (1.1)
+StandIn("Carry", { "Slash" }) -- 1.2.4: private, explicitly unverified history quotes
 StandIn("War", { "Show", "Slash" }) -- 1.2: the own-guild Department of War room
 StandIn("Crafters", { "Ask", "Slash" }) -- (1.1)
 StandIn("ChatWindow", { "Open", "Toggle" }) -- 1.1.1: the Chat tab of the Olympus window (ChatWindow.lua)
 StandIn("Arena", { "RunSlash" }) -- 1.2: the Blood Arena's core (ArenaNet.lua)
+StandIn("Records", {}) -- 1.2.4: the shared records of the games and duels that count (Records.lua)
 -- 1.1.2: the right-click menus' lines (PlayerMenu.lua), a player's version (Versions.lua), the
 -- answer bank's Answers and explanations (Answers.lua).
 StandIn("PlayerMenu", {})
@@ -2169,6 +2172,8 @@ local function Slash(input)
 			-- 1.1 (Fern's #22): the guild's loot notes and points, on the Realm tab.
 			ns.UI.SelectTab("realm")
 			ns.Loot.Show(true)
+		elseif cmd == "carry" then
+			ns.Carry.Slash(rest)
 		elseif cmd == "war" then
 			-- 1.2: own-guild operations, LFG, Centuries and readiness. No federal writer exists.
 			ns.War.Slash(rest)
@@ -2245,7 +2250,8 @@ local function Slash(input)
 				local a = arg:lower()
 				if a == "on" or a == "off" then ns.Workshop.SetCouncilHelp(a == "on")
 				else ns.Print(ns.db.councilHelp and L.COUNCIL_HELP_ON or L.COUNCIL_HELP_OFF) end
-			elseif verb == "icon" then ns.Workshop.ShowIconPicker() -- a councillor's own icon (0.9.8)
+			-- A councillor's own icon (0.9.8); 1.2.4: on his own page's Icons ("My profile"), as the Realm's button.
+			elseif verb == "icon" then ns.UI.OpenIconPicker()
 			else ns.Workshop.EditCouncil(verb) end
 		elseif cmd == "helpme" then
 			if rest ~= "" then ns.Workshop.AskCouncil(rest) else ns.ShowDialog("OLYMPUS_COUNCIL_ASK") end
@@ -2269,6 +2275,8 @@ local function Slash(input)
 			-- The marks left of the names on friendly players' nameplates (Nameplates.lua), alone: on or off.
 			local on = rest:lower()
 			if on == "on" or on == "off" then ns.Nameplates.SetEnabled(on == "on") else ns.Nameplates.Report() end
+		elseif cmd == "honours" or cmd == "honors" then
+			if ns.HonorsNet and ns.HonorsNet.PreviewSlash then ns.HonorsNet.PreviewSlash(rest) end
 		elseif cmd == "borders" then
 			-- The elite borders on the target, focus and your own portrait (Borders.lua), and the
 			-- nameplate marks with them (Nameplates.lua): on or off.

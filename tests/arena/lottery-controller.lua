@@ -186,7 +186,7 @@ test("Lottery controller: incompatible next-day terms retain carry in the settle
 	w:NoErrors()
 end)
 
-test("Lottery winners: the day's bank publishes them once settled and the King's rankings switch is on, every client keeps them from that bank only, and the Games tab shows them", function()
+test("Lottery winners 1.2.4: settled winners stay private with the King's rankings switch on; saved history survives, no LW is sent or accepted, and no Games ranking lists Lottery", function()
 	local w, cast, lottery = Setup()
 	local at = NextMinute(w, 600)
 	assert(lottery.SetSchedule({ on = true, at = at }))
@@ -206,25 +206,33 @@ test("Lottery winners: the day's bank publishes them once settled and the King's
 	eq(#Module(w, cast.b3, "Lottery").Winners().latest, 0)
 	local bankView = w:As(cast.bank, cast.bank.ns.Lottery.DayWinners, day.eid)
 	eq(#bankView, 1, "the bank knows them")
-	-- The King switches the rankings on: the bank publishes the settled day, once.
+	-- Even a legacy global ranking switch never publishes Lottery winners.
 	assert(cast.king.Roles.SetSettings({ rankPub = 1 }))
 	w:Run(30)
-	eq(#w:Sent({ from = cast.bank, type = "LW" }), 1, "published once, by the day's bank")
-	eq(#w:Sent({ type = "LW" }), 1, "by nobody else")
+	eq(#w:Sent({ from = cast.bank, type = "LW" }), 0, "the bank publishes no names")
+	eq(#w:Sent({ type = "LW" }), 0)
+	-- A private record already kept by the bank remains readable there.
+	local own = ("%s~%s~%s:1:%s"):format(day.eid, cast.bank.ns.Arena.B36(w.clock), cast.bank.ns.ArenaFights.Wire(cast.b1.name), cast.bank.ns.Arena.B36(23500))
+	assert(w:As(cast.bank, cast.bank.ns.Lottery.TakeWinners, cast.bank.name, "L", own))
 	-- The refund is 10g; the 5g profit pool's 1st tranche, 2.5g, less 6%, is b1's: a 2.35g gain.
-	for _, c in ipairs({ cast.b3, cast.king, cast.b2, cast.bank }) do
+	for _, c in ipairs({ cast.bank }) do
 		local list = Module(w, c, "Lottery").Winners()
 		eq(#list.latest, 1, c.name .. " heard the day's winners")
 		local r = list.latest[1]
 		eq(r.name, cast.b1.name); eq(r.amount, 23500); eq(r.beast, c.ns.Lottery.Label(1)); eq(r.eid, day.eid)
 		eq(#list.biggest, 1); eq(list.biggest[1].name, cast.b1.name); eq(list.biggest[1].amount, 23500)
 	end
-	-- Later changes and the bank's settle event again: not sent twice.
+	for _, c in ipairs({ cast.b3, cast.king, cast.b2 }) do eq(#Module(w, c, "Lottery").Winners().latest, 0, "no public winners") end
+	w:As(cast.bank, function() cast.bank.ns.Arena.Send("LW", "L", own) end)
+	w:Run(0)
+	eq(#Module(w, cast.b3, "Lottery").Winners().latest, 0, "an older bank's LW is not accepted")
+	local beforeLW = #w:Sent({ type = "LW" })
+	-- Later changes and the bank's settle event again: no automatic winner publication.
 	for _ = 1, 3 do w:As(cast.bank, function() cast.bank.ns.Fire("ARENA_CHANGED") cast.bank.ns.Fire("MARKETS_SETTLED", day.eid) end) w:Run(2) end
-	eq(#w:Sent({ from = cast.bank, type = "LW" }), 1, "a day's winners go out once")
+	eq(#w:Sent({ type = "LW" }), beforeLW)
 
 	-- Only that day's bank is heard, for a day drawn here, with beasts of that draw and no more than its pot.
-	local function Take(c, from, body) return w:As(c, c.ns.Lottery.TakeWinners, from, "L", body) end
+	local function Take(_, from, body) return w:As(cast.bank, cast.bank.ns.Lottery.TakeWinners, from, "L", body) end
 	local B36 = cast.b3.ns.Arena.B36
 	local forged = ("%s~%s~%s:1:%s"):format(day.eid, B36(w.clock + 1), "Parric Stowe", B36(9999))
 	eq(select(2, Take(cast.b3, cast.b2.name, forged)), "sender", "a bettor cannot publish a day's winners")
@@ -234,7 +242,7 @@ test("Lottery winners: the day's bank publishes them once settled and the King's
 		"more than the day's pot")
 	eq(select(2, Take(cast.b3, cast.bank.name, ("Lt99999zz~%s~-"):format(B36(w.clock + 1)))), "day", "a day nobody drew")
 	eq(select(2, Take(cast.b3, cast.bank.name, ("%s~%s~-"):format(day.eid, B36(w.clock - 3600)))), "older", "an older word for that day")
-	eq(Module(w, cast.b3, "Lottery").Winners().latest[1].name, cast.b1.name, "the refused words changed nothing")
+	eq(Module(w, cast.bank, "Lottery").Winners().latest[1].name, cast.b1.name, "the refused words changed no private history")
 
 	-- The Games tab: the Lottery's winners for a member while the switch is on, for its staff alone after.
 	local function Shows(c)
@@ -246,15 +254,15 @@ test("Lottery winners: the day's bank publishes them once settled and the King's
 			return false
 		end)
 	end
-	eq(Shows(cast.b3), true, "a member, while the King's switch is on")
+	eq(Shows(cast.b3), false, "Lottery is never a public ranking")
 	assert(cast.king.Roles.SetSettings({ rankPub = 0 }))
 	w:Run(5)
 	eq(Shows(cast.b3), false, "a member: not once the switch is off")
-	eq(Shows(cast.steward), true, "the staff still see what was published")
+	eq(Shows(cast.steward), false, "no Lottery ranking in the staff view either")
 	w:NoErrors()
 end)
 
-test("Lottery winners: with more drawn days known than the caller keeps in his history, the bank still publishes each day's winners once", function()
+test("Lottery winners 1.2.4: with more drawn days than the caller keeps in his history, the bank still publishes no winner names", function()
 	local w, cast, lottery = Setup()
 	assert(cast.king.Roles.SetSettings({ rankPub = 1 }))
 	w:Run(0)
@@ -286,13 +294,83 @@ test("Lottery winners: with more drawn days known than the caller keeps in his h
 		return count
 	end
 	local count = PerDay()
-	for n = 1, days do eq(count[eids[n]], 1, "day " .. n .. " published once") end
+	for n = 1, days do eq(count[eids[n]], nil, "day " .. n .. " stays private") end
 	-- Later changes and idle minutes: nothing goes out again.
 	local before = #w:Sent({ type = "LW" })
 	for _ = 1, 20 do w:As(cast.bank, function() cast.bank.ns.Fire("ARENA_CHANGED") end) w:Run(2) end
 	w:Run(120)
 	eq(#w:Sent({ type = "LW" }), before, "no day published twice")
-	eq(#Module(w, cast.b3, "Lottery").Winners().latest, lottery.WINNERS_SHOWN)
+	eq(#Module(w, cast.b3, "Lottery").Winners().latest, 0)
+	w:NoErrors()
+end)
+
+test("Lottery authority 1.2.4: only the pinned King, signed High Council and author can call and roll a real draw; a bank, guild master or claimed council rank cannot", function()
+	local w, cast, lottery = Setup()
+	local author = w:Cast("author")
+	-- The arena asks the real core Workshop for a pinned operator; a supplied title/name is
+	-- never enough, and callers remain discoverable without an observed presence announcement.
+	eq(w:As(cast.king, cast.king.ns.Workshop.IsPracticeOperator, author.name), true)
+	local operators = w:As(cast.king, cast.king.ns.Workshop.PracticeOperators)
+	eq(#operators, 1); eq(operators[1], author.name)
+	eq(w:As(cast.king, cast.king.ns.Workshop.IsPracticeOperator, author.short .. "-Foreign Realm"), false, "same short name outside the pinned realm group grants no authority")
+	w:As(cast.king, function()
+		local linked = author.short .. "-" .. H.World.REALMS[2]
+		cast.king.ns.Workshop.HandlePresence("CHANNEL", linked, "V4~1.2.4")
+		eq(cast.king.ns.Workshop.AuthorName(), linked, "actual guarded presence remembers the server-stamped linked realm")
+		eq(cast.king.ns.Lottery.IsCaller(linked, "L"), true)
+		local eid = "L000" .. cast.king.ns.Arena.Hash36(linked:lower(), 2)
+		local event = cast.king.ns.Lottery.EventOf(eid)
+		eq(event and event.opener, linked, "receiver resolves the accepted linked-realm caller's event")
+	end)
+	local gm = w:Player("Master Claim", { rank = 0 })
+	gm.rankName = "High Councillor" -- a guild's rank label grants no signed council authority
+	for _, c in ipairs({ cast.hc, author, cast.king }) do
+		local lot = Module(w, c, "Lottery")
+		eq(lot.IsCaller(c.name, "L"), true, c.name .. ": trusted caller")
+		assert(lot.SetSchedule({ on = false, at = 540, roller = "king" }))
+		local eid = w:As(c, c.ns.Arena.NewId, "L")
+		lot.Book().day = { eid = eid, lockAt = w.clock - 1, mode = "L", bank = cast.bank.name }
+		eq(lot.CanDraw(), true, c.name .. ": may operate his due draw")
+		assert(lot.OnRoll(("%s rolls 1 (1-10000)"):format(c.short)))
+		eq(#lot.Book().day.prizes, 1, "the real roll handler counted it")
+		local event = w:As(cast.king, cast.king.ns.Lottery.EventOf, eid)
+		assert(event and event.opener == c.name, "a receiver recognizes the trusted event writer")
+		for _, drawer in ipairs(event.drawers) do assert(drawer ~= cast.bank.name, "ordinary bank has no draw authority") end
+	end
+	for _, c in ipairs({ cast.bank, cast.b1, cast.steward, cast.arbiter, gm }) do
+		local lot = Module(w, c, "Lottery")
+		eq(lot.IsCaller(c.name, "L"), false, c.name)
+		eq(lot.Book(), nil)
+		eq(select(2, lot.SetSchedule({ on = false })), "king")
+		eq(select(2, lot.Draw()), "king", "rejected before any game roll")
+		local eid = w:As(c, c.ns.Arena.NewId, "L")
+		eq(w:As(cast.king, cast.king.ns.Lottery.EventOf, eid), nil, "a receiver rejects the untrusted event writer")
+	end
+	-- Rejecting a bank roller cannot mutate the caller's existing schedule.
+	lottery.Book().day = nil
+	local at = lottery.Schedule().at
+	eq(select(2, lottery.SetSchedule({ at = 600, roller = "bank" })), "king")
+	eq(lottery.Schedule().at, at)
+	-- Losing the signed list immediately removes council authority.
+	cast.hc.rdb.council = nil
+	eq(Module(w, cast.hc, "Lottery").IsCaller(cast.hc.name, "L"), false)
+	eq(Module(w, cast.hc, "Lottery").Book(), nil)
+	w:NoErrors()
+end)
+
+test("Lottery authority 1.2.4 bank: an ordinary bank cannot click Draw or make a typed roll count, even as the selected bank of a due real draw", function()
+	local w, cast, lottery = Setup()
+	assert(lottery.SetSchedule({ on = true, at = NextMinute(w, 600) }))
+	assert(lottery.SetSchedule({ on = false }))
+	w:Run(0)
+	local day = lottery.Book().day
+	w:Run(day.lockAt - w.clock)
+	local bank = Module(w, cast.bank, "Lottery")
+	eq(bank.CanDraw(), false, "the actual button is unavailable")
+	eq(select(2, bank.Draw()), "king", "no game roll is attempted")
+	bank.WatchDraw(true)
+	eq(bank.OnRoll(("%s rolls 1 (1-10000)"):format(cast.bank.short)), false, "a typed roll grants no authority")
+	eq(day.prizes, nil)
 	w:NoErrors()
 end)
 
@@ -344,7 +422,8 @@ test("Lottery reminders: 60, 15 and 5 minutes before the draw (last bets; the dr
 		eq(r and r.eid, day.eid, c.name); eq(r and r.mark, 3600, c.name)
 	end
 	local words = { roll = L.LOTTERY_REMIND_ROLL, mine = L.LOTTERY_REMIND_MINE, bet = L.LOTTERY_REMIND_BET }
-	local who = { { cast.king, "roll" }, { cast.bank, "roll" }, { cast.b1, "mine" }, { cast.b2, "bet" }, { cast.b3, "bet" } }
+	-- A bank appointment alone no longer authorizes rolling or a reminder to roll.
+	local who = { { cast.king, "roll" }, { cast.b1, "mine" }, { cast.b2, "bet" }, { cast.b3, "bet" } }
 	for _, minutes in ipairs({ 60, 15, 5 }) do
 		Wait(w, day.lockAt - minutes * 60 - w.clock - 1)
 		for _, x in ipairs(who) do eq(Said(x[1], words[x[2]]:format(minutes, when)), 0, x[1].name .. ": not before its time, " .. minutes) end
@@ -354,11 +433,12 @@ test("Lottery reminders: 60, 15 and 5 minutes before the draw (last bets; the dr
 				eq(Said(x[1], text:format(minutes, when)), kind == x[2] and 1 or 0, x[1].name .. ", " .. minutes .. " minutes: " .. kind)
 			end
 		end
+		for _, text in pairs(words) do eq(Said(cast.bank, text:format(minutes, when)), 0, "ordinary bank is no drawer") end
 	end
-	-- The 5 minutes' is an alert for the King and the bank alone.
+	-- Only the trusted caller gets the 5-minute roll alert.
 	local roll5 = L.LOTTERY_REMIND_ROLL:format(5, when)
 	table.sort(alerts)
-	local expect = { cast.king.name .. ":" .. roll5, cast.bank.name .. ":" .. roll5 }
+	local expect = { cast.king.name .. ":" .. roll5 }
 	table.sort(expect)
 	eq(table.concat(alerts, "|"), table.concat(expect, "|"))
 	-- At the draw time: the results now, for a bettor alone (and an alert).

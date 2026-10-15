@@ -79,8 +79,13 @@ test("Bones guide routing: Drink explains the actual HIC outcome and success lim
 			assert(pg.levels[4].shakes:GetText():find(tostring(R.SHAKES), 1, true))
 			local paragraphs = table.concat(UI.HowToParas(1), " ")
 			assert(paragraphs:find(locale == "enUS" and "qualification points" or "pontos de qualificação", 1, true))
-			assert(paragraphs:find(locale == "enUS" and "direct unjudged duels do not" or "duelos diretos sem árbitro não contam", 1, true))
-			assert(paragraphs:find(locale == "enUS" and "Judged ranked duels are not enabled here" or "Duelos ranqueados com árbitro não estão habilitados aqui", 1, true), "the free guide must not promise a gated scoring path")
+			-- (1.2.3, the owner's decision: a direct duel both clients confirm earns the points and,
+			-- by its two signed halves, reaches the rankings with no judge. The guide used to say that
+			-- direct duels earn nothing, which the triple check found contradicted the code: it now
+			-- describes the scoring path that exists, and still promises no judged one.)
+			eq(paragraphs:find(locale == "enUS" and "direct unjudged duels do not" or "duelos diretos sem árbitro não contam", 1, true), nil)
+			assert(paragraphs:find(locale == "enUS" and "both halves agree" or "as duas metades concordam", 1, true), "the free guide's scoring path")
+			eq(paragraphs:find(locale == "enUS" and "judged by an independent arbiter" or "julgados por um árbitro independente", 1, true), nil, "no gated scoring path promised")
 			assert(paragraphs:find(locale == "enUS" and "seed tournament" or "cabeças de chave", 1, true))
 		end)
 	end

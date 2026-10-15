@@ -162,13 +162,15 @@ local function PersonalValues()
 	end
 	local R = ns.Roster and ns.Roster.Fresh and ns.Roster.Fresh()
 	local online = R and type(R.online) == "table" and tostring(#R.online) or L.BRIEF_UNKNOWN
-	return { nextText, #open > 0 and table.concat(open, ", ") or L.BRIEF_NONE, online, Companion(), L.BRIEF_PAYMENT_UNKNOWN }
+	local D = ns.Dues
+	local payment = D and D.PaymentText and D.PaymentText() or L.BRIEF_PAYMENT_UNKNOWN
+	return { nextText, #open > 0 and table.concat(open, ", ") or L.BRIEF_NONE, online, Companion(), payment }
 end
 
 function Brief.PersonalLines()
 	local values = PersonalValues()
 	return { L.BRIEF_NEXT:format(values[1]), L.BRIEF_OPEN:format(values[2]), L.BRIEF_ONLINE:format(values[3]),
-		L.BRIEF_COMPANION:format(values[4]), L.BRIEF_PAYMENT }
+		L.BRIEF_COMPANION:format(values[4]), L.BRIEF_PAYMENT:format(values[5]) }
 end
 
 local INK, TITLE = "QuestFont", "QuestTitleFont"

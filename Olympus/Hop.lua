@@ -242,8 +242,10 @@ function Hop.HandleAsk(dist, sender, text)
 	if ns.Moderation.Hides and ns.Moderation.Hides(sender) then return end
 	local short = ns.ShortName(sender)
 	local now = ns.Now()
-	Hop.Hear(mapID, zoneUID, short, now)
 	if not Member(sender) then stats.strangers = (stats.strangers or 0) + 1 return end
+	-- Only an admitted Olympus member contributes to the crowd/backoff state.  A stranger may
+	-- still send an addon packet on the public channel, but cannot manipulate a layer's demand.
+	Hop.Hear(mapID, zoneUID, short, now)
 	if now - (answeredAt[short] or -math.huge) < Hop.HELP_GAP then return end
 	if now - lastOffer < Hop.OFFER_GAP then return end
 	if not Hop.CanHelp(mapID, zoneUID) then return end

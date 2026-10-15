@@ -52,7 +52,11 @@ King.MAX_SHOWN = 30          -- violators listed on the page
 
 King.MAX_HANDS = 40          -- Hands of the King (the list goes out in pieces when long)
 King.HANDS_EVERY = 300       -- the King's client repeats the list for late logins
-King.HANDS_FRESH = 20 * 60   -- a list the King stopped repeating (he left) ends
+-- (1.2.4, the author's ask: lists of people are not erased; provisional, his to confirm) A list the
+-- King (or a Steward) gave stands until his newer one, kept in the saved data across a /reload:
+-- before, it ended this long after his client stopped repeating it (he logged out), so his Hands
+-- lost the Throne's tools on every client 20 minutes after he left. Kept for the older builds' word.
+King.HANDS_FRESH = 20 * 60
 
 King.mode = nil              -- what the tab shows: home or hands (nil: home, the Throne Room)
 local summon, inspect        -- the King's own roll call / inspection in progress
@@ -113,8 +117,8 @@ end
 function King.Visible() return King.IsKing() or King.IsSteward() or King.IsHand() or King.Preview() end
 
 -- 1.1.5 (the author's call): the tab in the Throne's place is the Throne for the King's people
--- (the King, his Steward, his Hands, Asmon's view, and the High Council: the King's guild's
--- centurions are theirs to name, Nominees.lua), and a guild master's Guild tab for the guild master of
+-- (the King, his Steward, his Hands, the King preview, and the High Council: 1.2.4, the King's
+-- centurions, Nominees.lua), and a guild master's Guild tab for the guild master of
 -- another Olympus guild (his centurions and correspondents). Under the author's guild master's
 -- view (Nominees.DevView), the Guild tab alone: it shows what a guild master sees.
 function King.ThroneShown()
@@ -188,15 +192,17 @@ local function NewId() return math.random(1, 99999) end
 -- The Hands of the King: the players he names use the Throne's tools in his name (HAND_MAY:
 -- the roll call, the inspection, the agenda, Vox Populi, the gates), never what is his alone
 -- (the Hands, writs, the court, pardons, his position). Each client keeps the list of the
--- King it trusts, as he last sent it; a list he stopped repeating ends (HANDS_FRESH).
+-- King it trusts, as he last sent it (1.2.4: in its saved data, until his newer list, while he is
+-- the King; a list he stopped repeating ended after HANDS_FRESH before).
 -- 1.0.0: each of his Stewards names Hands too, in a list of his own that only his client sends
 -- (T1~N, STEWARD_MAY; clients before 1.0.0 know no such kind and leave it out):
 --   T1~N~<id>~<guild>~<Name-Realm,...>     a Steward's Hands (his alone; resent every 5 min)
 -- The Hands are the King's list and every Steward's together, each list its owner's alone:
 -- nobody changes anyone else's. The King's list is the same message as before 1.0.0, from his
 -- client alone. Each client keeps the list it last heard from each Steward (by his name, which
--- the server stamps); it ends HANDS_FRESH after his client stopped repeating it, and at once, on
--- every client, when the author's signed titles list no longer names him (for good: named again,
+-- the server stamps) until his newer list (1.2.4; it ended HANDS_FRESH after his client stopped
+-- repeating it before), and at once, on every client, when the author's signed titles list no
+-- longer names him (for good: named again,
 -- he starts from none, King.StewardsChanged). A Hand's powers are the same whoever named him.
 -- The King never removes a Steward's Hand: that Steward does, or the author, by removing him
 -- (the Hands page shows the others' lists, to read only).
@@ -230,6 +236,8 @@ local lastHandsSent = -math.huge
 local handsSendPending = false
 -- 1.0.0: each Steward's list as this client last heard it from him:
 -- [his Name-Realm] = { names = { "Name-Realm", ... }, set = { [name-realm, lower case] = true }, at = when }
+-- (1.2.4: the King's list heard and each Steward's are kept in the saved data too, rdb.handsHeard =
+-- { names, at, king } and rdb.stewardHandsHeard[his Name-Realm] = { names, at }: King.LoadHands.)
 local stewardHands = {}
 -- A Steward's own list, on his client, in order (saved: rdb.stewardHands[his Name-Realm]: the
 -- characters of one account on a realm group share what they save).
@@ -237,10 +245,10 @@ local myStewardHands = {}
 local lastStewardSent = -math.huge
 
 -- A Steward's list as heard here, while it counts: he is still a Steward (the signed titles
--- list names him) and his client kept repeating it.
+-- list names him). (1.2.4: until his newer list, whether his client still repeats it or not.)
 local function StewardList(steward)
 	local s = stewardHands[steward]
-	if not s or not King.IsStewardName(steward) or ns.Now() - s.at > King.HANDS_FRESH then return nil end
+	if not s or not King.IsStewardName(steward) then return nil end
 	return s
 end
 
@@ -254,13 +262,16 @@ local function Named(list, key)
 	for _, n in ipairs(list) do if type(n) == "string" and n:lower() == key then return true end end
 	return false
 end
+-- (1.2.4) The King's list as heard here counts while its sender is the King: kept until his
+-- newer list, never past his reign (an update naming another King).
+local function HeardKing() return type(handsKing) == "string" and ns.IsKingCharacter(handsKing) end
 local function Hand(name)
 	local full = ns.FullName(name)
 	if type(full) ~= "string" then return false end
 	local key = full:lower()
 	if King.IsKing() then
 		if Named(myHands, key) then return true end
-	elseif ns.Now() - handsAt <= King.HANDS_FRESH and hands[key] == true then
+	elseif hands[key] == true and HeardKing() then
 		return true
 	end
 	if King.IsSteward() and Named(myStewardHands, key) then return true end
@@ -272,6 +283,9 @@ local function Hand(name)
 end
 
 function King.IsHand() return not King.SetsLists() and ns.IsMember() and Hand(ns.me) end
+-- 1.2.4 (Bank.lua): the King's list is heard here now (he keeps repeating it), so that IsHand's
+-- false says this character is no Hand of his, not only that his list is not heard (he left).
+function King.HandsFresh() return King.IsKing() or ns.Now() - handsAt <= King.HANDS_FRESH end
 -- Whether the King's list or a Steward's names this sender (1.0.0): their word alone, never a
 -- census vote. His Hands speak with his Crown for his guild on every client outside it
 -- (Decree.lua, Channels.VerifiedLevel); on its own members' clients its roster says who speaks
@@ -299,7 +313,7 @@ King.StewardLabel = StewardLabel
 -- { { steward = <Name-Realm, nil for the King's>, names = { ... } }, ... }
 function King.OthersHands()
 	local out = {}
-	if not King.IsKing() and ns.Now() - handsAt <= King.HANDS_FRESH and #handsOrder > 0 then
+	if not King.IsKing() and #handsOrder > 0 and HeardKing() then
 		out[1] = { names = handsOrder }
 	end
 	local names = {}
@@ -328,6 +342,52 @@ function King.CanCommand()
 	local WC = ns.WatchChat
 	if WC and not WC.missing and WC.Barred and WC.Barred("powers") then return false end
 	return King.IsSteward() or King.IsHand()
+end
+
+-- 1.2.4: the Agenda is Heraldry's. A title or a Crown duty alone grants no posting power.
+-- Army: the existing verified King/Steward/Hand roots, the author, or a signed councillor of
+-- Heraldry (the old signed name remains readable). Guild: its own live-roster master or his
+-- verified Heraldry correspondent. A guild master alone never gains army authority.
+function King.AgendaAuthorized(name, guild, guildOnly)
+	if type(name) ~= "string" or not ns.IsMember() then return false end
+	local WC, M = ns.WatchChat, ns.Moderation
+	if M and M.Hides and M.Hides(name, guild) then return false end
+	if WC and not WC.missing and WC.Barred and WC.Barred("powers", name) then return false end
+	if guildOnly then
+		local mine, _, rank = GetGuildInfo("player")
+		if type(guild) ~= "string" or guild ~= mine then return false end
+		if ns.FullName(name) == ns.FullName(ns.me) and rank == 0 then return true end
+		local R = ns.Roster
+		local roster = R and R.Fresh and R.Fresh()
+		if roster and roster.guild == guild and R.RankOf and R.RankOf(ns.FullName(name)) == 0 then return true end
+		local N = ns.Nominees
+		return N and not N.missing and N.IsCorrespondent and N.IsCorrespondent(name, guild, "Department of Heraldry") == true or false
+	end
+	if ns.IsKingCharacter(name) then return true end
+	if King.Authorized("A", name, guild) then return true end
+	local W = ns.Workshop
+	if W and W.IsAuthorName and W.IsAuthorName(name) then return true end
+	if ns.IsHighCouncillor(name) ~= true then return false end
+	local title = ns.CouncilTitle and ns.CouncilTitle(name)
+	local dept = title and title.dept
+	local N = ns.Nominees
+	if N and N.DepartmentName then dept = N.DepartmentName(dept) end
+	return dept == "Department of Heraldry"
+end
+
+function King.AgendaScope(scope)
+	if scope ~= nil then return (scope == "guild" or scope == "army") and scope or nil end
+	if King.AgendaAuthorized(ns.me, GetGuildInfo("player"), false) or King.Preview() then return "army" end
+	return "guild"
+end
+function King.AgendaPreviewBlocked()
+	local V = ns.ViewAs
+	return V and V.Previewing and V.Previewing() and not King.Preview() or false
+end
+function King.CanAgenda(scope)
+	if King.AgendaPreviewBlocked() then return false end
+	scope = King.AgendaScope(scope)
+	return scope ~= nil and (King.Preview() or King.AgendaAuthorized(ns.me, GetGuildInfo("player"), scope == "guild"))
 end
 
 -- The King himself sent it (not a Hand): for how it is shown.
@@ -361,7 +421,9 @@ function King.SendHands(force)
 	if not King.IsKing() then return end
 	local now = ns.Now()
 	if not force and now - lastHandsSent < King.HANDS_EVERY then return end
-	if #myHands == 0 and lastHandsSent == -math.huge then return end -- nobody named yet
+	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, at his later sessions:
+	-- every client keeps the list it heard until his newer one, SaveHands' rdb.kingHands)
+	if #myHands == 0 and lastHandsSent == -math.huge and type(ns.rdb and ns.rdb.kingHands) ~= "table" then return end
 	lastHandsSent = now
 	local msg = ("T1~H~%d~%s~%s"):format(NewId(), GetGuildInfo("player") or "", table.concat(myHands, ","))
 	if #msg <= 250 then ns.Comm.Send("CHANNEL", msg, "hands") else ns.Comm.SendChunked(msg) end
@@ -372,7 +434,9 @@ function King.SendStewardHands(force)
 	if King.IsKing() or not King.IsSteward() then return end
 	local now = ns.Now()
 	if not force and now - lastStewardSent < King.HANDS_EVERY then return end
-	if #myStewardHands == 0 and lastStewardSent == -math.huge then return end -- nobody named yet
+	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, the King's way)
+	local saved = ns.rdb and type(ns.rdb.stewardHands) == "table" and ns.rdb.stewardHands[ns.FullName(ns.me)]
+	if #myStewardHands == 0 and lastStewardSent == -math.huge and type(saved) ~= "table" then return end
 	lastStewardSent = now
 	local msg = ("T1~N~%d~%s~%s"):format(NewId(), GetGuildInfo("player") or "", table.concat(myStewardHands, ","))
 	if #msg <= 250 then ns.Comm.Send("CHANNEL", msg, "stewardhands") else ns.Comm.SendChunked(msg) end
@@ -447,6 +511,8 @@ local function OnHands(king, rest)
 	end
 	local was = King.IsHand()
 	hands, handsOrder, handsAt, handsKing = list, order, ns.Now(), ns.FullName(king)
+	-- (1.2.4) Kept until his newer list (King.LoadHands).
+	if ns.rdb then ns.rdb.handsHeard = { names = order, at = handsAt, king = handsKing } end
 	HandChanged(was, function() return L.HANDS_YOU:format(ns.KingName(king)) end)
 end
 
@@ -468,6 +534,11 @@ local function OnStewardHands(sender, rest)
 	end
 	local was = King.IsHand()
 	stewardHands[steward] = { names = names, set = set, at = ns.Now() }
+	-- (1.2.4) Kept until his newer list (King.LoadHands).
+	if ns.rdb then
+		if type(ns.rdb.stewardHandsHeard) ~= "table" then ns.rdb.stewardHandsHeard = {} end
+		ns.rdb.stewardHandsHeard[steward] = { names = names, at = ns.Now() }
+	end
 	HandChanged(was, function() return L.HANDS_YOU_STEWARD:format(ns.DisplayName(steward) or "?") end)
 end
 
@@ -482,6 +553,28 @@ function King.LoadHands()
 	Load(myHands, ns.rdb and ns.rdb.kingHands)
 	local stewards = ns.rdb and ns.rdb.stewardHands
 	Load(myStewardHands, type(stewards) == "table" and stewards[ns.FullName(ns.me)])
+	-- (1.2.4) The lists heard from the King and each Steward, standing until their newer word.
+	local function Names(list)
+		local names, set = {}, {}
+		for _, n in ipairs(type(list) == "table" and list or {}) do
+			local short = type(n) == "string" and CleanName(n)
+			local full = short and ns.FullName(short, ns.RealmOf(n))
+			if full and not set[full:lower()] and #names < King.MAX_HANDS then set[full:lower()], names[#names + 1] = true, full end
+		end
+		return names, set
+	end
+	local heard = ns.rdb and ns.rdb.handsHeard
+	if type(heard) == "table" and type(heard.king) == "string" then
+		local names, set = Names(heard.names)
+		hands, handsOrder, handsAt, handsKing = set, names, tonumber(heard.at) or ns.Now(), heard.king
+	end
+	wipe(stewardHands)
+	for steward, x in pairs(ns.rdb and type(ns.rdb.stewardHandsHeard) == "table" and ns.rdb.stewardHandsHeard or {}) do
+		if type(steward) == "string" and type(x) == "table" then
+			local names, set = Names(x.names)
+			stewardHands[steward] = { names = names, set = set, at = tonumber(x.at) or ns.Now() }
+		end
+	end
 end
 
 -- A signed titles list was taken (Workshop.TakeTitles, 1.0.0): the list of each Steward it no
@@ -501,6 +594,13 @@ function King.StewardsChanged()
 			if not King.IsStewardName(owner) then saved[owner] = nil end
 		end
 		if next(saved) == nil then ns.rdb.stewardHands = nil end
+	end
+	local heard = ns.rdb and ns.rdb.stewardHandsHeard
+	if type(heard) == "table" then
+		for owner in pairs(heard) do
+			if not King.IsStewardName(owner) then heard[owner] = nil end
+		end
+		if next(heard) == nil then ns.rdb.stewardHandsHeard = nil end
 	end
 	if not King.IsSteward() and (#myStewardHands > 0 or lastStewardSent ~= -math.huge) then
 		wipe(myStewardHands)
@@ -885,7 +985,11 @@ function King.ParseAgenda(input)
 	return minutes, Clean(title, 60)
 end
 
-function King.SetAgenda(input)
+function King.SetAgenda(input, scope)
+	scope = King.AgendaScope(scope)
+	if not scope or not King.CanAgenda(scope) then return false end
+	-- Guild events use the existing dated week and its signup sheets, over guild chat alone.
+	if scope == "guild" then return ns.Week and ns.Week.SetEntry(input, scope) or false end
 	local minutes, title = King.ParseAgenda(input)
 	local W = ns.Week
 	-- 1.1: a day and an hour, then what: an entry of the King's week (Week.lua). After a number
@@ -893,7 +997,7 @@ function King.SetAgenda(input)
 	-- Agenda with its raid warning and popup for the whole army.
 	if W and W.LooksLikeEntry and W.LooksLikeEntry(minutes and title or input) then
 		local text = minutes and title or input
-		if W.Parse(text) then return W.SetEntry(text) end
+		if W.Parse(text) then return W.SetEntry(text, scope) end
 		ns.Print(L.THRONE_AGENDA_USAGE)
 		return false
 	end
@@ -907,13 +1011,12 @@ function King.SetAgenda(input)
 		return false
 	end
 	lastAgendaSent = now
-	local mine = { id = NewId(), title = title, at = now + minutes * 60, zone = Clean(ZoneName(), 40), by = ns.me, mine = true, fired = {} }
+	local mine = { id = NewId(), title = title, at = now + minutes * 60, zone = Clean(ZoneName(), 40), by = ns.me, guild = GetGuildInfo("player"), mine = true, fired = {} }
 	if King.Preview() then
 		agenda = mine
 		ns.Print(L.THRONE_PREVIEW_NOTE)
 		return Changed() or true
 	end
-	if not King.CanCommand() then return false end
 	agenda = mine
 	King.SendAgenda()
 	Warn(L.THRONE_AGENDA_SET:format(title, minutes, mine.zone), false, "agenda", { own = true })
@@ -923,17 +1026,22 @@ end
 
 function King.SendAgenda()
 	if not agenda or not agenda.mine or King.Preview() then return end
+	if not King.AgendaAuthorized(ns.me, agenda.guild, false) then return end
 	-- Seconds left, so a resend never moves the time (minutes rounded up did).
 	local left = math.floor(agenda.at - ns.Now())
 	if left < 30 then return end
-	ns.Comm.Send("CHANNEL", ("T1~A~%d~%s~%d~%s~%s"):format(agenda.id, GetGuildInfo("player") or "", left, agenda.zone, agenda.title), "agenda")
+	local a = agenda
+	ns.Comm.Send("CHANNEL", ("T1~A~%d~%s~%d~%s~%s"):format(a.id, GetGuildInfo("player") or "", left, a.zone, a.title), "agenda",
+		nil, nil, nil, { owner = King, guard = function() return agenda == a and King.AgendaAuthorized(ns.me, a.guild, false) end })
 end
 
 function King.CancelAgenda()
 	if not agenda then return end
+	if King.AgendaPreviewBlocked() then return false end
+	if not King.Preview() and not agenda.mine and not King.CanAgenda("army") then return false end
 	-- The King or a Hand cancels it for everyone, whoever set it (its setter's client stops
 	-- repeating it when the cancel reaches it).
-	if (agenda.mine or King.CanCommand()) and not King.Preview() then
+	if not King.Preview() then
 		ns.Comm.Send("CHANNEL", ("T1~X~%d~%s"):format(agenda.id, GetGuildInfo("player") or ""), "agenda")
 	end
 	if ns.Week and ns.Week.Forget then ns.Week.Forget(agenda.id) end -- (1.1: a signup for it, and its nudge)
@@ -943,6 +1051,7 @@ end
 
 function King.Agenda()
 	if agenda and agenda.at < ns.Now() - 600 then agenda = nil end -- over for 10 minutes
+	if agenda and not King.Preview() and not King.AgendaAuthorized(agenda.by, agenda.guild, false) then return nil end
 	return agenda
 end
 
@@ -952,6 +1061,7 @@ local function OnAgenda(king, id, rest, guild)
 	if not seconds or seconds < 30 or seconds > 720 * 60 or title == "" then return end
 	local now = ns.Now()
 	if agenda and agenda.id == id then
+		if ns.FullName(agenda.by) ~= ns.FullName(king) then return end
 		-- A resend: keep our time unless it is really off (late login, clock drift).
 		if math.abs((now + seconds) - agenda.at) > 60 then agenda.at = now + seconds end
 		return Changed()
@@ -969,7 +1079,8 @@ local function OnAgenda(king, id, rest, guild)
 			-- The King by the army's name for him; a Hand by theirs (as OnSummon).
 			local where = a.zone ~= "" and a.zone or "?"
 			local text = byKing and L.THRONE_AGENDA_POPUP:format(ns.KingName(king), a.title, minutes, where)
-				or L.THRONE_AGENDA_POPUP_HAND:format(ns.DisplayName(king), a.title, minutes, where)
+				or (King.IsHandName(king) or King.IsStewardName(king)) and L.THRONE_AGENDA_POPUP_HAND:format(ns.DisplayName(king), a.title, minutes, where)
+				or L.HERALDRY_AGENDA_POPUP:format(ns.DisplayName(king), a.title, minutes, where)
 			ns.ShowDialog("OLYMPUS_AGENDA_CALL", text)
 		end
 		Warn(L.THRONE_AGENDA_SET:format(a.title, math.ceil(seconds / 60), a.zone), false, "agenda", King.AgendaHeld(a, Popup))
@@ -981,7 +1092,7 @@ end
 -- reminders, current until it is due (and while it is still the Agenda).
 function King.AgendaHeld(a, show)
 	return { what = L.HELD_AGENDA:format(a.title), key = "agenda" .. tostring(a.id), show = show,
-		open = function() return agenda == a and a.at > ns.Now() end }
+		open = function() return King.Agenda() == a and a.at > ns.Now() end }
 end
 
 StaticPopupDialogs["OLYMPUS_AGENDA_CALL"] = {
@@ -1013,16 +1124,36 @@ local SHOW_FLAG = HBD_PINS_WORLDMAP_SHOW_CONTINENT or 2
 local crowns                 -- { world, mini } pin frames, made on first use
 local crownAt                -- where they are drawn now (drawn again only when he moved)
 
-function King.SharingLocation() return ns.db.throneLocation == true end
+-- Configured opt-in: also used by the independent layer/match/lives policy. It must not be
+-- rewritten merely because this frame has no publishable position (an instance or loading map).
+function King.SharingLocation() return ns.db ~= nil and ns.db.throneLocation == true end
+
+local function LocationPosition()
+	if IsInInstance and IsInInstance() then return nil, "instance" end
+	local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+	if type(mapID) ~= "number" or mapID <= 0 or mapID >= math.huge or mapID ~= math.floor(mapID) then return nil, "position" end
+	local pos = C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
+	if not pos or type(pos.GetXY) ~= "function" then return nil, "position" end
+	local x, y = pos:GetXY()
+	if type(x) ~= "number" or type(y) ~= "number" or x ~= x or y ~= y
+		or x < 0 or x > 1 or y < 0 or y > 1 or (x == 0 and y == 0) then return nil, "position" end
+	return mapID, x, y
+end
+
+-- Effective status uses exactly the sender's current position gate, not just its saved consent.
+-- No role, consent or independent game-live setting is changed by asking this read-only status.
+function King.EffectiveLocation()
+	if not King.SharingLocation() then return false, "off" end
+	if not King.IsKing() then return false, "role" end
+	local mapID, why = LocationPosition()
+	if not mapID then return false, why end
+	return true
+end
 
 local function SendLocation(force)
 	if not King.SharingLocation() or not King.IsKing() then return end
-	if IsInInstance and IsInInstance() then return end
-	local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-	local pos = mapID and C_Map.GetPlayerMapPosition and C_Map.GetPlayerMapPosition(mapID, "player")
-	if not pos then return end
-	local x, y = pos:GetXY()
-	if not x or (x == 0 and y == 0) then return end
+	local mapID, x, y = LocationPosition()
+	if not mapID then return end
 	local now = ns.Now()
 	local moved = lastLocation.mapID ~= mapID or math.abs((lastLocation.x or 0) - x) > 0.003 or math.abs((lastLocation.y or 0) - y) > 0.003
 	if not force and (now - lastLocation.t < King.LOCATION_EVERY or (not moved and now - lastLocation.t < King.LOCATION_STILL)) then return end
@@ -1140,10 +1271,16 @@ function King.Location()
 end
 
 function King.HandleCommand(dist, sender, text)
-	if dist ~= "CHANNEL" then return end
+	if dist ~= "CHANNEL" and dist ~= "GUILD" then return end
 	local kind, id, guild, rest = text:match("^T1~(%a)~(%d+)~([^~]*)~?(.*)$")
 	if not kind then return end
-	if not King.Authorized(kind, sender, guild) then
+	local guildOnly = dist == "GUILD"
+	local agendaKind = kind == "A" or kind == "D" or kind == "R" or kind == "X"
+	if guildOnly and kind ~= "D" and kind ~= "R" then return end
+	local ownCancel = kind == "D" and rest:find("^0~") and ns.Week and ns.Week.OwnCancel and ns.Week.OwnCancel(sender, tonumber(id), guild, guildOnly)
+		or kind == "X" and agenda and agenda.id == tonumber(id) and agenda.by == ns.FullName(sender)
+	local authorized = ownCancel or agendaKind and King.AgendaAuthorized(sender, guild, guildOnly) or (not agendaKind and King.Authorized(kind, sender, guild))
+	if not authorized then
 		-- Positions come every few seconds: not logged.
 		if kind ~= "P" then
 			ns.Log("throne %s from %s ignored: not the King of %s nor his Hand%s", kind, sender, tostring(guild),
@@ -1172,7 +1309,7 @@ function King.HandleCommand(dist, sender, text)
 	if kind == "S" then OnSummon(sender, id, guild)
 	elseif kind == "H" then OnHands(sender, rest)
 	elseif kind == "N" then OnStewardHands(sender, rest)
-	elseif kinds[kind] then kinds[kind](sender, id, rest, guild)
+	elseif kinds[kind] then kinds[kind](sender, id, rest, guild, guildOnly)
 	elseif kind == "I" then OnInspect(sender, id)
 	elseif kind == "U" then OnUntabarded(sender, rest)
 	elseif kind == "A" then OnAgenda(sender, id, rest, guild)
@@ -1251,7 +1388,7 @@ ns.On("LOGIN", function()
 end)
 
 StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
-	text = L.THRONE_AGENDA_PROMPT,
+	text = "%s",
 	button1 = OKAY or "OK",
 	button2 = CANCEL or "Cancel",
 	hasEditBox = true,
@@ -1263,12 +1400,14 @@ StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
 		local eb = self.editBox or self.EditBox
 		if eb then eb:SetText(""); eb:SetFocus() end
 	end,
-	OnAccept = function(self)
+	OnAccept = function(self, data)
 		local eb = self.editBox or self.EditBox
-		ns.SafeCall("agenda", King.SetAgenda, eb and eb:GetText())
+		data = data or self.data
+		ns.SafeCall("agenda", King.SetAgenda, eb and eb:GetText(), type(data) == "table" and data.scope or nil)
 	end,
 	EditBoxOnEnterPressed = function(self)
-		ns.SafeCall("agenda", King.SetAgenda, self:GetText())
+		local data = self:GetParent().data
+		ns.SafeCall("agenda", King.SetAgenda, self:GetText(), type(data) == "table" and data.scope or nil)
 		self:GetParent():Hide()
 	end,
 	EditBoxOnEscapePressed = function(self) self:GetParent():Hide() end,
@@ -1278,8 +1417,10 @@ StaticPopupDialogs["OLYMPUS_KING_AGENDA"] = {
 	preferredIndex = 3,
 }
 
-function King.AgendaPrompt()
-	ns.ShowDialog("OLYMPUS_KING_AGENDA")
+function King.AgendaPrompt(scope)
+	scope = King.AgendaScope(scope)
+	if not scope or not King.CanAgenda(scope) then return false end
+	ns.ShowDialog("OLYMPUS_KING_AGENDA", scope == "guild" and L.WEEK_GUILD_PROMPT or L.THRONE_AGENDA_PROMPT, nil, { scope = scope })
 	Changed()
 end
 
@@ -1438,12 +1579,16 @@ function King.InspectionLines()
 		local left = inspect.t + King.INSPECT_TIME + 10 - ns.Now()
 		if left > 0 then lines[#lines + 1] = { indent = 1, text = Gold(L.THRONE_INSPECT_RUNNING:format(math.ceil(left))) } end
 		lines[#lines + 1] = { indent = 1, text = L.THRONE_INSPECT_SUMMARY:format(reporters, total, pct) }
+		-- (1.2.4: as many inspected, the higher average level first, then the name: one order every time;
+		-- 1.2.4's review: its average level after its count, so that order is seen, both kept whole up
+		-- to half the row.)
 		local guilds = {}
 		for guild, g in pairs(byGuild) do guilds[#guilds + 1] = { name = guild, ok = g.ok, n = g.ok + g.bad } end
-		table.sort(guilds, function(a, b) return a.n > b.n end)
+		ns.Data.SortGuildCounts(guilds, "n")
+		local Tag = ns.Views and ns.Views.AvgTag or function() return "" end
 		for _, g in ipairs(guilds) do
-			lines[#lines + 1] = { indent = 2, text = Green("<" .. g.name .. ">"),
-				right = ("%d%%  (%d/%d)"):format(g.n > 0 and math.floor(g.ok * 100 / g.n + 0.5) or 0, g.ok, g.n) }
+			lines[#lines + 1] = { indent = 2, text = Green("<" .. g.name .. ">"), rightWide = true,
+				right = ("%d%%  (%d/%d)"):format(g.n > 0 and math.floor(g.ok * 100 / g.n + 0.5) or 0, g.ok, g.n) .. Tag(ns.Data.Guild(g.name)) }
 		end
 		if #names > 0 then
 			lines[#lines + 1] = { indent = 1, text = "|cffff4040" .. L.THRONE_VIOLATORS:format(#names) .. "|r" }
@@ -1504,8 +1649,8 @@ local function Go(mode) return function() King.Show(mode) end end
 -- on their own tabs): here, the army's key. A Hand's: where their tools are. His Steward's
 -- (1.0.0): the King's, with what is his to do in the King's name (he holds no court). 1.1.5 (the
 -- author's calls): no treasury here any more (its own tab has it all), and under it all, the
--- King's guild's centurions (Nominees.lua: the King's and the High Council's to name, the
--- others' to read); a High Councillor who is none of them has the Throne for them alone. One who
+-- King's centurions (1.2.4, the author's rule: the High Council, to read, nobody named there:
+-- Nominees.MainLines); a High Councillor who is none of them has the Throne for that alone. One who
 -- also leads another Olympus guild has his Guild tab's section after it.
 local function HomeLines()
 	local mine = King.IsKing() or King.Preview()
@@ -1567,7 +1712,8 @@ function King.Build(s)
 	if not home then table.insert(lines, 1, Line("< " .. L.THRONE_ROOM, INK, { onClick = Go("home"), gapAfter = true })) end
 	-- While the army sees him on the map, the page says so on top, whatever it shows.
 	if King.SharingLocation() and King.IsKing() then
-		table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. L.THRONE_LOCATION_LIVE, TITLE, { gapAfter = true }))
+		local status = King.EffectiveLocation() and L.THRONE_LOCATION_LIVE or L.THRONE_LOCATION_PAUSED
+		table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. status, TITLE, { gapAfter = true }))
 	end
 	local steward = King.IsSteward()
 	if steward then table.insert(lines, 1, Line("|T" .. ns.CROWN_ICON .. ":0|t " .. L.STEWARD_ACTING, TITLE, { gapAfter = true })) end
@@ -1609,10 +1755,11 @@ function King.StewardStatusLine()
 		for i, n in ipairs(ns.Stewards()) do shown[i] = StewardLabel(n) end
 		who = #shown > 0 and table.concat(shown, ", ") or "none named"
 	end
-	local function Heard(at) return ns.Now() - at <= King.HANDS_FRESH and ("heard " .. ns.Ago(at)) or "lapsed here" end
+	-- (1.2.4: a list stands until its owner's newer one, whenever it was heard)
+	local function Heard(at) return "heard " .. ns.Ago(at) end
 	local held = {}
 	if King.IsKing() then held[1] = ("the King's %d (yours)"):format(#myHands)
-	elseif handsAt ~= -math.huge then held[1] = ("the King's %d (%s)"):format(#handsOrder, Heard(handsAt)) end
+	elseif handsAt ~= -math.huge and HeardKing() then held[1] = ("the King's %d (%s)"):format(#handsOrder, Heard(handsAt)) end
 	if King.IsSteward() then held[#held + 1] = ("yours %d"):format(#myStewardHands) end
 	local stewards = {}
 	for steward in pairs(stewardHands) do stewards[#stewards + 1] = steward end
@@ -1629,10 +1776,9 @@ end
 -- the Realm and the Tabards), to see and try them. Nothing the view does reaches anyone.
 function King.SetDevView(on)
 	ns.db.devKingView = on and true or false
-	-- The preview's treasury switches and keepers were its own: gone with it.
+	-- The preview's treasury switches and keepers were its own: gone with it. (1.2.4: it names no
+	-- centurions any more; 1.1.5's copy of the ones it named goes at the next minute, Nominees.Minute.)
 	if not on then ns.db.previewTreasuryFlags, ns.db.previewTreasuryKeepers = nil, nil end
-	-- (1.1.5: and the King's guild's centurions it named, Nominees.lua.)
-	if not on then ns.db.previewMainNominees = nil end
 	ns.Print(on and L.DEV_KING_VIEW_NOW_ON or L.DEV_KING_VIEW_NOW_OFF)
 	ns.Fire("DATA_CHANGED")
 	Changed()

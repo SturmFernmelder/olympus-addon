@@ -331,7 +331,9 @@ test("1.2 War: removed posts persist as bounded tombstones and cannot return fro
 	end)
 end)
 
-test("1.2 War: persistence caps remove dependent RSVP, posts and after-action records", function()
+-- (1.2.4, the author's ask: records are not erased with what they name) An after-action record
+-- went with its operation; it now stands its own AAR_KEEP, its operation's title kept with it.
+test("1.2 War: persistence caps remove dependent RSVP and posts; after-action records stay (1.2.4)", function()
 	WithWar(function(w)
 		local s, now = War.Store(true), w.clock()
 		for i = 1, War.OP_MAX + 1 do
@@ -347,7 +349,8 @@ test("1.2 War: persistence caps remove dependent RSVP, posts and after-action re
 			s.posts[id] = { ["officer-realm"] = { player = "Officer-Realm", role = "tank", rev = now + i } }
 		end
 		assert(War.Prune(now))
-		eq(s.operations.op001, nil); eq(s.rsvp.op001, nil); eq(s.after.aar001, nil)
+		eq(s.operations.op001, nil); eq(s.rsvp.op001, nil)
+		eq(s.after.aar001 and s.after.aar001.opTitle, "Operation 1", "its record stays, with its operation's title")
 		eq(s.centuries.cent001, nil); eq(s.posts.cent001, nil)
 	end)
 end)
@@ -477,5 +480,33 @@ test("1.2 War: the Realm controller exposes actionable rows, Loot Notes and unav
 		loot.onClick(); eq(ns.Views.PageShown(), "loot")
 		assert(unavailable, "unverified cross-client fields are explicitly unavailable")
 		ns.Views.ShowPage(nil)
+	end)
+end)
+
+test("1.2.4 War: an after-action record outlives its operation's 30 days (90 days its own), listed under the earlier operations' reports, never in the recovery snapshot", function()
+	WithWar(function(w)
+		local op = assert(War.CreateOperation("pvp 15 caller=1 | Ridge watch"))
+		assert(War.SetOperation(op.id, "active")); assert(War.SetOperation(op.id, "complete"))
+		local a = assert(War.RecordAfter(op.id .. " - action ridge held ; Officer, Tanky One"))
+		local s = War.Store(false)
+		-- 31 days on: the operation goes (OP_KEEP), its record stays
+		w.clock(w.clock() + War.OP_KEEP + 86400)
+		War.Prune()
+		eq(s.operations[op.id], nil, "the operation went")
+		local kept = s.after[a.id]
+		assert(kept, "the record stays")
+		eq(kept.opTitle, "Ridge watch"); eq(kept.result, "ridge held")
+		local found
+		for i, line in ipairs(War.Lines()) do
+			if line.header and line.text == ns.L.WAR_AFTER_PAST then found = i end
+		end
+		assert(found, "the earlier operations' reports")
+		local row = War.Lines()[found + 1]
+		assert(tostring(row.text):find("Ridge watch", 1, true) and tostring(row.text):find("ridge held", 1, true), tostring(row.text))
+		for _, rec in ipairs(War.SnapshotRecords()) do assert(not rec:find(a.id, 1, true), "not in the snapshot: " .. rec) end
+		-- 90 days after it was written: it goes
+		w.clock(a.rev + War.AAR_KEEP + 1)
+		War.Prune()
+		eq(s.after[a.id], nil)
 	end)
 end)

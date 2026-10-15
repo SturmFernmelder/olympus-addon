@@ -14,6 +14,10 @@ local function World(fn)
 		RegisterEvent = function(event, f) w.events[event] = f end, IsMember = function() return w.member end,
 		Print = function(text) w.printed[#w.printed + 1] = text end,
 		UI = { Toggle = function() w.toggles = w.toggles + 1 end } }, { __index = ns })
+	c.IsHighCouncillor = function() return w.council == true end
+	c.ViewAs = { Previewing = function() return w.preview == true end }
+	c.Watch = { CouncilDeskShown = function() return w.councilAllowed == true end }
+	c.UI.SelectTab = function(tab) w.selected = tab end
 	c.Gate = { Allowed = function(id) eq(id, "main-key"); return not w.pad end,
 		Hooks = function(id, hooks) eq(id, "main-key"); w.hooks = hooks end,
 		Install = function(id) eq(id, "main-key"); if not w.pad then w.hooks.install() end end }
@@ -75,6 +79,25 @@ test("Main shortcut: a free Shift + guild key toggles the actual UI entry on pre
 		w.button.scripts.OnClick(w.button, "LeftButton", true); eq(w.toggles, 2)
 		eq(next(w.savedBindings), nil); eq(#w.calls, 1)
 		w.events.UPDATE_BINDINGS(); eq(#w.calls, 1, "unchanged state does not rebind")
+	end)
+end)
+
+test("1.2.4 follow-up: Shift + guild opens The Watch for actual authorized Council only", function()
+	World(function(k, w)
+		w.council, w.councilAllowed = true, true; w.listeners.LOGIN()
+		w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, "watch"); eq(w.toggles, 0, "the prior census/profile tab is not the target")
+		w.selected = nil; w.button.scripts.OnClick(w.button, "LeftButton", false); eq(w.selected, nil)
+		w.preview = true; w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, nil, "a role preview retains the ordinary toggle"); eq(w.toggles, 1)
+		w.preview, w.councilAllowed = false, false; w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, nil, "sanctioned or unavailable Council desk"); eq(w.toggles, 2)
+		w.council, w.councilAllowed = false, true; w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, nil, "a mocked/view-as desk alone grants no Council shortcut"); eq(w.toggles, 3)
+		w.council = true; k.SetEnabled(false); w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, nil); eq(w.toggles, 3, "hotkey opt-out remains in force")
+		k.SetEnabled(true); w.other = "OTHER_OWNER"; w.button.scripts.OnClick(w.button, "LeftButton", true)
+		eq(w.selected, nil); eq(w.toggles, 3, "another binding owner remains protected")
 	end)
 end)
 

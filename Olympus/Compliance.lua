@@ -23,6 +23,9 @@ local L = ns.L
 --   - the arena's buttons (Arena.Can): an action of Compliance.ACTIONS is refused before its own
 --     rule, so every screen greys it with Compliance.Line() as its reason.
 -- Refunds are not wagers: gold going back to whoever gave it is never refused here.
+-- 1.2.3 (the owner's decision): a game with no wager on it counts (its history, points and
+-- rankings) whatever the King's live switch says; that switch is the bets' alone, and a wager
+-- needs it on top of this gate (Arena.GameMode, Arena.FREE_TYPES in ArenaNet.lua).
 --
 -- The dormant region seam (not enabled in a release). Its table shape is:
 -- REGIONS[region] = { minAge = n, [kind] = true | { [game] = true, ... } }, where

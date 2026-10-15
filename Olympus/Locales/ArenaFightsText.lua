@@ -25,6 +25,10 @@ L.HONOR_TITLES = {
 	["guild-top-leader"] = "Wisest of Olympus",
 	["oracle-1"] = "Oracle", ["oracle-2"] = "Seer", ["oracle-3"] = "Soothsayer",
 	["missionary-1"] = "Good Shepherd", ["missionary-2"] = "Faithful Shepherd", ["missionary-3"] = "Shepherd",
+	-- (1.2.4)
+	["apostle-1"] = "Light of Olympus", ["apostle-2"] = "Voice of Olympus", ["apostle-3"] = "Herald of Olympus",
+	["bones-1"] = "Master of Bones", ["bones-2"] = "Luck's Favourite", ["bones-3"] = "Steady Hand",
+	["wanted-slayer-1"] = "Bane of the Horde", ["wanted-slayer-2"] = "Horde Hunter", ["wanted-slayer-3"] = "Bounty Hunter",
 	["the-dev"] = "The Royal Dev",
 }
 L.HONOR_CLASS_TITLE = { "%s Champion", "%s Contender", "%s Challenger" }
@@ -36,22 +40,49 @@ L.HONOR_RACE_NAMES = { human = "Human", dwarf = "Dwarf", nightelf = "Night Elf",
 L.HONOR_METAL_GOLD, L.HONOR_METAL_SILVER, L.HONOR_METAL_BRONZE = "gold", "silver", "bronze"
 
 -- The King's letter (the design): one per family, in his voice, naming the honour's title (%s);
--- signed by his title alone, never a name.
+-- signed by his title alone, never a name. (1.2.4, the author: the King talks the way he talks on
+-- stream, plain and blunt, not a herald's speech.)
 L.HONOR_LETTER_HEAD = "A letter from the King"
 L.HONOR_LETTER_SIGN = "- The King"
 L.HONOR_LETTER_WEAR = "Wear it"
+-- (1.2.4: Most Wanted's Slayer letter, its first button: the Wanted tab.)
+L.HONOR_LETTER_SLAYERS = "Slayers"
 L.HONOR_LETTER_LATER = "Later"
+L.HONOR_LETTER_PREVIEW_HEAD = "Preview: the King's letters"
+L.HONOR_LETTER_PREVIEW_ONLY = "Preview only"
+L.HONOR_LETTER_PREVIEW_NOTE = "Choose a letter to inspect its existing parchment, frame and text. These are fictional examples: no honour is awarded, worn, saved or sent, and real waiting letters are not consumed."
 L.HONOR_LETTER = {
-	arena = "Warrior,\n\nThe sand remembers every blow, and so do I. You stood where others fell, and Olympus names you %s. Wear the gryphon with pride: every eye in the arena is on you now.\n\nDefend it well.",
-	class = "Champion,\n\nAmong all who share your calling, none fights as you do. Olympus names you %s. Let your rivals study your every move, and let them fail to match it.",
-	race = "Fighter,\n\nYour people have a new standard to follow. Olympus names you %s. Ride at the head of your kin, and let the arena hear of it.",
-	["donor-top"] = "Friend,\n\nThe treasury of Olympus stands taller for your generosity. You are named %s, and the cornucopia is yours while your name stays among the three. The realm does not forget those who give.",
-	["donor-month"] = "Friend,\n\nThis past month your gold kept Olympus strong. For it you are named %s, and the koi is yours for the month ahead. May your hand stay open.",
-	level = "Adventurer,\n\nNobody in Olympus got there before you. The comet is yours, and with it the name %s: a record written for as long as Olympus stands.",
-	guild = "Lord,\n\nBy the levels of its members, your guild stands above every other in Olympus. You are named %s, and the owl watches over your banner while your guild leads. Keep them climbing.",
-	oracle = "Seer,\n\nLast month you read the arena better than anyone. You are named %s, and the raven is yours for this month. Olympus will be watching your next wager.",
-	missionary = "Missionary,\n\nThe flock of Olympus grows because of you: in the last thirty days few brought as many people into our guilds. You are named %s, and the shepherd's crook is yours while you stay among the three. May the flock keep growing.",
+	arena = "Okay, listen.\n\nYou walked into the arena and beat everybody. Not most people. Everybody. So you're %s now, and the gryphon is yours.\n\nHeads up: every tryhard in Olympus wants it off you now. Don't let them.",
+	class = "Hey,\n\nI checked. Of everyone playing your class in Olympus, nobody fights like you. That's huge. You're %s now.\n\nThe rest of them are gonna study every move you make. Let them. They still won't keep up.",
+	race = "Hey,\n\nYour whole race just got a new name to brag about, and it's yours. You're %s now.\n\nGo show your people how it's done.",
+	["donor-top"] = "Dude,\n\nYou've put more gold into Olympus than almost anyone. That's not a little, that's insane. You're %s, and the cornucopia stays yours as long as you stay in the top three.\n\nI see it, and so does everybody else. Thank you.",
+	["donor-month"] = "Hey,\n\nLast month your gold kept the lights on in Olympus. Genuinely, thank you. You're %s, and the koi is yours for the month.\n\nKeep that hand open.",
+	level = "Holy.\n\nYou got there before anybody else in Olympus. First. Nobody can ever take that from you. The comet is yours, and so is the name %s.\n\nNow go touch some grass. Or don't. Respect either way.",
+	guild = "Listen,\n\nYour guild has the highest levels in all of Olympus. Top of the list. You're %s, and the owl sits on your banner while your guild stays first.\n\nKeep your people climbing, because the others are coming.",
+	oracle = "Okay,\n\nLast month you called the arena better than anyone. Fight after fight, you just knew. You're %s, and the raven is yours this month.\n\nEverybody's gonna copy your picks now. Can't blame them.",
+	missionary = "Hey,\n\nIn the last thirty days you brought more people into our guilds than almost anyone. That's how Olympus grows. You're %s, and the shepherd's crook is yours while you stay in the top three.\n\nKeep bringing them in.",
+	-- (1.2.4)
+	apostle = "Hey,\n\nIn the last thirty days barely any Apostle brought as many people to Olympus as you did. You're %s, and the cross is yours while you stay in the top three.\n\nKeep the faith. And keep them coming.",
+	bones = "Okay,\n\nThe tavern is still talking about your throws last month. Some of those were actually insane. You're %s, and the lucky charm is yours for the month.\n\nMay the bones keep falling your way.",
+	["wanted-slayer"] = "Okay,\n\nThe Horde keeps counting its dead, and your name keeps coming up. That's what I like to see. You're %s now.\n\nRide the skeletal horse right where the Horde can see it. Let them know who did it.",
 }
+
+-- 1.2.4, the notices (HonorsNet.Tell): every move on a list after the King's first letter for its
+-- place, a strip at the top of the screen and a line in chat. Each list's name, a place's words,
+-- and the lines.
+L.HONOR_RANKING = { ["donor-top"] = "Top donors", ["donor-month"] = "Donors of the month", guild = "Best guild",
+	["wanted-slayer"] = "Slayers", apostle = "Apostles", missionary = "Missionaries", bones = "Bones" }
+L.HONOR_PLACE = { "1st", "2nd", "3rd" }
+L.HONOR_NOTICE_DOWN = "%s: you dropped to %s place."
+L.HONOR_NOTICE_OUT = "%s: you are off the list, and its frame is no longer yours."
+L.HONOR_NOTICE_BACK = "%s: you are back on the list, in %s place."
+L.HONOR_NOTICE_UP = "%s: you regained %s place."
+L.HONOR_NOTICE_GUILD_OUT = "Best guild: your guild is no longer first, and the owl is no longer yours."
+L.HONOR_NOTICE_GUILD_BACK = "Best guild: your guild is first again, and the owl is yours again."
+L.HONOR_NOTICE_SINCE = "Since your last visit: %s."
+L.HONOR_NOTICE_PART_PLACE = "%s, %s place"
+L.HONOR_NOTICE_PART_OUT = "%s, off the list"
+L.HONOR_NOTICE_MORE = "%d more"
 
 -- The rankings' switches (the owner's one compact view).
 L.ARENA_PERIOD_TODAY = "Today"
@@ -68,6 +99,23 @@ L.ARENA_TOURNEY = "Tournament"
 L.ARENA_WEEK_CARD_TIP = "The Blood Arena: %d bouts. Open the Arena tab for the card."
 L.ARENA_WEEK_FIGHT = "%s vs %s"
 
+-- 1.2.3, the duels: a challenge refused for a reason (Kit.Why), and a confirmed win that earned no
+-- qualification points (ArenaFights.QualNote: the opponent, then why).
+L.FIGHTS_WHY_BUSY = "You already have a duel open with this player: fight it first, or let it lapse."
+L.FIGHTS_WHY_EXPIRED = "That challenge lapsed."
+L.ARENA_QUAL_NONE = "Your win over %s earned no qualification points: %s."
+L.ARENA_QUAL_WHY_NATIVE = "the game did not end that duel here (no duel finished)"
+L.ARENA_QUAL_WHY_REPORT = "the two clients did not report the same result"
+L.ARENA_QUAL_WHY_INT = "one of you was killed by something else during the duel"
+L.ARENA_QUAL_WHY_UNSEEN = "this client did not see both characters during the duel (target your opponent)"
+L.ARENA_QUAL_WHY_GUILD = "one of you is not in an Olympus guild"
+L.ARENA_QUAL_WHY_REALM = "one of you is on a realm outside the realm group"
+L.ARENA_QUAL_WHY_LEVEL = "a level could not be read"
+L.ARENA_QUAL_WHY_SHORT = "it lasted under 15 seconds, or its length was not seen"
+L.ARENA_QUAL_WHY_DAY = "your 10 counted duels for today are done"
+L.ARENA_QUAL_WHY_PAIR = "3 counted duels against this opponent in 7 days are done"
+L.ARENA_QUAL_WHY_LEVELS = "your opponent is 10 or more levels below you (0 points)"
+
 -- The Chronicle's lines (what this client saw done).
 L.ARENA_CHRONICLE_CORRECT = "corrected the result of fight %s, round %d"
 L.ARENA_CHRONICLE_RULED = "ruled fight %s, round %d, himself (no duel line agreed)"
@@ -77,36 +125,64 @@ L.ARENA_CHRONICLE_DRAW = "draw disputed: tournament %s, step %d (the roll seen h
 L.ARENA_CHRONICLE_WORD = "belt word %s for %s"
 L.ARENA_CHRONICLE_DISPUTED = "fight %s, round %d: the arbiter's duel line against the reports (disputed)"
 
--- The person card, the history's Consent line.
+-- The person card. (The history's Consent line, ARENA_CONSENT_HISTORY and its _TEXT, is
+-- ArenaHomeText.lua's alone: that file loads after this one, so a copy here never showed.)
 L.ARENA_PERSON_LINE = "Arena: %d  (%d-%d)"
 L.ARENA_PERSON_PROFILE = "Arena profile"
 -- (1.1.6, the games' ledger: the privacy page's one line, Consent.Intro)
 L.CONSENT_GAMES_RECORDED = "Game results are recorded: each game you play (Bones, the Arena, the Lottery's practice: when, who, the result and the score) shows in your own list and goes to the King, the High Council and the author (and the auditors he signs), nobody else."
-L.ARENA_CONSENT_HISTORY = "Show my list of fights on my arena profile"
-L.ARENA_CONSENT_HISTORY_TEXT = "Your record, rating, tier and belts always show (the rankings need them). This chooses whether your list of fights shows too. Fights of public events (a Fight Night, a tournament, a public arbiter's bout) show whatever you choose: their cards and brackets show them anyway. The Olympus channel can be read by anyone on it: this chooses what the addon shows, not what a modified client could read."
 
--- The profile's Edit (ProfileEdit.lua).
-L.PROFILE_EDIT_TITLE = "My arena profile"
+-- "My profile" (ProfileEdit.lua, 1.2.4: the player's own page in the Olympus window). Frames,
+-- titles and honours are the whole addon's, not the arena's alone: no "arena profile" in these words.
 L.PROFILE_FRAME_RANK = "My rank's frame"
 L.PROFILE_FRAME_NONE = "No frame"
 L.PROFILE_FRAME_RED_CROSS = "Red cross (only you see it)"
 L.PROFILE_TITLE_NONE = "No title"
-L.PROFILE_FRAME = "Frame: %s"
-L.PROFILE_TITLE = "Title: %s"
-L.PROFILE_NICK_A = "Epithet"
-L.PROFILE_NICK_N = "Beast"
-L.PROFILE_EMBLEM = "Emblem"
-L.PROFILE_HISTORY_PUBLIC = "History: public"
-L.PROFILE_HISTORY_PRIVATE = "History: private"
 L.PROFILE_LOCK = "Keep my pick"
 L.PROFILE_LOCKED = "Pick kept"
-L.PROFILE_LETTERS = "The King's letters"
-L.PROFILE_COUNCIL_ICON = "My council icon"
 L.PROFILE_HONOURS = "Your honours"
 L.PROFILE_NO_HONOURS = "None yet: belts, podiums, donations, the level race, the Oracle, the best guild."
-L.PROFILE_PREVIEW = "As others see you: %s\nNickname: %s"
 L.PROFILE_ICON_REFUSED = "That icon can't be used here: pick one of your honours' marks (or, for your emblem, one of the game's icons)."
-L.HONOR_LETTER_WAITING = "A letter from the King awaits you: open the Olympus window or your arena profile to read it."
+L.HONOR_LETTER_WAITING = "A letter from the King awaits you: open the Olympus window (or My profile, in it) to read it."
+L.MYPROFILE_TITLE = "My profile"
+L.MYPROFILE_LINK = "My profile"
+L.MYPROFILE_NAV_LOOK = "Look"
+L.MYPROFILE_NAV_ICONS = "Icons"
+L.MYPROFILE_NAV_PRIVACY = "Who sees what"
+L.MYPROFILE_NAV_LETTERS = "Letters (%d)"
+L.MYPROFILE_SEEN_TITLE = "As others see you"
+L.MYPROFILE_SEEN_TEXT = "Title: %s\nNickname: %s"
+L.MYPROFILE_OWN_LOOK = "On your screen only: %s"
+L.MYPROFILE_RED_CROSS = "Red cross"
+L.MYPROFILE_FRAME_HEAD = "Frame"
+L.MYPROFILE_TITLE_HEAD = "Title"
+L.MYPROFILE_NICK_HEAD = "Nickname"
+L.MYPROFILE_EMBLEM_HEAD = "Emblem"
+L.MYPROFILE_ICON_HEAD = "Council icon"
+L.MYPROFILE_FRAME_LATER = "comes in a later version"
+L.MYPROFILE_EPITHET = "Epithet: %s"
+L.MYPROFILE_BEAST = "Beast: %s"
+L.MYPROFILE_NONE_WORD = "none"
+L.MYPROFILE_NICK_NONE = "No nickname"
+L.MYPROFILE_CHOOSE_EMBLEM = "Choose an emblem"
+L.MYPROFILE_CHOOSE_ICON = "Choose your council icon"
+L.MYPROFILE_LOCK_TIP = "A new honour no longer switches your frame and title by itself."
+L.MYPROFILE_EMBLEM_SAMPLE = "Your emblem: %s"
+L.MYPROFILE_CHAT_SAMPLE = "In the chat: %s"
+L.MYPROFILE_EMBLEM_HINT = "What it is for: your emblem shows in place of your portrait wherever your portrait can't show, as on the Games' cards. Click one, then Use this icon."
+L.MYPROFILE_ICON_HINT = "Your mark, the silver dragon, always shows before your name in the game's chat (channels, say, party, whispers, guild chat); an icon after it is optional. Click one, then Use this icon."
+L.MYPROFILE_USE = "Use this icon"
+L.MYPROFILE_LOOK_PUBLIC = "Your frame, title, nickname and emblem go out on the Olympus channel: every member's addon shows them."
+L.MYPROFILE_LOOK_KEPT = "Your frame, title, nickname and emblem don't go out on the Olympus channel from this character now: no member's addon gets them."
+L.MYPROFILE_FACTS_HEAD = "What your page shows"
+L.MYPROFILE_CHOICES_HEAD = "Your choices"
+L.MYPROFILE_PRIVACY_PAGE = "Open the privacy page"
+L.MYPROFILE_LETTERS_NONE = "No letter from the King yet."
+L.MYPROFILE_GAMES_OFF = "Your frame, title and nickname go out with the Games, which are off on this character."
+L.MYPROFILE_GAMES_PROFILE = "Games profile"
+-- (1.2.4) A letter held in an instance or Busy: its chat line, and its words on the Decrees tab.
+L.HONOR_LETTER_HELD = "A letter from the King awaits you: it opens once you are out of the instance and not Busy (or open the Olympus window to read it now)."
+L.HELD_HONOR_LETTER = "a letter from the King"
 
 if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_EPI_A = { "Inquebrável", "Carmesim", "Silencioso", "de Ferro", "de Ouro", "Veloz", "Sombrio", "Selvagem", "de Pedra", "da Tempestade",
@@ -125,6 +201,9 @@ if GetLocale and GetLocale() == "ptBR" then
 		["guild-top-leader"] = "O Mais Sábio do Olympus",
 		["oracle-1"] = "Oráculo", ["oracle-2"] = "Vidente", ["oracle-3"] = "Adivinho",
 		["missionary-1"] = "Bom Pastor", ["missionary-2"] = "Pastor Fiel", ["missionary-3"] = "Pastor",
+		["apostle-1"] = "Luz do Olympus", ["apostle-2"] = "Voz do Olympus", ["apostle-3"] = "Arauto do Olympus",
+		["bones-1"] = "Mestre dos Ossos", ["bones-2"] = "Favorito da Sorte", ["bones-3"] = "Mão Firme",
+		["wanted-slayer-1"] = "Ruína da Horda", ["wanted-slayer-2"] = "Caçador da Horda", ["wanted-slayer-3"] = "Caçador de Recompensas",
 		["the-dev"] = "The Royal Dev",
 	}
 	L.HONOR_CLASS_TITLE = { "Campeão %s", "Desafiante %s", "Pretendente %s" }
@@ -137,18 +216,38 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HONOR_LETTER_HEAD = "Uma carta do Rei"
 	L.HONOR_LETTER_SIGN = "- O Rei"
 	L.HONOR_LETTER_WEAR = "Usar"
+	L.HONOR_LETTER_SLAYERS = "Slayers"
 	L.HONOR_LETTER_LATER = "Depois"
+	L.HONOR_LETTER_PREVIEW_HEAD = "Prévia: cartas do Rei"
+	L.HONOR_LETTER_PREVIEW_ONLY = "Só prévia"
+	L.HONOR_LETTER_PREVIEW_NOTE = "Escolha uma carta para conferir seu pergaminho, moldura e texto existentes. São exemplos fictícios: nenhuma honraria é concedida, usada, salva ou enviada, e cartas reais pendentes não são consumidas."
 	L.HONOR_LETTER = {
-		arena = "Guerreiro,\n\nA areia se lembra de cada golpe, e eu também. Você ficou de pé onde outros caíram, e o Olympus o chama de %s. Use o grifo com orgulho: todos os olhos da arena estão em você agora.\n\nDefenda-o bem.",
-		class = "Campeão,\n\nEntre todos que seguem o seu caminho, ninguém luta como você. O Olympus o chama de %s. Que os rivais estudem cada movimento seu, e que não consigam igualá-lo.",
-		race = "Lutador,\n\nO seu povo tem um novo estandarte a seguir. O Olympus o chama de %s. Cavalgue à frente dos seus, e que a arena ouça falar disso.",
-		["donor-top"] = "Amigo,\n\nO tesouro do Olympus está mais alto pela sua generosidade. Você é chamado de %s, e a cornucópia é sua enquanto o seu nome estiver entre os três. O reino não esquece quem dá.",
-		["donor-month"] = "Amigo,\n\nNo último mês o seu ouro manteve o Olympus forte. Por isso você é chamado de %s, e o koi é seu pelo mês que vem. Que a sua mão siga aberta.",
-		level = "Aventureiro,\n\nNinguém no Olympus chegou lá antes de você. O cometa é seu, e com ele o nome %s: um recorde escrito enquanto o Olympus existir.",
-		guild = "Lorde,\n\nPelos níveis dos seus membros, a sua guilda está acima de todas as outras do Olympus. Você é chamado de %s, e a coruja guarda o seu estandarte enquanto a sua guilda liderar. Continue a fazê-los subir.",
-		oracle = "Vidente,\n\nNo último mês você leu a arena melhor que qualquer um. Você é chamado de %s, e o corvo é seu por este mês. O Olympus vai observar a sua próxima aposta.",
-		missionary = "Missionário,\n\nO rebanho do Olympus cresce por sua causa: nos últimos trinta dias, poucos trouxeram tanta gente para as nossas guildas. Você é chamado de %s, e o cajado é seu enquanto estiver entre os três. Que o rebanho continue a crescer.",
+		arena = "Olha só.\n\nVocê entrou na arena e ganhou de todo mundo. Não da maioria. De todo mundo. Agora você é %s, e o grifo é seu.\n\nSó avisando: todo tryhard do Olympus vai querer tirar ele de você. Não deixa.",
+		class = "E aí,\n\nEu conferi. De todo mundo da sua classe no Olympus, ninguém luta como você. Isso é enorme. Agora você é %s.\n\nO resto vai estudar cada movimento seu. Deixa. Mesmo assim não vão te acompanhar.",
+		race = "E aí,\n\nA sua raça inteira ganhou um nome novo pra se gabar, e é o seu. Agora você é %s.\n\nVai lá mostrar pro seu povo como se faz.",
+		["donor-top"] = "Cara,\n\nVocê colocou mais ouro no Olympus do que quase todo mundo. Isso não é pouca coisa, é insano. Você é %s, e a cornucópia fica com você enquanto estiver entre os três primeiros.\n\nEu vejo, e todo mundo vê também. Valeu mesmo.",
+		["donor-month"] = "E aí,\n\nNo mês passado o seu ouro manteve as luzes do Olympus acesas. Sério, obrigado. Você é %s, e o koi é seu este mês.\n\nContinua com essa mão aberta.",
+		level = "Caramba.\n\nVocê chegou lá antes de qualquer um no Olympus. Primeiro. Isso ninguém tira de você nunca mais. O cometa é seu, e o nome %s também.\n\nAgora vai tocar grama. Ou não. Respeito de qualquer jeito.",
+		guild = "Escuta,\n\nA sua guilda tem os níveis mais altos de todo o Olympus. Topo da lista. Você é %s, e a coruja fica no seu estandarte enquanto a sua guilda for a primeira.\n\nMantém o seu pessoal subindo, porque os outros estão vindo.",
+		oracle = "Olha,\n\nNo mês passado você leu a arena melhor que qualquer um. Luta após luta, você simplesmente sabia. Você é %s, e o corvo é seu este mês.\n\nAgora todo mundo vai copiar os seus palpites. Não dá pra culpar.",
+		missionary = "E aí,\n\nNos últimos trinta dias você trouxe mais gente pras nossas guildas do que quase todo mundo. É assim que o Olympus cresce. Você é %s, e o cajado é seu enquanto estiver entre os três primeiros.\n\nContinua trazendo.",
+		apostle = "E aí,\n\nNos últimos trinta dias quase nenhum Apóstolo trouxe tanta gente pro Olympus quanto você. Você é %s, e a cruz é sua enquanto estiver entre os três primeiros.\n\nMantém a fé. E continua trazendo.",
+		bones = "Olha,\n\nA taverna ainda fala dos seus lances do mês passado. Alguns foram insanos de verdade. Você é %s, e o amuleto da sorte é seu este mês.\n\nQue os ossos continuem caindo a seu favor.",
+		["wanted-slayer"] = "Olha só,\n\nA Horda continua contando os mortos, e o seu nome não para de aparecer. É isso que eu gosto de ver. Agora você é %s.\n\nMonta o cavalo esqueleto bem onde a Horda possa ver. Deixa eles saberem quem foi.",
 	}
+	L.HONOR_RANKING = { ["donor-top"] = "Maiores doadores", ["donor-month"] = "Doadores do mês", guild = "Melhor guilda",
+		["wanted-slayer"] = "Slayers", apostle = "Apóstolos", missionary = "Missionários", bones = "Bones" }
+	L.HONOR_PLACE = { "1º", "2º", "3º" }
+	L.HONOR_NOTICE_DOWN = "%s: você caiu para o %s lugar."
+	L.HONOR_NOTICE_OUT = "%s: você saiu da lista, e a moldura não é mais sua."
+	L.HONOR_NOTICE_BACK = "%s: você voltou à lista, em %s lugar."
+	L.HONOR_NOTICE_UP = "%s: você recuperou o %s lugar."
+	L.HONOR_NOTICE_GUILD_OUT = "Melhor guilda: a sua guilda não é mais a primeira, e a coruja não é mais sua."
+	L.HONOR_NOTICE_GUILD_BACK = "Melhor guilda: a sua guilda é a primeira de novo, e a coruja é sua outra vez."
+	L.HONOR_NOTICE_SINCE = "Desde a sua última visita: %s."
+	L.HONOR_NOTICE_PART_PLACE = "%s, %s lugar"
+	L.HONOR_NOTICE_PART_OUT = "%s, fora da lista"
+	L.HONOR_NOTICE_MORE = "mais %d"
 	L.ARENA_PERIOD_TODAY = "Hoje"
 	L.ARENA_PERIOD_WEEK = "Esta semana"
 	L.ARENA_PERIOD_MONTH = "Este mês"
@@ -160,6 +259,20 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_TOURNEY = "Torneio"
 	L.ARENA_WEEK_CARD_TIP = "A Arena de Sangue: %d lutas. Abra a aba Arena para ver o card."
 	L.ARENA_WEEK_FIGHT = "%s contra %s"
+	L.FIGHTS_WHY_BUSY = "Você já tem um duelo aberto com esse jogador: lutem esse primeiro, ou deixem expirar."
+	L.FIGHTS_WHY_EXPIRED = "Esse desafio expirou."
+	L.ARENA_QUAL_NONE = "Sua vitória sobre %s não deu pontos de qualificação: %s."
+	L.ARENA_QUAL_WHY_NATIVE = "o jogo não encerrou esse duelo aqui (nenhum duelo terminado)"
+	L.ARENA_QUAL_WHY_REPORT = "os dois clientes não relataram o mesmo resultado"
+	L.ARENA_QUAL_WHY_INT = "um de vocês foi morto por outra coisa durante o duelo"
+	L.ARENA_QUAL_WHY_UNSEEN = "este cliente não viu os dois personagens durante o duelo (mire no adversário)"
+	L.ARENA_QUAL_WHY_GUILD = "um de vocês não está numa guilda Olympus"
+	L.ARENA_QUAL_WHY_REALM = "um de vocês está num reino fora do grupo de reinos"
+	L.ARENA_QUAL_WHY_LEVEL = "não deu para ler um nível"
+	L.ARENA_QUAL_WHY_SHORT = "durou menos de 15 segundos, ou a duração não foi vista"
+	L.ARENA_QUAL_WHY_DAY = "seus 10 duelos que contam hoje já foram"
+	L.ARENA_QUAL_WHY_PAIR = "3 duelos que contam contra esse adversário em 7 dias já foram"
+	L.ARENA_QUAL_WHY_LEVELS = "seu adversário está 10 ou mais níveis abaixo de você (0 pontos)"
 	L.ARENA_CHRONICLE_CORRECT = "corrigiu o resultado da luta %s, round %d"
 	L.ARENA_CHRONICLE_RULED = "decidiu a luta %s, round %d, ele mesmo (nenhuma linha de duelo concordou)"
 	L.ARENA_CHRONICLE_SEASON = "abriu a temporada %d da arena"
@@ -170,27 +283,52 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.ARENA_PERSON_LINE = "Arena: %d  (%d-%d)"
 	L.ARENA_PERSON_PROFILE = "Perfil da arena"
 	L.CONSENT_GAMES_RECORDED = "Os resultados dos jogos ficam registrados: cada jogo que você joga (Bones, a Arena, o treino da Loteria: quando, quem, o resultado e o placar) aparece na sua própria lista e vai para o Rei, o Alto Conselho e o autor (e os auditores que ele assina), mais ninguém."
-	L.ARENA_CONSENT_HISTORY = "Mostrar a minha lista de lutas no meu perfil da arena"
-	L.ARENA_CONSENT_HISTORY_TEXT = "O seu cartel, rating, divisão e cinturões sempre aparecem (os rankings precisam deles). Isto escolhe se a sua lista de lutas aparece também. Lutas de eventos públicos (uma Noite da Luta, um torneio, uma luta de árbitro público) aparecem seja qual for a sua escolha: os cards e chaves delas já as mostram. O canal do Olympus pode ser lido por quem estiver nele: isto escolhe o que o addon mostra, não o que um cliente modificado poderia ler."
-	L.PROFILE_EDIT_TITLE = "Meu perfil da arena"
 	L.PROFILE_ICON_REFUSED = "Esse ícone não serve aqui: escolha a marca de uma das suas honras (ou, para o emblema, um ícone do jogo)."
-	L.HONOR_LETTER_WAITING = "Uma carta do Rei espera por você: abra a janela do Olympus ou o seu perfil da arena para lê-la."
+	L.HONOR_LETTER_WAITING = "Uma carta do Rei espera por você: abra a janela do Olympus (ou o Meu perfil, nela) para lê-la."
+	L.HONOR_LETTER_HELD = "Uma carta do Rei espera por você: ela abre quando você sair da instância e não estiver Ocupado (ou abra a janela do Olympus para lê-la agora)."
+	L.HELD_HONOR_LETTER = "uma carta do Rei"
 	L.PROFILE_FRAME_RANK = "A moldura do meu posto"
 	L.PROFILE_FRAME_NONE = "Sem moldura"
 	L.PROFILE_FRAME_RED_CROSS = "Cruz vermelha (só você a vê)"
 	L.PROFILE_TITLE_NONE = "Sem título"
-	L.PROFILE_FRAME = "Moldura: %s"
-	L.PROFILE_TITLE = "Título: %s"
-	L.PROFILE_NICK_A = "Epíteto"
-	L.PROFILE_NICK_N = "Fera"
-	L.PROFILE_EMBLEM = "Emblema"
-	L.PROFILE_HISTORY_PUBLIC = "Histórico: público"
-	L.PROFILE_HISTORY_PRIVATE = "Histórico: privado"
 	L.PROFILE_LOCK = "Manter a escolha"
 	L.PROFILE_LOCKED = "Escolha mantida"
-	L.PROFILE_LETTERS = "As cartas do Rei"
-	L.PROFILE_COUNCIL_ICON = "Meu ícone do conselho"
 	L.PROFILE_HONOURS = "As suas honrarias"
 	L.PROFILE_NO_HONOURS = "Nenhuma ainda: cinturões, pódios, doações, a corrida de níveis, o Oráculo, a melhor guilda."
-	L.PROFILE_PREVIEW = "Como os outros o veem: %s\nApelido: %s"
+	L.MYPROFILE_TITLE = "Meu perfil"
+	L.MYPROFILE_LINK = "Meu perfil"
+	L.MYPROFILE_NAV_LOOK = "Visual"
+	L.MYPROFILE_NAV_ICONS = "Ícones"
+	L.MYPROFILE_NAV_PRIVACY = "Quem vê o quê"
+	L.MYPROFILE_NAV_LETTERS = "Cartas (%d)"
+	L.MYPROFILE_SEEN_TITLE = "Como os outros o veem"
+	L.MYPROFILE_SEEN_TEXT = "Título: %s\nApelido: %s"
+	L.MYPROFILE_OWN_LOOK = "Só na sua tela: %s"
+	L.MYPROFILE_RED_CROSS = "Cruz vermelha"
+	L.MYPROFILE_FRAME_HEAD = "Moldura"
+	L.MYPROFILE_TITLE_HEAD = "Título"
+	L.MYPROFILE_NICK_HEAD = "Apelido"
+	L.MYPROFILE_EMBLEM_HEAD = "Emblema"
+	L.MYPROFILE_ICON_HEAD = "Ícone do Conselho"
+	L.MYPROFILE_FRAME_LATER = "chega numa versão futura"
+	L.MYPROFILE_EPITHET = "Epíteto: %s"
+	L.MYPROFILE_BEAST = "Fera: %s"
+	L.MYPROFILE_NONE_WORD = "nenhum"
+	L.MYPROFILE_NICK_NONE = "Sem apelido"
+	L.MYPROFILE_CHOOSE_EMBLEM = "Escolher um emblema"
+	L.MYPROFILE_CHOOSE_ICON = "Escolher o seu ícone do Conselho"
+	L.MYPROFILE_LOCK_TIP = "Uma honraria nova não troca mais a sua moldura e o seu título sozinha."
+	L.MYPROFILE_EMBLEM_SAMPLE = "Seu emblema: %s"
+	L.MYPROFILE_CHAT_SAMPLE = "No chat: %s"
+	L.MYPROFILE_EMBLEM_HINT = "Para que serve: o seu emblema aparece no lugar do seu retrato onde o retrato não pode aparecer, como nos cards dos Jogos. Clique em um e em Usar este ícone."
+	L.MYPROFILE_ICON_HINT = "Sua marca, o dragão prateado, sempre aparece antes do seu nome no chat do jogo (canais, dizer, grupo, sussurros, chat da guilda); um ícone depois dela é opcional. Clique em um e em Usar este ícone."
+	L.MYPROFILE_USE = "Usar este ícone"
+	L.MYPROFILE_LOOK_PUBLIC = "A sua moldura, título, apelido e emblema saem no canal do Olympus: o addon de todo membro os mostra."
+	L.MYPROFILE_LOOK_KEPT = "A sua moldura, título, apelido e emblema não saem agora no canal do Olympus deste personagem: nenhum addon de membro os recebe."
+	L.MYPROFILE_FACTS_HEAD = "O que a sua página mostra"
+	L.MYPROFILE_CHOICES_HEAD = "As suas escolhas"
+	L.MYPROFILE_PRIVACY_PAGE = "Abrir a página de privacidade"
+	L.MYPROFILE_LETTERS_NONE = "Nenhuma carta do Rei ainda."
+	L.MYPROFILE_GAMES_OFF = "A sua moldura, título e apelido saem com os Jogos, que estão desligados neste personagem."
+	L.MYPROFILE_GAMES_PROFILE = "Perfil nos Jogos"
 end

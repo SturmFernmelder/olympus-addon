@@ -129,6 +129,7 @@ local FEE_SUBJECT = "Olympus craft fee "
 local composer
 local openedId
 local pageMode = "board"
+local rulesReturn
 local nextId = math.random and math.random(0, 46655) or 0
 local publishTimes, cardBuckets, actionBuckets, chatBuckets, alertTimes = {}, {}, {}, {}, {}
 local priceSamples, adapters, escrowAdapters = {}, {}, {}
@@ -773,6 +774,17 @@ local function ReadsDebtors(name)
 	local W = ns.Workshop
 	return ns.IsHighCouncillor(Full(name)) == true
 		or (type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(Full(name)) == true)
+end
+local function ShowFeeRules()
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed("craft-debtors")) then return false end
+	rulesReturn, pageMode = pageMode, "rules"
+	Changed()
+	return true
+end
+local function CloseFeeRules()
+	pageMode, rulesReturn = rulesReturn or "fees", nil
+	Changed()
 end
 -- A desk character whose addon was heard lately (a whisper to one who is not online is a line of
 -- the game's in the chat): the fee words go only then.
@@ -4344,6 +4356,8 @@ function Fee.Page(lines)
 	local total = 0
 	for _, x in ipairs(d.ranking) do total = total + x.owed end
 	lines[#lines + 1] = { header = true, text = L.CRAFT_FEES_RANKING, right = L.CRAFT_FEES_TOTAL:format(Money(total)) }
+	local rules = ns.RankingRules and ns.RankingRules.Link("craft-debtors", ShowFeeRules)
+	if rules then lines[#lines + 1] = rules end
 	if #d.ranking == 0 then lines[#lines + 1] = { text = Grey(L.CRAFT_FEES_NONE) } end
 	local W = ns.Watch
 	local watch = type(W) == "table" and type(W.CanManage) == "function" and W.CanManage() == true
@@ -4397,6 +4411,11 @@ function Requests.BoardLines(q)
 	-- author's, by their own names.)
 	local readsFees = WalletShown() and ReadsDebtors(ns.me)
 	if pageMode == "fees" and not readsFees then pageMode = "board" end
+	if pageMode == "rules" then
+		local ruleLines = readsFees and ns.RankingRules and ns.RankingRules.Lines("craft-debtors", CloseFeeRules)
+		if ruleLines then return ruleLines end
+		pageMode, rulesReturn = "board", nil
+	end
 	local nav = {
 		{ text = L.CRAFT_BOARD_OPEN, selected = pageMode == "board", onClick = function() pageMode = "board" Changed() end },
 		{ text = L.CRAFT_BOARD_MINE, selected = pageMode == "mine", onClick = function() pageMode = "mine" Changed() end },
@@ -4495,12 +4514,30 @@ end
 function Requests.Reset()
 	transient = NewStore()
 	if ns.rdb then ns.rdb.craftRequests = nil end
-	composer, openedId, pageMode = nil, nil, "board"
+	composer, openedId, pageMode, rulesReturn = nil, nil, "board", nil
 	nextId = 0
 	publishTimes, cardBuckets, actionBuckets, chatBuckets, alertTimes, priceSamples, escrowAdapters = {}, {}, {}, {}, {}, {}, {}
 	exactTrade, exactMailOut, exactInbox, asked, itemsAsked = nil, nil, {}, {}, {}
 	Fee.view, Fee.warned, Fee.reminded, Fee.answered, Fee.jobs, Fee.pumping = { entries = {} }, {}, {}, {}, {}, false
 	if ns.rdb then ns.rdb.craftFees = nil end
+end
+
+if ns.RankingRules then
+	ns.RankingRules.Register("craft-debtors", {
+		title = L.RANK_RULE_DEBTORS_TITLE,
+		icon = "Interface\\Icons\\INV_Letter_16",
+		allowed = function() return WalletShown() and ReadsDebtors(ns.me) end,
+		sections = function()
+			local hours = math.floor(Requests.CURE_WINDOW / 3600)
+			local dueHours = math.floor(Requests.FEE_DUE / 3600)
+			return {
+				{ topic = "score", text = L.RANK_RULE_DEBTORS_SCORE:format(dueHours) },
+				{ topic = "order", text = L.RANK_RULE_DEBTORS_ORDER:format(hours, hours * 2) },
+				{ topic = "evidence", text = L.RANK_RULE_DEBTORS_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_DEBTORS_VISIBILITY },
+			}
+		end,
+	})
 end
 
 ns.Comm.Handle("CQ", Requests.ReceiveSnapshot)

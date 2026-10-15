@@ -105,6 +105,19 @@ end
 function Workshop.IsAuthor() return IsAuthorName(ns.me) end
 Workshop.IsAuthorName = IsAuthorName
 
+-- Practice tools delegate their pinned operator identity to the core. This grants
+-- no guild rank, payment authority or control of another player's result.
+function Workshop.IsPracticeOperator(name) return IsAuthorName(name) end
+function Workshop.PracticeOperators()
+	if type(ns.AUTHOR) ~= "string" or ns.AUTHOR == "" then return {} end
+	local pinned = ns.FullName(ns.AUTHOR, ns.AUTHOR_REALM)
+	local names = { pinned }
+	-- Linked realms stamp their own suffix. Retain only a guarded presence identity;
+	-- an accepted caller's event writer mark must resolve on the receiving client too.
+	if authorName and IsAuthorName(authorName) and authorName:lower() ~= pinned:lower() then names[#names + 1] = authorName end
+	return names
+end
+
 -- The author's test characters (Dev.lua, never published) see the tab too: nothing it sends
 -- goes anywhere but the test bench's log (DevTest.lua), or is ignored by everyone.
 function Workshop.Preview()
@@ -2493,8 +2506,7 @@ Workshop.ICON_EVERY = 1200 -- about every 20 minutes (the council ticker runs on
 Workshop.ICON_COLS, Workshop.ICON_ROWS = 8, 5
 local ICON_CELL, ICON_GAP = 36, 4
 local lastIconSent = -math.huge
-local picker          -- the picker window, built the first time it opens
-local host            -- 1.2: { onPick } while the picker lives inside the profile's Edit (Workshop.IconPickerHost)
+local picker          -- the picker window, built the first time it opens (1.2.4: only where ProfileEdit.lua is missing)
 local gameIcons       -- the game's icons while it is open (let go when it closes, like Blizzard's)
 local shownIcons      -- the ones the filter leaves
 local iconPage, iconChoice = 1, nil
@@ -2607,21 +2619,12 @@ function Workshop.GameIcons() -- gp:lookups
 	return out, names
 end
 
--- 1.2: inside a host (Workshop.IconPickerHost) an entry may also be an honour's mark, an addon
--- texture of Olympus's own: { key, texture, label } (IconEntry checks it). Its texture is drawn, its
--- key handed back.
-local function IconLabel(icon)
-	if type(icon) == "table" then return icon.label or icon.key end
-	return type(icon) == "number" and ("#" .. icon) or tostring(icon)
-end
-local function IconArt(icon)
-	if type(icon) == "table" then return icon.texture end
-	return ns.CouncilIconTexture(icon)
-end
+local function IconLabel(icon) return type(icon) == "number" and ("#" .. icon) or tostring(icon) end
 Workshop.MARK_TEXTURES = "^Interface\\AddOns\\Olympus\\media\\[%w_%-\\]+$" -- where a mark's texture may be
--- A host's entry: a council icon value (a file number, an icon's name), or a mark { key (letters,
--- digits, _ and -), texture (a file number, or a path under Interface\AddOns\Olympus\media\),
--- label }; nil for anything else.
+-- An entry of an icon list ("My profile"'s Icons section, ProfileEdit.lua, 1.2.4; the hosted picker
+-- until then): a council icon value (a file number, an icon's name), or an honour's mark, an addon
+-- texture of Olympus's own { key (letters, digits, _ and -), texture (a file number, or a path under
+-- Interface\AddOns\Olympus\media\), label }; nil for anything else.
 function Workshop.IconEntry(v)
 	if type(v) ~= "table" then return ns.CouncilIconValue(v) end
 	local key, texture, label = v.key, v.texture, v.label
@@ -2645,7 +2648,7 @@ function Workshop.RefreshIconPicker()
 		local icon = list[(iconPage - 1) * per + i]
 		b.icon = icon
 		if icon then
-			b.art:SetTexture(IconArt(icon))
+			b.art:SetTexture(ns.CouncilIconTexture(icon))
 			b.chosen:SetShown(icon == iconChoice)
 			b:Show()
 		else
@@ -2660,24 +2663,17 @@ function Workshop.RefreshIconPicker()
 	-- will show it: the mark always, the icon after it (0.9.9). Since 1.1.5 the mark there is the
 	-- High Council's silver dragon (Borders.ChatMarkText), and Olympus's own lines carry none; a
 	-- client updated without a restart (Borders.lua's stand-in) shows the council's skull.
-	local texture = IconArt(iconChoice)
+	local texture = ns.CouncilIconTexture(iconChoice)
 	picker.preview:SetTexture(texture or ns.HIGH_COUNCIL_SKULL)
-	-- (1.2: inside the profile's Edit a player who is no councillor has no mark before the icon.)
 	local B = ns.Borders
-	local councillor = ns.IsHighCouncillor(ns.me)
-	local mark = not councillor and ""
-		or type(B) == "table" and type(B.ChatMarkText) == "function" and B.ChatMarkText("silver") or ns.HIGH_COUNCIL_MARK
+	local mark = type(B) == "table" and type(B.ChatMarkText) == "function" and B.ChatMarkText("silver") or ns.HIGH_COUNCIL_MARK
 	picker.sample:SetText("[" .. mark .. (texture and ("|T" .. texture .. ":0|t") or "") .. (ns.DisplayName(ns.me) or "?") .. "]")
 	picker.chosenName:SetText(iconChoice and IconLabel(iconChoice) or L.COUNCIL_ICON_MARK_ONLY)
 end
 
--- A click on an icon (or No icon, nil): the preview only, until OK. (A mark only in a host.)
+-- A click on an icon (or No icon, nil): the preview only, until OK.
 function Workshop.PickIcon(icon)
-	if type(icon) == "table" then
-		iconChoice = host and Workshop.IconEntry(icon) and icon or nil
-	else
-		iconChoice = ns.CouncilIconValue(icon)
-	end
+	iconChoice = ns.CouncilIconValue(icon)
 	Workshop.RefreshIconPicker()
 end
 
@@ -2694,8 +2690,7 @@ function Workshop.FilterIcons(text)
 	else
 		shownIcons = {}
 		for _, icon in ipairs(gameIcons or {}) do
-			local words = type(icon) == "table" and ((icon.label or "") .. " " .. icon.key) or tostring(icon)
-			if words:lower():find(text, 1, true) then shownIcons[#shownIcons + 1] = icon end
+			if tostring(icon):lower():find(text, 1, true) then shownIcons[#shownIcons + 1] = icon end
 		end
 	end
 	iconPage = 1
@@ -2809,13 +2804,7 @@ local function MakePicker()
 	f.ok:SetPoint("BOTTOMRIGHT", -24, 18)
 	f.ok:SetScript("OnClick", function()
 		ns.SafeCall("council icon ok", function()
-			-- (1.2: inside a host, the profile's Edit, its own choice: Workshop.IconPickerHost.)
-			if host then
-				host.onPick(type(iconChoice) == "table" and iconChoice.key or iconChoice)
-				f:Hide()
-			elseif iconChoice == MyIcon() or Workshop.SetCouncilIcon(iconChoice) then
-				f:Hide()
-			end
+			if iconChoice == MyIcon() or Workshop.SetCouncilIcon(iconChoice) then f:Hide() end
 		end)
 	end)
 	f.cancel = PickerButton(f, CANCEL or "Cancel", 90)
@@ -2829,33 +2818,16 @@ local function MakePicker()
 	return f
 end
 
--- The picker back in its own window, on UIParent, after the profile's Edit held it: movable again,
--- above the other windows, closed by Escape (ShowIconPicker lists it again).
-local function Unhost()
-	if not (picker and host) then return end
-	host = nil
-	picker:Hide()
-	picker:SetParent(UIParent)
-	picker:ClearAllPoints()
-	picker:SetPoint("CENTER", 0, 40)
-	picker:SetFrameStrata("DIALOG")
-	picker:SetToplevel(true)
-	picker:SetMovable(true)
-	picker:SetScript("OnDragStart", picker.StartMoving)
-	picker:SetScript("OnDragStop", picker.StopMovingOrSizing)
-	picker.close:Show()
-end
-
--- /oly council icon, and the Realm tab's button: a councillor's alone.
+-- /oly council icon, and the Realm tab's button: a councillor's alone. 1.2.4: both open his own
+-- page's Icons section ("My profile", UI.OpenIconPicker); this window is the way only where
+-- ProfileEdit.lua is missing (a client updated without a restart). (The picker it hosted inside
+-- the profile's Edit, Workshop.IconPickerHost, went with that panel: the page draws its own.)
 function Workshop.ShowIconPicker()
 	if not ns.IsHighCouncillor(ns.me) then
 		ns.Print(L.COUNCIL_ICON_ONLY)
 		return false
 	end
 	picker = picker or MakePicker()
-	Unhost()
-	ns.SetWindowTitle(picker, L.COUNCIL_ICON_TITLE)
-	picker.hint:SetText(L.COUNCIL_ICON_HINT)
 	local names
 	gameIcons, names = Workshop.GameIcons()
 	shownIcons, iconChoice = gameIcons, MyIcon()
@@ -2878,72 +2850,10 @@ end
 
 function Workshop.IconPicker() return picker end
 
--- 1.2 (ProfileEdit.lua: the profile's Edit in the Olympus window, where the icon picker moves):
--- the same picker, inside `parent` (anchored to its top left; the host sizes and closes it), listing
--- `list` in its order (the player's honour marks first, then the game's icons the caller chose:
--- the whole list for councillors), each taken only as ns.CouncilIconValue takes it; nil: the
--- game's icons. Its OK calls onPick(icon) (nil: no icon) instead of setting a councillor's icon.
--- `current`: the icon shown chosen. Returns the picker's frame, built on first use only.
--- 1.2 (review): hosted, it is part of the Edit: never dragged out of it, in the host's strata, and
--- off the Escape list (Escape closes the Olympus window, the Edit with it).
-function Workshop.IconPickerHost(parent, list, onPick, current)
-	if type(parent) ~= "table" or type(onPick) ~= "function" then return nil end
-	picker = picker or MakePicker()
-	picker:Hide()
-	picker:SetParent(parent)
-	picker:ClearAllPoints()
-	picker:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, 0)
-	picker.close:Hide()
-	picker:SetMovable(false)
-	picker:SetScript("OnDragStart", nil)
-	picker:SetScript("OnDragStop", nil)
-	picker:SetToplevel(false)
-	if parent.GetFrameStrata then
-		local strata = parent:GetFrameStrata()
-		if type(strata) == "string" then picker:SetFrameStrata(strata) end
-	end
-	-- (Its own name off the escape list, in both modes: Escape closes the Olympus window instead.)
-	if type(UISpecialFrames) == "table" then -- gp:escape-list!undo
-		for i = #UISpecialFrames, 1, -1 do -- gp:escape-list!undo
-			if UISpecialFrames[i] == "OlympusCouncilIconFrame" then table.remove(UISpecialFrames, i) end -- gp:escape-list!undo
-		end
-	end
-	host = { onPick = onPick }
-	-- 1.2.3: hosted, it picks the profile's emblem, not the council's icon: its own title and words
-	-- (the council's promised a silver dragon in the chat to anyone who opened it).
-	ns.SetWindowTitle(picker, L.EMBLEM_ICON_TITLE)
-	picker.hint:SetText(L.EMBLEM_ICON_HINT)
-	local icons, names = {}, false
-	local chosen = ns.CouncilIconValue(current)
-	if type(list) == "table" then
-		local seen = {}
-		for _, v in ipairs(list) do
-			local icon = Workshop.IconEntry(v)
-			local key = icon and (type(icon) == "table" and ("mark:" .. icon.key:lower()) or tostring(icon):lower())
-			if key and not seen[key] then
-				seen[key] = true
-				icons[#icons + 1] = icon
-				if type(icon) ~= "number" then names = true end
-				if type(icon) == "table" and current == icon.key then chosen = icon end
-			end
-		end
-	else
-		icons, names = Workshop.GameIcons()
-	end
-	gameIcons, shownIcons, iconChoice, iconPage = icons, icons, chosen, 1
-	picker.filter:SetText("")
-	picker.filter:SetShown(names)
-	picker.filterLabel:SetShown(names)
-	Workshop.RefreshIconPicker()
-	picker:Show()
-	return picker
-end
-function Workshop.IconPickerHosted() return host ~= nil end
-
 -- Tests start from a clean state.
 function Workshop.ResetIcons()
 	if picker then picker:Hide() end
-	picker, host, gameIcons, shownIcons, iconPage, iconChoice = nil, nil, nil, nil, 1, nil
+	picker, gameIcons, shownIcons, iconPage, iconChoice = nil, nil, nil, 1, nil
 	lastIconSent = -math.huge
 end
 

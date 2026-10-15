@@ -257,6 +257,9 @@ function Loot.Write(text, item, to)
 	-- (One message: a long name of ours leaves the words a little less room.)
 	while #NoteEntry(n) > 250 do n.text = ns.Cut(n.text, #n.text - 1) end
 	b.notes[n.writer .. "#" .. n.id] = n
+	if n.to and ns.CarryHistory and ns.CarryHistory.CaptureOriginal then ns.CarryHistory.CaptureOriginal("L", ns.FullName(n.to),
+		n.writer .. "#" .. n.id, n.t, Loot.Guild(), { writer = n.writer, written = n.t, revision = n.rev,
+			item = n.item or "", to = ns.FullName(n.to), words = n.text, removed = "0" }) end
 	Loot.Prune(b)
 	Send(NoteEntry(n), true)
 	ns.Print(L.LOOT_WRITTEN)
@@ -270,8 +273,12 @@ function Loot.Remove(key)
 	local b = Book()
 	local n = b and b.notes[key]
 	if type(n) ~= "table" or n.del then return end
-	local r = { writer = n.writer, id = n.id, t = n.t, rev = math.max(ServerNow(), (n.rev or 0) + 1), del = true, item = n.item, by = ns.me }
+	local originalAt = ServerNow()
+	local r = { writer = n.writer, id = n.id, t = n.t, rev = math.max(originalAt, (n.rev or 0) + 1), del = true, item = n.item, by = ns.me }
 	b.notes[key] = r
+	if n.to and ns.CarryHistory and ns.CarryHistory.CaptureOriginal then ns.CarryHistory.CaptureOriginal("L", ns.FullName(n.to),
+		key .. ":removed:" .. r.rev, originalAt, Loot.Guild(), { writer = n.writer, written = n.t, revision = r.rev,
+			item = n.item or "", to = ns.FullName(n.to), words = n.text or "", removed = "1", removedBy = ns.me }) end
 	Send(NoteEntry(r))
 	ns.Print(L.LOOT_REMOVED)
 	Changed()

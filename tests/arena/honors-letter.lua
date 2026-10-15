@@ -28,9 +28,100 @@ local function Kept(w, c)
 	return c
 end
 
+local function PreviewFrames(c)
+	local make = CreateFrame
+	c.globals.CreateFrame = function(...)
+		local f = make(...)
+		if f:GetObjectType() == "Button" then
+			-- The Forever fixture exposes both methods; WithUI normally makes SetEnabled
+			-- a no-op, which cannot assert the preview's disabled Wear button.
+			f.SetEnabled = function(self, on) self.enabled = on == true end
+			f.IsEnabled = function(self) return self.enabled ~= false end
+		end
+		return f
+	end
+end
+
 print("HonorsNet: the King's letter (1.2.1)")
 
+test("1.2.4 honour letter previews: every family uses the real framed letter without awarding, consuming or transmitting anything", function()
+	-- All-family author samples stay available with the actual pre-launch race OFF.
+	local w, cast = W3.New({ levelRace = false })
+	local author = w:Client(N.author)
+	H.WithUI(function()
+		-- Use the same native-template fixture as the existing framed-letter geometry cases.
+		PreviewFrames(author)
+		-- This older fights-only world does not load the newer core Wanted adapter.
+		w:As(author, function() assert(loadfile(H.ADDON_DIR .. "Wanted.lua"))("Olympus", author.ns) end)
+		local hn = author.ns.HonorsNet
+		assert(type(hn.PreviewLetter) == "function", "all-family preview is exposed")
+		eq(w:As(cast.A, cast.A.ns.HonorsNet.PreviewLetter, "bones-1"), false, "ordinary members cannot enter the Workshop preview")
+		local before = #w.sent
+		local keys, families = w:As(author, hn.PreviewKeys), {}
+		assert(#keys > 30)
+		local profile = author.ns.db.arenaProfile
+		local picked = author.ns.ArenaProfile.Pick().frame
+		local queued, saved = #hn.QueuedLetters(), #hn.Letters()
+		for _, key in ipairs(keys) do
+			families[hn.LetterFamily(key)] = true
+			eq(w:As(author, hn.PreviewLetter, key), true, key)
+			local f = hn.LetterFrame()
+			eq(f.preview, true); eq(f.key, key); eq(f.metal, true)
+			eq(f.body:GetText(), w:As(author, hn.LetterText, key))
+			eq(f.wear:IsEnabled(), false, "sample cannot be worn")
+			w:As(author, hn.CloseLetter, true) -- even a direct caller cannot award the sample
+		end
+		for _, family in ipairs({ "arena", "class", "race", "donor-top", "donor-month", "oracle", "level", "guild", "missionary", "apostle", "bones", "wanted-slayer", "wanted" }) do
+			assert(families[family], "preview family: " .. family)
+		end
+		eq(#w.sent, before); eq(#hn.QueuedLetters(), queued); eq(#hn.Letters(), saved)
+		eq(author.ns.ArenaProfile.Pick().frame, picked); eq(author.ns.db.arenaProfile, profile, "an idle read must not create saved profiles")
+		eq(w:As(author, hn.PreviewLetter, "unapproved-key"), false)
+		W3.NoErrors(w)
+	end)
+end)
+
+test("1.2.4 honour letter previews: a real pending award is neither overwritten nor marked read by a preview", function()
+	local w, cast = W3.New()
+	local author = Kept(w, w:Client(N.author))
+	H.WithUI(function()
+		PreviewFrames(author)
+		local hn = author.ns.HonorsNet
+		Donors(w, author, w.clock, { author }); w:Run(3)
+		assert(Shown(author), "real award is visible")
+		local f = hn.LetterFrame(); eq(f.preview, false)
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), false)
+		eq(f.key, "donor-top-1"); eq(#hn.QueuedLetters(), 1)
+		w:As(author, hn.CloseLetter, false)
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), true)
+		w:As(author, hn.CloseLetter, false)
+		eq(#hn.QueuedLetters(), 0); eq(hn.Letters()[1].read, true)
+		W3.NoErrors(w)
+	end)
+end)
+
 -- The owner after the King's stream (1.2.1): the King got the King's letter about a frame he holds.
+test("1.2.4 honour letter previews: an award arriving during a sample waits unread and opens only after the sample closes", function()
+	local w = W3.New({ levelRace = false })
+	local author = Kept(w, w:Client(N.author))
+	H.WithUI(function()
+		PreviewFrames(author)
+		local hn = author.ns.HonorsNet
+		eq(w:As(author, hn.PreviewLetter, "bones-1"), true)
+		local f = hn.LetterFrame()
+		Donors(w, author, w.clock, { author }); w:Run(3)
+		eq(f.preview, true); eq(f.key, "bones-1", "incoming award does not overwrite a sample")
+		eq(#hn.QueuedLetters(), 1); eq(hn.Letters()[1].read, nil)
+		w:As(author, hn.CloseLetter, true)
+		eq(f.preview, false); eq(f.key, "donor-top-1"); eq(f:IsShown(), true)
+		eq(f.wear:IsEnabled(), true, "real award restores the native Wear button")
+		eq(#hn.QueuedLetters(), 1); eq(hn.Letters()[1].read, nil, "closing sample is not answering the actual award")
+		w:As(author, hn.CloseLetter, false)
+		eq(hn.Letters()[1].read, true); eq(#hn.QueuedLetters(), 0)
+		W3.NoErrors(w)
+	end)
+end)
+
 test("1.2.1 the King's letter: never to the King himself: his honour switches on, no letter shows, none is kept or opens on a click; where no King is pinned, the guild master of the King's guild the same; everyone else gets his", function()
 	local w, cast = W3.New({ more = { { "gm", "Bryn Halloway", { guild = World.KING_GUILD, rank = 0 } } } })
 	local king, A, gm = Kept(w, cast.king), Kept(w, cast.A), Kept(w, cast.gm)
@@ -258,7 +349,10 @@ test("1.2.1 the King's letter: a month's honour is told for its month: a reorder
 	-- The next month someone else's; the month after his again: a new award.
 	NextMonth()
 	Word(Short(B.name))
-	eq(A.ns.ArenaProfile.Pick().seen["donor-month"], nil, "not his this month")
+	for _, h in ipairs(HN.Holdings(A.name)) do assert(h.family ~= "donor-month", "not his this month") end
+	-- (1.2.4: his pick remembers the koi where its month ended, no longer forgets it, so the koi of a
+	-- later month at that place is no new honour switching on over his pick: Honors.Update's opts.)
+	eq(A.ns.ArenaProfile.Pick().seen["donor-month"].ended, true, "remembered where it ended")
 	eq(Shown(A), false)
 	NextMonth()
 	Word(Short(A.name))
@@ -364,6 +458,13 @@ test("1.2.1 the King's letter: its window is Olympus's own metal with the parchm
 					local sign = f.sign
 					local sgr, sgt = sign:GetRight(), sign:GetTop()
 					assert(sgr <= pr and sgr - sign:GetUnboundedStringWidth() >= bl - 1 and sgt <= bb, where .. ": the signature under the words, inside the paper")
+					-- (1.2.4, the author's ask) The seal just before the signature, on the right half.
+					local sealLeft, _, sealW = f.seal:GetRect()
+					local signLeft = sign:GetLeft()
+					assert(sealLeft + sealW <= signLeft + 0.5 and signLeft - (sealLeft + sealW) <= 12, where .. ": the seal just before the signature")
+					assert(sealLeft >= (pl + pr) / 2, where .. ": on the right half of the paper")
+					-- (1.2.4, the author's ask: "use vermelho no selo de cera do rei") Red wax: the
+					-- window's seal goes through H.TintSeal (below, on a texture that records it).
 					local wl, wb, wr, wt = Inside(f.wear, "Wear it")
 					local ll, lb, lr, lt = Inside(f.later, "Later")
 					assert(wr <= ll, where .. ": the buttons apart")
@@ -380,5 +481,28 @@ test("1.2.1 the King's letter: its window is Olympus's own metal with the parchm
 		for _, k in ipairs(WORDS) do rawset(L, k, saved[k]) end
 		if not ok then error(err, 0) end
 	end)
+	W3.NoErrors(w)
+end)
+
+-- 1.2.4, the author's ask: "use vermelho no selo de cera do rei". The letter's wax seal is the
+-- faction's own (the Alliance's is blue), greyed and tinted red, through H.TintSeal; the window
+-- made by H.ShowLetter tints its seal with it.
+test("1.2.4 the King's letter: its wax seal is red, the faction's seal greyed and tinted", function()
+	local w, cast = W3.New()
+	local A = cast.A
+	local HN = A.ns.HonorsNet
+	local tex = {}
+	function tex:SetDesaturated(on) self.desaturated = on end
+	function tex:SetVertexColor(r, g, b) self.color = { r, g, b } end
+	HN.TintSeal(tex)
+	eq(tex.desaturated, true, "greyed first")
+	assert(tex.color and tex.color[1] > 0.6 and tex.color[2] < 0.25 and tex.color[3] < 0.25, "red")
+	-- The window's own seal: H.TintSeal is what its creation calls.
+	local tinted = 0
+	local real = HN.TintSeal
+	HN.TintSeal = function(t) tinted = tinted + 1; return real(t) end
+	w:As(A, HN.ShowLetter, "arena-champion")
+	HN.TintSeal = real
+	eq(tinted, 1, "the window's seal tinted, once, as it is made")
 	W3.NoErrors(w)
 end)

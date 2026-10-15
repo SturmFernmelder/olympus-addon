@@ -421,7 +421,7 @@ test("Bones table chat: gated empty local preview uses real controls without inv
 	Clean(w)
 end)
 
-test("Bones table chat: ending the actual table hides both panels and retained lines cannot become a History chat", function()
+test("Bones table chat: ending the actual table hides panels and stops polling, preserving only the original participants' private chat", function()
 	local w, a, b, s, id = Live()
 	local rooms = w:As(a, a.ns.ArenaChat.TableRooms, id)
 	Send(w, a, "A last private line")
@@ -429,10 +429,12 @@ test("Bones table chat: ending the actual table hides both panels and retained l
 	for _, c in ipairs({ a, b, s }) do
 		eq(Frame(c):IsShown(), false, c.name)
 		eq(Frame(c).refreshTicker, nil, "ended table releases its panel's polling timer")
-		eq(#w:As(c, c.ns.ArenaChat.Lines, rooms.players), 0)
+		eq(#w:As(c, c.ns.ArenaChat.Lines, rooms.players), c == s and 0 or 1, "only the real participants retain their private line")
+		eq(w:As(c, c.ns.ArenaChat.MaySend, rooms.players), c ~= s, "retained private peer chat is not a spectator privilege")
 		eq(#w:As(c, c.ns.ArenaChat.Lines, rooms.everyone), 0)
 		eq(w:As(c, c.ns.ArenaChat.TableRooms, id), nil)
 	end
+	eq(w:As(s, s.ns.ArenaChat.Open, rooms.players), nil, "ending the table never reveals the private room")
 	Clean(w)
 end)
 

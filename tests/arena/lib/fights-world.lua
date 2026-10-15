@@ -6,15 +6,35 @@ local H = ...
 local World = H.World
 local W3 = {}
 
+-- Explicit future-launch fixture, by composition: the foundation World remains unchanged and
+-- OFF. A newly loaded HonorsNet is opened after file loading, before INIT/LOGIN; reload gets a
+-- fresh module too. Shipped-release worlds/clients never opt in, even inside this future helper.
+function W3.LevelRaceWorld(opts)
+	local w = World.New(opts)
+	local as, seen = w.As, {}
+	local function Loaded(c, ...)
+		c = type(c) == "table" and c or w:Find(c)
+		local net = c and c.ns and rawget(c.ns, "HonorsNet")
+		if type(net) == "table" and seen[c] ~= net then
+			seen[c] = net
+			if (c.compliance or w.compliance) ~= "shipped" then net.LEVEL_RACE_LAUNCHED = true end
+		end
+		return ...
+	end
+	function w:As(c, fn, ...) return Loaded(c, as(self, c, fn, ...)) end
+	return w
+end
+
 W3.DUEL_KO = "%s has defeated %s in a duel"        -- ArenaParse.EN's DUEL_WINNER_KNOCKOUT, argument order kept
 W3.DUEL_FLED = "%s has fled from %s in a duel"      -- (the retreat: the loser first)
 W3.ROLL = "%s rolls %d (%d-%d)"
 
 -- A world with the King (and the live switch on unless live = false), the signed arbiter, the two
--- fighters and a spectator; opts.more: more clients, { name, where } each.
+-- fighters and a spectator; opts.more: more clients, { name, where } each. This fights-design
+-- helper explicitly opens the future level race (levelRace = false keeps the shipped OFF policy).
 function W3.New(opts)
 	opts = opts or {}
-	local w = World.New(opts.world)
+	local w = opts.levelRace == false and World.New(opts.world) or W3.LevelRaceWorld(opts.world)
 	local cast = {}
 	cast.king = w:Role("king")
 	cast.arbiter = w:Role("arbiter")
@@ -163,6 +183,47 @@ function W3.Money(w, c, opts)
 	ns.Stakes.Direct = function(t) calls.direct[#calls.direct + 1] = t return true end
 	if opts.persists ~= false then A.Persists = function() return true end end
 	return calls
+end
+
+-- 1.2.4: the Olympus window as "My profile" (ProfileEdit.lua) uses it, stood in on client c (the
+-- world's clients load no UI.lua; UI.lua's own wiring has its tests in tests/run.lua): the person
+-- page it opens (OpenPlayerProfile, members only, his own or another's), whether his own shows,
+-- Back (here to the list), its redraws counted, its close (Toggle); PLAYER_PROFILE_LEFT, with
+-- whose page it was, wherever UI.lua fires it. Returns the stand-in: { person, shown, opened = {
+-- the people opened }, refreshed, toggled }.
+function W3.PageUI(w, c)
+	local ns = c.ns
+	local ui = { shown = false, opened = {}, refreshed = 0, toggled = 0 }
+	local function Key(p) return ns.Fold(tostring(ns.FullName(p.name, p.realm))) end
+	local function Left()
+		local was = ui.person
+		ui.person = nil
+		if was then ns.Fire("PLAYER_PROFILE_LEFT", Key(was)) end
+	end
+	function ui.OpenPlayerProfile(p)
+		if type(p) ~= "table" or type(p.name) ~= "string" or p.name == "" or not ns.IsMember() then return false end
+		if ui.person and Key(ui.person) ~= Key(p) then Left() end
+		ui.shown, ui.person = true, p
+		ui.opened[#ui.opened + 1] = p
+		ui.refreshed = ui.refreshed + 1
+		return true
+	end
+	function ui.OwnProfileShown() return ui.person ~= nil and Key(ui.person) == ns.Fold(tostring(ns.me)) end
+	function ui.IsShown() return ui.shown end
+	function ui.BackFromPlayerProfile()
+		if not ui.person then return false end
+		Left()
+		return true
+	end
+	function ui.Refresh() ui.refreshed = ui.refreshed + 1 end
+	ui.RefreshSoon = ui.Refresh
+	function ui.Toggle()
+		ui.toggled = ui.toggled + 1
+		if ui.shown then Left() end
+		ui.shown = not ui.shown
+	end
+	rawset(ns, "UI", ui)
+	return ui
 end
 
 -- The messages of a type sent by a client (World:Sent), their bodies.

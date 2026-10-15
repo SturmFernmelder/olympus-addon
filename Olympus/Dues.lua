@@ -67,6 +67,12 @@ local L = ns.L
 --   removes nobody, and its "paid" counts are not known there: the review of Konig's fixes, 1.1.)
 -- Versions before 1.1 have no handler for F? messages and drop them; a Steward's T1~Y is logged
 -- there as ignored.
+-- 1.2.4 F26-10: FP~1~<week> asks the pinned Treasurer privately for the immutable sender's
+-- own observed receipt, never a guild list. FR~1~<book pin>~<sequence>~<week>~<weekly amount>
+-- ~<observed cumulative copper>~<book time>~<guild> is whispered only to that payer. Five
+-- resets of native-only proofs (5000 per keeper book), 64 paced/coalesced pending whispers,
+-- 300-second requester limits and monotonic per-book receipt sequences bound the loop. Manual
+-- book totals and a prepared/sent mail cannot create confirmed payment; absence stays unknown.
 
 local Dues = {}
 ns.Dues = Dues
@@ -108,6 +114,15 @@ local answers = {}           -- [guild lower] = one guild's list as it came (FA)
 local summary                -- every guild, as it came (FS)
 local salt                   -- the Treasurer's client: this session's secret, in the digest of the payers with no guild
 local shownRows = Dues.PAGE
+local payerIntent, payerMail
+local PayerStore
+local payerReceipts, payerReceiptOrder = {}, {}
+local payerReceiptNotice = {}
+local payerReceiptAnswered = {}
+local lastPayerAsk = -math.huge
+Dues.PAYER_RECEIPTS_MAX = 64
+Dues.PAYER_INTENT_FOR = 1800
+Dues.PAYER_PROOFS_MAX = 5000
 
 local function Grey(s) return "|cff9d9d9d" .. s .. "|r" end
 local function Gold(s) return "|cffffd200" .. s .. "|r" end
@@ -1556,11 +1571,8 @@ local function TableLines(lines, q)
 	local own = GetGuildInfo("player")
 	if own and ns.IsFederation(own) and not seen[own:lower()] then rows[#rows + 1] = { name = own, paid = 0, copper = 0, payers = 0 } end
 	for _, r in ipairs(rows) do r.members = Dues.Members(r.name) end
-	table.sort(rows, function(a, b)
-		if a.copper ~= b.copper then return a.copper > b.copper end
-		if (a.members or 0) ~= (b.members or 0) then return (a.members or 0) > (b.members or 0) end
-		return a.name < b.name
-	end)
+	-- (1.2.4: as much paid by as many members, the higher average level first, then the name.)
+	ns.Data.SortGuildCounts(rows, "copper", "members")
 	local shown = 0
 	for _, r in ipairs(rows) do
 		if ns.Holds(q, r.name) then
@@ -1573,6 +1585,10 @@ local function TableLines(lines, q)
 				tooltip = function(tt)
 					tt:AddLine("<" .. r.name .. ">", 1, 0.82, 0)
 					tt:AddLine(L.DUES_GUILD_TIP:format(tostring(r.members or "?"), paid, Coins(amount), Coins(r.copper), r.payers), 1, 1, 1, true)
+					-- (1.2.4's review: its average level, the table's tie-break after its members, as the
+					-- Census's hover says it; none, no line.)
+					local avg = ns.Data.AvgLevelText(ns.Data.Guild(r.name))
+					if avg then tt:AddDoubleLine(L.AVG_LEVEL, avg, 1, 0.82, 0, 1, 1, 1) end
 					-- (1.1.2's review: its members are the census's, the guild's last report.)
 					if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(tt, "count-other-guild-report") end
 				end }
@@ -1627,8 +1643,21 @@ function Dues.SummaryLines(lines)
 				local pending, from = Dues.Pending()
 				if pending then tt:AddLine(L.DUES_PENDING:format(Coins(pending), Dues.DateLabel(from)), 1, 0.82, 0, true) end
 			end }
+		lines[#lines + 1] = { text = Grey(Dues.PaymentText()) }
+		local saved = PayerStore()
+		lines[#lines + 1] = { text = Grey(saved and saved.reminderOff and L.DUES_PAYER_REMIND_OFF or L.DUES_PAYER_REMIND_ON),
+			onClick = function()
+				local s = PayerStore()
+				if s then s.reminderOff = not s.reminderOff end
+				ns.Fire("DUES_PAYER_CHANGED")
+				ns.Fire("TREASURY_CHANGED")
+			end }
+		if saved and not saved.reminderOff and saved.dismissed ~= Dues.Week() then
+			lines[#lines + 1] = { text = Grey(L.DUES_PAYER_DISMISS), onClick = function() Dues.DismissPayerReminder() end }
+		end
 	end
 	if not Dues.Sees() then return end
+	if ns.DuesGrace and not ns.DuesGrace.missing then ns.DuesGrace.SummaryLines(lines) end
 	lines[#lines + 1] = { text = Gold("> " .. L.DUES_LINK:format(Coins(Dues.Amount()))), gapAfter = true, onClick = function() Dues.Open() end,
 		tooltip = function(tt) tt:AddLine(L.DUES_LINK_TIP, 1, 1, 1, true) end }
 end
@@ -1650,6 +1679,305 @@ function Dues.MailTo()
 	end
 	return ns.FullName(mail or ns.TREASURER, ns.TREASURER_REALM)
 end
+
+-- F26-10: a payer's own facts, not a debt list. Intent is session-only; sent is a matched
+-- server success, and counted is a private word from a pinned Treasurer after observed gold.
+PayerStore = function()
+	if not ns.rdb or not ns.me then return nil end
+	if type(ns.rdb.duesPayer) ~= "table" then ns.rdb.duesPayer = {} end
+	local s = ns.rdb.duesPayer[ns.me]
+	if type(s) ~= "table" then s = { version = 1, weeks = {} }; ns.rdb.duesPayer[ns.me] = s end
+	if s.version ~= 1 then return nil end
+	if type(s.weeks) ~= "table" then s.weeks = {} end
+	local week = Dues.Week()
+	for wk in pairs(s.weeks) do
+		if type(wk) ~= "number" or wk > week or wk < week - Dues.WEEKS_KEPT + 1 then s.weeks[wk] = nil end
+	end
+	return s
+end
+local function Whole(n, ceiling)
+	return type(n) == "number" and n == n and n > 0 and n <= ceiling and n == math.floor(n)
+end
+local function PayerWeek(week, make)
+	local s = PayerStore()
+	if not s then return nil end
+	local row = s.weeks[week]
+	if type(row) ~= "table" then
+		if not make then return nil end
+		row = { sources = {} }; s.weeks[week] = row
+	end
+	if type(row.sources) ~= "table" then row.sources = {} end
+	return row
+end
+function Dues.PayerStatus(week)
+	week = week or Dues.Week()
+	local row, guild = PayerWeek(week, false), GetGuildInfo("player")
+	if not row or not Dues.Pays() then return "unknown" end
+	local counted, at = 0, 0
+	for pin = 1, #(ns.TREASURER_CHARACTERS or {}) do
+		local source = row.sources[pin]
+		if type(source) == "table" and source.guild == guild and source.amount == Dues.AmountOf(week)
+			and Whole(source.copper, MAX_COPPER) and Whole(source.seq, MAX_COPPER) then
+			counted, at = math.min(MAX_COPPER, counted + source.copper), math.max(at, tonumber(source.at) or 0)
+		end
+	end
+	if counted > 0 then return counted >= Dues.AmountOf(week) and "counted" or "partial", counted, at end
+	local sent = row.sent
+	if type(sent) == "table" and sent.guild == guild and Whole(sent.copper, Dues.MAX_AMOUNT) then return "sent", sent.copper, sent.at end
+	return "unknown"
+end
+function Dues.PaymentText()
+	local status, copper = Dues.PayerStatus()
+	if status == "counted" then return L.DUES_PAYER_COUNTED:format(Coins(copper)) end
+	if status == "partial" then return L.DUES_PAYER_PARTIAL:format(Coins(copper), Coins(Dues.Amount())) end
+	if status == "sent" then return L.DUES_PAYER_SENT:format(Coins(copper)) end
+	return L.BRIEF_PAYMENT_UNKNOWN
+end
+function Dues.PayerReceiptFacts(week)
+	week = week or Dues.Week()
+	if not Dues.Pays() then return {} end
+	local row, out = PayerWeek(week, false), {}
+	if not row then return out end
+	for pin = 1, #(ns.TREASURER_CHARACTERS or {}) do
+		local source = row.sources[pin]
+		if type(source) == "table" and type(source.from) == "string" and Whole(source.seq, MAX_COPPER)
+			and Whole(source.copper, MAX_COPPER) then
+			out[#out + 1] = { issuer = source.from, observedAt = source.receivedAt, at = source.at,
+				week = week, guild = source.guild, amount = source.amount, copper = source.copper,
+				sequence = source.seq, bookPin = pin, payer = ns.me, source = "pinned-treasurer-whisper" }
+		end
+	end
+	return out -- fresh copies of this character's own authenticated facts; no ledger/alt inference
+end
+function Dues.PayerMailSending(to, subject)
+	payerMail = nil -- an unrelated manual send cannot inherit an earlier matched candidate
+	local i = payerIntent
+	if type(to) ~= "string" or not i or not Dues.Pays() or i.week ~= Dues.Week() or Clock() - i.at > Dues.PAYER_INTENT_FOR
+		or i.guild ~= GetGuildInfo("player") or ns.FullName(ns.Normal(to or "")):lower() ~= i.to:lower()
+		or subject ~= i.note or not GetSendMailMoney or GetSendMailMoney() ~= i.copper
+		or not GetSendMailCOD or GetSendMailCOD() ~= 0 then return false end
+	if GetSendMailItem then
+		for slot = 1, tonumber(ATTACHMENTS_MAX_SEND) or 12 do if GetSendMailItem(slot) then return false end end
+	end
+	payerMail = { week = i.week, guild = i.guild, copper = i.copper, to = i.to, at = Clock() }
+	return true
+end
+function Dues.PayerMailSent()
+	local m = payerMail
+	payerMail = nil
+	if not m or not Dues.Pays() or m.week ~= Dues.Week() or m.guild ~= GetGuildInfo("player")
+		or Clock() - m.at > Dues.PAYER_INTENT_FOR then return false end
+	local row = PayerWeek(m.week, true)
+	if not row then return false end
+	row.sent = { copper = m.copper, guild = m.guild, at = Clock(), to = m.to }
+	payerIntent = nil
+	ns.Print(L.DUES_PAYER_SENT:format(Coins(m.copper)))
+	ns.Fire("DUES_PAYER_CHANGED")
+	ns.Fire("TREASURY_CHANGED")
+	return true
+end
+function Dues.PayerMailFailed() payerMail = nil end
+
+local function ReceiptSender()
+	local T = ns.Treasury
+	if ns.faction == "Horde" or T.DevView() or ns.King.Preview()
+		or not (ns.IsTreasurer(ns.me, GetGuildInfo("player")) or ns.IsTreasurerMail(ns.me)) then return nil end
+	return T.TreasurerPin(ns.me)
+end
+-- An old book's opening predates this native proof tracker. It says nothing about
+-- missing receipts. Only the actual pinned character starts its own local tracker;
+-- generic remote book copies do not carry this field or its complete proof map.
+function Dues.StartNativePayerTracking()
+	local pin, now = ReceiptSender(), Clock()
+	if not Whole(pin, 128) or pin < 1 or not Whole(now, MAX_COPPER) or now < 1577836800 then return false end
+	local book = ns.Treasury.Book()
+	if type(book) ~= "table" or ns.Treasury.TreasurerPin(book.name) ~= pin then return false end
+	if book.duesPayerProofs ~= nil and type(book.duesPayerProofs) ~= "table" then return false end
+	if book.duesNativeTracking == nil then
+		book.duesPayerProofs = book.duesPayerProofs or {}
+		book.duesNativeTracking = { version = 1, at = now, issuer = ns.FullName(ns.Normal(ns.me)), pin = pin,
+			group = ns.GroupOf(ns.realm), faction = ns.faction }
+	end
+	return true
+end
+function Dues.NativePayerCoverage(book, week)
+	if type(book) ~= "table" or not Whole(week, 1000000) or week > Dues.Week() or book.epoch ~= ns.Treasury.EPOCH
+		or type(book.duesPayerProofs) ~= "table" or type(book.name) ~= "string" then return false end
+	local m, start, pin = book.duesNativeTracking, Dues.WeekStart(week), ns.Treasury.TreasurerPin(book.name)
+	if not Whole(pin, 128) or pin < 1 then return false end
+	if type(m) ~= "table" or m.version ~= 1 or not Whole(m.at, MAX_COPPER) or m.at < 1577836800 or m.at > start
+		or m.issuer ~= ns.FullName(ns.Normal(book.name)) or m.pin ~= pin
+		or m.group ~= ns.GroupOf(ns.realm) or m.faction ~= ns.faction then return false end
+	-- Restoring a ledger is not restoring original native observation coverage. Native
+	-- positive receipts remain a lower bound; an older week's absence stays unknown.
+	if book.restored ~= nil then
+		local at = tonumber(book.restored)
+		if not at or at ~= at or at < 0 or at > start then return false end
+	end
+	return true
+end
+local function QueuePayerReceipt(pin, to, proof, week)
+	local key = pin .. "~" .. to:lower() .. "~" .. week
+	if not payerReceipts[key] then
+		if #payerReceiptOrder >= Dues.PAYER_RECEIPTS_MAX then return false end
+		payerReceiptOrder[#payerReceiptOrder + 1] = key
+	end
+	payerReceipts[key] = { to = to, from = ns.me, pin = pin,
+		msg = ("FR~1~%d~%d~%d~%d~%d~%d~%s"):format(pin, proof.seq, week, proof.amount, proof.copper, proof.at, proof.guild) }
+	return true
+end
+local function PayerProofs(book)
+	book.duesPayerProofs = type(book.duesPayerProofs) == "table" and book.duesPayerProofs or {}
+	local count = 0
+	for week, rows in pairs(book.duesPayerProofs) do
+		if type(week) ~= "number" or week < Dues.Week() - Dues.WEEKS_KEPT + 1 or week > Dues.Week() or type(rows) ~= "table" then
+			book.duesPayerProofs[week] = nil
+		else for _ in pairs(rows) do count = count + 1 end end
+	end
+	return book.duesPayerProofs, count
+end
+-- Treasury calls only from observed native mail gold/trade completion, after Count/Touch. A
+-- manual book line, preview, sale, returned mail, fee or transfer cannot manufacture a receipt.
+function Dues.PayerBooked(book, e, payer, observed)
+	local pin = ReceiptSender()
+	if not observed or not pin or type(book) ~= "table" or ns.Treasury.TreasurerPin(book.name) ~= pin
+		or type(e) ~= "table" or e.out or e.item or e.excluded or e.kind or not e.guild
+		or e.duesPayerReceipt or not ns.IsFederation(e.guild) or not Whole(e.money, MAX_COPPER) then return false end
+	local week = tonumber(e.wk)
+	if not week or week < Dues.Week() - Dues.WEEKS_KEPT + 1 or week > Dues.Week() then return false end
+	local to = ns.FullName(ns.Normal(payer))
+	Dues.StartNativePayerTracking()
+	local proofs, count = PayerProofs(book)
+	local key = to:lower() -- new private proof identity retains the realm, unlike legacy ledger keys
+	local rows = proofs[week] or {}
+	if not rows[key] and count >= Dues.PAYER_PROOFS_MAX then
+		book.duesProofsCut = type(book.duesProofsCut) == "table" and book.duesProofsCut or {}
+		book.duesProofsCut[week] = true -- absence in a capped proof book can never imply a missed week
+		return false
+	end
+	book.duesReceiptSeq = (tonumber(book.duesReceiptSeq) or 0) + 1
+	if not Whole(book.duesReceiptSeq, MAX_COPPER) then return false end
+	-- Staff ledger sums may include manual lines. They are never an observation proof: only
+	-- eligible native gold increments this cache, once for this exact recorded line.
+	local old = rows[key]
+	local before = type(old) == "table" and old.guild == e.guild and Whole(old.copper, MAX_COPPER) and old.copper or 0
+	proofs[week] = rows
+	e.duesPayerReceipt = book.duesReceiptSeq
+	rows[key] = { seq = book.duesReceiptSeq, amount = Dues.AmountOf(week), copper = math.min(MAX_COPPER, before + e.money), at = Clock(), guild = e.guild }
+	local carry = ns.CarryHistory
+	if carry and not carry.missing and carry.CaptureOriginal then
+		local proof = rows[key]
+		carry.CaptureOriginal("D", to, book.name .. ":" .. proof.seq, proof.at, proof.guild,
+			{ week = week, copper = proof.copper, amount = proof.amount, sequence = proof.seq, bookPin = pin, payer = to })
+	end
+	return QueuePayerReceipt(pin, to, rows[key], week)
+end
+function Dues.PumpPayerReceipts()
+	if #payerReceiptOrder == 0 or ns.Comm.QueueSize() >= Dues.QUEUE_ROOM then return end
+	local key = table.remove(payerReceiptOrder, 1)
+	local item = payerReceipts[key]; payerReceipts[key] = nil
+	if not item then return end
+	local function Guard() return ReceiptSender() == item.pin and ns.me == item.from end
+	if not Guard() then return end
+	return ns.Comm.Whisper(item.to, item.msg, "dues receipt " .. key, nil, nil, nil, { owner = Dues, guard = Guard })
+end
+function Dues.HandlePayerReceipt(dist, sender, text)
+	if dist ~= "WHISPER" or not Dues.Pays() or type(text) ~= "string" or #text > Dues.ROOM then return false end
+	local pin, seq, week, amount, copper, at, guild = text:match("^FR~1~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~([^~]+)$")
+	pin, seq, week, amount, copper, at = tonumber(pin), tonumber(seq), tonumber(week), tonumber(amount), tonumber(copper), tonumber(at)
+	if not pin or ns.Treasury.TreasurerPin(sender) ~= pin or not Whole(seq, MAX_COPPER)
+		or not week or week > Dues.Week() or week < Dues.Week() - Dues.WEEKS_KEPT + 1
+		or amount ~= Dues.AmountOf(week) or not Whole(copper, MAX_COPPER)
+		or not at or at > Clock() + 120 or at < Dues.WeekStart(week)
+		or guild ~= GetGuildInfo("player") or not ns.IsFederation(guild) then return false end
+	local row = PayerWeek(week, true)
+	if not row then return false end
+	local old = row.sources[pin]
+	if type(old) == "table" and seq <= (tonumber(old.seq) or 0) then return false end
+	row.sources[pin] = { seq = seq, amount = amount, copper = copper, at = at, guild = guild,
+		from = ns.FullName(ns.Normal(sender)), receivedAt = Clock() }
+	-- Bursts of genuinely recorded gifts may update the held total, but cannot flood the payer's
+	-- chat. Replays are rejected above; each pinned issuer's local notice is limited to 30 seconds.
+	if Clock() - (payerReceiptNotice[pin] or -math.huge) >= 30 then
+		payerReceiptNotice[pin] = Clock()
+		ns.Print(L.DUES_PAYER_RECEIPT:format(Dues.DateLabel(week), Coins(copper)))
+	end
+	ns.Fire("DUES_PAYER_CHANGED")
+	ns.Fire("TREASURY_CHANGED")
+	return true
+end
+ns.Comm.Handle("FR", function(...) Dues.HandlePayerReceipt(...) end)
+
+-- A payer offline at mail intake can recover only his own observed receipt later. This never
+-- opens a guild list or synthesizes a receipt from old/manual ledger totals. Requests identify
+-- their payer by the immutable server-stamped sender, not a name supplied in the body.
+function Dues.HandlePayerAsk(dist, sender, text)
+	local pin = ReceiptSender()
+	local week = type(text) == "string" and tonumber(text:match("^FP~1~(%d+)$"))
+	if dist ~= "WHISPER" or not pin or not week or week > Dues.Week() or week < Dues.Week() - Dues.WEEKS_KEPT + 1
+		or type(sender) ~= "string" or ns.GroupOf(ns.RealmOf(sender)) ~= ns.GroupOf(ns.TREASURER_REALM) then return false end
+	local key, now = ns.FullName(ns.Normal(sender)):lower(), Clock()
+	for name, at in pairs(payerReceiptAnswered) do if now - at >= Dues.ANSWER_GAP then payerReceiptAnswered[name] = nil end end
+	if payerReceiptAnswered[key] or #payerReceiptOrder >= Dues.PAYER_RECEIPTS_MAX then return false end
+	local count = 0; for _ in pairs(payerReceiptAnswered) do count = count + 1 end
+	if count >= Dues.PAYER_RECEIPTS_MAX then return false end
+	local book = ns.Treasury.BookOf(ns.me)
+	local proof = book and book.duesPayerProofs and book.duesPayerProofs[week] and book.duesPayerProofs[week][key]
+	if type(proof) ~= "table" or not Whole(proof.seq, MAX_COPPER) or not Whole(proof.copper, MAX_COPPER)
+		or not Whole(proof.amount, Dues.MAX_AMOUNT) or not Whole(proof.at, 9007199254740991)
+		or type(proof.guild) ~= "string" or #proof.guild > 100 or not ns.IsFederation(proof.guild) then return false end
+	payerReceiptAnswered[key] = now
+	return QueuePayerReceipt(pin, ns.FullName(ns.Normal(sender)), proof, week)
+end
+ns.Comm.Handle("FP", function(...) Dues.HandlePayerAsk(...) end)
+function Dues.RequestPayerReceipt()
+	if not Dues.Pays() or Dues.PayerStatus() == "counted" or Clock() - lastPayerAsk < Dues.ASK_EVERY then return false end
+	lastPayerAsk = Clock()
+	local sent
+	for _, name in ipairs(ns.TREASURER_CHARACTERS or {}) do
+		local to, me = ns.FullName(name, ns.TREASURER_REALM), ns.me
+		local ok = ns.Comm.Whisper(to, "FP~1~" .. Dues.Week(), "own dues receipt " .. to, nil, nil, nil,
+			{ owner = Dues, guard = function() return Dues.Pays() and ns.me == me end })
+		sent = sent or ok
+	end
+	return sent == true
+end
+
+function Dues.DismissPayerReminder(off)
+	local s = PayerStore()
+	if not s then return false end
+	s.dismissed = Dues.Week()
+	if off ~= nil then s.reminderOff = off == true end
+	ns.Fire("TREASURY_CHANGED")
+	return true
+end
+function Dues.PayerReminder(kind)
+	-- F26-10 explicitly keeps this unsolicited reminder out of instances. As with the nearby
+	-- Treasury/Consent/Letters notices, combat also waits; neither consumes this reset's reminder.
+	if (IsInInstance and IsInInstance()) or (InCombatLockdown and InCombatLockdown()) then return false end
+	local s = PayerStore()
+	if not s or not Dues.Pays() or s.reminderOff or s.dismissed == Dues.Week() or s.reminded == Dues.Week()
+		or Dues.PayerStatus() ~= "unknown" then return false end
+	if kind == "trade" then
+		local name = ns.UnitFullName and ns.UnitFullName("NPC")
+		if not name or not ns.Treasury.TreasurerPin(name) then return false end
+	end
+	s.reminded = Dues.Week()
+	ns.Print(L.DUES_PAYER_REMINDER:format(Coins(Dues.Amount())))
+	return true
+end
+
+-- Dues loads before Consent in the TOC. Register after all core modules exist, on Privacy's
+-- existing page. This local reminder preference is never an unanswered sharing permission.
+ns.On("INIT", function()
+	local C = ns.Consent
+	if not C or not C.Register then return end
+	C.Register({ key = "dues-reminder", label = "DUES_PAYER_PRIVACY_LABEL", text = "DUES_PAYER_PRIVACY_TEXT",
+		shown = function() return Dues.Pays() == true end, perCharacter = true,
+		get = function() local s = PayerStore(); return s ~= nil and s.reminderOff ~= true end,
+		set = function(on) Dues.DismissPayerReminder(not on) end,
+		pending = function() return false end })
+end)
 
 local function Shown(frame) return type(frame) == "table" and frame.IsShown and frame:IsShown() and true or false end
 
@@ -1697,6 +2025,7 @@ function Dues.SendDues() -- gp:mail-trade-fill
 	if not Dues.Pays() then return false end
 	local amount, to = Dues.Amount(), Dues.MailTo()
 	local note = Dues.Note(Dues.Week(), GetGuildInfo("player"))
+	payerIntent = { week = Dues.Week(), copper = amount, to = to, note = note, guild = GetGuildInfo("player"), at = Clock() }
 	if ns.GamepadUI() then
 		ns.Print(L.DUES_SEND_GAMEPAD:format(Coins(amount), ns.DisplayName(to), note))
 		return "gamepad"
@@ -1778,13 +2107,21 @@ StaticPopupDialogs["OLYMPUS_DUES_AMOUNT"] = {
 }
 
 ns.On("LOGIN", function()
+	Dues.StartNativePayerTracking()
 	Dues.MarkMail()
 	ns.After(30, "dues amount", function() Dues.SendAmount(true) end)
 	ns.Every(60, "dues amount", function()
+		Dues.StartNativePayerTracking()
 		Dues.SendAmount()
 		Dues.MarkMail()
 	end)
-	ns.Every(Dues.PACE, "dues answers", Dues.Pump)
+	ns.Every(Dues.PACE, "dues answers", function() Dues.Pump(); Dues.PumpPayerReceipts() end)
+	-- Forever's extracted fixture verifies MAIL_INBOX_UPDATE, not MAIL_SHOW. This read-only
+	-- mailbox reminder therefore follows an actual inbox update; neither event fills or sends.
+	ns.RegisterEvent("MAIL_INBOX_UPDATE", function() Dues.PayerReminder("mail") end)
+	ns.RegisterEvent("TRADE_SHOW", function() Dues.PayerReminder("trade") end)
+	ns.After(45, "own dues receipt", Dues.RequestPayerReceipt)
+	ns.Every(Dues.ASK_EVERY, "own dues receipt", Dues.RequestPayerReceipt)
 end)
 
 -- Tests start from a clean state.
@@ -1797,5 +2134,9 @@ function Dues.Reset()
 	Dues.shown, shownRows, Dues.filter, Dues.picked = nil, Dues.PAGE, nil, nil
 	if ns.rdb then ns.rdb.duesAmount = nil end
 	if ns.db then ns.db.previewDuesAmount, ns.db.duesTradeBlocked = nil, nil end
+	payerIntent, payerMail = nil, nil
+	wipe(payerReceipts); wipe(payerReceiptOrder)
+	wipe(payerReceiptNotice)
+	wipe(payerReceiptAnswered); lastPayerAsk = -math.huge
 end
 function Dues.Outbox() return outbox end

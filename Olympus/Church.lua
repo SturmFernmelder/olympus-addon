@@ -19,7 +19,16 @@ local L = ns.L
 --   root names one under the Apostle or missionary he picks. A parent names NAMES_PER at most (the
 --   ones he adopted not counted), DEPTH_MAX levels below the Apostle, MISSIONARIES_MAX in all.
 -- - One Church correspondent per Olympus guild, answering to the Head: named by that guild's guild
---   master or by a root; a new naming replaces the old one.
+--   master or by a root; a new naming replaces the old one. (1.2.4, the author's ask: "if the GM isn't
+--   online ... it has to be kept".) Another guild's master is known as Data.AuthorizedRank knows him:
+--   that guild's census, as for his bronze wings and the list of nominees he sends, until the author's
+--   signed leadership is enforced, that list alone from then on (since 1.2.1 that list alone, which no
+--   release enforces yet: no client outside a guild took its master's correspondent, and every Church
+--   page showed "none" for it). Each client keeps his correspondent, saved, while it can't tell (that
+--   guild's census quiet, its reporters offline), CORR_KEEP after it last confirmed him that guild's
+--   master; it drops him at once when it can tell he is not (another rank, another master proven), when
+--   he takes it back, or once the signed leadership is enforced and does not name him. A guild master
+--   still gains nothing beyond his own guild's correspondent (Church.MayAct).
 -- - The audience (the room, the tab, the numbers): the roots, the Apostles, the missionaries, the
 --   correspondents and the High Council. The keepers (they serve the book and keep the ledger):
 --   the Head, the Apostles and the author. The King's client does no background work beyond
@@ -70,10 +79,12 @@ ns.Church = Church
 
 Church.PROTOCOL = 1
 Church.APOSTLES_MAX = 12
-Church.MISSIONARIES_MAX = 300
-Church.NAMES_PER = 10          -- direct nominees of one parent (adopted ones not counted)
+Church.MISSIONARIES_MAX = 5000 -- (1.2.4) the author's limit for the whole Church
+Church.NAMES_PER = 12          -- direct nominees of one parent (adopted ones not counted)
 Church.DEPTH_MAX = 5           -- missionary levels below the Apostle
-Church.CORRESPONDENTS_MAX = 64
+Church.CORRESPONDENTS_MAX = 128 -- (1.2.4) as many guilds as the author's signed leadership names (Authority.MAX_GUILDS); 64 before (Church.Prune)
+Church.CORR_KEEP = 30 * 86400  -- (1.2.4) a guild master's correspondent, this long after this client last confirmed him its master
+Church.MASTER_MEMO = 30        -- (1.2.4) another guild's master, as its census or the signed list tells it, asked again after this long
 Church.TOMBS_MAX = 200
 Church.TOMB_KEEP = 30 * 86400  -- a tombstone no entry points to goes after this long
 Church.DATE_AHEAD = 60         -- an act or entry dated later than this ahead of our clock is refused
@@ -114,7 +125,7 @@ local actSeen = {}       -- sender|message -> t (an act heard on both lanes)
 local actRate = {}       -- sender key -> { minute = {t...}, day, dayN }
 local pending = {}       -- acts this client could not check yet
 local asked = {}         -- keeper key -> when we asked him for pages
-local answered = {}      -- asker key -> when we last answered him
+local answered = {}      -- asker key -> { at, next }: when answered, next entry of the differing pages
 local outgoing           -- the page entries on their way to one asker: { target, list, i }
 local lastPresence, lastAsk, loginAt, lastSwitch = -math.huge, -math.huge, nil, -math.huge
 local lastPrune = -math.huge
@@ -427,13 +438,20 @@ function Church.State()
 	end
 	-- Correspondents grant a private room and counting duties. Recheck their original issuer,
 	-- even when the book is cached: a roster demotion or expired signed role ends that authority.
-	derived.corr, derived.corrOf = {}, {}
+	-- (1.2.4: while this client can't tell, the one it last confirmed stays CORR_KEEP: CorrespondentHolds.
+	-- corrCensus: the guilds whose correspondent only another guild's census stands behind, ChurchCount's
+	-- smaller budget for his word as for any census-only witness.)
+	derived.corr, derived.corrOf, derived.corrCensus = {}, {}, {}
+	local now, enforced = Clock(), Church.Enforced()
 	for gkey, c in pairs((Book() or { c = {} }).c) do
-		if type(c.g) == "string" and ns.IsFederation(c.g)
-			and (Church.RootCode(c.ac) or Church.IsGuildMaster(c.ac, c.g) == true) then
-			derived.corr[gkey] = c
-			local k = Key(c.n)
-			if k then derived.corrOf[k] = derived.corrOf[k] or gkey end
+		if type(c.g) == "string" and ns.IsFederation(c.g) then
+			local holds, census = Church.CorrespondentHolds(c, now, enforced)
+			if holds then
+				derived.corr[gkey] = c
+				if census then derived.corrCensus[gkey] = true end
+				local k = Key(c.n)
+				if k then derived.corrOf[k] = derived.corrOf[k] or gkey end
+			end
 		end
 	end
 	return derived
@@ -502,12 +520,60 @@ function Church.Children(key)
 	return out
 end
 
--- The guild master of `guild`: true, false, or nil while this client can't tell (another guild's
--- signed authority not held yet). Our own guild from the server's roster; another from Authority.
+-- The author's signed leadership enforced (Authority.lua): from then on another guild's master is that
+-- list's alone, never the census's, and never kept from memory.
+function Church.Enforced()
+	local A = ns.Authority
+	return type(A) == "table" and type(A.Enforced) == "function" and A.Enforced() == true
+end
+
+local function Ours(guild)
+	local mine = OwnGuild()
+	return mine ~= nil and type(guild) == "string" and ns.Fold(mine) == ns.Fold(guild)
+end
+
+-- (1.2.4) Another guild's master as Data.AuthorizedRank tells it: its census (two senders naming him, one
+-- of them someone else, Data.KnownRank) until the author's signed leadership is enforced, that list from
+-- then on. false too when nothing names him but the same proof gives that guild another master, and for
+-- a guild the moderators took off the network (it ranks nobody here, Data.KnownRank). The census's answer
+-- is kept MASTER_MEMO at most, and until the next DATA_CHANGED (every census report heard fires it):
+-- Church.State asks it for each correspondent it holds, on every Role. The signed list's is asked each
+-- time, as 1.2.1 to 1.2.3 asked it: its expiry or a revocation ends a naming at once.
+local masterMemo, masterMemoN = {}, 0
+local function ForeignMaster(name, guild)
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.AuthorizedRank) ~= "function" then return nil end
+	if type(D.NetOff) == "function" and D.NetOff(guild) then return false end
+	local mk = not Church.Enforced() and (ns.Fold(guild) .. "|" .. tostring(Key(name))) or nil
+	local m, now = mk and masterMemo[mk], Now()
+	if m and now >= m.t and now - m.t < Church.MASTER_MEMO then return m.v end
+	local full = ns.FullName(name)
+	local rank, v = D.AuthorizedRank(full, guild), nil
+	if rank == 0 then
+		v = true
+	elseif rank ~= nil then
+		v = false
+	else
+		local g = type(D.Guild) == "function" and D.Guild(guild) or nil
+		local lead = type(g) == "table" and type(g.leader) == "string" and g.leader ~= "" and ns.FullName(g.leader, g.realm) or nil
+		if lead and not Same(lead, full) and D.AuthorizedRank(lead, guild) == 0 then v = false end
+	end
+	if mk then
+		if not m then
+			if masterMemoN >= 4 * Church.CORRESPONDENTS_MAX then wipe(masterMemo); masterMemoN = 0 end
+			masterMemoN = masterMemoN + 1
+		end
+		masterMemo[mk] = { v = v, t = now }
+	end
+	return v
+end
+
+-- The guild master of `guild`: true, false, or nil while this client can't tell (another guild's census
+-- quiet, or its signed leadership not held; our roster not read yet). Our own guild from the server's
+-- roster; another from Data.AuthorizedRank (1.2.4; 1.2.1 to 1.2.3: the signed leadership alone).
 function Church.IsGuildMaster(name, guild)
 	if type(name) ~= "string" or type(guild) ~= "string" then return false end
-	local mine = OwnGuild()
-	if mine and ns.Fold(mine) == ns.Fold(guild) then
+	if Ours(guild) then
 		if Same(name, ns.me) then
 			local _, _, rank = GetGuildInfo("player")
 			return rank == 0
@@ -518,11 +584,34 @@ function Church.IsGuildMaster(name, guild)
 		local rank = R.RankOf(ns.FullName(name))
 		return rank == 0
 	end
-	local A = ns.Authority
-	if not (A and A.Rank) then return nil end
-	local rank = A.Rank(ns.FullName(name), guild)
-	if rank == nil then return nil end
-	return rank == 0
+	return ForeignMaster(name, guild)
+end
+
+-- (1.2.4) Does a correspondent's naming hold here, and does only another guild's census stand behind it?
+-- A root's always. A guild master's while this client confirms him that guild's master (the time is noted
+-- on the entry, c.ok: saved, never sent, in no page or digest); while it can't tell, CORR_KEEP after it
+-- last did; never once it tells he is not (the note goes: a census gone quiet after another master was
+-- proven brings nothing back), nor, the signed leadership enforced, for another guild that list does not
+-- confirm. (An entry saved before 1.2.4 has no c.ok: it holds again at its next confirming.)
+function Church.CorrespondentHolds(c, now, enforced)
+	if type(c) ~= "table" then return false end
+	if Church.RootCode(c.ac) then return true end
+	now = now or Clock()
+	if enforced == nil then enforced = Church.Enforced() end
+	local ours = Ours(c.g)
+	local census = not ours and not enforced
+	local gm = Church.IsGuildMaster(c.ac, c.g)
+	if gm == true then
+		c.ok = now
+		return true, census
+	end
+	if gm == false then
+		c.ok = nil
+		return false
+	end
+	if not (ours or census) then return false end
+	local ok = tonumber(c.ok)
+	return ok ~= nil and ok <= now + Church.DATE_AHEAD and now - ok <= Church.CORR_KEEP, census
 end
 
 ---------------------------------------------------------------------------
@@ -610,7 +699,9 @@ function Church.MayAct(op, role, target, under, guild, actor)
 		elseif op == "-" then
 			local c = S.corr[ns.Fold(guild)]
 			if not c then return false, "none" end
-			if root or gm == true or Key(c.n) == ak then return true end
+			-- (1.2.4: and the one who named him, while his naming holds here: kept while that guild's census
+			-- is quiet, the guild master's own word takes him back.)
+			if root or gm == true or Key(c.n) == ak or Key(c.ac) == ak then return true end
 			if gm == nil then return false, "unknown" end
 			return false, "rights"
 		end
@@ -691,7 +782,8 @@ local function Apply(op, role, target, under, guild, at, actor)
 	if role == "C" then
 		guild = CleanGuild(guild)
 		local slot = ns.Fold(guild)
-		if op == "+" then return Put("C", slot, { n = WireName(target), g = guild, ac = ac, ar = ar, at = at }) end
+		-- (1.2.4: Church.MayAct just confirmed a guild master's naming: noted, Church.CorrespondentHolds.)
+		if op == "+" then return Put("C", slot, { n = WireName(target), g = guild, ac = ac, ar = ar, at = at, ok = not Church.RootCode(actor) and Clock() or nil }) end
 		return Put("Y", slot, { g = guild, ac = ac, ar = ar, at = at })
 	end
 	local tk, name = Key(target), WireName(target)
@@ -930,7 +1022,10 @@ function Church.SendAct(op, role, target, under, guild)
 	if #text > 255 then return false, "size" end
 	local ok, why = Church.MayAct(op, role, target, under, guild, ns.me)
 	if not ok then
-		ns.Print(rawget(L, "CHURCH_NO_" .. tostring(why):upper()) or L.CHURCH_NO_RIGHTS)
+		-- (1.2.4) A naming past a parent's ten says whose ten it is and his count (Church.QuotaText).
+		if why == "quota" and role == "M" and op == "+" then ns.Print(Church.QuotaText(Church.RootCode(ns.me) and under or ns.me))
+		elseif why == "full" and role == "M" then ns.Print(Church.FullText()) -- (1.2.4: the Church's total, its number)
+		else ns.Print(rawget(L, "CHURCH_NO_" .. tostring(why):upper()) or L.CHURCH_NO_RIGHTS) end
 		return false, why
 	end
 	local before, wasAudience = Church.Role(ns.me), Church.InAudience(ns.me)
@@ -984,7 +1079,37 @@ function Church.InputName(input)
 	return WireName(name)
 end
 
+-- (1.2.4, an Apostle's report: "can't name missionaries anymore") Why one more missionary under
+-- `parent` is refused at his ten, with his count: the namer's own words when the parent is this
+-- player (what frees a place), else that parent's name. Every place in the book under him counts,
+-- as Church.MayAct counts them: the ones a root put there, and the ones that never played.
+function Church.QuotaText(parent)
+	local S, pk = Church.State(), Key(parent)
+	local n = pk and Church.NamedShown(pk) or 0
+	if pk and pk == Key(ns.me) then return L.CHURCH_NO_QUOTA_SELF:format(n, Church.NAMES_PER) end
+	local e = pk and (S.apostle[pk] or S.miss[pk])
+	local shown = ns.DisplayName(ns.FullName(e and e.n or parent)) or tostring(parent)
+	return L.CHURCH_NO_QUOTA_UNDER:format(ns.Codec.Plain(shown), n, Church.NAMES_PER)
+end
+
+-- (1.2.4, the review of that report) A parent's count as the words show it: the quota's own (every
+-- entry naming him, as Church.MayAct counts them), never past NAMES_PER. Two namings under him at
+-- once (his own and a root's) both reach the book through the keepers' pages, which take an entry
+-- without the quota: the later holds no place (Derive: "quota") and takes the next one freed. "11 of
+-- 10" would be no place he holds: the People page shows his ten.
+function Church.NamedShown(key)
+	return math.min(Church.State().named[key] or 0, Church.NAMES_PER)
+end
+
+-- (1.2.4, the review) The Church's total (MISSIONARIES_MAX) refuses every naming of a missionary,
+-- whoever names and under whom, whatever the parent's own count (Church.MayAct checks that ten
+-- first): its number, and what frees a place.
+function Church.FullText()
+	return L.CHURCH_FULL_LINE:format(Church.MISSIONARIES_MAX) .. " " .. L.CHURCH_FULL_HOW
+end
+
 -- What this player may name now (the Name page, the player menus): { apostle, missionary (left),
+-- named (his own places used, with missionary), full (the Church's total reached, with missionary),
 -- correspondent (a guild), register }.
 function Church.Rights()
 	local S = Church.State()
@@ -994,7 +1119,10 @@ function Church.Rights()
 	if Church.MayNameApostle(me) then out.apostle = Church.APOSTLES_MAX - S.apostles end
 	local m = S.miss[k]
 	if S.apostle[k] or (m and m.valid and m.depth < Church.DEPTH_MAX) then
-		out.missionary = math.max(0, Church.NAMES_PER - (S.named[k] or 0))
+		out.named = Church.NamedShown(k) -- (1.2.4: shown with the reason once none is left)
+		out.missionary = math.max(0, Church.NAMES_PER - out.named)
+		-- (1.2.4) Places of his own left, none in the Church's total: Church.MayAct refuses that too.
+		if S.valid >= Church.MISSIONARIES_MAX then out.full = true end
 	end
 	local guild = OwnGuild()
 	if guild and ns.IsFederation(guild) and (root or Church.IsGuildMaster(me, guild) == true) then out.correspondent = guild end
@@ -1146,14 +1274,21 @@ function Church.TakeEntry(sender, text)
 	if kind == "C" and not ns.IsFederation(e.g) then return Drop("guild") end
 	if kind == "C" and not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true) then return Drop("issuer") end
 	-- (1.2.1: a correspondent's removal too, by whom the act could come from, Church.MayAct: a root, the
-	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.)
+	-- guild's master, or the correspondent this book holds. Any keeper's page took any guild's away.
+	-- 1.2.4: or the one who named the correspondent this book holds. Both only while that naming holds
+	-- here, as Church.MayAct asks of the same removal live: a keeper that could not tell took a deposed
+	-- master's late removal, and its time then refused the new master's earlier naming on every client.)
 	if kind == "Y" then
 		local held = (Book() or { c = {} }).c[slot]
-		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true or (held ~= nil and Same(held.n, e.ac))) then
+		local holds = held ~= nil and Church.State().corr[slot] == held
+		if not (Church.RootCode(e.ac) or Church.IsGuildMaster(e.ac, e.g) == true
+			or (holds and (Same(held.n, e.ac) or Same(held.ac, e.ac)))) then
 			return Drop("issuer")
 		end
 	end
 	e.via = Key(sender) ~= Key(e.ac) and ns.FullName(sender) or nil
+	-- (1.2.4: a guild master's naming, its issuer just confirmed here: noted, Church.CorrespondentHolds.)
+	if kind == "C" and not Church.RootCode(e.ac) then e.ok = Clock() end
 	local before, wasAudience = Church.Role(ns.me), Church.InAudience(ns.me)
 	if not Put(kind, slot, e) then return false, "same" end
 	stats.pages = stats.pages + 1
@@ -1193,21 +1328,32 @@ function Church.AnswerAsk(sender, text)
 	if not Church.InAudience(sender) then return Drop("asker") end
 	local now = Now()
 	local k = Key(sender)
-	if answered[k] and now - answered[k] < Church.ANSWER_GAP then return Drop("gap") end
+	local previous = answered[k]
+	if previous and now - previous.at < Church.ANSWER_GAP then return Drop("gap") end
 	if not answered[k] then Capped(answered, Church.HEARD_MAX) end
 	if outgoing then return Drop("busy") end
 	local theirs = {}
 	for d in list:gmatch("[^,]+") do theirs[#theirs + 1] = d end
 	if #theirs ~= #PAGES then return Drop("shape") end
-	local mine, out = Church.Digests(), {}
+	local mine, entries, out = Church.Digests(), {}, {}
 	for i, page in ipairs(PAGES) do
 		if theirs[i] ~= mine[i] then
 			for _, line in ipairs(Church.PageLines(page)) do
-				if #out < Church.TRANSFER_MAX then out[#out + 1] = "NB~1~p~" .. line end
+				entries[#entries + 1] = line
 			end
 		end
 	end
-	answered[k] = now
+	-- (1.2.4) A page can contain more than one answer's budget. Always taking its first
+	-- TRANSFER_MAX entries left a late client stuck there forever. Rotate through the differing
+	-- pages, wrapping so a refused or lost send is offered again; the protocol and budget stay the
+	-- same. A completed page drops out of the next ask's list, so clamp the remembered position.
+	local nextEntry = previous and previous.next or 1
+	if nextEntry > #entries then nextEntry = 1 end
+	for _ = 1, math.min(Church.TRANSFER_MAX, #entries) do
+		out[#out + 1] = "NB~1~p~" .. entries[nextEntry]
+		nextEntry = nextEntry % #entries + 1
+	end
+	answered[k] = { at = now, next = nextEntry }
 	if #out == 0 then return true end
 	outgoing = { target = sender, list = out, i = 1 }
 	Pump()
@@ -1331,15 +1477,17 @@ function Church.IsDesk() local d = Church.Desk() return d ~= nil and Same(d, ns.
 -- own network (his Apostle and its missionaries), the other Apostles, the correspondents, the other
 -- missionaries, then the High Council; the most recently heard first within each. Also how many
 -- members heard online were left out (the sender is told: the room's line says so).
-function Church.RoomRecipients()
+-- 1.2.4: roles (optional, { [role code] = true }): the Apostles' rooms' audience alone.
+function Church.RoomRecipients(roles)
 	local order = { W = 1, K = 1, H = 1, A = 3, C = 4, M = 5, N = 6 }
 	local mine = Church.Place(ns.me)
 	local net = mine and mine.net
 	local list = {}
 	for _, h in pairs(heard) do
 		local ok = Church.Online(h.name)
-		if ok and not Same(h.name, ns.me) then
-			local o = order[Church.Role(h.name)] or 9
+		local role = ok and Church.Role(h.name)
+		if ok and not Same(h.name, ns.me) and (not roles or roles[role or ""]) then
+			local o = order[role] or 9
 			if net and (o == 3 or o == 5) then
 				local p = Church.Place(h.name)
 				if p and p.net == net then o = 2 end
@@ -1433,14 +1581,44 @@ function Church.Prune()
 	for slot, p in pairs(b.p) do places[#places + 1] = { slot = slot, at = p.at } end
 	local cap = Church.MISSIONARIES_MAX + Church.APOSTLES_MAX * 2
 	if #places > cap then
-		table.sort(places, function(a, c) return a.at > c.at end)
+		-- Keep every accepted place before invalid entries: newer surplus entries must never
+		-- displace an older Apostle or missionary, and taking a parent away would break its tree.
+		local S = Church.State()
+		for _, p in ipairs(places) do
+			p.valid = S.apostle[p.slot] ~= nil or (S.miss[p.slot] and S.miss[p.slot].valid) == true
+		end
+		table.sort(places, function(a, c)
+			if a.valid ~= c.valid then return a.valid end
+			if a.at ~= c.at then return a.at > c.at end
+			return a.slot < c.slot
+		end)
 		for i = cap + 1, #places do b.p[places[i].slot] = nil end
 	end
+	-- Correspondents past CORRESPONDENTS_MAX. (1.2.4, the review: since a guild master is known by his
+	-- census, two characters can name a made-up guild's correspondent, and the newest naming alone kept
+	-- them: 64 made-up guilds pushed the Crown's namings out of every book, the keepers' too, never to come
+	-- back.) Now the ones that no longer hold here go first (the oldest naming first), then those only
+	-- another guild's census stands behind (the one this client confirmed longest ago first, then the
+	-- oldest naming), and a root's, a roster's or the signed list's only after all of them (the oldest
+	-- naming first). The cap is the signed leadership's own, every guild it can name fitting; not the
+	-- census's 300, as Church.State checks each correspondent held (Church.CorrespondentHolds).
 	local corr = {}
-	for slot, c in pairs(b.c) do corr[#corr + 1] = { slot = slot, at = c.at } end
+	for slot in pairs(b.c) do corr[#corr + 1] = slot end
 	if #corr > Church.CORRESPONDENTS_MAX then
-		table.sort(corr, function(a, c) return a.at > c.at end)
-		for i = Church.CORRESPONDENTS_MAX + 1, #corr do b.c[corr[i].slot] = nil end
+		local enforced, tier, when = Church.Enforced(), {}, {}
+		for _, slot in ipairs(corr) do
+			local c = b.c[slot]
+			local holds, census = Church.CorrespondentHolds(c, now, enforced)
+			tier[slot] = not holds and 3 or (census and 2 or 1)
+			when[slot] = tier[slot] == 2 and (tonumber(c.ok) or c.at) or c.at
+		end
+		table.sort(corr, function(a, c)
+			if tier[a] ~= tier[c] then return tier[a] < tier[c] end
+			if when[a] ~= when[c] then return when[a] > when[c] end
+			if b.c[a].at ~= b.c[c].at then return b.c[a].at > b.c[c].at end
+			return a < c
+		end)
+		for i = Church.CORRESPONDENTS_MAX + 1, #corr do b.c[corr[i]] = nil end
 	end
 	Changed()
 end
@@ -1553,6 +1731,14 @@ function Church.StatusLines()
 		("acts %d (applied %d), page entries %d, sent %d (kept for keepers %d, handed later %d), public %s"):format(st.acts, st.applied,
 			st.pages, st.sent, #(OwnActs() or {}), st.delivered, tostring((Church.Public()))),
 	}
+	-- (1.2.4) This player's own ten: the entries naming him, as the quota counts them (one more than
+	-- his ten after two namings at once, Church.NamedShown), and how many of them hold a place.
+	local r = Church.Rights()
+	if r.named then
+		local mine, holding = Key(ns.me), 0
+		for _, info in ipairs(Church.Children(mine)) do if not info.adopted then holding = holding + 1 end end
+		table.insert(lines, 3, ("named %d of %d (%d left), %d holding a place"):format(S.named[mine] or 0, Church.NAMES_PER, r.missionary, holding))
+	end
 	local dropped = {}
 	for why, n in pairs(st.dropped) do dropped[#dropped + 1] = why .. "=" .. n end
 	table.sort(dropped)
@@ -1568,21 +1754,50 @@ end
 -- recipient, checked again before it leaves; never a broadcast)
 ---------------------------------------------------------------------------
 
+-- 1.2.4 (the author: "Da igreja: precisa de um dos apóstolos, um do de toda a igreja, de todo mundo
+-- falando sobre igreja, e precisa de um dos apóstolos com os missionários"): the Apostles' room (the
+-- author, the King, the Head and the signed Apostles) and the Apostles' and missionaries' room, beside
+-- the whole Church's. Folded together in a long Roles menu (group "church").
+local APOSTLES_ROOM = { W = true, K = true, H = true, A = true }
+local MISSION_ROOM = { W = true, K = true, H = true, A = true, M = true }
+local function RoomOf(roles)
+	return function(name) return roles[Church.Role(name or ns.me) or ""] == true end
+end
 if ns.ChatRooms and ns.ChatRooms.RegisterAudience then
+	ns.ChatRooms.RegisterAudience("apostles", {
+		label = function() return L.CHURCH_ROOM_APOSTLES end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
+		preview = { king = true },
+		CanAccess = RoomOf(APOSTLES_ROOM),
+		Recipients = function() return Church.RoomRecipients(APOSTLES_ROOM) end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
+	})
+	ns.ChatRooms.RegisterAudience("missionaries", {
+		label = function() return L.CHURCH_ROOM_MISSIONARIES end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
+		preview = { king = true },
+		CanAccess = RoomOf(MISSION_ROOM),
+		Recipients = function() return Church.RoomRecipients(MISSION_ROOM) end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
+	})
 	ns.ChatRooms.RegisterAudience("church", {
 		label = function() return L.CHURCH_ROOM end,
+		group = "church", groupLabel = function() return L.CHURCH_ROOM end,
+		-- (1.2.4: the King's and a councillor's previews list it, View as.)
+		preview = { king = true, councillor = true },
 		CanAccess = function(name) return Church.InAudience(name or ns.me) end,
-		Recipients = function()
-			local list, left = Church.RoomRecipients()
-			if left > 0 then ns.Print(L.CHURCH_ROOM_NOT_REACHED:format(left)) end
-			return list
-		end,
+		-- (1.2.4: the list and how many it left out; the sender is told that when he writes, ChatRooms'
+		-- Send, never when he only picks the room.)
+		Recipients = function() return Church.RoomRecipients() end,
+		notReached = function(left) return L.CHURCH_ROOM_NOT_REACHED:format(left) end,
 	})
 end
 
 ns.On("INIT", function() Church.CheckSaved() end)
 ns.On("DATA_CHANGED", function()
 	derived = nil
+	-- (1.2.4: a census report heard may prove or depose another guild's master: asked again.)
+	wipe(masterMemo); masterMemoN = 0
 	Church.RetryPending()
 end)
 ns.On("LOGIN", function()

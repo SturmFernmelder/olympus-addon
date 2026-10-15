@@ -350,7 +350,7 @@ end
 --   Before any handler, here: K0 K1 (the realm key), H1 (hello), R1 R2 (census reports), and
 --   C<id>:<n>:<of>: (pieces)
 --   Comm.lua Q1 | Positions P1 | Layers L0 L1 | Hop LN LO LQ LR LX | HopSightings LY | Decree D1 | Channels M1 | ChatRooms M2
---   Inspect S1 U0 U1 | TabardsV2 U2 U3 U4 | King T1 T2 T3 | Court T4 T5 | Acts T6 | Treasury T8 TB TE TQ TR TX
+--   Inspect S1 U0 U1 | TabardsV2 U2 U3 U4 | King T1 T2 T3 | Court T4 T5 | Acts T6 T7 | Treasury T8 TB TE TQ TR TX
 --   Bank T9 | Vox Y1 Y3 | Loot X1 XQ XB | Crafters W0 W1 WA WL WQ WR
 --   Workshop HA HI HK HQ HR HS HT V1 V2 V3 V4 V5 V6 | Link DA DB DC DE DK DR DV DW
 --   Authority H2 H3
@@ -359,7 +359,8 @@ end
 --   Other 1.1 work: Recruit J1 J3 | Alts AL | Filter BW | Dues FA FB FC FD FQ FS FU
 --   Board G0 G1 GQ | Keys K3 K4 K5 | Channels N1 | Moderation O1 | The Watch MW | Treasury TA TD TW
 --   Bank TL TN TO TS | Week Y2 | Wanted WS WY W4 W5, and 1.2.3's WK (a member's own kill or death,
---   and a reviewer's relay of one) WV (a reviewer's removal or void). Reserved: J2 (#20's route
+--   and a reviewer's relay of one) WV (a reviewer's removal or void), and 1.2.4's W7 (a member's
+--   avenged ask at login: digests of the Horde players his open deaths name). Reserved: J2 (#20's route
 --   answer), FK (a 1.1 build's copy of the dues' amount from the Treasurer's client, read by nobody
 --   now), WX (1.2.0 to 1.2.2's evidence whispered to a reviewer, read by nobody now).
 --   Bank UP UQ UG (the guild keeper's grant, reader's ask and own-guild snapshot).
@@ -372,17 +373,20 @@ end
 --   1.2, the Blood Arena (each one enveloped, <type>~<mode>1~<body>, and registered through
 --   Arena.Handle): ArenaNet EP | ArenaChat EC EM | ArenaTest ER EH | Wallet ZH ZE ZN ZG ZD ZK ZC
 --   ZW ZS ZQ ZL ZJ | Debts ZT ZX ZY ZR ZF | Stakes ZA ZV | Markets BM BO BS BK BV | MarketBank BF |
---   ArenaFights AF AG AC AW AR AS AN | ArenaLedger AE AB AQ AV AH AY | ArenaTourney AT AD |
+--   ArenaFights AF AG AC AW AR AS AN | ArenaLedger AE AB AQ AV AH AY AX | ArenaTourney AT AD |
 --   ArenaProfile AP | HonorsNet IL ID IO | FarkleTable KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD |
---   ArenaMatch AM | Lottery LW | ArenaRoles AU.
+--   ArenaMatch AM | Lottery LW | ArenaRoles AU | Records RK RD RA RR RS RT.
 --   (The Lottery's: a day's bank publishes that day's winners for the Games tab's rankings.)
 --   FarkleTable also registers KL at runtime (the design: the arbiter's floor under a drunk level),
 --   without extending this legacy inventory.
---   (ArenaLedger's last one, 1.1.6: a finished game's record, any game, from its players to the auditors, the games' ledger.)
+--   (ArenaLedger's last two: 1.1.6's, a finished game's record, any game, from its players to the auditors, the games'
+--   ledger; 1.2.3's, a fighter's signed half of a direct duel, the rankings' two halves.)
+--   (Records', 1.2.4: the shared records of the games and duels that count, any holder's.)
 --   (The King's arena words are kinds of the King's type, King.Register in ArenaRoles.lua.)
 --   1.1.2, the right-click menus: Versions V7 V8 V9 | Workshop VR (the author asks for a bug report).
 --   1.1.5, the guild masters' centurions and correspondents: Nominees NM (a list in parts, never chunked;
---   the King's guild's centurions too, from the King or a High Councillor).
+--   1.2.4: for the King's guild only the empty list the King's or a councillor's client sends to end
+--   1.1.5's list of its centurions on older clients).
 --   1.1.6, moderation: Moderation O2 (a guild's word with notice) | The Watch MR (the players' reports).
 --   1.2, The Watch's judgments: Judgment MJ (a case to the King, the High Council's votes, his final
 --   word; logged whispers between an officer's or a councillor's client and the King's).
@@ -391,6 +395,11 @@ end
 --   lifts, a guild master's Watchers, the Olympus moderators, a target's own word, appeals and their
 --   answers, a case's decision told to its player; logged, over GUILD or the channel).
 --   1.1.6, the War Room's squads: WarSquads WU (a guild's squad assignments, over GUILD) SC (a squad's chat, logged whispers).
+--   1.2.4, voluntary Campaign VG (the King's public aggregate and keepers' private reports).
+--   1.2.4, JusticeTasks JT (original signatures; private recovery by actual King, Council and verified author).
+--   1.2.4, Carry XC (bounded consented historical quotes to the destination guild master, private only).
+--   1.2.4, Dues FP FR (a payer's private receipt ask and the pinned Treasurer's observed receipt).
+--   1.2.4, ChurchFullness NF (private coverage recovery between a current nominee and the guild desk).
 local handlers = {}
 -- 1.1 (Moderation.lua): a client the moderators took off (net-off) sends none of what they hide.
 local function Held(msg)

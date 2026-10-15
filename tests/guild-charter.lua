@@ -85,7 +85,12 @@ test("Guild charter: actual editing preserves bounds, canonical classes, logged 
 		eq(w.jobs[1].opts.guard(), true)
 		w.rank = 1; eq(w.jobs[1].opts.guard(), false); eq(G.SetField("purpose", "Not authorized"), false); eq(G.Send(true), false)
 		w.rank = 0; w.guild = "Olympus Willow"; eq(w.jobs[1].opts.guard(), false); eq(G.Ours(), nil)
-		w.guild = "Olympus Ember"; w.clock = w.clock + G.LIFE + 61; eq(G.Ours(), nil, "repeating cannot renew an expired edit")
+		w.guild = "Olympus Ember"; w.clock = w.clock + G.LIFE + 61; eq(G.Ours(), nil, "an edit past LIFE is not shown before his client says it again")
+		-- (1.2.4, the author's ask: lists are not erased: a repeat renews the card, which ended
+		-- LIFE after its last edit before, the master playing on or not)
+		G.Send(true)
+		local renewed = assert(G.Ours(), "his repeat renews it")
+		eq(renewed.purpose, "Friendly dungeon groups"); eq(G.Parse(w.jobs[#w.jobs].msg, c.me).rev, renewed.rev)
 	end)
 end)
 
@@ -319,5 +324,48 @@ test("Guild charter: Horde cards stay separate and Portuguese wording preserves 
 		local msg = assert(c.GuildCharter.Encode(c.GuildCharter.Ours(), "QD"))
 		assert(msg:find("QD~1~H~", 1, true)); assert(c.L.CHARTER_REPORTED:find("Dois membros", 1, true))
 		eq(c.GuildCharter.Parse(msg:gsub("QD~1~H", "QD~1~A")), nil)
+	end)
+end)
+
+-- 1.2.4, the author's ask (lists of people and guilds are not erased): an edit of a card older than
+-- LIFE kept none of its other fields (SetField started from Ours(), nil past LIFE); the card ended
+-- LIFE after its last edit although its master repeated it while he played; and every other client
+-- kept the cards it heard in this session's memory alone, gone at a /reload.
+test("Guild charter (1.2.4): an edit of a card past seven days keeps its other fields; the master's repeats renew it; a member keeps a card heard across a /reload", function()
+	local w, c = Client()
+	local msg
+	w:As(function()
+		local G = c.GuildCharter
+		eq(G.SetField("purpose", "Friendly dungeon groups"), true)
+		eq(G.SetField("nights", "Fri 20:00"), true)
+		w.clock = w.clock + G.LIFE + 61
+		eq(G.SetField("language", "deDE"), true)
+		local card = assert(G.Ours())
+		eq(card.purpose, "Friendly dungeon groups", "kept, not cleared"); eq(card.nights, "Fri 20:00"); eq(card.language, "deDE")
+		-- He plays on for ten days without an edit: his client's repeats renew it.
+		local first = card.rev
+		for _ = 1, 10 do
+			w.clock = w.clock + 86400
+			G.Send()
+		end
+		local now = assert(G.Ours(), "still his card ten days after its last edit")
+		assert(now.rev >= first + 9 * 86400, "its revision renewed")
+		msg = w.jobs[#w.jobs].msg
+		eq(G.Parse(msg, c.me).rev, now.rev, "the renewed card on the channel")
+	end)
+	-- A member hears it: kept in his saved data, so another session of it (a /reload) still has it.
+	local wm, cm = Client()
+	wm.rank, wm.clock, cm.me = 3, w.clock, "Reed Reader-Realm"
+	wm.ranks["Nova Crown-Realm"] = 0
+	wm:As(function()
+		eq(cm.GuildCharter.Handle("CHANNEL", "Nova Crown-Realm", msg), true)
+		eq(cm.GuildCharter.Get("Olympus Ember").purpose, "Friendly dungeon groups")
+	end)
+	local wr, cr = Client()
+	wr.rank, wr.clock, cr.me, cr.rdb = 3, wm.clock + 3600, "Reed Reader-Realm", cm.rdb
+	wr.ranks["Nova Crown-Realm"] = 0
+	wr:As(function()
+		local got = cr.GuildCharter.Get("Olympus Ember")
+		eq(got and got.purpose, "Friendly dungeon groups", "kept across a /reload")
 	end)
 end)

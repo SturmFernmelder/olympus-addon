@@ -19,7 +19,10 @@ local function Client(saved, savedDB)
 	c.Comm = setmetatable({ loginAt = w.clock - 500, Handle = function() end,
 		Send = function() w.sent = w.sent + 1 end, Whisper = function() w.sent = w.sent + 1 end }, { __index = ns.Comm })
 	c.King = setmetatable({ Preview = function() return false end, Register = function() end }, { __index = ns.King })
-	c.Dues = setmetatable({ Week = function() return w.week end }, { __index = ns.Dues })
+	-- The brief-only fixture holds no payer proof. Actual Dues observations and its private
+	-- receipt adapter are exercised on separate real clients in dues-payer-loop.lua.
+	c.Dues = setmetatable({ Week = function() return w.week end,
+		PaymentText = function() return c.L.BRIEF_PAYMENT_UNKNOWN end }, { __index = ns.Dues })
 	c.Week = { Entries = function() return w.entries end, DayLabel = function() return "Today" end, TimeLabel = function() return "20:00" end,
 		Section = function() end }
 	c.Vox = setmetatable({ State = function() return nil, w.history, w.shown end }, { __index = ns.Vox })
@@ -140,7 +143,7 @@ test("Weekly personal brief: five read-only lines use held sources, sharing stay
 	assert(rows[2]:find("Court", 1, true) and rows[2]:find("Vox Populi", 1, true))
 	eq(rows[3], c.L.BRIEF_ONLINE:format("3"))
 	eq(rows[4], c.L.BRIEF_COMPANION:format(c.L.BRIEF_LOCATION_PRIVATE))
-	eq(rows[5], c.L.BRIEF_PAYMENT)
+	eq(rows[5], c.L.BRIEF_PAYMENT:format(c.L.BRIEF_PAYMENT_UNKNOWN))
 	assert(not table.concat(rows, "\n"):find("Private question", 1, true), "status is not a copy of a restricted question's words")
 	eq(w.sent, 0); eq(c.db.location, false); eq(c.db.layerHelp, false)
 	-- Both sides already share location. This reads a fresh layer's already-held head only,

@@ -105,6 +105,11 @@ fi
 printf 'Running the signing round trip...\n'
 bash tests/sign-roundtrip.sh
 
+if command -v python3 >/dev/null 2>&1; then
+	printf 'Running the monthly records sealing round trip...\n'
+	bash tests/records-seal-roundtrip.sh
+fi
+
 # Max's border textures (Olympus/media/borders): the offline tests check the .tga files
 # themselves; with Pillow installed, also that they are what scripts/make-borders.py builds
 # from his PNGs in media/borders/src (the script changes nothing with --check).

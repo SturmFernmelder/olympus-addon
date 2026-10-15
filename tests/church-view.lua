@@ -52,6 +52,84 @@ local function Build(w, cl, page)
 	return w:As(cl, cl.View.Build)
 end
 
+test("1.2.4 Church ranking rules: the highlighted in-window page preserves the exact list and time window on Back", function()
+	local w = World.New()
+	local c = w:Client(World.AUTHOR, { view = true })
+	c.View.page, c.View.list, c.View.window = "ranking", "m", "w"
+	local lines = Build(w, c)
+	local link
+	for _, line in ipairs(lines) do if line.id == "ranking-rules:church-score" then link = line break end end
+	assert(link and link.onClick, Texts(lines))
+	w:As(c, link.onClick)
+	eq(c.View.page, "rules")
+	lines = Build(w, c)
+	eq(lines[1].id, "ranking-rules-back")
+	assert(Texts(lines):gsub("\n", " "):find(L.RANK_RULE_CHURCH_SCORE:format(c.Count.POINTS_JOIN, c.Count.STAY_DAYS, c.Count.POINTS_STAY, 25, 10, 5), 1, true), Texts(lines))
+	w:As(c, lines[1].onClick)
+	eq(c.View.page, "ranking")
+	eq(c.View.list, "m")
+	eq(c.View.window, "w")
+end)
+
+test("1.2.4 Church fullness ranking rules: the private link opens in place and Back restores the fullness list", function()
+	local w = World.New()
+	local c = w:Client(World.AUTHOR, { view = true })
+	c.View.page, c.View.list, c.View.window = "ranking", "c", "a"
+	local lines = Build(w, c)
+	local link
+	for _, line in ipairs(lines) do if line.id == "ranking-rules:church-fullness" then link = line break end end
+	assert(link and link.onClick, Texts(lines))
+	w:As(c, link.onClick)
+	eq(c.View.page, "rules")
+	lines = Build(w, c)
+	eq(lines[1].id, "ranking-rules-back")
+	local prose = Texts(lines):gsub("\n", " ")
+	assert(prose:find(L.CHURCH_FULLNESS_RULE, 1, true), prose)
+	assert(prose:find(L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY, 1, true), prose)
+	w:As(c, lines[1].onClick)
+	eq(c.View.page, "ranking")
+	eq(c.View.list, "c")
+	eq(c.View.window, "a")
+	lines = Build(w, c)
+	w:As(c, assert((function()
+		for _, line in ipairs(lines) do if line.id == "ranking-rules:church-fullness" then return line.onClick end end
+	end)()))
+	local inAudience = c.Church.InAudience
+	c.Church.InAudience = function() return false end
+	lines = Build(w, c)
+	eq(c.View.page, "people", "loss of the private Church audience closes the rules page")
+	for _, line in ipairs(lines) do
+		assert(line.id ~= "ranking-rules-back" and line.id ~= "ranking-rules:church-fullness", "private rules remained discoverable")
+	end
+	c.Church.InAudience = inAudience
+end)
+
+test("1.2.4 Church correspondence: guild representation uses observed days and never invents historical fullness from census", function()
+	local w, c = Cast()
+	eq(w:Act(c.gm, c.gm.Church.NameCorrespondent, "Plain Member"), true)
+	c.author.View.list = "c"
+	c.author.c.Data = { Guild = function(guild) if guild == World.GUILD then return { total = 951 } end end }
+	local lines = Build(w, c.author, "ranking")
+	local row
+	for _, line in ipairs(lines) do if line.capacityGuild == World.GUILD then row = line end end
+	assert(row and row.player == "Plain Member-Realm", "the guild's actual appointed correspondent")
+	assert(row.text:find(World.GUILD, 1, true), "represents the guild, not invitation points")
+	eq(row.cols, nil, "no invitation score or invented streak column")
+	assert(Texts(lines):find(L.CHURCH_FULLNESS_RULE, 1, true), "explicit observation and unknown-day policy")
+	eq(row.fullness.days, nil, "a census snapshot invents no zero or streak")
+	eq(row.right, L.CHURCH_CAPACITY_UNKNOWN)
+	eq(#lines[2].filters, 1, "fullness is an ongoing streak, not invitation week/month filters")
+	local tip = {}
+	row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+	assert(table.concat(tip, "\n"):find(L.CHURCH_FULLNESS_TIP, 1, true), "client-evidence limitation")
+	-- With no census record, the same valid appointment remains visible without a fabricated count.
+	c.author.c.Data.Guild = function() return nil end
+	lines = Build(w, c.author, "ranking")
+	for _, line in ipairs(lines) do if line.capacityGuild == World.GUILD then row = line end end
+	tip = {}; row.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+	eq(row.fullness.days, nil)
+end)
+
 test("Church discoverability: missionaries are the third visible group with existing appointment action", function()
 	local w, c = Cast()
 	local lines = Build(w, c.a1, "people")
@@ -69,14 +147,14 @@ test("Church discoverability: missionaries are the third visible group with exis
 	local state = w:As(c.a1, c.a1.Church.State)
 	for _, line in ipairs(lines) do if line.key and state.apostle[line.key] then signed[#signed + 1] = line.key end end
 	eq(table.concat(signed, ","), table.concat(state.order, ","), "original signed ordering unchanged")
-	local name = Find(lines, L.CHURCH_NAME_MISSIONARY:format(9, 10))
+	local name = Find(lines, L.CHURCH_NAME_MISSIONARY:format(11, 12))
 	assert(name and name.onClick, "existing authorized naming duty surfaced beside group")
 	name.onClick(); local dialog = c.a1.dialogs[#c.a1.dialogs]
 	eq(dialog.which, "OLYMPUS_CHURCH_NAME"); eq(dialog.data.kind, "missionary")
 	eq(w:Act(c.a1, c.a1.View.Submit, dialog.data, "Fresh Face"), true)
 	eq(w:As(c.member, c.member.Church.Role, "Fresh Face-Realm"), "M")
 	lines = Build(w, c.member, "people")
-	eq(Find(lines, L.CHURCH_NAME_MISSIONARY:format(8, 10)), nil, "ordinary member gets no appointment action")
+	eq(Find(lines, L.CHURCH_NAME_MISSIONARY:format(10, 12)), nil, "ordinary member gets no appointment action")
 end)
 
 test("Church publication authority UI: actual King/council switches, no preview action", function()
@@ -230,7 +308,7 @@ test("1.1.6 Church: Mine, People, Name and Review: each one's numbers, the tree 
 	eq(Find(people, L.CHURCH_ACT_REMOVE:format("Aldric Vane")), nil, "a missionary removes no Apostle")
 	-- Name: the quotas; the root's guild list; a guild master's own line.
 	local name = Build(w, c.a1, "name")
-	assert(Find(name, L.CHURCH_NAME_MISSIONARY:format(9, 10)), Texts(name))
+	assert(Find(name, L.CHURCH_NAME_MISSIONARY:format(11, 12)), Texts(name))
 	name = Build(w, c.author, "name")
 	assert(Find(name, L.CHURCH_NAME_APOSTLE:format(9, 12)), Texts(name)) -- (two and the Head)
 	assert(Find(name, World.GUILD2), "every Olympus guild, each with its correspondent")
@@ -320,6 +398,176 @@ test("1.1.6 Church: the right-click line: an Apostle or a missionary names a mis
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.4 (an Apostle's report on 1.2.3: "can't name missionaries anymore"). One parent's ten
+-- (Church.NAMES_PER, the same since 1.2.0, with no time window: only a removal frees a place) left
+-- him nothing to read: the Name page's header went dead, the People page's line and the
+-- right-click line vanished, and only /oly church name said why, with no count. Each way to name
+-- now says he has named 10 of 10, the most one may, and what frees a place.
+test("1.2.4 Church: an Apostle at his ten is told why and how many he named, wherever he names from", function()
+	local w, c = Cast()
+	local per = c.a1.Church.NAMES_PER
+	for i = 1, per - 1 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	eq(w:As(c.a1, c.a1.Church.Rights).missionary, 0, "Mira Wells and nine more: his ten")
+	-- The Name page: the header with none left, then the reason with his count, and what frees a place.
+	local name = Build(w, c.a1, "name")
+	local header = Find(name, L.CHURCH_NAME_MISSIONARY:format(0, per))
+	assert(header, Texts(name))
+	eq(header.onClick, nil, "no dialog for an eleventh")
+	assert(Find(name, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(name))
+	assert(Find(name, L.CHURCH_QUOTA_HOW), Texts(name))
+	-- The People page: the missionaries' group and his own row say so instead of losing the line.
+	local people = Build(w, c.a1, "people")
+	assert(Find(people, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(people))
+	Find(people, "Aldric Vane").onClick()
+	people = Build(w, c.a1, "people")
+	eq(Find(people, L.CHURCH_ACT_NAME_UNDER:format("Aldric Vane")), nil, "no naming line past his ten")
+	local full = Find(people, L.CHURCH_ACT_UNDER_FULL:format("Aldric Vane", per, per))
+	assert(full and full.onClick == nil, Texts(people))
+	-- The right-click line stays, greyed, with his count; its tooltip says what he can do.
+	local menu = { buttons = {} }
+	function menu.Button(text, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = text, fn = fn, tip = tip, enabled = enabled } end
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(#menu.buttons, 1)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY_FULL:format(per, per))
+	eq(menu.buttons[1].enabled, false)
+	eq(menu.buttons[1].tip, L.CHURCH_NO_QUOTA_SELF:format(per, per))
+	-- /oly church name: refused, with his count and what frees a place; nobody is named.
+	eq(w:Act(c.a1, c.a1.Church.Slash, "name Kid Eleven"), false)
+	eq(w:Printed(c.a1), L.CHURCH_NO_QUOTA_SELF:format(per, per))
+	eq(w:As(c.member, c.member.Church.Role, "Kid Eleven-Realm"), nil)
+	-- The author naming under him is told it is that Apostle's ten, not his own.
+	eq(w:Act(c.author, c.author.Church.NameMissionary, "Kid Twelve", A1), false)
+	eq(w:Printed(c.author), L.CHURCH_NO_QUOTA_UNDER:format("Aldric Vane", per, per))
+	-- The words on the page (in both languages: the test below) carry both numbers.
+	assert(L.CHURCH_QUOTA_LINE:format(per, per):find(tostring(per) .. "[^%d]+" .. tostring(per)), L.CHURCH_QUOTA_LINE)
+	-- A removal frees a place at once: the page offers the naming again, without the reason.
+	w:Run(61)
+	eq(w:Act(c.a1, c.a1.Church.Remove, "M", "Kid Numbera"), true)
+	name = Build(w, c.a1, "name")
+	local again = Find(name, L.CHURCH_NAME_MISSIONARY:format(1, per))
+	assert(again and again.onClick, Texts(name))
+	eq(Find(name, L.CHURCH_QUOTA_HOW), nil)
+	menu.buttons = {}
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY)
+	eq(menu.buttons[1].enabled, true)
+end)
+
+-- A line's tooltip as the game would show it: its lines, one under the other.
+local function TipText(tooltip)
+	local out = {}
+	tooltip({ AddLine = function(_, text) out[#out + 1] = tostring(text) end })
+	return table.concat(out, "\n")
+end
+
+-- 1.2.4 (the same report, its review): the Church's total (Church.MISSIONARIES_MAX, 300 since
+-- 1.1.6) refuses every naming of a missionary at once (Church.MayAct, after the namer's own ten),
+-- whatever his own count. The Name page still offered "Name a missionary (9 of 10 left)" and its
+-- dialog, the People page and the right-click line too, and the refusal said only "That list is
+-- full.". Each way to name now says the Church holds its total, with the number, and what frees a place.
+test("1.2.4 Church: at the Church's total an Apostle with places of his own left is told the Church is full, with its count", function()
+	local w, c = Cast()
+	local Ch, per = c.a1.Church, c.a1.Church.NAMES_PER
+	local saved = Ch.MISSIONARIES_MAX
+	local ok, err = pcall(function()
+		-- (The total lowered on his client, as the limits test in tests/church.lua does: Mira Wells holds its one place.)
+		Ch.MISSIONARIES_MAX = 1
+		Ch.Changed()
+		local r = w:As(c.a1, Ch.Rights)
+		eq(r.missionary, per - 1, "his own ten is not the cause")
+		local text = L.CHURCH_FULL_LINE:format(1) .. " " .. L.CHURCH_FULL_HOW
+		-- The Name page: his own count in the header, nothing to click, the Church's total and what frees a place.
+		local name = Build(w, c.a1, "name")
+		local header = Find(name, L.CHURCH_NAME_MISSIONARY:format(per - 1, per))
+		assert(header, Texts(name))
+		eq(header.onClick, nil, "no dialog the Church would refuse")
+		eq(TipText(header.tooltip), L.CHURCH_MISSIONARY .. "\n" .. text)
+		assert(Find(name, L.CHURCH_FULL_LINE:format(1)), Texts(name))
+		assert(Find(name, L.CHURCH_FULL_HOW), Texts(name))
+		eq(Find(name, L.CHURCH_QUOTA_HOW), nil, "not his ten")
+		-- The People page: the group's line and his own row's, greyed, nothing to click.
+		local people = Build(w, c.a1, "people")
+		assert(Find(people, L.CHURCH_FULL_LINE:format(1)), Texts(people))
+		eq(Find(people, L.CHURCH_NAME_MISSIONARY:format(per - 1, per)), nil, Texts(people))
+		Find(people, "Aldric Vane").onClick()
+		people = Build(w, c.a1, "people")
+		local under = Find(people, L.CHURCH_ACT_NAME_UNDER:format("Aldric Vane"))
+		assert(under and under.onClick == nil, Texts(people))
+		eq(TipText(under.tooltip), L.CHURCH_MISSIONARY .. "\n" .. text)
+		-- The right-click line stays, greyed; its tooltip and its click say why.
+		local menu = { buttons = {} }
+		function menu.Button(label, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = label, fn = fn, tip = tip, enabled = enabled } end
+		w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+		eq(#menu.buttons, 1)
+		eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY)
+		eq(menu.buttons[1].enabled, false)
+		eq(menu.buttons[1].tip, text)
+		-- /oly church name: refused with the Church's total, not "That list is full."; nobody is named.
+		local before = #w.sent
+		eq(w:Act(c.a1, Ch.Slash, "name Kid Eleven"), false)
+		eq(w:Printed(c.a1), text)
+		eq(#w.sent, before, "nothing sent")
+		eq(w:As(c.member, c.member.Church.Role, "Kid Eleven-Realm"), nil)
+		-- A place in the total again: the naming comes back.
+		Ch.MISSIONARIES_MAX = saved
+		Ch.Changed()
+		name = Build(w, c.a1, "name")
+		local again = Find(name, L.CHURCH_NAME_MISSIONARY:format(per - 1, per))
+		assert(again and again.onClick, Texts(name))
+		eq(Find(name, L.CHURCH_FULL_HOW), nil)
+	end)
+	Ch.MISSIONARIES_MAX = saved
+	Ch.Changed()
+	if not ok then error(err, 0) end
+end)
+
+-- 1.2.4 (the review): two namings under one parent at the same moment, his own tenth and a root's
+-- under him, each refused by the clients that heard the other first, both reach every book through
+-- the keepers' pages, which take an entry without the quota (Church.TakeEntry): one entry more than
+-- his ten, the later holding no place (the tree's "quota"), the next freed place its own. His words
+-- said "You have named 11 of 10"; they count his ten, as many as the People page shows under him.
+test("1.2.4 Church: two namings at once past his ten: his words say his ten, never one more", function()
+	local w, c = Cast()
+	local per = c.a1.Church.NAMES_PER
+	for i = 1, per - 2 do w:Run(11); eq(w:Act(c.a1, c.a1.Church.NameMissionary, "Kid Number" .. ("a"):rep(i)), true, i) end
+	w:Run(11)
+	-- Neither heard before the other went.
+	eq(w:As(c.a1, c.a1.Church.NameMissionary, "Kid Mine"), true)
+	eq(w:As(c.author, c.author.Church.NameMissionary, "Kid Root", A1), true)
+	w:Flush()
+	for _ = 1, 4 do w:Run(700); w:Presence(); w:Run(130); w:Tick(); w:Run(130) end
+	local S = w:As(c.a1, c.a1.Church.State)
+	eq(S.named[Key(A1)], per + 1, "both entries in his book")
+	eq(#w:As(c.a1, c.a1.Church.Children, Key(A1)), per, "ten hold a place")
+	local quota = L.CHURCH_NO_QUOTA_SELF:format(per, per)
+	local name = Build(w, c.a1, "name")
+	assert(Find(name, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(name))
+	eq(Find(name, L.CHURCH_QUOTA_LINE:format(per + 1, per)), nil, Texts(name))
+	local people = Build(w, c.a1, "people")
+	Find(people, "Aldric Vane").onClick()
+	people = Build(w, c.a1, "people")
+	assert(Find(people, L.CHURCH_QUOTA_LINE:format(per, per)), Texts(people))
+	assert(Find(people, L.CHURCH_ACT_UNDER_FULL:format("Aldric Vane", per, per)), Texts(people))
+	local menu = { buttons = {} }
+	function menu.Button(label, fn, _, tip, enabled) menu.buttons[#menu.buttons + 1] = { text = label, tip = tip, enabled = enabled } end
+	w:As(c.a1, c.a1.View.MenuLines, { name = "Some Body-Realm" }, menu)
+	eq(menu.buttons[1].text, L.CHURCH_MENU_MISSIONARY_FULL:format(per, per))
+	eq(menu.buttons[1].tip, quota)
+	eq(w:Act(c.a1, c.a1.Church.Slash, "name Kid Eleven"), false)
+	eq(w:Printed(c.a1), quota)
+	eq(w:Act(c.author, c.author.Church.NameMissionary, "Kid Twelve", A1), false)
+	eq(w:Printed(c.author), L.CHURCH_NO_QUOTA_UNDER:format("Aldric Vane", per, per))
+	-- The status window (for the author to read) keeps the book's own count, and how many hold a place.
+	local status = table.concat(w:As(c.a1, c.a1.Church.StatusLines), "\n")
+	assert(status:find(("named %d of %d (0 left), %d holding a place"):format(per + 1, per, per), 1, true), status)
+	-- One of his removed: the one waiting takes the place freed, and he is still at his ten.
+	w:Run(61)
+	eq(w:Act(c.a1, c.a1.Church.Remove, "M", "Kid Numbera"), true)
+	eq(#w:As(c.a1, c.a1.Church.Children, Key(A1)), per)
+	eq(w:As(c.a1, c.a1.Church.Rights).missionary, 0)
+	assert(Find(Build(w, c.a1, "name"), L.CHURCH_QUOTA_LINE:format(per, per)))
+end)
+
 test("1.1.6 Church: the Church chat button opens the Chat tab on the Church's room; /oly church status opens a window to copy from", function()
 	local w, c = Cast()
 	w:As(c.m1, c.m1.View.OpenChat)
@@ -338,7 +586,10 @@ test("1.1.6 Church: every word the Church shows is in English and pt-BR, with th
 		local savedLocale = GetLocale
 		GetLocale = function() return locale end
 		local t = { L = {} }
-		local ok, err = pcall(function() assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", t) end)
+		local ok, err = pcall(function()
+			assert(loadfile(ROOT .. "Olympus/Locales/ChurchText.lua"))("Olympus", t)
+			assert(loadfile(ROOT .. "Olympus/Locales/ChurchFullnessText.lua"))("Olympus", t)
+		end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
 		return t.L
@@ -357,7 +608,7 @@ test("1.1.6 Church: every word the Church shows is in English and pt-BR, with th
 	for _, k in ipairs({ "CHURCH_RANKING_A", "CHURCH_RANKING_M", "CHURCH_RANKING_C", "CHURCH_WHY_FULL", "CHURCH_WHY_DEEP", "CHURCH_WHY_QUOTA",
 		"CHURCH_WHY_CHAIN", "CHURCH_NO_HOLDS", "CHURCH_NO_QUOTA", "CHURCH_NO_DEEP" }) do used[k] = true end
 	for key in pairs(used) do
-		if key:sub(-1) ~= "_" and key ~= "CHURCH_CHANGED" and key ~= "CHURCH_COUNT_CHANGED" and key ~= "CHURCH_PUBLIC_CHANGED" and key ~= "CHURCH_TOP_CHANGED" then
+		if key:sub(-1) ~= "_" and key ~= "CHURCH_CHANGED" and key ~= "CHURCH_COUNT_CHANGED" and key ~= "CHURCH_PUBLIC_CHANGED" and key ~= "CHURCH_TOP_CHANGED" and key ~= "CHURCH_FULLNESS_CHANGED" then
 			assert(rawget(en, key), "English: " .. key)
 			assert(rawget(pt, key), "pt-BR: " .. key)
 			eq(Codes(pt[key]), Codes(en[key]), "codes: " .. key)
@@ -385,4 +636,33 @@ test("1.1.6 Church: the README and the CurseForge page tell of the Church in the
 	eq(page[1], "feat-church"); eq(page[2], "feat-church-count")
 	local bank = Read("Olympus/AnswerBank.lua")
 	assert(bank:find('"feat-church"', 1, true) and bank:find('"feat-church-count"', 1, true))
+end)
+
+-- (1.2.4, the author's ask: the Church's Name page said "none" for every other guild: its master's
+-- naming was taken on no client outside his guild, and nothing kept it.) Fails before: Olympus Vale's
+-- row on the author's Name page read "none" with its master online, and after.
+test("1.2.4 Church: the root's Name page shows each guild's correspondent its master named, with that guild offline and after a reload", function()
+	local w, c = Cast()
+	local vgm = w:Client("Vale Master", { view = true, guild = World.GUILD2, rank = 0 })
+	local function Census(rank)
+		w.census[ns.Fold(World.GUILD2) .. ":" .. Key(vgm.name)] = rank
+		for _, cl in ipairs(w.clients) do if cl.Church and cl.online then w:As(cl, cl.ns.Fire, "DATA_CHANGED") end end
+	end
+	local function Row(cl)
+		local line = Find(Build(w, cl, "name"), World.GUILD2)
+		return tostring(line and line.right)
+	end
+	Census(0)
+	eq(w:Act(vgm, vgm.Church.NameCorrespondent, "Vale Helper"), true)
+	assert(Row(c.author):find("Vale Helper", 1, true), Row(c.author))
+	assert(Find(Build(w, c.author, "people"), L.CHURCH_CORRESPONDENTS:format(1)), "the People page counts him")
+	-- His guild logs off; the author reloads eight hours later.
+	vgm.online, c.other.online = false, false
+	Census(nil)
+	w:Run(8 * 3600)
+	c.author.online = false
+	local author = w:Client(World.AUTHOR, { view = true, rdb = c.author.ns.rdb })
+	w:As(author, author.ns.Fire, "INIT")
+	assert(Row(author):find("Vale Helper", 1, true), "after a reload, his guild offline: " .. Row(author))
+	assert(Find(Build(w, author, "people"), L.CHURCH_CORRESPONDENTS:format(1)), "still counted")
 end)

@@ -420,13 +420,13 @@
     {
       "id": "feat-census-list",
       "topic": "features",
-      "status": "current (1.1.1)",
+      "status": "current (1.2.4)",
       "questions": [
         "What does the Census tab show?",
         "What's in a guild's tooltip?"
       ],
-      "answer": "Every Olympus guild with its members, online and Lord; click a column to sort. Hover a guild for free slots, average level, inactive members, classes online and top zones.",
-      "in_game": "Every Olympus guild: members, online, Lord. Click a column to sort; hover a guild for free slots, level, classes and zones.",
+      "answer": "Every Olympus guild with its members, online, average level and Lord; click a column to sort, a tie goes to the higher average level. Hover a guild for free slots, inactive members, classes online and top zones.",
+      "in_game": "Every Olympus guild: members, online, average level, Lord. Click a column to sort (a tie: the higher average level); hover a guild for free slots, classes and zones.",
       "sources": [
         "README.md:90-97",
         "Views.lua:595-632"
@@ -573,13 +573,13 @@
     {
       "id": "feat-realm-tree",
       "topic": "features",
-      "status": "current (1.1.1)",
+      "status": "current (1.2.4)",
       "questions": [
         "What's the Realm tab?",
         "Why is a Lord's name red?"
       ],
-      "answer": "The hierarchy: the King, the Treasurer, then every guild's Lord and Captains, online or how many days away. A name turns red after a long absence (3 days by default; /oly warndays changes it).",
-      "in_game": "The Realm tab is the hierarchy: King, Treasurer, Lords, Captains. Red names have been away 3+ days (/oly warndays to change).",
+      "answer": "The hierarchy: the King, the Treasurer, then every guild's Lord and Captains, online or days away, its average level after its Lord; its Order line sorts the guilds (members, online, average level, guild, Lord). A name turns red after a long absence (3 days by default; /oly warndays changes it).",
+      "in_game": "The Realm tab is the hierarchy: King, Treasurer, Lords (their guild's average level after them), Captains; its Order line sorts the guilds. Red names have been away 3+ days (/oly warndays to change).",
       "sources": [
         "README.md:131-143"
       ]
@@ -646,13 +646,13 @@
     {
       "id": "feat-nominees",
       "topic": "features",
-      "status": "current (1.1.5)",
+      "status": "current (1.2.4)",
       "questions": [
         "What are centurions and correspondents?",
         "How do I name a centurion?",
         "Why does someone have a bronze border without wings?"
       ],
-      "answer": "Guild masters name up to 10 centurions and one correspondent per High Council department, members of their guild, in their Guild tab or with /oly nominees; the King and the High Council name the King's guild's 10 centurions on the Throne. They wear bronze without wings while in that guild.",
+      "answer": "Guild masters name up to 10 centurions and one correspondent per High Council department, members of their guild, in their Guild tab or with /oly nominees. They wear bronze without wings while in that guild. In the King's guild, the High Council are the King's centurions.",
       "in_game": "Guild masters: /oly nominees, or your Guild tab. Up to 10 centurions and one correspondent per council department, from your guild.",
       "sources": [
         "L.HELP_NOMINEES",

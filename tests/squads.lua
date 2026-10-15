@@ -82,14 +82,179 @@ local function RealTransport(w)
 	return events
 end
 
+test("Legates: native online count includes the leader, leaves unknown honest, and allows fluid shared membership", function()
+	World(function(w, s)
+		local R = w.c.Roster
+		R.generation, R.snapshotAt = 1, w.now
+		R.members = { { full = "Leader-Realm", online = true }, { full = "OtherLeader-Realm", online = false },
+			{ full = "Soldier1-Realm", online = true }, { full = "Soldier2-Realm", online = false } }
+		eq(s.Replace("Leader", { "Soldier1", "Soldier2", "Soldier3" }), true)
+		eq(s.Replace("OtherLeader", { "Soldier1" }), true, "not an exclusive partition of the guild")
+		local group = s.Get("Leader")
+		eq(group.total, 4); eq(group.online, 2); eq(group.onlineUnknown, 1, "missing row is not silently offline")
+		eq(s.Get("OtherLeader").online, 1); eq(s.Get("OtherLeader").total, 2)
+		local row
+		for _, line in ipairs(s.Lines("Leader")) do if line.squadOnline == "Leader-Realm" then row = line end end
+		assert(row and row.text:find("1 unknown", 1, true), "unknown coverage is visible")
+		R.members[1].online = false; R.members[2].online = true; R.members[3].online = false
+		R.members[#R.members + 1] = { full = "Soldier3-Realm", online = true }
+		R.generation, R.snapshotAt = 2, w.now + 1
+		group = s.Get("Leader"); eq(group.online, 1); eq(group.onlineUnknown, 0)
+		eq(s.Get("OtherLeader").online, 1)
+		w.fresh = false; eq(s.Get("Leader"), nil, "stale or incomplete roster cannot claim a current group count")
+	end)
+end)
+
+test("Legates: a group is its manually appointed leader and at most thirty-nine current guildmates", function()
+	World(function(w, s)
+		eq(s.MAX_SOLDIERS, 39); eq(s.MAX_MEMBERS, 40)
+		local soldiers = {}; for i = 1, 39 do soldiers[i] = "Soldier" .. i end
+		eq(s.Replace("Leader", soldiers), true)
+		local group = s.Get("Leader"); eq(group.count, 39); eq(group.total, 40); eq(group.overflow, false)
+		eq(s.Assign("Leader", "Soldier40"), false); eq(s.Get("Leader").count, 39)
+		soldiers[40] = "Soldier40"; eq(s.Replace("Leader", soldiers), false)
+		local full = {}; for i = 1, 40 do full[i] = "Soldier" .. i .. "-Realm" end
+		table.sort(full, function(a, b) return a:lower() < b:lower() end)
+		eq(s.Handle("GUILD", "Officer-Realm", "WU~1~S~Leader-Realm~1800000001~" .. table.concat(full, ",")), false)
+		eq(s.Get("Leader").total, 40)
+	end)
+end)
+
+test("Legates: a King's guild High Councillor without a manual appointment has no group or implicit room", function()
+	World(function(w, s)
+		w.guild = "Olympus"; w.council["Leader-Realm"] = true
+		w.c.rdb.council = { blob = "HS1~1~Alliance~Leader~abcd" }
+		w.list.entries = {}
+		eq(#s.Leaders(), 0); eq(s.Get("Leader"), nil); eq(#w.provider.Options("role"), 0)
+		w.list.entries = { { name = "OtherLeader-Realm", role = "centurion" } }
+		eq(#s.Leaders(), 1); eq(s.Leaders()[1].name, "OtherLeader-Realm", "ordinary-rank manual appointee, not automatic council")
+		eq(s.Assign("OtherLeader", "Soldier1"), true)
+		local room = s.Get("OtherLeader").room
+		w.c.me = "Leader-Realm"; eq(s.CanAccess(room), false); eq(#w.provider.Options("role"), 0)
+		w.c.me = "OtherLeader-Realm"; eq(s.CanAccess(room), true)
+		local lines = s.Lines(); assert(#lines > 0)
+		for _, line in ipairs(lines) do assert(not (line.squadLeader == "Leader-Realm"), "unappointed HC has no hierarchy row") end
+		w.proven = false; eq(#s.Leaders(), 0); eq(s.CanAccess(room), false)
+	end)
+end)
+
+test("Legates: legacy oversized saved groups remain intact as read-only overflow, never new forty-plus membership", function()
+	World(function(w, s)
+		assert(s.Replace("Leader", { "Soldier1" }))
+		local store = w.c.rdb.warSquads["olympus ii"]
+		local members = {}; for i = 1, 99 do members[i] = "Soldier" .. i .. "-Realm" end
+		local row = { leader = "Leader-Realm", rev = w.now, members = members }
+		store.rows["leader-realm"] = row
+		local group = s.Get("Leader"); eq(group.count, 99); eq(group.total, 100); eq(group.overflow, true)
+		eq(s.Assign("Leader", "Soldier100"), false); eq(s.Remove("Leader", "Soldier1"), false)
+		eq(s.Replace("Leader", {}), false); eq(store.rows["leader-realm"], row); eq(#row.members, 99)
+		local displayed, notice, inLegacy = 0, false, false
+		for _, line in ipairs(s.Lines("Leader")) do
+			if line.squadLeader then inLegacy = line.squadLeader == "Leader-Realm" end
+			if inLegacy then
+				if line.player then displayed = displayed + 1 end
+				if line.text == (rawget(w.c.L, "SQUAD_OVERFLOW") or "Legacy group: %d/40 members; read-only until reviewed."):format(100) then notice = true end
+				assert(not line.onClick or line.text == (rawget(w.c.L, "SQUAD_REVIEW") or "Review legacy group"), "legacy overflow offers only deliberate review, not implicit mutation or live chat")
+			end
+		end
+		eq(displayed, 99); eq(notice, true)
+		w.c.me = "Leader-Realm"; eq(s.ChatSend(group.room, "not a forty-member live group"), false)
+		eq(store.rows["leader-realm"], row); eq(#row.members, 99)
+		w.c.me = "Officer-Realm"
+		local jobs = #w.jobs; eq(s.Handle("GUILD", "Soldier1-Realm", "WU~1~Q"), true)
+		eq(#w.jobs, jobs, "legacy oversized membership is not reissued as a new live assignment")
+		eq(s.Review("Leader"), true); eq(w.dialog[1], "OLYMPUS_SQUAD_REVIEW")
+		local reset, focus = nil, false
+		StaticPopupDialogs.OLYMPUS_SQUAD_REVIEW.OnShow({ editBox = { SetText = function(_, text) reset = text end, SetFocus = function() focus = true end } })
+		eq(reset, ""); eq(focus, true, "a reviewed list is a fresh explicit input")
+		local input = { data = w.dialog[4], editBox = { GetText = function() return "Soldier1, Soldier2" end } }
+		eq(select(2, StaticPopupDialogs.OLYMPUS_SQUAD_REVIEW.OnAccept(input)), "confirmation", "actual review dialog requires a separate explicit confirmation")
+		eq(select(2, s.Replace("Leader", { "Soldier1", "Soldier2" })), "confirmation")
+		eq(w.dialog[1], "OLYMPUS_SQUAD_REPLACE"); eq(store.rows["leader-realm"], row)
+		local confirmation = w.dialog[4]
+		w.preview = true; eq(s.ConfirmReplacement(confirmation), false); w.preview = false
+		eq(s.ConfirmReplacement(confirmation), true)
+		eq(store.legacy["leader-realm"], row); eq(#store.legacy["leader-realm"].members, 99)
+		eq(s.Get("Leader").total, 3); eq(s.Get("Leader").overflow, false)
+		eq(s.ConfirmReplacement(confirmation), false, "stale confirmation cannot replace a newer row")
+	end)
+end)
+
+test("Legates: a full legacy archive refuses reviewed replacement without discarding either membership", function()
+	World(function(w, s)
+		assert(s.Replace("Leader", { "Soldier1" }))
+		local store = w.c.rdb.warSquads["olympus ii"]
+		local members = {}; for i = 1, 40 do members[i] = "Soldier" .. i .. "-Realm" end
+		local row = { leader = "Leader-Realm", rev = w.now, members = members }; store.rows["leader-realm"] = row
+		store.legacy = {}; for i = 1, s.MAX_ROWS do store.legacy["old" .. i] = { retained = true } end
+		eq(select(2, s.Replace("Leader", { "Soldier1" })), "confirmation")
+		eq(select(2, s.ConfirmReplacement(w.dialog[4])), "archive")
+		eq(store.rows["leader-realm"], row); eq(#row.members, 40)
+		local count = 0; for _ in pairs(store.legacy) do count = count + 1 end; eq(count, s.MAX_ROWS)
+	end)
+end)
+
+test("Legates: twenty-five manually appointed own-guild leaders are available, never a twenty-sixth", function()
+	World(function(w, s)
+		w.list.entries = {}
+		for i = 1, 26 do w.list.entries[i] = { name = "Soldier" .. i .. "-Realm", role = "centurion" } end
+		eq(s.MAX_LEADERS, 25); eq(#s.Leaders(), 25); eq(s.Get("Soldier25").total, 1)
+		eq(s.Get("Soldier26"), nil); eq(s.Assign("Soldier26", "Soldier50"), false)
+	end)
+end)
+
+test("Legate live overflow: provider access, options and queued writes close while the old transcript stays privately read-only", function()
+	World(function(w, s)
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		local room = s.Get("Leader").room; local store = w.c.rdb.warSquads[w.c.Fold(w.guild)]
+		w.c.me = "Leader-Realm"; eq(s.ChatSend(room, "queued before overflow"), true)
+		local guard = w.jobs[#w.jobs].options.guard
+		local members = {}; for i = 1, 99 do members[i] = "Soldier" .. i .. "-Realm" end
+		store.rows["leader-realm"] = { leader = "Leader-Realm", members = members, rev = w.now + 1, by = "Officer-Realm" }
+		store.chats[room] = { seq = 0, seen = {}, lines = { { sender = "Soldier1-Realm", text = "already received", id = 1, t = w.now } } }
+		eq(s.CanAccess(room), false, "old room is not a live capability")
+		eq(w.provider.CanAccess(room), false); eq(w.provider.Select(room), false); eq(w.provider.IsOpen(room), false)
+		for _, option in ipairs(w.provider.Options("role")) do eq(option.id == room, false) end
+		eq(guard(), false, "queued pre-overflow message cannot be delivered later")
+		eq(s.ChatSend(room, "no live send"), false)
+		eq(s.ReceiveChat("WHISPER", "Soldier1-Realm", "SC~1~" .. room:sub(7) .. "~2~no live receive"), false)
+		eq(#s.ChatHistory(room), 1, "already-held transcript is not deleted")
+		w.c.UI = { ShowCopy = function(title, body) w.copy = { title, body }; return true end }
+		local read
+		for _, line in ipairs(s.Lines("Leader")) do if line.readonlyHistory == room then read = line.onClick end end
+		assert(read); eq(read(), true); assert(w.copy[2]:find("already received", 1, true))
+		w.c.me = "Outsider-Realm"; eq(#s.ChatHistory(room), 0); eq(read(), false, "stale history button rechecks private membership")
+		w.c.me = "Leader-Realm"; w.guild = "Olympus"; eq(read(), false, "another guild cannot read the old transcript")
+	end)
+end)
+
+test("Legates: a verified appointee edits only their own group and queued writes lose authority when the appointment ends", function()
+	World(function(w, s)
+		w.c.me = "Leader-Realm"
+		eq(s.CanManage(), true); eq(s.Assign("Leader", "Soldier1"), true)
+		eq(s.Assign("OtherLeader", "Soldier2"), false); eq(s.Get("OtherLeader").count, 0)
+		eq(s.Handle("GUILD", "Leader-Realm", "WU~1~S~OtherLeader-Realm~1800000001~Soldier2-Realm"), false)
+		eq(s.Handle("GUILD", "OtherLeader-Realm", "WU~1~S~OtherLeader-Realm~1800000001~Soldier2-Realm"), true)
+		local own, foreign = 0, 0
+		for _, row in ipairs(s.Lines()) do
+			if row.text == "Assign soldier" and row.onClick then row.onClick(); if w.dialog[4].prefix:find("OtherLeader", 1, true) then foreign = foreign + 1 else own = own + 1 end end
+		end
+		eq(own, 1); eq(foreign, 0, "no other Legate's edit action")
+		local queued = w.jobs[1]; eq(queued.options.permit(nil, queued.key, "GUILD", nil, queued.msg), true)
+		w.list.entries[1] = w.list.entries[2]; w.list.entries[2] = nil
+		eq(s.CanManage(), false); eq(s.Get("Leader"), nil)
+		eq(queued.options.permit(nil, queued.key, "GUILD", nil, queued.msg), false)
+	end)
+end)
+
 test("Squads: bounded assignments preserve Centuries and require current officer authority", function()
 	World(function(w, s)
 		eq(#s.Leaders(), 2); eq(s.Get("Leader").count, 0)
-		local soldiers = {}; for i = 1, 99 do soldiers[i] = "Soldier" .. i end
-		eq(s.Replace("Leader", soldiers), true); eq(s.Get("Leader").count, 99)
+		local soldiers = {}; for i = 1, 39 do soldiers[i] = "Soldier" .. i end
+		eq(s.Replace("Leader", soldiers), true); eq(s.Get("Leader").count, 39)
 		local oldJob = w.jobs[#w.jobs]
-		eq(s.Assign("Leader", "Soldier100"), false); eq(s.Get("Leader").count, 99)
-		soldiers[100] = "Soldier100"; eq(s.Replace("Leader", soldiers), false); eq(s.Get("Leader").count, 99)
+		eq(s.Assign("Leader", "Soldier40"), false); eq(s.Get("Leader").count, 39)
+		soldiers[40] = "Soldier40"; eq(s.Replace("Leader", soldiers), false); eq(s.Get("Leader").count, 39)
 		eq(s.Replace("Leader", { "Leader" }), false)
 		eq(s.Replace("Leader", { "Soldier1", "Soldier1" }), false)
 		eq(s.Replace("Leader", { "Unknown" }), false)
@@ -100,7 +265,7 @@ test("Squads: bounded assignments preserve Centuries and require current officer
 		eq(s.Request(), true); eq(s.Request(), false)
 		local query = w.jobs[#w.jobs]
 		eq(query.options.permit(nil, query.key, "GUILD", nil, query.msg), true)
-		w.c.me = "Leader-Realm"; eq(s.Replace("Leader", {}), false)
+		w.c.me = "Outsider-Realm"; eq(s.Replace("Leader", {}), false)
 		w.c.me = "Officer-Realm"; w.fresh = false; eq(s.Replace("Leader", {}), false)
 		eq(w.c.rdb.war.centuries.old, "preserved")
 	end)
@@ -153,10 +318,12 @@ test("Squads: actual Realm tree inserts only own-guild hierarchy when that guild
 		c.Acts = { Gates = function() return nil end }
 		c.FormatNumber = tostring
 		c.Roster.online = {}
-		c.Data = { Dispute = function() return nil end, Summary = function() return { guilds = {
+		-- (1.2.4: the rest is Data's own: the Realm's guild headers and Recruiting carry their average
+		-- level, its order a tie-break, Data.AvgLevelText and Data.SortGuildCounts.)
+		c.Data = setmetatable({ Dispute = function() return nil end, Summary = function() return { guilds = {
 			{ name = w.guild, fresh = true, g = { leader = "Officer", total = 15, online = 0, mine = true } },
 			{ name = "Olympus III", fresh = true, g = { leader = "Foreign", total = 15, online = 0 } },
-		} } end }
+		} } end }, { __index = ns.Data })
 		assert(loadfile(ROOT .. "Olympus/Views.lua"))("Olympus", c)
 		local function Count(lines) local count = 0; for _, line in ipairs(lines) do if line.squadLeader then count = count + 1 end end return count end
 		eq(Count(c.Views.RealmLines()), 0)
@@ -226,13 +393,15 @@ test("Squads: actual hierarchy chat callback and OpenMatter route select only th
 		w.c.me = "Outsider-Realm"; eq(action(), false); eq(rooms.OpenMatter({ room = room }), false); eq(opened, 1)
 	end)
 end)
-test("Squads: main leaders follow held signed order without invented identities or foreign roster authority", function()
+test("Squads: main leaders follow verified manual appointment order without invented identities or foreign roster authority", function()
 	World(function(w, s)
 		w.guild = "Olympus"; w.c.council = nil
 		w.c.rdb.council = { blob = "HS1~1~Alliance~OtherLeader,Missing,Leader~abcd" }
 		w.council["OtherLeader-Realm"], w.council["Leader-Realm"] = true, true
+		w.list.entries = { { name = "OtherLeader-Realm", role = "centurion" }, { name = "Missing-Realm", role = "centurion" }, { name = "Leader-Realm", role = "centurion" } }
 		local leaders = s.Leaders(); eq(#leaders, 2); eq(leaders[1].name, "OtherLeader-Realm"); eq(leaders[2].name, "Leader-Realm")
-		w.council["Leader-Realm"] = nil; eq(#s.Leaders(), 1)
+		w.council["Leader-Realm"] = nil; eq(#s.Leaders(), 2, "council membership is not the appointment")
+		w.list.entries[3] = nil; eq(#s.Leaders(), 1)
 		w.guild = "Olympus II"; w.proven = false; eq(#s.Leaders(), 0)
 		w.proven = true; w.ranks["Officer-Realm"] = 1; eq(#s.Leaders(), 0)
 	end)
@@ -308,20 +477,20 @@ test("Squads: two actual clients converge complete assignments and exchange only
 		end)
 	end)
 end)
-test("Squads: real SendChunked pump and GUILD reassembly deliver 99 maximum-length full names end to end", function()
+test("Squads: real SendChunked pump and GUILD reassembly deliver 39 maximum-length full names end to end", function()
 	local names = {}
 	local leader = "Leader" .. string.rep("a", 58) .. "AA-Realm"
-	for i = 1, 99 do names[i] = "Soldier" .. string.rep("a", 57) .. string.char(65 + math.floor((i - 1) / 26), 65 + (i - 1) % 26) .. "-Realm" end
+	for i = 1, 39 do names[i] = "Soldier" .. string.rep("a", 57) .. string.char(65 + math.floor((i - 1) / 26), 65 + (i - 1) % 26) .. "-Realm" end
 	World(function(a, sa)
 		a.c.Roster.byName[leader], a.ranks[leader] = {}, 9; a.list.entries[1].name = leader
 		for _, name in ipairs(names) do a.c.Roster.byName[name], a.ranks[name] = {}, 9 end
 		RealTransport(a)
 		eq(sa.Replace(leader, names), true)
 		eq(#leader, 72); eq(#names[1], 72)
-		eq(99 * 72 + 98 + 72 + 10 + 9 <= a.c.Codec.CHUNK * a.c.Codec.MAX_CHUNKS, true, "worst-case full header and members fit")
+		eq(39 * 72 + 38 + 72 + 10 + 9 <= a.c.Codec.CHUNK * a.c.Codec.MAX_CHUNKS, true, "worst-case full header and members fit")
 		eq(a.c.Comm.QueueSize() > 1, true, "the actual queue must contain a multipart transfer")
 		for _ = 1, 40 do a.c.Comm.Pump(); a.now = a.now + 2 end
-		eq(a.c.Comm.QueueSize(), 0); eq(#a.native, 34, "the inclusive worst-case wire uses exactly the new bound")
+		eq(a.c.Comm.QueueSize(), 0); eq(#a.native, 14, "the forty-member group's inclusive worst-case wire is bounded")
 		for _, piece in ipairs(a.native) do eq(piece.dist, "GUILD"); eq(#piece.msg <= 255, true) end
 		World(function(b, sb)
 			b.c.me = names[1]
@@ -332,7 +501,7 @@ test("Squads: real SendChunked pump and GUILD reassembly deliver 99 maximum-leng
 				local piece = a.native[i]
 				events.CHAT_MSG_ADDON(piece.prefix, piece.msg, piece.dist, "Officer-Realm")
 			end
-			eq(sb.Get(leader).count, 99, "the actual guild assembler must dispatch WU to the actual model")
+			eq(sb.Get(leader).count, 39, "the actual guild assembler must dispatch WU to the actual model")
 			for i, name in ipairs(sa.Get(leader).soldiers) do eq(sb.Get(leader).soldiers[i], name) end
 			eq(sb.CanAccess(sb.Get(leader).room), true)
 			local asm = b.c.Codec.NewAssembler()

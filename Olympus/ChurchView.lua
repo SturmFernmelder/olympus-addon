@@ -25,6 +25,7 @@ local Church, Count = ns.Church, ns.ChurchCount
 
 View.page, View.list, View.window = "ranking", "a", "m"
 View.open = {}
+View.rulesReturn = nil
 
 local function Grey(s) return "|cff9d9d9d" .. tostring(s or "") .. "|r" end
 local function Gold(s) return "|cffffd200" .. tostring(s or "") .. "|r" end
@@ -112,6 +113,22 @@ function View.Show(page, arg)
 	Redraw()
 end
 
+local function ShowRules(key)
+	local R = ns.RankingRules
+	if not (R and R.Allowed and R.Allowed(key)) then return false end
+	View.rulesReturn = { key = key, page = View.page, list = View.list, window = View.window, arg = View.arg }
+	View.page, View.arg = "rules", nil
+	Redraw()
+	return true
+end
+
+local function CloseRules()
+	local back = View.rulesReturn or { page = View.Pages()[1] }
+	View.rulesReturn = nil
+	View.page, View.list, View.window, View.arg = back.page or View.Pages()[1], back.list or View.list, back.window or View.window, back.arg
+	Redraw()
+end
+
 local PAGE_LABEL = { ranking = "CHURCH_NAV_RANKING", mine = "CHURCH_NAV_MINE", people = "CHURCH_NAV_PEOPLE", name = "CHURCH_NAV_NAME",
 	review = "CHURCH_NAV_REVIEW", public = "CHURCH_NAV_PUBLIC" }
 
@@ -146,6 +163,7 @@ end
 
 local function Filters(who)
 	local filters = who and { ListFilter(), WindowFilter() } or { WindowFilter() }
+	if who and View.list == "c" then filters = { ListFilter() } end
 	return { filters = filters, id = "church-filters", gapAfter = true }
 end
 
@@ -286,11 +304,31 @@ function View.RankingLines()
 	local lines = { Nav("ranking"), Filters(true) }
 	local switch = SwitchLine()
 	if switch then lines[#lines + 1] = switch end
+	if View.list == "c" then
+		lines[#lines + 1] = { header = true, text = L.CHURCH_RANKING_C }
+		local rules = ns.RankingRules and ns.RankingRules.Link("church-fullness", function() ShowRules("church-fullness") end)
+		if rules then lines[#lines + 1] = rules end
+		lines[#lines + 1] = { text = Grey(L.CHURCH_FULLNESS_RULE), gapAfter = true }
+		if not PreviewRole() then ns.ChurchFullness.Ask() end
+		local rows = ns.ChurchFullness.Ranking()
+		for _, row in ipairs(rows) do
+			local value = row.average and L.CHURCH_FULLNESS_VALUE:format(row.days, row.average)
+				or (row.days == 0 and L.CHURCH_FULLNESS_ZERO or L.CHURCH_CAPACITY_UNKNOWN)
+			if row.state == "unknown" and row.days then value = L.CHURCH_FULLNESS_PAUSED:format(value) end
+			lines[#lines + 1] = { text = row.rank .. ". " .. L.CHURCH_FULLNESS_ROW:format(Plain(row.guild), Name(row.name)),
+				right = value, player = ns.FullName(row.name), capacityGuild = row.guild, fullness = row,
+				tooltip = Tip(Name(row.name), L.CHURCH_FULLNESS_TIP), indent = 1 }
+		end
+		if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
+		return lines, L.CHURCH_TITLE, L.CHURCH_FULLNESS_RULE
+	end
 	local rows, asOf, remote = Count.RankingView(View.list, View.window)
 	if remote and not PreviewRole() then Count.Ask(View.list, View.window) end
 	lines[#lines + 1] = AsOfLine(asOf, remote)
 	lines[#lines + 1] = { header = true, text = L["CHURCH_RANKING_" .. View.list:upper()],
 		tooltip = Tip(L["CHURCH_RANKING_" .. View.list:upper()], L.CHURCH_POINTS_TIP) }
+	local rules = ns.RankingRules and ns.RankingRules.Link("church-score", function() ShowRules("church-score") end)
+	if rules then lines[#lines + 1] = rules end
 	if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
 	local me = Church.Key(ns.me)
 	for _, row in ipairs(rows) do
@@ -421,6 +459,23 @@ end
 -- People: the Head, the Apostles and their networks, the orphans, the correspondents
 ---------------------------------------------------------------------------
 
+-- (1.2.4) May this player name a missionary now (Church.Rights): a place of his own left, and one
+-- in the Church's total (Church.MISSIONARIES_MAX).
+local function MayNameNow(r) return r.missionary ~= nil and r.missionary > 0 and not r.full end
+-- Why not, as Church.MayAct refuses, in its order: his ten (Church.NAMES_PER), else the total.
+local function NoneLeftText(r) return r.missionary == 0 and Church.QuotaText(ns.me) or Church.FullText() end
+
+-- (1.2.4) Why this player can name none now: his count (his ten) or the Church's total on a line of
+-- its own, the whole reason in its tooltip, and (how) what frees a place on the next. Nothing to
+-- click: the dialog would only refuse.
+local function QuotaLines(lines, r, how)
+	local tip = Tip(L.CHURCH_MISSIONARY, NoneLeftText(r))
+	local line, after = L.CHURCH_FULL_LINE:format(Church.MISSIONARIES_MAX), L.CHURCH_FULL_HOW
+	if r.missionary == 0 then line, after = L.CHURCH_QUOTA_LINE:format(r.named or Church.NAMES_PER, Church.NAMES_PER), L.CHURCH_QUOTA_HOW end
+	lines[#lines + 1] = { indent = 1, text = Red(line), tooltip = tip }
+	if how then lines[#lines + 1] = { indent = 1, text = Grey(after), tooltip = tip } end
+end
+
 local function Actions(lines, info, indent)
 	if PreviewRole() then return end
 	local S = Church.State()
@@ -428,11 +483,20 @@ local function Actions(lines, info, indent)
 	local me = Church.Key(ns.me)
 	local name = ns.FullName(info.n)
 	local role = info.role
-	local canName = (root or info.key == me) and (role == "A" or (info.valid and (info.depth or 0) < Church.DEPTH_MAX))
-		and (S.named[info.key] or 0) < Church.NAMES_PER
-	if canName then
+	local mayName = (root or info.key == me) and (role == "A" or (info.valid and (info.depth or 0) < Church.DEPTH_MAX))
+	local named = Church.NamedShown(info.key)
+	local full = S.valid >= Church.MISSIONARIES_MAX
+	if mayName and named < Church.NAMES_PER and not full then
 		lines[#lines + 1] = { indent = indent, text = Gold(L.CHURCH_ACT_NAME_UNDER:format(Name(info.n))),
 			onClick = function() View.Ask("missionary", { under = root and name or nil }) end }
+	elseif mayName and named >= Church.NAMES_PER then
+		-- (1.2.4) At his ten the line says so, with his count, instead of vanishing.
+		lines[#lines + 1] = { indent = indent, text = Grey(L.CHURCH_ACT_UNDER_FULL:format(Name(info.n), named, Church.NAMES_PER)),
+			tooltip = Tip(L.CHURCH_MISSIONARY, Church.QuotaText(name)) }
+	elseif mayName then
+		-- (1.2.4) The Church's total: the line greyed, the total and what frees a place in its tooltip.
+		lines[#lines + 1] = { indent = indent, text = Grey(L.CHURCH_ACT_NAME_UNDER:format(Name(info.n))),
+			tooltip = Tip(L.CHURCH_MISSIONARY, Church.FullText()) }
 	end
 	local mayRemove = root or info.key == me
 	if role == "M" and not mayRemove then mayRemove = (info.p and Church.Key(info.p.ac) == me) or Church.Above(me, info.key) end
@@ -515,9 +579,11 @@ function View.PeopleLines()
 	lines[#lines + 1] = { header = true, text = L.CHURCH_MISSIONARIES:format(S.valid),
 		tooltip = Tip(L.CHURCH_MISSIONARY, L.CHURCH_MISSIONARIES_TIP) }
 	local rights = Rights()
-	if not PreviewRole() and rights.missionary and rights.missionary > 0 then
+	if not PreviewRole() and MayNameNow(rights) then
 		lines[#lines + 1] = { indent = 1, text = Gold(L.CHURCH_NAME_MISSIONARY:format(rights.missionary, Church.NAMES_PER)),
 			onClick = function() View.Ask("missionary") end, tooltip = Tip(L.CHURCH_MISSIONARY, L.CHURCH_NAME_MISSIONARY_TIP) }
+	elseif not PreviewRole() and rights.missionary then
+		QuotaLines(lines, rights, false)
 	end
 	for _, k in ipairs(S.order) do
 		if #Church.Children(k) > 0 then
@@ -542,8 +608,11 @@ function View.NameLines()
 	local lines = { Nav("name") }
 	local r = Rights()
 	if r.missionary then
+		local left = MayNameNow(r)
 		lines[#lines + 1] = { header = true, text = Gold(L.CHURCH_NAME_MISSIONARY:format(r.missionary, Church.NAMES_PER)),
-			onClick = r.missionary > 0 and function() View.Ask("missionary") end or nil, tooltip = Tip(L.CHURCH_MISSIONARY, L.CHURCH_NAME_MISSIONARY_TIP) }
+			onClick = left and function() View.Ask("missionary") end or nil,
+			tooltip = Tip(L.CHURCH_MISSIONARY, left and L.CHURCH_NAME_MISSIONARY_TIP or NoneLeftText(r)) }
+		if not left then QuotaLines(lines, r, true) end
 	end
 	if r.apostle then
 		lines[#lines + 1] = { header = true, text = Gold(L.CHURCH_NAME_APOSTLE:format(r.apostle, Church.APOSTLES_MAX)),
@@ -621,6 +690,8 @@ function View.PublicLines()
 	local lines = { Nav("public") }
 	local v = Count.PublicView()
 	lines[#lines + 1] = { header = true, text = L.CHURCH_TITLE }
+	local rules = ns.RankingRules and ns.RankingRules.Link("church-score", function() ShowRules("church-score") end)
+	if rules then lines[#lines + 1] = rules end
 	for _, it in ipairs({ { "a", "CHURCH_RANKING_A" }, { "m", "CHURCH_RANKING_M" } }) do
 		lines[#lines + 1] = { header = true, text = L[it[2]] }
 		local rows = v and v[it[1]] or {}
@@ -645,6 +716,16 @@ end
 function View.Build()
 	if not View.Visible() then return {}, L.CHURCH_TITLE, L.CHURCH_NO_ACCESS end
 	local page = View.page
+	if page == "rules" then
+		local key = View.rulesReturn and View.rulesReturn.key
+		local lines = ns.RankingRules and ns.RankingRules.Lines(key, CloseRules)
+		if lines then return lines, L.CHURCH_TITLE, L.RANK_RULES_NOTE end
+		local back = View.rulesReturn
+		View.rulesReturn = nil
+		page = back and back.page or View.Pages()[1]
+		View.list, View.window, View.arg = back and back.list or View.list, back and back.window or View.window, back and back.arg or nil
+		View.page = page
+	end
 	if page == "detail" then
 		local person = View.arg
 		if person and not PreviewRole() and Count.MaySeeDetail(ns.me, person) and Audience() then return View.DetailLines(person) end
@@ -691,6 +772,37 @@ local buttons = {
 	{ "CHURCH_BTN_REGISTER", function() View.Ask("register") end, shown = Person },
 }
 
+if ns.RankingRules then
+	ns.RankingRules.Register("church-score", {
+		title = L.RANK_RULE_CHURCH_TITLE,
+		icon = "Interface\\Icons\\Spell_Holy_PrayerOfFortitude",
+		allowed = function() return Audience() or Count.PublicView() ~= nil end,
+		sections = function()
+			local shares = Count.SHARES or {}
+			return {
+				{ topic = "score", text = L.RANK_RULE_CHURCH_SCORE:format(Count.POINTS_JOIN, Count.STAY_DAYS, Count.POINTS_STAY,
+					math.floor((shares[1] or 0) * 100 + 0.5), math.floor((shares[2] or 0) * 100 + 0.5), math.floor((shares[3] or 0) * 100 + 0.5)) },
+				{ topic = "order", text = L.RANK_RULE_CHURCH_ORDER },
+				{ topic = "evidence", text = L.RANK_RULE_CHURCH_EVIDENCE },
+				{ topic = "visibility", text = L.RANK_RULE_CHURCH_VISIBILITY },
+			}
+		end,
+	})
+	ns.RankingRules.Register("church-fullness", {
+		title = L.RANK_RULE_CHURCH_FULLNESS_TITLE,
+		icon = "Interface\\Icons\\INV_Misc_GroupLooking",
+		allowed = Audience,
+		sections = function()
+			return {
+				{ topic = "score", text = L.CHURCH_FULLNESS_RULE },
+				{ topic = "order", text = L.RANK_RULE_CHURCH_FULLNESS_ORDER },
+				{ topic = "evidence", text = L.CHURCH_FULLNESS_TIP },
+				{ topic = "visibility", text = L.RANK_RULE_CHURCH_FULLNESS_VISIBILITY },
+			}
+		end,
+	})
+end
+
 if ns.UI and ns.UI.AddTab then
 	ns.UI.AddTab({ key = "church", label = "TAB_CHURCH", after = "crafters",
 		icon = function()
@@ -711,9 +823,15 @@ function View.MenuLines(target, menu)
 	local p = Church.Place(target.name)
 	if p or Church.RootCode(target.name) then return end
 	local name = target.name
-	if r.missionary and r.missionary > 0 then
+	if MayNameNow(r) then
 		menu.Button(L.CHURCH_MENU_MISSIONARY, function() View.AskConfirm("missionary", { name = name }) end,
 			L.CHURCH_MISSIONARY, L.CHURCH_MENU_MISSIONARY_TIP, not target.locked)
+	elseif r.missionary then
+		-- (1.2.4) At his ten: the line greyed with his count, its tooltip what frees a place; at the
+		-- Church's total, the plain line greyed, its tooltip the total.
+		local why = NoneLeftText(r)
+		menu.Button(r.missionary == 0 and L.CHURCH_MENU_MISSIONARY_FULL:format(r.named or Church.NAMES_PER, Church.NAMES_PER) or L.CHURCH_MENU_MISSIONARY,
+			function() ns.Print(why) end, L.CHURCH_MISSIONARY, why, false)
 	end
 	if r.apostle and r.apostle > 0 then
 		menu.Button(L.CHURCH_MENU_APOSTLE, function() View.AskConfirm("apostle", { name = name }) end,
@@ -724,7 +842,7 @@ if ns.PlayerMenu and ns.PlayerMenu.Add then
 	ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40)
 end
 
-for _, event in ipairs({ "CHURCH_CHANGED", "CHURCH_COUNT_CHANGED", "CHURCH_PUBLIC_CHANGED" }) do
+for _, event in ipairs({ "CHURCH_CHANGED", "CHURCH_COUNT_CHANGED", "CHURCH_PUBLIC_CHANGED", "CHURCH_FULLNESS_CHANGED" }) do
 	ns.On(event, function()
 		if ns.UI and ns.UI.IsShown and ns.UI.IsShown() then Redraw() end
 	end)

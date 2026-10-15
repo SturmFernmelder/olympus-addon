@@ -1014,8 +1014,11 @@ test("1.2 the Bone Throw tables board: a table with another player: the create p
 	local ask = P(b).ask
 	eq(ask.lines[1]:GetText(), "Torvin Hale invites you to Bones.")
 	eq(ask.lines[2]:GetText(), "Play to 2,000 · 60 seconds a turn")
+	-- (1.2.3, decision 1: a free game counts for the history and the ranking with the live switch
+	-- off, so its invitation says so, and that it is played at a tavern or a camp; 1.2.2 said it
+	-- was a rehearsal while the game counted)
 	eq(ask.lines[3]:GetText(), "No stake: for fun.")
-	eq(ask.lines[4]:GetText(), "A rehearsal: nothing counts.")
+	eq(ask.lines[4]:GetText(), "Counts for your history and the ranking: at a tavern or camp.")
 	eq(ask.lines[5]:GetText(), "Hiccup on: drinking during the game counts.")
 	eq(ask.lines[6]:GetText(), a.ns.L.FARKLE_G_DRINK_STEP_2, "the invitation describes reuse, not an extra percentile roll")
 	check(ask.sober:IsShown(), "a sober table may be asked")
@@ -1070,6 +1073,43 @@ test("1.2 the Bone Throw tables board: a table with another player: the create p
 	eq(P(b).card.line:GetText(), "Bones · against Torvin Hale")
 	eq(P(b).card.note:GetText(), "No stake: for fun.")
 	eq(P(a).primary:GetText(), "Play again")
+	NoErrors(w)
+end)
+
+-- (Review of v123/bones, 88dec8e: the guest's pop-up read the table's mode, T for every 1.2.x
+-- table while the live switch stays off, so it said "A rehearsal: nothing counts." of a free game
+-- that counts for his history and the ranking, decision 1.)
+test("1.2.3 the Bone Throw tables board: the guest's pop-up of a free table that counts says so, in both languages, never that nothing counts; a test build's invitation is a rehearsal and says it", function()
+	-- (pt-BR first: the world's clients share the harness's words, and the English load puts them back)
+	for _, locale in ipairs({ "ptBR", "enUS" }) do
+		local w = FW.New({ seed = 11, compliance = "shipped" })
+		local a, b = Seat(w, P1), Seat(w, P2)
+		b.globals.GetLocale = function() return locale end
+		w:Group({ a, b })
+		local id = assert(w:As(a, a.ns.FarkleTable.Create, { guest = b.name, target = 2000 }))
+		w:Run(0)
+		eq(w:As(b, b.ns.FarkleTable.Counted, id), true, "decision 1: the free game counts")
+		local ask = P(b).ask
+		check(ask and ask:IsShown(), "the guest's pop-up")
+		local L = b.ns.L
+		eq(ask.lines[4]:GetText(), locale == "ptBR" and "Conta no histórico e no ranking: numa taverna ou acampamento."
+			or "Counts for your history and the ranking: at a tavern or camp.")
+		-- (the gate allows no stake: the line before says points, as 1.1.6 has it)
+		eq(ask.lines[3]:GetText(), L.FARKLE_B_POINTS_FUN)
+		for i = 1, 6 do check(ask.lines[i]:GetText() ~= L.FARKLE_B_ASK_REHEARSAL, "line %d says nothing counts", i) end
+		NoErrors(w)
+	end
+	local tb = { n = 3, base = "1.2.3", built = H.World.CLOCK - 60, expires = H.World.CLOCK + 86400 }
+	local w = FW.New({ seed = 11, compliance = "shipped" })
+	local a, b = Seat(w, P1, { testBuild = tb }), Seat(w, P2)
+	w:Group({ a, b })
+	local id = assert(w:As(a, a.ns.FarkleTable.Create, { guest = b.name, target = 2000 }))
+	w:Run(0)
+	eq(w:As(b, b.ns.FarkleTable.Counted, id), false, "a test build's table never counts")
+	local ask = P(b).ask
+	check(ask and ask:IsShown(), "the guest's pop-up")
+	eq(ask.lines[4]:GetText(), "A rehearsal: nothing counts.")
+	for i = 1, 6 do check(ask.lines[i]:GetText() ~= b.ns.L.FARKLE_B_ASK_COUNTS, "line %d says it counts", i) end
 	NoErrors(w)
 end)
 

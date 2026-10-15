@@ -644,11 +644,17 @@ local function KingName()
 	return ns.FullName(short, realm)
 end
 
--- The lottery's caller: the King's character; in a rehearsal (T), a King's stand-in too.
+-- The real lottery's callers: the pinned King, the signed High Council and the author.
+-- A guild rank, a bank appointment or a claimed title grants no draw authority.
 function Lottery.IsCaller(name, mode)
 	if type(name) ~= "string" or name == "" then return false end
+	name = ns.FullName(name)
 	local R = Roles()
 	if R and R.IsKing(name) then return true end
+	if R and type(R.Barred) == "function" and R.Barred(name) then return false end
+	local W = ns.Workshop
+	if type(W) == "table" and type(W.IsPracticeOperator) == "function" and W.IsPracticeOperator(name) == true then return true end
+	if type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true then return true end
 	if mode == "T" and R and type(R.standIn) == "function" then
 		local ok, yes = pcall(R.standIn, ns.FullName(name), "k", "T")
 		return ok and yes == true
@@ -658,13 +664,23 @@ end
 -- Every name an L eid's writer mark may stand for, in a mode.
 function Lottery.Callers(mode)
 	local out = {}
+	local function Add(name)
+		if type(name) ~= "string" or not Lottery.IsCaller(name, mode) then return end
+		name = ns.FullName(name)
+		for _, held in ipairs(out) do if Same(held, name) then return end end
+		out[#out + 1] = name
+	end
 	local king = KingName()
-	if king then out[1] = king end
+	Add(king)
 	local R = Roles()
+	for _, name in ipairs(R and type(R.Councillors) == "function" and R.Councillors() or {}) do Add(name) end
+	local W = ns.Workshop
+	for _, name in ipairs(type(W) == "table" and type(W.PracticeOperators) == "function" and W.PracticeOperators() or {}) do Add(name) end
+	Add(ns.me)
 	if mode == "T" and R and type(R.standIns) == "function" then
 		local ok, list = pcall(R.standIns, "k", "T")
 		for _, name in ipairs(ok and type(list) == "table" and list or {}) do
-			if type(name) == "string" then out[#out + 1] = ns.FullName(name) end
+			Add(name)
 		end
 	end
 	return out
@@ -762,9 +778,11 @@ local function EventOf(eid)
 					local bank = day.bank or Lottery.Bank(tmode or "L")
 					-- (noResult: a bank online since the draw time voids a day with no declared draw this
 					-- long after it; one that came on later waits for the declaration, MarketBank.Tick.)
+					local drawers = { name }
+					if Lottery.IsCaller(bank, tmode or "L") and not Same(name, bank) then drawers[#drawers + 1] = bank end
 					return { kind = "lottery", opener = name, public = true, category = "lottery", market = Lottery.TYPE,
 						outcomes = Lottery.OUTCOMES, mode = tmode, lockAt = day.lockAt, bank = bank,
-						excluded = { name, bank }, drawers = { name, bank }, noResult = Lottery.DRAW_WINDOW + Lottery.VOID_SLACK }
+						excluded = { name, bank }, drawers = drawers, noResult = Lottery.DRAW_WINDOW + Lottery.VOID_SLACK }
 				end
 			end
 		end
@@ -837,15 +855,14 @@ function Lottery.Read(eid)
 end
 
 ---------------------------------------------------------------------------
--- The caller's book (the King's client, or a stand-in's in a rehearsal)
+-- The caller's book (the King, signed councillors, author, or rehearsal stand-in)
 ---------------------------------------------------------------------------
 
--- Where this client keeps the lottery it calls: the King's in his realm's live store, a stand-in's
--- in the rehearsal store; nil for everyone else.
+-- Trusted callers use their realm's live store; rehearsal stand-ins use the rehearsal store.
+-- No book is exposed to a bank or a guild rank alone.
 local function Book()
-	local R = Roles()
 	local store
-	if R and R.IsKing(ns.me) then
+	if Lottery.IsCaller(ns.me, "L") then
 		store = Arena.Store("L")
 	elseif Lottery.IsCaller(ns.me, "T") then
 		store = Arena.Store("T")
@@ -922,7 +939,7 @@ function Lottery.OnRoll(text)
 	local day = lot and lot.day
 	if day and now >= (day.lockAt or math.huge) and not day.void and not (day.declared and now - (day.declaredAt or 0) > Lottery.EXTRA_FOR) then
 		local roller = day.rolledBy or (lot.roller == "bank" and day.bank or ns.me)
-		if not Same(name, roller) then return false end
+		if not Same(name, roller) or not Lottery.IsCaller(roller, day.mode or "L") then return false end
 		-- (The draw's hour is over: no roll counts any more, and the day goes void.)
 		if not day.declared and now >= day.lockAt + Lottery.DRAW_WINDOW then return false end
 		day.prizes = day.prizes or {}
@@ -944,6 +961,7 @@ function Lottery.OnRoll(text)
 	local eid = Lottery.Current()
 	local d = eid and Lottery.Read(eid)
 	if not d or d.prizes or not d.lockAt or now < d.lockAt or now >= d.lockAt + Lottery.DRAW_WINDOW then return false end
+	if not Lottery.IsCaller(name, d.mode or "L") then return false end
 	if not witness or witness.eid ~= eid then witness = { eid = eid, prizes = {} } end
 	if witness.drawer then
 		if not Same(name, witness.drawer) then return false end
@@ -1126,6 +1144,8 @@ function Lottery.SetSchedule(t)
 	if type(t) ~= "table" then return false, "shape" end
 	local lot = Book()
 	if not lot then return false, "king" end
+	local mode = lot.day and lot.day.mode or "L"
+	if t.roller == "bank" and not Lottery.IsCaller(Lottery.Bank(mode), mode) then return false, "king" end
 	-- (The day's market never opens while the gate says no: the schedule is not turned on.)
 	if t.on == true and not Wagers() then
 		ns.Print(L.COMPLIANCE_WAIT)
@@ -1160,10 +1180,10 @@ end
 -- The draw: the Roll button
 ---------------------------------------------------------------------------
 
--- Whether this client may roll the current draw now: the caller's client (his draw is due and
--- he rolls it), or the lottery's bank's (a draw is due and it is the bank).
+-- Only a trusted caller can operate the actual draw. Being its bank alone is insufficient.
 function Lottery.CanDraw()
 	if Arena.Off() then return false, "off" end
+	if not Lottery.IsCaller(ns.me, "L") and not Lottery.IsCaller(ns.me, "T") then return false, "king" end
 	if not Wagers("payout") then return false, "compliance" end
 	local lot = Book()
 	local day = lot and lot.day
@@ -1419,19 +1439,20 @@ end
 function Lottery.WhyText(why) return L["LOTTERY_WHY_" .. tostring(why):upper()] end
 
 ---------------------------------------------------------------------------
--- The winners: the Games tab's Lottery rankings (latest and biggest)
+-- Legacy private winner history; never published or exposed as a Games ranking in 1.2.4.
 ---------------------------------------------------------------------------
 
--- Only a day's bank knows whose tickets they are (the ledger on the channel carries blinded codes),
--- so its bank publishes the day's winners once the day is settled: LW, its eid, its time and up to
+-- Dormant legacy publication contract (the transport below is closed in 1.2.4). Only a day's bank
+-- knows whose tickets they are (the channel's ledger carries blinded codes). LW carried its eid,
+-- its time and up to
 -- WINNERS_DAY rows "name:beast:copper b36", each an account that came out ahead that day, by its
 -- net gain over its tickets (paid less staked), with the beast of its best-paying ticket, the
 -- biggest first. Every client keeps the last WINNERS_DAYS days it heard, from that day's own bank
 -- only, and Lottery.Winners() reads them; the Games tab shows them (ArenaHome's RankingLines).
 -- A name next to an amount is what the markets otherwise never put on the channel, so a bank
--- publishes only while the King's rankings switch is on (rankPub, ArenaHome.RankingsPublic): the
--- days it settled with the switch off go out when he turns it on, and before that nobody, his
--- staff included, sees a Lottery winner.
+-- previously published only while the King's rankings switch was on. Now neither LW direction
+-- runs: the private history remains, but no switch can publish the winners.
+local PUBLIC_WINNERS = false -- 1.2.4: Lottery results remain private, regardless of rankPub.
 Lottery.WINNERS_DAY = 5     -- rows a day publishes
 Lottery.WINNERS_DAYS = 30   -- days a client keeps
 Lottery.WINNERS_SHOWN = 5   -- rows of each list
@@ -1536,6 +1557,7 @@ function Lottery.TakeWinners(sender, mode, body)
 	return true
 end
 local function OnWinners(dist, sender, mode, body)
+	if not PUBLIC_WINNERS then return false, "private" end
 	local ok, why = Lottery.TakeWinners(sender, mode, body)
 	if not ok then ns.Log("lottery winners from %s refused: %s", tostring(sender), tostring(why)) end
 end
@@ -1549,6 +1571,7 @@ ns.Comm.Handle("LW", ns.Arena.Handle("LW", OnWinners))
 -- however many there are, and a day still known but no longer remembered would go out again at
 -- every change. A day drawn longer ago than that is not published.
 local function PublishWinners(days)
+	if not PUBLIC_WINNERS then return false, "private" end
 	local R = Roles()
 	if not (R and type(R.IsBank) == "function") or not (R.IsBank(ns.me, "L") or R.IsBank(ns.me, "T")) then return end
 	local s = type(R.Settings) == "function" and R.Settings() or nil
@@ -1738,7 +1761,7 @@ function Lottery.Remind(eid, mark)
 	local text, alert
 	if d and d.lockAt and not d.prizes and d.state ~= "void" then
 		local left = d.lockAt - Arena.Now()
-		local roller = Lottery.IsCaller(ns.me, d.mode) or Same(ns.me, d.bank)
+		local roller = Lottery.IsCaller(ns.me, d.mode)
 		local mine = #Lottery.Mine(eid) > 0
 		if mark > 0 and left > 0 then
 			local minutes, when = max(1, math.ceil(left / 60)), Lottery.WhenText(d.lockAt)

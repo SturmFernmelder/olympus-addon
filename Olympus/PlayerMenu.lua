@@ -89,13 +89,13 @@ local function Secret(...)
 end
 
 -- The player a menu is for, or nil when it is not one we can reach (see above).
-function PlayerMenu.Target(which, ctx)
+function PlayerMenu.Target(which, ctx, allowSelf)
 	if type(ctx) ~= "table" then return nil end
 	local info = ctx.clubMemberInfo
 	-- (Checked before any test of them: a secret can't be compared or tested.)
 	if Secret(ctx.name, ctx.surname, ctx.server, ctx.unit, ctx.isSelf, ctx.isOffline, ctx.bnetIDAccount, ctx.isMobile, info) then return nil end
 	if type(info) == "table" and Secret(info.presence, info.name, info.isSelf) then return nil end
-	if ctx.isSelf or ctx.isOffline or ctx.bnetIDAccount or ctx.isMobile then return nil end
+	if (ctx.isSelf and not allowSelf) or ctx.isOffline or ctx.bnetIDAccount or ctx.isMobile then return nil end
 	local offline = Enum and Enum.ClubMemberPresence and Enum.ClubMemberPresence.Offline
 	if type(info) == "table" and offline ~= nil and info.presence == offline then return nil end
 	local unit = type(ctx.unit) == "string" and ctx.unit ~= "" and ctx.unit or nil
@@ -107,16 +107,30 @@ function PlayerMenu.Target(which, ctx)
 		local first, realm
 		if UnitFullName then first, realm = UnitFullName(unit) end
 		if Secret(isPlayer, isMe, connected, first, realm) then return nil end
-		if not isPlayer or isMe or not connected then return nil end
+		if not isPlayer or (isMe and not allowSelf) or not connected then return nil end
 		name = ns.UnitFullName(unit)
 	else
 		local raw = ctx.name
 		if type(raw) ~= "string" or raw == "" then return nil end
 		name = ns.FullName(ns.Normal(Joined(raw, ctx.surname or ctx.server)))
 	end
-	if type(name) ~= "string" or name == "" or name == ns.me then return nil end
-	if ns.me and ns.Fold(name) == ns.Fold(ns.me) then return nil end
-	return { name = name, which = which, unit = unit, locked = ns.ChatLocked() }
+	if type(name) ~= "string" or name == "" then return nil end
+	local self = ns.me and ns.Fold(name) == ns.Fold(ns.me) or false
+	-- The native self flag must agree with the resolved character. A malformed context
+	-- must not turn the own-profile exception into actions against another player.
+	if ctx.isSelf and not self then return nil end
+	if self and not allowSelf then return nil end
+	return { name = name, which = which, unit = unit, locked = ns.ChatLocked(), self = self or nil }
+end
+
+-- Profiles use the main window, not the Games window. Opening your own menu offers only this
+-- local action: version requests, reports and challenges still never target yourself.
+function PlayerMenu.OpenProfile(name)
+	if not ns.IsMember() or type(name) ~= "string" then return false end
+	if ns.me and ns.Fold(ns.FullName(name)) == ns.Fold(ns.me) then
+		return ns.ProfileEdit and ns.ProfileEdit.Open and ns.ProfileEdit.Open() or false
+	end
+	return ns.PlayerProfile and ns.PlayerProfile.OpenName and ns.PlayerProfile.OpenName(name) or false
 end
 
 -- What a feature's build gets to add lines with. The first line any of them adds puts a divider
@@ -166,9 +180,15 @@ function PlayerMenu.Build(which, root, ctx)
 	if ns.GamepadUI() then return 0 end
 	if type(root) ~= "table" and type(root) ~= "userdata" then return 0 end
 	if not ns.IsMember() then return 0 end
-	local target = PlayerMenu.Target(which, ctx)
+	local target = PlayerMenu.Target(which, ctx, true)
 	if not target then return 0 end
 	local menu = Wrap(root)
+	if ns.UI and type(ns.UI.OpenPlayerProfile) == "function" then
+		menu.Button(L.ARENA_MENU_PROFILE, function() PlayerMenu.OpenProfile(target.name) end,
+			L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
+		target.profileAdded = true
+	end
+	if target.self then return menu.count end
 	for _, e in ipairs(entries) do
 		ns.SafeCall("player menu " .. e.key, e.build, target, menu)
 	end

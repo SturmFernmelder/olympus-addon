@@ -27,12 +27,26 @@ local HD_TABS_REACH = 40            -- a side tab and its art, past the window's
 local SIDE_TOP, SIDE_GAP = 36, 20   -- CommunitiesFrame.xml: the first side tab 36 down, then 20 apart
 local SIDE_ART_BELOW = 21           -- RightSideTab.xml: a side tab's art, below its button
 local SIDE_LEFT_UP = 46             -- the one on the left edge: its art as far from the bottom as theirs from the top
+local SIDE_LEFT_TOP_CLEAR = 64      -- keep the overflow rail below PortraitFrameTemplate's portrait
+local SIDE_ART_ABOVE = 11           -- RightSideTab.xml: its art reaches this far above the button
 local HD_DEFAULT_H = 426            -- CommunitiesFrame.xml
 local main                          -- the window in use: frames.old or frames.hd
 local frames = {}                   -- style -> window, each created on first use
 local personFrames = {}             -- style -> person details panel (created on first use, further below)
 local playerProfile, playerReturn   -- the full-window person page, and the list page it returns to
 local playerTrail = {}              -- the person pages Back goes through first, oldest first: { person, scroll }
+
+-- 1.2.4: a person page left (for the list, another tab, another person's page, or the window
+-- closed): PLAYER_PROFILE_LEFT with whose it was (folded, as ProfileKey), so the player's own page
+-- ("My profile", ProfileEdit.lua) lets go of what it held (its icon list, the Games window's return).
+local function ProfileLeft(p)
+	if type(p) == "table" then ns.Fire("PLAYER_PROFILE_LEFT", ns.Fold(tostring(ns.FullName(p.name, p.realm)))) end
+end
+local function LeaveProfile()
+	local was = playerProfile
+	playerProfile, playerReturn, playerTrail = nil, nil, {}
+	ProfileLeft(was)
+end
 
 -- icon: the side tab's (HD window), a texture or a function giving one. A new tab is one
 -- entry here, its L.TAB_ label and, if it has any, its BUTTONS.
@@ -68,6 +82,37 @@ local TABS = {
 	-- The addon author's alone (Workshop.lua), the same way.
 	{ key = "workshop", label = "TAB_WORKSHOP", icon = "Interface\\Icons\\Trade_Engineering" },
 }
+
+-- A registered API client may contribute one self-contained surface in a generic slot immediately
+-- before Workshop. The definitions live in the same canonical sequence as Olympus's own tabs, but
+-- are looked up explicitly because they do not have localized label keys or native list views.
+local API_SURFACE_VERSION = 1
+local API_SURFACE_LIMIT = 1 -- the narrow old window has room for one foreign bottom tab
+local TAB_BY_KEY = {}
+local API_SURFACES = {} -- [owner key] = the one definition registered for that API client
+local apiSurfaceCount = 0
+UI.API_SURFACE_LIMIT = API_SURFACE_LIMIT
+for _, tab in ipairs(TABS) do TAB_BY_KEY[tab.key] = tab end
+
+local function TabLabel(tab)
+	if tab.apiSurface then return tab.label end
+	return L[tab.label]
+end
+
+local function TabTooltip(tab)
+	if tab.apiSurface then return tab.label end
+	return L[tab.label]
+end
+
+local function APISurfaceByTab(key)
+	local tab = TAB_BY_KEY[key]
+	return tab and tab.apiSurface and tab or nil
+end
+
+local function APISurfaceByOwner(ownerKey)
+	if type(ownerKey) ~= "string" then return nil end
+	return API_SURFACES[ownerKey:lower()]
+end
 
 -- The first of these files the client has (GetFileIDFromPath), or the last one.
 function UI.FirstTexture(paths)
@@ -108,7 +153,9 @@ function UI.AddTab(t)
 	if type(t.build) == "function" and not (ns.Views and ns.Views.Register and ns.Views.Register(t.key, t.build)) then return false, "view" end
 	local at = #TABS + 1
 	for i, x in ipairs(TABS) do if t.after and x.key == t.after then at = i + 1 end end
-	table.insert(TABS, at, { key = t.key, label = t.label, icon = t.icon })
+	local definition = { key = t.key, label = t.label, icon = t.icon }
+	table.insert(TABS, at, definition)
+	TAB_BY_KEY[t.key] = definition
 	added[t.key] = type(t.visible) == "function" and t.visible or function() return true end
 	if type(t.buttons) == "table" then addedButtons[t.key] = t.buttons end
 	if type(t.view) == "function" then addedViews[t.key] = t.view end
@@ -191,7 +238,7 @@ local BUTTONS = {
 	-- (1.1.5: each the Throne's people's alone: a guild master's Guild tab, or a councillor who is no
 	-- Hand, has none of them.)
 	throne = {
-		{ "THRONE_AGENDA", function() ns.King.AgendaPrompt() end, shown = function() return ns.King.ThroneShown() and ns.King.CanCall() end },
+		{ "THRONE_AGENDA", function() ns.King.AgendaPrompt("army") end, shown = function() return ns.King.ThroneShown() and ns.King.CanAgenda("army") end },
 		{ "COURT_BTN", function() ns.Court.Toggle() end, refresh = true, shown = function() return ns.King.IsKing() or ns.King.Preview() end,
 			label = function() return ns.Court.Holding() and L.COURT_BTN_CLOSE or L.COURT_BTN_OPEN end,
 			tooltip = function(tt)
@@ -289,7 +336,7 @@ local DETAIL_BUTTONS = {
 				tt:AddLine(L.KING_ARROW_GLOBAL_TIP, 1, 1, 1, true)
 			end },
 		{ "THRONE_CANCEL_AGENDA", function() ns.King.CancelAgendaButton() end,
-			shown = function() return ns.King.Agenda() ~= nil and ns.King.ThroneShown() and ns.King.CanCall() end },
+			shown = function() return ns.King.Agenda() ~= nil and ns.King.ThroneShown() and ns.King.CanAgenda("army") end },
 	},
 	-- The full roll call (0.9.9), right above Roll call: rounds on its own until nearly every addon
 	-- user answered; the same button stops it. Then the author's views, to see and try what only
@@ -325,11 +372,18 @@ table.insert(DETAIL_BUTTONS.realm, { "COUNCIL_ASK_BTN", function() ns.ShowDialog
 	shown = function() local c = ns.rdb and ns.rdb.council return type(c) == "table" and next(c.names or {}) ~= nil end })
 -- A councillor's own icon with their name (0.9.8, Workshop.lua; since 1.1.5 in the game's own
 -- chat, Borders.lua): the button shown to councillors alone.
--- 1.2: it opens the profile's Edit in this window once ProfileEdit.lua gives one (the icon picker
--- moved there, Workshop.IconPickerHost), the picker's own window until then.
+-- 1.2: it opens the profile's Edit in this window once ProfileEdit.lua gives one, the picker's own
+-- window until then. 1.2.4: the Icons section of his own page, "My profile", on the council icon
+-- (/oly council icon too); a councillor's alone, as the picker's window was.
 function UI.OpenIconPicker()
 	local PE = ns.ProfileEdit
-	if type(PE) == "table" and not PE.missing and type(PE.Open) == "function" then return PE.Open("icon") end
+	if type(PE) == "table" and not PE.missing and type(PE.Open) == "function" then
+		if not ns.IsHighCouncillor(ns.me) then
+			ns.Print(L.COUNCIL_ICON_ONLY)
+			return false
+		end
+		return PE.Open("icon")
+	end
 	return ns.Workshop.ShowIconPicker()
 end
 table.insert(DETAIL_BUTTONS.realm, { "COUNCIL_ICON_BTN", function() UI.OpenIconPicker() end,
@@ -398,6 +452,28 @@ local function FitText(fs, room, fonts) -- gp:lookups
 	fs:SetWidth(math.max(1, room))
 end
 
+-- (1.2.4's review) A column's title in its header, never over the next one: the old headers'
+-- templates draw it 8 from their left edge, and the next header starts 2 before this one's right
+-- edge (UI.Layout). A title wider than that room takes its language's short title (col.short,
+-- Views.COLUMNS: the narrow window, a longer language's words), and one still too wide is cut
+-- ("...") inside its own; one that fits keeps its own width, as before.
+UI.TITLE_INSET = 10
+local function FitColumnTitle(b, col, width)
+	b:SetText(L[col.key])
+	local fs = b.GetFontString and b:GetFontString()
+	if not fs then return end
+	local function Wide()
+		return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()
+	end
+	local room = math.max(1, width - UI.TITLE_INSET)
+	fs:SetWidth(0)
+	if Wide() > room and col.short then b:SetText(L[col.short]) end
+	if Wide() > room then
+		if fs.SetWordWrap then fs:SetWordWrap(false) end
+		fs:SetWidth(room)
+	end
+end
+
 -- Header lines end this far from the window's right edge: the big line keeps clear of
 -- the close button column (24 wide on Forever, 32 on the Classic clients), the small one
 -- sits lower and only keeps off the border.
@@ -425,10 +501,10 @@ end
 
 -- The anchor of tab i (prev is tab i - 1) under `frame`, or beside it for "side" (the HD
 -- window's icon tabs, placed like the Guild & Communities window's in CommunitiesFrame.xml).
-function UI.TabAnchor(style, i, frame, prev)
+function UI.TabAnchor(style, i, frame, prev, sideGap)
 	if style == "side" then
 		if i == 1 then return "TOPLEFT", frame, "TOPRIGHT", 0, -SIDE_TOP end
-		return "TOPLEFT", prev, "BOTTOMLEFT", 0, -SIDE_GAP
+		return "TOPLEFT", prev, "BOTTOMLEFT", 0, -(sideGap or SIDE_GAP)
 	end
 	if style == "mainline" then
 		if i == 1 then return "TOPLEFT", frame, "BOTTOMLEFT", 5, 2 end
@@ -817,10 +893,155 @@ local function SideTabOnLeft(tab, left)
 	end
 end
 
+-- API-client callbacks do not belong to Olympus's own error report. Keep them behind pcall and
+-- log only the owner and lifecycle phase; one broken surface must not stop the window or another
+-- client's surface.
+local function APISurfaceCall(surface, phase, ...)
+	local fn = surface[phase]
+	if type(fn) ~= "function" then return true end
+	local ok, result = pcall(fn, ...)
+	if not ok then ns.Log("api surface %s: %s callback failed", tostring(surface.ownerKey), phase) end
+	return ok, result
+end
+
+local function APISurfaceVisible(surface)
+	if not surface or not surface.apiSurface then return true end
+	local ok, visible = APISurfaceCall(surface, "visible")
+	return ok and visible ~= false
+end
+
+-- A surface owns the whole content area below the title bar. Olympus continues to own the outer
+-- frame, portrait, help and close buttons, and the top-level tab rail.
+local function CreateAPISurfacePage(f, surface)
+	f.apiSurfaceViews = f.apiSurfaceViews or {}
+	local page = CreateFrame("Frame", nil, f)
+	local g = GEOMETRY[f.style]
+	page:SetPoint("TOPLEFT", f, "TOPLEFT", g.box.left, g.box.topNoCols or g.box.top)
+	page:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", g.box.right, g.buttons.y)
+	if f.listBox then page:SetFrameLevel(f.listBox:GetFrameLevel() + 3) end
+	page.style = f.style
+	page.apiSurfaceContext = { style = f.style, apiVersion = API_SURFACE_VERSION }
+	page:Hide()
+	f.apiSurfaceViews[surface.key] = page
+	return page
+end
+
+local function EnsureAPISurfacePage(f, surface)
+	local page = f.apiSurfaceViews and f.apiSurfaceViews[surface.key]
+	if not page or page.apiSurfaceBuildFailed then return false, page end
+	if not page.apiSurfaceBuilt then
+		if not APISurfaceCall(surface, "build", page, page.apiSurfaceContext) then
+			page.apiSurfaceBuildFailed = true
+			return false, page
+		end
+		page.apiSurfaceBuilt = true
+	end
+	return true, page
+end
+
+local function RefreshAPISurfacePage(f, surface)
+	local ok, page = EnsureAPISurfacePage(f, surface)
+	if not ok then return false end
+	return APISurfaceCall(surface, "refresh", page, page.apiSurfaceContext)
+end
+
+local function OldTabTemplates()
+	return UI.OldTabs()
+		and { "CharacterFrameTabButtonTemplate", "PanelTabButtonTemplate", "TabButtonTemplate" }
+		or { "PanelTabButtonTemplate", "CharacterFrameTabButtonTemplate", "TabButtonTemplate" }
+end
+
+-- Materialize one canonical definition in a window. The same path builds Olympus's native tabs
+-- and a surface registered after either window style already exists.
+local function AttachTabDefinition(f, definition)
+	if not TAB_BY_KEY[definition.key] then TAB_BY_KEY[definition.key] = definition end
+	if definition.apiSurface and not (f.apiSurfaceViews and f.apiSurfaceViews[definition.key]) then
+		CreateAPISurfacePage(f, definition)
+	end
+	local at = #f.tabs + 1
+	for i, candidate in ipairs(TABS) do
+		if candidate == definition then at = i break end
+	end
+	local serial = #f.tabs + 1
+	local tab
+	if f.style == "hd" then
+		local template
+		tab, template = SideTab(f)
+		local icon = definition.icon
+		if type(icon) == "function" then
+			local okIcon, result = pcall(icon)
+			icon = okIcon and result or nil
+		end
+		tab.Icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+		tab.tooltip = TabTooltip(definition)
+		tab:SetFrameLevel(f.tabLevel)
+		local function Select() ns.SafeCall("tab " .. definition.key, UI.SelectTab, definition.key) end
+		if template == "fallback" then tab:SetScript("OnClick", Select) else tab:HookScript("OnClick", Select) end
+		f.tabTemplate, f.tabStyle = template, "side"
+	else
+		for n, template in ipairs(OldTabTemplates()) do
+			local name = f:GetName() .. "Tab" .. n .. "_" .. serial
+			local okTab, result = pcall(CreateFrame, "Button", name, f, template)
+			if okTab and result and (result.Left or result.LeftActive or _G[name .. "Left"] or _G[name .. "LeftDisabled"]) then -- gp:lookups
+				tab = result
+				f.tabTemplate = template
+				break
+			elseif okTab and result then
+				result:Hide()
+			end
+		end
+		if not tab then
+			tab = Button(f, 80, 22)
+			tab.isFallback = true
+			f.tabTemplate = "fallback"
+		end
+		tab:SetText(TabLabel(definition))
+		if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 0) end
+		f.tabStyle = f.tabStyle or UI.TabStyle(tab)
+		tab:SetScript("OnClick", function() ns.SafeCall("tab " .. definition.key, UI.SelectTab, definition.key) end)
+	end
+	tab.key = definition.key
+	table.insert(f.tabs, at, tab)
+	for i, materialized in ipairs(f.tabs) do materialized:SetID(i) end
+	tab:SetPoint(UI.TabAnchor(f.tabStyle, at, f, f.tabs[at - 1]))
+	f.numTabs = #f.tabs
+	return tab
+end
+
 -- Whether `count` side tabs, `tabHeight` tall, fit down a window `height` tall, their art
 -- included.
 function UI.SideTabsFit(count, tabHeight, height)
 	return SIDE_TOP + count * tabHeight + (count - 1) * SIDE_GAP + SIDE_ART_BELOW <= height
+end
+
+-- A dense overflow rail grows from the bottom up. Contract only the empty gaps enough to keep its
+-- top art below the portrait; the tab buttons themselves remain Blizzard's normal 32 x 32.
+function UI.SideLeftGap(count, tabHeight, height)
+	if count <= 1 then return SIDE_GAP end
+	local room = height - SIDE_LEFT_UP - SIDE_LEFT_TOP_CLEAR - SIDE_ART_ABOVE - count * tabHeight
+	return math.max(0, math.min(SIDE_GAP, math.floor(room / (count - 1))))
+end
+
+local function SideRightGap(count, tabHeight, height)
+	if count <= 1 then return SIDE_GAP end
+	local room = height - SIDE_TOP - SIDE_ART_BELOW - count * tabHeight
+	return math.max(0, math.min(SIDE_GAP, math.floor(room / (count - 1))))
+end
+
+-- Once the canonical rail overflows, split it at the point that gives both sides the largest
+-- common gap. Prefer the right side on a tie, preserving the Communities window's normal seven
+-- tabs there whenever both columns can still keep Blizzard's full 20 px spacing.
+function UI.SideTabColumns(count, tabHeight, height)
+	if count <= 1 or UI.SideTabsFit(count, tabHeight, height) then return count, SIDE_GAP end
+	local bestRight, bestGap = 1, -1
+	for right = 1, count - 1 do
+		local left = count - right
+		local gap = math.min(SideRightGap(right, tabHeight, height), UI.SideLeftGap(left, tabHeight, height))
+		if gap > bestGap or (gap == bestGap and right > bestRight) then
+			bestRight, bestGap = right, gap
+		end
+	end
+	return bestRight, math.max(0, bestGap)
 end
 
 -- Blizzard's help button art, on every client we run on (the Guild & Communities window, the
@@ -854,7 +1075,15 @@ local function HelpButton(f) -- gp:lookups
 	b:SetHighlightTexture(UI.HELP_ICON, "ADD")
 	local highlight = b.GetHighlightTexture and b:GetHighlightTexture()
 	if highlight and highlight.SetAlpha then highlight:SetAlpha(0.2) end
-	b:SetScript("OnClick", function() ns.SafeCall("help", UI.ShowHelp) end)
+	b:SetScript("OnClick", function()
+		local surface = APISurfaceByTab(f.tab)
+		if surface and type(surface.help) == "function" then
+			local page = f.apiSurfaceViews and f.apiSurfaceViews[surface.key]
+			APISurfaceCall(surface, "help", page, page and page.apiSurfaceContext)
+		else
+			ns.SafeCall("help", UI.ShowHelp)
+		end
+	end)
 	-- The title bar still drags the window from there, as it did before the button.
 	b:RegisterForDrag("LeftButton")
 	b:SetScript("OnDragStart", function() f:StartMoving() end)
@@ -916,6 +1145,25 @@ function UI.Locked()
 	return V ~= nil and V.Is("outsider") == true
 end
 
+-- The portrait belongs to the Olympus shell. A registered surface may replace its picture while
+-- selected; every native page restores the Olympus emblem. Forever refuses texture-coordinate
+-- changes after a mask has been attached, so the mask and initial coordinates are applied once.
+local function ApplyPortrait(f, asset)
+	asset = asset or ns.LOGO
+	f.portraitAsset = asset
+	if not f.hasPortrait then return end
+	local portrait = f.portrait or f.Portrait or (f.PortraitContainer and f.PortraitContainer.portrait)
+	if portrait then
+		portrait:SetTexture(asset)
+		if not portrait.olympusMasked then portrait:SetTexCoord(0, 1, 0, 1) end
+		if portrait.SetMask and not portrait.olympusMasked then
+			portrait.olympusMasked = pcall(portrait.SetMask, portrait, "Interface\\CharacterFrame\\TempPortraitAlphaMask")
+		end
+	elseif f.SetPortraitToAsset then
+		pcall(f.SetPortraitToAsset, f, asset)
+	end
+end
+
 local function CreateMain(style)
 	local g = GEOMETRY[style]
 	local hd = style == "hd"
@@ -964,19 +1212,7 @@ local function CreateMain(style)
 	elseif f.TitleContainer and f.TitleContainer.TitleText then
 		f.TitleContainer.TitleText:SetText(L.TITLE)
 	end
-	if f.hasPortrait then
-		local portrait = f.portrait or f.Portrait or (f.PortraitContainer and f.PortraitContainer.portrait)
-		if portrait then
-			portrait:SetTexture(ns.LOGO)
-			-- (Its coords before its mask, once: a masked texture refuses new ones, Forever 1.60.)
-			if not portrait.olympusMasked then portrait:SetTexCoord(0, 1, 0, 1) end
-			if portrait.SetMask and not portrait.olympusMasked then
-				portrait.olympusMasked = pcall(portrait.SetMask, portrait, "Interface\\CharacterFrame\\TempPortraitAlphaMask")
-			end
-		elseif f.SetPortraitToAsset then
-			pcall(f.SetPortraitToAsset, f, ns.LOGO)
-		end
-	end
+	ApplyPortrait(f, ns.LOGO)
 	f.helpButton = HelpButton(f)
 	f.viewAs = ViewAsButton(f)
 
@@ -1040,7 +1276,8 @@ local function CreateMain(style)
 	f.colHeader:SetHeight(g.header.h)
 	if f.listBox then f.colHeader:SetFrameLevel(f.listBox:GetFrameLevel() + 2) end
 	f.colHeader.buttons = {}
-	for c = 1, 4 do
+	-- (1.2.4: five, the Census's average level among them; a layout of four hides the fifth.)
+	for c = 1, ns.Views.MAX_COLS or 4 do
 		local b = ColumnHeader(f, c)
 		b:SetHeight(g.header.h)
 		b:SetScript("OnClick", function(self)
@@ -1076,13 +1313,15 @@ local function CreateMain(style)
 	scroll:HookScript("OnScrollRangeChanged", function(self) ns.SafeCall("list place", UI.HoldPlace, f, self) end)
 	-- The player scrolls with the wheel: the list stays where he puts it (UI.Scrolled).
 	scroll:HookScript("OnMouseWheel", function() ns.SafeCall("list scrolled", UI.Scrolled, f) end)
-	f.views = {}
+	f.views, f.apiSurfaceViews = {}, {}
 	for _, t in ipairs(TABS) do
-		local v = CreateFrame("Frame", nil, scroll)
-		v:SetSize(10, 10)
-		v:Hide()
-		v.style = style -- rows are drawn in the window's look (Views.lua)
-		f.views[t.key] = v
+		if not t.apiSurface then
+			local v = CreateFrame("Frame", nil, scroll)
+			v:SetSize(10, 10)
+			v:Hide()
+			v.style = style -- rows are drawn in the window's look (Views.lua)
+			f.views[t.key] = v
+		end
 	end
 
 	-- Detail box (like "Guild Message Of The Day")
@@ -1142,66 +1381,9 @@ local function CreateMain(style)
 	f.tabs = {}
 	if hd then
 		-- Above the metal border, like the Communities window's (frameLevel 510).
-		local level = (f.NineSlice and f.NineSlice.GetFrameLevel and f.NineSlice:GetFrameLevel() or f:GetFrameLevel()) + 10
-		for i, t in ipairs(TABS) do
-			local tab, template = SideTab(f)
-			local icon = t.icon
-			if type(icon) == "function" then
-				local okIcon, res = pcall(icon)
-				icon = okIcon and res or nil
-			end
-			tab.Icon:SetTexture(icon or "Interface\\Icons\\INV_Misc_QuestionMark")
-			tab.tooltip = L[t.label] -- shown by RightSideTabMixin:OnEnter: the tab's name alone (1.1.6, the owner's call)
-			tab.key = t.key
-			tab:SetID(i)
-			tab:SetFrameLevel(level)
-			tab:SetPoint(UI.TabAnchor("side", i, f, f.tabs[i - 1]))
-			local function Select() ns.SafeCall("tab " .. t.key, UI.SelectTab, t.key) end
-			-- Hooked: the template's own click (its sound, the check) runs first.
-			if template == "fallback" then tab:SetScript("OnClick", Select) else tab:HookScript("OnClick", Select) end
-			f.tabs[i] = tab
-			f.tabTemplate = template
-		end
-		f.tabStyle = "side"
-	else
-		-- Tab templates differ between clients. Ours look like the Friends window's tabs
-		-- (Friends, Who, Guild, Raid): the older tab with small text where Blizzard's is one
-		-- (the Classic clients, Anniversary included), the atlas one where it is not (Forever).
-		-- The first template that really builds a tab is used; otherwise a plain button, its
-		-- selection marked by us.
-		local templates = UI.OldTabs()
-			and { "CharacterFrameTabButtonTemplate", "PanelTabButtonTemplate", "TabButtonTemplate" }
-			or { "PanelTabButtonTemplate", "CharacterFrameTabButtonTemplate", "TabButtonTemplate" }
-		for i, t in ipairs(TABS) do
-			local tab
-			for n, template in ipairs(templates) do
-				local name = f:GetName() .. "Tab" .. n .. "_" .. i
-				local okTab, res = pcall(CreateFrame, "Button", name, f, template)
-				if okTab and res and (res.Left or res.LeftActive or _G[name .. "Left"] or _G[name .. "LeftDisabled"]) then -- gp:lookups
-					tab = res
-					UI.tabTemplate = template
-					break
-				elseif okTab and res then
-					res:Hide()
-				end
-			end
-			if not tab then
-				tab = Button(f, 80, 22)
-				tab.isFallback = true
-				UI.tabTemplate = "fallback"
-			end
-			tab:SetID(i)
-			tab:SetText(L[t.label])
-			if PanelTemplates_TabResize then pcall(PanelTemplates_TabResize, tab, 0) end
-			UI.tabStyle = UI.TabStyle(tab)
-			tab:SetPoint(UI.TabAnchor(UI.tabStyle, i, f, f.tabs[i - 1]))
-			tab:SetScript("OnClick", function() ns.SafeCall("tab " .. t.key, UI.SelectTab, t.key) end)
-			tab.key = t.key
-			f.tabs[i] = tab
-		end
-		f.tabTemplate, f.tabStyle = UI.tabTemplate, UI.tabStyle
+		f.tabLevel = (f.NineSlice and f.NineSlice.GetFrameLevel and f.NineSlice:GetFrameLevel() or f:GetFrameLevel()) + 10
 	end
-	f.numTabs = #TABS
+	for _, t in ipairs(TABS) do AttachTabDefinition(f, t) end
 
 	local elapsed = 0
 	f:SetScript("OnUpdate", function(_, dt)
@@ -1227,8 +1409,15 @@ local function CreateMain(style)
 		if person then person:Hide() end
 		-- (The Chat tab goes with it: its boxes let go of the keyboard.)
 		if ChatPaneReady() then ns.ChatWindow.Detach(self) end
+		-- (1.2.4: and the person page shown, for what it held: ProfileLeft.)
+		if self == main then ProfileLeft(playerProfile) end
 	end)
-	f:SetScript("OnSizeChanged", function(self) if self == main then UI.Layout() end end)
+	-- (1.2.4: his own page, "My profile", drawn again for its new room: its Icons fill it.)
+	f:SetScript("OnSizeChanged", function(self)
+		if self ~= main then return end
+		UI.Layout()
+		if UI.OwnProfileShown() then UI.RefreshSoon() end
+	end)
 	return f
 end
 
@@ -1245,6 +1434,88 @@ local function UseStyle(style)
 	end
 	UI.tabTemplate, UI.tabStyle = main.tabTemplate, main.tabStyle
 	return main
+end
+
+local function Asset(value)
+	return (type(value) == "string" and value ~= "") or (type(value) == "number" and value > 0)
+end
+
+-- Register the one page assigned to an API handle. The owner is an opaque session-local slot made
+-- by API.lua, not the addon's name or consent key. Copy the specification so a caller cannot change
+-- the tab rail or callback contract after registration.
+function UI.RegisterAPISurface(ownerKey, spec)
+	if type(ownerKey) ~= "string" or ownerKey == "" or #ownerKey > 64 or not ownerKey:match("^[%w][%w_.:%-]*$") then
+		return false, "invalid-owner"
+	end
+	local owner = ownerKey:lower()
+	if API_SURFACES[owner] then return false, "registered" end
+	if TAB_BY_KEY[owner] then return false, "reserved-owner" end
+	if apiSurfaceCount >= API_SURFACE_LIMIT then return false, "surface-full" end
+	if type(spec) ~= "table" then return false, "invalid-spec" end
+	if type(spec.label) ~= "string" or #spec.label == 0 or #spec.label > 96 then return false, "invalid-label" end
+	if not Asset(spec.icon) then return false, "invalid-icon" end
+	if spec.portrait ~= nil and not Asset(spec.portrait) then return false, "invalid-portrait" end
+	if type(spec.build) ~= "function" then return false, "invalid-build" end
+	if spec.refresh ~= nil and type(spec.refresh) ~= "function" then return false, "invalid-refresh" end
+	if spec.visible ~= nil and type(spec.visible) ~= "function" then return false, "invalid-visible" end
+	if spec.help ~= nil and type(spec.help) ~= "function" then return false, "invalid-help" end
+	if spec.availableWhenLocked ~= nil and type(spec.availableWhenLocked) ~= "boolean" then
+		return false, "invalid-locked-availability"
+	end
+
+	local definition = {
+		apiSurface = true,
+		ownerKey = owner,
+		key = owner,
+		label = spec.label,
+		icon = spec.icon,
+		portrait = spec.portrait,
+		build = spec.build,
+		refresh = spec.refresh,
+		visible = spec.visible,
+		help = spec.help,
+		availableWhenLocked = spec.availableWhenLocked == true,
+	}
+	local at = #TABS + 1
+	for i, tab in ipairs(TABS) do
+		if tab.key == "workshop" then at = i break end
+	end
+	table.insert(TABS, at, definition)
+	TAB_BY_KEY[owner] = definition
+	API_SURFACES[owner] = definition
+	apiSurfaceCount = apiSurfaceCount + 1
+	for _, frame in pairs(frames) do AttachTabDefinition(frame, definition) end
+	if main and main:IsShown() then UI.Refresh() end
+	return true
+end
+
+function UI.OpenAPISurface(ownerKey)
+	local surface = APISurfaceByOwner(ownerKey)
+	if not surface then return false, "unregistered" end
+	return UI.SelectTab(surface.key)
+end
+
+function UI.ToggleAPISurface(ownerKey)
+	local surface = APISurfaceByOwner(ownerKey)
+	if not surface then return false, "unregistered" end
+	if main and main:IsShown() and main.tab == surface.key then
+		main:Hide()
+		return true
+	end
+	return UI.SelectTab(surface.key)
+end
+
+function UI.RefreshAPISurface(ownerKey)
+	if not APISurfaceByOwner(ownerKey) then return false, "unregistered" end
+	-- Refresh also re-evaluates visible(), even while a different page is selected.
+	if main and main:IsShown() then UI.Refresh() end
+	return true
+end
+
+function UI.IsAPISurfaceOpen(ownerKey)
+	local surface = APISurfaceByOwner(ownerKey)
+	if not surface then return false, "unregistered" end
+	return main ~= nil and main:IsShown() and main.tab == surface.key
 end
 
 -- The bottom buttons share the window width: three on a tab (four on the Games tab), two on the
@@ -1312,11 +1583,13 @@ function UI.LayoutTabs()
 		if tab:IsShown() then shown[#shown + 1] = tab end
 	end
 	if #shown == 0 then return end
-	local left, onLeft = {}, {}
+	local left, onLeft, sideGap = {}, {}, SIDE_GAP
 	if main.tabStyle == "side" then
 		local height, tabHeight = main:GetHeight() or 0, shown[1]:GetHeight() or 0
 		if height > 0 and tabHeight > 0 then
-			while not UI.SideTabsFit(#shown, tabHeight, height) do
+			local rightCount
+			rightCount, sideGap = UI.SideTabColumns(#shown, tabHeight, height)
+			while #shown > rightCount do
 				local tab = table.remove(shown)
 				if not tab then break end
 				table.insert(left, 1, tab)
@@ -1331,14 +1604,14 @@ function UI.LayoutTabs()
 	end
 	for i, tab in ipairs(shown) do
 		tab:ClearAllPoints()
-		tab:SetPoint(UI.TabAnchor(main.tabStyle, i, main, shown[i - 1]))
+		tab:SetPoint(UI.TabAnchor(main.tabStyle, i, main, shown[i - 1], sideGap))
 	end
 	for i, tab in ipairs(left) do
 		tab:ClearAllPoints()
 		if i == 1 then
 			tab:SetPoint("BOTTOMRIGHT", main, "BOTTOMLEFT", 0, SIDE_LEFT_UP)
 		else
-			tab:SetPoint("BOTTOMRIGHT", left[i - 1], "TOPRIGHT", 0, SIDE_GAP)
+			tab:SetPoint("BOTTOMRIGHT", left[i - 1], "TOPRIGHT", 0, sideGap)
 		end
 	end
 	if main.tabStyle == "side" then return end
@@ -1372,13 +1645,33 @@ local function FitHeader()
 	if main.headerHover then main.headerHover:SetWidth(math.max(40, room - HEADER_RIGHT)) end
 end
 
+-- The list's width in the window as it is now, and how far `n` strips of page navigation push it down.
+local function ListWidth()
+	local g = GEOMETRY[main.style]
+	return main:GetWidth() - g.scroll.left + (main.scrollRight or g.scroll.right) - 2
+end
+local function StripsHeight(n) return n > 0 and n * ns.Views.SUBTAB_STYLE.height + 3 or 0 end
+
+-- 1.2.4: the room a page's list has in the window as it is now, under `strips` strips of page
+-- navigation (UI.Layout's, without column titles or a page search): its width, the height in sight,
+-- and whether its rows are the HD look's. "My profile"'s Icons lays its grid out in it
+-- (ProfileEdit.lua), before the layout for its page is done. nil before the window is made.
+function UI.ListRoom(strips)
+	if not main then return nil end
+	local g = GEOMETRY[main.style]
+	local n = math.max(0, math.floor(tonumber(strips) or 0))
+	return ListWidth(), (main:GetHeight() or 0) + g.scroll.topNoCols - StripsHeight(n) - g.scroll.bottom, main.style == "hd"
+end
+
 -- Positions that depend on the window width (buttons, columns, list width) and on
 -- membership (the Join screen has no column titles).
 local function DrawPageNavigation()
 	local g = GEOMETRY[main.style]
-	local page = main.pageNavTab == main.tab and not playerProfile and not UI.Locked()
+	-- (1.2.4: a person page has no strip, but the player's own, "My profile": its sections.)
+	local page = not APISurfaceByTab(main.tab) and main.pageNavTab == main.tab
+		and (not playerProfile or UI.OwnProfileShown()) and not UI.Locked()
 	local lines = page and main.pageNavLines or {}
-	local width = main:GetWidth() - g.scroll.left + (main.scrollRight or g.scroll.right) - 2
+	local width = ListWidth()
 	local searchHeight = 0
 	main.pageSearchHolders = main.pageSearchHolders or {}
 	for tab, holder in pairs(main.pageSearchHolders) do
@@ -1410,28 +1703,28 @@ local function DrawPageNavigation()
 		row:Show()
 	end
 	for i = #lines + 1, #main.pageNavRows do main.pageNavRows[i]:Hide() end
-	return searchHeight + (#lines > 0 and #lines * ns.Views.SUBTAB_STYLE.height + 3 or 0)
+	return searchHeight + StripsHeight(#lines)
 end
 
 function UI.Layout()
 	if not main then return end
 	local g = GEOMETRY[main.style]
-	local w = main:GetWidth()
 	LayoutButtons()
 	LayoutDetailButtons()
 	FitHeader()
 	main.layoutLocked = UI.Locked()
-	local hasCols = not playerProfile and not main.layoutLocked and ns.Views.COLUMNS[main.tab] ~= nil and main.tab == "census"
+	local surface = APISurfaceByTab(main.tab)
+	local hasCols = not surface and not playerProfile and not main.layoutLocked and ns.Views.COLUMNS[main.tab] ~= nil and main.tab == "census"
 	main.colHeader:SetShown(hasCols)
 	-- The Chat tab: the header's counts, the list and the detail box give their place to its parts.
-	local chat = not playerProfile and not main.layoutLocked and main.tab == "chat" and ChatPaneReady()
+	local chat = not surface and not playerProfile and not main.layoutLocked and main.tab == "chat" and ChatPaneReady()
 	local navHeight = DrawPageNavigation()
 	for _, key in ipairs({ "total", "sub", "listBox", "scroll", "detail" }) do
-		if main[key] then main[key]:SetShown(not chat) end
+		if main[key] then main[key]:SetShown(not chat and not surface) end
 	end
 	-- The count's hover and the page answer describe tabs, not a player profile.
-	if main.headerHover then main.headerHover:SetShown(not chat and not playerProfile) end
-	if main.pageHelp then main.pageHelp:SetShown(not playerProfile) end
+	if main.headerHover then main.headerHover:SetShown(not chat and not surface and not playerProfile) end
+	if main.pageHelp then main.pageHelp:SetShown(not surface and not playerProfile) end
 	-- The HD list box starts right under the column titles, higher without them.
 	if main.listBox then
 		main.listBox:ClearAllPoints()
@@ -1442,7 +1735,7 @@ function UI.Layout()
 	main.scroll:ClearAllPoints()
 	main.scroll:SetPoint("TOPLEFT", g.scroll.left, hasCols and g.scroll.top or g.scroll.topNoCols - navHeight)
 	main.scroll:SetPoint("BOTTOMRIGHT", right, g.scroll.bottom)
-	local listW = w - g.scroll.left + right - 2
+	local listW = ListWidth()
 	for _, v in pairs(main.views) do v:SetWidth(listW) end
 	if hasCols then
 		local layout = ns.Views.COLUMNS[main.tab]
@@ -1456,7 +1749,7 @@ function UI.Layout()
 				-- The old headers' middle part is sized by Blizzard's code; the HD ones stretch.
 				if (main.style == "old" or b.whoTemplate) and WhoFrameColumn_SetWidth then pcall(WhoFrameColumn_SetWidth, b, width) else b:SetWidth(width) end -- gp:own-templates
 				b:SetWidth(width)
-				b:SetText(L[col.key])
+				FitColumnTitle(b, col, width)
 				b.sortKey = col.sort
 				b:Show()
 				x = x + width - 2
@@ -1572,13 +1865,33 @@ end
 -- Shows tab `key` in the window in use, and the window if it is closed. `focus`: the id of the
 -- row it opens on (Views.lua: a guild clicked in the Census), in sight (UI.KeepPlace).
 local function ShowTab(key, focus)
+	local definition = TAB_BY_KEY[key]
+	if not definition then return false, "unknown-tab" end
+	local surface = definition.apiSurface and definition or nil
+	if surface then
+		if UI.Locked() and not surface.availableWhenLocked then return false, "unavailable" end
+		if not APISurfaceVisible(surface) then return false, "hidden" end
+		if not EnsureAPISurfacePage(main, surface) then
+			for _, tab in ipairs(main.tabs) do if tab.key == key then tab:Hide() break end end
+			UI.LayoutTabs()
+			return false, "build-failed"
+		end
+	end
+	-- Only a successful destination leaves a profile. A rejected or hidden surface must not make the
+	-- page currently in front of the player disappear.
+	LeaveProfile()
 	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
 	main.tab = key
-	for k, v in pairs(main.views) do v:SetShown(k == key) end
-	main.scroll:SetScrollChild(main.views[key])
-	main.scroll:SetVerticalScroll(0)
+	for k, v in pairs(main.views) do v:SetShown(not surface and k == key) end
+	for k, v in pairs(main.apiSurfaceViews or {}) do v:SetShown(surface ~= nil and k == key) end
+	if not surface then
+		main.scroll:SetScrollChild(main.views[key])
+		main.scroll:SetVerticalScroll(0)
+	end
 	-- A tab opened: its list starts at the top, or at the row it opens on (UI.KeepPlace).
 	main.page, main.wantScroll, main.focus = nil, nil, focus
+	if surface then SetParchment(false) end
+	ApplyPortrait(main, surface and surface.portrait or ns.LOGO)
 	for i, tab in ipairs(main.tabs) do
 		if main.tabStyle == "side" then
 			-- The HD window's icon tabs: the selected one stays checked.
@@ -1604,6 +1917,7 @@ local function ShowTab(key, focus)
 	UI.Layout()
 	if not main:IsShown() then main:Show() end
 	UI.Refresh()
+	return true
 end
 
 -- Generic UI clicks must not run restricted actions. In particular, SendWho is restricted
@@ -1618,8 +1932,8 @@ end
 -- Guild tab): their text (the side tabs: tooltip and icon) set again when it changed.
 function UI.RelabelTabs()
 	if not main then return end
-	for i, tab in ipairs(main.tabs) do
-		local t = TABS[i]
+	for _, tab in ipairs(main.tabs) do
+		local t = TAB_BY_KEY[tab.key]
 		if t and t.labelOf then
 			local key = t.labelOf()
 			if tab.labelKey ~= key then
@@ -1640,12 +1954,10 @@ end
 -- Opening the window picks its look again, from the guild window in use (UI.Style).
 -- Called from clicks and slash commands. `focus`: see ShowTab.
 function UI.SelectTab(key, focus)
-	-- A tab is an explicit destination. If a person page was open, do not leave a hidden
-	-- profile in front of the newly selected tab; its Back history belongs only to that page.
-	playerProfile, playerReturn, playerTrail = nil, nil, {}
 	if not (main and main:IsShown()) then UseStyle(UI.Style()) end
-	ShowTab(key, focus)
-	UI.Clicked()
+	local ok, reason = ShowTab(key, focus)
+	if ok then UI.Clicked() end
+	return ok, reason
 end
 
 -- Whose census this is: our realm, or the realms sharing it ("A + B").
@@ -1671,7 +1983,15 @@ UI.PLACE_HOLD = 1  -- seconds a redraw's place is given again when the client me
 -- Which page of its tab the list shows: another one starts at the top.
 local function PageOf(tab, locked)
 	if locked then return "join" end
-	if playerProfile then return "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm)) end
+	if playerProfile then
+		local id = "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm))
+		-- (1.2.4: his own page's sections, "My profile", each a page of its own, each from the top.)
+		local PE = ns.ProfileEdit
+		if UI.OwnProfileShown() and type(PE) == "table" and not PE.missing and type(PE.Section) == "function" then
+			id = id .. "#" .. tostring((PE.Section()))
+		end
+		return id
+	end
 	local sub
 	if tab == "realm" then
 		-- (1.1: our guild's members page, Members.lua, a page of its own.)
@@ -1701,6 +2021,12 @@ UI.PROFILE_BACK_MAX = 8
 -- "Ann-Other", a player of another realm of the group).
 local function ProfileKey(p) return ns.Fold(tostring(ns.FullName(p.name, p.realm))) end
 
+-- 1.2.4: the person page shown is the player's own, "My profile" (ProfileEdit.lua): its section
+-- strip under the header, its sections as pages, its portrait in the detail box.
+function UI.OwnProfileShown()
+	return playerProfile ~= nil and ProfileKey(playerProfile) == ns.Fold(tostring(ns.me))
+end
+
 -- A person selected from the normal Census/Realm/inspection lists occupies this same window.
 -- The Arena companion has its own profile and never calls this path. Keep the normal tab's
 -- exact subpage, search state and scroll offset so Back returns to what the player was reading.
@@ -1711,7 +2037,14 @@ local function ProfileKey(p) return ns.Fold(tostring(ns.FullName(p.name, p.realm
 -- with), not swapped for the other way in's, often poorer one.
 function UI.OpenPlayerProfile(p)
 	if type(p) ~= "table" or type(p.name) ~= "string" or p.name == "" or not ns.IsMember() then return false end
-	if not (main and main:IsShown()) then UI.SelectTab(main and main.tab or "census") end
+	-- The profile renderer requires a native list view and its Back state. If a contributed surface
+	-- was last selected, start from Census instead of leaving two full-canvas pages active.
+	if not (main and main:IsShown()) then
+		local key = main and not APISurfaceByTab(main.tab) and main.tab or "census"
+		if not UI.SelectTab(key) then return false end
+	elseif APISurfaceByTab(main.tab) and not UI.SelectTab("census") then
+		return false
+	end
 	local scroll = main.scroll:GetVerticalScroll() or 0
 	if not playerProfile then
 		playerReturn = {
@@ -1726,6 +2059,7 @@ function UI.OpenPlayerProfile(p)
 	else
 		playerTrail[#playerTrail + 1] = { person = playerProfile, scroll = scroll }
 		if #playerTrail > UI.PROFILE_BACK_MAX then table.remove(playerTrail, 1) end
+		ProfileLeft(playerProfile)
 	end
 	playerProfile = p
 	main.scroll:SetVerticalScroll(0)
@@ -1741,6 +2075,7 @@ function UI.CurrentPlayerProfile() return playerProfile end
 function UI.BackFromPlayerProfile()
 	if not playerProfile then return false end
 	local prior = table.remove(playerTrail)
+	ProfileLeft(playerProfile)
 	if prior then
 		-- The person page before this one, where it was scrolled to.
 		playerProfile = prior.person
@@ -1852,6 +2187,48 @@ local function Clock()
 	return ok and type(ms) == "number" and ms or nil
 end
 
+-- 1.2.4: the player's own page, "My profile" (ProfileEdit.Page): his portrait in the detail box,
+-- in the frame others see (art = { frame, emblem }: ProfileEdit.DressPortrait dresses it), its art
+-- inside the box (its size so that the art's reach above and below fits DETAIL_H - 8,
+-- Borders.PortraitReach) and the box's words to its right. Made the first time on each look's
+-- window (HonorsNet.NewPortrait); hidden on every other page, the words back in their place.
+UI.OWN_PORTRAIT_MAX = 44
+local function OwnPortraitSize()
+	local Bd = ns.Borders
+	local reach = type(Bd) == "table" and not Bd.missing and type(Bd.PortraitReach) == "function" and Bd.PortraitReach or nil
+	for size = UI.OWN_PORTRAIT_MAX, 16, -1 do
+		local r = reach and reach(size) or { top = 0, bottom = 0 }
+		if size + r.top + r.bottom <= DETAIL_H - 8 then return size end
+	end
+	return 16
+end
+local function ShowOwnPortrait(art)
+	local HN, PE = ns.HonorsNet, ns.ProfileEdit
+	local rig = main.ownPortrait
+	if art and not rig and type(HN) == "table" and type(HN.NewPortrait) == "function" and type(PE) == "table" and type(PE.DressPortrait) == "function" then
+		local size = OwnPortraitSize()
+		rig = HN.NewPortrait(main.detail, size)
+		rig.size = rig.size or size
+		local reach = rig.reach or { left = 0, right = 0, top = 0, bottom = 0 }
+		rig.slot:SetPoint("TOPLEFT", main.detail, "TOPLEFT", 6 + reach.left, -(4 + reach.top))
+		main.ownPortrait = rig
+	end
+	local shown = art ~= nil and rig ~= nil
+	if rig then rig.slot:SetShown(shown) end
+	if (main.ownPortraitShown == true) ~= shown then
+		main.ownPortraitShown = shown
+		main.detailTitle:ClearAllPoints()
+		if shown then
+			local reach = rig.reach or { left = 0, right = 0 }
+			main.detailTitle:SetPoint("TOPLEFT", 6 + reach.left + rig.size + reach.right + 8, -6)
+		else
+			main.detailTitle:SetPoint("TOPLEFT", 8, -6)
+		end
+		main.detailTitle:SetPoint("TOPRIGHT", -26, -6) -- (the page's "?" at its end)
+	end
+	if shown then ns.SafeCall("my profile portrait", PE.DressPortrait, rig, art) end
+end
+
 function UI.Refresh()
 	if not main or not main:IsShown() then return end
 	UI.lastRedraw = GetTime()
@@ -1870,10 +2247,89 @@ function UI.Refresh()
 		local views = AuthorView()
 		local previewing = views ~= nil and views.Previewing() == true
 		local inert = locked and ns.IsMember() -- (locked by the preview alone)
-		if locked and playerProfile then playerProfile, playerReturn, playerTrail = nil, nil, {} end
+		if locked and playerProfile then LeaveProfile() end
 		-- Joined or left a guild while the window is open: lay it out again.
 		if locked ~= main.layoutLocked then UI.Layout() end
-		local lines, title, text, profileButtons, profileHeader, profileSubheader
+			-- Role-only native pages keep their existing rules. A contributed surface decides only
+			-- whether its own page is available; it never participates in Olympus's role-preview model.
+			local only = {
+				chat = ChatTabVisible(), -- (1.1.1)
+				throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false, -- (1.1.5: or a guild master's Guild tab)
+				vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
+				treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false, -- (1.1: the dues' button too)
+				workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
+			}
+			for key, visible in pairs(added) do
+				local okVisible, shows = pcall(visible)
+				only[key] = okVisible and shows == true
+			end
+			if views and not locked then
+				for _, tab in ipairs(main.tabs) do
+					local definition = TAB_BY_KEY[tab.key]
+					if not (definition and definition.apiSurface) then
+						local shows = views.TabShown(tab.key, only[tab.key])
+						if shows ~= nil then only[tab.key] = shows end
+					end
+				end
+			end
+
+			local tabsWere = main.tabs[1] and main.tabs[1]:IsShown()
+			local function LayoutAvailableTabs()
+				local surfaceShown = {}
+				local lockedSurfaceAvailable = false
+				-- The ordinary locked view has no tab rail. If a contributed page is explicitly
+				-- available there, keep Census as its route back to the Join screen and show the
+				-- contributed page beside it. A hidden or failed page must not create an empty rail.
+				if locked then
+					for _, tab in ipairs(main.tabs) do
+						local definition = TAB_BY_KEY[tab.key]
+						if definition and definition.apiSurface and definition.availableWhenLocked then
+							local page = main.apiSurfaceViews and main.apiSurfaceViews[definition.key]
+							local shown = not (page and page.apiSurfaceBuildFailed) and APISurfaceVisible(definition)
+							surfaceShown[definition.key] = shown
+							if shown then lockedSurfaceAvailable = true end
+						end
+					end
+				end
+				for _, tab in ipairs(main.tabs) do
+					local definition = TAB_BY_KEY[tab.key]
+					local shown = definition ~= nil and (not locked or tab.key == "census" and lockedSurfaceAvailable
+						or definition.apiSurface and definition.availableWhenLocked)
+					if shown and definition.apiSurface then
+						if surfaceShown[definition.key] == nil then
+							local page = main.apiSurfaceViews and main.apiSurfaceViews[definition.key]
+							surfaceShown[definition.key] = not (page and page.apiSurfaceBuildFailed)
+								and APISurfaceVisible(definition)
+						end
+						shown = surfaceShown[definition.key]
+						surfaceShown[definition.key] = shown
+					elseif shown then
+						shown = only[tab.key] ~= false
+					end
+					tab:SetShown(shown)
+				end
+				UI.RelabelTabs()
+				UI.LayoutTabs()
+				return surfaceShown
+			end
+
+			local selected = TAB_BY_KEY[main.tab]
+			if not selected then return ShowTab("census") end
+			if selected.apiSurface then
+				local surfaceShown = LayoutAvailableTabs()
+				if surfaceShown[selected.key] ~= true then return ShowTab("census") end
+				SetButtons(main.buttons, nil)
+				SetButtons(main.detailButtons, nil)
+				ChatPane(false)
+				if main.viewAs then main.viewAs:Hide() end
+				SetParchment(false)
+				ShowOwnPortrait(nil)
+				UI.Layout()
+				RefreshAPISurfacePage(main, selected)
+				if not locked and not tabsWere then ns.SafeCall("issue reporter", ClearOfIssueReporter, MainClearOfIssueReporter) end
+				return
+			end
+		local lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt
 		if locked then
 			-- Not an Olympus member yet: the only thing on offer is joining one.
 			lines = ns.Views.RecruitLines()
@@ -1883,7 +2339,8 @@ function UI.Refresh()
 			main.total:SetText(header)
 			main.sub:SetText(sub)
 		elseif playerProfile and ns.PlayerProfile and ns.PlayerProfile.Build then
-			lines, title, text, profileButtons, profileHeader, profileSubheader = ns.PlayerProfile.Build(playerProfile)
+			-- (1.2.4: his own page, "My profile", gives its portrait's art too: ShowOwnPortrait.)
+			lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt = ns.PlayerProfile.Build(playerProfile)
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
 		else
@@ -1922,36 +2379,13 @@ function UI.Refresh()
 		UI.KeepPlace(content, offset, click, PageOf(main.tab, locked), focus)
 		main.detailTitle:SetText(title or "")
 		main.detailText:SetText(text or "")
+		ShowOwnPortrait(not locked and playerProfile and profileArt or nil)
 		local recruit = inert and InertButtons(RECRUIT_BUTTONS) or RECRUIT_BUTTONS
 		SetButtons(main.buttons, locked and recruit or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
-		local tabsWere = main.tabs[1] and main.tabs[1]:IsShown()
-		-- The Throne only for the King, the Workshop only for the addon's author (and their
-		-- test builds, King.Preview and Workshop.Preview).
-		local only = {
-			chat = ChatTabVisible(), -- (1.1.1)
-			throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false, -- (1.1.5: or a guild master's Guild tab)
-			vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
-			treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false, -- (1.1: the dues' button too)
-			workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
-		}
-		-- (1.2: the tabs UI.AddTab added, each by its own visible(); one that fails is hidden.)
-		for key, visible in pairs(added) do
-			local okVisible, shows = pcall(visible)
-			only[key] = okVisible and shows == true
-		end
-		-- 1.2 (ViewAs.lua): every tab for the author in his own view (he works as part of the council
-		-- and debugs everything: each page still shows what his own client may), a role's tabs in
-		-- its preview. Presentation alone: no page's own rights change.
-		if views and not locked then
-			for _, tab in ipairs(main.tabs) do
-				local shows = views.TabShown(tab.key, only[tab.key])
-				if shows ~= nil then only[tab.key] = shows end
-			end
-		end
+			-- Preserve the internal tab contract: its builder runs before a role or surface rule sends
+			-- the window back to Census (some builders create state used by the next interaction).
 		if only[main.tab] == false then return ShowTab("census") end
-		for _, tab in ipairs(main.tabs) do tab:SetShown(not locked and only[tab.key] ~= false) end
-		UI.RelabelTabs()
-		UI.LayoutTabs()
+			LayoutAvailableTabs()
 		-- The Chat tab (ChatWindow.lua) over the list's place while it is the one shown.
 		ChatPane(not locked and not playerProfile and main.tab == "chat")
 		local detail = not locked and not playerProfile and Shown(DETAIL_BUTTONS[view]) or nil
@@ -1986,8 +2420,8 @@ function UI.OpenDocked(host, tab, heightOnly, style)
 	main:SetSize(UI.DockSize(host:GetWidth(), host:GetHeight(), heightOnly, SocialSize()))
 	DockTo(host)
 	main.docked = true
-	playerProfile, playerReturn, playerTrail = nil, nil, {}
-	ShowTab(tab or main.tab or "census")
+	local ok = ShowTab(tab or main.tab or "census")
+	if not ok then ShowTab("census") end
 	UI.Clicked()
 end
 
@@ -2524,7 +2958,8 @@ function UI.Toggle()
 		main:Hide()
 		return
 	end
-	UI.SelectTab(main and main.tab or "census")
+	local ok = UI.SelectTab(main and main.tab or "census")
+	if not ok then UI.SelectTab("census") end
 end
 
 -- Reports come in bursts (every guild answers a census request within seconds, a patrol
@@ -2570,7 +3005,31 @@ function UI.FilterChanged(tab, fromTop)
 	UI.RefreshSoon()
 end
 
-ns.On("DATA_CHANGED", function() UI.RefreshSoon() end)
+-- The open chat has its own message/authority refresh. Background census traffic must not
+-- rebuild the whole main window for every packet; keep one pending summary refresh at most.
+UI.CHAT_DATA_EVERY = 60
+local chatDataAt, chatDataPending = -math.huge, false
+function UI.DataChanged()
+	if not main or not main:IsShown() then return end
+	if main.tab ~= "chat" or playerProfile or not ns.IsMember() or main.layoutLocked then return UI.RefreshSoon() end
+	local now = GetTime()
+	if now < chatDataAt then chatDataAt = -math.huge end
+	if now - chatDataAt >= UI.CHAT_DATA_EVERY then
+		chatDataAt = now
+		return UI.RefreshSoon()
+	end
+	if chatDataPending then return end
+	chatDataPending = true
+	ns.After(UI.CHAT_DATA_EVERY - (now - chatDataAt), "chat census summary", function()
+		chatDataPending = false
+		if main and main:IsShown() and main.tab == "chat" and not playerProfile
+			and GetTime() - chatDataAt >= UI.CHAT_DATA_EVERY then
+			chatDataAt = GetTime()
+			UI.RefreshSoon()
+		end
+	end)
+end
+ns.On("DATA_CHANGED", UI.DataChanged)
 ns.On("MAP_TOGGLED", function() UI.Refresh() end)
 ns.On("INSPECT_CHANGED", function() if main and ViewOf(main.tab) == "heraldry" then UI.RefreshSoon() end end)
 -- Layers show in the Realm tab, and the King's layer line tops the Census and the Realm.

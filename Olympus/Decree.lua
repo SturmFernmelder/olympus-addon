@@ -33,6 +33,9 @@ local L = ns.L
 --   D1 over GUILD       a guild decree: a Royal decree or a Tabard inspection, from our guild's
 --                       own master; a Call to Arms or a Muster, from one of our guild's officers
 --                       (clients before 1.2.3 hear D1 on the channel alone: theirs never shows it)
+-- 1.2.4: its own verified Heraldry correspondent may send every existing kind to that guild
+-- alone. Receivers check the current master's appointment against their fresh own-guild roster;
+-- a department label or claimed wire rank grants no Crown or authority in another guild.
 
 local Decree = {}
 ns.Decree = Decree
@@ -162,6 +165,10 @@ end
 -- decrees for the King's guild, whatever his own rank or guild; every client takes them by his
 -- name, as the King's (below).
 local function Steward() return ns.King ~= nil and ns.King.IsSteward ~= nil and ns.King.IsSteward() end
+local function GuildHeraldry(name, guild)
+	local N = ns.Nominees
+	return N and not N.missing and N.IsCorrespondent and N.IsCorrespondent(name, guild, "Department of Heraldry") == true or false
+end
 
 -- Where this player's decree of `kind` goes (1.2.3): "army" (the channel: every Olympus
 -- member), "guild" (GUILD: his own guild alone) or nil (a local preview only), and why:
@@ -173,6 +180,7 @@ local function Steward() return ns.King ~= nil and ns.King.IsSteward ~= nil and 
 --   crown    the same from the King's guild's own Crown (ns.IsCrown in his guild: the King, its
 --            master, its officers on their own client), as before
 --   lord     the same from the master of any other Olympus guild: his guild's alone
+--   heraldry every kind from the verified correspondent of our own guild: that guild alone
 -- (A Hand sends from his own client as one of the King's guild's officers, as before; the
 -- receivers know him by the King's list or a Steward's, King.IsHandName. A councillor's Call to
 -- Arms is his officer rank's, as before: one who is an officer of another guild calls that guild.)
@@ -184,6 +192,7 @@ function Decree.Scope(kind)
 		if ns.IsMember() and ns.IsHighCouncillor(ns.me) == true then return "army", "council" end
 		local K = ns.King
 		if ns.IsMember() and K ~= nil and type(K.IsHandName) == "function" and K.IsHandName(ns.me) == true then return "army", "hand" end
+		if ns.IsMember() and GuildHeraldry(ns.me, GetGuildInfo("player")) then return "guild", "heraldry" end
 		if not ns.Roster.IsOfficer() then return nil end
 		if ns.IsKingGuild(GetGuildInfo("player")) then return "army", "captain" end
 		return "guild", "officer"
@@ -192,6 +201,7 @@ function Decree.Scope(kind)
 	if ns.IsHighCouncillor(ns.me) == true then return "army", "council" end
 	if ns.IsKingGuild(GetGuildInfo("player")) and ns.IsCrown() then return "army", "crown" end
 	if ns.Roster.MyRank() == 0 then return "guild", "lord" end
+	if GuildHeraldry(ns.me, GetGuildInfo("player")) then return "guild", "heraldry" end
 	return nil
 end
 
@@ -233,7 +243,10 @@ function Decree.Send(kind, text)
 	-- officers' Call to Arms or Muster, over GUILD, to his guild alone.
 	local own = scope == "guild" and "guild" or nil
 	-- Logged (1.0.0): the server keeps its words, so abuse can be reported (Comm.Send).
-	ns.Comm.Send(own and "GUILD" or "CHANNEL", ns.Codec.EncodeDecree(kind, mapID, x, y, guild, rank, text), nil, nil, true)
+	ns.Comm.Send(own and "GUILD" or "CHANNEL", ns.Codec.EncodeDecree(kind, mapID, x, y, guild, rank, text), nil, nil, true,
+		nil, { owner = Decree, guard = function()
+			return ns.IsMember() and Decree.Scope(kind) == scope and (not own or GetGuildInfo("player") == guild)
+		end })
 	local d = { kind = kind, scope = own, mapID = mapID, x = x, y = y, guild = guild, rank = rank, text = text or "", sender = ns.DisplayName(ns.me), t = now }
 	-- 1.1 (#12): our own decree never comes back to us: in our log as we send it.
 	ns.Chronicle.Add("decree", ns.me, Label(d) .. " " .. ns.Zones.NameForKey("m" .. mapID), { words = text })
@@ -274,6 +287,7 @@ function Decree.YouCan()
 	if why == "council" then return L.YOU_ARE_COUNCIL_DECREES end
 	if royal ~= "army" and armsWhy == "hand" then return L.YOU_ARE_HAND_DECREES end
 	if royal == "army" then return L.YOU_ARE_CROWN end
+	if why == "heraldry" then return L.YOU_ARE_GUILD_HERALDRY:format(GetGuildInfo("player") or "?") end
 	if royal == "guild" then return L.YOU_ARE_GUILD_LORD:format(GetGuildInfo("player") or "?") end
 	if arms == "guild" then return L.YOU_ARE_GUILD_OFFICER:format(GetGuildInfo("player") or "?") end
 	if arms then return L.YOU_ARE_OFFICER end
@@ -321,9 +335,10 @@ end
 local function GuildDecree(sender, d)
 	local why
 	local rank = ns.Roster.RankOf(sender)
+	local heraldry = GuildHeraldry(sender, d.guild)
 	if d.guild ~= GetGuildInfo("player") then why = "it names <" .. d.guild .. ">, not our guild"
-	elseif CROWN_ONLY[d.kind] and rank ~= 0 then why = "not our guild master in our roster"
-	elseif not CROWN_ONLY[d.kind] and (rank == nil or rank > ns.CAPTAIN_RANK) then why = "not one of our guild's officers in our roster" end
+	elseif CROWN_ONLY[d.kind] and rank ~= 0 and not heraldry then why = "not our guild master in our roster or a verified Heraldry correspondent"
+	elseif not CROWN_ONLY[d.kind] and (rank == nil or rank > ns.CAPTAIN_RANK) and not heraldry then why = "not one of our guild's officers in our roster or a verified Heraldry correspondent" end
 	if why then
 		ns.Log("guild decree %s from %s ignored: %s", d.kind, sender, why)
 		return nil

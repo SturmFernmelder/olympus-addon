@@ -58,7 +58,9 @@ Arena.PARK_TRIES = 36         -- ...this many times at most (about six hours)
 -- Every arena type and the file that registers it (the design, Comm.lua's list). 5 E, 19 Z, 6 B,
 -- 15 A, 3 I, 16 K (the design adds KL), matchmaking's AM (the design), the Lottery's
 -- winners, LW (its bank's word for the Games tab's rankings), and the games' rankings'
--- publish word AU (ArenaRoles, 2026-10-04), and the games' ledger AY (ArenaLedger, 1.1.6): 68.
+-- publish word AU (ArenaRoles, 2026-10-04), the games' ledger AY (ArenaLedger, 1.1.6), and the
+-- duels' signed halves AX (ArenaLedger, 1.2.3), and (1.2.4) the shared records' RK RD RA RR RS RT
+-- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals): 75.
 -- Arena.Send refuses any other type.
 Arena.TYPES = {
 	EP = "ArenaNet", EC = "ArenaChat", EM = "ArenaChat", ER = "ArenaTest", EH = "ArenaTest",
@@ -75,9 +77,11 @@ Arena.TYPES = {
 	KQ = "FarkleTable", KR = "FarkleTable", KS = "FarkleTable", KN = "FarkleTable", KD = "FarkleTable",
 	KL = "FarkleTable", -- (the design: the arbiter's floor under a drunk level)
 	AY = "ArenaLedger", -- (1.1.6: a finished game's record to the auditors, the games' ledger)
+	AX = "ArenaLedger", -- (1.2.3: a fighter's signed half of a direct duel, the rankings' two halves)
 	AM = "ArenaMatch",
 	LW = "Lottery",
 	AU = "ArenaRoles",
+	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RS = "Records", RT = "Records",
 }
 -- A player's own obligations go out even with the arena turned off, and in L while the live switch
 -- is off (the design): receipts, key claims, Farkle's payments; a debt mark about himself (ZX) and a
@@ -88,11 +92,31 @@ Arena.OBLIGATIONS = { ZR = true, ZF = true, KD = true, ZT = true }
 -- the design): it moves nothing; the challenge or table it hands off to fixes its own mode.
 -- Nor is the games' ledger (AY, 1.1.6): a game's record to the auditors, whatever its mode.
 Arena.LIVE_EXEMPT = { AP = true, IL = true, ID = true, IO = true, AM = true, AU = true, AY = true }
+-- 1.2.3 (the owner's decision, 2026-10-11): free games count. A game with no gold on it (a duel, a
+-- Bones game: the only kind while the Wallet is off, Compliance.WALLET_ENABLED) counts for the
+-- history, the points and the rankings on a release whatever the live switch says; the switch
+-- (the King's T1~O live) is the bets' alone, for 2.0. A test build never counts (Arena.GameMode).
+-- These are the types a free game and its rankings use: they go out and come in L with the switch
+-- off. A wager they may carry (a stake on a challenge or a table) is refused by its own handler in
+-- L while the switch is off; the types that carry nothing but a wager are the compliance gate's.
+-- Not here: AE, AV and AH (an arbiter's ledger entry, a belt's and a season's word), the cards and
+-- the tournaments (they need arbiters), the markets and the money.
+Arena.FREE_TYPES = {
+	AS = true, AF = true, AC = true, AW = true, AR = true, AG = true, -- a challenge and its fight
+	AX = true,                        -- a fighter's signed half of a duel (ArenaLedger, the rankings)
+	AB = true, AQ = true,             -- the clerk's carousel and the single asks (late members catch up)
+	KI = true, KA = true, KO = true, KP = true, KG = true, KY = true, KK = true, KT = true, KE = true, -- Bones
+	KQ = true, KR = true, KS = true, KN = true, KL = true,
+	-- (1.2.4) the shared records (Records.lua): any holder tells the games and duels that count
+	RK = true, RD = true, RA = true, RR = true, RS = true, RT = true,
+}
 -- The types a sender may mark as his own obligation (o.obligation: ZX about himself, a staked AW,
 -- the Wallet's hello): taken in L whatever the switch, their handlers check the rest.
 Arena.MAY_OBLIGE = { ZX = true, ZQ = true, AW = true }
--- Only ID rides GUILD (the Treasurer's own client, the design); nothing else is relayed there.
-Arena.GUILD_TYPES = { ID = true }
+-- Only ID rides GUILD (the Treasurer's own client, the design), and (1.2.4) AU, the rankings'
+-- publish word a holder tells his guild where it spans the group's realms (ArenaRoles); nothing
+-- else is relayed there.
+Arena.GUILD_TYPES = { ID = true, AU = true }
 -- The letters of Arena.NewId: a fight, a card (Fight Night), a tournament, a Farkle table, a
 -- Lottery day (the design), a match (matchmaking, the design), a game played alone in the
 -- games' ledger (the House, the Lottery's practice: ArenaLedger.SoloId, 1.1.6).
@@ -418,6 +442,17 @@ function Arena.NewMode(rehearsal)
 end
 -- Does it count (rankings, belts, history, debts, standing, the treasury, honours)? L outside the sim.
 function Arena.Counts(mode) return mode == "L" and not Arena.Sim() end
+-- 1.2.3 (Arena.FREE_TYPES says why): a new game's mode. T when it is a rehearsal or on a test
+-- build; a game with a wager on it (a stake, a judge holding gold, the crowd's bets) takes the live
+-- switch's word (NewMode); a free game is L, so it counts. The Bones tables ask it too.
+function Arena.GameMode(rehearsal, wager)
+	if wager then return Arena.NewMode(rehearsal) end
+	if rehearsal or Arena.TestBuild() then return "T" end
+	return "L"
+end
+-- Whether a free game made here now counts (its history, points and rankings): a release outside
+-- the sim, whatever the live switch says.
+function Arena.FreeCounts() return Arena.Counts(Arena.GameMode(false, false)) end
 
 -- The live store of a realm (ours by default): ns.rdb.arena.realms[realm], made on first use.
 function Arena.RealmStore(realm)
@@ -642,6 +677,14 @@ local function Compliant(kind)
 	return type(C) == "table" and type(C.Wire) == "function" and C.Wire(kind) == true
 end
 
+-- IL is launch-only, independent of the King's games-live switch. Missing HonorsNet is closed
+-- too, so a raw sender or a mixed-version peer cannot bypass its collection boundary.
+local function LevelRaceWire(kind)
+	if kind ~= "IL" then return true end
+	local H = ns.HonorsNet
+	return type(H) == "table" and type(H.LevelRaceActive) == "function" and H.LevelRaceActive() == true
+end
+
 -- Why an item may not go out now, or nil (the design): the compliance gate, the sim, the kill switch
 -- (a player's own obligations excepted), a test build's L or channel, L while this realm's live
 -- switch is off, outside an Olympus guild.
@@ -649,6 +692,7 @@ local function Refusal(kind, mode, o)
 	if not Arena.TYPES[kind] then return "type" end
 	if mode ~= "L" and mode ~= "T" then return "mode" end
 	if not Compliant(kind) then return "compliance" end
+	if not LevelRaceWire(kind) then return "level-race-off" end
 	if Arena.Sim() then return "sim" end
 	if ns.IsMember and not ns.IsMember() then return "guild" end
 	local obligation = Arena.OBLIGATIONS[kind] or o.obligation == true
@@ -657,7 +701,7 @@ local function Refusal(kind, mode, o)
 		if mode == "L" then return "test-live" end
 		if o.dist == "CHANNEL" or o.dist == "GUILD" then return "test-channel" end
 	end
-	if mode == "L" and not obligation and not Arena.LIVE_EXEMPT[kind] then
+	if mode == "L" and not obligation and not Arena.LIVE_EXEMPT[kind] and not Arena.FREE_TYPES[kind] then
 		local R = Roles()
 		if not (R and R.Live and R.Live()) then return "live-off" end
 	end
@@ -1052,7 +1096,7 @@ end
 
 -- Arena.Send(kind, mode, body, o): builds kind~<mode>1~body and sends it (the design).
 --   o.to       a whisper to this character (else the public lane: o.dist, or Arena.Lane)
---   o.dist     "CHANNEL", "RAID", "PARTY" (or "GUILD" for ID alone)
+--   o.dist     "CHANNEL", "RAID", "PARTY" (or "GUILD" for ID and AU alone)
 --   o.key      Comm's dedupe key (a newer message replaces the one waiting, whose done says "replaced")
 --   o.urgent   ahead of what waits (8 arena items at most: the rest wait here)
 --   o.logged   the logged API (a player's own words)
@@ -1369,12 +1413,17 @@ function Arena.Handle(kind, fn)
 		if proto ~= tostring(Arena.PROTO) then Count(stats.dropped, "proto") return end
 		-- (A wager's type from anyone, a modified client's too: never taken while the gate says no.)
 		if not Compliant(kind) then Count(stats.dropped, "compliance") return end
+		if not LevelRaceWire(kind) then Count(stats.dropped, "level-race-off") return end
 		if Arena.Off() then Count(stats.dropped, "off") return end
 		if Arena.Sim() and not injecting then Count(stats.dropped, "sim") return end
 		if not Accepts(kind, mode, dist) then Count(stats.dropped, Arena.TestBuild() and "live-in-test" or "lane") return end
 		-- (L while this realm's live switch is off: refused here as Refusal refuses it going out, a
-		-- modified client's too. The switch itself is the King's T1, not an arena type.)
-		if mode == "L" and not (Arena.OBLIGATIONS[kind] or Arena.LIVE_EXEMPT[kind] or Arena.MAY_OBLIGE[kind]) then
+		-- modified client's too; a free game's types never, 1.2.3. The switch itself is the King's
+		-- T1, not an arena type. The pieces' envelope EP is never asked here (1.2.3, the review: a
+		-- free type's long message, a best of 3's signed half or a clerk's relay, goes as EP pieces
+		-- in L and was dropped before it was whole): OnPiece hands the whole payload to its own
+		-- type's wrapper, which asks again for that type, the switch included.)
+		if mode == "L" and kind ~= "EP" and not (Arena.OBLIGATIONS[kind] or Arena.LIVE_EXEMPT[kind] or Arena.MAY_OBLIGE[kind] or Arena.FREE_TYPES[kind]) then
 			local R = Roles()
 			if not (R and R.Live and R.Live()) then Count(stats.dropped, "live-off") return end
 		end
@@ -1502,6 +1551,33 @@ function Arena.Verify(sender, claim, cb)
 	return nil
 end
 function Arena.VerifyQueue() return #vqueue end
+-- (1.2.3) One signed message's own check, through the same queue: a fighter's signed half of a
+-- duel (ArenaLedger), whoever relayed it, so not one claim per sender. key: what makes it the same
+-- message; claim = { pk (32 bytes), msg, sig (64 bytes) }. cb(true|false) once known; cb(nil) when
+-- the queue is full (asked again later). Answers are kept, CHECKS_MAX of them.
+Arena.CHECKS_MAX = 600
+local checks, checksN = {}, 0
+function Arena.Check(key, claim, cb)
+	cb = type(cb) == "function" and cb or function() end
+	if type(key) ~= "string" or type(claim) ~= "table" then cb(false) return false end
+	local rec = checks[key]
+	if rec then
+		if rec.ok ~= nil then cb(rec.ok) return rec.ok end
+		rec.cbs[#rec.cbs + 1] = cb
+		return nil
+	end
+	if #vqueue >= Arena.VERIFY_QUEUE then cb(nil) return nil end
+	if checksN >= Arena.CHECKS_MAX then
+		-- (the answers known, dropped; the ones still waiting stay)
+		for k, r in pairs(checks) do if r.ok ~= nil then checks[k] = nil checksN = checksN - 1 end end
+	end
+	rec = { key = key, cbs = { cb } }
+	checks[key] = rec
+	checksN = checksN + 1
+	vqueue[#vqueue + 1] = { claim = claim, rec = rec }
+	PumpVerify()
+	return nil
+end
 
 ---------------------------------------------------------------------------
 -- The ticker's work

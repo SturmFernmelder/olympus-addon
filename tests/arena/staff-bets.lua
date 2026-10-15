@@ -248,12 +248,19 @@ end)
 test("1.2 the right-click Arena lines: challenge, Bones, Watch only at a watchable table, the profile; greyed when held; never on yourself", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
+	-- Load the real shared menu against this client's namespace, not the host harness fallback.
+	w:As(a, function() assert(loadfile(H.ADDON_DIR .. "PlayerMenu.lua"))("Olympus", a.ns) end)
 	local AH, L = a.ns.ArenaHome, a.ns.L
 	local function Menu()
 		local got = {}
 		return got, { Button = function(text, fn, tipTitle, tipText, enabled) got[#got + 1] = { text = text, fn = fn, tip = tipText, enabled = enabled } end }
 	end
 	local calls = {}
+	-- The profile now opens the main person page, not the companion's old profile route.
+	-- Keep the actual PlayerMenu.OpenProfile call and capture only its UI endpoint.
+	With(a.ns, { PlayerProfile = { OpenName = function(name)
+		calls[#calls + 1] = { "profile", name }; return true
+	end } }, function()
 	With(AH, {
 		Challenge = function(name) calls[#calls + 1] = { "challenge", name } return true end,
 		Open = function(where, arg) calls[#calls + 1] = { where, arg } return true end,
@@ -286,6 +293,7 @@ test("1.2 the right-click Arena lines: challenge, Bones, Watch only at a watchab
 			local t = AH.MenuTarget("FRIEND", { name = "Parric Stowe", server = a.realm })
 			eq(t and t.name, "Parric Stowe-Emberfall")
 		end)
+	end)
 	end)
 	-- A non-member (a guild outside Olympus): no lines.
 	local loner = w:Client("Doran Ashpeak", { guild = "Quiet Hollow" })

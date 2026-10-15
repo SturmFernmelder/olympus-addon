@@ -268,7 +268,11 @@ function P.VerifyGk(sender, gk)
 	if type(GetPlayerInfoByGUID) == "function" then
 		local ok, _, _, _, _, _, name, realm = pcall(GetPlayerInfoByGUID, guid)
 		if ok and type(name) == "string" and name ~= "" and not Secret(name) and not Secret(realm) then
-			-- (The name rebuilt as ns.UnitFullName does: the realm the game gives, ours when none.)
+			-- (The name rebuilt as ns.UnitFullName does: the realm the game gives, ours when none. 1.2.3,
+			-- the review of the duels' halves, which now rate a duel only on this answer: WoW: Forever
+			-- gives the surname where the realm goes, as Debts.InfoName rebuilds it, so "First" and
+			-- "Surname" are "First Surname" here, never another character's "First-Surname".)
+			if type(realm) == "string" and realm ~= "" and ns.splitNames and not ns.IsRealmName(realm) then name, realm = name .. " " .. realm, nil end
 			local full = ns.FullName(name, type(realm) == "string" and realm ~= "" and realm or nil)
 			return full:lower() == who
 		end
@@ -481,6 +485,11 @@ function P.Card(x)
 		end
 	end
 	card.following = gk and P.Following(gk) or false
+	-- (1.2.4) His Bones, as the rankings here count them (FarkleTable.PlayerStats): the profile
+	-- page's stats.bones, which nothing but the sim's sample filled before.
+	local FT = ns.FarkleTable
+	local bones = name and type(FT) == "table" and type(FT.PlayerStats) == "function" and FT.PlayerStats(name) or nil
+	if bones then card.stats = V({ bones = bones }, "ledger") end
 	return card
 end
 

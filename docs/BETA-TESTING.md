@@ -90,6 +90,11 @@ not game stakes or prizes.
 
 For the 1.2.1 candidate, include these focused live checks:
 
+The Wanted paragraph below describes the historical 1.2.1 local-only capture path. It is
+superseded for 1.2.3 and later by ordinary-member public intake. For the consolidated 1.2.4
+candidate, use the Wanted checks in section 4 instead of expecting another client's own
+verified observation to stay local. The installation and build instructions above still apply.
+
 - Bones: two players exchange Players messages, then switch to Everyone with a spectator.
   Private messages must never reach the spectator. Collapse/reopen the side panel; keep an
   unfinished draft in each tab; repeat with gamepad mode. Disable spectators during a queued
@@ -160,3 +165,203 @@ A [CurseForge Beta file](https://support.curseforge.com/support/solutions/articl
 is a public, opt-in distribution. Use it only after the build is safe to publish. Named or closed
 testers receive the expiring test zip and its checksum directly; that test zip is not uploaded to
 CurseForge or GitHub.
+
+## 4. Consolidated 1.2.4 live checks
+
+Use [RELEASE-1.2.4.md](RELEASE-1.2.4.md) as the candidate's behavior and limitation list.
+Apply sections 1–3 for installation, checksum, exact commit, input modes and evidence. This
+section adds the current checks; it does not record any of them as passed and authorizes no
+publication. Record **Pass / Fail / Not run**, with the client build, exact candidate, input
+mode, roles, observed result and screenshot or error log. Stop on an unexplained Lua error or
+an unintended recipient.
+
+### Start and retain evidence
+
+After a full client restart, use these in-game commands:
+
+```text
+/oly status
+/oly arena status
+/oly bug
+/oly perf reset
+/oly perf on
+```
+
+Confirm the supplied candidate/build/commit before testing. Play the normal workload, including
+the busy Chat, Census, Realm, Treasury and Games pages. Then use `/oly perf` and save its
+copyable report, screenshots and `/oly bug` output; finish with `/oly perf off`.
+Repeat the same workload with Olympus disabled **after another full client restart**. Record
+visible stutter, worst spikes and surrounding events; average CPU or RAM alone is insufficient.
+Do not claim the enabled/disabled comparison passed from a Lua fixture or a short idle session.
+
+### Windows UI, privacy and honours
+
+1. Run `/oly privacy`. Close it with X without changing an existing choice, reload and relog.
+   Existing choices should remain; the same questions should not reopen automatically. A new
+   question may be asked once. Check that the version letter follows a pending privacy page
+   without repeatedly reopening a previously answered page or the main window.
+2. Run `/oly profile`. Test Look, Icons, Who sees what, Letters, Back and reopening. With Games
+   off, an ordinary member can still select a personal portrait fallback icon, but no Games
+   sharing is enabled. Council chat icons remain restricted to actual High Councillors. Own and
+   other portrait/name right-clicks open **View profile** in the normal Olympus shell.
+3. On an actually authorized author client, run `/oly honours preview`. Open every gallery
+   family, including gold/silver/bronze, monthly, cross, charm and Slayer examples. The preview
+   must create no saved award/letter/Wanted entry, change no worn pick and consume no real
+   waiting letter. An ordinary member or a role preview gets no author gallery. Close it before
+   testing a real earned letter.
+4. Check paper, portrait, ring, words, red seal beside the signature and all buttons at normal
+   and smaller UI scales. Honour art has no duplicate dragon beneath it; rank dragons remain.
+   All cross frames are larger; other-honour size normalization is not claimed complete. A
+   local red-cross choice is labelled local and other clients see the ordinary chosen honour.
+5. Check a newly earned eligible honour, reload, lose/regain it and change place. First eligible
+   letters should not repeat; subsequent movement uses quiet notices. The King gets no letter
+   from himself. The completed-month koi/Bones charm and a retained cornucopia choice need
+   their own checks; do not create fake saved achievements to mark them passed.
+6. Click native `[Olympus]` in chat: its input targets Olympus when writing is permitted. Test
+   the native chat UI and any chat replacement separately. With mouse input and a free guild
+   shortcut, an authorized High Councillor's Shift + guild key opens The Watch; existing saved
+   or override bindings are not replaced. Hotkey opt-out and gamepad mode remain respected.
+7. As the real King, enable location sharing in the Throne, reload, enter/leave an instance,
+   and wait for the map to load. The status distinguishes configured opt-in from effective
+   location availability and resumes without an off/on workaround. Games live-table settings
+   remain independent. Compare the visible crown/layer on another client.
+8. Repeat native kick, promote, demote and rank changes with the game's guild window open and
+   an Olympus question open. No Olympus line should be inserted into native guild roster menus.
+   Separately reproduce the reported network-ban attempt in a battleground with authorized
+   moderators; retain the exact action/error/stack. Generic popup checks do not prove this
+   previously intermittent error resolved.
+
+### Two or more real clients
+
+- **Wanted:** use ordinary verified members from different Olympus guilds, with capture consent
+  enabled, and a spectator. Perform agreed outdoor PvP observations; run `/oly wanted status`
+  on sender and receiver. A player's own observed death/kill should reach the other client.
+  Retry the same evidence: one death counts once. Nonfatal damage, animals, stale recaps,
+  unresolved identities and instance deaths must not count. Zero/zero entries stay out of all
+  views. Compare points, kills, revenge notice/avenger actions and the bounty's reset after a
+  claim. Test a proved Olympian alt link and an unlinked character separately: do not infer
+  Horde account ownership or claim the unrelated two-account farming case solved.
+- **Role rooms and Games:** check approved HC, GM, legate, department, Church and Watch
+  audiences with one authorized participant and one excluded client. A role preview grants
+  no membership. Enter must yield an echo/history entry or an explanation of failure/partial
+  delivery. With many rooms, selection and drafting remain responsive. Finish a Bones game:
+  participants can continue its conversation; spectators retain read-only history. Reload and
+  reconnect within retention limits; a lifecycle update must not open the window by itself.
+- **Guild authority:** an ordinary sister-guild master cannot send a global Crown decree,
+  muster, agenda or moderation action. Their own authorized guild actions stay available.
+  Verify Heraldry correspondent revocation while a message is queued. Explicitly appoint a
+  member of the King's guild as Legate; an unnamed High Councillor must not gain a group merely
+  from that title. Check the 25-leader cap, the group's 40-total cap and Legate self-management
+  without access to another leader's group. Nomination and its quiet local notice must explain
+  attendance at events, raids and wars without repeating on unrelated appointments or reload.
+  Review a retained oversized legacy group: cancel changes nothing; confirm retains the complete
+  old membership privately before replacing it. Check the same actions with another client and
+  gamepad mode. No automatic invitations, removals or native promotions may happen. Lottery
+  draws remain King/author/HC-only, with no public Lottery ranking and no paid tickets.
+- **Private Justice requests:** as the actual King/HC, open The Watch > Justice requests and
+  issue a deliberate request to the verified correspondent's full name and own guild. Keep the
+  assignee offline initially: no received time or speed should be invented. Overlap online and
+  compare the first receipt; repeat it without resetting the timer. Review the existing native
+  removal dialog: cancel performs nothing; only the player's confirmed click invokes it, with
+  current native permissions. Promote the subject or revoke the correspondent before accepting
+  to check that the stale dialog refuses. A partial/stale roster or ordinary departure must not
+  complete the request. Observe later absence, then have the original issuer explicitly review
+  human-confirmed completion. Disconnect during the decision, recover and compare exactly once.
+  Check local retained-report counts, unknown coverage, own-only views and inert role previews.
+  There must be no public task/name list, automatic removal, global quality score or new honour.
+  Have a second actual councillor recover the original issuer/assignee signatures, then take
+  both originals offline and let a third authorized staff reader recover from that councillor.
+  Missing first-hand original keys must remain visibly pending, not trust a relayed key. Compare
+  medians and sample counts; a legacy JT1 row is local-only and cannot enter that ranking. The
+  verified author may read/relay but cannot issue, confirm, cancel or remove through this role.
+- **Records:** compare the participants' retained game/duel results and closed-month ranking
+  after reload, later join and recovery from another holder. Exercise more than one day/month
+  page where records actually exist; a full rotating page should not label older coverage
+  missing. Missing halves, conflicts and untrusted seals cannot become completed evidence.
+  Record what is unavailable; do not fabricate historical games or infer a full replay.
+- **Church:** check retained appointments while the source is offline, then reconnect; a signed
+  Apostle must not degrade from incomplete data. Check the twelfth direct missionary and
+  rejection of a thirteenth for both Apostle and missionary. A 5,000-entry offline fixture
+  does not establish live synchronization performance. For correspondent daily history,
+  **950 does not qualify; more than 950 does**. Unknown days pause with no increment and no
+  break; known nonqualifying days must follow the implemented daily rule. Compare the average
+  membership tie-break. Observe a real daily boundary and a following day before marking this
+  gate passed. Clock jumps or a single-day session cannot replace that observation; existing
+  snapshots cannot prove a historical streak.
+
+### Treasury, dues, campaign and private quote transfer
+
+1. As an ordinary member, open the dues page and Privacy reminder switch. With no retained
+   receipt, payment is unknown. A successful native send may show sent, but not confirmed.
+   Arrange a normal contribution with a pinned Treasurer; compare partial and counted receipt
+   states after actual native mail/trade intake. A manual ledger entry must not authenticate an
+   unrelated later receipt. Request a retained missing receipt through the page and reload.
+   Dismissing the local reminder leaves sharing choices intact and keeps reminders quiet in
+   combat/instances. No automatic payment or sanction is expected. The pinned primary
+   Treasurer's own native guild has a bounded private recorded-week flow: observe real start/end
+   membership and complete pinned books, then compare paid, first-week tolerance and a second
+   covered week below the native confirmed amount. The private notice must go to the player
+   before their current native GM. Absent/capped/offline history remains unknown; a manually
+   entered line or an old current roster must not create historical confirmation or a miss.
+   Changing confirmed alt links, duplicate pinned books and malformed saved rows must not
+   create a false notice. Other guilds are not negatively judged through census-only coverage.
+   For a sister guild, its actual current signed native GM explicitly enables reset sharing
+   on their guild page; default off, 31-day expiry. Compare complete native membership/confirmed
+   alt groups near both real resets and the amount captured then by the primary Treasurer.
+   The private checkpoint must reach only the federal Treasurer. Test withheld sharing,
+   missing original keys, a changed/demoted GM, partial roster, cap, conflict, reload, retry and
+   withdrawal: these must yield unknown, not a missed-payment notice. An old book opening or
+   a generic restored/remote book cannot provide negative native receipt coverage. Individual
+   received proofs remain positive lower bounds; no public list or automatic native action.
+2. As authorized staff, inspect affiliated Treasury snapshots, let the sharer go offline and
+   reload. Retained gold/items show their observation age; absent data stays unknown. Check an
+   unauthorized client cannot read restricted details. Public numeric summaries must not
+   disclose private donor names or item histories.
+   Open Guild income and event spending as a current keeper. Explicitly attribute a completed
+   native expense or receipt once; an offered/cancelled trade or failed mail sends nothing and
+   adds no proof. A mail expense is sent, not delivered. Assign an actual outgoing purchase to
+   a recognized guild event, then inspect that guild's aggregate as its current verified GM.
+   Two ordinary census claims cannot grant this private view. Withhold sharing/revoke a role
+   during a queued transfer; every piece must stop, and the authenticated withdrawal hides the
+   retained aggregate. Unknown-guild income and ambiguous returned mail remain unknown, not
+   guessed refunds or guild balances. No auto bank, mail, Trade or AcceptTrade is called.
+3. As the actual King, start a voluntary campaign through its Treasury controls. Check purpose,
+   gold/material goals and the 14-day window. As a real keeper, explicitly assign an eligible
+   newly received voluntary gift. Current-week dues remain reserved; old/manual money, sales,
+   transfers and custody cannot be assigned as fresh campaign gifts. Cancel confirmation, then
+   accept once, retry and reload: the same receipt cannot be counted twice. Public clients see
+   only aggregates. Closing needs the King's purchases note and removes the bar; it moves no
+   gold or items and awards no privilege. Do not manufacture receipts to exercise these checks.
+4. For a deliberately arranged same-character guild move, retain source records and run:
+
+   ```text
+   /oly carry history collect <original author-Realm>
+   /oly carry prepare <destination guild master-Realm>
+   /oly carry
+   /oly carry offer
+   /oly carry cancel
+   ```
+
+   Prepare in the source guild; cancel its question first and verify nothing is sent. Confirm
+   preparation, move by a human invitation and wait for the complete destination roster. Offer
+   to that exact verified master. The master opens `/oly carry`, cancels the acceptance question
+   once, then explicitly accepts the pending offer while it is fresh: only their current private
+   master view may show unverified quotes.
+   Compare original author/time/relay against retained originals. Destination Loot/Court/Dues/
+   pardons/ranks/keys must not change. Revoke queued and completed copies; delivery cancels/hides
+   the quote view and replay cannot restore it. Demotion, stale roster, another guild, unknown
+   alt and replacement master grant no inherited copy. Offline withdrawal delivery is not
+   guaranteed. See [history-carry.md](history-carry.md) for bounds and remaining limitations.
+
+   Test the named-heir route separately before release: the actual King and both current guild
+   masters must approve the same frozen index before any character is asked to consent. Confirm
+   that only consenting characters' historical records appear for the exact approving heir
+   master, that private Loot moves only keeper-to-keeper, and that no rank, key, payment, pardon
+   or moderation record is imported. Replacing a master, using an alt or replaying a withdrawn
+   consent must fail closed.
+
+Justice quality/composite scoring, other-honour normalization, unlinked Horde/account
+anti-farming, universally portable historical office proof, linked-alt merger consent,
+moderation-record transport and complete sister-guild negative dues coverage remain separate
+from the implemented original-signature archives, named-heir route, response metrics and
+own-guild private grace. Keep these limits distinct from every unobserved live gate above.
