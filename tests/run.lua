@@ -40292,11 +40292,13 @@ end)
 			local before = ns.Hop.Crowd(1453, 8, w.clock)
 			ns.Hop.HandleAsk("CHANNEL", "Innocent Guy-Realm", "LQ~51~1453~8")
 			ns.Hop.HandleAsk("CHANNEL", "Streamer Friend-Realm", "LQ~52~1453~8")
-			eq(ns.Hop.Crowd(1453, 8, w.clock), before + 2, "their hop asks are heard")
+			-- Names merely written in a rejected census have no membership provenance.  They stay
+			-- unhidden, but their public-channel packets cannot change layer-hop contention.
+			eq(ns.Hop.Crowd(1453, 8, w.clock), before, "their unverified hop asks are ignored")
 			-- Its sender (the server's name) speaks for that guild: his own ask is not.
 			assert(M.Hides("Troll Guy-Realm"), "the sender")
 			ns.Hop.HandleAsk("CHANNEL", "Troll Guy-Realm", "LQ~53~1453~8")
-			eq(ns.Hop.Crowd(1453, 8, w.clock), before + 2)
+			eq(ns.Hop.Crowd(1453, 8, w.clock), before)
 		end)
 	end)
 
