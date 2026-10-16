@@ -139,18 +139,23 @@ function Workshop.AuthorName() return authorName end
 -- Versions
 ---------------------------------------------------------------------------
 
--- "0.8.2" -> { 0, 8, 2 }; anything else -> nil.
+-- "0.8.2" -> { 0, 8, 2, 0 }, "1.2.5.1" -> { 1, 2, 5, 1 }; anything else -> nil.
 local function Parts(v)
-	local a, b, c = tostring(v or ""):match("^(%d+)%.(%d+)%.(%d+)$")
+	local value = tostring(v or "")
+	local a, b, c, d = value:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+	if not a then
+		a, b, c = value:match("^(%d+)%.(%d+)%.(%d+)$")
+		d = "0"
+	end
 	if not a then return nil end
-	return { tonumber(a), tonumber(b), tonumber(c) }
+	return { tonumber(a), tonumber(b), tonumber(c), tonumber(d) }
 end
 
 -- a is newer than b.
 function Workshop.Newer(a, b)
 	local x, y = Parts(a), Parts(b)
 	if not x or not y then return false end
-	for i = 1, 3 do
+	for i = 1, 4 do
 		if x[i] ~= y[i] then return x[i] > y[i] end
 	end
 	return false
@@ -187,7 +192,7 @@ end
 -- Only values a real addon sends: anything else becomes "?".
 local CLIENTS = { Forever = true, Era = true, Anniversary = true }
 local WINDOWS = { hd = true, old = true }
-local function Version(v) return (type(v) == "string" and v:match("^%d+%.%d+%.%d+$")) and v or "?" end
+local function Version(v) return (type(v) == "string" and Parts(v)) and v or "?" end
 
 -- Which game: by the interface number (Forever 1.60, Era 1.15, Anniversary 2.5).
 function Workshop.Client()
@@ -582,8 +587,8 @@ end
 
 function Workshop.HandleUpdate(dist, sender, text)
 	if dist ~= "WHISPER" or not IsAuthorName(sender) or not Workshop.Notices() then return end
-	local latest = text:match("^V3~(%d+%.%d+%.%d+)$")
-	if not latest or not Workshop.Newer(latest, ns.VERSION) then return end
+	local latest = text:match("^V3~([^~]+)$")
+	if not Parts(latest) or not Workshop.Newer(latest, ns.VERSION) then return end
 	local now = ns.Now()
 	if now - lastUpdateShown < Workshop.UPDATE_GAP then return end
 	lastUpdateShown = now
@@ -615,8 +620,8 @@ end
 -- client runs, which may be one CurseForge does not list yet. Later fields, if V4 ever gains
 -- any, are left for later versions.
 local function ReleasedField(text)
-	local v, rest = tostring(text or ""):match("^V4~[^~]*~(%d+%.%d+%.%d+)(.*)$")
-	if not v or (rest ~= "" and rest:sub(1, 1) ~= "~") then return nil end
+	local v, rest = tostring(text or ""):match("^V4~[^~]*~([^~]+)(.*)$")
+	if not Parts(v) or (rest ~= "" and rest:sub(1, 1) ~= "~") then return nil end
 	return v
 end
 
@@ -673,7 +678,7 @@ function Workshop.MarkReleased(v)
 end
 
 function Workshop.HeardVersion(v)
-	if type(v) ~= "string" or not v:match("^%d+%.%d+%.%d+$") or #v > 12 then return end
+	if type(v) ~= "string" or not Parts(v) or #v > 12 then return end
 	local now = ns.Now()
 	heardVersion = { v = v, t = now }
 	if ns.db then ns.db.authorRelease = { v = v, t = now } end
@@ -690,7 +695,7 @@ end
 function Workshop.AuthorVersion()
 	local e = heardVersion
 	if not e and ns.db and type(ns.db.authorRelease) == "table" then e = ns.db.authorRelease end
-	if type(e) ~= "table" or type(e.v) ~= "string" or not e.v:match("^%d+%.%d+%.%d+$") then return nil end
+	if type(e) ~= "table" or type(e.v) ~= "string" or not Parts(e.v) then return nil end
 	return e.v, tonumber(e.t)
 end
 

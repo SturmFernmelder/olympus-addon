@@ -1678,6 +1678,11 @@ Since 1.1 the King (or his Steward, for him) can also rotate the army's key from
 Lords and Captains online of the guilds he picks whom his own /who saw in them by whisper, and
 their guilds over guild chat, never on the Olympus channel.
 
+If a guild was accidentally given a different private key and lost the shared census and
+Olympus chat, one of its current officers can use `/oly key off`. The recovery instruction stays
+inside Blizzard's guild channel, returns updated guildmates to the public Olympus channel, and
+retires the old private key so a delayed message cannot split them again.
+
 ## How it works
 
 1. Every guild member can read their own guild's roster: name, level, class, zone, rank,
@@ -2178,6 +2183,7 @@ Other limits:
 | `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V): the game's gold elite mark for the King, silver for the High Council, bronze for guild masters, the verified Legate or department shield for an appointee, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
 | `/oly chatmarks on` · `/oly chatmarks off` | 1.1.5: the verified mark before a player's name in the game's own chat (channels, say, yell, emote, party, raid, instance and whispers; guild and officer chat the office marks alone, never the star): the King's gold dragon, a High Councillor's silver then their icon, a guild master's bronze, the Legate or department shield for an appointee, and the star for any other member your addon can check. Olympus's own lines carry none. Through the game's own name filter, so the name's link, right-click and /r stay the game's; on by default, hidden with the gamepad UI, and a councillor's on the King's screen while the council's names are hidden |
 | `/oly key <secret>` | officers: seal the Olympus channel |
+| `/oly key off` | officers: remove a mismatched guild-only key and return the guild to the public Olympus channel (1.2.5.1) |
 | `/oly key rotate` | the King or his Steward: a new key for the whole army, by whisper to the Lords and Captains his /who saw in the guilds he picks and over guild chat, never on the Olympus channel (also on the Throne) (1.1) |
 | `/oly block <name>` | ignore a player |
 | `/oly filter add\|remove <word>` · `/oly filter` | block terms: hide, on your screen, lines of addon text (Olympus chats, writs, decrees, Vox) with a word; the list (1.1) |

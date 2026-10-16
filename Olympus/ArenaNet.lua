@@ -288,7 +288,7 @@ function Arena.TestBuild()
 	if type(t) ~= "table" then return nil end
 	local n, built, expires = t.n, t.built, t.expires
 	if type(n) ~= "number" or n ~= math.floor(n) or n < 1 or n > 999 then return nil end
-	if type(t.base) ~= "string" or not t.base:find("^%d+%.%d+%.%d+$") then return nil end
+	if type(t.base) ~= "string" or not (t.base:find("^%d+%.%d+%.%d+$") or t.base:find("^%d+%.%d+%.%d+%.%d+$")) then return nil end
 	if type(built) ~= "number" or type(expires) ~= "number" or expires <= built then return nil end
 	if expires - built > Arena.TEST_DAYS_MAX * 86400 then return nil end
 	if t.commit ~= nil and (type(t.commit) ~= "string" or #t.commit > 24 or not t.commit:find("^[%w%-]+$")) then return nil end

@@ -26,6 +26,10 @@ local L = ns.L
 --                      under the guild it whispered him for (its own record), never the one named.
 --   K5~<epoch held>    over GUILD, after login: a guildmate asks whether a newer key exists;
 --                      an officer holding one answers with K3.
+--   K7~<epoch>~<h1.h2> over GUILD: an officer deliberately returns his guild to the public
+--                      Olympus channel. The hashes are the private keys this clears. Updated
+--                      clients remember them, so an older client's delayed K1 cannot split the
+--                      guild again. K7 never travels on the Olympus channel.
 -- The epoch is the server's second the key was made (or an officer typed one, 1.1): every 1.1
 -- client keeps the newest, and remembers the keys a newer one replaced (their hashes): a key
 -- without an epoch (K1 alone, from an officer before 1.1) is taken as ever, unless it is one of
@@ -284,14 +288,75 @@ function Keys.HandleAsk(dist, sender, text)
 	end)
 end
 
+-- Take an officer's dated instruction to leave a guild-only key and return to the public channel.
+-- The clear itself remains the newest key epoch, even though it holds no key: an older K3/K1 must
+-- not silently put the guild back on the private channel after it recovered.
+local function TakeClear(at, quiet, retires)
+	local rdb = ns.rdb
+	if not rdb then return false end
+	local latest = Latest()
+	if latest and at <= latest then return false end
+	local old = rdb.realmKey
+	local list = Hashes(retires, ValidKey(old) and Hash(old) or nil)
+	rdb.realmKey = nil
+	rdb.keyEpoch = { at = at, clear = true, retires = #list > 0 and table.concat(list, ".") or nil }
+	for _, h in ipairs(list) do Retire(h) end
+	stats.taken = stats.taken + 1
+	ns.Log("realm key: public-channel instruction of epoch %d taken", at)
+	if old ~= nil then
+		if not quiet then ns.Print(L.KEY_CLEARED_TAKEN) end
+		ns.Comm.JoinChannel()
+	end
+	return true
+end
+Keys.TakeClear = TakeClear
+
+function Keys.HandleClear(dist, sender, text)
+	if dist ~= "GUILD" then return false end
+	local at, retires = tostring(text):match("^K7~(%d+)~?([%w%.]*)$")
+	at = tonumber(at)
+	if not at then return false end
+	sender = ns.FullName(sender)
+	local rank = ns.Roster.RankOf(sender)
+	if not rank or rank > ns.CAPTAIN_RANK then
+		stats.refused = stats.refused + 1
+		return false
+	end
+	if at > Clock() + Keys.DATE_AHEAD then
+		stats.refused = stats.refused + 1
+		return false
+	end
+	return TakeClear(at, false, retires)
+end
+
+-- /oly key off: the same guild officers who may set a private key may remove it. The instruction
+-- goes only through Blizzard's guild channel; it cannot be forged from OlympusNet.
+function Keys.Clear()
+	if not ns.IsMember() or not ns.Roster.IsOfficer() then
+		ns.Print(L.KEY_OFFICERS_ONLY)
+		return false
+	end
+	local at = Clock()
+	local latest = Latest()
+	if latest and at <= latest then at = latest + 1 end
+	local old = ns.rdb and ns.rdb.realmKey
+	local e = ns.rdb and ns.rdb.keyEpoch
+	local list = Hashes(type(e) == "table" and e.retires or nil, ValidKey(old) and Hash(old) or nil)
+	TakeClear(at, true, #list > 0 and table.concat(list, ".") or nil)
+	ns.Comm.Send("GUILD", ("K7~%d~%s"):format(at, #list > 0 and table.concat(list, ".") or ""), "key7")
+	ns.Print(L.KEY_CLEARED)
+	return true
+end
+
 ns.Comm.Handle("K3", function(...) Keys.HandleKey(...) end)
 ns.Comm.Handle("K4", function(...) Keys.HandleAck(...) end)
 ns.Comm.Handle("K5", function(...) Keys.HandleAsk(...) end)
+ns.Comm.Handle("K7", function(...) Keys.HandleClear(...) end)
 
 -- After login: is there a newer key than ours in the guild?
 function Keys.Ask()
 	if not ns.IsMember() then return end
-	ns.Comm.Send("GUILD", ("K5~%d"):format(Epoch() or 0), "key5")
+	ns.Comm.Send("GUILD", ("K5~%d"):format(Latest() or 0), "key5")
 end
 
 -- An officer typed /oly key (Comm.SetRealmKey): his key, dated now, for his guild's 1.1 clients
@@ -301,10 +366,16 @@ function Keys.Typed(key, was)
 	local at = Clock()
 	local latest = Latest()
 	if latest and at <= latest then at = latest + 1 end
-	local retires = ValidKey(was) and was ~= key and Hash(was) or nil
+	-- A key set after /oly key off carries the clear's retired hashes too. A guildmate who was
+	-- offline for the clear can then take this new key without an older client's K1 pulling them
+	-- back to the mismatched one.
+	local oldEpoch = ns.rdb.keyEpoch
+	local list = Hashes(type(oldEpoch) == "table" and oldEpoch.retires or nil,
+		ValidKey(was) and was ~= key and Hash(was) or nil, Hash(key))
+	local retires = #list > 0 and table.concat(list, ".") or nil
 	ns.rdb.keyEpoch = { key = Hash(key), at = at, retires = retires }
 	Unretire(key)
-	if retires then Retire(retires) end
+	for _, h in ipairs(list) do Retire(h) end
 	ns.Comm.Send("GUILD", Message(at, key, retires), "key3")
 end
 

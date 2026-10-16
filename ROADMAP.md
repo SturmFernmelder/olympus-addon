@@ -43,6 +43,8 @@
   from members' own kills and deaths, bounties by office and level; the missionaries' crook
 - v1.2.5 Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,
   safer shared rankings and relay queues, and predictable Most Wanted list expansion.
+- v1.2.5.1 Hotfix: officers can return a guild separated by a mismatched private realm key to the
+  public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
 - v1.2.4 Implementation candidate: role rooms, retained signed game records, guild average levels,
   Church appointment catch-up, Heraldry guild duties and Wanted count fixes. Not published;
   Windows visual and multiplayer acceptance remain separate gates. Undefined departmental metrics

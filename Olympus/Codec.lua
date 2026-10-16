@@ -274,7 +274,7 @@ end
 function Codec.Versions(map)
 	local out = {}
 	for k, v in pairs(map or {}) do
-		if (k == "?" or k:match("^%d+%.%d+%.%d+$")) and #k <= 12 then out[k] = v end
+		if (k == "?" or k:match("^%d+%.%d+%.%d+$") or k:match("^%d+%.%d+%.%d+%.%d+$")) and #k <= 12 then out[k] = v end
 	end
 	return out
 end

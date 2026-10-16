@@ -500,7 +500,7 @@ local function OnHello(dist, sender, mode, body)
 	if mode ~= "T" or (dist ~= "RAID" and dist ~= "PARTY") then return false, "lane" end
 	local build, base, flags = ns.Arena.Fields(body, 3)
 	build = ns.Arena.N(build, 0, 999)
-	if not build or type(base) ~= "string" or not base:match("^%d+%.%d+%.%d+$") or not tostring(flags):match("^[grko]*$") then return false, "shape" end
+	if not build or type(base) ~= "string" or not (base:match("^%d+%.%d+%.%d+$") or base:match("^%d+%.%d+%.%d+%.%d+$")) or not tostring(flags):match("^[grko]*$") then return false, "shape" end
 	sender = ns.FullName(sender)
 	local now = Now()
 	for k, r in pairs(roster) do if now - r.at >= ArenaTest.ROSTER_GONE * 6 then roster[k] = nil end end
