@@ -62917,7 +62917,7 @@ end)()
 				w.login(); eq(w.after[1].sec, w.Letters.LOGIN_WAIT); eq(#w.every, 1)
 				ns.Consent.Show():Hide(); w.run()
 				eq(w.Letters.Frame():IsShown(), true); eq(w.Letters.Frame().version, savedVersion)
-				eq(w.Letters.IsRead("1.2.4"), true, "the current release's configured catch-up letter is included")
+				eq(w.Letters.IsRead("1.2.5"), true, "the current hotfix's configured catch-up letter is included")
 				eq(w.Letters.IsRead("1.2.0"), false, "older history stays available without expanding the update popup")
 				eq(w.Letters.IsRead(savedVersion), true)
 				baseline, read = ns.db.lettersAutoVersion, ns.db.lettersRead
@@ -63073,7 +63073,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.2.5 1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.2.5.1 1.2.5 1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)
