@@ -2,7 +2,7 @@ local ADDON, ns = ...
 local L = ns.L
 
 ns.NAME = "Olympus"
-ns.VERSION = "1.2.5"
+ns.VERSION = "1.2.5.1"
 ns.PREFIX = "OLYMPUS"        -- addon message prefix (max 16 chars)
 ns.CHANNEL = "OlympusNet"    -- hidden chat channel shared by every Olympus guild (Alliance)
 ns.CHANNEL_HORDE = "OlympusNetH" -- the Horde's: the two factions never see each other's guilds
@@ -2118,6 +2118,7 @@ local function Help()
 	print(L.HELP_CMD_STATUS)
 	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
+	print(L.HELP_CMD_KEY_PUBLIC)
 	print(L.HELP_MAINKEY)
 	if ns.Keys.CanRotate and ns.Keys.CanRotate() then print(L.HELP_KEY_ROTATE) end -- (1.1: the King's alone)
 	print(L.HELP_CMD_BLOCK)
@@ -2383,6 +2384,8 @@ local function Slash(input)
 				else
 					ns.Print(L.KEY_ROTATE_ONLY_KING)
 				end
+			elseif rest:lower() == "off" or rest:lower() == "public" then
+				if ns.Keys.missing then ns.Print(L.RESTART_NEEDED) else ns.Keys.Clear() end
 			else
 				ns.Comm.SetRealmKey(rest)
 			end

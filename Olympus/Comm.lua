@@ -1762,7 +1762,8 @@ local function OnAddonMessage(prefix, text, dist, sender, target, zoneChannelID,
 		local named, stamped = Codec.RealmField(text:match("^H1~[^~]*~([^~]+)")) or "old", ns.RealmOf(sender)
 		if named ~= "old" and stamped and stamped ~= ns.realm then named = stamped end
 		peerRealm[sender] = named
-		peerVersion[sender] = text:match("^H1~(%d+%.%d+%.%d+)") or "?"
+		local version = text:match("^H1~([^~]+)")
+		peerVersion[sender] = version and (version:match("^%d+%.%d+%.%d+$") or version:match("^%d+%.%d+%.%d+%.%d+$")) and version or "?"
 		local sealed = text:match("^H1~[^~]*~[^~]*~([^~]*)")
 		peerSealed[sender] = (sealed == "s" or sealed == "p") and sealed or nil
 		peerZone[sender] = text:match("^H1~[^~]*~[^~]*~[^~]*~([^~]*)") == "z" or nil

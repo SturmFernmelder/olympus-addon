@@ -59,7 +59,8 @@ test("1.2.5 letter content: both languages describe only the shipped reply, offi
 			assert(not previous or at > previous, locale .. ": release points stay ordered")
 			previous = at
 		end
-		eq(cns.Letters.Versions()[1], "1.2.5", locale .. ": current release first")
+		eq(cns.Letters.Versions()[1], "1.2.5.1", locale .. ": hotfix first")
+		eq(cns.Letters.Versions()[2], "1.2.5", locale .. ": release retained after hotfix")
 	end
 end)
 

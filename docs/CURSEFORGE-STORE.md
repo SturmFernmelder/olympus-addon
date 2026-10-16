@@ -29,14 +29,12 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
+- **1.2.5.1**: Hotfix: officers can return a guild separated by a mismatched private realm key to the
+  public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
 - **1.2.5**: Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,
   safer shared rankings and relay queues, and predictable Most Wanted list expansion.
 - **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
   from members' own kills and deaths, bounties by office and level; the missionaries' crook
-- **1.2.2**: The stutter fixed (the level race's checks off the message handler, data changes taken once
-  a second, the map left alone while closed, the minute jobs spread out) and `/oly perf`; the
-  privacy page and Bones invitations; guild removal and rank changes; Church counts; chat reports to
-  the King and the High Council; [Olympus] links; Shift + the guild key; the security reviews' fixes
 
 Every version's notes are in the [GitHub releases](https://github.com/dnl-gentile/olympus-addon/releases). This page is the short one for CurseForge: the [README](https://github.com/dnl-gentile/olympus-addon#olympus) has every section in full.
 
@@ -808,6 +806,11 @@ find or join it. Share the same secret with the officers of the other Olympus gu
 Since 1.1 the King (or his Steward, for him) can also rotate the army's key from the Throne: his new key reaches the
 Lords and Captains online of the guilds he picks whom his own /who saw in them by whisper, and
 their guilds over guild chat, never on the Olympus channel.
+
+If a guild was accidentally given a different private key and lost the shared census and
+Olympus chat, one of its current officers can use `/oly key off`. The recovery instruction stays
+inside Blizzard's guild channel, returns updated guildmates to the public Olympus channel, and
+retires the old private key so a delayed message cannot split them again.
 
 ## How it works
 

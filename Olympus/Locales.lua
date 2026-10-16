@@ -97,6 +97,22 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.JUSTICE_TASKS_CONFIRM_HINT = "Confirmar a conclusão para %s após sua própria revisão? A tentativa e a ausência observada não comprovam quem agiu ou a causa. O registro será identificado como confirmado por revisão humana."
 end
 
+L.LETTER_1_2_5_1_TITLE = "Reconnect a separated guild"
+L.LETTER_1_2_5_1 = [==[Version 1.2.5.1.
+
+- {guild} A guild officer can use /oly key off to remove a mismatched guild-only realm key and return the guild to the public Olympus channel.
+- {team} The recovery instruction travels only inside Blizzard's guild channel, and only a current officer can issue it. Updated guildmates move together and remember the retired private key so an older delayed message cannot split them again.
+- {news} This reconnects the shared census and Olympus chat for a guild accidentally separated by its key. It does not invent missing historical reports; live reports refill after the guild rejoins.]==]
+
+if GetLocale() == "ptBR" then
+	L.LETTER_1_2_5_1_TITLE = "Reconectar uma guilda separada"
+	L.LETTER_1_2_5_1 = [==[Versão 1.2.5.1.
+
+- {guild} Um officer da guilda pode usar /oly key off para remover uma chave exclusiva e divergente e levar a guilda de volta ao canal público do Olympus.
+- {team} A instrução de recuperação passa apenas pelo canal nativo da guilda, e só um officer atual pode enviá-la. Os colegas atualizados mudam juntos e lembram a chave privada aposentada, impedindo que uma mensagem antiga volte a separar a guilda.
+- {news} Isso reconecta o censo compartilhado e o chat do Olympus quando uma guilda foi separada por sua chave. Não inventa relatórios históricos ausentes; os relatórios ao vivo voltam a preencher depois da reconexão.]==]
+end
+
 L.THOUSANDS = ","
 L.TITLE = "Olympus"
 L.ARMY_TOTAL = "%s soldiers"
@@ -982,6 +998,8 @@ L.OFFICER_FIXED = "Captains are rank 1 (right below the guild master) in every g
 L.KEY_OFFICERS_ONLY = "Only officers of an Olympus guild can set the realm key."
 L.KEY_TOO_SHORT = "The key needs at least 6 characters."
 L.KEY_SET = "Realm key set: the Olympus channel is now sealed, your guildmates receive the key automatically."
+L.KEY_CLEARED = "Realm key cleared: your guild is returning to the public Olympus channel."
+L.KEY_CLEARED_TAKEN = "A guild officer returned your guild to the public Olympus channel."
 L.WHISPER = "Whisper"
 L.INVITE = "Invite"
 L.WHO = "Who"
@@ -1544,6 +1562,7 @@ L.HELP_CMD_SHARE = "  /oly share - share/stop sharing your position with your gu
 L.HELP_CMD_BUG = "  /oly bug - copy a bug report (errors + diagnostics)"
 L.HELP_CMD_STATUS = "  /oly status - print diagnostics in chat"
 L.HELP_CMD_KEY = "  /oly key <secret> - officers: seal the Olympus channel with a shared secret"
+L.HELP_CMD_KEY_PUBLIC = "  /oly key off - officers: return your guild to the public Olympus channel"
 L.HELP_CMD_BLOCK = "  /oly block <name> - ignore everything a player sends"
 L.HELP_CMD_LAYER = "  /oly layer - show the layer id of your target (test)"
 L.HELP_CMD_MINIMAP = "  /oly minimap - show/hide the minimap button"
@@ -3257,6 +3276,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.KEY_OFFICERS_ONLY = "Só officers de uma guilda Olympus podem definir a chave do reino."
 	L.KEY_TOO_SHORT = "A chave precisa de pelo menos 6 caracteres."
 	L.KEY_SET = "Chave do reino definida: o canal Olympus agora é selado, seus colegas recebem a chave sozinhos."
+	L.KEY_CLEARED = "Chave do reino removida: sua guilda está voltando ao canal público do Olympus."
+	L.KEY_CLEARED_TAKEN = "Um officer da guilda levou sua guilda de volta ao canal público do Olympus."
 	L.WHISPER = "Sussurrar"
 	L.INVITE = "Convidar"
 	L.WHO = "Quem"
@@ -3813,6 +3834,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HELP_CMD_BUG = "  /oly bug - copiar um relatório de bug (erros + diagnóstico)"
 	L.HELP_CMD_STATUS = "  /oly status - mostrar o diagnóstico no chat"
 	L.HELP_CMD_KEY = "  /oly key <segredo> - oficiais: selar o canal de Olympus com um segredo em comum"
+	L.HELP_CMD_KEY_PUBLIC = "  /oly key off - oficiais: levar a guilda de volta ao canal público do Olympus"
 	L.HELP_CMD_BLOCK = "  /oly block <nome> - ignorar tudo o que um jogador mandar"
 	L.HELP_CMD_LAYER = "  /oly layer - mostrar o id do layer do seu alvo (teste)"
 	L.HELP_CMD_MINIMAP = "  /oly minimap - mostrar/esconder o botão do minimapa"

@@ -40197,6 +40197,46 @@ end)
 		end)
 	end)
 
+	test("1.2.5.1 realm-key recovery: only a current guild officer can return the guild to public; updated guildmates follow it and delayed private keys cannot split them again", function()
+		WithKeys(function(w, K)
+			AsSoldier("Watcher")
+			ns.Roster.Scan()
+			ns.rdb.realmKey = "wrongguildkey"
+			ns.rdb.keyEpoch = { key = ns.Comm.Hash36("wrongguildkey"), at = w.clock - 10 }
+			eq(KY.Clear(), false, "a member cannot clear it")
+			eq(ns.rdb.realmKey, "wrongguildkey")
+
+			AsCaptain()
+			w.sent, w.printed = {}, {}
+			eq(KY.Clear(), true)
+			eq(ns.rdb.realmKey, nil, "back on the public channel")
+			eq(ns.rdb.keyEpoch.clear, true, "the clear is a dated epoch")
+			eq(w.joined, 1, "rejoined once")
+			local clear = Sent(w, "GUILD", "K7~")
+			eq(#clear, 1, "the guild alone receives the recovery")
+			local clearAt = tonumber(clear[1]:match("^K7~(%d+)~"))
+			assert(clearAt and KY.IsRetired("wrongguildkey"), "the old private key is retired")
+
+			-- Neither an older dated key nor an old client's undated K1 may undo the clear.
+			KY.HandleKey("GUILD", "Member2-Realm", ("K3~%d~wrongguildkey"):format(clearAt - 1))
+			local cns, Deliver = FreshComm()
+			cns.Comm.JoinChannel = function() w.joined = w.joined + 1 end
+			Deliver("GUILD", "Member3-Realm", "K1~wrongguildkey")
+			eq(ns.rdb.realmKey, nil); eq(w.joined, 1)
+
+			-- On another updated guildmate, only a roster officer over GUILD can clear it.
+			ns.rdb.realmKey = "anotherbadkey"
+			ns.rdb.keyEpoch = { key = ns.Comm.Hash36("anotherbadkey"), at = clearAt }
+			ns.rdb.keyRetired = {}
+			eq(KY.HandleClear("CHANNEL", "Member2-Realm", ("K7~%d~"):format(clearAt + 1)), false)
+			eq(KY.HandleClear("GUILD", "Member9-Realm", ("K7~%d~"):format(clearAt + 1)), false)
+			eq(ns.rdb.realmKey, "anotherbadkey")
+			eq(KY.HandleClear("GUILD", "Member2-Realm", ("K7~%d~"):format(clearAt + 1)), true)
+			eq(ns.rdb.realmKey, nil); eq(w.joined, 2)
+			eq(KY.HandleClear("GUILD", "Member2-Realm", ("K7~%d~"):format(clearAt + 1)), false, "replay ignored")
+		end)
+	end)
+
 	test("1.1 key rotation (#8): the King's Throne: rotate, how far it got, late Lords handed it, then he moves with his guild after the grace (or now)", function()
 		WithKeys(function(w, K)
 			AsKing()
@@ -40277,7 +40317,7 @@ end)
 	test("1.1 key rotation (#8): its strings in English and pt-BR; the README and the CurseForge page", function()
 		local keys = { "HELP_KEY_ROTATE", "KEY_ROTATE_TITLE", "KEY_ROTATE", "KEY_ROTATE_TIP", "KEY_ROTATE_CONFIRM", "KEY_ROTATE_ONLY_KING",
 			"KEY_ROTATE_BUSY", "KEY_ROTATED", "KEY_ROTATING", "KEY_MOVE_NOW", "KEY_MOVE_CONFIRM", "KEY_ROTATION_MOVED", "KEY_ROTATED_AGO",
-			"KEY_ROTATED_TAKEN" }
+			"KEY_ROTATED_TAKEN", "KEY_CLEARED", "KEY_CLEARED_TAKEN", "HELP_CMD_KEY_PUBLIC" }
 		local pt = PtBR()
 		for _, k in ipairs(keys) do
 			assert(rawget(ns.L, k) and rawget(ns.L, k) ~= k, "English: " .. k)
@@ -62190,10 +62230,15 @@ end)()
 		assert(#pt.VERSION_INVITE_TEXT:format("https://www.curseforge.com/wow/addons/olympus-guild") <= 255)
 	end)
 
-	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.5") -- the focused follow-up candidate has one identity in both folders
+	test("1.2.5.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
+		eq(ns.VERSION, "1.2.5.1") -- the hotfix has one identity in both folders
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.5", 1, true))
+		assert(toc:find("## Version: 1.2.5.1", 1, true))
+		eq(ns.Workshop.Newer("1.2.5.1", "1.2.5"), true, "the hotfix is newer")
+		eq(ns.Workshop.Newer("1.2.5", "1.2.5.1"), false)
+		eq(ns.Workshop.Newer("1.2.6", "1.2.5.1"), true, "the next patch remains newer")
+		eq(ns.Workshop.Newer("1.2.5.", "1.2.5"), false, "a trailing dot is not a version")
+		eq(ns.Codec.Versions({ ["1.2.5.1"] = 2, broken = 9 })["1.2.5.1"], 2, "the census carries hotfix versions")
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -62453,7 +62498,11 @@ end
 		for v in ("\n" .. recent):gmatch("\n%- %*%*([%d.]+)%*%*: ") do versions[#versions + 1] = v end
 		eq(#versions, gen.RECENT); eq(versions[1], ns.VERSION)
 		local roadmap = assert(ReadFile(ROOT .. "ROADMAP.md"))
-		local function Num(v) local a, b, c = v:match("^(%d+)%.(%d+)%.(%d+)$"); return a * 1e6 + b * 1e3 + c end
+		local function Num(v)
+			local a, b, c, d = v:match("^(%d+)%.(%d+)%.(%d+)%.(%d+)$")
+			if not a then a, b, c = v:match("^(%d+)%.(%d+)%.(%d+)$"); d = 0 end
+			return a * 1e9 + b * 1e6 + c * 1e3 + d
+		end
 		for i, v in ipairs(versions) do
 			assert(roadmap:find("\n- v" .. v .. " ", 1, true), v)
 			if i > 1 then assert(Num(versions[i - 1]) > Num(v), v) end
@@ -62593,8 +62642,8 @@ end)()
 		return n
 	end
 
-	test("1.2.5 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.5")
+	test("1.2.5.1 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.5.1")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -62615,7 +62664,9 @@ end)()
 				assert(lns.Letters.Has("1.2.0"), code .. ": previous release letter retained")
 				assert(lns.Letters.Has("1.2.1"), code .. ": the published 1.2.1 letter retained")
 				assert(lns.Letters.Has("1.2.2"), code .. ": the published 1.2.2 letter retained")
-				assert(body:find(code == "ptBR" and "Responder" or "Reply", 1, true), code .. ": reply interaction")
+				assert(body:find("/oly key off", 1, true), code .. ": recovery command")
+				local oldTitle, oldBody = lns.Letters.Text("1.2.5")
+				assert(oldTitle and oldBody and oldBody:find(code == "ptBR" and "Responder" or "Reply", 1, true), code .. ": 1.2.5 retained")
 			end)
 			GetLocale = savedLocale
 			if not ok then error(err, 0) end
@@ -62630,7 +62681,7 @@ end)()
 		end)
 		-- A reader of all previous published letters gets the new candidate's alone.
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true, ["1.2.4"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true, ["1.2.4"] = true, ["1.2.5"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true, "a reader of the previous published letter gets the new one's")
 			eq(w.Letters.Frame().version, ns.VERSION)

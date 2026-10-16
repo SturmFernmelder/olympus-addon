@@ -69,6 +69,9 @@ local updateFrame        -- the plain-language parchment opened from a received 
 
 local function W() return ns.Workshop end
 local function Newer(a, b) return W().Newer(a, b) == true end
+local function Version(v)
+	return type(v) == "string" and (v:match("^%d+%.%d+%.%d+$") or v:match("^%d+%.%d+%.%d+%.%d+$")) and v or nil
+end
 local function Full(name) return ns.FullName(ns.Normal(tostring(name or ""))) end
 local function IsAuthor() local w = W() return w.IsAuthor ~= nil and w.IsAuthor() == true end
 -- Who may ask a player to update: the author, the King and the High Council, by the name the
@@ -149,7 +152,7 @@ function Versions.Status(name)
 	local a = RollAnswer(name)
 	if a then Take(a.version, "roll", a.t) end
 	if version then
-		if not version:match("^%d+%.%d+%.%d+$") then return "olympus", nil, how, at end
+		if not Version(version) then return "olympus", nil, how, at end
 		local latest = Versions.Latest()
 		if Newer(latest, version) then return "outdated", version, how, at end
 		if Newer(version, latest) then return "newer", version, how, at end
@@ -291,8 +294,8 @@ end
 -- Their answer to our check (the id we sent; late, it still counts).
 function Versions.HandleAnswer(dist, sender, text)
 	if dist ~= "WHISPER" then return end
-	local id, v = tostring(text or ""):match("^V8~(%d+)~(%d+%.%d+%.%d+)$")
-	if not id or #v > 12 then return end
+	local id, v = tostring(text or ""):match("^V8~(%d+)~([^~]+)$")
+	if not id or not Version(v) or #v > 12 then return end
 	local c = checks[Key(sender)]
 	if not c or c.roll or tostring(c.id) ~= id or c.version then return end
 	c.version, c.at = v, ns.Now()
@@ -494,7 +497,7 @@ function Versions.HandleAsk(dist, sender, text)
 	-- (1.2.1: from the author, the King or a councillor alone; his client sends V3. Older
 	-- versions let anyone send one.)
 	if not MayAsk(Full(sender)) then return end
-	local latest = tostring(text or ""):match("^V9~(%d+%.%d+%.%d+)$")
+	local latest = Version(tostring(text or ""):match("^V9~([^~]+)$"))
 	if not latest or #latest > 12 or not Newer(latest, ns.VERSION) or Ignored(sender) then return end
 	local M = ns.Moderation
 	if M and not M.missing and type(M.Hides) == "function" and M.Hides(sender) then return end
@@ -531,8 +534,8 @@ end
 
 function Versions.LetterText(notice)
 	notice = type(notice) == "table" and notice or {}
-	local current = type(notice.current) == "string" and notice.current:match("^%d+%.%d+%.%d+$") and notice.current or "?"
-	local latest = type(notice.latest) == "string" and notice.latest:match("^%d+%.%d+%.%d+$") and notice.latest or nil
+	local current = Version(notice.current) or "?"
+	local latest = Version(notice.latest)
 	local verified = notice.verified == true and latest ~= nil
 	local who = tostring(notice.who or "Olympus")
 	local status = verified and L.VERSION_UPDATE_STATUS:format(current, latest) or L.VERSION_UPDATE_STATUS_CHECK:format(current)

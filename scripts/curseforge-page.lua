@@ -220,7 +220,8 @@ function M.Recent(roadmap, version, n)
 		if l:find("^## ") then
 			done = l == "## Done"
 		elseif done then
-			local v, text = l:match("^%- v(%d+%.%d+%.%d+) (.*)$")
+			local v, text = l:match("^%- v(%d+%.%d+%.%d+%.%d+) (.*)$")
+			if not v then v, text = l:match("^%- v(%d+%.%d+%.%d+) (.*)$") end
 			if v then
 				items[#items + 1] = { version = v, lines = { text } }
 			elseif l:find("^%- ") then
