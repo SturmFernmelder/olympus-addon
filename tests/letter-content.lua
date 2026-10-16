@@ -15,6 +15,54 @@ local function Language(locale)
 	return cns
 end
 
+test("1.2.5 letter content: both languages describe only the shipped reply, office, Wanted and relay follow-ups", function()
+	local order
+	local expected = {
+		enUS = {
+			"Right-click a saved line in Olympus Chat and choose Reply",
+			"Legates now use the chosen Legate shield",
+			"High Council decision",
+			"normalized visible sizes and centering",
+			"/oly borders test role-legate",
+			"Leaving Most Wanted collapses all three back to five",
+			"Only rows with independent membership evidence",
+			"deterministic across clients",
+			"fair per-sender limit",
+			"Unverified public-channel strangers cannot create layer-hop demand",
+		},
+		ptBR = {
+			"Clique com o botão direito numa linha salva do Chat do Olympus e escolha Responder",
+			"Legates agora usam o badge escolhido de Legate",
+			"decisão do High Council",
+			"tamanhos visíveis e centralização normalizados",
+			"/oly borders test role-legate",
+			"Sair de Most Wanted recolhe as três listas para cinco",
+			"Somente linhas com prova independente de filiação",
+			"determinística entre clientes",
+			"limite justo por remetente",
+			"Estranhos não verificados no canal público não podem criar demanda de troca de layer",
+		},
+	}
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = Language(locale)
+		local title, body = cns.Letters.Text("1.2.5")
+		assert(type(title) == "string" and title ~= "", locale .. ": title")
+		assert(type(body) == "string" and #body > 2000 and body:find("1.2.5", 1, true), locale .. ": detailed current letter")
+		local raw, marks = cns.L.LETTER_1_2_5, {}
+		for mark in raw:gmatch("{(%a+)}") do marks[#marks + 1] = mark end
+		local sequence = table.concat(marks, ",")
+		if order then eq(sequence, order, "same sections and icon order") else order = sequence end
+		assert(not body:find("{[%a]+}"), locale .. ": all icons render or have text fallback")
+		local previous
+		for _, phrase in ipairs(expected[locale]) do
+			local at = assert(raw:find(phrase, 1, true), locale .. ": " .. phrase)
+			assert(not previous or at > previous, locale .. ": release points stay ordered")
+			previous = at
+		end
+		eq(cns.Letters.Versions()[1], "1.2.5", locale .. ": current release first")
+	end
+end)
+
 test("1.2.4 letter content: both languages describe verified records and retain privacy, free-game and live-test limits", function()
 	local order
 	for _, locale in ipairs({ "enUS", "ptBR" }) do
@@ -99,8 +147,11 @@ test("1.2.4 Legate wording: current duty and letter replace the old council cent
 		local phrases = locale == "enUS" and { "optional", "offline", "events, raids and wars" }
 			or { "opcionais", "offline", "eventos, raides e guerras" }
 		for _, phrase in ipairs(phrases) do assert(L.NOMINEES_LEGATE_DUTY:find(phrase, 1, true), phrase) end
-		local notice = L.NOMINEES_LEGATE_APPOINTED:format("Issuer", "Olympus", L.NOMINEES_LEGATE_DUTY)
+		local notice = L.NOMINEES_LEGATE_APPOINTED:format("Issuer", "Olympus", L.NOMINEES_LEGATE_DUTY, L.NOMINEES_BADGE_DECISION)
 		assert(notice:find("Issuer", 1, true) and notice:find("Olympus", 1, true) and notice:find("39", 1, true))
+		assert(notice:find(locale == "enUS" and "High Council" or "High Council", 1, true))
+		local correspondent = L.NOMINEES_CORRESPONDENT_APPOINTED:format("Issuer", "Department of War", "Olympus", L.NOMINEES_CORRESPONDENT_DUTY, L.NOMINEES_BADGE_DECISION)
+		assert(correspondent:find("Department of War", 1, true) and correspondent:find("Issuer", 1, true))
 		eq(L.SQUAD_TOTAL:format(40), locale == "enUS" and "40/40 members" or "40/40 membros")
 		assert(not L.NOMINEES_NOTE:find("30", 1, true), "offline duration is no longer appointment revocation")
 		assert(not L.BORDERS_WHO_BRONZE:lower():find("legate", 1, true), "Legate office does not award the correspondent's border")

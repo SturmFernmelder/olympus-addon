@@ -1153,8 +1153,9 @@ L.BORDERS_GAMEPAD = "With the gamepad UI they stay hidden: Olympus leaves the ga
 L.BORDERS_PREVIEW_ON = "Border preview: %s round your own portrait, and on your target frame when you target yourself; its mark after your name on your own frame and on every friendly player's nameplate. On your screen only: nothing is sent, and a /reload forgets it. /oly borders test off ends it."
 L.BORDERS_PREVIEW_ON_NO_MARK = "Border preview: %s round your own portrait, and on your target frame when you target yourself. Nameplate marks are off, so no mark shows with it (/oly nameplates on shows them). On your screen only: nothing is sent, and a /reload forgets it. /oly borders test off ends it."
 L.BORDERS_PREVIEW_ON_MEMBER = "Mark preview: member, the Olympus star, after your name on your own frame and on every friendly player's nameplate. The borders have no member tier: none round your portrait. On your screen only: nothing is sent, and a /reload forgets it. /oly borders test off ends it."
+L.BORDERS_BADGE_PREVIEW_ON = "Office badge preview: %s (%s) on your own portrait and on target or focus when you target yourself; its small mark also appears with friendly names. Your real rank or honour frame stays underneath. Only your screen changes: nothing is sent, and /oly borders test off ends it."
 L.BORDERS_PREVIEW_OFF = "Border preview off: your own portrait shows your own rank's border again, if any, and the nameplates their own marks."
-L.BORDERS_PREVIEW_HELP = "/oly borders test <tier> | off - a border round your own portrait and its nameplate mark, on your screen only. Tiers: %s; member: the star alone (a mark, no border)."
+L.BORDERS_PREVIEW_HELP = "/oly borders test <tier> | role-<office> | off - a border or office badge on your own portrait and its nameplate mark, on your screen only. Tiers: %s; member: the star alone. Office examples: role-legate, role-department-of-war."
 L.BORDERS_PREVIEW_WHEN_OFF = "Elite borders are off, so the preview waits: /oly borders on shows it."
 L.BORDERS_PREVIEW_NOT_MEMBER = "Borders show only in an Olympus guild: the preview waits until you are in one."
 L.BORDERS_PREVIEW_COMBAT = "In combat: the borders are set up when the fight is over, and the preview shows then."
@@ -3424,8 +3425,9 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.BORDERS_PREVIEW_ON = "Prévia de borda: %s em volta do seu próprio retrato, e no quadro do alvo quando você mira em si mesmo; a marca dela depois do seu nome no seu quadro e na placa de identificação de todo jogador aliado. Só na sua tela: nada é enviado, e um /reload esquece. /oly borders test off encerra."
 	L.BORDERS_PREVIEW_ON_NO_MARK = "Prévia de borda: %s em volta do seu próprio retrato, e no quadro do alvo quando você mira em si mesmo. As marcas nas placas de identificação estão desligadas, então nenhuma marca aparece com ela (/oly nameplates on mostra). Só na sua tela: nada é enviado, e um /reload esquece. /oly borders test off encerra."
 	L.BORDERS_PREVIEW_ON_MEMBER = "Prévia de marca: member, a estrela do Olympus, depois do seu nome no seu quadro e na placa de identificação de todo jogador aliado. As bordas não têm o nível member: nenhuma em volta do seu retrato. Só na sua tela: nada é enviado, e um /reload esquece. /oly borders test off encerra."
+	L.BORDERS_BADGE_PREVIEW_ON = "Prévia de badge de cargo: %s (%s) no seu próprio retrato e no alvo ou foco quando você mira em si mesmo; a marca pequena também aparece junto aos nomes aliados. Sua borda real de cargo ou honraria continua por baixo. Só a sua tela muda: nada é enviado, e /oly borders test off encerra."
 	L.BORDERS_PREVIEW_OFF = "Prévia de borda desligada: seu próprio retrato volta a mostrar a borda do seu cargo, se houver, e as placas de identificação as marcas de cada um."
-	L.BORDERS_PREVIEW_HELP = "/oly borders test <borda> | off - uma borda em volta do seu próprio retrato e a marca dela nas placas de identificação, só na sua tela. Bordas: %s; member: só a estrela (uma marca, sem borda)."
+	L.BORDERS_PREVIEW_HELP = "/oly borders test <borda> | role-<cargo> | off - uma borda ou badge de cargo no seu próprio retrato e sua marca nas placas, só na sua tela. Bordas: %s; member: só a estrela. Exemplos de cargo: role-legate, role-department-of-war."
 	L.BORDERS_PREVIEW_WHEN_OFF = "As bordas de elite estão desligadas, então a prévia espera: /oly borders on mostra."
 	L.BORDERS_PREVIEW_NOT_MEMBER = "As bordas só aparecem numa guilda Olympus: a prévia espera até você estar numa."
 	L.BORDERS_PREVIEW_COMBAT = "Em combate: as bordas são montadas quando a luta acabar, e a prévia aparece então."
@@ -4130,7 +4132,7 @@ L.WANTED_SIGHT_OTHER_LAYER = "On another layer than yours"
 L.WANTED_SIGHT_NEARBY = "The pin is where the Olympian who saw him stood, not his own position."
 L.HELP_SIGHTINGS = "  /oly sightings on | off - Most Wanted: the Horde players you see, on your map and whispered to the reviewer you chose (Sightings to; off until you say on)"
 L.CONSENT_WANTED_SIGHTINGS = "Most Wanted sightings (off until you say Yes)"
-L.CONSENT_WANTED_SIGHTINGS_TEXT = "When your client sees a Horde player who is on your Most Wanted list (a nameplate, your target, the mouse), it notes his name and GUID as the game shows them, your own map position (rounded) and layer at that moment, the time, your name and your guild. That shows on your own map for 15 minutes. It is also whispered to one reviewer: the one you choose with Sightings to on the Most Wanted page (the King, a High Councillor or the author), while he is online and takes sightings, three a minute at most; until you choose one, nobody gets it. He gets a pin where you stood, labelled seen nearby, with your name, for 15 minutes. Nothing goes while you keep your zone and layer private, and the King's only while his crown shows on the map. Never anyone off the list, never on the Olympus channel, never in an instance, nothing saved. Off until you say Yes on this line (Accept all does not turn it on): No stops it at once, drops what has not gone yet and asks the reviewer's client to take your pins off his map; what reached him before you logged out stays there until its 15 minutes are up. (/oly sightings on|off)"
+L.CONSENT_WANTED_SIGHTINGS_TEXT = "When your client sees a Horde player who is on your Most Wanted list (a nameplate, your target, the mouse), it notes his name and GUID as the game shows them, your own map position (rounded) and layer at that moment, the time, your name and your guild. That shows on your own map for 15 minutes. It is also whispered to one reviewer: the one you choose with Sightings to on the Most Wanted page (the King, a High Councillor or the author), while he is online and takes sightings, three a minute at most; until you choose one, nobody gets it. He gets a pin where you stood, labelled seen nearby, with your name, for 15 minutes. Nothing goes while you keep your zone and layer private, and the King's only while his crown shows on the map. Never anyone off the list, never on the Olympus channel, never in an instance, nothing saved. Off until you say Yes on this line or choose Authorize all while it is pending: No stops it at once, drops what has not gone yet and asks the reviewer's client to take your pins off his map; what reached him before you logged out stays there until its 15 minutes are up. (/oly sightings on|off)"
 
 if GetLocale and GetLocale() == "ptBR" then
 	L.TAB_WANTED = "Wanted"
@@ -4290,7 +4292,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.WANTED_SIGHT_NEARBY = "O marcador é onde estava o Olympian que o viu, não a posição dele."
 	L.HELP_SIGHTINGS = "  /oly sightings on | off - Mais Procurados: os jogadores da Horda que você vê, no seu mapa e sussurrados ao revisor que você escolheu (Avistamentos para; desligado até você dizer on)"
 	L.CONSENT_WANTED_SIGHTINGS = "Avistamentos dos Mais Procurados (desligado até você dizer Sim)"
-	L.CONSENT_WANTED_SIGHTINGS_TEXT = "Quando o seu cliente vê um jogador da Horda que está na sua lista de Mais Procurados (uma placa de nome, o seu alvo, o mouse), ele anota o nome e o GUID dele como o jogo mostra, a sua própria posição no mapa (arredondada) e o seu layer naquele momento, a hora, o seu nome e a sua guilda. Isso aparece no seu próprio mapa por 15 minutos. Também vai por sussurro a um revisor: aquele que você escolhe em Avistamentos para, na página dos Mais Procurados (o Rei, um Alto Conselheiro ou o autor), enquanto ele está online e recebe avistamentos, três por minuto no máximo; até você escolher um, ninguém recebe. Ele recebe um marcador onde você estava, marcado como visto por perto, com o seu nome, por 15 minutos. Nada sai enquanto você mantém a sua zona e o seu layer privados, e os do Rei só enquanto a coroa dele aparece no mapa. Nunca quem não está na lista, nunca no canal Olympus, nunca numa instância, nada guardado. Desligado até você dizer Sim nesta linha (Aceitar tudo não liga): o Não para na hora, descarta o que ainda não saiu e pede ao cliente do revisor que tire os seus marcadores do mapa dele; o que chegou a ele antes de você sair do jogo fica lá até completar os 15 minutos. (/oly sightings on|off)"
+	L.CONSENT_WANTED_SIGHTINGS_TEXT = "Quando o seu cliente vê um jogador da Horda que está na sua lista de Mais Procurados (uma placa de nome, o seu alvo, o mouse), ele anota o nome e o GUID dele como o jogo mostra, a sua própria posição no mapa (arredondada) e o seu layer naquele momento, a hora, o seu nome e a sua guilda. Isso aparece no seu próprio mapa por 15 minutos. Também vai por sussurro a um revisor: aquele que você escolhe em Avistamentos para, na página dos Mais Procurados (o Rei, um Alto Conselheiro ou o autor), enquanto ele está online e recebe avistamentos, três por minuto no máximo; até você escolher um, ninguém recebe. Ele recebe um marcador onde você estava, marcado como visto por perto, com o seu nome, por 15 minutos. Nada sai enquanto você mantém a sua zona e o seu layer privados, e os do Rei só enquanto a coroa dele aparece no mapa. Nunca quem não está na lista, nunca no canal Olympus, nunca numa instância, nada guardado. Desligado até você dizer Sim nesta linha ou escolher Autorizar tudo enquanto ela está pendente: o Não para na hora, descarta o que ainda não saiu e pede ao cliente do revisor que tire os seus marcadores do mapa dele; o que chegou a ele antes de você sair do jogo fica lá até completar os 15 minutos. (/oly sightings on|off)"
 end
 
 local localeReport -- { code, taken, skipped = { key, ... }, lines } for the language taken
@@ -4335,7 +4337,8 @@ L.CONSENT_INTRO = "While you are in an Olympus guild, two things always go out. 
 L.CONSENT_OPTIONAL = "Nothing below goes out, or shows, until you say Yes, and until you answer each one stays off, unless its line says a yes you gave before still stands."
 L.CONSENT_FOOTER = "The window, the census and your own guild's roster work whatever you answer. Change any answer later: /oly privacy opens this page again."
 L.CONSENT_DONE = "Done"
-L.CONSENT_ACCEPT_ALL = "Accept all"
+L.CONSENT_ACCEPT_ALL = "Authorize all"
+L.CONSENT_KEEP_CURRENT = "Keep current choices"
 L.CONSENT_YES = "Yes"
 L.CONSENT_NO = "No"
 L.CONSENT_STATE_YES = "Yes"
@@ -4405,7 +4408,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CONSENT_OPTIONAL = "Nada abaixo sai, nem aparece, até você dizer Sim, e até você responder cada um fica desligado, a menos que a linha diga que um sim que você deu antes ainda vale."
 	L.CONSENT_FOOTER = "A janela, o censo e o rol da sua própria guilda funcionam seja qual for a resposta. Para mudar depois: /oly privacy abre esta página de novo."
 	L.CONSENT_DONE = "Pronto"
-	L.CONSENT_ACCEPT_ALL = "Aceitar tudo"
+	L.CONSENT_ACCEPT_ALL = "Autorizar tudo"
+	L.CONSENT_KEEP_CURRENT = "Manter escolhas atuais"
 	L.CONSENT_YES = "Sim"
 	L.CONSENT_NO = "Não"
 	L.CONSENT_STATE_YES = "Sim"
@@ -5331,6 +5335,9 @@ end
 L.TAB_CHAT = "Chat"
 L.HELP_TAB_CHAT = "the Olympus chats, [Olympus], [Captains] and [Lords]: every line whole, and a box to write in (Enter sends)."
 L.CHATWIN_PLACEHOLDER = "Write in [%s]..."
+L.CHATWIN_REPLY = "Reply"
+L.CHATWIN_REPLYING_TO = "Replying to %s"
+L.CHATWIN_REPLY_CANCEL = "Cancel reply"
 L.CHATWIN_PUBLIC = " (public channel)"
 L.CHATWIN_YOU = "You"
 L.CHATWIN_TAG_STEWARD = "Steward"
@@ -5455,6 +5462,9 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.TAB_CHAT = "Chat"
 	L.HELP_TAB_CHAT = "os chats Olympus, [Olympus], [Capitães] e [Lordes]: cada linha inteira, e uma caixa para escrever (Enter envia)."
 	L.CHATWIN_PLACEHOLDER = "Escreva em [%s]..."
+	L.CHATWIN_REPLY = "Responder"
+	L.CHATWIN_REPLYING_TO = "Respondendo a %s"
+	L.CHATWIN_REPLY_CANCEL = "Cancelar resposta"
 	L.CHATWIN_PUBLIC = " (canal público)"
 	L.CHATWIN_YOU = "Você"
 	L.CHATWIN_TAG_STEWARD = "Senescal"
@@ -6745,7 +6755,10 @@ L.NOMINEES_NOTE = "Accepted appointments remain saved across logouts while their
 L.NOMINEES_CLICK_REMOVE = "Click to take the title back."
 L.NOMINEES_CLICK_NAME = "Click to name one: type the name, or target them first."
 L.NOMINEES_LEGATE_DUTY = "Organize your own guild's raid group: you and up to 39 guildmates, 40 in total. Speak with the members and agree the group. Coordinate their attendance at events, raids and wars. Groups are optional: members may play with another leader even when you are offline. You manage your own group's list; no guild invitation, removal or native promotion is automatic."
-L.NOMINEES_LEGATE_APPOINTED = "%s appointed you a Legate of <%s>. %s"
+L.NOMINEES_LEGATE_APPOINTED = "%s appointed you a Legate of <%s>. %s %s"
+L.NOMINEES_CORRESPONDENT_DUTY = "Represent your guild in this department and keep its officers informed. This office grants no automatic guild rank or federal authority."
+L.NOMINEES_CORRESPONDENT_APPOINTED = "%s appointed you correspondent for %s in <%s>. %s %s"
+L.NOMINEES_BADGE_DECISION = "By decision of the High Council, this office is now shown by its shield badge instead of the bronze dragon frame. Earned honours remain yours."
 L.NOMINEES_DUTY_TREASURY = "Keep your guild's Treasury records and bank sharing organized. Coordinate resources and finance with your guild master and the Federal Treasury."
 L.NOMINEES_DUTY_WAR = "Organize your guild's raids and PvP operations, raid groups and after-action records in the War Room. These duties apply to your own guild."
 L.NOMINEES_DUTY_JUSTICE = "Watch your guild's chat, report problems and carry out moderation requests through its existing Watch duties, working with the guild master and the Council of Justice."
@@ -6816,7 +6829,10 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.NOMINEES_CLICK_REMOVE = "Clique para retirar o título."
 	L.NOMINEES_CLICK_NAME = "Clique para indicar: digite o nome, ou mire na pessoa antes."
 	L.NOMINEES_LEGATE_DUTY = "Organize o grupo de raide da sua própria guilda: você e até 39 companheiros, 40 no total. Converse com os membros e combine o grupo. Coordene a presença deles em eventos, raides e guerras. Os grupos são opcionais: os membros podem jogar com outro líder mesmo quando você estiver offline. Você cuida da lista do seu próprio grupo; nenhum convite, remoção ou promoção nativa é automático."
-	L.NOMINEES_LEGATE_APPOINTED = "%s nomeou você Legate de <%s>. %s"
+	L.NOMINEES_LEGATE_APPOINTED = "%s nomeou você Legate de <%s>. %s %s"
+	L.NOMINEES_CORRESPONDENT_DUTY = "Represente sua guilda neste departamento e mantenha seus oficiais informados. Este cargo não concede rank automático na guilda nem autoridade federal."
+	L.NOMINEES_CORRESPONDENT_APPOINTED = "%s nomeou você correspondente de %s em <%s>. %s %s"
+	L.NOMINEES_BADGE_DECISION = "Por decisão do High Council, este cargo agora é identificado pelo escudo próprio em vez da moldura de dragão bronze. As honrarias conquistadas continuam suas."
 	L.NOMINEES_DUTY_TREASURY = "Mantenha organizados os registros do Tesouro e o compartilhamento do banco da sua guilda. Coordene recursos e finanças com o mestre da guilda e o Tesouro Federal."
 	L.NOMINEES_DUTY_WAR = "Organize as raides e operações JxJ da sua guilda, grupos de raide e registros após as operações na Sala de Guerra. Essas atribuições valem na sua própria guilda."
 	L.NOMINEES_DUTY_JUSTICE = "Acompanhe o chat da sua guilda, relate problemas e cumpra pedidos de moderação pelas atribuições atuais da Guarda, junto do mestre da guilda e do Conselho de Justiça."
@@ -6886,4 +6902,52 @@ if GetLocale() == "ptBR" then
 - {wanted} A última zona vista de um alvo do Wanted só fica guardada quando este cliente conserva sua própria evidência aceita de abate ou morte. Linhas repassadas não levam zona; um pin nativo mais novo do mapa pode substituir o avistamento salvo. O addon não guarda coordenadas exatas, e o avistamento é evidência do cliente, não certificada pelo servidor.
 - {wanted} A pontuação dos Slayers agora soma um ponto base a cada dez níveis do alvo da Horda, arredondado para cima, a recompensa atual inteira do alvo e 100 pontos por uma vingança elegível. A migração refaz apenas o histórico comprovável; totais antigos sem resolução ficam arquivados, não estimados. Quem tiver a própria pontuação reduzida recebe uma explicação pessoal uma única vez.
 - {news} Wanted/Slayers, doadores, Tesouro das guildas, serviço e lotação da Igreja, Arena, Bones e rankings de nível e raça do reino agora têm páginas de Regras legíveis dentro da janela principal. A ordem privada de cobrança de taxas de crafting também tem uma, mas não é ranking de honraria. As permissões existentes continuam decidindo quem pode ver cada página.]==] .. "\n\nLoteria e limites seguros", 1)
+end
+
+L.LETTER_1_2_5_TITLE = "Replies, office shields and steadier records"
+L.LETTER_1_2_5 = [==[Version 1.2.5.
+
+Chat replies
+- {team} Right-click a saved line in Olympus Chat and choose Reply. A compact reference appears above the message box, the sent line keeps the quoted reference, and the X cancels it before sending.
+- {team} The reference stores only the room, sender and retained text already visible to that client. It does not grant room access, moderation power or another player's identity. Older clients receive a readable text prefix.
+
+Legates, correspondents and honours
+- {crown} Legates now use the chosen Legate shield. Correspondents use the shield of their department. The former wingless bronze office frame is no longer used by either office; a Guild Master still keeps the winged bronze frame.
+- {crown} A signed High Councillor may show the shield of their signed department without replacing the silver Council frame. An earned honour also remains underneath its separate office shield.
+- {guild} Existing and newly appointed Legates and correspondents receive one personal explanation of the change, its High Council decision and the duties of their office. A relog does not repeat it; a real later appointment change may explain the new office once.
+- {news} The plain honour families use normalized visible sizes and centering. This changes their presentation, not their owner, score or verification.
+- {news} The author can inspect any office shield locally with /oly borders test role-legate or role-<department-key>, then end it with /oly borders test off. The preview keeps the real frame underneath and sends nothing.
+
+Wanted and shared records
+- {wanted} Wanted, Monthly Slayers and All-time Slayers each open with five rows and expand independently by ten. Leaving Most Wanted collapses all three back to five; opening Rules and returning keeps the page you were reading.
+- {wanted} A locally retained cross-guild kill or death remains in the perennial ledger even when guild membership cannot yet be proved. Only rows with independent membership evidence can affect the signed shared Slayer board. Later roster-backed evidence promotes the same row instead of counting it twice.
+- {wanted} Character identity, guild-membership evidence and office evidence are checked separately. Shared office score is deterministic across clients; a local-only office observation cannot silently change the public score.
+- {guild} Retained game-record queues have a fair per-sender limit, so one peer cannot evict every other sender's records. Unverified public-channel strangers cannot create layer-hop demand or control its backoff.
+
+Please test
+- {news} Test Reply with a second updated client, each office shield on player/target/focus, leaving and reopening Most Wanted after expanding its lists, and a late login receiving retained records. Offline tests cover the rules, but only the live clients can confirm the final interaction and relay path.]==]
+
+if GetLocale() == "ptBR" then
+	L.LETTER_1_2_5_TITLE = "Respostas, badges de cargo e registros mais estáveis"
+	L.LETTER_1_2_5 = [==[Versão 1.2.5.
+
+Respostas no chat
+- {team} Clique com o botão direito numa linha salva do Chat do Olympus e escolha Responder. Uma referência compacta aparece acima da caixa de mensagem, a linha enviada conserva a citação e o X cancela antes do envio.
+- {team} A referência guarda somente a sala, o autor e o texto já retido e visível naquele cliente. Ela não dá acesso à sala, poder de moderação nem identidade de outro jogador. Clientes antigos recebem um prefixo de texto legível.
+
+Legates, correspondentes e honrarias
+- {crown} Legates agora usam o badge escolhido de Legate. Correspondentes usam o badge do seu departamento. A antiga borda bronze sem asas deixou de ser usada pelos dois cargos; o Guild Master continua com a borda bronze com asas.
+- {crown} Um membro assinado do High Council pode mostrar o badge do seu departamento assinado sem substituir a borda prata do Conselho. Uma honraria conquistada também continua por baixo do badge separado do cargo.
+- {guild} Legates e correspondentes atuais ou recém-nomeados recebem uma explicação pessoal da mudança, da decisão do High Council e das funções do cargo. Relogar não repete o aviso; uma mudança real de nomeação pode explicar o novo cargo uma vez.
+- {news} As famílias simples de honrarias usam tamanhos visíveis e centralização normalizados. Isso muda a apresentação, não o dono, a pontuação nem a verificação.
+- {news} O autor pode conferir qualquer badge localmente com /oly borders test role-legate ou role-<chave-do-departamento> e encerrar com /oly borders test off. A prévia mantém a borda real por baixo e não envia nada.
+
+Wanted e registros compartilhados
+- {wanted} Wanted, Slayers Mensais e Slayers de Todos os Tempos abrem com cinco linhas e expandem separadamente de dez em dez. Sair de Most Wanted recolhe as três listas para cinco; abrir Regras e voltar preserva a página que você estava lendo.
+- {wanted} Um abate ou morte entre guildas guardado localmente continua no livro perene mesmo quando ainda não é possível provar a filiação. Somente linhas com prova independente de filiação podem alterar o placar compartilhado e assinado dos Slayers. Prova posterior baseada na lista da guilda promove a mesma linha sem contar duas vezes.
+- {wanted} Identidade do personagem, prova de filiação e prova de cargo são verificadas separadamente. A pontuação compartilhada de cargo é determinística entre clientes; uma observação local de cargo não pode mudar silenciosamente o placar público.
+- {guild} As filas de registros de jogos retidos têm limite justo por remetente, para que um único peer não expulse os registros de todos os outros. Estranhos não verificados no canal público não podem criar demanda de troca de layer nem controlar o intervalo dela.
+
+O que testar
+- {news} Teste Responder com um segundo cliente atualizado, cada badge no jogador/alvo/foco, sair e voltar a Most Wanted depois de expandir as listas e um login tardio recebendo registros retidos. Os testes offline cobrem as regras, mas somente os clientes ao vivo confirmam a interação final e o caminho de relay.]==]
 end

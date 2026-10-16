@@ -2475,6 +2475,14 @@ function Wanted.VisibleRows(kind, total)
 	return math.min(math.max(0, tonumber(total) or 0), math.max(Wanted.LIST_FIRST, shown))
 end
 
+-- Expanding a ranking is useful only while reading this visit to Most Wanted. There is no collapse
+-- affordance in the compact page, so leaving the outer tab restores its three short previews.
+function Wanted.CollapseLists()
+	Wanted.listShown.wanted = Wanted.LIST_FIRST
+	Wanted.listShown.month = Wanted.LIST_FIRST
+	Wanted.listShown.all = Wanted.LIST_FIRST
+end
+
 function Wanted.MoreLine(lines, kind, id, total)
 	local shown = Wanted.VisibleRows(kind, total)
 	if shown >= total then return false end
@@ -3722,11 +3730,17 @@ if ns.Consent and ns.Consent.Register then
 	ns.Consent.Register({
 		key = "wantedsightings", label = "CONSENT_WANTED_SIGHTINGS", text = "CONSENT_WANTED_SIGHTINGS_TEXT",
 		shown = function() return ns.IsMember() == true and ns.faction ~= "Horde" end,
-		get = function() return SightingsOn() end,
+		-- Keep unanswered distinct from No on the authorization page. Runtime collection still uses
+		-- SightingsOn(), where both nil and false are safely off.
+		get = function()
+			local answer
+			if type(ns.db) == "table" then answer = ns.db.wantedSightings end
+			if answer == true or answer == false then return answer end
+			return nil
+		end,
 		set = function(on) Wanted.SetSightings(on) end,
-		-- 1.2.0: off until its own Yes, and asked like the page's other lines until it is answered
-		-- (1.2.1: the page opens by itself for it once, never again once shown); the bulk Yes never
-		-- turns it on.
+		-- Off until an explicit choice. Authorize all includes every visible pending line, including
+		-- this one; an earlier No remains a No because it is no longer pending.
 		pending = function() return type(ns.db) == "table" and ns.db.wantedSightings == nil end,
 		explicit = true,
 	})
@@ -6561,7 +6575,8 @@ end
 
 if ns.UI and ns.UI.AddTab then
 	ns.UI.AddTab({ key = "wanted", label = "TAB_WANTED", after = "realm",
-		icon = Wanted.Icon, visible = function() return ns.IsMember and ns.IsMember() end, build = Wanted.Build, buttons = buttons })
+		icon = Wanted.Icon, visible = function() return ns.IsMember and ns.IsMember() end, build = Wanted.Build,
+		onLeave = Wanted.CollapseLists, buttons = buttons })
 end
 
 -- Never COMBAT_LOG_EVENT_UNFILTERED: on Forever it is a restricted event (HasRestrictions in the

@@ -29,10 +29,8 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
-- **1.2.4**: Implementation candidate: role rooms, retained signed game records, guild average levels,
-  Church appointment catch-up, Heraldry guild duties and Wanted count fixes. Not published;
-  Windows visual and multiplayer acceptance remain separate gates. Undefined departmental metrics
-  and unrelated future backlog are not included as finished features.
+- **1.2.5**: Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,
+  safer shared rankings and relay queues, and predictable Most Wanted list expansion.
 - **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
   from members' own kills and deaths, bounties by office and level; the missionaries' crook
 - **1.2.2**: The stutter fixed (the level race's checks off the message handler, data changes taken once
@@ -173,9 +171,13 @@ versions before 1.1 just get the whisper, as before.
   correspondent. Since 1.2.4, up to 25
   Legates and one correspondent per department (6 at most), members of his own guild only: the
   addon refuses a 26th Legate, a second correspondent for a department, one name twice and
-  anyone outside his roster, and says why. Correspondents retain Max's bronze border without
-  wings. Legates no longer receive that portrait border merely for this office; a separate badge
-  design has not been chosen or enabled. Offices count only while verified in the guild.
+  anyone outside his roster, and says why. By decision of the High Council, Legates and
+  correspondents no longer receive the bronze dragon frame merely for their office: a Legate gets
+  the Legate shield and a correspondent gets their department's shield. A signed High Councillor
+  likewise gets their department shield without replacing the Council's silver frame. Earned
+  honours remain round the portrait underneath the separate badge. Offices count only while
+  verified in the guild. Existing appointees receive this explanation once; a real office or
+  department change explains the new badge again.
   His own client sends the list on the Olympus channel; every addon takes it from that guild's
   master alone (proven as for his bronze wings: your roster for your own guild, two census senders
   for another), retains accepted bounded lists across logouts and offline periods, and drops the
@@ -753,8 +755,8 @@ Another addon can read, with your permission, what Olympus already shows you: th
 and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
 title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
-page and nothing until your **Yes** there (**Accept all** never answers for it; `/oly privacy`
-changes it at any time). Olympus sends nothing for it and gives it no way to send anything for
+page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
+(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Olympus sends nothing for it and gives it no way to send anything for
 you, nor your location, the census, other players' private data or Olympus's keys; each addon
 gets its own copy, a limited number of calls at a time. What that addon then does with what it
 read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
@@ -935,9 +937,9 @@ code.
 | `/oly lfg` · `/oly lfg dungeon\|raid\|pvp\|layer [note]` · `/oly lfg off` | the Board (1.1): who is looking for a group; raise your flag (a box with your note first) or lower it |
 | `/oly week` | the week on the Board and Decrees: army and own-guild Agenda entries for 7 days, alongside your guild's calendar; eligible schedulers see separate army and guild buttons ("Sat 20:00 Raid night") |
 | `/oly location on` · `/oly location off` | share (or not) your zone and layer on the Olympus channel |
-| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council, Max's bronze wings for the guild masters of Olympus guilds, and his bronze without wings for the correspondents a guild master names, while they are in his guild (none for a character or a guild the moderators took off, net-off). Since 1.1.5 the rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
-| `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V), like an elite creature's dragon: the game's gold elite mark for the King, its silver for the High Council, bronze for guild masters and the people they name, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
-| `/oly chatmarks on` · `/oly chatmarks off` | 1.1.5: the mark of a player's border tier before their name in the game's own chat (channels, say, yell, emote, party, raid, instance and whispers; guild and officer chat the dragons alone, never the star): the King's gold dragon, a High Councillor's silver then their icon, the bronze of a guild master and the people he names, the star for any other member your addon can check. Olympus's own lines carry none. Through the game's own name filter, so the name's link, right-click and /r stay the game's; on by default, hidden with the gamepad UI, and a councillor's on the King's screen while the council's names are hidden |
+| `/oly borders on` · `/oly borders off` | elite borders round the portrait of your target, focus, party members and your own frame (Forever): the game's gold wings for the King, silver wings for the High Council and Max's bronze wings for Olympus guild masters (none for a character or guild the moderators took off, net-off). Legates and correspondents use separate verified office shields instead of the old wingless bronze role frame; signed High Council departments use the same shield family without replacing silver, and earned honours remain. Since 1.1.5 the old rank borders (gold for Lords, silver for Captains, bronze for Raiders and Veterans) are gone, and any other member has the nameplate star alone. On by default, hidden with the gamepad UI. Off, the nameplate marks go too |
+| `/oly nameplates on` · `/oly nameplates off` | a small mark left of the name on friendly players' nameplates (Forever; friendly nameplates show with Shift+V): the game's gold elite mark for the King, silver for the High Council, bronze for guild masters, the verified Legate or department shield for an appointee, and a star for any other member of an Olympus guild (none for a character or a guild the moderators took off, net-off); on by default, hidden with the gamepad UI and with `/oly borders off` |
+| `/oly chatmarks on` · `/oly chatmarks off` | 1.1.5: the verified mark before a player's name in the game's own chat (channels, say, yell, emote, party, raid, instance and whispers; guild and officer chat the office marks alone, never the star): the King's gold dragon, a High Councillor's silver then their icon, a guild master's bronze, the Legate or department shield for an appointee, and the star for any other member your addon can check. Olympus's own lines carry none. Through the game's own name filter, so the name's link, right-click and /r stay the game's; on by default, hidden with the gamepad UI, and a councillor's on the King's screen while the council's names are hidden |
 | `/oly block <name>` | ignore a player |
 | `/oly filter add\|remove <word>` · `/oly filter` | block terms: hide, on your screen, lines of addon text (Olympus chats, writs, decrees, Vox) with a word; the list (1.1) |
 | `/oly alt add Name` · `/oly alt remove Name` · `/oly alt` | link a character of this account as your alt (log it and say yes there), take a link apart, or see your links: the census and the treasury count you once (1.1) |
@@ -974,7 +976,7 @@ also saved in `WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua`.
 - **Feature requests:** Fernmelder, whose 39 posts became 1.1 (the Fernmelder release);
   shenanigans_ (the nameplate marks), Valdericht (`<OLYMPIAN>`), Pyralis Ashandar (taking
   donations) and Zeal (what the King hides stays off the channel).
-- **Art:** Max (the bronze elite borders, drawn over the game's own: the winged one is the guild masters' since 1.1.5, the plain one their correspondents').
+- **Art:** Max (the bronze elite borders, drawn over the game's own; the winged one remains the guild masters').
 - **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
   to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
   player who told us WoW had handed him the channel.

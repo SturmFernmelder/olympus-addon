@@ -1997,6 +1997,10 @@ function Widget:SetColorTexture(...) self.colorTexture = { ... } end
 function Widget:SetTextColor(...) self.textColor = { ... } end
 function Widget:SetFrameStrata(strata) self.strata = strata end
 function Widget:GetFrameStrata() return self.strata end
+-- Buttons in the real client inherit Region's alpha API. Keep it observable here so consent's
+-- conservative action can be tested as visually muted without pretending it is disabled.
+function Widget:SetAlpha(alpha) self.alpha = alpha end
+function Widget:GetAlpha() return self.alpha or 1 end
 -- (1.2: a window moved into another one stops being movable and on top, Workshop.IconPickerHost.)
 function Widget:SetMovable(on) self.movable = on and true or false end
 function Widget:IsMovable() return self.movable == true end
@@ -3718,9 +3722,10 @@ test("1.2 UI.AddTab: a tab joins at its canonical position with its list and but
 	local ok, err = pcall(WithUI, function()
 		local w, UI = ForeverWorld(true)
 		local n = #UI.TABS
-		local extra, shown, clicked = true, true, 0
+		local extra, shown, clicked, left = true, true, 0, 0
 		eq(UI.AddTab({ key = "core-tab", label = "TAB_REALM", icon = "Interface\\Icons\\Ability_Warrior_BattleShout", after = "chat",
 			visible = function() return shown end, build = function() return { { text = "Torvin Hale v Selka Drummond" } }, "Blood Arena", "" end,
+			onLeave = function() left = left + 1 end,
 			buttons = { { "WHO", function() clicked = clicked + 1 end } } }), true)
 		eq(UI.AddTab({ key = "core-extra", label = "TAB_REALM", icon = "Interface\\Icons\\INV_Letter_15", after = "core-tab",
 			visible = function() return extra end }), true)
@@ -3738,6 +3743,8 @@ test("1.2 UI.AddTab: a tab joins at its canonical position with its list and but
 		-- Its list is its builder's (Views.Register), its buttons its own.
 		Tab("core-tab"):Click()
 		eq(main.tab, "core-tab")
+		Tab("core-tab"):Click()
+		eq(left, 0, "reselecting the same tab does not leave it")
 		local found = false
 		for _, row in ipairs(main.views["core-tab"] and main.views["core-tab"].rows or {}) do
 			if (RowText(row) or ""):find("Torvin Hale v Selka Drummond", 1, true) then found = true end
@@ -3750,6 +3757,7 @@ test("1.2 UI.AddTab: a tab joins at its canonical position with its list and but
 		shown = false
 		UI.Refresh()
 		eq(Tab("core-tab"):IsShown(), false); eq(main.tab, "census")
+		eq(left, 1, "a successful move to another tab runs the registered leave cleanup")
 		shown = true
 		local function Keys(onLeft)
 			local out = {}
@@ -24736,7 +24744,12 @@ end
 local BORDER_GLOBALS = { "TargetFrame", "FocusFrame", "PlayerFrame", "hooksecurefunc", "UnitExists", "UnitIsPlayer", "UnitGUID",
 	"UnitFactionGroup", "UnitFullName", "GetUnitName", "GetGuildInfo", "IsInGuild", "InCombatLockdown", "issecretvalue", "C_Texture",
 	"C_InputInterfaceStyle", "PartyFrame" }
-local CONTAINER_OF = { target = "TargetFrame.TargetFrameContainer", focus = "FocusFrame.TargetFrameContainer", player = "PlayerFrame.PlayerFrameContainer" }
+local CONTAINER_OF = {
+	target = "TargetFrame.TargetFrameContainer", focus = "FocusFrame.TargetFrameContainer", player = "PlayerFrame.PlayerFrameContainer",
+	targetBadge = "TargetFrame.TargetFrameContent.TargetFrameContentContextual",
+	focusBadge = "FocusFrame.TargetFrameContent.TargetFrameContentContextual",
+	playerBadge = "PlayerFrame.PlayerFrameContent.PlayerFrameContentContextual",
+}
 
 -- A player as the unit functions give it; its GUID one of its own (the same character: the same GUID).
 local function BorderUnit(name, guild, rank, rankIndex, extra)
@@ -24801,9 +24814,12 @@ local function WithBorders(fn, setup)
 		end)
 		return c
 	end
-	local function UnitFrameStandIn(label, key, classification)
+	local function UnitFrameStandIn(label, key, classification, contentKey, contextualKey)
 		local f = Logged(label, { label = label })
 		rawset(f, key, Container(label .. "." .. key))
+		local content = Logged(label .. "." .. contentKey, { label = label .. "." .. contentKey })
+		rawset(content, contextualKey, Container(label .. "." .. contentKey .. "." .. contextualKey))
+		rawset(f, contentKey, content)
 		if classification then
 			rawset(f, "CheckClassification", function(self)
 				-- The game's, for a player: no classification of note, its elite art hidden.
@@ -24815,9 +24831,9 @@ local function WithBorders(fn, setup)
 		return f
 	end
 	local ok, err = pcall(function()
-		TargetFrame = UnitFrameStandIn("TargetFrame", "TargetFrameContainer", true)
-		FocusFrame = UnitFrameStandIn("FocusFrame", "TargetFrameContainer", true)
-		PlayerFrame = UnitFrameStandIn("PlayerFrame", "PlayerFrameContainer", false)
+		TargetFrame = UnitFrameStandIn("TargetFrame", "TargetFrameContainer", true, "TargetFrameContent", "TargetFrameContentContextual")
+		FocusFrame = UnitFrameStandIn("FocusFrame", "TargetFrameContainer", true, "TargetFrameContent", "TargetFrameContentContextual")
+		PlayerFrame = UnitFrameStandIn("PlayerFrame", "PlayerFrameContainer", false, "PlayerFrameContent", "PlayerFrameContentContextual")
 		PartyFrame = nil
 		w.partyRegions = {
 			Portrait = { layer = "BACKGROUND", sub = 0, x = 7, y = -6, width = 37, height = 37 },
@@ -24947,7 +24963,7 @@ local function WithBorders(fn, setup)
 		w.shownTextureOn = function(owner)
 			local found
 			for _, tex in ipairs(w.textures) do
-				if owner ~= nil and tex.owner == owner and tex.sub ~= 2 and tex.shown then
+				if owner ~= nil and tex.owner == owner and tex.sub ~= 2 and tex.sub ~= 7 and tex.shown then
 					assert(not found, "two borders at once on " .. owner)
 					found = tex
 				end
@@ -24983,6 +24999,21 @@ local function WithBorders(fn, setup)
 			local found = w.shownTexture(unit)
 			return found and w.tierOf(found) or nil
 		end
+		w.roleBadge = function(unit)
+			local owner = CONTAINER_OF[unit .. "Badge"]
+			if not owner then
+				local f = w.partyFrame(unit)
+				owner = f and f.label
+			end
+			local found
+			for _, tex in ipairs(w.textures) do
+				if owner ~= nil and tex.owner == owner and tex.sub == 7 and tex.shown then
+					assert(not found, "two role badges at once on " .. owner)
+					found = tex
+				end
+			end
+			return found
+		end
 		w.computed = function() return w.B.stats.computed end
 		w.container = Container -- (1.2: a frame of Olympus's own whose textures are recorded the same way)
 		-- Once the frame textures exist, combat updates may only switch tier art and
@@ -25000,7 +25031,7 @@ local function WithBorders(fn, setup)
 					if tex.sub == 2 then
 						assert(underlayMethods[method], "underlay in combat: " .. method)
 					else
-						assert(tex.sub == 3 or tex.sub == -1, "tier art's sublevel (a party member's frame: -1)")
+						assert(tex.sub == 3 or tex.sub == -1 or tex.sub == 7, "tier art or badge sublevel")
 						assert(method == "Show" or method == "Hide", "tier art in combat: " .. method)
 					end
 				end
@@ -25963,6 +25994,55 @@ do
 			AsAuthor(w)
 			w.units.player = BorderUnit("Faladoriel Skylance", "Olympus II", "Zeus", 0, { realm = "ClassicBetaPvP" })
 		end)
+	end)
+
+	test("1.2.5 office badge preview: the author's local command overlays each role shield on player target and focus portraits without replacing real frames or sending anything", function()
+		WithBorders(function(w)
+			ns.Borders = w.B
+			w.internal("LOGIN")
+			eq(w.shown("player"), "silver", "the author's real frame before preview")
+			RecordingSends(function(sent)
+				SlashCmdList.OLYMPUS("borders test role-legate")
+				eq(w.B.Preview(), "role-legate")
+				eq(w.B.PreviewRole(w.B.Preview()), "legate")
+				eq(w.printed[#w.printed], ns.L.BORDERS_BADGE_PREVIEW_ON:format("Legate", "role-legate"))
+				eq(w.shown("player"), "silver", "the real silver remains underneath")
+				local badge = assert(w.roleBadge("player"), "Legate shield on the author's portrait")
+				eq(badge.file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\legate")
+				eq(badge.size, "36 36")
+				w.target(w.units.player)
+				eq(w.shown("target"), "silver", "targeting self keeps the real frame")
+				eq(assert(w.roleBadge("target")).file, badge.file, "and shows the preview shield")
+				w.units.focus = w.units.player
+				w.fire("PLAYER_FOCUS_CHANGED")
+				eq(w.shown("focus"), "silver")
+				eq(assert(w.roleBadge("focus")).file, badge.file)
+				w.target(BorderUnit("Stranger", "Stormwind Traders", "Member", 3))
+				eq(assert(w.roleBadge("target")).file, badge.file, "another player target shows the local preview")
+				w.units.focus = BorderUnit("Other Player", "Stormwind Traders", "Member", 3)
+				w.fire("PLAYER_FOCUS_CHANGED")
+				eq(assert(w.roleBadge("focus")).file, badge.file, "another player focus shows the local preview")
+				local npc = BorderUnit("Innkeeper", nil, nil, nil)
+				npc.npc = true
+				w.target(npc)
+				eq(w.roleBadge("target"), nil, "an NPC never shows the office preview")
+				for _, key in ipairs({ "olympus", "federal-treasury", "department-of-war", "council-of-justice",
+					"association-of-artisanry", "department-of-heraldry", "missionary-church-of-olympus" }) do
+					SlashCmdList.OLYMPUS("borders test role-" .. key)
+					eq(w.B.Preview(), "role-" .. key)
+					eq(assert(w.roleBadge("player")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\" .. key, key)
+					eq(w.shown("player"), "silver", key .. ": the real frame remains")
+				end
+				SlashCmdList.OLYMPUS("borders test role-not-an-office")
+				eq(w.B.Preview(), "role-missionary-church-of-olympus", "an unknown role does not replace the preview")
+				SlashCmdList.OLYMPUS("borders test off")
+				eq(w.B.Preview(), nil)
+				eq(w.roleBadge("player"), nil, "preview badge removed")
+				eq(w.roleBadge("focus"), nil, "focus restored too")
+				eq(w.shown("player"), "silver", "real frame unchanged after preview")
+				eq(#sent, 0, "the preview has no chat, addon or whisper traffic")
+			end)
+		end, AsAuthor)
 	end)
 
 	test("1.0.0 borders preview: the Workshop lists the tiers for the author; a click shows one, a click on it again ends it; not in the copy for Discord", function()
@@ -27382,31 +27462,33 @@ do
 		assert(comm:find("Nominees NM", 1, true), "in Comm.lua's list")
 	end)
 
-	test("1.2.4 nominees' border: a Legate keeps native rank and earned honours, with no extra portrait; a guild-verified correspondent retains the bronze, removed with its title", function()
+	test("1.2.4 office badges: Legates and correspondents keep native rank and earned honours, lose the bronze role frame, and show their verified shield only", function()
 		local savedRoster = ns.Roster.byName
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
 			-- Our own guild's master (our roster), and Zeusy, <Olympus Zeus>'s (its census).
 			ns.Roster.byName = { [MASTER] = 0, ["Tester-Realm"] = 2, ["Ada-Realm"] = 3 }
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada;d=Lore=Bea"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "c=Ada;d=Department of Heraldry=Bea"))
 			N.Handle("CHANNEL", MASTER, Msg(OURS, ns.Now(), "c=Tester;c=Ada"))
 			w.party()
 			w.units.party1 = BorderUnit("Ada", THEIRS, "Member", 4)
 			w.internal("LOGIN")
 			eq(w.shown("party1"), nil, "a manual Legate has no added portrait border")
+			eq(assert(w.roleBadge("party1")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\legate")
 			eq(w.shown("player"), nil, "the appointment itself does not change your portrait")
 			w.target(BorderUnit("Bea", THEIRS, "Member", 4))
-			eq(w.shown("target"), "bronze", "a correspondent")
-			local tex = w.shownTexture("target")
-			eq(tex.file, MEDIA .. "bronze-plain", "Max's plain bronze"); eq(tex.size, "100 100")
-			eq(tex.point, "TOPRIGHT TargetFrame.TargetFrameContainer TOPRIGHT 0 1")
+			eq(w.shown("target"), nil, "a correspondent has no bronze role frame")
+			local tex = assert(w.roleBadge("target"))
+			eq(tex.file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry")
+			eq(tex.size, "36 36")
 			w.units.focus = BorderUnit("Bea", THEIRS, "Member", 4)
 			w.fire("PLAYER_FOCUS_CHANGED")
-			eq(w.shown("focus"), "bronze")
-			eq(w.B.MarkOf("target"), "bronze", "the nameplate's bronze, a guild master's mark")
-			eq(w.B.MarkOfName("Bea-Realm", THEIRS), "bronze", "the game's chat: the bronze")
+			eq(w.shown("focus"), nil)
+			eq(assert(w.roleBadge("focus")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry")
+			eq(w.B.MarkOf("target"), "role-department-of-heraldry", "the nameplate's verified office shield")
+			eq(w.B.MarkOfName("Bea-Realm", THEIRS), "role-department-of-heraldry", "the game's chat: the office shield")
 			eq(N.RoleOf("Ada-Realm", OURS), "centurion", "the legitimate manual appointment is actually accepted")
-			eq(w.B.MarkOfName("Ada-Realm", OURS), "bronze", "existing nomination identity mark is not a portrait border")
+			eq(w.B.MarkOfName("Ada-Realm", OURS), "role-legate", "the Legate identity is its shield, not a portrait border")
 			-- Nobody can borrow it: the same name in another guild, guildless, on another realm.
 			w.target(BorderUnit("Bea", OURS, "Member", 4))
 			eq(w.shown("target"), nil, "in another guild"); eq(w.B.MarkOf("target"), "member", "the star")
@@ -27422,16 +27504,17 @@ do
 			-- The plain bronze's file the client can't load: the plain gold under it, without colour.
 			-- (Below, with the file's own WithBorders.)
 			-- Taken back (his master's new list without him): gone at the next refresh.
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now() + 1, "d=Lore=Bea"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now() + 1, "d=Department of Heraldry=Bea"))
 			w.internal("DATA_CHANGED")
 			eq(w.shown("party1"), nil, "no longer named")
-			eq(w.shown("focus"), "bronze", "Bea still is")
-			-- Her guild master no longer its master (the census proves another): her border goes too.
+			eq(w.roleBadge("party1"), nil, "the revoked Legate shield is removed")
+			eq(assert(w.roleBadge("focus")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry", "Bea still is")
+			-- Her guild master no longer its master (the census proves another): her shield goes too.
 			ns.rdb.guilds[THEIRS] = Vouched({ guild = THEIRS, leader = "Newboss", officers = { { name = "Zeusy" } }, realm = "Realm", t = ns.Now() },
 				"W1-Realm", "W2-Realm")
 			N.Prune()
 			w.internal("DATA_CHANGED")
-			eq(w.shown("focus"), nil, "her master's list ended")
+			eq(w.roleBadge("focus"), nil, "her master's list ended")
 			eq(w.shown("player"), nil, "still no appointment-specific Legate portrait")
 			local status = ns.StatusText()
 			assert(status:find("\nnominees: <Olympus II> 2 by Boss Hammer (heard ", 1, true), status)
@@ -27439,36 +27522,36 @@ do
 		ns.Roster.byName = savedRoster
 		N.Reset()
 		if not ok then error(err, 0) end
-		-- Max's plain bronze not loaded: the game's plain gold it was drawn over, without colour.
+		-- A missing office asset invents no fallback border or badge.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
-			w.noFile[MEDIA .. "bronze-plain"] = true
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Department of Heraldry=Ada"))
+			w.noFile["Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry"] = true
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
-			eq(w.shown("target"), "bronze")
-			local tex = w.shownTexture("target")
-			eq(tex.atlas, "UI-HUD-UnitFrame-Target-PortraitOn-Boss-Gold"); eq(tex.desaturated, true)
+			eq(w.shown("target"), nil)
+			eq(w.roleBadge("target"), nil)
 		end)
 		N.Reset()
 		if not ok then error(err, 0) end
 		-- The gamepad UI: none, as every border.
 		ok, err = pcall(WithBorders, function(w)
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada"))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Department of Heraldry=Ada"))
 			w.style = 1
 			w.internal("LOGIN")
 			w.target(BorderUnit("Ada", THEIRS, "Member", 4))
 			eq(w.shown("target"), nil); eq(#w.textures, 0, "nothing made"); eq(#w.hooks, 0)
 			w.style = 0
 			w.fire("INPUT_DEVICE_INTERFACE_TRANSITION", 0, 1)
-			eq(w.shown("target"), "bronze", "back with mouse and keyboard")
+			eq(w.shown("target"), nil, "no office frame after returning to mouse and keyboard")
+			eq(assert(w.roleBadge("target")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry")
 		end)
 		N.Reset()
 		if not ok then error(err, 0) end
 	end)
 
-	-- Manual Legates have the bronze chat identity, not a bronze portrait. The High Council's
+	-- Manual Legates have their own shield identity, not a bronze portrait. The High Council's
 	-- own silver portrait still wins. The legacy c= wire is retained for compatible nominations.
-	test("1.2.4 the King's guild's Legates: a manual authorized list gives bronze chat identity but no bronze portrait; a High Councillor wears silver", function()
+	test("1.2.4 the King's guild's Legates: a manual authorized list gives the Legate shield but no bronze portrait; a High Councillor wears silver", function()
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
 			ns.rdb.council.names["vera councillor"] = true
@@ -27478,7 +27561,8 @@ do
 			w.target(BorderUnit("Ada", "Olympus", "Member", 4))
 			eq(w.shown("target"), nil, "no bronze from a list in the King's guild")
 			eq(N.RoleOf("Ada-Realm", "Olympus"), "centurion", "actual compatible manual nomination")
-			eq(w.B.MarkOfName("Ada-Realm", "Olympus"), "bronze", "the game's chat keeps the Legate identity mark")
+			eq(w.B.MarkOfName("Ada-Realm", "Olympus"), "role-legate", "the game's chat keeps the Legate shield")
+			eq(assert(w.roleBadge("target")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\legate")
 			w.target(nil); w.target(BorderUnit("Vera Councillor", "Olympus", "Member", 4))
 			eq(w.shown("target"), "silver-elite", "a High Councillor of the King's guild: one of the King's centurions, in his silver")
 			ns.rdb.council.names["vera councillor"] = nil
@@ -27487,25 +27571,29 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	test("1.1.5 borders, who wins when several hold: the King, the High Council, the dev's silver, a guild master, a nominee, then the star; the dev's plain silver (ns.AUTHOR on his realm group) with its mark, the silver dragon, on nameplates and in the game's chat (1.2.3)", function()
+	test("1.2.4 borders and office shields: the King, High Council, developer, guild master and earned honour keep their frame precedence while a verified office remains a separate badge", function()
 		local savedRoster = ns.Roster.byName
 		N.Reset()
 		local ok, err = pcall(WithBorders, function(w)
 			local AUTHOR_REALM = ns.AUTHOR_REALM
 			local dev = ns.AUTHOR .. "-" .. AUTHOR_REALM
 			ns.Roster.byName = { [MASTER] = 0, ["Tester-Realm"] = 2 }
-			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Lore=Ada;c=Zeusy;c=" .. dev))
+			N.Handle("CHANNEL", "Zeusy-Realm", Msg(THEIRS, ns.Now(), "d=Department of Heraldry=Ada;c=Zeusy;c=" .. dev))
 			w.internal("LOGIN")
 			local function Tier(unit) w.target(nil); w.target(unit) return w.shown("target"), w.B.MarkOf("target") end
 			local ada = BorderUnit("Ada", THEIRS, "Member", 4)
-			eq(Tier(ada), "bronze", "a correspondent retains the plain bronze portrait")
+			local border, mark = Tier(ada)
+			eq(border, nil, "a correspondent has no role frame")
+			eq(mark, "role-department-of-heraldry", "the correspondent has the department shield")
+			eq(assert(w.roleBadge("target")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry")
 			-- A guild master before a nominee (named in a list of his own guild's).
-			local border, mark = Tier(BorderUnit("Zeusy", THEIRS, "Zeus", 0))
+			border, mark = Tier(BorderUnit("Zeusy", THEIRS, "Zeus", 0))
 			eq(border, "bronze-elite"); eq(mark, "bronze")
 			-- The High Council before a nominee.
 			ns.rdb.council.names["ada"] = true
 			border, mark = Tier(ada)
 			eq(border, "silver-elite"); eq(mark, "silver")
+			eq(assert(w.roleBadge("target")).file, "Interface\\AddOns\\Olympus\\media\\pauldrons\\department-of-heraldry", "office badge remains separate from the council frame")
 			ns.rdb.council.names["ada"] = nil
 			-- The dev: his plain silver, in any guild or none, before a guild master and a nominee. 1.2.3
 			-- (the author's ask: "minhas msgs no chat têm o dragão prata, né?"): it has its mark, the
@@ -27516,7 +27604,7 @@ do
 			border, mark = Tier(BorderUnit(ns.AUTHOR, OURS, "Member", 3, { realm = AUTHOR_REALM }))
 			eq(border, "silver"); eq(mark, "silver", "before an Olympus member's star")
 			border, mark = Tier(BorderUnit(ns.AUTHOR, THEIRS, "Member", 3, { realm = AUTHOR_REALM }))
-			eq(border, "silver", "before a nominee's bronze"); eq(mark, "silver", "before a nominee's mark")
+			eq(border, "silver", "before an office role mark"); eq(mark, "silver", "before an office role mark")
 			border, mark = Tier(BorderUnit(ns.AUTHOR, OURS, "Zeus", 0, { realm = AUTHOR_REALM }))
 			eq(border, "silver", "before a guild master's wings"); eq(mark, "silver", "before a guild master's mark")
 			eq(w.B.MarkOfName(dev, nil), "silver", "the game's chat: the silver dragon")
@@ -36290,11 +36378,19 @@ do
 					end
 					assert(RowOf(page, "chat").text:GetText():find("neither sends nor shows", 1, true))
 					assert(RowOf(page, "layerhelp").text:GetText():find(ns.L.CONSENT_NEEDS_LOCATION, 1, true), "needs the location, while it is off")
-					-- X: nothing answered for the player; and once a session. Lines wait: Accept all
-					-- beside Done (1.1.6, the owner's ask; it was the untouched page's Done before).
+					-- Nothing answered for the player; and once a session. Lines wait: the primary
+					-- Authorize all on the right; the equal-sized conservative action on the left,
+					-- muted in the same way as the game's secondary dialog choices.
 					eq(page.all:IsShown(), true); eq(page.all:GetText(), ns.L.CONSENT_ACCEPT_ALL)
-					eq(page.done:GetText(), ns.L.CONSENT_DONE)
-					page.close:Click()
+					eq(page.done:GetText(), ns.L.CONSENT_KEEP_CURRENT)
+					eq(page.all:GetWidth(), page.done:GetWidth(), "equal widths")
+					eq(page.all:GetHeight(), page.done:GetHeight(), "equal heights")
+					eq(page.done:GetAlpha(), 0.8, "the secondary action is muted, not disabled")
+					eq(page.done.normalFont, "GameFontDisable", "the game's dim secondary font")
+					eq(page.all.points[#page.all.points][1], "TOPRIGHT", "primary action on the right")
+					eq(page.done.points[#page.done.points][1], "TOPLEFT", "secondary action on the left")
+					assert(page.close == nil or not page.close:IsShown(), "there is no X")
+					page.done:Click()
 					eq(page:IsShown(), false)
 					for _, k in ipairs(SWITCHES) do eq(ns.db[k], nil, k .. ": still unanswered, off") end
 					eq(ns.TabardsV2.Consent("self"), nil); eq(ns.TabardsV2.Consent("nearby"), nil)
@@ -36305,16 +36401,16 @@ do
 					-- /oly privacy opens it whenever; No to each sets each switch.
 					SlashCmdList.OLYMPUS("privacy")
 					eq(page:IsShown(), true)
-					-- An individual choice keeps Accept all while another line waits (it went away before).
+					-- An individual choice keeps Authorize all while another line waits (it went away before).
 					Rows(page)[1].no:Click()
-					eq(page.all:IsShown(), true, "Accept all stays while a line waits, after an individual choice")
+					eq(page.all:IsShown(), true, "Authorize all stays while a line waits, after an individual choice")
 					for _, r in ipairs(Rows(page)) do r.no:Click() end
-					eq(page.all:IsShown(), false, "every line answered: no Accept all")
+					eq(page.all:IsShown(), false, "every line answered: no Authorize all")
 					eq(page.done:GetText(), ns.L.CONSENT_DONE)
 					for _, k in ipairs(SWITCHES) do eq(ns.db[k], false, k .. ": No") end
 					eq(ns.TabardsV2.Consent("self"), false); eq(ns.TabardsV2.Consent("nearby"), false)
 					for _, r in ipairs(Rows(page)) do assert(r.state:GetText():find(ns.L.CONSENT_STATE_NO, 1, true), r.key) end
-					page.close:Click()
+					page.done:Click()
 					-- Every answer No: the window, the census and our own guild still work.
 					UI.SelectTab("census")
 					eq(OlympusFrame:IsShown(), true)
@@ -36344,7 +36440,7 @@ do
 		end)
 	end)
 
-	test("1.2 authorizations: Accept all authorizes every visible unanswered line, preserves No and hidden roles, fires the real events, and can be revoked", function()
+	test("1.2 authorizations: Authorize all authorizes every visible unanswered line, preserves No and hidden roles, fires the real events, and can be revoked", function()
 		local savedPatrol, savedFire = ns.db.patrolShare, ns.Fire
 		local events = {}
 		local ok, err = pcall(function()
@@ -36371,7 +36467,7 @@ do
 					eq(table.concat(events, ","), "location:true,layerhelp:true,inspection:true,chat:true,chatrooms:true,tabardselfv2:true,tabardnearbyv2:true")
 					-- Reopening has no bulk work. A later No uses the same real setter and persists.
 					page = ns.Consent.Show()
-					eq(page.all:IsShown(), false, "nothing waits: no Accept all")
+					eq(page.all:IsShown(), false, "nothing waits: no Authorize all")
 					RowOf(page, "chat").no:Click()
 					eq(ns.db.addonChat, false)
 					eq(page.all:IsShown(), false)
@@ -36380,6 +36476,43 @@ do
 			end)
 		end)
 		ns.db.patrolShare, ns.Fire = savedPatrol, savedFire
+		if not ok then error(err, 0) end
+	end)
+
+	test("1.2.5 authorizations: a new explicit permission offers Authorize all, while Keep current choices closes without granting it", function()
+		local visible, answer = false, nil
+		assert(ns.Consent.Register({
+			key = "test-explicit-consent", label = "Explicit test choice", text = "Test-only explicit choice.",
+			explicit = true, shown = function() return visible end, get = function() return answer end,
+			set = function(on) answer = on and true or false end,
+		}))
+		local saved = {}
+		for _, k in ipairs(SWITCHES) do saved[k] = ns.db[k]; ns.db[k] = false end
+		local savedTabards = ns.db.tabardsV2
+		ns.db.tabardsV2 = { consent = {
+			self = { v = ns.TabardsV2.CONTRACT, value = false },
+			nearby = { v = ns.TabardsV2.CONTRACT, value = false },
+		} }
+		local ok, err = pcall(function()
+			WithUI(function()
+				GetGuildInfo = function() return "Olympus II", "Member", 3 end
+				visible = true
+				local page = ns.Consent.Show()
+				eq(Keys(page), "location,layerhelp,inspection,rollcall,chat,chatrooms,tabardselfv2,tabardnearbyv2,test-explicit-consent")
+				eq(page.all:IsShown(), true, "the explicit pending line has the primary action")
+				eq(page.all:GetText(), ns.L.CONSENT_ACCEPT_ALL)
+				eq(page.done:GetText(), ns.L.CONSENT_KEEP_CURRENT)
+				page.done:Click()
+				eq(page:IsShown(), false); eq(answer, nil, "keeping current choices grants nothing")
+				page = ns.Consent.Show()
+				page.all:Click()
+				eq(page:IsShown(), false); eq(answer, true, "Authorize all deliberately grants the explicit line")
+			end)
+		end)
+		visible, answer = false, nil
+		for _, k in ipairs(SWITCHES) do ns.db[k] = saved[k] end
+		ns.db.tabardsV2 = savedTabards
+		ns.Consent.Reset()
 		if not ok then error(err, 0) end
 	end)
 
@@ -36498,7 +36631,7 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	test("1.2 authorizations: Accept all stays open when a visible setter fails and does not emit a saved-choice event", function()
+	test("1.2 authorizations: Authorize all stays open when a visible setter fails and does not emit a saved-choice event", function()
 		local visible, answer = false, nil
 		assert(ns.Consent.Register({
 			key = "test-broken-consent", label = "Broken test choice", text = "Test-only choice.",
@@ -36536,7 +36669,7 @@ do
 		if not ok then error(err, 0) end
 	end)
 
-	test("1.1 first-open page (#11): with Blizzard's gamepad UI it is Olympus's own window, answered with the cursor, never the game's popup nor on the escape list; with mouse and keyboard Escape closes it", function()
+	test("1.1 first-open page (#11): it is Olympus's own window, answered with its choices, never the game's popup, X or escape list", function()
 		Unanswered(function()
 			WithUI(function()
 				WithGamepadUI(true, function(game)
@@ -36551,9 +36684,9 @@ do
 				ns.Consent.Reset()
 				WithGamepadUI(false, function(game)
 					local page = ns.Consent.Show()
-					local listed = false
-					for _, name in ipairs(UISpecialFrames) do if name == "OlympusConsentFrame" then listed = true end end
-					eq(listed, true, "Escape closes it with mouse and keyboard"); eq(#game.shown, 0)
+					for _, name in ipairs(UISpecialFrames) do assert(name ~= "OlympusConsentFrame", "not on the mouse and keyboard escape list") end
+					assert(page.close == nil or not page.close:IsShown(), "no X with mouse and keyboard either")
+					eq(#game.shown, 0)
 				end)
 			end)
 		end)
@@ -36598,7 +36731,7 @@ do
 		local ok, err = pcall(function() assert(loadfile(ADDON_DIR .. "Locales.lua"))("Olympus", pt) end)
 		GetLocale = savedLocale
 		if not ok then error(err, 0) end
-		local keys = { "CONSENT_TITLE", "CONSENT_INTRO", "CONSENT_OPTIONAL", "CONSENT_FOOTER", "CONSENT_DONE", "CONSENT_ACCEPT_ALL", "CONSENT_YES", "CONSENT_NO",
+		local keys = { "CONSENT_TITLE", "CONSENT_INTRO", "CONSENT_OPTIONAL", "CONSENT_FOOTER", "CONSENT_DONE", "CONSENT_ACCEPT_ALL", "CONSENT_KEEP_CURRENT", "CONSENT_YES", "CONSENT_NO",
 			"CONSENT_STATE_YES", "CONSENT_STATE_NO", "CONSENT_STATE_NONE", "CONSENT_LOCATION", "CONSENT_LOCATION_TEXT", "CONSENT_LAYERHELP",
 			"CONSENT_LAYERHELP_TEXT", "CONSENT_NEEDS_LOCATION", "CONSENT_TREASURER", "CONSENT_TREASURER_TEXT", "CONSENT_INSPECTION",
 			"CONSENT_INSPECTION_TEXT", "CONSENT_ROLLCALL", "CONSENT_ROLLCALL_TEXT", "CONSENT_CHAT", "CONSENT_CHAT_TEXT", "CHAT_ON_MSG",
@@ -48579,7 +48712,7 @@ do
 	-- (1.1.5: the page was the game's opaque dialog box, the "gold" dialog family; now the Olympus
 	-- window's metal without its portrait, whose rock ground and inset box are opaque as well, and the
 	-- plain frame's marble inset on a client without the metal.)
-	test("1.1 the first-open page stands on an opaque ground: the Olympus window's metal (its rock and inset box), else the plain frame's; its title in the title bar, the page under it, its X closes it in combat too", function()
+	test("1.1 the first-open page stands on an opaque ground with its title in the title bar and no dismiss X", function()
 	local saved = TEMPLATES.DefaultPanelTemplate
 	local ok, err = pcall(function()
 		WithUI(function()
@@ -48591,7 +48724,8 @@ do
 			Harness.Win.UnderBar(page, { intro = page.intro }, "the privacy page")
 			assert(page.rows[1] and page.rows[1].yes:IsShown(), "its lines, each with its Yes and No")
 			eq(page.close, page.CloseButton)
-			Harness.Win.XInCombat(page, "the privacy page")
+			assert(page.close == nil or not page.close:IsShown(), "the privacy page has no dismiss X")
+			for _, name in ipairs(UISpecialFrames) do assert(name ~= "OlympusConsentFrame", "the privacy page is not closed by Escape") end
 		end)
 		-- A client without it: the plain frame, its own marble inset.
 		TEMPLATES.DefaultPanelTemplate = nil
@@ -48732,8 +48866,8 @@ test("1.1 review (#11): for the Treasurer whose 0.9.3 yes stands, his line says 
 						assert(page:IsShown(), "the minute after")
 						eq(ns.Layers.AskChoice(), false, "the page is up: nothing more")
 						eq(#game.shown, 0)
-						-- Closed unanswered with X: once a session, by any of them.
-						page.close:Click()
+						-- Keeping current choices unanswered: once a session, by any of them.
+						page.done:Click()
 						eq(ns.Layers.AskChoice(), false); timers[2].fn(); eq(ns.Consent.Ask("window"), false)
 						eq(page:IsShown(), false); eq(#game.shown, 0)
 						-- A player who answered the location in 1.0 still gets the page by itself, for the rest.
@@ -62057,9 +62191,9 @@ end)()
 	end)
 
 	test("1.2.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.2.4") -- the consolidated correction candidate has one identity in both folders
+		eq(ns.VERSION, "1.2.5") -- the focused follow-up candidate has one identity in both folders
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.2.4", 1, true))
+		assert(toc:find("## Version: 1.2.5", 1, true))
 		local at = {}
 		local n = 0
 		for line in toc:gmatch("[^\n]+") do n = n + 1; at[line:gsub("%s+$", "")] = n end
@@ -62459,8 +62593,8 @@ end)()
 		return n
 	end
 
-	test("1.2.4 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.2.4")
+	test("1.2.5 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.2.5")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -62481,7 +62615,7 @@ end)()
 				assert(lns.Letters.Has("1.2.0"), code .. ": previous release letter retained")
 				assert(lns.Letters.Has("1.2.1"), code .. ": the published 1.2.1 letter retained")
 				assert(lns.Letters.Has("1.2.2"), code .. ": the published 1.2.2 letter retained")
-				assert(body:lower():find(code == "ptBR" and "sem apostas" or "no bets", 1, true), code .. ": free-game policy")
+				assert(body:find(code == "ptBR" and "Responder" or "Reply", 1, true), code .. ": reply interaction")
 			end)
 			GetLocale = savedLocale
 			if not ok then error(err, 0) end
@@ -62496,7 +62630,7 @@ end)()
 		end)
 		-- A reader of all previous published letters gets the new candidate's alone.
 		WithLetters(function(w)
-			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true }
+			ns.db.lettersRead = { ["1.2.0"] = true, ["1.2.1"] = true, ["1.2.2"] = true, ["1.2.3"] = true, ["1.2.4"] = true }
 			ns.Consent.Show():Hide()
 			eq(w.Letters.Ask("update"), true, "a reader of the previous published letter gets the new one's")
 			eq(w.Letters.Frame().version, ns.VERSION)
@@ -62732,7 +62866,8 @@ end)()
 				w.login(); eq(w.after[1].sec, w.Letters.LOGIN_WAIT); eq(#w.every, 1)
 				ns.Consent.Show():Hide(); w.run()
 				eq(w.Letters.Frame():IsShown(), true); eq(w.Letters.Frame().version, savedVersion)
-				eq(w.Letters.IsRead("1.2.0"), true, "unread previous letter included before current release")
+				eq(w.Letters.IsRead("1.2.4"), true, "the current release's configured catch-up letter is included")
+				eq(w.Letters.IsRead("1.2.0"), false, "older history stays available without expanding the update popup")
 				eq(w.Letters.IsRead(savedVersion), true)
 				baseline, read = ns.db.lettersAutoVersion, ns.db.lettersRead
 				w.Letters.Hide(); w.tick(); eq(w.every[1].cancelled, true)
@@ -62794,9 +62929,9 @@ end)()
 		end)
 	end)
 
-	-- (1.2.3, the King's stream: the privacy page asked first and he closed it with its X; the
+	-- (1.2.3, the King's stream: the privacy page asked first and he closed it without answering; the
 	-- letter came long after, on the minute's next try, 60 to 120 seconds after login at first.)
-	test("1.2.3 version letters: the privacy page closed after the letter's wait, the letter comes HANDOFF (2 s) after its X, not at the next try; the page hidden with the whole interface (Alt+Z) is no close", function()
+	test("1.2.3 version letters: after the privacy page closes, the letter comes after HANDOFF, not at the next try; hiding the whole interface is no close", function()
 		WithLetters(function(w)
 			local Lt = w.Letters
 			ns.db.addonChat = nil
@@ -62810,7 +62945,7 @@ end)()
 			-- Hidden with the whole interface (OnHide while it still says shown): nothing yet.
 			for _, h in ipairs(page.hooks.OnHide or {}) do h(page) end
 			eq(#w.after, 0, "not a close")
-			page:Hide() -- (its X)
+			page:Hide() -- (a completed privacy-page close)
 			local a = w.after[1]
 			assert(a, "the letter is asked again after the page's close")
 			eq(a.sec, Lt.HANDOFF); assert(Lt.HANDOFF <= 2, tostring(Lt.HANDOFF))
@@ -62887,7 +63022,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.2.5 1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)
@@ -63145,10 +63280,11 @@ end)()
 			assert(doc:find("| `/oly letters [version]` |", 1, true), path .. ": the command")
 			assert(doc:find("**Marks in the game's own chat (1.1.5).**", 1, true), path .. ": the marks")
 			assert(doc:find("in the guild their own Olympus messages speak for (someone else's report alone proves nothing", 1, true), path .. ": what proves a mark")
-			-- (1.1.5, the guild masters' nominees: the bronze there is also the people a guild master names.)
-			assert(doc:find("Guild and officer chat show the dragons alone (the King's gold, a High Councillor's silver, the bronze of a guild master and the people he names), never the star", 1, true),
-				path .. ": the dragons in guild chat")
-			assert(doc:find("guild and officer chat the dragons alone, never the star", 1, true), path .. ": the command's row")
+			-- The High Council's later badge decision keeps rank dragons and gives verified appointees
+			-- their own shields; guild/officer chat still omits the ordinary-member star.
+			assert(doc:find("Guild and officer chat show the office marks alone (the King's gold, a High Councillor's silver, a guild master's bronze and the verified Legate or department shields), never the star", 1, true),
+				path .. ": the role marks in guild chat")
+			assert(doc:find("guild and officer chat the office marks alone, never the star", 1, true), path .. ": the command's row")
 			eq(doc:find("never guild or officer chat", 1, true), nil, path .. ": nothing says no mark there")
 		end
 		-- The letters are from the dev (L.LETTER_SIGNED), and the pages players read say so: the King's
@@ -63492,7 +63628,12 @@ end)()
 				-- The privacy page.
 				local page = ns.Consent.Show()
 				Harness.Win.Metal(page, ns.L.CONSENT_TITLE, "the privacy page")
-				Harness.Win.XInCombat(page, "the privacy page")
+				-- A pending privacy choice has no ambiguous dismiss path: its two named actions are
+				-- the only way out, and Escape is deliberately unavailable too.
+				assert(page.CloseButton == nil or not page.CloseButton:IsShown(), "the privacy page: no X")
+				for _, n in ipairs(UISpecialFrames) do assert(n ~= page:GetName(), "the privacy page: not on the escape list") end
+				eq(page.done:GetText(), ns.L.CONSENT_KEEP_CURRENT)
+				eq(page.all:GetText(), ns.L.CONSENT_ACCEPT_ALL)
 				-- A Royal Writ.
 				ns.Acts.Reset()
 				ns.Acts.ShowWrit({ id = 7, to = "L", text = "Hold the bridge", by = "Testking", mine = true })
