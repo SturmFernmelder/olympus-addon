@@ -7,11 +7,12 @@ local L = ns.L
 --
 -- What it is, and what it never is:
 --   - Read-only ordinary data. Its getters send no chat line, decree, whisper or other message and
---     change no Olympus data. The only network action is the separately feature-detected,
---     request-bound player-sighting search: a verified operator's explicit Start/Cancel, or a
+--     change no Olympus data. Network actions are separately feature-detected: the request-bound
+--     player-sighting search is a verified operator's explicit Start/Cancel, or a
 --     bounded rotation while a visible session the operator explicitly started remains on, with
---     the observer consent, short life, audience and last-seen semantics below. A registered
---     addon may also contribute one page to the Olympus window; Olympus still owns its lifecycle.
+--     the observer consent, short life, audience and last-seen semantics below; the bounded
+--     profile-presentation session is host-owned, self-only and fixed-style. A registered addon
+--     may also contribute one page to the Olympus window; Olympus still owns its lifecycle.
 --   - Only what this player already sees on Olympus's own pages, at no more detail: the Wanted list
 --     and its bounties (the Wanted tab's rows), the public rankings (the Slayers boards of the Wanted
 --     tab and the signed top three, the donors' top three while the King shows the army the
@@ -36,8 +37,9 @@ local L = ns.L
 --     changes it changes its own copy, never Olympus's state nor another addon's.
 --   - Versioned and pushed: OlympusAPI.VERSION and OlympusAPI.Has(feature) say what this build gives;
 --     handle:On(event, fn) tells of a change (WANTED_CHANGED, RANKINGS_CHANGED, PROFILE_CHANGED,
---     SIGHTING_CHANGED for a search that same handle owns, and PERMISSION_CHANGED when the player
---     answers), once a burst settles (DISPATCH_DELAY, never in combat), and only when what that
+--     SIGHTING_CHANGED for a search that same handle owns, PROFILE_EFFECT_SESSION_CHANGED for the
+--     sanitized host-owned profile session, and PERMISSION_CHANGED when the player answers), once
+--     a burst settles (DISPATCH_DELAY, never in combat), and only when what that
 --     call would return changed: nobody needs to poll.
 --   - Bounded. RATE_MAX data calls a RATE_WINDOW per addon, MAX_ADDONS addons a session, MAX_CALLBACKS
 --     callbacks per event. A callback runs protected: its error is logged with the addon's name
@@ -58,12 +60,12 @@ local API = {}
 ns.API = API
 
 API.VERSION = 1
--- Version 6 also describes the five-minute hostile-area request and its sanitized host-owned map
--- view, in addition to the visible, user-started exact-name rotation described by version 5. A Yes
--- permits an authorized operator's addon to start and stop those short searches and read the
--- public rows below, so every older Yes must be asked again even though the compatible API version
--- stays 1. Olympus still never performs the consuming addon's trusted-roster relay.
-API.CONSENT_VERSION = 6
+-- Version 8 bounds hostile-area rotation to one live area per handle, no faster than once a minute,
+-- and only the player's current map or a fresh exact result map already owned by that handle. A
+-- visible user-started consumer session must still declare the chosen/configured names or list
+-- sources it includes. Every older Yes must be asked again even though the compatible API version
+-- stays 1.
+API.CONSENT_VERSION = 8
 API.MAX_ADDONS = 16       -- addons registered in one session
 API.SURFACE_LIMIT = 1     -- one client-owned page in the shared tab rail per session
 API.RATE_MAX = 20         -- data calls one addon makes...
@@ -72,11 +74,14 @@ API.MAX_CALLBACKS = 4     -- one addon's callbacks for one event
 API.CALLBACK_FAILS = 3    -- a callback that failed this many times is dropped
 API.DISPATCH_DELAY = 2    -- a change is told this long after it, a burst of them once
 API.COMBAT_RETRY = 5      -- in combat, looked at again this long after
+API.AREA_ROTATE_MIN = 60  -- minimum seconds between successful area starts by one handle
+API.AREA_PROOF_MAX = 64   -- fresh exact result maps retained by one handle until those rows expire
 API.MAX_ROWS = 50         -- rows of one Slayers board
 API.MAX_WANTED = 200      -- Wanted rows (Wanted.MAX_TARGETS)
 API.TITLE_MAX = 40        -- the addon's title on the privacy page
-API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "SIGHTING_CHANGED", "PERMISSION_CHANGED" }
-API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED" }
+API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "SIGHTING_CHANGED",
+	"PROFILE_EFFECT_SESSION_CHANGED", "PERMISSION_CHANGED" }
+API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
 
 local IS_EVENT = {}
@@ -343,6 +348,18 @@ function API.Profile()
 	return out
 end
 
+-- The current host-owned profile-presentation session, without its internal issuer, grant id,
+-- transport epoch or caption. The remaining lifetime is deliberately approximate and bounded by
+-- the host module; callers should use PROFILE_EFFECT_SESSION_CHANGED instead of polling it.
+function API.ProfileSession()
+	if not Has("ProfileEffects", "Session") then return nil end
+	local state = Call("ProfileEffects", "Session")
+	if type(state) ~= "table" then return nil end
+	local style, expiresIn = Plain(state.style, 32), Num(state.expiresIn, false)
+	if not style or not expiresIn or expiresIn < 0 or expiresIn > 3600 then return nil end
+	return { style = style, expiresIn = expiresIn }
+end
+
 -- One short, request-bound search owned by this client. PlayerSightings keeps the transport,
 -- authority, consent, expiry and observation rules; the API only copies the already-normalized
 -- public result. "exact-unit" and "exact-group" are native map/world unit points; "nearby" is the
@@ -462,6 +479,59 @@ end
 
 local ClearAreaMap, DrawAreaMap
 
+-- A consumer may rotate an exact-name request before it rotates its hostile-area coverage. Keep
+-- only the already-sanitized exact target/map binding until that result's own expiry; cancellation
+-- of the transport request does not turn the point into a live tracker. The cache belongs to one
+-- API handle, is bounded, and is discarded on permission loss or UI reload.
+local function PruneAreaProofs(c, now)
+	c.areaProofs = type(c.areaProofs) == "table" and c.areaProofs or {}
+	local count = 0
+	for key, proof in pairs(c.areaProofs) do
+		if type(proof) ~= "table" or type(proof.expiresAt) ~= "number" or proof.expiresAt <= now then
+			c.areaProofs[key] = nil
+		else
+			count = count + 1
+		end
+	end
+	while count > API.AREA_PROOF_MAX do
+		local oldestKey, oldestAt
+		for key, proof in pairs(c.areaProofs) do
+			if oldestAt == nil or proof.expiresAt < oldestAt then oldestKey, oldestAt = key, proof.expiresAt end
+		end
+		if not oldestKey then break end
+		c.areaProofs[oldestKey] = nil
+		count = count - 1
+	end
+	return c.areaProofs
+end
+
+local function EachExactAreaProof(state, now, take)
+	now = type(now) == "number" and now or ns.Now and ns.Now() or 0
+	if type(state) ~= "table" or state.mode ~= "player" then return end
+	local target = type(state.target) == "string" and ns.Fold(state.target) or nil
+	if not target then return end
+	for _, row in ipairs(type(state.sightings) == "table" and state.sightings or {}) do
+		local rowTarget = type(row.target) == "string" and ns.Fold(row.target) or nil
+		local exact = row.kind == "exact-unit" or row.kind == "exact-group"
+		local mapID, expiresAt = row.mapID, row.expiresAt
+		if exact and rowTarget == target and type(mapID) == "number" and mapID > 0
+			and mapID == math.floor(mapID) and type(expiresAt) == "number" and expiresAt > now then
+			local key = table.concat({ target, tostring(mapID), row.kind }, "\031")
+			take(key, { target = target, mapID = mapID, kind = row.kind, expiresAt = expiresAt })
+		end
+	end
+end
+
+local function RetainAreaProofs(c, state, now)
+	now = type(now) == "number" and now or ns.Now and ns.Now() or 0
+	PruneAreaProofs(c, now)
+	EachExactAreaProof(state, now, function(key, proof)
+		local old = c.areaProofs[key]
+		if not old or proof.expiresAt > old.expiresAt then c.areaProofs[key] = proof end
+	end)
+	return PruneAreaProofs(c, now)
+end
+
 local function ForgetSearch(c, id)
 	if c.areaMapID == id and ClearAreaMap then ClearAreaMap(c) end
 	c.searches[id] = nil
@@ -494,12 +564,43 @@ local function PruneOwnedSearches(c, mode)
 	return out
 end
 
+-- Area coverage may follow only evidence the same handle already owns. This is deliberately
+-- narrower than accepting any map id from a consumer: the player's current map is explicit at the
+-- time of the click, and another map must come from an unexpired native point in one of this
+-- handle's exact-name searches. Nearby encounter points do not authorize a different area.
+local function CurrentMapID()
+	if type(C_Map) ~= "table" or type(C_Map.GetBestMapForUnit) ~= "function" then return nil end
+	local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
+	mapID = ok and Num(mapID, true) or nil
+	return mapID and mapID > 0 and mapID or nil
+end
+
+local function AreaMapAllowed(c, mapID, now)
+	if CurrentMapID() == mapID then return true end
+	for _, search in ipairs(PruneOwnedSearches(c, "player")) do
+		if search.status ~= "cancelled" and search.status ~= "expired" then
+			local found = false
+			EachExactAreaProof(search, now, function(_, proof)
+				if proof.mapID == mapID then found = true end
+			end)
+			if found then return true end
+		end
+	end
+	for _, proof in pairs(PruneAreaProofs(c, now)) do
+		if proof.mapID == mapID then return true end
+	end
+	return false
+end
+
 -- What each data event's callback is given: what its call returns.
 local BUILD = {
 	WANTED_CHANGED = function() return Member() and API.Wanted() or nil end,
 	RANKINGS_CHANGED = function() return Member() and API.Rankings() or nil end,
 	PROFILE_CHANGED = function() return API.Profile() end,
+	PROFILE_EFFECT_SESSION_CHANGED = function() return Member() and API.ProfileSession() or nil end,
 }
+
+local NIL_DATA_EVENT = { PROFILE_EFFECT_SESSION_CHANGED = true }
 
 ---------------------------------------------------------------------------
 -- The addons, their answers and their handles
@@ -562,7 +663,7 @@ local function Baseline(c, event)
 	local build = BUILD[event]
 	if not build or not Listens(c, event) or not Granted(c) then return end
 	local data = build()
-	if data ~= nil then c.told[event] = Signature(data) end
+	if data ~= nil or NIL_DATA_EVENT[event] then c.told[event] = Signature(data) end
 end
 
 local Dispatch
@@ -597,7 +698,7 @@ Dispatch = function()
 	for _, event in ipairs(API.DATA_EVENTS) do
 		if events[event] then
 			local data = BUILD[event]()
-			if data ~= nil then
+			if data ~= nil or NIL_DATA_EVENT[event] then
 				local sig = Signature(data)
 				for _, c in ipairs(order) do
 					if Listens(c, event) and Granted(c) and c.told[event] ~= sig then
@@ -667,6 +768,11 @@ local function SetAnswer(c, on)
 	-- saving the No. PlayerSightings also withdraws any live observer evidence when its own sharing
 	-- permission is revoked.
 	if not on then
+		-- Release both sides of this handle's host-owned presentation before the saved answer changes.
+		-- Close/disable are safe after a No as well, but doing them here guarantees that revocation is
+		-- an active boundary rather than waiting for the short network leases to expire.
+		if Has("ProfileEffects", "CloseSession") then pcall(ns.ProfileEffects.CloseSession, c.profileOwner) end
+		if Has("ProfileEffects", "DisableOwner") then pcall(ns.ProfileEffects.DisableOwner, c.profileOwner) end
 		local ids = {}
 		for id in pairs(c.searches) do ids[#ids + 1] = id end
 		if Has("PlayerSightings", "Cancel") then
@@ -678,6 +784,8 @@ local function SetAnswer(c, on)
 		end
 		c.searches = {}
 		c.sightingEnded = {}
+		c.areaProofs = {}
+		c.areaStartedAt = nil
 		ClearAreaMap(c)
 	end
 	all[c.key] = { on = on and true or false, v = API.CONSENT_VERSION, at = ns.Now and ns.Now() or 0 }
@@ -761,6 +869,25 @@ end
 local function SightingRead(c, build, ...)
 	if not Has("PlayerSightings", "Session") then return nil, "unavailable" end
 	return Read(c, true, build, ...)
+end
+
+local function ProfileAction(c, fn, ...)
+	if not Has("ProfileEffects", fn) then return false, "unavailable" end
+	if not Granted(c) then return false, Status(c) end
+	if not Member() then return false, "guild" end
+	if not Spend(c) then return false, "busy" end
+	local ok, result, why = pcall(ns.ProfileEffects[fn], ...)
+	if not ok then return false, "failed" end
+	return result == true, why
+end
+
+-- Stop/disable remain available after revocation because they can only remove this handle's own
+-- bounded state. The internal owner check prevents one API handle from changing another's state.
+local function ProfileRelease(c, fn, ...)
+	if not Has("ProfileEffects", fn) then return false, "unavailable" end
+	local ok, result, why = pcall(ns.ProfileEffects[fn], ...)
+	if not ok then return false, "failed" end
+	return result == true, why
 end
 
 local function AreaPin(row) -- gp:worldmap-icons
@@ -886,6 +1013,31 @@ function METHODS.GetRankings(c, kind)
 	return Read(c, true, API.Rankings, kind)
 end
 function METHODS.GetProfile(c) return Read(c, false, API.Profile) end
+function METHODS.StartProfileSession(c, style)
+	style = Plain(style, 32)
+	if not style then return false, "style" end
+	return ProfileAction(c, "OpenSession", c.profileOwner, style)
+end
+function METHODS.StopProfileSession(c)
+	return ProfileRelease(c, "CloseSession", c.profileOwner)
+end
+function METHODS.SetProfileEffect(c, style, enabled, caption)
+	style = Plain(style, 32)
+	if not style then return false, "style" end
+	if enabled ~= true and enabled ~= false then return false, "state" end
+	if enabled then
+		if Secret(caption) or type(caption) ~= "string" then return false, "caption" end
+		return ProfileAction(c, "Set", c.profileOwner, style, true, caption)
+	end
+	return ProfileRelease(c, "Set", c.profileOwner, style, false)
+end
+function METHODS.GetProfileSession(c)
+	if not Has("ProfileEffects", "Session") then return nil, "unavailable" end
+	return Read(c, true, function()
+		local state = API.ProfileSession()
+		return state, state and nil or "none"
+	end)
+end
 function METHODS.StartPlayerSearch(c, target)
 	if not Has("PlayerSightings", "Start") then return nil, "unavailable" end
 	local state, why = SightingRead(c, function() return Call("PlayerSightings", "Start", target) end)
@@ -905,13 +1057,15 @@ function METHODS.StartPlayerSearch(c, target)
 	return nil, why or "failed"
 end
 function METHODS.CancelPlayerSearch(c, id)
-	if not OwnedSearch(c, id, "player") then return false, "unknown" end
+	local state = OwnedSearch(c, id, "player")
+	if not state then return false, "unknown" end
 	if not Has("PlayerSightings", "Cancel") then return false, "unavailable" end
 	-- This method has no read-permission gate because cancellation can only reduce disclosure. A No
 	-- already cancels and forgets every owned request in SetAnswer above.
 	local ok, result, why = pcall(ns.PlayerSightings.Cancel, id, "api")
 	if not ok then return false, "failed" end
 	if result == true then
+		RetainAreaProofs(c, state)
 		ForgetSearch(c, id)
 		if Granted(c) and Listens(c, "SIGHTING_CHANGED") then
 			c.sightingEnded[id] = { id = id, status = "cancelled" }
@@ -942,20 +1096,33 @@ function METHODS.GetPlayerSearches(c)
 end
 function METHODS.StartAreaSearch(c, mapID)
 	if not Has("PlayerSightings", "StartArea") then return nil, "unavailable" end
-	if Secret(mapID) then return nil, "map" end
-	local state, why = SightingRead(c, function() return Call("PlayerSightings", "StartArea", mapID) end)
-	if state == true and (type(why) == "string" or type(why) == "number") then
-		local id = why
-		state, why = API.AreaSearch(id), nil
-	end
-	if type(state) == "table" and type(state.id) == "string" and state.id ~= "" then
-		PruneOwnedSearches(c)
-		c.sightingEnded[state.id] = nil
-		c.searches[state.id] = SearchFingerprint(state)
-		c.sightingTold[state.id] = Signature(state)
-		return Copy(state)
-	end
-	return nil, why or "failed"
+	return SightingRead(c, function()
+		if Secret(mapID) then return nil, "map" end
+		mapID = Num(mapID, false)
+		if not mapID or mapID <= 0 or mapID ~= math.floor(mapID) then return nil, "map" end
+		for _, search in ipairs(PruneOwnedSearches(c, "area")) do
+			if search.status == "searching" then return nil, "active" end
+		end
+		local now = ns.Now and ns.Now() or 0
+		if c.areaStartedAt ~= nil and now - c.areaStartedAt < API.AREA_ROTATE_MIN then
+			return nil, "cooldown"
+		end
+		if not AreaMapAllowed(c, mapID, now) then return nil, "map" end
+		local state, why = Call("PlayerSightings", "StartArea", mapID)
+		if state == true and (type(why) == "string" or type(why) == "number") then
+			local id = why
+			state, why = API.AreaSearch(id), nil
+		end
+		if type(state) == "table" and type(state.id) == "string" and state.id ~= "" then
+			PruneOwnedSearches(c)
+			c.sightingEnded[state.id] = nil
+			c.searches[state.id] = SearchFingerprint(state)
+			c.sightingTold[state.id] = Signature(state)
+			c.areaStartedAt = now
+			return Copy(state)
+		end
+		return nil, why or "failed"
+	end)
 end
 function METHODS.CancelAreaSearch(c, id)
 	if not OwnedSearch(c, id, "area") then return false, "unknown" end
@@ -1086,7 +1253,7 @@ local function ReadOnly(_, k) error("OlympusAPI: read-only (" .. tostring(k) .. 
 local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
 		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot), searches = {}, sightingTold = {}, sightingEnded = {},
-		areaMapOwner = {}, areaMapFrames = {} }
+		areaMapOwner = {}, areaMapFrames = {}, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot) }
 	local methods = {}
 	for k, fn in pairs(METHODS) do methods[k] = Method(c, fn) end
 	c.handle = setmetatable({}, { __index = methods, __newindex = ReadOnly, __metatable = false })
@@ -1127,6 +1294,12 @@ local FEATURES = {
 	["network.sightings"] = function()
 		for _, fn in ipairs({ "Start", "Cancel", "Session", "StartArea", "CancelArea", "AreaSession" }) do
 			if not Has("PlayerSightings", fn) then return false end
+		end
+		return true
+	end,
+	["network.profile-effects"] = function()
+		for _, fn in ipairs({ "OpenSession", "CloseSession", "Set", "DisableOwner", "Session" }) do
+			if not Has("ProfileEffects", fn) then return false end
 		end
 		return true
 	end,
@@ -1185,3 +1358,6 @@ ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED") end)
 -- A request started by one handle changed or received a fresh, normalized observation. Only the
 -- handle that owns that opaque request id is told; the event never exposes another addon's search.
 ns.On("PLAYER_SIGHTINGS_CHANGED", function(id) MarkSighting(id) end)
+-- The profile module owns the issuer, grant and transport. The public event rebuilds only its
+-- sanitized style and remaining lease, including nil when the session closes or expires.
+ns.On("PROFILE_EFFECT_SESSION_CHANGED", function() Mark("PROFILE_EFFECT_SESSION_CHANGED") end)

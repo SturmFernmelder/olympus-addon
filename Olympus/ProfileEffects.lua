@@ -698,7 +698,7 @@ local function EnsureUI()
 	if not CanRender() then return nil end
 	if ui then return ui end
 	if InCombatLockdown and InCombatLockdown() then waitingUI = true return nil end
-	if type(CreateFrame) ~= "function" or type(UIParent) ~= "table" then return nil end
+	if type(UIParent) ~= "table" then return nil end
 	local targetFrame = rawget(_G, "TargetFrame") -- gp:borders
 	local container = type(targetFrame) == "table" and targetFrame.TargetFrameContainer or nil
 	if type(container) ~= "table" then return nil end

@@ -741,7 +741,11 @@ page and nothing until your **Yes** there or the page's deliberate **Authorize a
 send nothing. A compatible addon can also let an authorized player start a short exact-name
 last-seen search, maintain a bounded set of exact-name searches while a visible tool session the
 player started remains on, or start a five-minute hostile-area search for one selected zone or
-micro-map. Olympus sends each exact **Name-Realm** sought, or the selected map ID, to the network.
+micro-map. Its visible Start declares selected/configured names and any included list source. A
+handle has one area at a time: current map or an owned exact-result map until its row expires, then cancel
+and wait 60 seconds to rotate. Its UI shows map/position and Stop/Off; it never opens the map or
+resumes after No or `/reload` automatically. Olympus sends each exact **Name-Realm** sought, or the
+selected map ID, to the network.
 Members who separately enabled **Guild tools: player sightings** may answer privately from a
 current target, nameplate or mouseover observation or one their client kept only in memory after
 the game directly showed that player. While that permission and location sharing stay on, each
@@ -755,6 +759,9 @@ map. The kind, observation time, expiry and layer are labelled, so this is last-
 not continuous tracking. Requests and answers expire, and turning either permission off cancels or
 withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
 world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
+can also host one bounded profile presentation. A current signed issuer opens it; an admitted
+member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
+and **No** closes that addon's state. Olympus
 never gives another addon the census, other players' private data or Olympus's keys; each addon gets
 its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
 you trust. After the update it loads once the game restarts (not on a `/reload`).

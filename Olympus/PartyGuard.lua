@@ -14,8 +14,10 @@ Guard.CANDIDATE_MAX = 20
 Guard.CANDIDATE_SHOWN = 5
 Guard.DIRECT_TTL = 5 * 60
 Guard.EVIDENCE_TTL = 15 * 60
+Guard.VERIFY_TTL = 30 -- Who.LATE: after this, a name result no longer belongs to the click
 
 local candidates = {} -- [folded Name-Realm] = { name, firstAt, lastAt, count, direct?, evidence? }
+local showAll = false
 
 local function Secret(v)
 	return type(issecretvalue) == "function" and issecretvalue(v)
@@ -106,6 +108,8 @@ function Guard.InviteIntent(text)
 	if s:find("don't invite", 1, true) or s:find("do not invite", 1, true)
 		or s:find("dont invite", 1, true) or s:find("no invite", 1, true)
 		or s:find("invite sent", 1, true)
+		or s:find("why did you invite me", 1, true)
+		or s:find("did you invite me already", 1, true)
 		or s:find("nao me convida", 1, true) or s:find("não me convida", 1, true) then return false end
 	if s:match("^inv[%s%p]*$") or s:match("^invite[%s%p]*$") then return true end
 	local phrases = {
@@ -142,11 +146,6 @@ local function Evidence(candidate)
 	if direct and now - (direct.at or 0) <= Guard.DIRECT_TTL then Take(direct.guild, "direct", direct.at) end
 	local who = candidate.who
 	if who then Take(who.guild, "who", who.at) end
-	if ns.Who and ns.Who.SeenGuild then
-		local guild, age = ns.Who.SeenGuild(candidate.name)
-		if not Secret(guild) and not Secret(age) and type(guild) == "string" and type(age) == "number"
-			and age >= 0 and age <= Guard.EVIDENCE_TTL then Take(guild, "who", now - age) end
-	end
 	candidate.evidence = best
 	if best then best.status = ns.IsFederation(best.guild) and "olympus" or "outsider" end
 	return best
@@ -181,6 +180,9 @@ function Guard.OnWhisper(text, sender)
 		while Count() >= Guard.CANDIDATE_MAX do Drop(Oldest()) end
 		candidate = { key = key, name = full, firstAt = now, lastAt = now, count = 1 }
 		candidates[key] = candidate
+		-- A chat line is non-modal and does not take focus from play. Repeated whispers update the
+		-- existing row without repeating the notice.
+		ns.Print(L.PARTY_GUARD_NEW:format(ns.DisplayName(full) or full))
 	end
 	Evidence(candidate)
 	Changed()
@@ -191,10 +193,20 @@ function Guard.OnWhoSeen(name, guild)
 	if Secret(name) or Secret(guild) or type(guild) ~= "string" then return false end
 	local key = Key(name)
 	local candidate = key and candidates[key]
-	if not candidate or not Current(candidate) then return false end
-	-- Who.SeenGuild is still consulted by Evidence; this copy lets tests and direct listeners
-	-- refresh the line immediately without making a whisper into proof.
-	candidate.who = { guild = guild, at = ns.Now() }
+	if not candidate then return false end
+	local current, now = Current(candidate)
+	local verifyAt = candidate and tonumber(candidate.verifyAt)
+	local firstAt = candidate and tonumber(candidate.firstAt)
+	if not current or not verifyAt or not firstAt or now < firstAt or now < verifyAt then return false end
+	if now - verifyAt > Guard.VERIFY_TTL then
+		candidate.verifyAt = nil
+		return false
+	end
+	-- OnSaw announces every row from every /who answer. Only the exact candidate armed by the
+	-- player's Verify click may consume one row, once. The global SeenGuild cache is deliberately
+	-- ignored: it can predate both the whisper and this verification request, and uses another clock.
+	candidate.verifyAt = nil
+	candidate.who = { guild = guild, at = now }
 	candidate.evidence = { guild = guild, source = "who", at = candidate.who.at, status = ns.IsFederation(guild) and "olympus" or "outsider" }
 	Changed()
 	return true
@@ -219,9 +231,22 @@ end
 
 -- Explicit-click /who only. Who.Search owns the client's cooldown, window and capability checks.
 function Guard.Verify(candidate)
-	if not Active() or not Current(candidate) or (ns.GamepadUI and ns.GamepadUI()) then return false end
+	if not Active() or (ns.GamepadUI and ns.GamepadUI()) then return false end
+	local current, now = Current(candidate)
+	if not current then return false end
 	if not (ns.Who and ns.Who.Search) then return false end
-	return ns.Who.Search(true, nil, candidate.name) == true
+	local previous = candidate.verifyAt
+	candidate.verifyAt = now -- armed before Search in case a client or test answers synchronously
+	local ok, sent = pcall(ns.Who.Search, true, nil, candidate.name)
+	if not ok then
+		candidate.verifyAt = previous
+		error(sent, 0)
+	end
+	if sent ~= true then
+		candidate.verifyAt = previous
+		return false
+	end
+	return true
 end
 
 local function CanInvite(candidate)
@@ -283,7 +308,7 @@ end
 function Guard.SetEnabled(on)
 	if not ns.db then return false end
 	if on then ns.db.partyGuardOff = nil else ns.db.partyGuardOff = true end
-	if not on then wipe(candidates) end
+	if not on then wipe(candidates); showAll = false end
 	ns.Print(on and L.PARTY_GUARD_ON or L.PARTY_GUARD_OFF)
 	Changed()
 	return true
@@ -321,7 +346,8 @@ function Guard.Lines()
 			tt:AddLine(L.PARTY_GUARD_TIP, 1, 1, 1, true)
 		end,
 	} }
-	for i = 1, math.min(#list, Guard.CANDIDATE_SHOWN) do
+	local visible = showAll and #list or math.min(#list, Guard.CANDIDATE_SHOWN)
+	for i = 1, visible do
 		local candidate = list[i]
 		local evidence = Evidence(candidate)
 		lines[#lines + 1] = {
@@ -345,7 +371,17 @@ function Guard.Lines()
 		lines[#lines + 1] = { indent = 1, text = V.Grey(L.PARTY_GUARD_DISMISS), onClick = function() Guard.Dismiss(candidate) end }
 	end
 	if #list > Guard.CANDIDATE_SHOWN then
-		lines[#lines + 1] = { indent = 1, text = V.Grey(L.PARTY_GUARD_MORE:format(#list - Guard.CANDIDATE_SHOWN)) }
+		if showAll then
+			lines[#lines + 1] = { indent = 1, text = V.Grey(L.PARTY_GUARD_LESS), onClick = function()
+				showAll = false
+				Changed()
+			end }
+		else
+			lines[#lines + 1] = { indent = 1, text = V.Gold(L.PARTY_GUARD_MORE:format(#list - visible)), onClick = function()
+				showAll = true
+				Changed()
+			end }
+		end
 	end
 	lines[#lines + 1] = { indent = 1, text = V.Grey(L.PARTY_GUARD_TURN_OFF), onClick = function() Guard.SetEnabled(false) end }
 	lines[#lines].gapAfter = true
@@ -354,13 +390,15 @@ end
 
 function Guard.ResetForTests()
 	wipe(candidates)
+	showAll = false
 end
 
 if ns.Who and ns.Who.OnSaw then ns.Who.OnSaw(Guard.OnWhoSeen) end
-ns.On("KING_LOCATION_CHANGED", function()
-	if not Guard.KingOnline() then wipe(candidates) end
+function Guard.OnKingLocationChanged()
+	if not Guard.KingOnline() then wipe(candidates); showAll = false end
 	Changed()
-end)
+end
+ns.On("KING_LOCATION_CHANGED", Guard.OnKingLocationChanged)
 ns.On("LOGIN", function()
 	ns.RegisterEvent("CHAT_MSG_WHISPER", function(text, sender) Guard.OnWhisper(text, sender) end)
 	ns.RegisterEvent("PLAYER_TARGET_CHANGED", function() Guard.ObserveUnit("target") end)
