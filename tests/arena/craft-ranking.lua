@@ -62,3 +62,18 @@ test("craft ranking: records aggregate deliveries rather than recipes known", fu
 	eq(rows[1].points, C.PAIR_DAY_MAX * C.Score(1, 0))
 	eq(rows[1].customers, 1)
 end)
+
+test("craft ranking: a crafter cannot farm beyond the documented daily cap through many customers", function()
+	local day, crafter, bodies = 20000, "Smith-Emberfall", {}
+	for i = 1, 30 do
+		local buyer, id = ("Buyer%d-Emberfall"):format(i), "many" .. i
+		bodies[i] = Half(id, buyer, crafter, 100 + i, 1, 0, day, "r") .. "^"
+			.. Half(id, buyer, crafter, 100 + i, 1, 0, day, "c")
+	end
+	local C = Ranking(bodies)
+	local rows = C.Totals(math.floor(day / 31))
+	eq(#rows, 1)
+	eq(rows[1].deliveries, C.DAY_MAX, "the advertised overall daily cap is enforced")
+	eq(rows[1].points, C.DAY_MAX * C.Score(1, 0))
+	eq(rows[1].customers, C.DAY_MAX)
+end)

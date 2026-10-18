@@ -195,11 +195,13 @@ function Craft.Totals(month)
 		if rec then records[#records + 1] = rec end
 	end
 	table.sort(records, function(a, b) if a.day ~= b.day then return a.day < b.day end return a.id < b.id end)
-	local rows, by, pairs = {}, {}, {}
+	local rows, by, pairs, days = {}, {}, {}, {}
 	for _, rec in ipairs(records) do
 		local pair = Low(rec.requester) .. "|" .. Low(rec.crafter) .. "|" .. rec.day
+		local craftDay = Low(rec.crafter) .. "|" .. rec.day
 		pairs[pair] = (pairs[pair] or 0) + 1
-		if pairs[pair] <= Craft.PAIR_DAY_MAX then
+		days[craftDay] = (days[craftDay] or 0) + 1
+		if pairs[pair] <= Craft.PAIR_DAY_MAX and days[craftDay] <= Craft.DAY_MAX then
 			local key = Low(rec.crafter)
 			local row = by[key]
 			if not row then row = { name = rec.crafter, points = 0, deliveries = 0, customers = 0, _customers = {} }; by[key] = row; rows[#rows + 1] = row end

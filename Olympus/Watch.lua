@@ -55,7 +55,7 @@ Watch.REPORT_TIERS = { "A" }
 Watch.REPORT_DEDUPE = 86400       -- a reporter's client: one report a day on the same name...
 Watch.REPORT_GAP = 60             -- ...one a minute...
 Watch.REPORT_DAY = 5              -- ...and five a day
-Watch.REPORT_HOLD = 86400         -- a report no officer was online for waits this long for one
+Watch.REPORT_HOLD = 30 * 86400    -- a report no officer was online for waits privately for one
 Watch.REPORT_RETRY = 60           -- and is tried again at most this often
 Watch.OUTBOX_MAX = 5
 Watch.MAX_REPORTS = 200           -- reports an officer's client keeps (the oldest go)
@@ -1901,7 +1901,7 @@ function Watch.SendReport(name, cat, note, message)
 end
 
 -- The reports waiting for an officer: sent, oldest first, once one is online (the roster says so)
--- while this client is too, dropped a day after they were made (the reporter is told).
+-- while this client is too, dropped after REPORT_HOLD (the reporter is told).
 function Watch.FlushReports(force)
 	local now = Mono()
 	if not force and now - lastFlush < Watch.REPORT_RETRY then return 0 end

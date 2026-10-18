@@ -1169,8 +1169,9 @@ test("watch: a reporter's client reports a name once a day, once a minute and fi
 	end)
 end)
 
-test("watch: a report with no officer online waits a day for the first one; past a day it is dropped and the reporter told", function()
+test("watch: a report with no officer online waits privately for thirty days; after that it is dropped and the reporter told", function()
 	WithWatch(function(w, W, c)
+		eq(W.REPORT_HOLD, W.REPORT_KEEP, "the sender retains a pending report for the same thirty-day review window")
 		w.setRank(c.me, 3); w.online(c.me)
 		local ok, how = W.SendReport(SPAMMER, "A", "waits")
 		eq(ok, true); eq(how, "held"); eq(#w.jobs, 0)
@@ -1192,7 +1193,7 @@ test("watch: a report with no officer online waits a day for the first one; past
 		eq(#W.Book(false).outbox, 1, "delivered to the officers; it waits for the King's client")
 		eq(W.FlushReports(true), 0, "never twice")
 		eq(#w.jobs, 1, "nothing more to the officers")
-		-- Another one, from its dialog: the reporter is told it waits. Nobody online for a day:
+		-- Another one, from its dialog: the reporter is told it waits. Nobody online for the full window:
 		-- dropped, and said so.
 		w.online(c.me); w.jobs = {}
 		w.epoch = w.epoch + W.REPORT_GAP; w.refreshRoster()
