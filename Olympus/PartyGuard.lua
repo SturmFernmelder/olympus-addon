@@ -226,6 +226,12 @@ end
 
 local function CanInvite(candidate)
 	if not Active() or not Current(candidate) then return false end
+	return Guard.InviteAPI()
+end
+
+-- Shared by the guarded whisper inbox and the Legates' own-guild group rows. It is called only
+-- from an Olympus click; no timer, whisper or network packet can invoke the protected action.
+function Guard.InviteAPI()
 	if InCombatLockdown and InCombatLockdown() then return false end
 	local groupSize, room
 	if ns.Hop and ns.Hop.GroupState then groupSize, room = ns.Hop.GroupState() end
@@ -233,6 +239,21 @@ local function CanInvite(candidate)
 	local invite = C_PartyInfo and C_PartyInfo.InviteUnit or InviteUnit -- gp:roster-actions
 	if type(invite) ~= "function" then return false end
 	return invite
+end
+
+function Guard.InviteGuildmate(name)
+	local _, full = Key(name)
+	local roster = ns.Roster and ns.Roster.Fresh and ns.Roster.Fresh()
+	if not full or not ns.IsMember or not ns.IsMember() or not roster or not ns.Roster.RankOf
+		or ns.Roster.RankOf(full) == nil then
+		ns.Print(L.PARTY_GUARD_RECHECK)
+		return false
+	end
+	local invite = Guard.InviteAPI()
+	if not invite then ns.Print(L.PARTY_GUARD_CANNOT_INVITE) return false end
+	local ok = pcall(invite, ns.TellName(full)) -- gp:roster-actions
+	if not ok then ns.Print(L.PARTY_GUARD_CANNOT_INVITE) return false end
+	return true
 end
 
 local function InviteNow(candidate, expected)

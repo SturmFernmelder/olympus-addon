@@ -949,10 +949,14 @@ end
 -- Public for the focused harness.  The server-stamped sender is the trust boundary; the rows
 -- themselves are never mistaken for signed census authority.
 function Data.ReceiveGlobalCensus(dist, sender, text)
-	if dist ~= "CHANNEL" or type(text) ~= "string" or not GlobalTrusted(sender) then return false end
+	if dist ~= "CHANNEL" or type(text) ~= "string" or type(sender) ~= "string"
+		or sender == "" or #sender > 100 or sender:find("[%c~]") then return false end
 	local ver, kind, made, body = text:match("^CG~(%d+)~([SQ])~(%d*)~?(.*)$")
 	if tonumber(ver) ~= Data.GLOBAL_PROTOCOL then return false end
 	if kind == "Q" then
+		-- A query grants no authority and the answer is broadcast to the channel.  Requiring
+		-- the requester itself to be a keeper made anti-entropy useless for the ordinary late
+		-- client it was designed to heal.  Only snapshot senders need the trusted-relay gate.
 		if not GlobalTrusted(ns.me) or ns.Now() - globalLastSent < Data.GLOBAL_ANSWER_GAP or globalAnswerPending then return true end
 		globalAnswerPending = true
 		local heardAt = globalLastHeard
@@ -962,6 +966,7 @@ function Data.ReceiveGlobalCensus(dist, sender, text)
 		end)
 		return true
 	end
+	if not GlobalTrusted(sender) then return false end
 	local snapshotAt = GlobalNumber(made, 1, 4102444800)
 	if not snapshotAt or snapshotAt > ns.Now() + 5 * 60 or ns.Now() - snapshotAt > Data.KEEP then return false end
 	local changed, count = false, 0

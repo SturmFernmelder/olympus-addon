@@ -94,6 +94,29 @@ test("global census: a trusted holder restores normalized guild counts to a late
 	eq(late.D.ReceiveGlobalCensus("CHANNEL", "Stranger-Realm", payload), false, "an untrusted snapshot is refused")
 end)
 
+test("global census: an ordinary late client may ask a trusted holder for the public snapshot", function()
+	local holder = CensusWorld()
+	local relay, sent = "Council-Realm", 0
+	holder.ns.me = relay
+	holder.ns.Church = { IsLedgerRelay = function(name) return name == relay end }
+	holder.ns.Comm = setmetatable({
+		SendChunked = function(payload)
+			assert(payload:find("^CG~1~S~"), "the scheduled answer is a census snapshot")
+			sent = sent + 1
+			return true
+		end,
+	}, { __index = holder.ns.Comm })
+	holder.ns.rdb.guilds["Olympus Dawn"] = {
+		total = 987, online = 73, avgLevel = 46.2, t = holder.clock, st = holder.clock,
+	}
+	assert(holder.D.ReceiveGlobalCensus("CHANNEL", "Latecomer-Realm", "CG~1~Q~2000000000"),
+		"an ordinary requester is admitted because a query grants no authority")
+	eq(holder.Run(), 1, "one randomized answer is queued")
+	eq(sent, 1, "the trusted holder broadcasts its normalized snapshot")
+	eq(holder.D.ReceiveGlobalCensus("CHANNEL", "Bad~Name", "CG~1~Q~2000000000"), false,
+		"malformed senders are still refused")
+end)
+
 -- Two values alike, tables compared value by value whatever their identity; the first difference.
 local function Alike(a, b, path)
 	if type(a) ~= "table" or type(b) ~= "table" then

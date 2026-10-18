@@ -730,6 +730,13 @@ function Crafters.Lines(q)
 		-- Personal request views contain their own records, not the shared directory.
 		if requests.Page and requests.Page() ~= "board" then return lines end
 	end
+	-- The public ranking is earned by completed, bilaterally confirmed deliveries. It deliberately
+	-- does not rank how many recipes somebody knows. Search stays about finding a crafter, so the
+	-- compact ranking is shown only on the unfiltered board.
+	if not q and ns.CraftRanking and ns.CraftRanking.Lines then
+		ns.CraftRanking.Lines(lines)
+		if lines[#lines] then lines[#lines].gapAfter = true end
+	end
 	lines[#lines + 1] = { header = true, text = L.CRAFTER_TITLE,
 		tooltip = function(tt) tt:AddLine(L.CRAFTER_TITLE, 1, 0.82, 0); tt:AddLine(L.CRAFTER_ABOUT, 1, 1, 1, true) end }
 	if not q then

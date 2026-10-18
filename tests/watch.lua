@@ -126,6 +126,9 @@ local function WithWatch(fn)
 		c.KingCharacter = function() return w.king and (w.king:gsub("%-.*$", "")) or nil end
 		c.ViewAs = { Available = function() return w.author ~= nil end, Role = function() return w.author or "my" end,
 			Allows = function(page) return w.allows ~= nil and w.allows[page] == true end }
+		c.Workshop = { IsAuthorName = function(name)
+			return w.authorName ~= nil and c.Fold(c.FullName(name)) == c.Fold(c.FullName(w.authorName))
+		end }
 
 		local initial = { "census", "treasury", "throne", "vox" }
 		c.UI = { TABS = {} }
@@ -1775,6 +1778,9 @@ local function Peer(w, c, name, o)
 	local p = setmetatable({ me = name, db = {}, rdb = { council = { names = w.councilNames } } }, { __index = c })
 	p.prints, p.handlers = {}, {}
 	p.King = { IsKing = function() return o.king == true end, Preview = function() return false end }
+	p.Workshop = { IsAuthorName = function(who)
+		return w.authorName ~= nil and c.Fold(c.FullName(who)) == c.Fold(c.FullName(w.authorName))
+	end }
 	p.Data = { ServerTime = function() return w.epoch end,
 		AuthorizedRank = function(sender, guild) return (w.ranksSeen or {})[c.Fold(c.FullName(sender)) .. "@" .. c.Fold(guild)] end }
 	p.Watch, p.ViewAs = { missing = true }, { missing = true }
@@ -2516,6 +2522,28 @@ test("watch: council reports (1.2.1): a member's report reaches the King's clien
 		local heads = 0
 		for _, m in ipairs(w.elsewhere) do if m.target == "Captain One-Realm" and m.msg:find("^MR~1~R~") then heads = heads + 1 end end
 		eq(heads, 1)
+	end)
+end)
+
+test("watch: council reports: the pinned addon author receives the read-only council copy without guild moderation powers", function()
+	WithWatch(function(w, W, c)
+		local king = CouncilWorld(w, c)
+		w.authorName = "Author-Realm"
+		local author = WatchPeer(w, c, w.authorName, { guild = "Olympus IV", rank = 3 })
+		eq(As(author, function() return author.Watch.CanRead() end), false, "not an officer of that guild")
+		eq(As(author, function() return author.Watch.CanManage() end), false, "the observer receives no moderation power")
+		eq(As(author, function() return author.Watch.CouncilDeskShown() end), true, "the exact pinned author has the council desk")
+		eq(As(author, function() return author.Watch.CouncilTick(true) end), true, "the author asks the King's relay")
+		Route(w, c)
+		local ok = W.SendReport(SPAMMER, "A", "author visibility")
+		eq(ok, true)
+		Route(w, c)
+		Timers(king)
+		Route(w, c)
+		local reports = As(author, function() return author.Watch.CouncilReports() end)
+		eq(#reports, 1); eq(reports[1].reporter, c.me); eq(reports[1].target, SPAMMER)
+		eq(#As(author, function() return author.Watch.CouncilCases() end), 1)
+		eq(As(author, function() return author.Watch.Store(false) end), nil, "no guild-local Watch store or actions")
 	end)
 end)
 

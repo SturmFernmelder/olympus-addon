@@ -11,7 +11,7 @@ local function World(fn)
 		C_ChatInfo = { SendAddonMessageLogged = function() end }
 		StaticPopupDialogs = {}
 		local c = setmetatable({ me = "Officer-Realm", db = { chatRooms = true }, rdb = { war = { centuries = { old = "preserved" } } },
-			CAPTAIN_RANK = 1, Roster = { byName = {} }, ViewAs = {}, War = {}, ChatRooms = {}, Comm = {}, Nominees = {} }, { __index = ns })
+			CAPTAIN_RANK = 1, Roster = { byName = {} }, ViewAs = {}, War = {}, ChatRooms = {}, Comm = {}, Nominees = {}, PartyGuard = {} }, { __index = ns })
 		w.c = c
 		c.Fold = string.lower
 		c.FullName = function(name) return name:find("-", 1, true) and name or name .. "-Realm" end
@@ -56,6 +56,7 @@ local function World(fn)
 		c.Comm.Whisper = function(to, msg, key, _, logged, done, options)
 			w.jobs[#w.jobs + 1] = { to = to, msg = msg, key = key, logged = logged, done = done, options = options }; return true
 		end
+		c.PartyGuard.InviteGuildmate = function(name) w.invited = name; return true end
 		c.Channels = { Admit = function() return not w.filtered, "filtered" end }
 		c.Moderation = { Hides = function() return w.hidden == true end, Blocks = function() return false end }
 		assert(loadfile(ROOT .. "Olympus/WarSquads.lua"))("Olympus", c)
@@ -102,6 +103,23 @@ test("Legates: native online count includes the leader, leaves unknown honest, a
 		group = s.Get("Leader"); eq(group.online, 1); eq(group.onlineUnknown, 0)
 		eq(s.Get("OtherLeader").online, 1)
 		w.fresh = false; eq(s.Get("Leader"), nil, "stale or incomplete roster cannot claim a current group count")
+	end)
+end)
+
+test("Legates: an assigned online member has one deliberate raid invite action; offline members do not", function()
+	World(function(w, s)
+		local R = w.c.Roster
+		R.generation, R.snapshotAt = 1, w.now
+		R.members = { { full = "Leader-Realm", online = true }, { full = "Soldier1-Realm", online = true },
+			{ full = "Soldier2-Realm", online = false } }
+		assert(s.Replace("Leader", { "Soldier1", "Soldier2", "Soldier3" }))
+		local invite, inviteCount = nil, 0
+		for _, line in ipairs(s.Lines("Leader")) do
+			if line.text == (w.c.L.SQUAD_INVITE or "Invite online member to raid") then invite, inviteCount = line, inviteCount + 1 end
+		end
+		eq(inviteCount, 1, "only the member confirmed online is actionable")
+		assert(invite and invite.onClick())
+		eq(w.invited, "Soldier1-Realm")
 	end)
 end)
 

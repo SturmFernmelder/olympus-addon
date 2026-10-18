@@ -1045,6 +1045,9 @@ function War.Lines(q)
 	local s = Store(true)
 	local lines = { { text = Gold(L.CHATS_BACK), onClick = function() ns.Views.ShowPage(nil) end } }
 	if not s then lines[#lines + 1] = { text = Grey(L.WAR_NOT_MEMBER) }; return lines end
+	-- Party requests and the persistent Legate groups share one operational desk. The request is
+	-- only an inbox entry; guild verification and the actual party action remain explicit clicks.
+	for _, line in ipairs(ns.PartyGuard and ns.PartyGuard.Lines and ns.PartyGuard.Lines() or {}) do lines[#lines + 1] = line end
 	local officer = War.IsOfficer()
 	for _, line in ipairs(ns.WarSquads and ns.WarSquads.Lines(q) or {}) do lines[#lines + 1] = line end
 	if Preview() then

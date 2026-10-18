@@ -1614,8 +1614,12 @@ local function PowersBarred(name)
 	return type(WC) == "table" and not WC.missing and type(WC.PowersBarred) == "function" and WC.PowersBarred(name) ~= nil
 end
 -- On the signed council list (the King left out), under no sanction.
-local function Councillor(name)
-	return type(name) == "string" and type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true
+local function CouncilObserver(name)
+	if type(name) ~= "string" then return false end
+	local W = ns.Workshop
+	local author = type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(name) == true
+	local councillor = type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true
+	return (author or councillor)
 		and not (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(name)) and not PowersBarred(name)
 end
 -- This client keeps the council's reports: the King's, a councillor's (Watch.CouncilDeskShown,
@@ -1736,7 +1740,7 @@ local function RelayTo(name, r, kind)
 		local guardKey = "council-relay#" .. Key(name) .. "#" .. Key(r.reporter) .. "#" .. Key(r.target) .. "#" .. i
 		ns.Comm.Whisper(name, msg, nil, false, true, nil, { owner = Watch, key = guardKey, permit = function(owner, key, dist, to, payload)
 			if owner ~= Watch or key ~= guardKey or dist ~= "WHISPER" or payload ~= msg or not Same(to, name) then return false, "guard" end
-			if not KingHere() or not CouncilReader() or not Councillor(name) or Accused(name, r.target) then
+			if not KingHere() or not CouncilReader() or not CouncilObserver(name) or Accused(name, r.target) then
 				stats.revoked = stats.revoked + 1
 				return false, "revoked"
 			end
@@ -1754,7 +1758,7 @@ local function RelayFresh(id)
 		if type(r) ~= "table" or not KingHere() then return end
 		local now = Mono()
 		for _, e in pairs(councilHeard) do
-			if now - e.t <= Watch.COUNCIL_HEARD and Councillor(e.name) then RelayTo(e.name, r, "p") end
+			if now - e.t <= Watch.COUNCIL_HEARD and CouncilObserver(e.name) then RelayTo(e.name, r, "p") end
 		end
 	end)
 end
@@ -2145,7 +2149,7 @@ end
 
 -- A councillor's client: one the King's client passed on (F), its lines after it (E).
 local function TakeRelay(sender, text)
-	if KingHere() or not Councillor(ns.me) then return false, "access" end
+	if KingHere() or not CouncilObserver(ns.me) then return false, "access" end
 	if not (Same(KingClient(), sender) and ns.IsKingCharacter(sender)) then return false, "sender" end
 	local inAt, kind, prev, seq, at, guild, cat, target, n, reporter, note =
 		text:match("^MR~1~F~(%d+)~([ap])(%d*)~(%d+)~(%d+)~([^~]+)~(%u)~([^~]+)~(%d)~([^~]+)~(.*)$")
@@ -2185,7 +2189,7 @@ end
 local function TakeCouncilAsk(sender, text)
 	local since = tonumber(text:match("^MR~1~Q~(%d+)$"))
 	if not since then return false, "shape" end
-	if not Councillor(sender) then return false, "sender" end
+	if not CouncilObserver(sender) then return false, "sender" end
 	local key, now = Key(sender), Mono()
 	if not councilHeard[key] and Count(councilHeard) >= 200 then
 		for k, e in pairs(councilHeard) do if now - e.t > Watch.COUNCIL_HEARD then councilHeard[k], councilAnswered[k] = nil, nil end end
@@ -2216,7 +2220,7 @@ end
 -- own within COUNCIL_SPREAD, so the councillors' asks do not all reach it at once), then every
 -- COUNCIL_ASK_EVERY; sooner after an answer that came full. force: now.
 function Watch.CouncilTick(force)
-	if KingHere() or not Councillor(ns.me) or not CouncilReader() then return false end
+	if KingHere() or not CouncilObserver(ns.me) or not CouncilReader() then return false end
 	local king = KingClient()
 	if not king then councilAsk.lease = nil return false end
 	local now = Mono()
@@ -2237,7 +2241,7 @@ function Watch.CouncilTick(force)
 	local msg = "MR~1~Q~" .. math.max(0, since)
 	return ns.Comm.Whisper(king, msg, nil, false, true, nil, { owner = Watch, key = "council-ask", permit = function(owner, key, dist, to, payload)
 		if owner ~= Watch or key ~= "council-ask" or dist ~= "WHISPER" or payload ~= msg or not Same(to, king) then return false, "guard" end
-		if not Councillor(ns.me) or not CouncilReader() or not Same(KingClient(), king) then return false, "revoked" end
+		if not CouncilObserver(ns.me) or not CouncilReader() or not Same(KingClient(), king) then return false, "revoked" end
 		return true
 	end }) ~= false
 end
@@ -2451,8 +2455,10 @@ function Watch.CouncilDeskShown()
 	if not ns.me or not ns.IsMember() or SelfOff() then return false end
 	local WC = ns.WatchChat
 	if WC and WC.Barred and WC.Barred("powers") then return false end
+	local W = ns.Workshop
 	return (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(ns.me) == true)
 		or (type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(ns.me) == true)
+		or (type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(ns.me) == true)
 end
 
 -- The desk's pages show: an officer's (Watch.CanRead), the King and High Council's layout;

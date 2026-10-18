@@ -207,6 +207,10 @@ local function OnlineCounts(leader, soldiers)
 	for _, name in ipairs(soldiers) do Count(name) end
 	return online, unknown
 end
+local function Online(name)
+	-- Squad() refreshes this cache before Lines reaches a member row.
+	return onlineIndex[Fold(name)] == true
+end
 -- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
 local function Squad(leader)
 	local s = Store(false)
@@ -572,6 +576,11 @@ function Squads.Lines(query, baseIndent, manage)
 				end
 				for _, name in ipairs(squad.soldiers) do
 					lines[#lines + 1] = { indent = indent + 1, player = name, text = ns.Codec.Plain(ns.ShortName(name)) }
+					if edit and not squad.overflow and Online(name) and ns.PartyGuard and ns.PartyGuard.InviteGuildmate then
+						local soldier = name
+						lines[#lines + 1] = { indent = indent + 2, text = Label("SQUAD_INVITE", "Invite online member to raid"),
+							onClick = function() return CanEdit(e.name) and ns.PartyGuard.InviteGuildmate(soldier) or false end }
+					end
 					if edit and not squad.overflow then
 						local soldier, leader = name, e.name
 						lines[#lines + 1] = { indent = indent + 2, text = Label("SQUAD_REMOVE", "Remove soldier"),

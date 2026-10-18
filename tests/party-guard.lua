@@ -120,7 +120,7 @@ test("party guard: guild status only comes from fresh roster, explicit who, or a
 		local unknown = assert(Candidate("Unknown-Realm"))
 		eq(unknown.evidence, nil)
 		local verify = assert(Has(G.Lines(), ns.L.PARTY_GUARD_VERIFY))
-		assert(Has(ns.Views.Build("census"), ns.L.PARTY_GUARD_TITLE:format(1)), "the non-modal rows are in the Census")
+		assert(Has(G.Lines(), ns.L.PARTY_GUARD_TITLE:format(1)), "the non-modal rows are available to the War Room")
 		verify.onClick()
 		eq(#w.searches, 1); eq(w.searches[1][1], true); eq(w.searches[1][3], "Unknown-Realm")
 		eq(unknown.evidence, nil, "sending /who alone proves nothing")
@@ -211,6 +211,21 @@ test("party guard: invitations are manual and recheck King, identity, evidence, 
 		changed.who = { guild = "Olympus Test", at = w.now }
 		eq(G.ConfirmOutsider(decision), false, "stale confirmation cannot invite after evidence changes")
 		eq(#w.invited, before + 1)
+	end)
+end)
+
+test("party guard: a Legate may click-invite a fresh own-guild member without waiting for the King", function()
+	Scene(function(w)
+		w.kingAt, w.localKing = false, false
+		w.rosterName, w.rosterAt = "Soldier-Realm", w.now
+		eq(G.InviteGuildmate("Soldier-Realm"), true)
+		eq(w.invited[1], "Soldier")
+		w.rosterAt = nil
+		eq(G.InviteGuildmate("Soldier-Realm"), false, "stale roster is not membership proof")
+		eq(#w.invited, 1)
+		w.rosterAt, w.room = w.now, false
+		eq(G.InviteGuildmate("Soldier-Realm"), false, "a full group is rechecked at the click")
+		eq(#w.invited, 1)
 	end)
 end)
 

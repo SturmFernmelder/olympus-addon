@@ -149,6 +149,7 @@ DuesRosterCheckpoints.lua
 CarryHistory.lua
 CarryMerger.lua
 Records.lua
+CraftRanking.lua
 Wallet.lua
 Stakes.lua
 Markets.lua
