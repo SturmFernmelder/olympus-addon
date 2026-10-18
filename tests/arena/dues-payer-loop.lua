@@ -213,6 +213,34 @@ test("Dues payer loop: an offline payer recovers only his observed receipt after
 	w:Run(8); eq(#Receipts(w), before)
 end)
 
+test("Dues payer loop: a server not-found reply stops periodic pinned-character spam until that character is heard", function()
+	local w, p, t, mail = Setup()
+	w:Logout(t); w:Logout(mail)
+	assert(w:As(p, p.ns.Dues.RequestPayerReceipt))
+	w:Run(8)
+	local before = #w.failed
+	eq(before >= 2, true, "the first recovery tried both pinned books")
+	for _, name in ipairs(p.ns.TREASURER_CHARACTERS) do
+		w:System(p, p.globals.ERR_CHAT_PLAYER_NOT_FOUND_S:format(name))
+	end
+	for _ = 1, 3 do
+		w.clock = w.clock + p.ns.Dues.ASK_EVERY
+		eq(w:As(p, p.ns.Dues.RequestPayerReceipt), false, "known-offline books are not retried")
+		w:Run(8)
+	end
+	eq(#w.failed, before, "no repeated unavailable whispers")
+	-- Valid traffic is stronger and newer than the old system reply. Once the main Treasurer is
+	-- heard again, only his recovered identity becomes eligible; the still-offline mail book stays quiet.
+	w:Login(t); t.ns.splitNames = true; t.ns.Comm.Hash36 = H.ns.Comm.Hash36
+	w:As(p, p.ns.Treasury.Heard, t.name)
+	local beforeSent = #w.sent
+	assert(w:As(p, p.ns.Dues.RequestPayerReceipt))
+	w:Run(8)
+	local tries = 0
+	for i = beforeSent + 1, #w.sent do if w.sent[i].msg:sub(1, 3) == "FP~" then tries = tries + 1; eq(w.sent[i].target, t.name) end end
+	eq(tries, 1, "only the character heard back is retried")
+end)
+
 test("Dues payer loop: native proof and pending queue caps preserve observed facts without granting overflow payer credit", function()
 	local w, p, t = Setup()
 	local p2, p3 = M.Client(w, W.NAMES.fighterB, { money = 1000000 }), M.Client(w, W.NAMES.bettor1, { money = 1000000 })

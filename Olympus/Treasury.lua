@@ -2078,6 +2078,7 @@ Treasury.PRIVATE_REPEAT = 1800     -- the same one whispered again to the same p
 
 local heard = {}         -- [Name-Realm] = when the King, a Steward or a keeper was last heard
 local firstHeard = {}    -- [Name-Realm] = when he was first heard this session
+local unavailable = {}   -- [server's displayed lower name] = true after its not-playing reply this session
 local outbox = {}        -- whispers waiting: { to, kind, key, msg, pieces }
 local sending            -- the transfer owned by Comm now, or waiting for admission
 local sentTo = {}        -- [Name-Realm] = { [key] = { msg, at }: the message last whispered whole to him, when }
@@ -2087,6 +2088,22 @@ local privAsm = ns.Codec.NewAssembler()
 local lastAsk = -math.huge
 local privateKinds = {}  -- [type] = { from(sender), to(), handle(dist, sender, text) }
 local held = false       -- a changed message was held back by PRIVATE_GAP: FlushPrivate sends it
+
+-- The game names an unavailable whisper recipient in a system line. Keep that server-stamped
+-- fact only for this login: periodic private recovery must not ask the same offline character
+-- every five minutes. Any later authenticated addon traffic from that character clears it.
+local function UnavailableMatches(name, who)
+	return (ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who
+end
+function Treasury.Unavailable(name)
+	if type(name) ~= "string" or name == "" then return false end
+	for who in pairs(unavailable) do if UnavailableMatches(name, who) then return true end end
+	return false
+end
+function Treasury.Available(name)
+	if type(name) ~= "string" or name == "" then return end
+	for who in pairs(unavailable) do if UnavailableMatches(name, who) then unavailable[who] = nil end end
+end
 
 -- The King's switches as he last gave them (never the author's Asmon's view): what goes on the
 -- channel. Returns the parts, and whether all of them show (the whole book goes there then).
@@ -2138,6 +2155,7 @@ end
 function Treasury.Heard(name)
 	if not Insider(name) then return end
 	name = ns.FullName(name)
+	Treasury.Available(name)
 	heard[name] = ns.Now()
 	firstHeard[name] = firstHeard[name] or heard[name]
 end
@@ -2645,6 +2663,7 @@ function Treasury.NotFound(text)
 	local who = text:match(notFound)
 	if not who then return end
 	who = who:lower()
+	unavailable[who] = true
 	local function Is(name) return (ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who end
 	Treasury.CancelPrivate(function(o) return Is(o.to) end)
 	for name in pairs(heard) do if Is(name) then heard[name] = nil end end
@@ -2656,7 +2675,7 @@ end
 function Treasury.PrivateState() return { outbox = outbox, sending = sending, sentTo = sentTo, heard = heard, held = held } end
 function Treasury.ResetPrivate()
 	Treasury.CancelPrivate()
-	wipe(heard); wipe(firstHeard); wipe(outbox); wipe(sentTo); wipe(resetAt)
+	wipe(heard); wipe(firstHeard); wipe(unavailable); wipe(outbox); wipe(sentTo); wipe(resetAt)
 	sending, lastAsk, notFound, held = nil, -math.huge, nil, false
 	if ns.rdb then ns.rdb.treasuryReaders = nil end
 	privAsm = ns.Codec.NewAssembler()
