@@ -562,7 +562,34 @@ test("1.1.6 Church: the keepers' ledger: a keeper catches up from another; the m
 	eq(w:As(c.head, c.head.Count.StateOf, Key("Merge Guy") .. ":" .. Key("Mira Wells")), "credited")
 	-- A line from a non-keeper is refused.
 	local line = w:As(c.a1, c.a1.Count.RecordLine, "x", r1)
-	eq(select(2, w:As(c.head, c.head.Count.TakeLine, "Wes Brook-Realm", line)), "keeper")
+	eq(select(2, w:As(c.head, c.head.Count.TakeLine, "Wes Brook-Realm", line)), "relay")
+end)
+
+test("global Church ledger: signed council preserves verified rankings after the source Apostle goes offline", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	c.a2.online = false
+	w:Presence({ c.a1, council })
+	local id = Key("Relay Recruit") .. ":" .. Key("Mira Wells")
+	local rec = { n = "Relay Recruit", bn = "Mira Wells", g = World.GUILD, kind = "i",
+		tc = w.clock - 7200, tj = w.clock - 3600, ws = { Key("Wes Brook") }, c = 1 }
+	eq(w:As(c.a1, c.a1.Count.MergeIn, id, rec, true), true)
+	w:Run(20)
+	assert(Rec(w, council, "Relay Recruit", "Mira Wells"), "signed council retained the verified ledger line")
+
+	-- The only Apostle holding the record leaves. A later trusted client must recover it from the
+	-- council relay, not wait for the original observer to return.
+	c.a1.online = false
+	c.author.online = true
+	w:Presence({ council, c.author })
+	eq(w:As(c.author, c.author.Count.CatchUp, true), true)
+	w:Run(30)
+	assert(Rec(w, c.author, "Relay Recruit", "Mira Wells"), "late relay recovered while source was offline")
+	local found
+	for _, row in ipairs(w:As(c.author, c.author.Count.Ranking, "m", "a")) do
+		if row.key == Key("Mira Wells") then found = row break end
+	end
+	assert(found and found.joins == 1, "recovered all-time ranking includes the verified recruit")
 end)
 
 test("1.1.6 Church: reading the log: never in combat, at most every minute, drawn among guildmates, never on the King's client; the event registered once, on first use", function()

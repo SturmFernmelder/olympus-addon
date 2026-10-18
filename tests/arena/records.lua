@@ -290,6 +290,41 @@ test("1.2.4 records: any ordinary holder relays a Bones result to a late member;
 	Errors(w)
 end)
 
+test("global records: two validating holders recover Bones ranking for a late client while both original players are offline", function()
+	local w, a, b, c = Setup()
+	local second = w:Player(N.bettor2)
+	local body = Pair(w, a, b, "Kr11")
+	Keys(w, a, b)
+	Take(w, c, body)
+	Take(w, second, body)
+	eq(Do(w, c, "Count", "b"), 1)
+	eq(Do(w, second, "Count", "b"), 1)
+
+	-- The original players and their firsthand RK declarations are gone before this client exists.
+	w:Logout(a)
+	w:Logout(b)
+	local late = w:Player(N.bettor1)
+	c.ns.Records.random = function() return 0 end
+	second.ns.Records.random = function() return 0 end
+	late.ns.Records.random = function() return 0 end
+	w:Run(120) -- login discovery, digest, ask, body, two independently signed validations
+
+	local count = Do(w, late, "Count", "b")
+	local refused = {}
+	for why, n in pairs(c.ns.Arena.Stats().refused or {}) do refused[#refused + 1] = tostring(why) .. "=" .. tostring(n) end
+	table.sort(refused)
+	assert(count == 1, ("validated network survives originals offline: count=%d pending=%d RD=%d RA=%d RR=%d RK=%d RV=%d witnessed=%d"):format(
+		count, Do(w, late, "Pending", "b"), #w:Sent({ type = "RD" }), #w:Sent({ type = "RA" }), #w:Sent({ type = "RR" }),
+		#w:Sent({ type = "RK" }), #w:Sent({ type = "RV" }), late.ns.Records.Stats().witnessed or 0)
+		.. (" out=%d/%d producers=%d/%d arenaoff=%s/%s"):format(Do(w, c, "OutSize"), Do(w, second, "OutSize"),
+			c.ns.Arena.ProducerCount(), second.ns.Arena.ProducerCount(), tostring(c.ns.Arena.Off()), tostring(second.ns.Arena.Off()))
+		.. " refused=" .. table.concat(refused, ","))
+	eq(Do(w, late, "Pending", "b"), 0)
+	eq(#w:As(late, late.ns.FarkleTable.Best, "L"), 2)
+	assert((late.ns.Records.Stats().witnessed or 0) >= 1, "identity was admitted by holder quorum")
+	Errors(w)
+end)
+
 test("1.2.4 records: the duel adapter preserves GUID identity checks and adds a verified relayed result to ordinary rankings", function()
 	local w, a, b, c = Setup()
 	for _, client in ipairs(w.clients) do

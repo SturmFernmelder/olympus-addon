@@ -70,6 +70,30 @@ local function CensusWorld()
 	return w
 end
 
+test("global census: a trusted holder restores normalized guild counts to a late client without granting census authority", function()
+	local source, late = CensusWorld(), CensusWorld()
+	local relay = "Council-Realm"
+	for _, w in ipairs({ source, late }) do
+		w.ns.Church = { IsLedgerRelay = function(name) return name == relay end }
+		w.ns.Alts = nil
+	end
+	source.ns.me = relay
+	source.ns.rdb.guilds["Olympus Dawn"] = {
+		total = 987, online = 73, avgLevel = 46.2, t = source.clock, st = source.clock,
+		leader = "Real Leader", officers = { { name = "Real Officer" } }, zones = { m1453 = 10 },
+	}
+	local payload = assert(source.D.GlobalCensusPayload())
+	assert(payload:find("Olympus Dawn,987,73,462", 1, true), "the trusted snapshot carries normalized counts")
+	assert(late.D.ReceiveGlobalCensus("CHANNEL", relay, payload))
+	eq(next(late.ns.rdb.guilds), nil, "a relay never becomes an authoritative census report")
+	local s = late.D.Summary()
+	eq(s.characters, 987); eq(s.total, 987); eq(s.online, 73); eq(#s.guilds, 1)
+	eq(s.guilds[1].name, "Olympus Dawn"); eq(s.guilds[1].g.relayed, true)
+	eq(s.guilds[1].g.leader, nil, "leadership is deliberately not relayed as census authority")
+	late.ns.Church.IsLedgerRelay = function() return false end
+	eq(late.D.ReceiveGlobalCensus("CHANNEL", "Stranger-Realm", payload), false, "an untrusted snapshot is refused")
+end)
+
 -- Two values alike, tables compared value by value whatever their identity; the first difference.
 local function Alike(a, b, path)
 	if type(a) ~= "table" or type(b) ~= "table" then

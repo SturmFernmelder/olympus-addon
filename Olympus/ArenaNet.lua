@@ -81,7 +81,7 @@ Arena.TYPES = {
 	AM = "ArenaMatch",
 	LW = "Lottery",
 	AU = "ArenaRoles",
-	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RS = "Records", RT = "Records",
+	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RV = "Records", RS = "Records", RT = "Records",
 }
 -- A player's own obligations go out even with the arena turned off, and in L while the live switch
 -- is off (the design): receipts, key claims, Farkle's payments; a debt mark about himself (ZX) and a
@@ -108,7 +108,7 @@ Arena.FREE_TYPES = {
 	KI = true, KA = true, KO = true, KP = true, KG = true, KY = true, KK = true, KT = true, KE = true, -- Bones
 	KQ = true, KR = true, KS = true, KN = true, KL = true,
 	-- (1.2.4) the shared records (Records.lua): any holder tells the games and duels that count
-	RK = true, RD = true, RA = true, RR = true, RS = true, RT = true,
+	RK = true, RD = true, RA = true, RR = true, RV = true, RS = true, RT = true,
 }
 -- The types a sender may mark as his own obligation (o.obligation: ZX about himself, a staked AW,
 -- the Wallet's hello): taken in L whatever the switch, their handlers check the rest.
