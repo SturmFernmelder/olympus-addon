@@ -2074,6 +2074,7 @@ local function Help()
 	print(L.HELP_MENTORS)
 	print(L.HELP_NOMINEES)
 	print(L.HELP_NOCONTACT)
+	print(L.HELP_PARTY_GUARD)
 	print(L.HELP_HOP)
 	print(L.HELP_LAYERHELP)
 	print(L.HELP_LAYERAUTO)
@@ -2226,6 +2227,9 @@ local function Slash(input)
 			else
 				ns.Print(ns.Recruit.NoContactMe() and L.NOCONTACT_ON or L.NOCONTACT_OFF)
 			end
+		elseif cmd == "partyguard" then
+			-- A local, bounded inbox for clear party-invite whispers while the King is online.
+			ns.PartyGuard.Slash(rest)
 		elseif cmd == "inactive" or cmd == "members" or cmd == "recruits" or cmd == "mentors" then
 			-- (1.1: our guild's members offline 7, 14 or 30 days and more; the Lord's recruits and
 			-- their mentors. Members.lua.)

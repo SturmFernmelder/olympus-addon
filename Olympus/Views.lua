@@ -1547,6 +1547,9 @@ local function CensusLines(s, q)
 	end
 	-- Recruits asking to join our guild (1.1, Recruit.lua): an officer's Invite and Decline.
 	for _, l in ipairs(ns.Recruit and ns.Recruit.RequestLines and ns.Recruit.RequestLines() or {}) do lines[#lines + 1] = l end
+	-- Clear party-invite whispers while the King is online (1.2.5.1): local, short-lived and
+	-- manually verified. Nothing interrupts the game or trusts what the whisper claimed.
+	for _, l in ipairs(ns.PartyGuard and ns.PartyGuard.Lines and ns.PartyGuard.Lines() or {}) do lines[#lines + 1] = l end
 	-- The King's Agenda, for the whole army (King.lua).
 	local a = ns.King and ns.King.Agenda and ns.King.Agenda()
 	if a then

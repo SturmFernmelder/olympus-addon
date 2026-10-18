@@ -99,6 +99,7 @@ libs\QREncode\qrencode.lua
 Link.lua
 GuildCharter.lua
 Recruit.lua
+PartyGuard.lua
 AnswerBank.lua
 Answers.lua
 Views.lua
