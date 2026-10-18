@@ -1461,9 +1461,12 @@ alone until then).
   item the game has not loaded yet counts in the items, not in the value, which shows "at least"
   until its data comes and fills it in by itself (the game is asked for 100 items a draw at most);
   an item no vendor buys counts in the items alone, and the tooltip says how many. The guilds with
-  no snapshot are listed below it. A click on a row opens that guild's bank as before. Nothing of
-  the ranking is sent anywhere: sharing its numbers with everyone (never a bank's items) is for a
-  later version.
+  no snapshot are listed below it. A click on a local row opens that guild's bank as before. The
+  numeric ranking row alone (guild, correspondent, gold, item count, vendor value, total, average
+  level and observation time) can be recovered privately by the same authorized Treasury viewers
+  after two independent authorized live holders attest it. No bank item, tab, donor, book or
+  snapshot is carried by that ranking relay; a relayed row cannot be opened as a bank, and nothing
+  is published on the Olympus channel.
 - **Sent by each keeper's addon by itself** (every 5 minutes and after a change), once he said
   yes: his book's balance, totals, ranking, items donated and latest lines (1.1: never a line of
   gold given to the Treasurer's characters, see the dues below). On the Olympus

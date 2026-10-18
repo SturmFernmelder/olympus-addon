@@ -30,6 +30,15 @@ local function Errors(w)
 	for _, c in ipairs(w.clients) do for _, err in ipairs(c.errors) do error(c.name .. ": " .. err) end end
 end
 
+test("shared records diagnostics include every registered ranking type", function()
+	local w, _, _, c = Setup()
+	local text = Do(w, c, "StatusText")
+	assert(text:find("Bones games", 1, true), "Bones is visible")
+	assert(text:find("Craft deliveries", 1, true), "crafting is not hidden from the records diagnostic")
+	assert(text:find("Duels", 1, true), "duels are visible")
+	Errors(w)
+end)
+
 test("1.2.4 records: both original signatures and firsthand keys admit one Bones result; repeated bodies never count twice", function()
 	local w, a, b, c = Setup() local body = Pair(w, a, b, "Kr1") Keys(w, a, b)
 	Take(w, c, body) eq(Do(w, c, "Count", "b"), 1)

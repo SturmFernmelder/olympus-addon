@@ -1392,13 +1392,14 @@ end)
 -- from; `/oly arena records seal`: the box to paste a signed seal in.
 function R.StatusText()
 	local lines = { L.RECORDS_TITLE }
-	for _, letter in ipairs({ "b", "d" }) do
-		if R.TYPES[letter] then
-			local s = Store(letter)
-			local sealed = 0
-			for _, seal in pairs(s and s.seals or {}) do if Adopted(seal) then sealed = sealed + 1 end end
-			lines[#lines + 1] = L.RECORDS_LINE:format(L["RECORDS_TYPE_" .. letter] or letter, R.Count(letter), R.Pending(letter), #R.Clashes(letter), sealed)
-		end
+	local letters = {}
+	for letter in pairs(R.TYPES) do letters[#letters + 1] = letter end
+	table.sort(letters)
+	for _, letter in ipairs(letters) do
+		local s = Store(letter)
+		local sealed = 0
+		for _, seal in pairs(s and s.seals or {}) do if Adopted(seal) then sealed = sealed + 1 end end
+		lines[#lines + 1] = L.RECORDS_LINE:format(L["RECORDS_TYPE_" .. letter] or letter, R.Count(letter), R.Pending(letter), #R.Clashes(letter), sealed)
 	end
 	local keys = 0
 	for _ in pairs((Root(false) or {}).keys or {}) do keys = keys + 1 end
