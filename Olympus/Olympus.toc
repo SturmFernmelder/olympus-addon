@@ -126,6 +126,7 @@ TabardsV2.lua
 Letters.lua
 GuildFrame.lua
 Borders.lua
+ProfileEffects.lua
 Nameplates.lua
 ChatWindow.lua
 WatchChat.lua

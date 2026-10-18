@@ -123,7 +123,10 @@ Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR
 	-- Never a player's own obligations (AW, ZX, ZR, ZT, ZF, KD): a net-off player's result, debt
 	-- marks and receipts still go out, and receivers ignore a net-off witness's AW (Moderation.Hides).
 	EC = true, BS = true, ZD = true, AS = true, AP = true, IL = true, KI = true, KO = true, KN = true, KS = true,
-	AM = true }
+	AM = true,
+	-- A temporary, self-owned profile presentation is never announced while this character or
+	-- guild is held back. Receivers independently apply the same moderation boundary.
+	FX = true }
 
 Moderation.random = math.random -- tests
 
