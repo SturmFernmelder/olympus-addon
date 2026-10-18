@@ -400,6 +400,7 @@ end
 --   1.2.4, Carry XC (bounded consented historical quotes to the destination guild master, private only).
 --   1.2.4, Dues FP FR (a payer's private receipt ask and the pinned Treasurer's observed receipt).
 --   1.2.4, ChurchFullness NF (private coverage recovery between a current nominee and the guild desk).
+--   1.2.5, PlayerSightings PS (request-bound queries; private last-seen answers and withdrawals).
 local handlers = {}
 -- 1.1 (Moderation.lua): a client the moderators took off (net-off) sends none of what they hide.
 local function Held(msg)

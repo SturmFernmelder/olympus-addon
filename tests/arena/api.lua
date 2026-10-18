@@ -107,6 +107,80 @@ local function SurfaceHost(c)
 	return state
 end
 
+-- The transport-side contract behind the public adapter.  It intentionally keeps fields the API
+-- must never forward, and returns numeric internal ids, so these tests exercise the adapter rather
+-- than duplicating its public shape in the fixture.
+local function SightingHost(c)
+	local host = { nextID = 7, starts = {}, areaStarts = {}, cancels = {}, sessions = {} }
+	function host.Start(target)
+		host.starts[#host.starts + 1] = target
+		local id = host.nextID
+		host.nextID = id + 1
+		host.sessions[tostring(id)] = {
+			id = id, target = target, phase = "waiting", createdAt = 100 + id, expiresAt = 700 + id,
+			rawSecret = "transport-only-state", targetGUID = "Player-4002-TARGET",
+			results = {
+				{ target = target, reporter = "Scout One-Emberfall", guild = "Olympus", at = 110 + id,
+					mapID = 1415, x = 401, y = 522, layer = 3, guid = "Player-4001-OBSERVER", rawSecret = "row-only-state" },
+				{ target = target, observer = "Scout One-Emberfall", observerGuild = "Olympus", seenAt = 111 + id,
+					receivedAt = 115 + id, expiresAt = 1011 + id,
+					mapID = 1415, x = 402, y = 523, layer = 3, kind = "exact-unit", accuracyYards = 0 },
+				{ target = target, observer = "Scout Two-Emberfall", observerGuild = "Olympus", seenAt = 112 + id,
+					receivedAt = "invalid-time", expiresAt = math.huge,
+					mapID = 1415, x = 403, y = 524, layer = 4, kind = "exact-group", accuracyYards = 0 },
+				-- Invalid coordinates are discarded rather than clamped into an apparently valid report.
+				{ target = target, observer = "Bad Row-Emberfall", observerGuild = "Olympus", seenAt = 113 + id,
+					mapID = 1415, x = 1001, y = 524, layer = 4, rawSecret = "invalid-row-secret" },
+				{ target = target, observer = "False Precision-Emberfall", observerGuild = "Olympus", seenAt = 114 + id,
+					mapID = 1415, x = 404, y = 525, layer = 4, kind = "exact-group", accuracyYards = 5 },
+			},
+		}
+		return true, id
+	end
+	function host.Session(id)
+		return host.sessions[tostring(id)]
+	end
+	function host.StartArea(mapID)
+		host.areaStarts[#host.areaStarts + 1] = mapID
+		local id = host.nextID
+		host.nextID = id + 1
+		host.sessions[tostring(id)] = {
+			id = id, mode = "area", scope = "hostile", mapID = mapID, phase = "waiting",
+			createdAt = 100 + id, expiresAt = 700 + id, rawSecret = "area-transport-secret",
+			results = {
+				{ target = "Enemy One-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
+					seenAt = 110 + id, receivedAt = 112 + id, expiresAt = 900 + id,
+					mapID = mapID, x = 410, y = 520, layer = 3, kind = "nearby", rawSecret = "area-row-secret" },
+				{ target = "Enemy Exact-Emberfall", reporter = "Hidden Scout Two-Emberfall", observerGuild = "Olympus",
+					seenAt = 111 + id, receivedAt = 113 + id, expiresAt = 901 + id,
+					mapID = mapID, x = 411, y = 521, layer = 4, kind = "exact-unit", accuracyYards = 0 },
+				{ target = "Wrong Map-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
+					seenAt = 112 + id, expiresAt = 902 + id, mapID = mapID + 1, x = 412, y = 522, layer = 3 },
+			}
+		}
+		return true, id
+	end
+	function host.AreaSession(id)
+		local state = host.sessions[tostring(id)]
+		return state and state.mode == "area" and state or nil
+	end
+	function host.Cancel(id, why)
+		local key = tostring(id)
+		local state = host.sessions[key]
+		host.cancels[#host.cancels + 1] = { id = key, why = why }
+		if not state then return false, "unknown" end
+		host.sessions[key] = nil
+		return true
+	end
+	function host.CancelArea(id, why)
+		local state = host.sessions[tostring(id)]
+		if not state or state.mode ~= "area" then return false, "not-found" end
+		return host.Cancel(id, why)
+	end
+	rawset(c.ns, "PlayerSightings", host)
+	return host
+end
+
 local function Keys(t)
 	local out = {}
 	for k in pairs(t or {}) do out[#out + 1] = tostring(k) end
@@ -236,6 +310,464 @@ test("1.2.4 the API: VERSION and Has; Register only for an installed addon, once
 	for i = 1, API.MAX_ADDONS - 1 do Install(viewer, "Extra" .. i) eq(type(w:As(viewer, O.Register, "Extra" .. i)), "table") end
 	Install(viewer, "OneTooMany")
 	eq(select(2, w:As(viewer, O.Register, "OneTooMany")), "full")
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API sightings: capability detection, explicit permission, sanitized copies, owner isolation, callbacks, cancellation and revocation", function()
+	local w, cast, viewer, API = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	rawset(viewer.ns, "PlayerSightings", nil)
+	eq(w:As(viewer, O.Has, "network.sightings"), false, "no transport: no advertised capability")
+	local host = SightingHost(viewer)
+	eq(w:As(viewer, O.Has, "network.sightings"), true, "the complete transport is feature-detected")
+	eq(w:As(viewer, O.Has, "SIGHTING_CHANGED"), true, "the public event is feature-detected")
+
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "BountyBoard", "Bounty Board")
+	local a = w:As(viewer, O.Register, "MapPins")
+	local b = w:As(viewer, O.Register, "BountyBoard")
+	local state, why = Do(w, viewer, a, "StartPlayerSearch", "Tracked Name-Emberfall")
+	eq(state, nil); eq(why, "pending"); eq(#host.starts, 0, "pending permission sends no request")
+	state, why = Do(w, viewer, a, "GetPlayerSearches")
+	eq(state, nil); eq(why, "pending", "pending permission reads no searches")
+	w:As(viewer, C.Choose, "api:mappins", false)
+	state, why = Do(w, viewer, a, "StartPlayerSearch", "Tracked Name-Emberfall")
+	eq(state, nil); eq(why, "refused"); eq(#host.starts, 0, "a No sends no request")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	w:As(viewer, C.Choose, "api:bountyboard", true)
+
+	state = assert(Do(w, viewer, a, "StartPlayerSearch", "Tracked Name-Emberfall"))
+	eq(state.id, "7", "the transport's numeric id is an opaque public string")
+	eq(state.target, "Tracked Name-Emberfall"); eq(state.status, "searching")
+	eq(state.createdAt, 107); eq(state.expiresAt, 707)
+	eq(state.observers, 2, "duplicate reports by one observer count once")
+	eq(state.confirmed, true, "two distinct observers confirm the nearby sighting")
+	eq(#state.sightings, 3, "the out-of-range row is discarded")
+	eq(Keys(state), "confirmed,createdAt,expiresAt,id,mode,observers,sightings,status,target")
+	eq(state.mode, "player")
+	eq(Keys(state.sightings[1]), "kind,layer,mapID,observer,observerGuild,seenAt,target,x,y")
+	eq(state.sightings[1].kind, "nearby"); eq(state.sightings[1].observer, "Scout One-Emberfall")
+	eq(state.sightings[1].observerGuild, "Olympus"); eq(state.sightings[1].mapID, 1415)
+	eq(state.sightings[1].x, 401); eq(state.sightings[1].y, 522); eq(state.sightings[1].layer, 3)
+	eq(state.sightings[2].kind, "exact-unit"); eq(state.sightings[2].accuracyYards, 0)
+	eq(state.sightings[2].receivedAt, 122); eq(state.sightings[2].expiresAt, 1018)
+	eq(state.sightings[3].kind, "exact-group"); eq(state.sightings[3].accuracyYards, 0)
+	eq(Keys(state.sightings[2]), "accuracyYards,expiresAt,kind,layer,mapID,observer,observerGuild,receivedAt,seenAt,target,x,y")
+	eq(state.sightings[3].receivedAt, nil); eq(state.sightings[3].expiresAt, nil,
+		"malformed transport times are not exposed as an apparently durable result")
+	local returned = {}
+	local function Walk(v, depth)
+		assert(depth < 10, "no cycle")
+		if type(v) == "table" then
+			for k, x in pairs(v) do Walk(k, depth + 1) Walk(x, depth + 1) end
+		elseif type(v) == "string" then returned[#returned + 1] = v end
+	end
+	Walk(state, 0)
+	local exported = table.concat(returned, "\n")
+	for _, secret in ipairs({ "transport-only-state", "row-only-state", "invalid-row-secret", "Player-4002-TARGET", "Player-4001-OBSERVER" }) do
+		eq(exported:find(secret, 1, true), nil, "transport-only data stays internal: " .. secret)
+	end
+	state.sightings[1].observer = "changed by consumer"
+	eq(Do(w, viewer, a, "GetPlayerSearch", "7").sightings[1].observer, "Scout One-Emberfall", "every read is a fresh copy")
+
+	local other = assert(Do(w, viewer, b, "StartPlayerSearch", "Other Target-Emberfall"))
+	eq(other.id, "8")
+	state, why = Do(w, viewer, a, "GetPlayerSearch", "8")
+	eq(state, nil); eq(why, "unknown", "one handle cannot read another handle's search")
+	state, why = Do(w, viewer, b, "GetPlayerSearch", "7")
+	eq(state, nil); eq(why, "unknown", "ownership isolation works both ways")
+	local allA, allB = Do(w, viewer, a, "GetPlayerSearches"), Do(w, viewer, b, "GetPlayerSearches")
+	eq(#allA, 1); eq(allA[1].id, "7"); eq(#allB, 1); eq(allB[1].id, "8")
+	eq(select(2, Do(w, viewer, a, "CancelPlayerSearch", "8")), "unknown", "another handle cannot cancel it")
+
+	local toldA, toldB = {}, {}
+	eq(Do(w, viewer, a, "On", "SIGHTING_CHANGED", function(_, row) toldA[#toldA + 1] = row end), true)
+	eq(Do(w, viewer, b, "On", "SIGHTING_CHANGED", function(_, row) toldB[#toldB + 1] = row end), true)
+	host.sessions["7"].results[#host.sessions["7"].results + 1] = {
+		target = "Tracked Name-Emberfall", observer = "Scout Three-Emberfall", observerGuild = "Olympus",
+		seenAt = 200, mapID = 1415, x = 405, y = 526, layer = 5,
+	}
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", 7) end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#toldA, 1); eq(toldA[1].id, "7"); eq(toldA[1].observers, 3)
+	eq(#toldB, 0, "the other addon is not told about a search it does not own")
+	host.sessions["8"].phase = "complete"
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "8") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#toldA, 1); eq(#toldB, 1); eq(toldB[1].id, "8"); eq(toldB[1].status, "complete")
+
+	eq(Do(w, viewer, b, "CancelPlayerSearch", "8"), true)
+	eq(host.cancels[#host.cancels].id, "8"); eq(host.cancels[#host.cancels].why, "api")
+	w:Run(API.DISPATCH_DELAY)
+	eq(#toldB, 2); eq(toldB[2].id, "8"); eq(toldB[2].status, "cancelled")
+	-- Transport ids are intentionally small and reusable. Cancelling must discard the old
+	-- handle's ownership, and the target+creation fingerprint is a second backstop: reusing id 8
+	-- for the other handle must not let B read, cancel or receive callbacks for A's new request.
+	host.nextID = 8
+	local reused = assert(Do(w, viewer, a, "StartPlayerSearch", "Reused Target-Emberfall"))
+	eq(reused.id, "8")
+	state, why = Do(w, viewer, b, "GetPlayerSearch", "8")
+	eq(state, nil); eq(why, "unknown")
+	local beforeReuseCancel = #host.cancels
+	local cancelled
+	cancelled, why = Do(w, viewer, b, "CancelPlayerSearch", "8")
+	eq(cancelled, false); eq(why, "unknown"); eq(#host.cancels, beforeReuseCancel)
+	host.sessions["8"].phase = "complete"
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "8") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#toldA, 2); eq(toldA[2].id, "8"); eq(toldA[2].target, "Reused Target-Emberfall")
+	eq(#toldB, 2, "the old owner receives no state or callback for a reused id")
+	eq(Do(w, viewer, a, "CancelPlayerSearch", "8"), true)
+	w:Run(API.DISPATCH_DELAY)
+
+	-- Even without callbacks or GetPlayerSearches, a later successful start prunes ownership of a
+	-- transport session that disappeared. Reusing that old id must not produce a spurious terminal
+	-- callback for the stale handle.
+	host.nextID = 9
+	eq(assert(Do(w, viewer, b, "StartPlayerSearch", "Gone Before Poll-Emberfall")).id, "9")
+	host.sessions["9"] = nil
+	eq(assert(Do(w, viewer, b, "StartPlayerSearch", "Still Live-Emberfall")).id, "10")
+	host.nextID = 9
+	eq(assert(Do(w, viewer, a, "StartPlayerSearch", "Replacement After Prune-Emberfall")).id, "9")
+	local toldBBeforeReuse = #toldB
+	host.sessions["9"].phase = "complete"
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "9") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#toldB, toldBBeforeReuse, "a successful start prunes the handle's gone ownership")
+	eq(Do(w, viewer, a, "CancelPlayerSearch", "9"), true)
+	w:Run(API.DISPATCH_DELAY)
+
+	-- B still owns id 10 when its transport entry disappears. If the transport reuses 10 for A,
+	-- revoking B must compare the session fingerprint instead of cancelling by stale id alone.
+	host.sessions["10"] = nil
+	host.nextID = 10
+	eq(assert(Do(w, viewer, a, "StartPlayerSearch", "Replacement Before Revoke-Emberfall")).id, "10")
+	local beforeStaleRevoke = #host.cancels
+	w:As(viewer, C.Choose, "api:bountyboard", false)
+	eq(#host.cancels, beforeStaleRevoke, "revoking a stale handle does not cancel a reused id")
+	eq(host.sessions["10"].target, "Replacement Before Revoke-Emberfall")
+	eq(Do(w, viewer, a, "CancelPlayerSearch", "10"), true)
+	w:Run(API.DISPATCH_DELAY)
+
+	w:As(viewer, C.Choose, "api:mappins", false)
+	eq(host.cancels[#host.cancels].id, "7"); eq(host.cancels[#host.cancels].why, "permission", "revocation stops every owned request")
+	state, why = Do(w, viewer, a, "GetPlayerSearch", "7")
+	eq(state, nil); eq(why, "refused", "revocation closes the read path")
+	local starts = #host.starts
+	state, why = Do(w, viewer, a, "StartPlayerSearch", "Never Sent-Emberfall")
+	eq(state, nil); eq(why, "refused"); eq(#host.starts, starts)
+	local cancels = #host.cancels
+	cancelled, why = Do(w, viewer, a, "CancelPlayerSearch", "7")
+	eq(cancelled, false); eq(why, "unknown", "a No already cancelled and forgot the owned request")
+	eq(#host.cancels, cancels, "a stale post-revocation id never reaches a later transport session")
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API area sightings: hostile-area shape, privacy, ownership, host map pins and cancellation", function()
+	local w, cast, viewer, API = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local host = SightingHost(viewer)
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "BountyBoard", "Bounty Board")
+	local a = w:As(viewer, O.Register, "MapPins")
+	local b = w:As(viewer, O.Register, "BountyBoard")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	w:As(viewer, C.Choose, "api:bountyboard", true)
+	local secret = setmetatable({}, { __tostring = function() error("secret used", 2) end,
+		__eq = function() error("secret compared", 2) end })
+	viewer.globals.issecretvalue = function(value) return rawequal(value, secret) end
+	local hidden, hiddenWhy = Do(w, viewer, a, "StartAreaSearch", secret)
+	eq(hidden, nil); eq(hiddenWhy, "map"); eq(#host.areaStarts, 0, "a secret map id never reaches the transport")
+	eq(select(2, Do(w, viewer, a, "GetAreaSearch", secret)), "unknown")
+	eq(select(2, Do(w, viewer, a, "ShowAreaSearchOnMap", secret)), "unknown")
+	eq(select(2, Do(w, viewer, a, "ClearAreaSearchMap", secret)), "unknown")
+	eq(select(2, Do(w, viewer, a, "CancelAreaSearch", secret)), "unknown")
+
+	local state = assert(Do(w, viewer, a, "StartAreaSearch", 1453))
+	eq(state.id, "7"); eq(state.mode, "area"); eq(state.scope, "hostile"); eq(state.mapID, 1453)
+	eq(state.status, "searching"); eq(#state.sightings, 2, "wrong-map rows fail closed")
+	eq(Keys(state), "createdAt,expiresAt,id,mapID,mode,scope,sightings,status")
+	eq(Keys(state.sightings[1]), "expiresAt,kind,layer,mapID,receivedAt,seenAt,target,x,y")
+	eq(state.sightings[1].observer, nil); eq(state.sightings[1].observerGuild, nil)
+	local exported = ""
+	for _, row in ipairs(state.sightings) do for _, value in pairs(row) do exported = exported .. tostring(value) .. "\n" end end
+	eq(exported:find("Hidden Scout", 1, true), nil, "observer identity is not in an area copy")
+	eq(exported:find("area-row-secret", 1, true), nil)
+	eq(select(2, Do(w, viewer, a, "GetPlayerSearch", "7")), "unknown", "an area id is not a player search")
+	eq(select(2, Do(w, viewer, b, "GetAreaSearch", "7")), "unknown", "handle ownership")
+	eq(#assert(Do(w, viewer, a, "GetAreaSearches")), 1)
+
+	local pins = { rows = {}, clears = 0 }
+	function pins:AddWorldMapIconMap(ref, frame, mapID, x, y)
+		self.rows[#self.rows + 1] = { ref = ref, frame = frame, mapID = mapID, x = x, y = y }
+		return true
+	end
+	function pins:RemoveAllWorldMapIcons(ref)
+		local keep = {}
+		for _, row in ipairs(self.rows) do if row.ref ~= ref then keep[#keep + 1] = row end end
+		self.rows, self.clears = keep, self.clears + 1
+	end
+	viewer.ns.Pins = function() return pins end
+	viewer.ns.WorldMapIcons = function() return true end
+	local saved = { create = CreateFrame, parent = UIParent, map = WorldMapFrame, show = ShowUIPanel }
+	UIParent = {}
+	CreateFrame = function()
+		local frame = { hidden = false }
+		function frame:SetSize() end
+		function frame:CreateTexture()
+			return { SetAllPoints = function() end, SetTexture = function() end }
+		end
+		function frame:SetScript() end
+		function frame:Hide() self.hidden = true end
+		function frame:Show() self.hidden = false end
+		return frame
+	end
+	WorldMapFrame = { SetMapID = function(self, mapID) self.mapID = mapID end }
+	ShowUIPanel = function() return true end
+	local future = w:As(viewer, viewer.ns.Now) + 1000
+	for _, row in ipairs(host.sessions["7"].results) do row.expiresAt = future end
+	local ok, why = Do(w, viewer, a, "ShowAreaSearchOnMap", "7")
+	eq(ok, true, why); eq(#pins.rows, 2); eq(pins.rows[1].mapID, 1453); eq(WorldMapFrame.mapID, 1453)
+	eq(pins.rows[1].frame.row.observer, nil, "host-owned pin keeps only the sanitized row")
+	local firstFrame, secondFrame = pins.rows[1].frame, pins.rows[2].frame
+	-- Map ownership is a lifecycle subscription of its own. The consuming addon did not register a
+	-- SIGHTING_CHANGED callback, but the host must still redraw pins after the transport event.
+	host.sessions["7"].results[#host.sessions["7"].results + 1] = {
+		target = "Enemy New-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
+		seenAt = 120, receivedAt = 121, expiresAt = future,
+		mapID = 1453, x = 420, y = 530, layer = 3, kind = "nearby",
+	}
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "7") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#pins.rows, 3, "an active map redraws without a data-event subscription")
+	eq(pins.rows[1].frame, firstFrame, "the first map frame is reused on refresh")
+	eq(pins.rows[2].frame, secondFrame, "the second map frame is reused on refresh")
+	local thirdFrame = pins.rows[3].frame
+	assert(thirdFrame ~= firstFrame and thirdFrame ~= secondFrame, "only the newly needed third frame is added")
+	-- Empty is not terminal: keep the explicit map view armed so a later observation returns on its
+	-- own, and reuse the bounded frame pool rather than leaking undestroyable WoW frames per update.
+	host.sessions["7"].results = {}
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "7") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#pins.rows, 0, "a temporarily empty searching session removes stale pins")
+	eq(rawget(firstFrame, "row"), nil, "empty refresh wipes copied row data from the reusable frame")
+	eq(rawget(secondFrame, "row"), nil); eq(rawget(thirdFrame, "row"), nil)
+	host.sessions["7"].results[1] = {
+		target = "Enemy Return-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
+		seenAt = 122, receivedAt = 123, expiresAt = future,
+		mapID = 1453, x = 470, y = 580, layer = 3, kind = "nearby",
+	}
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "7") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#pins.rows, 1, "a later result redraws after the temporary empty state")
+	eq(pins.rows[1].frame, firstFrame, "a later result reuses the bounded frame pool")
+	eq(Do(w, viewer, b, "ClearAreaSearchMap"), true, "another handle clears only its own empty pin set")
+	eq(#pins.rows, 1, "another handle cannot clear this handle's pins")
+	host.sessions["7"].phase = "complete"
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", "7") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#pins.rows, 0, "expiry/completion clears an active map without a data-event subscription")
+
+	eq(Do(w, viewer, a, "CancelAreaSearch", "7"), true)
+	eq(#pins.rows, 0, "cancel removes host-owned pins")
+	eq(host.cancels[#host.cancels].id, "7"); eq(host.cancels[#host.cancels].why, "api")
+	eq(select(2, Do(w, viewer, a, "ShowAreaSearchOnMap", "7")), "unknown")
+	CreateFrame, UIParent, WorldMapFrame, ShowUIPanel = saved.create, saved.parent, saved.map, saved.show
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API area sightings: a reused transport id never enters a stale handle's map frames", function()
+	local w, cast, viewer, API = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local host = SightingHost(viewer)
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	local state = assert(Do(w, viewer, api, "StartAreaSearch", 1453))
+
+	local pins = { rows = {}, seen = {} }
+	function pins:AddWorldMapIconMap(ref, frame, mapID, x, y)
+		self.rows[#self.rows + 1] = { ref = ref, frame = frame, mapID = mapID, x = x, y = y }
+		self.seen[#self.seen + 1] = frame.row and frame.row.target
+		return true
+	end
+	function pins:RemoveAllWorldMapIcons(ref)
+		local keep = {}
+		for _, row in ipairs(self.rows) do if row.ref ~= ref then keep[#keep + 1] = row end end
+		self.rows = keep
+	end
+	viewer.ns.Pins = function() return pins end
+	viewer.ns.WorldMapIcons = function() return true end
+	local saved = { create = CreateFrame, parent = UIParent, map = WorldMapFrame, show = ShowUIPanel }
+	UIParent = {}
+	CreateFrame = function()
+		local frame = {}
+		function frame:SetSize() end
+		function frame:CreateTexture() return { SetAllPoints = function() end, SetTexture = function() end } end
+		function frame:SetScript() end
+		function frame:Hide() self.hidden = true end
+		function frame:Show() self.hidden = false end
+		return frame
+	end
+	WorldMapFrame = { SetMapID = function() end }
+	ShowUIPanel = function() return true end
+	local future = w:As(viewer, viewer.ns.Now) + 1000
+	for _, row in ipairs(host.sessions[state.id].results) do row.expiresAt = future end
+	eq(Do(w, viewer, api, "ShowAreaSearchOnMap", state.id), true)
+	eq(#pins.rows, 2)
+	pins.seen = {}
+	-- The bounded transport may reuse an id, but ownership includes the immutable map and creation
+	-- time. The replacement must be rejected before any of its row is copied into this handle's pins.
+	host.sessions[state.id] = {
+		id = tonumber(state.id), mode = "area", scope = "hostile", mapID = 84, phase = "waiting",
+		createdAt = state.createdAt + 50, expiresAt = future,
+		results = { { target = "Replacement Secret-Realm", seenAt = 130, expiresAt = future,
+			mapID = 84, x = 330, y = 440, layer = 2, kind = "nearby" } },
+	}
+	w:As(viewer, function() viewer.ns.Fire("PLAYER_SIGHTINGS_CHANGED", state.id) end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#pins.rows, 0, "the stale map view is cleared")
+	eq(#pins.seen, 0, "the replacement row was never passed to the map library")
+	eq(select(2, Do(w, viewer, api, "GetAreaSearch", state.id)), "unknown")
+	CreateFrame, UIParent, WorldMapFrame, ShowUIPanel = saved.create, saved.parent, saved.map, saved.show
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API area sightings: a map-library false return leaves no partial host pins", function()
+	local w, cast, viewer = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local host = SightingHost(viewer)
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	local state = assert(Do(w, viewer, api, "StartAreaSearch", 1453))
+
+	local pins = { rows = {}, clears = 0, calls = 0 }
+	function pins:AddWorldMapIconMap(ref, frame, mapID, x, y)
+		self.calls = self.calls + 1
+		self.rows[#self.rows + 1] = { ref = ref, frame = frame, mapID = mapID, x = x, y = y }
+		return self.calls < 2
+	end
+	function pins:RemoveAllWorldMapIcons(ref)
+		local keep = {}
+		for _, row in ipairs(self.rows) do if row.ref ~= ref then keep[#keep + 1] = row end end
+		self.rows, self.clears = keep, self.clears + 1
+	end
+	viewer.ns.Pins = function() return pins end
+	viewer.ns.WorldMapIcons = function() return false end
+	local saved = { create = CreateFrame, parent = UIParent, map = WorldMapFrame, show = ShowUIPanel }
+	UIParent = {}
+	CreateFrame = function()
+		local frame = {}
+		function frame:SetSize() end
+		function frame:CreateTexture() return { SetAllPoints = function() end, SetTexture = function() end } end
+		function frame:SetScript() end
+		function frame:Hide() self.hidden = true end
+		return frame
+	end
+	WorldMapFrame = { SetMapID = function() end }
+	ShowUIPanel = function() return true end
+	local future = w:As(viewer, viewer.ns.Now) + 1000
+	for _, row in ipairs(host.sessions[state.id].results) do row.expiresAt = future end
+	local ok, why = Do(w, viewer, api, "ShowAreaSearchOnMap", state.id)
+	eq(ok, false); eq(why, "unsupported")
+	eq(#pins.rows, 0, "an unsupported client keeps the sanitized rows but claims no pins")
+	eq(#assert(Do(w, viewer, api, "GetAreaSearch", state.id)).sightings, 2,
+		"an unsupported map path does not remove the area results")
+	viewer.ns.WorldMapIcons = function() return true end
+	ok, why = Do(w, viewer, api, "ShowAreaSearchOnMap", state.id)
+	eq(ok, false); eq(why, "failed")
+	eq(#pins.rows, 0, "a false AddWorldMapIconMap result removes the first partial pin")
+	assert(pins.clears >= 2, "the failed draw was cleaned up")
+	CreateFrame, UIParent, WorldMapFrame, ShowUIPanel = saved.create, saved.parent, saved.map, saved.show
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API guild-tools route: named profiles and neutral sections stay host-owned", function()
+	local w, _, viewer = Setup()
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	rawset(viewer.ns, "Watch", nil)
+	eq(w:As(viewer, O.Has, "ui.guild-tools"), false)
+	local ok, why = Do(w, viewer, api, "OpenGuildTools")
+	eq(ok, false); eq(why, "unavailable")
+
+	local selected
+	viewer.ns.UI = viewer.ns.UI or {}
+	viewer.ns.UI.SelectTab = function(tab) selected = tab return true end
+	local page, available = "justice", { desk = true, reports = true, cases = true, justice = true }
+	viewer.ns.Watch = {
+		Show = function(section, key)
+			if section == "profile" and type(key) == "string" and key ~= "" then
+				page = "profile:" .. key
+				return
+			end
+			local wanted = section or "desk"
+			page = available[wanted] and wanted or "desk"
+		end,
+		OpenMember = function(target)
+			if target == "Hidden-Realm" then page = "profile:Wrong-Realm" return false, "access" end
+			if target == "Bad-Realm" then error("host profile failure") end
+			page = "profile:" .. target
+			return true
+		end,
+		PageId = function() return page end,
+	}
+	eq(w:As(viewer, O.Has, "ui.guild-tools"), true, "the host route exposes no section data")
+	eq(Do(w, viewer, api, "OpenGuildTools"), true,
+		"host-owned UI routing does not disclose data while API consent is pending")
+	eq(selected, "watch"); eq(page, "desk")
+	for _, section in ipairs({ "reports", "cases", "justice" }) do
+		selected = nil
+		eq(Do(w, viewer, api, "OpenGuildTools", section), true, section)
+		eq(selected, "watch"); eq(page, section)
+	end
+
+	selected = nil
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "profile")
+	eq(ok, false); eq(why, "target"); eq(page, "justice", "a missing target changes no host page")
+	eq(Do(w, viewer, api, "OpenGuildTools", "profile", "Target-Realm"), true)
+	eq(selected, "watch"); eq(page, "profile:Target-Realm")
+
+	selected = nil
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "profile", "Hidden-Realm")
+	eq(ok, false); eq(why, "access"); eq(selected, nil)
+	eq(page, "profile:Target-Realm", "a refused named profile restores the page that was open")
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "profile", "Bad-Realm")
+	eq(ok, false); eq(why, "failed")
+	eq(page, "profile:Target-Realm", "a failed named profile restores the page that was open")
+
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "chat")
+	eq(ok, false); eq(why, "access"); eq(selected, nil, "a hidden host section cannot be forced open")
+	eq(page, "profile:Target-Realm", "a refused route restores the page that was open")
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "ban")
+	eq(ok, false); eq(why, "section", "only documented host sections are accepted")
+
+	viewer.ns.UI.SelectTab = function() return false, "blocked" end
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "reports")
+	eq(ok, false); eq(why, "blocked", "a host navigation refusal is preserved")
+	eq(page, "profile:Target-Realm", "a refused tab navigation restores the page that was open")
+	viewer.ns.UI.SelectTab = function(tab) selected = tab return true end
+	w:As(viewer, C.Choose, "api:mappins", false)
+	selected = nil
+	eq(Do(w, viewer, api, "OpenGuildTools", "reports"), true,
+		"a data No does not disable Olympus's own accessible page")
+	eq(selected, "watch"); eq(page, "reports")
+	local pageCalls = 0
+	viewer.ns.Watch.PageId = function() pageCalls = pageCalls + 1 error("host state unavailable") end
+	ok, why = Do(w, viewer, api, "OpenGuildTools", "cases")
+	eq(ok, false); eq(why, "failed"); eq(pageCalls, 1)
+	eq(page, "reports", "an unreadable prior page fails before changing host state")
+	viewer.ns.Watch.PageId = function() return page end
+	viewer.guild = nil
+	ok, why = Do(w, viewer, api, "OpenGuildTools")
+	eq(ok, false); eq(why, "guild", "outside the guild there is no guild-tools route")
+	viewer.guild = World.GUILD
+	viewer.ns.UI.SelectTab = function() error("UI failure") end
+	ok, why = Do(w, viewer, api, "OpenGuildTools")
+	eq(ok, false); eq(why, "failed", "a host UI failure is contained")
+	eq(page, "reports", "a thrown tab failure restores the prior host page")
 	W3.NoErrors(w)
 end)
 
@@ -709,7 +1241,7 @@ end)
 
 test("1.2.4 the API: read-only by its source: no send, no message, no window, no game event, no timer at load; the TOC loads it after the boards it reads", function()
 	local src = Read(H.ADDON_DIR .. "API.lua"):gsub("%-%-[^\n]*", "")
-	for _, word in ipairs({ "Comm.", "SendChatMessage", "SendAddonMessage", "Whisper", "Send(", "Decree", "ShowDialog", "StaticPopup", "CreateFrame",
+	for _, word in ipairs({ "Comm.", "SendChatMessage", "SendAddonMessage", "Whisper", "Send(", "Decree", "ShowDialog", "StaticPopup",
 		"RegisterEvent", "ns.Every", "SetCVar", "ns.Print", "_G[", "hooksecurefunc" }) do
 		eq(src:find(word, 1, true), nil, "API.lua uses " .. word)
 	end
@@ -739,21 +1271,54 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	local en, pt = {}, {}
 	for k in head:gmatch("\nL%.([%w_]+) =") do en[k] = true end
 	for k in tail:gmatch("\n\tL%.([%w_]+) =") do pt[k] = true end
-	eq(Keys(en), "API_CONSENT_LABEL,API_CONSENT_TEXT"); eq(Keys(pt), Keys(en))
-	for _, word in ipairs({ "location", "census", "keys", "sends nothing", "Authorize all" }) do
+	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_CONSENT_LABEL,API_CONSENT_TEXT"); eq(Keys(pt), Keys(en))
+	for _, word in ipairs({ "Seen nearby", "Exact last-seen point", "Visto nas proximidades", "Ponto exato do último avistamento" }) do
+		assert(src:find(word, 1, true), "the map tooltip says: " .. word)
+	end
+	for _, word in ipairs({ "exact-name last-seen search", "target, nameplate or mouseover observation",
+		"observer and guild", "five-minute hostile-area search", "selected map ID", "at most six observations",
+		"at most 48 distinct hostile players", "Olympus-owned world-map pins",
+		"target's native observed-unit or matching party/raid-unit point", "observer's nearby encounter point",
+		"at most 64 observations", "only in memory", "up to 15 minutes", "Authorize all",
+		"Keep current choices", "last-seen information, not continuous tracking",
+		"no protected game action", "census", "keys" }) do
 		assert(src:find(word, 1, true), "the line says: " .. word)
 	end
-	-- (Review of 1.2.4) Its promises are Olympus's own: it never promised for the other addon that it
-	-- sends nothing, and says that what that addon does with what it read is its own.
+	for _, word in ipairs({ "Nome-Reino exato", "busca curta por último avistamento de um nome exato",
+		"alvo, placa de nome ou mouseover", "observador e sua guilda",
+		"busca de cinco minutos por jogadores hostis", "ID do mapa selecionado", "no máximo seis observações",
+		"no máximo 48 jogadores hostis distintos", "marcadores do mapa-múndi pertencentes ao Olympus",
+		"ponto nativo do alvo observado ou da unidade correspondente no grupo ou raide", "ponto próximo do encontro",
+		"no máximo 64 observações", "só na memória", "por até 15 minutos", "Autorizar tudo",
+		"Manter escolhas atuais", "último avistamento, não rastreamento contínuo",
+		"nenhuma ação protegida", "censo", "chaves" }) do
+		assert(src:find(word, 1, true), "the pt-BR line says: " .. word)
+	end
+	-- Its promises are Olympus's own: ordinary reads are passive, while the separately described,
+	-- explicit search or visible user-started session is the only network action. What the other
+	-- addon does with copies is its own.
 	eq(head:find("it sends nothing for you", 1, true), nil, "no promise for the other addon")
 	eq(tail:find("ele não envia nada por você", 1, true), nil, "no promise for the other addon (pt-BR)")
-	for _, word in ipairs({ "Olympus lets it read", "no way to send anything for you", "up to that addon", "addons you trust" }) do
+	for _, word in ipairs({ "what Olympus shows you", "what that addon then does with the copies is up to that addon", "addons you trust",
+		"No, Keep current choices, or no answer: it receives nothing and starts no search" }) do
 		assert(head:find(word, 1, true), "the line says: " .. word)
 	end
-	for _, word in ipairs({ "o Olympus permite", "não lhe dá meio de enviar nada por você", "é com ele", "em que você confia" }) do
+	for _, word in ipairs({ "o que o Olympus mostra a você", "o que esse addon fizer depois com as cópias é responsabilidade dele",
+		"em que você confia", "Não, Manter escolhas atuais ou sem resposta: ele não recebe nada e não inicia busca" }) do
 		assert(tail:find(word, 1, true), "the pt-BR line says: " .. word)
 	end
 	local doc = Read(H.ROOT .. "docs/API.md")
+	local observerConsent = Read(H.ADDON_DIR .. "Locales/PlayerSightingsText.lua")
+	for _, word in ipairs({ "at most 64 observations", "in memory", "up to 15 minutes", "never saved",
+		"five-minute hostile-area search", "selected map ID", "at most six",
+		"at most 48 distinct hostile players", "world position that can be placed on your current map",
+		"omits your identity and guild", "Authorize all",
+		"no máximo 64 observações", "na memória", "posição no mundo que possa ser colocada no seu mapa atual",
+		"busca de cinco minutos por jogadores hostis", "ID de mapa selecionado", "no máximo seis",
+		"no máximo 48 jogadores hostis distintos", "por até 15 minutos", "nunca é salvo",
+		"omite sua identidade e guilda", "Autorizar tudo" }) do
+		assert(observerConsent:find(word, 1, true), "observer consent says: " .. word)
+	end
 	local api = Read(H.ADDON_DIR .. "API.lua")
 	for m in api:gmatch("\nfunction METHODS%.(%u%a+)%(") do assert(doc:find(":" .. m .. "(", 1, true), "docs/API.md: " .. m) end
 	for e in api:match("API%.EVENTS = (%b{})"):gmatch('"([%u_]+)"') do assert(doc:find(e, 1, true), "docs/API.md: " .. e) end
@@ -762,24 +1327,57 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	end
 	for _, word in ipairs({ '"ui.surface"', "one client-owned page", "availableWhenLocked", 'style = "old" or "hd"',
 		"OlympusAPI.SURFACE_LIMIT", '"surface-full"', "works while the answer is pending or refused",
-		"contains no addon name, consent key or" }) do
+		"contains no addon name, consent key or", "expiry is enforced locally by each client",
+		"x = 520, y = 375", 'kind = "exact-group"', "accuracyYards = 0",
+		"receivedAt = 1792000125", "expiresAt = 1792001023", "must stop alerts and sharing",
+		"bundled supported map library", "Conversion rejects another", "out-of-map coordinates",
+		"at most 64 names for at most 15 minutes", "user-started tool session",
+		"cancel a request before rotating it out", "stop alerts when a result expires",
+		"initial snapshot", "queued-send transition", "terminal marker", "discard every previously copied result",
+		"present a nearby encounter point as exact" }) do
 		assert(doc:find(word, 1, true), "docs/API.md surface contract: " .. word)
 	end
+	for _, word in ipairs({ '"ui.guild-tools"', "handle:OpenGuildTools([section[, target]])",
+		'`"profile"` requires', "Watch.OpenMember(target)", "remain inside the host-owned Watch page",
+		"restores the Watch page" }) do
+		assert(doc:find(word, 1, true), "docs/API.md guild-tools contract: " .. word)
+	end
+	for _, word in ipairs({ "handle:StartAreaSearch(mapID)", "handle:CancelAreaSearch(id)",
+		"handle:GetAreaSearch(id)", "handle:GetAreaSearches()", "handle:ShowAreaSearchOnMap(id)",
+		"handle:ClearAreaSearchMap([id])", "five-minute hostile-area search", "at most six distinct rows",
+		"at most 48 target rows", "public rows omit the observer and guild", "an anchor name or an instruction",
+		"pins refresh when that session changes", "client or gamepad UI that disables that path",
+		"area rows remain readable", "removed on cancellation, expiry/completion" }) do
+		assert(doc:find(word, 1, true), "docs/API.md area contract: " .. word)
+	end
+	eq(doc:find("trusted roster", 1, true), nil, "the public contract stays consumer-neutral")
 	local sections = {}
 	for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md" }) do
 		local page = Read(H.ROOT .. path)
 		local s = page:match("\n### Other addons: the Olympus API %(1%.2%.4%)\n(.-)\n##")
 		assert(s and s ~= "", path .. ": the section")
 		assert(s:find("docs/API.md", 1, true), path .. ": its link")
-		-- (Review of 1.2.4) Olympus's promise, and the other addon's doing its own.
+		-- The public pages make the same distinction as the permission line: passive ordinary reads,
+		-- one explicit bounded search or visible session, and the consuming addon's responsibility
+		-- for its copies.
 		eq(s:find("nothing is sent for you", 1, true), nil, path .. ": no promise for the other addon")
-		for _, word in ipairs({ "Olympus sends nothing for it", "no way to send anything for", "up to it", "addons you trust",
-			"while he shows the Treasury's ranking", "one such page per session", "data handles still work",
-			"data answer is pending or refused", "hosting it grants no Olympus data" }) do
+		for _, word in ipairs({ "send nothing. A compatible addon", "Name-Realm", "player sightings", "native",
+			"five-minute hostile-area search", "selected map ID", "at most six", "at most 48 distinct players",
+			"public area row", "sanitized area rows",
+			"encounter point, rounded", "not continuous tracking", "at most 64", "only in memory",
+			"Authorize all", "Keep current choices", "Requests and answers expire", "up to it", "authorize only addons",
+			"while he shows the Treasury's ranking",
+			"one such page per session", "data handles still work", "data answer is pending or refused", "hosting it grants no Olympus data" }) do
 			assert(s:find(word, 1, true), path .. ": " .. word)
 		end
 		local privacy = page:match("\n%*%*What waits for your yes%.%*%*(.-)\n\n")
-		assert(privacy and privacy:find("Olympus sends nothing for it, and what it does with what it read is its own", 1, true), path .. ": the privacy section")
+		for _, word in ipairs({ "ordinary reads send nothing",
+			"authorized exact-name search sends the Name-Realm",
+			"five-minute hostile-area search sends one selected map ID", "at most six rows from one observer and 48 distinct players at the requester",
+			"Guild tools: player sightings", "up to 64 direct observations may remain only in memory",
+			"what the addon does with its bounded copies is its own" }) do
+			assert(privacy and privacy:find(word, 1, true), path .. ": privacy: " .. word)
+		end
 		eq(page:find("it reads on your computer alone", 1, true), nil, path .. ": no promise for the other addon")
 		sections[#sections + 1] = s
 	end
