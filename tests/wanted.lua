@@ -2251,6 +2251,72 @@ end)
 
 -- L's missing keys show the key itself on screen: every line Wanted.lua names is in English and
 -- pt-BR, with the same format arguments, and none holds a character the game's fonts lack.
+test("wanted last seen online (RH-09): a member's shared row dates it, this client's own sighting and a later shared kill move it, newest first, and a checkpoint and a reload keep it", function()
+	WithWanted(function(w, W, c)
+		W.MAX_EVIDENCE = 2
+		local H = assert(w.commHandlers.WK, "the WK handler")
+		local scope = ScopeOf(c)
+		local sender = w.participant("Herald-Realm", "Player-1-CC000091")
+		local horde = "Player-1-0F000091"
+		local function Row(kind, digest)
+			return table.concat({ "WK", 1, scope, "Olympus II", digest, w.epoch, W.MonthNow(), kind, "1.0f000091",
+				"1.cc000091", "Prowler-Realm" }, "~")
+		end
+		-- His "Last seen online" line on the list: its text and its tooltip's.
+		local function Online()
+			for _, line in ipairs(W.Build()) do
+				if line.id == "wanted-online:g:" .. horde then
+					local tt = Tooltip()
+					line.tooltip(tt)
+					return line.text, table.concat(tt.lines, "\n")
+				end
+			end
+			return nil
+		end
+		local function Says(at, source)
+			local text, tip = Online()
+			assert(text and text:find(c.L.WANTED_LAST_ONLINE:format(date("%Y-%m-%d %H:%M", at)), 1, true), tostring(text))
+			assert(tip:find(source, 1, true), tip)
+		end
+		-- A member's own death to him, heard on the channel: the shared record dates him.
+		local killed = w.epoch
+		assert(H("CHANNEL", sender, Row("S", "00000000000009a1")))
+		local t = assert(W.Target(nil, horde))
+		eq(t.lastOnline, killed); eq(t.lastOnlineKind, "kill")
+		Says(killed, c.L.WANTED_ONLINE_KILL)
+		-- This client sees him (its target) a minute later, sightings on: the newer time is its own,
+		-- kept even where the game gives no map position for a pin.
+		w.advance(60)
+		local seen = w.epoch
+		c.db.wantedSightings = true
+		w.units.target = { name = "Prowler-Realm", guid = horde, faction = "Horde" }
+		eq(select(2, W.ObserveUnit("target")), "position", "no pin without a position")
+		w.units.target = nil
+		eq(W.Target(nil, horde).seenOnline, seen)
+		Says(seen, c.L.WANTED_ONLINE_OWN)
+		-- The member kills him two minutes later: the shared record is the newest again.
+		w.advance(120)
+		local died = w.epoch
+		assert(H("CHANNEL", sender, Row("P", "00000000000009a2")))
+		t = W.Target(nil, horde)
+		eq(t.lastOnline, died); eq(t.lastOnlineKind, "death"); eq(t.seenOnline, seen)
+		Says(died, c.L.WANTED_ONLINE_DEATH)
+		-- A third row folds the first two into his base (Checkpoint), then a reload: all still kept.
+		w.advance(W.DEATH_WINDOW + 1)
+		local other = w.participant("Crier-Realm", "Player-1-CC000092")
+		assert(H("CHANNEL", other, table.concat({ "WK", 1, scope, "Olympus II", "00000000000009a3", w.epoch, W.MonthNow(), "S",
+			"1.0f000093", "1.cc000092", "Lurker-Realm" }, "~")))
+		assert(W.Stats().checkpointed >= 1, "the rows were folded")
+		assert(c.rdb.wanted.targets["g:" .. horde].base.lastOnline == died, "his base keeps the time")
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		W = c.Wanted
+		assert(W.Prune())
+		t = W.Target(nil, horde)
+		eq(t.lastOnline, died); eq(t.lastOnlineKind, "death"); eq(t.seenOnline, seen)
+		Says(died, c.L.WANTED_ONLINE_DEATH)
+	end)
+end)
+
 test("wanted 1.2.3 locales: every line Wanted.lua names, and its buttons' labels and tips, are in English and pt-BR with the same arguments", function()
 	local f = assert(io.open(ROOT .. "Olympus/Wanted.lua"))
 	local src = f:read("*a")

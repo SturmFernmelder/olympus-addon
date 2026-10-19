@@ -1933,6 +1933,13 @@ and take no place. A Horde player is his GUID, never a name: his name is the one
 that GUID wherever your client can look it up, a row that gives a GUID the game knows another
 character's name is refused, and an entry under someone's name never keeps that player off.
 
+**Last seen online.** Each entry on the list, its tooltip and its page say when he was last seen in
+the world: the newest of the shared rows (a member he killed, or his own death to one), your own
+client's sighting of him (only while your Most Wanted sightings are on: the time alone is kept on
+your list, never where, never sent, and your No forgets it) and, for a reviewer, a sighting a
+member sent him this session. It is never a presence lookup: a Horde player nobody saw or fought
+shows no time.
+
 The signed **Slayers top three** is the publisher's own board, by verified GUID (a slayer his
 client knows by name only is left out and named on his Frames page). A trusted peer can relay that
 unchanged ranking only to a recipient who already independently pinned its original publisher's
