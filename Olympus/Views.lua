@@ -1464,9 +1464,10 @@ end
 
 -- The reported guilds in the order the column titles say, fresh reports first; `sort` (1.2.4's
 -- review): another order of the same kind, { key, desc } (the Realm's own, Views.realmSort).
--- A tie: the higher average level first (1.2.4, the author's ask: one of the first tie-breaks,
--- whichever way the column runs), then the name. The average level's own column: a guild without
--- one last whichever way, a tie the larger guild first, then the name.
+-- A tie, whichever way the column runs: the exact <OLYMPUS> first (Data.IsStandardBearer, as in
+-- the default order: the author's ask), then the higher average level (1.2.4, the author's ask: one
+-- of the first tie-breaks), then the name. The average level's own column: a guild without one last
+-- whichever way, a tie the standard-bearer first, then the larger guild, then the name.
 local function SortedGuilds(list, sort)
 	sort = sort or Views.sort
 	local key, desc = sort.key, sort.desc
@@ -1485,6 +1486,8 @@ local function SortedGuilds(list, sort)
 			if desc then return va > vb end
 			return va < vb
 		end
+		local ba, bb = ns.Data.IsStandardBearer(a.name), ns.Data.IsStandardBearer(b.name)
+		if ba ~= bb then return ba end
 		if level then
 			local ta, tb = a.g.total or 0, b.g.total or 0
 			if ta ~= tb then return ta > tb end

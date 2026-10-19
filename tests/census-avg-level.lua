@@ -191,7 +191,7 @@ test("1.2.4 the Census: a click on Avg lvl sorts by it, the highest first, again
 	end)
 end)
 
-test("1.2.4 tie-breaks: the higher average level first in every column's tie, whichever way it runs; the default order keeps the exact <OLYMPUS> first at the same size", function()
+test("1.2.4 tie-breaks: the higher average level first in every column's tie, whichever way it runs, after the exact <OLYMPUS> (CR-04); the default order keeps it first at the same size", function()
 	WithGuilds({
 		["OLYMPUS"] = Report(500, 10, { online = 50, leader = "King" }),
 		["Olympus Hi"] = Report(500, 58, { online = 50, leader = "Same" }),
@@ -206,14 +206,16 @@ test("1.2.4 tie-breaks: the higher average level first in every column's tie, wh
 		for i, e in ipairs(D.Summary().guilds) do names[i] = e.name end
 		eq(table.concat(names, ","), "OLYMPUS,Olympus Hi,Olympus Lo,Olympus None,Olympus Few", "Data.Summary's")
 		-- Members the other way: the smallest first; as many, the higher average level first.
+		-- (Changed on purpose, CR-04, the author's ask: the exact <OLYMPUS> first on a tie of any
+		-- order, a column's too, before the average level; it sat by its average level, 10.0, before.)
 		V.SortBy("members")
 		eq(V.sort.desc, false)
-		eq(CensusNames(), "Olympus Few,Olympus Hi,Olympus Lo,OLYMPUS,Olympus None")
+		eq(CensusNames(), "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Olympus None")
 		-- Online, both ways: as many online, the higher average level first.
 		V.sort = { key = "online", desc = true }
-		eq(CensusNames(), "Olympus Hi,Olympus Lo,OLYMPUS,Olympus None,Olympus Few")
+		eq(CensusNames(), "OLYMPUS,Olympus Hi,Olympus Lo,Olympus None,Olympus Few")
 		V.sort = { key = "online", desc = false }
-		eq(CensusNames(), "Olympus Few,Olympus Hi,Olympus Lo,OLYMPUS,Olympus None")
+		eq(CensusNames(), "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Olympus None")
 		-- The Lord: the same name (any case), the higher average level first.
 		V.sort = { key = "lord", desc = false }
 		eq(CensusNames(), "OLYMPUS,Olympus Hi,Olympus Lo,Olympus None,Olympus Few")
@@ -461,6 +463,93 @@ test("1.2.4 Data.SortGuildCounts: the larger first by each count in turn, then t
 		rows = { { name = "Olympus A", n = 1, e = { g = { avgLevel = 59 } } }, { name = "Olympus B", n = 1 } }
 		D.SortGuildCounts(rows, "n")
 		eq(rows[1].name .. ":" .. rows[1].avg, "Olympus A:590")
+	end)
+end)
+
+-- CR-04 (the author's ask, 10-02: "<OLYMPUS> comes first on a tie, then average level is the third
+-- sorting rule", the Census and the Realm): the 1.1.5 default order had it; now every order of
+-- guilds does, a column's whichever way it runs, the Realm's own and the lists by a count. Its
+-- average level here the lowest of every tie, so only the standard-bearer rule puts it first.
+test("CR-04 the exact <OLYMPUS> first on a tie of every order of guilds, whichever way a column runs, before the average level; a larger count and a current report still first", function()
+	for _, name in ipairs({ "OLYMPUS", "Olympus", "olympus" }) do eq(D.IsStandardBearer(name), true, name) end
+	for _, name in ipairs({ "Olympus II", "Knights of Olympus", "<OLYMPUS>", "Olympus ", "", 7 }) do
+		eq(D.IsStandardBearer(name), false, tostring(name))
+	end
+	eq(D.IsStandardBearer(nil), false)
+	local zones = { m1453 = 20 }
+	WithGuilds({
+		["OLYMPUS"] = Report(500, 10, { online = 50, leader = "Same", zones = zones }),
+		["Alpha Olympus"] = Report(500, 10, { online = 50, leader = "same", zones = zones }),
+		["Olympus Hi"] = Report(500, 58, { online = 50, leader = "Same", zones = zones }),
+		["Olympus Lo"] = Report(500, 30, { online = 50, leader = "SAME", zones = zones }),
+		["Olympus Few"] = Report(100, 59, { online = 5, leader = "Zed", zones = { m1453 = 30 } }),
+		["Olympus Stale"] = Report(500, 60, { online = 50, leader = "Same", t = os.time() - D.FRESH - 1 }),
+	}, function()
+		eq(CensusNames(), "OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Few,Olympus Stale", "the default order, as in 1.1.5")
+		-- Each Census column, both ways: as many, the standard-bearer first, then the higher average level.
+		local orders = {
+			{ "members", false, "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Stale" },
+			{ "online", true, "OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Few,Olympus Stale" },
+			{ "online", false, "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Stale" },
+			-- (The average level's own column: 10.0 twice, the standard-bearer before the name.)
+			{ "level", true, "Olympus Few,Olympus Hi,Olympus Lo,OLYMPUS,Alpha Olympus,Olympus Stale" },
+			{ "level", false, "OLYMPUS,Alpha Olympus,Olympus Lo,Olympus Hi,Olympus Few,Olympus Stale" },
+			-- (The same Lord in any case.)
+			{ "lord", false, "OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Few,Olympus Stale" },
+			{ "lord", true, "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Stale" },
+			-- (A name A to Z: no tie, so its title's order alone.)
+			{ "name", false, "Alpha Olympus,OLYMPUS,Olympus Few,Olympus Hi,Olympus Lo,Olympus Stale" },
+		}
+		for _, o in ipairs(orders) do
+			V.sort = { key = o[1], desc = o[2] }
+			eq(CensusNames(), o[3], o[1] .. (o[2] and " highest first" or " lowest first"))
+		end
+		V.sort = { key = "members", desc = true }
+		-- The Realm's own order, chosen on its line: the same.
+		V.realmSort = "online"
+		eq((RealmHeaders()), "OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus,Olympus Few,Olympus Stale", "the Realm by online")
+		V.realmSort = "level"
+		eq((RealmHeaders()), "Olympus Few,Olympus Hi,Olympus Lo,OLYMPUS,Alpha Olympus,Olympus Stale", "the Realm by average level")
+		V.realmSort = "members"
+		-- Recruiting (and who recruits are sent to): as many free slots, the standard-bearer first.
+		local names = {}
+		for i, o in ipairs(V.OpenGuilds(D.Summary())) do names[i] = o.name .. "=" .. o.free end
+		eq(table.concat(names, ","), "Olympus Few=900,OLYMPUS=500,Olympus Hi=500,Olympus Lo=500,Alpha Olympus=500")
+		names = {}
+		for i, o in ipairs(ns.Recruit.OpenGuilds()) do names[i] = o.name end
+		eq(table.concat(names, ","), "Olympus Few,OLYMPUS,Olympus Hi,Olympus Lo,Alpha Olympus")
+		-- A zone's guilds, by their soldiers there.
+		V.SetFilter("census", "stormwind")
+		local lines, at = V.Build("census"), nil
+		for i, line in ipairs(lines) do if line.header and Bare(line.text):find("Stormwind City", 1, true) then at = i end end
+		assert(at, "the zone's header")
+		local found = {}
+		for i = at + 1, at + 5 do found[#found + 1] = Bare(lines[i].text) end
+		eq(table.concat(found, ","), "<Olympus Few>,<OLYMPUS>,<Olympus Hi>,<Olympus Lo>,<Alpha Olympus>")
+		V.SetFilter("census", "")
+		-- Data.SortGuildCounts (the map's pins, the Royal Inspection, the dues table): the counts
+		-- first, then the standard-bearer, then the average level.
+		local rows = { { name = "Olympus Hi", n = 3 }, { name = "Alpha Olympus", n = 3 }, { name = "OLYMPUS", n = 3 }, { name = "Olympus Few", n = 7 } }
+		D.SortGuildCounts(rows, "n")
+		names = {}
+		for i, r in ipairs(rows) do names[i] = r.name end
+		eq(table.concat(names, ","), "Olympus Few,OLYMPUS,Olympus Hi,Alpha Olympus")
+		rows = { { name = "Olympus Hi", copper = 5, members = 10 }, { name = "OLYMPUS", copper = 5, members = 10 },
+			{ name = "Olympus Lo", copper = 5, members = 12 }, { name = "Olympus Few", copper = 9 } }
+		D.SortGuildCounts(rows, "copper", "members")
+		names = {}
+		for i, r in ipairs(rows) do names[i] = r.name end
+		eq(table.concat(names, ","), "Olympus Few,Olympus Lo,OLYMPUS,Olympus Hi", "the dues: gold, then members, then the standard-bearer")
+	end)
+	-- An old report of it stays after every current one, whatever the column.
+	WithGuilds({
+		["OLYMPUS"] = Report(500, 60, { online = 50, t = os.time() - D.FRESH - 1 }),
+		["Olympus Hi"] = Report(500, 10, { online = 50 }),
+	}, function()
+		V.sort = { key = "online", desc = true }
+		eq(CensusNames(), "Olympus Hi,OLYMPUS")
+		V.sort = { key = "members", desc = false }
+		eq(CensusNames(), "Olympus Hi,OLYMPUS")
 	end)
 end)
 

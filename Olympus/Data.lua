@@ -789,7 +789,8 @@ function Data.AvgTenthsOf(name)
 end
 -- The lists of guilds by a count of theirs (free slots, soldiers in a zone, players inspected,
 -- dues paid), sorted in place: the larger first by each count named in turn; then, all alike, the
--- higher average level first (1.2.4), then the name, so the order is the same every time. `rows`:
+-- exact <OLYMPUS> first (the standard-bearer, as in the default order: the author's ask), then the
+-- higher average level (1.2.4), then the name, so the order is the same every time. `rows`:
 -- { name = <guild>, [count] = n, ... } each, its census entry as `e` where it has one (Data.Summary's:
 -- read from it, else from the census kept by its name); each row gets its tenths as `avg` (0 for none).
 function Data.SortGuildCounts(rows, ...)
@@ -803,6 +804,8 @@ function Data.SortGuildCounts(rows, ...)
 			local na, nb = tonumber(a[k]) or 0, tonumber(b[k]) or 0
 			if na ~= nb then return na > nb end
 		end
+		local bearerA, bearerB = Data.IsStandardBearer(a.name), Data.IsStandardBearer(b.name)
+		if bearerA ~= bearerB then return bearerA end
 		if a.avg ~= b.avg then return a.avg > b.avg end
 		return tostring(a.name) < tostring(b.name)
 	end)
@@ -826,6 +829,11 @@ local function GuildSortName(name)
 		guildSortNamesCount = guildSortNamesCount + 1
 	end
 	return folded
+end
+-- The standard-bearer: the exact <OLYMPUS> (any case), first on a tie of any order of guilds, the
+-- default one's and a column's whichever way it runs, before the average level (the author's ask).
+function Data.IsStandardBearer(name)
+	return type(name) == "string" and GuildSortName(name) == "olympus"
 end
 function Data.GuildDefaultLess(a, b)
 	if a.fresh ~= b.fresh then return a.fresh end

@@ -123,10 +123,11 @@ channels; the same charter and Join controls work for each side.
   clicking, like the Guild window: a first click on Members, Online or Avg lvl puts the highest
   first, a second the lowest. By default, fresh reports and larger guilds come first; at the same
   size the exact `<OLYMPUS>` comes first, then the higher average level, then the name (1.1.5).
-  Any other column's tie goes to the higher average level, then the name; by Avg lvl, a guild
-  without one comes last either way and a tie goes to the larger guild (1.2.4). A title wider
-  than its column (the narrow window, a longer language's words) shows its short form (*Memb.*,
-  *Onl.*, *Avg*), or is cut with "..." inside its own header, never over the next one.
+  Any other column's tie, whichever way it runs, goes to the exact `<OLYMPUS>` first, then the
+  higher average level, then the name; by Avg lvl, a guild without one comes last either way and
+  a tie goes to `<OLYMPUS>`, then the larger guild (1.2.4). A title wider than its column (the
+  narrow window, a longer language's words) shows its short form (*Memb.*, *Onl.*, *Avg*), or is
+  cut with "..." inside its own header, never over the next one.
 - The Realm lists its guilds in the same default order, and its own **Order** line above them
   (1.2.4) sorts them by members (the default), online, average level, guild or Lord: a count the
   highest first, a name A to Z, ties as in the Census. A column clicked in the Census leaves the
@@ -137,8 +138,8 @@ channels; the same charter and Join controls work for each side.
   parentheses after each Lord's *online* or *offline*, Recruiting after each guild's free slots,
   and the copy for Discord in a column of its own. Wherever guilds are listed by a count (free
   slots, soldiers in a zone, a map pin, the Royal Inspection, the dues table after its members),
-  the same count goes to the higher average level first, then the name, and the average level
-  shows after the count (in the dues table, in each guild's hover).
+  the same count goes to the exact `<OLYMPUS>` first, then the higher average level, then the
+  name, and the average level shows after the count (in the dues table, in each guild's hover).
 - **Total soldiers** and **online now** across the whole realm. Next to the soldiers (every
   character on the guilds' rosters), smaller and darker, the **people**: each player once, the
   characters their players linked as alts counted once (see Alt links, below).

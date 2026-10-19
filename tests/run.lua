@@ -599,16 +599,18 @@ test("1.1.5 Census and Realm default guild order puts OLYMPUS first on a size ti
 		eq(table.concat(realmRows, ","), "OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Alpha Olympus,Beta Olympus,Olympus Old",
 			"the Realm uses the same default order")
 
-		-- A Members click the other way is the plain column: smallest first, no standard-bearer.
+		-- A Members click the other way is the plain column: smallest first.
 		-- (Changed on purpose, 1.2.4, the author's ask: a tie goes to the higher average level
-		-- first, whichever way the column runs, then the name; before, to the name alone.)
+		-- first, whichever way the column runs, then the name; before, to the name alone.
+		-- Changed on purpose again, CR-04, the author's ask: the exact <OLYMPUS> first on a tie of
+		-- any order, before the average level; before, an explicit column click had no standard-bearer.)
 		ns.Views.SortBy("members")
 		guildRows = {}
 		for _, line in ipairs(ns.Views.Build("census")) do
 			if line.cols then guildRows[#guildRows + 1] = line.cols[1] end
 		end
-		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,Olympus III,Olympus II,OLYMPUS,Olympus Old",
-			"an ascending Members sort keeps its header's meaning, a tie by average level")
+		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Olympus Old",
+			"an ascending Members sort keeps its header's meaning, a tie the standard-bearer first, then by average level")
 	end)
 	ns.rdb.guilds, ns.rdb.seen, ns.Views.sort, ns.UI, ns.rdb.realmKey = savedGuilds, savedSeen, savedSort, savedUI, savedKey
 	if not ok then error(err, 0) end
