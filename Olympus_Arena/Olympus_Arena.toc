@@ -25,6 +25,7 @@ Card.lua
 BracketView.lua
 ChatPanel.lua
 Overlay.lua
+Spectate.lua
 Popups.lua
 BonesChat.lua
 FarkleBoard.lua

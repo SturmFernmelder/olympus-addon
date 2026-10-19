@@ -589,6 +589,19 @@ local UI_FIELDS = {
 	find = function(v) return type(v) == "table" and v or nil end,
 	sounds = function(v) return type(v) == "boolean" and v or nil end,
 	seen = function(v) return type(v) == "table" and v or nil end,
+	-- (1.2.6) The duel view's place and the bar's, its scale, pin and tab (Olympus_Arena/Spectate.lua).
+	watch = function(v)
+		if type(v) ~= "table" then return nil end
+		local function Point(p)
+			if type(p) ~= "table" or type(p[1]) ~= "string" or type(p[2]) ~= "string" or not tonumber(p[3]) or not tonumber(p[4]) then return nil end
+			return { p[1], p[2], tonumber(p[3]), tonumber(p[4]) }
+		end
+		local scale = tonumber(v.scale)
+		local out = { point = Point(v.point), barPoint = Point(v.barPoint), scale = scale and math.max(0.6, math.min(1.6, scale)) or nil,
+			pin = (v.pin == "auto" or v.pin == "full" or v.pin == "compact") and v.pin or nil,
+			tab = (v.tab == "gear" or v.tab == "talents") and v.tab or nil }
+		return next(out) and out or nil
+	end,
 }
 function ArenaHome.CheckUI()
 	if not ns.db then return end
