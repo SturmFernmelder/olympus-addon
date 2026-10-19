@@ -619,6 +619,9 @@ function Data.Receive(r, sender)
 	local h = r ~= nil and heard.r == r and heard.who == ns.FullName(sender) and heard or nil
 	local taken = Take(r, sender, h)
 	heard.r, heard.text, heard.entry = nil, nil, nil -- (the text goes with its report)
+	-- Record mode (Record.lua): a report taken may go into the witness's own file (nothing is sent).
+	local record = ns.Record
+	if taken and record and record.Recording and record.Recording() then ns.SafeCall("record heard", record.Heard, r) end
 	return taken
 end
 

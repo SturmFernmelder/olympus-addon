@@ -1781,6 +1781,7 @@ StandIn("Crafters", { "Ask", "Slash" }) -- (1.1)
 StandIn("ChatWindow", { "Open", "Toggle" }) -- 1.1.1: the Chat tab of the Olympus window (ChatWindow.lua)
 StandIn("Arena", { "RunSlash" }) -- 1.2: the Blood Arena's core (ArenaNet.lua)
 StandIn("Records", {}) -- 1.2.4: the shared records of the games and duels that count (Records.lua)
+StandIn("Record", { "Slash" }) -- the Guinness attempt's record mode, the witnesses' own file (Record.lua)
 -- 1.1.2: the right-click menus' lines (PlayerMenu.lua), a player's version (Versions.lua), the
 -- answer bank's Answers and explanations (Answers.lua).
 StandIn("PlayerMenu", {})
@@ -1992,7 +1993,7 @@ ns.RegisterEvent("PLAYER_LOGIN", function()
 	local missing = {}
 	-- (1.2: the file of a key named otherwise: the Blood Arena's core is ArenaNet.lua.)
 	local FILES = { Arena = "ArenaNet.lua" }
-	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees" }) do
+	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "Record" }) do
 		if ns[key].missing then missing[#missing + 1] = FILES[key] or (key .. ".lua") end
 	end
 	if ns.Gate.missing then missing[#missing + 1] = "Gamepad.lua" end -- (1.1.5, the gamepad gate)
@@ -2118,6 +2119,7 @@ local function Help()
 	print(L.HELP_CMD_BUG)
 	print(L.HELP_CMD_STATUS)
 	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
+	if not ns.Record.missing then print(L.HELP_CMD_RECORD) end -- (record mode, Record.lua: a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
 	print(L.HELP_CMD_KEY_PUBLIC)
 	print(L.HELP_MAINKEY)
@@ -2363,6 +2365,10 @@ local function Slash(input)
 			ns.Print(ns.L.DEMO_REMOVED)
 		elseif cmd == "bug" then
 			ns.UI.ShowBugReport()
+		elseif cmd == "record" then
+			-- The Guinness attempt's record mode (Record.lua): on, off, status, mark; alone, its status
+			-- in the copy window. It writes only to this client's own saved file and sends nothing.
+			ns.Record.Slash(rest)
 		elseif cmd == "perf" then
 			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
 			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
