@@ -35,7 +35,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned).
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with the moderation team only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his
@@ -308,6 +308,13 @@ friends list, a community roster) and the game's menu gets an **Olympus** part a
   are in an Olympus guild. It uses the game's own way for addons to add to its menus (a client
   without it gets no lines); no Blizzard function is replaced, and nothing opens the game's chat
   box.
+
+**Olympus's own lines (1.2.5.1).** The profile, **Report to Olympus**, the Arena's lines and the
+Church's show only for a player your client knows to be in an Olympus guild: the guild the game
+gives for that player, your guild's roster, your last /who, the guild his own Olympus messages spoke
+for, or the signed leadership list. Opening a menu still sends nothing to find out. The version
+lines and **Tell them about Olympus** show for anyone, and the Olympus window's own rows keep every
+line. None of it shows before you accepted the Olympus Accord.
 
 **Explanations and Answers.** Each page has a **?** in its bottom box: what the page shows and,
 where it counts, why the numbers can differ between players. The Chat tab has no bottom box and,
@@ -1830,9 +1837,43 @@ message (the game adds it). What goes where:
 | The Church: what your addon read in your guild's log (an invite by a Church person and the join after it: both names, your guild, the hours), a registration (the name), your public-row choice | the Church's keepers online (the Head, the Apostles, the author), alone (whispers); kept on your client up to 7 days while none is online | a Church person's own addon every 5 minutes; any other member's only where a Church person was heard in the guild lately, drawn so that about two of each guild read; your own invite count and your guild's joins and leaves are never sent |
 | The Church's seen-check (a name) and its answer (the guild your roster saw him in, the first and last day, whether he is in it now) | the check: everyone on the Olympus channel, from the desk (a keeper). The answer: that keeper alone (a whisper) | the desk asks about each new recruit, a registered one on its days and 7 days after a join; about two clients of each guild that knew the name answer |
 | The Church's numbers (rankings, a person's detail) and the keepers' ledger | the Church's audience who asked (the Church, the High Council, the King, the author), alone; the ledger between keepers alone | when a member of that audience opens the tab or refreshes; never on the channel, except, while the author's switch is open, the rows of the people who chose to show theirs and the top 3 of each ranking (names only) |
+| Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named), by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
+| A moderation team member's ask for BattleTags (BQ, 1.2.5.1): nothing but his name | everyone on the Olympus channel | from a team member's addon, 90 seconds after login and every 30 minutes |
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
 position on the map).
+
+**The Olympus Accord (1.2.5.1).** Before anything else the addon asks every game account once to
+accept its terms of use, the Olympus Accord: a letter on parchment in Olympus's own window (no X,
+never on the escape list, never the game's popup, the gamepad UI included), its version and date at
+the bottom. It says what Olympus is (a fan addon, not Blizzard's), that Blizzard's rules come first,
+what is not allowed (the rules the addon already keeps: abuse, slurs, harassment, spam or scams,
+any language but English in Olympus's chats, bets or gold stakes, another player's BattleTag or
+personal details, coming back on another character to get around a sanction, a modified addon),
+how moderation works (people decide; a warning, then 1 hour, 24 hours and 7 days out of the chats;
+a public appeal), what is shared, that a new version is asked again, and that there is no
+warranty. **I accept** or **Not now**; `/oly accord` shows it again, accepted or not, and
+`/oly privacy` shows it first while it waits. Until it is accepted nothing of Olympus works on
+that client: it sends nothing (the census, the hello, the chats), joins no channel and hears
+nothing of the army, and the window shows the Accord's page alone. Accepted once per game account
+(its alts are not asked again), it is kept with its version and time; a higher version asks again,
+and so does another BattleTag on the account. Not now saves nothing: the next login asks again (on
+the Forever beta, which forgets addon data at every login, every session asks). A client updated
+with the game running and then reloaded does not have the Accord's file yet: Olympus stays off
+there until the game restarts, and says so.
+The Accord asks for **your BattleTag**. Your own addon reads it from your own game (Battle.net's,
+locally: Olympus Link still needs no Battle.net login) and shows it on the letter with its digits
+masked (**Show** reveals them for ten seconds; on the King's screen the name is masked too and
+there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
+reached the letter says so and tries again by itself, and an account that accepted is never locked
+out by an outage. Only 16 bits of its hash are kept on your client, to see whether it changed, never
+the tag itself. Your BattleTag goes to the moderation team alone (the author, the King, the High
+Council and the Olympus moderators they named), by a logged whisper, only to a team member whose
+addon just asked on your channel, at most once every 20 hours to each from each of your
+characters, and his client keeps it up to 180 days after he last received it (The Watch's
+BattleTags). It never goes on the Olympus channel or guild chat, and no other player's client
+keeps or shows one. Nothing is done with a BattleTag automatically (no ban or match by tag): a
+modified addon can send someone else's.
 
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll
@@ -1840,12 +1881,12 @@ calls, the Olympus chats, an officer's patrol findings to his guild's officers, 
 listing (and with it your addon's answers to who can make it), another addon's use of the Olympus API (1.2.4: each
 addon its own Yes or the page's deliberate **Authorize all**; ordinary reads send nothing; an authorized exact-name search sends the Name-Realm, while a five-minute hostile-area search sends one selected map ID; a visible Start declares selected/configured names and included list sources; one live area uses the current or an owned exact-result map until its row expires, cancels before a 60-second rotation, stays visibly stoppable and never auto-resumes or opens the map; both receive only opted-in observers' private, expiring last-seen reports labelled as a native target point or observer encounter point; an area row omits observer identity and guild, with at most six rows from one observer and 48 distinct players at the requester; the same permission may let a current signed issuer open the bounded host-owned profile-presentation session and an admitted member enable its single fixed style on themself; it never accepts a target, asset path or arbitrary message; what the addon does with its bounded copies is its own; it may also read the King's presence as his lines and the Realm tab show it, and widen an area search to labelled not-hostile players outside Olympus guilds and the observer's group), **Guild tools: player sightings** (a separate permission enabled by its own Yes or **Authorize all**; while it and location sharing stay on, up to 64 direct observations may remain only in memory for up to 15 minutes; the same permission also permits bounded hostile-area answers on a selected map and, for a wider search, labelled not-hostile players outside Olympus guilds and your group) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
 bot's keeper made them) wait for your yes. The rest of the table goes out while you are in an
-Olympus guild, with no question first: your guild's census (from the member it elects, with the
-names above), the hello, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks
+Olympus guild, once you accepted the Olympus Accord, with no question first: your guild's census (from the member it elects, with the
+names above), the hello, your BattleTag to the moderation team alone, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks
 (when the page opens), your addon's word of a direct crafting sale to the Treasurer's characters (1.2), and what other
 addons read through the bridge.
 
-**The first-open page (1.1).** It is the first question the addon asks. About 45 seconds after
+**The first-open page (1.1).** It is the first question the addon asks after the Olympus Accord. About 45 seconds after
 login, or when you open the Olympus window first (never in combat or in an instance, and once for
 each question: closed with a line unanswered, it never opens by itself again for it), a page of
 its own says in plain words what always goes out (the census, with the names it carries, and the
@@ -2140,6 +2181,10 @@ snapshot for a realm group and faction, the documented legacy census limits abov
 authenticates ranks; it does not encrypt officer chat.
 
 Other limits:
+- **A BattleTag is what each player's own addon reads and sends** (the Olympus Accord, 1.2.5.1):
+  a modified addon can send someone else's. The moderation team sees it as a lead, never as proof,
+  and nothing happens automatically. Another addon running on a team member's client can read his
+  saved variables, the BattleTags his client keeps included.
 - **The Forever beta forgets addon data at every login**: its client saves it but never loads
   it back ([a known beta bug](https://us.forums.blizzard.com/en/wow/t/savedvariables-never-load-in-the-beta-%E2%80%94-all-addon-settings-reset-on-login-69913/2354798)),
   so settings and the realm key reset every session. The census still refills in seconds: a
@@ -2203,6 +2248,7 @@ Other limits:
 | `/oly need <count> <item>` · `/oly need` | Lords and Captains: ask the treasury for an item (shift-click it into the chat line, or its name or number); alone, your requests and where each stands (1.1) |
 | `/oly bank share on\|off` | the guild master or an officer of an Olympus guild other than the King's shows his guild bank's snapshot to the King, his Steward and his Hands (by whisper, never on the channel), or not (1.1) |
 | `/oly rollcall on\|off` | answer the author's roll calls (version, client, channel state) or not (1.1: not until you say yes) |
+| `/oly accord` | the Olympus Accord (Olympus's terms of use) again: its version and date; while it waits, I accept or Not now (1.2.5.1) |
 | `/oly privacy` | the first-open page again: what the addon shares, and your Yes or No to each (1.1) |
 | `/oly profile [Name]` | a player's profile in the Olympus window, yours (**My profile**) with no name |
 | `/oly letters [version]` | the version letters (1.1.5): every one, newest first, a click opens one; with a version, that letter |

@@ -576,7 +576,8 @@ The player himself. In an Olympus guild:
 profile shows: an honour's key, `"rank"` (his rank's frame) or `"none"`. `title` is his title's
 words, or `nil`.
 
-Outside an Olympus guild it is `{ member = false }`, and `GetWanted` and `GetRankings` return
+Outside an Olympus guild, or before the player accepted the Olympus Accord (Olympus's terms of
+use, 1.2.5.1), it is `{ member = false }`, and `GetWanted` and `GetRankings` return
 `nil, "guild"`.
 
 ### `handle:GetLeaderPresence()`
@@ -653,7 +654,7 @@ Every data method returns `nil` and a reason when it gives nothing:
 | Reason | Why |
 |---|---|
 | `"pending"`, `"refused"` | no Yes from the player |
-| `"guild"` | the player is in no Olympus guild |
+| `"guild"` | the player is in no Olympus guild, or has not accepted the Olympus Accord |
 | `"busy"` | more than 20 data calls from your addon in 10 seconds: wait, or use the callbacks |
 | `"kind"` | `GetRankings` was given an unknown kind |
 | `"unavailable"` | this build does not provide the requested optional capability |
