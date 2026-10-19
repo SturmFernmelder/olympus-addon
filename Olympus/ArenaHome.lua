@@ -2031,7 +2031,11 @@ end
 
 -- Without PlayerMenu.lua (a 1.1.1 base): Blizzard's hook, our own lines, the same rules as its
 -- (never ourselves, an offline name, a Battle.net account, a secret value).
-ArenaHome.MENUS = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_GUILD_MEMBER", "COMMUNITIES_WOW_MEMBER", "GUILD", "CHAT_ROSTER" }
+-- Never the game's guild roster menus either, as PlayerMenu.NEVER (1.2.1, an officer's failed kick
+-- and rank change): COMMUNITIES_GUILD_MEMBER and GUILD hold the game's own promote, demote, rank and
+-- Remove from Guild, whose calls the game refuses from tainted code.
+ArenaHome.MENUS = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_WOW_MEMBER", "CHAT_ROSTER" }
+ArenaHome.NEVER = { COMMUNITIES_GUILD_MEMBER = true, GUILD = true }
 local function Secret(...)
 	if type(issecretvalue) ~= "function" then return false end
 	for i = 1, select("#", ...) do if issecretvalue((select(i, ...))) then return true end end
@@ -2093,10 +2097,12 @@ function ArenaHome.HookMenus()
 	if not (Menu and type(Menu.ModifyMenu) == "function") then return false end -- gp:player-menu
 	for _, which in ipairs(ArenaHome.MENUS) do
 		local w = which
-		pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx) -- gp:player-menu
-			if not ns.Gate.Allowed("player-menu") then return end
-			ns.SafeCall("arena menu", OwnMenu, w, root, ctx)
-		end)
+		if not ArenaHome.NEVER[w] then
+			pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx) -- gp:player-menu
+				if not ns.Gate.Allowed("player-menu") then return end
+				ns.SafeCall("arena menu", OwnMenu, w, root, ctx)
+			end)
+		end
 	end
 	hooked = "own"
 	return hooked
