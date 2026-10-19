@@ -1146,12 +1146,22 @@ end
 -- Completion never reroutes a line: its audience is the one fixed at Enter.
 local function Send(id, text)
 	if Rooms.PreviewOnly(id) then return false, "preview" end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too.
+	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too; so does a
+	-- chat warning's pause or hold ("paused", ChatStrikes.lua).
 	local WC = ns.WatchChat
-	if WC and WC.RefuseSend and WC.RefuseSend() then return false, "timeout" end
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
 	local provider = ProviderFor(id)
 	if provider then
 		if not Rooms.CanAccess(id) then ns.Print(L.CHATROOM_NO_ACCESS or "You cannot use this room.") return false, "access" end
+		-- (The chat warnings' words, as below: a squad's or a craft deal's room is reached only here.)
+		if WC and WC.RefuseSevere then
+			local severe, body = WC.RefuseSevere(text, id)
+			if severe then return false, severe end
+			text = body or text
+		end
 		return provider.Send(id, text)
 	end
 	local info = Rooms.Info(id)
@@ -1166,9 +1176,16 @@ local function Send(id, text)
 		ns.Print(ns.Moderation.YouText(ns.Moderation.SelfOff()))
 		return false, "netoff"
 	end
+	-- The chat warnings (the author, 2026-10-19): a word of their list in what he typed is never sent,
+	-- in Guild (the game's own send) and every room of this file; never read in The Watch's room
+	-- (ChatStrikes.Refuse: its staff quote what was said). On the raw line, as Channels.Send.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, id)
+		if severe then return false, severe end
+		text = body or text
+	end
 	text = Cut(ns.Codec.SanitizeChat(text), Rooms.TEXT_MAX)
 	if text == "" then return false, "empty" end
-	if WC and WC.RefuseSevere and WC.RefuseSevere(text) then return false, "severe" end -- (1.1.6, WatchChat.SEVERE)
 	if Locked() then ns.Print(L.CHAN_LOCKDOWN) return false, "lockdown" end
 	local now = Now()
 	if now - lastSend < Rooms.SEND_GAP or Recent(now) >= Rooms.PER_MINUTE then

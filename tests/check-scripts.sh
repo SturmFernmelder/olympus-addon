@@ -58,17 +58,17 @@ fixture 'missing TOC entry'
 printf 'Missing.lua\n' >> "$case_root/Olympus/Olympus.toc"
 expect_failure 'missing TOC file' 'Cannot read TOC entry: Olympus/Missing.lua'
 
-# 1.2: the Blood Arena's companion folder is checked too: its syntax, its TOC's files, its lint.
-fixture 'companion checks'
+# 1.2: the Olympus Arena module folder is checked too: its syntax, its TOC's files, its lint.
+fixture 'Olympus Arena module checks'
 mkdir -p "$case_root/Olympus_Arena"
 printf 'return {}\n' > "$case_root/Olympus_Arena/Handoff.lua"
 printf '## Interface: 16001\r\n\r\nHandoff.lua\r\nMissing.lua\r\n' > "$case_root/Olympus_Arena/Olympus_Arena.toc"
-expect_failure 'missing companion TOC file' 'Cannot read TOC entry: Olympus_Arena/Missing.lua'
+expect_failure 'missing Olympus Arena module TOC file' 'Cannot read TOC entry: Olympus_Arena/Missing.lua'
 printf '## Interface: 16001\r\n\r\nHandoff.lua\r\n' > "$case_root/Olympus_Arena/Olympus_Arena.toc"
 printf 'local =\n' > "$case_root/Olympus_Arena/Broken.lua"
-expect_failure 'syntax error in the companion' 'Broken.lua'
+expect_failure 'syntax error in the Olympus Arena module' 'Broken.lua'
 printf 'local function readValue() return laterValue end\nlocal laterValue = 1\n' > "$case_root/Olympus_Arena/Broken.lua"
-expect_failure 'local/global lint failure in the companion' "Olympus_Arena/Broken.lua: 'laterValue' is read as a global"
+expect_failure 'local/global lint failure in the Olympus Arena module' "Olympus_Arena/Broken.lua: 'laterValue' is read as a global"
 
 fixture 'lint error'
 printf 'local function readValue() return laterValue end\nlocal laterValue = 1\n' > "$case_root/Olympus/Main.lua"
@@ -191,8 +191,9 @@ fi
 
 # 1.2 (the Blood Arena): scripts/package.sh in a temporary copy. The release zip holds both folders,
 # Olympus and Olympus_Arena, and no test build; --test N writes TestBuild.lua after Core.lua and the
-# -test.N version in its copy of Olympus.toc alone (the repository's untouched), the companion keeping
-# the base version, which its handoff accepts; a release is refused while Olympus/TestBuild.lua exists.
+# -test.N version in its copy of Olympus.toc alone (the repository's untouched), the Olympus Arena
+# module keeping the base version, which its handoff accepts; a release is refused while
+# Olympus/TestBuild.lua exists.
 package_fail() {
 	printf 'FAIL: package.sh: %s\n' "$1" >&2
 	exit 1
@@ -240,6 +241,48 @@ for sha_tool in sha256sum shasum openssl; do
 	if command -v "$sha_tool" >/dev/null 2>&1; then have_sha=true; break; fi
 done
 if command -v git >/dev/null 2>&1 && command -v zip >/dev/null 2>&1 && command -v unzip >/dev/null 2>&1 && command -v luajit >/dev/null 2>&1 && $have_sha; then
+	missing_pkg="$scratch_root/package-missing-arena"
+	mkdir -p "$missing_pkg/scripts"
+	cp -R "$repo_root/Olympus" "$missing_pkg/"
+	cp "$repo_root/scripts/package.sh" "$repo_root/scripts/bets-only.txt" "$missing_pkg/scripts/"
+	rm -f "$missing_pkg/Olympus/TestBuild.lua"
+	(
+		cd "$missing_pkg"
+		git init -q
+		git config user.name "Package Test"
+		git config user.email "package-test@example.invalid"
+		git add Olympus scripts/package.sh scripts/bets-only.txt
+		git commit -qm "package fixture without Arena"
+	)
+	if (cd "$missing_pkg" && bash scripts/package.sh > out.txt 2>&1); then
+		package_fail 'a release without Olympus_Arena unexpectedly built'
+	fi
+	grep -Fq 'requires Olympus_Arena/Olympus_Arena.toc in the Olympus release bundle' "$missing_pkg/out.txt" ||
+		package_fail 'the missing-Arena refusal says why'
+	printf 'ok: package.sh refuses a commit missing the Olympus_Arena half of the release bundle\n'
+
+	mismatch_pkg="$scratch_root/package-version-mismatch"
+	mkdir -p "$mismatch_pkg/scripts"
+	cp -R "$repo_root/Olympus" "$repo_root/Olympus_Arena" "$mismatch_pkg/"
+	cp "$repo_root/scripts/package.sh" "$repo_root/scripts/bets-only.txt" "$mismatch_pkg/scripts/"
+	rm -f "$mismatch_pkg/Olympus/TestBuild.lua"
+	awk '{ line = $0; sub(/\r$/, "", line); if (line ~ /^## Version:/) print "## Version: 9.9.9"; else print line }' \
+		"$mismatch_pkg/Olympus_Arena/Olympus_Arena.toc" > "$mismatch_pkg/Olympus_Arena/Olympus_Arena.toc.mismatch"
+	mv "$mismatch_pkg/Olympus_Arena/Olympus_Arena.toc.mismatch" "$mismatch_pkg/Olympus_Arena/Olympus_Arena.toc"
+	(
+		cd "$mismatch_pkg"
+		git init -q
+		git config user.name "Package Test"
+		git config user.email "package-test@example.invalid"
+		git add Olympus Olympus_Arena scripts/package.sh scripts/bets-only.txt
+		git commit -qm "package fixture with mismatched versions"
+	)
+	if (cd "$mismatch_pkg" && bash scripts/package.sh > out.txt 2>&1); then
+		package_fail 'a release with mismatched bundle versions unexpectedly built'
+	fi
+	grep -Fq 'requires one bundle version:' "$mismatch_pkg/out.txt" || package_fail 'the version-mismatch refusal says why'
+	printf 'ok: package.sh refuses mismatched Olympus and Olympus_Arena base versions\n'
+
 	pkg="$scratch_root/package"
 	mkdir -p "$pkg/scripts"
 	cp -R "$repo_root/Olympus" "$repo_root/Olympus_Arena" "$pkg/"
@@ -296,15 +339,15 @@ assert(loadfile(dir .. "/Olympus/TestBuild.lua"))("Olympus", ns)
 assert(loadfile(dir .. "/Olympus/ArenaNet.lua"))("Olympus", ns)
 local t = assert(ns.Arena.TestBuild(), "Arena.TestBuild refuses it")
 assert(t.n == 3 and t.base == version and t.expires - t.built == 21 * 86400, "its fields")
--- The companion's handoff takes it: its Version is Olympus's base version, ns.VERSION.
+-- The Olympus Arena module's handoff takes it: its Version is Olympus's base version, ns.VERSION.
 ns.VERSION = assert(Read(dir .. "/Olympus/Core.lua"):match('\nns%.VERSION = "([^"]+)"'))
-local companion = assert(Read(dir .. "/Olympus_Arena/Olympus_Arena.toc"):match("## Version:%s*([^\r\n]+)"))
-C_AddOns = { GetAddOnMetadata = function(name, field) if name == "Olympus_Arena" and field == "Version" then return companion end end }
+local arenaVersion = assert(Read(dir .. "/Olympus_Arena/Olympus_Arena.toc"):match("## Version:%s*([^\r\n]+)"))
+C_AddOns = { GetAddOnMetadata = function(name, field) if name == "Olympus_Arena" and field == "Version" then return arenaVersion end end }
 OlympusArenaHandoff = ns
 local own = {}
 assert(loadfile(dir .. "/Olympus_Arena/Handoff.lua"))("Olympus_Arena", own)
 assert(OlympusArenaHandoff == nil, "the handoff is taken")
-assert(ns.Arena.companionReady == true and own.host == ns, "the handoff refused the test build's companion")
+assert(ns.Arena.companionReady == true and own.host == ns, "the handoff refused the test build's Olympus Arena module")
 LUA
 	printf 'ok: package.sh --test 3: both folders, no wager-only modules, TestBuild.lua after Core.lua, manifest and checksum match, the handoff takes it\n'
 
@@ -356,4 +399,11 @@ LUA
 	printf 'ok: package.sh refuses a release over a test build, and a test number not from 1 to 999\n'
 else
 	printf 'skip: package.sh (git, zip, unzip, luajit or a SHA-256 tool not found)\n'
+fi
+
+# The private checkpoint sidecar has its own one-folder package and must remain outside every
+# public Olympus + Olympus_Arena ZIP. Its focused fixture also exercises dirty/untracked/secret
+# refusals without trying to package this development checkout.
+if [ -f "$repo_root/tests/package-companion-bridge.sh" ]; then
+	"$bash_bin" "$repo_root/tests/package-companion-bridge.sh"
 fi

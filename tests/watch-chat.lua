@@ -13,6 +13,30 @@ local GLOBALS = { "GetGuildInfo", "IsInGuild", "UnitIsPlayer", "C_ChatInfo", "Ge
 	"issecretvalue", "UnitClass", "C_FriendList", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
 
 local function Fold(s) return ns.Fold(tostring(s or "")) end
+
+-- ChatWindow's own reply codec (a quote of another's line before the words typed), the file loaded
+-- once into a namespace of its own: the chat warnings read a reply's words apart from its quote.
+local replyCodec
+local function ReplyCodec()
+	if replyCodec then return replyCodec end
+	local cns = setmetatable({}, { __index = ns })
+	cns.On, cns.RegisterEvent = function() end, function() end
+	assert(loadfile(ROOT .. "Olympus/GamepadRegistry.lua"))("Olympus", cns)
+	assert(loadfile(ROOT .. "Olympus/Gamepad.lua"))("Olympus", cns)
+	assert(loadfile(ROOT .. "Olympus/ChatWindow.lua"))("Olympus", cns)
+	replyCodec = { DecodeReply = cns.ChatWindow.DecodeReply, EncodeReply = cns.ChatWindow.EncodeReply }
+	return replyCodec
+end
+
+-- The chat warnings' list of a client (ChatStrikes.LIST): these synthetic words, each by its real
+-- digest (no real word of the list is ever written in this repository).
+local function List(S, words)
+	for _, word in ipairs(words or {}) do
+		local form = assert(S.Canon(word), word)
+		S.LIST[S.Digest(form)] = #form
+	end
+	S.Index()
+end
 local function Full(name)
 	name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
 	if name == "" or name:find("-", 1, true) then return name end
@@ -137,6 +161,7 @@ local function World(fn)
 				YouText = function() return "net-off" end, Any = function() return next(w.off) ~= nil end,
 			}
 			c.Alts = { Linked = function(n) return w.links[Fold(c.FullName(n))] or {} end }
+			c.ChatWindow = ReplyCodec()
 			local roster = { byName = {}, complete = true, generation = 1, group = c.group, faction = c.faction, online = {} }
 			setmetatable(roster, { __index = function(_, k)
 				if k == "guild" then return cl.guild end
@@ -195,10 +220,13 @@ local function World(fn)
 				assert(loadfile(ROOT .. "Olympus/Channels.lua"))("Olympus", c)
 				assert(loadfile(ROOT .. "Olympus/ChatRooms.lua"))("Olympus", c)
 				assert(loadfile(ROOT .. "Olympus/WatchChat.lua"))("Olympus", c)
+				assert(loadfile(ROOT .. "Olympus/ChatStrikes.lua"))("Olympus", c)
 			end)
-			cl.W, cl.C, cl.R, cl.WC = c.Watch, c.Channels, c.ChatRooms, c.WatchChat
+			cl.W, cl.C, cl.R, cl.WC, cl.S = c.Watch, c.Channels, c.ChatRooms, c.WatchChat, c.ChatStrikes
 			c.Watch.ResetForTests()
 			c.WatchChat.ResetForTests()
+			c.ChatStrikes.ResetForTests()
+			List(c.ChatStrikes, w.words) -- (the scene's list: the same on every client, as it ships)
 			c.WatchChat.random = function() return 0 end
 			return cl
 		end
@@ -251,7 +279,8 @@ local function World(fn)
 			w.deliveredLogged = logged ~= false
 			-- (The module's own receiver, for its answer: the registered handler returns nothing.)
 			local kind = msg:match("^(%w%w)~")
-			local h = kind == "MD" and to.WC.Handle or kind == "M1" and to.C.Receive or kind == "M2" and to.R.Receive or to.handlers[kind or ""]
+			local h = kind == "MD" and to.WC.Handle or kind == "M1" and to.C.Receive or kind == "M2" and to.R.Receive
+				or kind == "MS" and to.S.Handle or to.handlers[kind or ""]
 			local res = { w.As(to, h, dist, from, msg) }
 			w.deliveredLogged = nil
 			return unpack(res)
@@ -1415,20 +1444,32 @@ test("watch: chat moderation: a sanction bars powers, games, locations and craft
 	end)
 end)
 
-test("watch: chat moderation: the severe-insult block: nothing is blocked while its approved list is empty; a listed word is refused at send and counted, never kept", function()
+-- (Changed on purpose, the author's decision of 2026-10-19, the chat warnings: the list is
+-- ChatStrikes.LIST now (digests, ChatStrikes.lua), and a refused line is a warning: the first pauses
+-- his chats 5 minutes, so the room's line right after it is refused as paused, before its words are
+-- read (one counted, not two). The counts still keep no words; his own client now keeps the line it
+-- refused, 30 days, for the moderation team.)
+test("watch: chat moderation: the severe-insult block: nothing is blocked while its approved list is empty; a listed word is refused at send and counted, never in the counts; the sender's own client keeps his struck line 30 days", function()
 	World(function(w)
 		local G, A, B, D, Y1 = Standard(w)
-		eq(next(B.WC.SEVERE), nil, "shipped empty")
+		eq(next(B.S.LIST), nil, "shipped empty")
 		w.Say(B, "A", "a plainword here")
 		assert(w.Line(D, "A", B.name, "a plainword here"))
-		B.WC.SEVERE = { plainword = "slur" }
+		w.words = { "plainword" }
+		for _, cl in ipairs(w.clients) do List(cl.S, w.words) end
 		w.epoch = w.epoch + 2
 		eq(select(2, w.As(B, B.C.Send, "A", "a plainword again")), "severe")
-		eq(select(2, w.As(B, B.R.Send, "guild", "a plainword again")), "severe")
+		eq(select(2, w.As(B, B.R.Send, "guild", "a plainword again")), "paused", "the first warning pauses his chats")
 		eq(#w.wire, 0, "nothing queued")
 		local counts, total = w.As(B, B.WC.BlockedCounts, B.name)
-		eq(counts.severe, 2); eq(total, 2)
+		eq(counts.severe, 1); eq(total, 1)
 		for _, e in pairs(B.WC.Store().blocked) do eq(e.text, nil, "never the words") end
+		local mine = B.S.Store().mine
+		eq(#mine, 1); eq(mine[1].text, "a plainword again", "his own client keeps the line it refused")
+		eq(w.As(B, B.S.Prune, B.S.Store()), nil)
+		w.epoch = w.epoch + B.S.KEEP + 1
+		w.As(B, B.S.Prune, B.S.Store())
+		eq(#B.S.Store().mine, 0, "for 30 days")
 	end)
 end)
 
@@ -2083,8 +2124,14 @@ test("watch: chat moderation: its strings in English and pt-BR, with the same pl
 	end
 	assert(n >= 150, "the strings: " .. n)
 	-- Every key the code reads is there.
-	local src = assert(io.open(ROOT .. "Olympus/WatchChat.lua", "rb")):read("*a")
-	for key in src:gmatch("L%.(WATCHCHAT_[%w_]+)") do assert(rawget(ns.L, key), "missing: " .. key) end
+	-- (The chat warnings' file too, ChatStrikes.lua; and its keys outside WATCHCHAT_, in both languages.)
+	for _, file in ipairs({ "WatchChat.lua", "ChatStrikes.lua" }) do
+		local src = assert(io.open(ROOT .. "Olympus/" .. file, "rb")):read("*a")
+		for key in src:gmatch("L%.(WATCHCHAT_[%w_]+)") do assert(rawget(ns.L, key), "missing: " .. key) end
+	end
+	for _, k in ipairs({ "CHATWIN_WHY_PAUSED", "ARENA_CHAT_WHY_PAUSED" }) do
+		assert(rawget(ns.L, k) and rawget(pt.L, k) and rawget(pt.L, k) ~= rawget(ns.L, k), "both languages: " .. k)
+	end
 	eq(ns.L.WATCHCHAT_DELETED, "[deleted by a moderator]")
 	eq(pt.L.WATCHCHAT_DELETED, "[apagada por um moderador]")
 	-- The README says what the game's chat window keeps.
@@ -2160,5 +2207,925 @@ test("watch: chat moderation (1.2.4): The Watch's room: the author, the King, ev
 			eq(Listed(D), want, role)
 		end
 		eq(w.As(D, D.R.Select, "watch"), false, "a preview opens nothing")
+	end)
+end)
+
+---------------------------------------------------------------------------
+-- The chat warnings (ChatStrikes.lua). The author, 2026-10-19: "Vamos fazer a cada 24 horas e vamos
+-- fazer três mesmo. É, primeiro avisa e bota um bloqueio de 5 minutos ... e apaga e esconde a
+-- mensagem que a pessoa mandou. Segundo, esconde, bloqueio de 30, avisa ... Terceiro, avisa a equipe
+-- de moderação, bloqueia o uso do chat da pessoa até a equipe de moderação decidir e assim por diante
+-- ... A equipe de moderação precisa ver o que ele digitou ... quais foram as palavras que ele usou".
+-- Synthetic words only ("plainword").
+---------------------------------------------------------------------------
+
+local WORD = "plainword"
+local function Words(w, ...)
+	w.words = w.words or {}
+	for i = 1, select("#", ...) do w.words[#w.words + 1] = select(i, ...) end
+	for _, cl in ipairs(w.clients) do List(cl.S, w.words) end
+end
+-- The chat warnings' team: the author (online), the King, a councillor and the Olympus moderator he
+-- names; every client knows the council's signed names and that the author is online.
+local function Team(w)
+	w.author, w.king = "Quill Wright-Realm", "Crown Rook-Realm"
+	w.council[Fold("Councillor-Realm")] = true
+	local Au = w.Client("Quill Wright", Y, 3)
+	local K = w.Client("Crown Rook", Y, 3)
+	local Co = w.Client("Councillor", Y, 3)
+	local Mo = w.Client("Modder", Y, 3)
+	for _, cl in ipairs(w.clients) do
+		cl.ns.rdb.council = { names = { [Fold("Councillor")] = "Councillor" } }
+		cl.ns.Workshop.AuthorOnline = function() return true end
+		cl.ns.Workshop.AuthorName = function() return w.author end
+	end
+	assert(w.As(Co, Co.WC.SetMod, Mo.name, true))
+	w.epoch = w.epoch + 3
+	w.Run()
+	w.namer = Co
+	return Au, K, Co, Mo
+end
+-- The councillor's list of moderators again, as his client repeats it while he plays (it lapses on
+-- the others' clients 20 minutes after it was last heard: these scenes span hours).
+local function Refresh(w)
+	if w.namer then w.As(w.namer, w.namer.WC.SendMods, true) w.Run() end
+end
+-- A minute (or `seconds`) on: the striker's client's tick, and everything it queued delivered.
+local function Tick(w, cl, seconds)
+	w.epoch = w.epoch + (seconds or 60)
+	Refresh(w)
+	w.As(cl, cl.S.Tick)
+	w.Run()
+end
+-- A line with a listed word from cl: refused before anything is queued; its kept entry.
+local function Strike(w, cl, text, tier)
+	w.epoch = w.epoch + 2
+	local queued = #w.wire
+	local ok, why = w.As(cl, cl.C.Send, tier or "A", text or ("a " .. WORD .. " here"))
+	eq(ok, false, "struck"); eq(why, "severe", "struck")
+	for i = queued + 1, #w.wire do assert(w.wire[i].msg:sub(1, 3) == "MS~", "only the team's report: " .. w.wire[i].msg) end
+	local mine = cl.S.Store().mine
+	return mine[#mine]
+end
+local function Past(w, e)
+	w.epoch = math.max(w.epoch, (tonumber(e.untilAt) or 0) + 1)
+	Refresh(w)
+end
+-- Three warnings in a row (each after the last one's pause): the third's entry, held.
+local function Held(w, cl)
+	local e1 = Strike(w, cl, "first " .. WORD); Past(w, e1)
+	local e2 = Strike(w, cl, "second " .. WORD); Past(w, e2)
+	return Strike(w, cl, "third " .. WORD), e1, e2
+end
+local function CaseKey(cl, e) return Fold(cl.name) .. "#" .. e.at end
+-- The client as rebuilt by a /reload (or another login) on the same saved store: a new client of
+-- that name, the old one gone.
+local function Rebuild(w, cl)
+	for i, x in ipairs(w.clients) do if x == cl then table.remove(w.clients, i) break end end
+	local fresh = w.Client(cl.short, cl.guild, cl.rank)
+	fresh.ns.rdb = cl.ns.rdb
+	fresh.ns.Workshop.AuthorOnline, fresh.ns.Workshop.AuthorName = cl.ns.Workshop.AuthorOnline, cl.ns.Workshop.AuthorName
+	return fresh
+end
+
+test("watch: chat moderation: strikes: the first warning: not sent (nothing queued), a pop-up saying why with 5 minutes, the line kept with its words; his chats paused: a pop-up then a red line, and open again after 5 minutes", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		Words(w, WORD)
+		local e = Strike(w, B, "well this is a " .. WORD .. " for you")
+		eq(#w.wire, 0, "nothing queued")
+		eq(e.n, 1); eq(e.untilAt - e.at, B.WC.DURATIONS[1]); eq(e.untilAt - e.at, 300)
+		eq(e.words, WORD); eq(e.text, "well this is a " .. WORD .. " for you"); eq(e.where, "A"); eq(e.char, B.name)
+		local d = w.Dialog(B, "OLYMPUS_WATCHCHAT_DECISION")
+		eq(d.a, B.ns.L.WATCHCHAT_STRIKE_1:format(B.WC.Span(300)))
+		for _, part in ipairs({ "5 minutes", "verify anyone's age", "Blizzard's Terms of Service", "screenshots", "Asmongold's team" }) do
+			assert(d.a:find(part, 1, true), "the first pop-up says: " .. part)
+		end
+		assert(w.Printed(B, B.ns.L.WATCHCHAT_SEVERE_REFUSED), "the red line too")
+		eq(w.Line(D, "A", B.name), nil, "nobody saw it")
+		-- Paused: a clean line is refused before its words are read, a pop-up first, then a red line.
+		w.epoch = e.at + 299
+		local dialogs = #B.dialogs
+		eq(select(2, w.As(B, B.C.Send, "A", "a clean line")), "paused")
+		eq(#B.dialogs, dialogs + 1, "a pop-up")
+		eq(B.dialogs[#B.dialogs].a, B.ns.L.WATCHCHAT_STRIKE_PAUSED:format(date("%H:%M", e.untilAt)))
+		eq(select(2, w.As(B, B.R.Send, "guild", "a clean line")), "paused")
+		eq(#B.dialogs, dialogs + 1, "within a minute: a red line, not another pop-up")
+		assert(w.Printed(B, B.ns.L.WATCHCHAT_STRIKE_PAUSED:format(date("%H:%M", e.untilAt))))
+		eq(#w.wire, 0)
+		eq(w.As(B, B.WC.StripText), B.ns.L.WATCHCHAT_STRIP_STRIKE:format(date("%H:%M", e.untilAt)), "the Chat tab's strip")
+		w.epoch = e.at + 301
+		w.Say(B, "A", "a clean line after")
+		assert(w.Line(D, "A", B.name, "a clean line after"), "open again")
+		eq(w.As(B, B.WC.StripText), nil)
+	end)
+end)
+
+test("watch: chat moderation: strikes: the second warning pauses 30 minutes; the 24 hours roll by the clock, not by the day (a midnight between two warnings)", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		Words(w, WORD)
+		local t = w.epoch
+		local e1 = Strike(w, B)
+		-- (The regression: WatchChat.CountBlocked's day, UTC, would start the count again at midnight.)
+		assert(math.floor((e1.at + 23 * 3600) / 86400) > math.floor(e1.at / 86400), "a UTC midnight falls in between")
+		w.epoch = e1.at + 23 * 3600
+		local e2 = Strike(w, B)
+		eq(e2.n, 2); eq(e2.untilAt - e2.at, 1800)
+		eq(w.Dialog(B, "OLYMPUS_WATCHCHAT_DECISION").a, B.ns.L.WATCHCHAT_STRIKE_2:format(B.WC.Span(1800)))
+		assert(w.Dialog(B, "OLYMPUS_WATCHCHAT_DECISION").a:find("doing it again", 1, true))
+		w.epoch = e1.at + 25 * 3600
+		local e3 = Strike(w, B)
+		eq(e3.n, 2, "the first is more than 24 hours old: this is the second again")
+		eq(e3.untilAt - e3.at, 1800)
+		eq(#w.wire, 0, "no report: nothing leaves at the first two")
+		eq(t <= e1.at, true)
+	end)
+end)
+
+test("watch: chat moderation: strikes: the third warning in 24 hours: held until the team decides; its report (head and lines, logged whispers of at most 255 bytes) reaches the author online, the King, a councillor and an Olympus moderator, two a minute, nobody else, never on the channel or over guild; they keep his words exactly and say so", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		eq(e3.n, 3); eq(e3.untilAt, 0)
+		eq(w.Dialog(B, "OLYMPUS_WATCHCHAT_DECISION").a, B.ns.L.WATCHCHAT_STRIKE_3)
+		eq(w.As(B, B.S.Block).kind, "hold")
+		eq(w.As(B, B.WC.StripText), B.ns.L.WATCHCHAT_STRIP_STRIKE_HOLD)
+		local queued = {}
+		for _, job in ipairs(w.wire) do queued[#queued + 1] = job end
+		eq(#queued, 2 * 4, "two of the team a minute: a head and three lines each")
+		for _, job in ipairs(queued) do
+			eq(job.dist, "WHISPER"); eq(job.logged, true, "logged"); assert(#job.msg <= 255, job.msg)
+			assert(job.options and job.options.permit, "checked again at the send")
+		end
+		w.Run()
+		Tick(w, B)
+		local key = CaseKey(B, e3)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do
+			local c = cl.S.Store().cases[key]
+			assert(c, "the team keeps it: " .. cl.short)
+			eq(c.name, B.name); eq(c.guild, X); eq(c.n, 3); eq(c.c24, 3); eq(#c.lines, 3)
+			eq(c.lines[1].text, "first " .. WORD); eq(c.lines[3].text, "third " .. WORD, "exactly what he typed")
+			eq(c.lines[3].words, WORD, "and the words")
+			eq(c.lines[3].where, "A")
+			eq(B.S.Store().out.to[Fold(cl.name)].acked, true, "said so: " .. cl.short)
+		end
+		assert(w.Printed(Mo, Mo.ns.L.WATCHCHAT_STRIKE_IN:format("Member", 3)), "the team is told, in gold")
+		for _, cl in ipairs({ G, A, D, Y1 }) do eq(next(cl.S.Store().cases), nil, "nobody else: " .. cl.short) end
+		for _, sent in ipairs(w.sent) do
+			if sent.dist ~= "WHISPER" then assert(not sent.msg:find(WORD, 1, true), "never on " .. sent.dist .. ": " .. sent.msg) end
+			if sent.msg:find(WORD, 1, true) then
+				eq(sent.msg:sub(1, 7), "MS~1~L~")
+				local to = Fold(Full(sent.target))
+				assert(to == Fold(Au.name) or to == Fold(K.name) or to == Fold(Co.name) or to == Fold(Mo.name), "to the team only: " .. to)
+			end
+		end
+		-- The author while his presence is heard: not otherwise.
+		B.ns.Workshop.AuthorOnline = function() return false end
+		local names = {}
+		for _, n in ipairs((w.As(B, B.R.Recipients, "watch"))) do names[#names + 1] = Fold(n) end
+		table.sort(names)
+		eq(table.concat(names, ","), table.concat({ Fold(Co.name), Fold(K.name), Fold(Mo.name) }, ","))
+		-- Acknowledged: never sent again.
+		local heads = #w.Sent("MS~1~H~")
+		Tick(w, B, 2000)
+		eq(#w.Sent("MS~1~H~"), heads, "acknowledged: not again")
+		-- While held, every chat refuses before reading.
+		eq(select(2, w.As(B, B.C.Send, "A", "a clean line")), "paused")
+		eq(select(2, w.As(B, B.R.Send, "guild", "a clean line")), "paused")
+		assert(w.Printed(B, B.ns.L.WATCHCHAT_STRIKE_HELD))
+		eq(#B.S.Store().mine, 3, "not counted")
+	end)
+end)
+
+test("watch: chat moderation: strikes: a team member who never acknowledges is sent it again every 15 minutes, three times at most, the tries kept across a rebuilt client", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		Mo.online = false
+		local e3 = Held(w, B)
+		w.Run()
+		Tick(w, B)
+		local function Tries() return B.S.Store().out.to[Fold(Mo.name)].tries end
+		eq(Tries(), 1); eq(B.S.Store().out.to[Fold(Mo.name)].acked, nil)
+		Tick(w, B)
+		eq(Tries(), 1, "not before 15 minutes")
+		Tick(w, B, B.S.RETRY)
+		eq(Tries(), 2)
+		B = Rebuild(w, B)
+		Tick(w, B, B.S.RETRY)
+		eq(Tries(), 3, "the tries were saved")
+		local heads = #w.Sent("MS~1~H~")
+		Tick(w, B, B.S.RETRY)
+		eq(Tries(), 3); eq(#w.Sent("MS~1~H~"), heads, "three at most")
+		eq(next(Mo.S.Store().cases), nil)
+		eq(e3.n, 3)
+	end)
+end)
+
+test("watch: chat moderation: strikes: \"Let them chat\": the hold ends on his client and on an alt of his account, the team's other clients mark it decided; never from a guild's Watcher, a member or for an older hold; a replay changes nothing; and it never ends a guild timeout of his", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local Alt = w.Client("Alternate", X, 3)
+		Alt.ns.rdb = B.ns.rdb -- (the account's other character, the same saved store)
+		Alt.ns.rdb.council = B.ns.rdb.council
+		local e1, e2
+		local e3
+		e3, e1, e2 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		eq(select(2, w.As(Alt, Alt.C.Send, "A", "from the alt")), "paused", "the account is held")
+		-- A guild's own Watcher (his officer) gives him a guild timeout meanwhile.
+		assert(w.As(A, A.WC.Timeout, B.name, 604800, "guild matter"))
+		w.Run()
+		eq(w.As(B, B.WC.SelfTimeout).scope, "G")
+		-- Refused: the officer (no Olympus authority), an ordinary member, an older hold's id.
+		local forged = ("MS~1~D~%s~%d~R~%d"):format(B.name, e3.at, w.epoch)
+		for _, who in ipairs({ A, D }) do
+			local ok, why = w.Inject("WHISPER", who.name, B, forged)
+			eq(ok, false, who.short); eq(why, "actor", who.short)
+		end
+		local older = ("MS~1~D~%s~%d~R~%d"):format(B.name, e1.at, w.epoch)
+		eq(w.Inject("WHISPER", Mo.name, B, older), false, "a struck line that was never a hold")
+		A.S.Store().cases[key] = { name = B.name, id = e3.at, n = 3, heard = w.epoch, lines = {} }
+		eq(w.As(A, A.S.Release, key), false, "the officer's client may not")
+		eq(w.As(B, B.S.Block).kind, "hold")
+		-- The moderator lets him chat.
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, key))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil, "the hold is over")
+		eq(B.S.Store().mine[3].decided.op, "R"); eq(Fold(B.S.Store().mine[3].decided.by), Fold(Mo.name))
+		assert(w.Printed(B, B.ns.L.WATCHCHAT_STRIKE_RELEASED))
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "R", "decided on " .. cl.short) end
+		eq(w.As(Alt, Alt.S.Block), nil, "the alt's chats with it")
+		-- A replay changes nothing.
+		local again = ("MS~1~D~%s~%d~R~%d"):format(B.name, e3.at, w.epoch)
+		local ok, why = w.Inject("WHISPER", Mo.name, B, again)
+		eq(ok, true); eq(why, "repeat")
+		eq(Fold(B.S.Store().mine[3].decided.by), Fold(Mo.name))
+		-- (The regression: a lift, U, would have ended the guild's timeout too.)
+		eq(w.As(B, B.WC.SelfTimeout).scope, "G", "his guild's timeout stands")
+		eq(select(2, w.As(B, B.C.Send, "A", "still timed out")), "timeout")
+		eq(#w.Sent("MD~1~U~"), 0, "no lift sent")
+		w.Say(Alt, "A", "the alt chats again")
+		assert(w.Line(D, "A", Alt.name, "the alt chats again"))
+		eq(e2.n, 2)
+	end)
+end)
+
+test("watch: chat moderation: strikes: an Olympus moderator's timeout decides the case instead: the chats open when it ends; a guild's timeout leaves the hold", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		assert(w.As(A, A.WC.Timeout, B.name, 300, "guild"))
+		w.Run()
+		eq(w.As(B, B.S.Block).kind, "hold", "a guild's timeout decides nothing")
+		eq(Co.S.Store().cases[key].decided, nil)
+		w.epoch = w.epoch + 301
+		Refresh(w)
+		assert(w.As(Mo, Mo.WC.Timeout, B.name, 3600, "the team's call"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil, "decided by the timeout")
+		eq(B.S.Store().mine[3].decided.op, "T")
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "T", cl.short) end
+		eq(select(2, w.As(B, B.C.Send, "A", "during the hour")), "timeout", "the timeout in force")
+		w.epoch = w.epoch + 3601
+		w.Say(B, "A", "after the hour")
+		assert(w.Line(D, "A", B.name, "after the hour"))
+	end)
+end)
+
+test("watch: chat moderation: strikes: let chat while he was away: back, his client asks one of the team and the answer ends the hold", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		B.online = false
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e3)))
+		w.Run()
+		eq(w.As(B, B.S.Block).kind, "hold", "away: not heard")
+		B = Rebuild(w, B) -- (his next login)
+		w.epoch = w.epoch + B.S.PING
+		Refresh(w)
+		w.As(B, B.S.Tick)
+		eq(#w.wire, 1); eq(w.wire[1].msg, ("MS~1~P~%d"):format(e3.at)); eq(w.wire[1].dist, "WHISPER")
+		w.Run()
+		eq(w.As(B, B.S.Block), nil, "the team's answer ended it")
+		eq(B.S.Store().mine[3].decided.op, "R")
+	end)
+end)
+
+test("watch: chat moderation: strikes: \"e assim por diante\": a fourth warning the same day after a release holds again with a new report; a day later the count starts over; a hold nobody decides lapses in 30 days", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e3)))
+		w.Run()
+		local e4 = Strike(w, B, "fourth " .. WORD)
+		eq(e4.n, 4); eq(e4.untilAt, 0); assert(e4.at > e3.at, "a new id")
+		eq(w.Dialog(B, "OLYMPUS_WATCHCHAT_DECISION").a, B.ns.L.WATCHCHAT_STRIKE_MORE:format(4))
+		w.Run(); Tick(w, B)
+		local c = Mo.S.Store().cases[CaseKey(B, e4)]
+		assert(c, "a new case"); eq(c.n, 4); eq(c.lines[#c.lines].text, "fourth " .. WORD); eq(#c.lines, 3, "the last three of the window")
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e4)))
+		w.Run()
+		w.epoch = e4.at + 86401
+		Refresh(w)
+		local e5 = Strike(w, B, "a day later " .. WORD)
+		eq(e5.n, 1); eq(e5.untilAt - e5.at, 300)
+		Past(w, e5)
+		local e6 = Strike(w, B); Past(w, e6)
+		local e7 = Strike(w, B)
+		eq(e7.n, 3)
+		w.Run(); Tick(w, B)
+		eq(#Mo.S.Store().cases[CaseKey(B, e7)].lines, 5, "three of the window and two earlier, from the 30 days")
+		w.epoch = e7.at + B.S.HOLD_MAX
+		eq(w.As(B, B.S.Block), nil, "lapsed")
+		w.Say(B, "A", "free again")
+	end)
+end)
+
+test("watch: chat moderation: strikes: the King and the author have the line refused and counted, nothing more; The Watch's room is not read; a line during a pause is not counted", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		for _, cl in ipairs({ K, Au }) do
+			for i = 1, 4 do
+				w.epoch = w.epoch + 2
+				eq(select(2, w.As(cl, cl.C.Send, "A", "a " .. WORD)), "severe", cl.short)
+			end
+			eq(#cl.S.Store().mine, 0, "no warning kept: " .. cl.short)
+			eq(w.Dialog(cl, "OLYMPUS_WATCHCHAT_DECISION"), nil, "no pop-up: " .. cl.short)
+			assert(w.Printed(cl, cl.ns.L.WATCHCHAT_SEVERE_REFUSED), "the red line: " .. cl.short)
+			eq((w.As(cl, cl.WC.BlockedCounts, cl.name)).severe, 4)
+			eq(w.As(cl, cl.S.Block), nil)
+			w.Say(cl, "A", "a clean line from " .. cl.short)
+		end
+		eq(#w.Sent("MS~"), 0, "no report")
+		-- The Watch's room: its staff quote what was said.
+		w.epoch = w.epoch + 10
+		assert(w.As(Co, Co.R.Send, "watch", "he wrote " .. WORD .. " in the chat"))
+		w.Run()
+		eq(Mo.R.RawHistory("watch")[1].text, "he wrote " .. WORD .. " in the chat")
+		eq(#Co.S.Store().mine, 0)
+		-- A pause: the next line is not read.
+		local e = Strike(w, B)
+		eq(select(2, w.As(B, B.C.Send, "A", "another " .. WORD)), "paused")
+		eq(#B.S.Store().mine, 1); eq((w.As(B, B.WC.BlockedCounts, B.name)).severe, 1)
+		eq(e.n, 1)
+	end)
+end)
+
+test("watch: chat moderation: strikes: chats only: during a pause no power, game or wallet is barred, a paused moderator keeps his level, and no other client silences him", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		Strike(w, B)
+		for _, what in ipairs({ "powers", "games", "locations", "crafting", "wallet" }) do eq(w.As(B, B.WC.Barred, what), nil, what) end
+		eq(w.As(B, B.WC.SelfTimeout), nil, "never a moderator's timeout")
+		eq(next(B.WC.Store().timeouts), nil)
+		eq(w.As(D, D.WC.Silenced, B.name), false)
+		Strike(w, Mo)
+		eq(w.As(Mo, Mo.WC.ActorLevel, Mo.name), Mo.WC.LEVEL.mod, "his level, on his client")
+		eq(w.As(D, D.WC.ActorLevel, Mo.name), D.WC.LEVEL.mod, "and on the others'")
+		eq(w.As(Mo, Mo.WC.CanModerate, D.name), "O", "he still moderates")
+		eq(select(2, w.As(Mo, Mo.C.Send, "A", "a clean line")), "paused", "but his chats are paused")
+	end)
+end)
+
+test("watch: chat moderation: strikes: every way a line leaves is covered: the three chats, the privacy warning's Send, the Guild room (the game's send never called), a role room, a Church room, a provider's room (its send never called), a pin; a reply's quote alone goes without it; CanWrite while paused", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local function Fresh(cl) cl.ns.rdb.chatStrikes = nil end
+		local function Refused(cl, fn, ...)
+			Fresh(cl)
+			w.epoch = w.epoch + 2
+			local queued = #w.wire
+			local ok, why = w.As(cl, fn, ...)
+			eq(ok, false); eq(why, "severe")
+			eq(#w.wire, queued, "nothing queued")
+			eq(#cl.S.Store().mine, 1, "a warning")
+			return cl.S.Store().mine[1]
+		end
+		eq(Refused(B, B.C.Send, "A", "a " .. WORD).where, "A")
+		eq(Refused(A, A.C.Send, "C", "a " .. WORD).where, "C")
+		eq(Refused(G, G.C.Send, "L", "a " .. WORD).where, "L")
+		-- The privacy warning: a struck line never reaches it; its Send runs every check again.
+		Fresh(B)
+		B.ns.db.chatWarned = {}
+		local dialogs = #B.dialogs
+		eq(select(2, w.As(B, B.C.Send, "A", "a " .. WORD)), "severe")
+		for i = dialogs + 1, #B.dialogs do assert(B.dialogs[i].which ~= "OLYMPUS_CHAT_PRIVACY", "the privacy warning shown") end
+		Fresh(B)
+		eq(select(2, w.As(B, B.C.Confirm, { tier = "A", text = "a " .. WORD, channel = "OlympusChannel" }, true)), "severe")
+		eq(#w.wire, 0)
+		B.ns.db.chatWarned = { A = true, C = true, L = true }
+		-- Guild: the game's own send.
+		local native = 0
+		C_ChatInfo.SendChatMessage = function() native = native + 1 end
+		eq(Refused(B, B.R.Send, "guild", "a " .. WORD).where, "R:guild")
+		eq(native, 0, "the game's send never called")
+		Fresh(B); w.epoch = w.epoch + 10
+		assert(w.As(B, B.R.Send, "guild", "a clean guild line")); eq(native, 1)
+		C_ChatInfo.SendChatMessage = nil
+		-- A role room (the High Council's) and a Church room (an audience another file keeps).
+		eq(Refused(Co, Co.R.Send, "council", "a " .. WORD).where, "R:council")
+		w.As(D, D.R.RegisterAudience, "church", { CanAccess = function() return true end, Recipients = function() return { B.name } end })
+		eq(Refused(D, D.R.Send, "church", "a " .. WORD).where, "R:church")
+		-- A provider's room (a squad's, a craft deal's): its send never called.
+		local provided = 0
+		w.As(D, D.R.RegisterProvider, { Info = function(id) if id == "sq:test" then return { label = "squad" } end end,
+			CanAccess = function() return true end, History = function() return {} end, Send = function() provided = provided + 1 return true end })
+		eq(Refused(D, D.R.Send, "sq:test", "a " .. WORD).where, "R:sq:test")
+		eq(provided, 0)
+		Fresh(D); w.epoch = w.epoch + 10
+		assert(w.As(D, D.R.Send, "sq:test", "a clean squad line")); eq(provided, 1)
+		-- A pin (a guild master's for his guild): refused, nothing queued; paused, refused before it is read.
+		eq(Refused(G, G.C.SetPin, "pinned " .. WORD .. " for all").where, "P")
+		eq(select(2, w.As(G, G.C.SetPin, "a clean pin")), "paused")
+		-- CanWrite (the channel's link in the game's chat) while paused.
+		Fresh(B); Strike(w, B)
+		eq(w.As(B, B.C.CanWrite, "A"), false)
+		eq(w.As(B, B.C.CanWrite, "A", true), false)
+		Fresh(B)
+		eq(w.As(B, B.C.CanWrite, "A"), true)
+		-- A reply: what he typed, apart from his quote of another's line.
+		local codec = ReplyCodec()
+		w.epoch = w.epoch + 5
+		w.wire = {}
+		assert(w.As(B, B.C.Send, "A", codec.EncodeReply({ who = D.name, text = "their " .. WORD .. " line" }, "my clean answer")))
+		eq(#w.wire, 1); assert(not w.wire[1].msg:find(WORD, 1, true), "the quote dropped: " .. w.wire[1].msg)
+		assert(w.wire[1].msg:find("my clean answer", 1, true))
+		w.Run()
+		eq(#B.S.Store().mine, 0, "no warning for the quote")
+		w.epoch = w.epoch + 5
+		eq(select(2, w.As(B, B.C.Send, "A", codec.EncodeReply({ who = D.name, text = "a clean line" }, "my " .. WORD))), "severe")
+		eq(B.S.Store().mine[1].text, "my " .. WORD)
+	end)
+end)
+
+test("watch: chat moderation: strikes: the team's side takes MS only as a logged whisper of 255 bytes at most, from his own name, on a team member's client, within its counts, rates and order; the net-off backstop leaves it alone", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		local id = w.epoch
+		local head = ("MS~1~H~%d~3~3~3~1~%s"):format(id, X)
+		local line = ("MS~1~L~%d~1~%d~3~A~%s~a %s"):format(id, id, WORD, WORD)
+		local function Refused(why, dist, to, msg, logged, from)
+			local ok, got = w.Inject(dist, from or B.name, to, msg, logged)
+			eq(ok, false, why); eq(got, why, why)
+		end
+		Refused("lane", "CHANNEL", Co, head)
+		Refused("lane", "GUILD", Co, head)
+		Refused("unlogged", "WHISPER", Co, head, false)
+		Refused("audience", "WHISPER", D, head)
+		Refused("size", "WHISPER", Co, head .. string.rep("x", 255))
+		Refused("count", "WHISPER", Co, ("MS~1~H~%d~3~3~3~6~%s"):format(id, X))
+		Refused("count", "WHISPER", Co, ("MS~1~H~%d~2~3~3~1~%s"):format(id, X))
+		Refused("guild", "WHISPER", Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id, "Some Other Guild"))
+		Refused("time", "WHISPER", Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id + 3600, X))
+		Refused("head", "WHISPER", Co, line)
+		Refused("self", "WHISPER", Co, head, true, Co.name)
+		-- The real one: kept under the server's name for its sender.
+		eq(w.Inject("WHISPER", B.name, Co, head), true)
+		eq(w.Inject("WHISPER", B.name, Co, line), true)
+		local c = Co.S.Store().cases[Fold(B.name) .. "#" .. id]
+		assert(c); eq(c.lines[1].text, "a " .. WORD); eq(c.name, B.name)
+		-- Again: kept already (acknowledged quietly); an older id from him: refused.
+		local ok, why = w.Inject("WHISPER", B.name, Co, head)
+		eq(ok, true); eq(why, "repeat")
+		Refused("old", "WHISPER", Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id - 10, X))
+		-- At most six heads an hour from one sender.
+		for i = 1, 6 do w.Inject("WHISPER", Y1.name, Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id + i, Y)) end
+		Refused("rate", "WHISPER", Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id + 7, Y), true, Y1.name)
+		-- A line whose fields are not clean.
+		eq(w.Inject("WHISPER", D.name, Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id, X)), true)
+		Refused("field", "WHISPER", Co, ("MS~1~L~%d~1~%d~3~A~%s~ two  spaces"):format(id, id, WORD), true, D.name)
+		-- A ping or a decision about a case this client never had.
+		Refused("case", "WHISPER", Co, ("MS~1~P~%d"):format(id + 99))
+		-- (Never in Moderation's net-off backstop: the player's own obligation, as a result or a receipt.)
+		eq(ns.Moderation.BLOCKED.MS, nil)
+		eq(ns.Moderation.BLOCKED.MD, true)
+	end)
+end)
+
+test("watch: chat moderation: strikes: in a lockdown a struck line is still struck, and the report waits for it to end", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local locked = true
+		C_ChatInfo.InChatMessagingLockdown = function() return locked end
+		local e3 = Held(w, B)
+		eq(e3.n, 3)
+		eq(#w.wire, 0, "no report in a lockdown")
+		w.epoch = w.epoch + 60; Refresh(w); w.As(B, B.S.Tick)
+		eq(#w.wire, 0)
+		locked = false
+		w.epoch = w.epoch + 60; Refresh(w); w.As(B, B.S.Tick)
+		eq(w.wire[1].msg:sub(1, 7), "MS~1~H~", "sent once it ends")
+		w.Run()
+		C_ChatInfo.InChatMessagingLockdown = nil
+	end)
+end)
+
+test("watch: chat moderation: strikes: the team's page and dialog: named moderators see it, open cases first; the dialog lets him chat, times him out or shows every line; on the King's stream the words are hidden", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		eq(w.As(Mo, Mo.WC.PageShown), true, "an Olympus moderator sees the Chat moderation page")
+		eq(w.As(D, D.WC.PageShown), false)
+		local function PageText(cl)
+			local out = {}
+			for _, l in ipairs(w.As(cl, cl.WC.PageLines)) do out[#out + 1] = tostring(l.text) end
+			return table.concat(out, "\n"), w.As(cl, cl.WC.PageLines)
+		end
+		local text, lines = PageText(Mo)
+		assert(text:find(Mo.ns.L.WATCHCHAT_STRIKES_TITLE, 1, true), "the cases")
+		assert(text:find(Mo.ns.L.WATCHCHAT_STRIKE_OPEN, 1, true))
+		assert(not text:find(WORD, 1, true), "the words only in the tooltip, the dialog, the copy")
+		local row
+		for _, l in ipairs(lines) do if l.onClick and tostring(l.text):find("Member", 1, true) then row = l end end
+		assert(row, "the case's row")
+		local said = {}
+		local tt = { AddLine = function(_, s) said[#said + 1] = s end }
+		row.tooltip(tt)
+		assert(table.concat(said, "\n"):find(WORD, 1, true), "his words in the tooltip")
+		w.As(Mo, row.onClick)
+		local d = w.Dialog(Mo, "OLYMPUS_WATCHCHAT_STRIKE")
+		eq(d.a, Mo.ns.L.WATCHCHAT_STRIKE_ASK:format("Member", 3, WORD)); eq(d.data.key, key)
+		-- Show all: the copy pop-up, each line with its words, and the note.
+		local copied
+		Mo.ns.UI.ShowCopy = function(title, body, _, opts) copied = { title = title, body = body, key = opts and opts.key } end
+		w.As(Mo, StaticPopupDialogs.OLYMPUS_WATCHCHAT_STRIKE.OnAlt, nil, d.data)
+		eq(copied.title, Mo.ns.L.WATCHCHAT_STRIKES_TITLE); eq(copied.key, "watch-strike")
+		for _, part in ipairs({ "first " .. WORD, "second " .. WORD, "third " .. WORD, Mo.ns.L.WATCHCHAT_STRIKE_COPY_NOTE, X }) do
+			assert(copied.body:find(part, 1, true), "the copy holds: " .. part)
+		end
+		-- Time out...: WatchChat's own timeout dialogs.
+		w.As(Mo, StaticPopupDialogs.OLYMPUS_WATCHCHAT_STRIKE.OnCancel, nil, d.data, "clicked")
+		eq(w.Dialog(Mo, "OLYMPUS_WATCHCHAT_TIME").data.name, B.name)
+		-- /oly watch strikes: the open cases in the copy pop-up.
+		copied = nil
+		w.As(Mo, Mo.S.Slash, "strikes", "")
+		assert(copied and copied.body:find("third " .. WORD, 1, true))
+		-- On the King's stream: names cut, words and lines hidden.
+		Mo.masked = true
+		copied = nil
+		w.As(Mo, Mo.S.Slash, "strikes", "")
+		assert(not copied.body:find(WORD, 1, true), "hidden on the stream")
+		assert(copied.body:find(Mo.ns.L.NETOFF_REASON_HIDDEN, 1, true))
+		assert(not w.As(Mo, Mo.S.AskText, Mo.S.Store().cases[key]):find(WORD, 1, true))
+		said = {}
+		row.tooltip(tt)
+		assert(not table.concat(said, "\n"):find(WORD, 1, true), "the tooltip too")
+		Mo.masked = false
+		-- Let them chat: from the dialog; then /oly watch release finds nothing open.
+		w.As(Mo, StaticPopupDialogs.OLYMPUS_WATCHCHAT_STRIKE.OnAccept, nil, d.data)
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		assert(w.Printed(Mo, Mo.ns.L.WATCHCHAT_STRIKE_DONE:format("Member")))
+		eq(w.As(Mo, Mo.S.Slash, "release", "Member"), false)
+		assert(w.Printed(Mo, Mo.ns.L.WATCHCHAT_STRIKE_NOT_FOUND:format("Member")))
+		text = PageText(Mo)
+		assert(text:find(Mo.ns.L.WATCHCHAT_STRIKE_LET_BY:format("Modder"), 1, true), "decided, and by whom")
+		-- Not a moderator: no command.
+		eq(w.As(D, D.S.Slash, "strikes", ""), nil)
+		assert(w.Printed(D, D.ns.L.WATCH_NO_ACCESS))
+	end)
+end)
+
+test("watch: chat moderation: strikes: /oly watch release <name> lets the newest open case of that name chat; a client rebuilt from the same saved store keeps the count and the hold", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e1 = Strike(w, B); Past(w, e1)
+		B = Rebuild(w, B)
+		local e2 = Strike(w, B)
+		eq(e2.n, 2, "the count kept")
+		Past(w, e2)
+		local e3 = Strike(w, B)
+		w.Run(); Tick(w, B)
+		B = Rebuild(w, B)
+		eq(w.As(B, B.S.Block).kind, "hold", "the hold kept")
+		eq(select(2, w.As(B, B.C.Send, "A", "after a reload")), "paused")
+		assert(w.As(Co, Co.S.Slash, "release", "Member"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		eq(Co.S.Store().cases[CaseKey(B, e3)].decided.op, "R")
+	end)
+end)
+
+-- (The review: "decided?" always went to the first of the team who kept the report, and a "Let them
+-- chat" reached only who was online then. One who missed it kept the case open on his page, and the
+-- player asked him alone every 10 minutes for 30 days: held, though the team had decided.)
+test("watch: chat moderation: strikes: \"Let them chat\" reaches whoever missed it: a team member away at the decision is told when back; and the held player's \"decided?\" goes round the team in turn, so one who knows answers", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(B.S.Store().out.to[Fold(cl.name)].acked, true, cl.short) end
+		-- The author and the player away; the moderator lets him chat.
+		Au.online, B.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, key))
+		w.Run()
+		for _, cl in ipairs({ K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "R", cl.short) end
+		eq(Au.S.Store().cases[key].decided, nil, "away: not heard")
+		local tell = Mo.S.Store().cases[key].tell
+		eq(tell[Fold(K.name)].acked, true, "the King's client said it keeps it"); eq(tell[Fold(Au.name)].acked, nil)
+		-- Back within the tries: the moderator's client tells him again, and only him and the player.
+		Au.online = true
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(Au.S.Store().cases[key].decided.op, "R", "told when back")
+		eq(Fold(Au.S.Store().cases[key].decided.by), Fold(Mo.name))
+		eq(tell[Fold(Au.name)].acked, true)
+		local function ToAuthor()
+			local n = 0
+			for _, s in ipairs(w.Sent("MS~1~D~")) do if Fold(Full(s.target)) == Fold(Au.name) then n = n + 1 end end
+			return n
+		end
+		local before = ToAuthor()
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(ToAuthor(), before, "kept: not told again")
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(tell[Fold(B.name)].tries, 3, "the player away: three times at most")
+		-- Back, the player asks; the author's client knows it now.
+		B.online = true
+		B = Rebuild(w, B)
+		w.epoch = w.epoch + B.S.PING
+		Refresh(w)
+		w.As(B, B.S.Tick)
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		-- The next hold the same day; this time the author misses the decision entirely (away through
+		-- every try). Back, the player's "decided?" asks the author first, then the next of the team.
+		local e4 = Strike(w, B, "fourth " .. WORD)
+		w.Run(); Tick(w, B)
+		local key4 = CaseKey(B, e4)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(B.S.Store().out.to[Fold(cl.name)].acked, true, cl.short) end
+		Au.online, B.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, key4))
+		w.Run()
+		Tick(w, Mo, Mo.S.RETRY); Tick(w, Mo, Mo.S.RETRY)
+		Au.online = true
+		B = Rebuild(w, B) -- (his next login)
+		eq(w.As(B, B.S.Block).kind, "hold", "away through every try: not heard")
+		local asked = {}
+		for _ = 1, 2 do
+			w.epoch = w.epoch + B.S.PING
+			Refresh(w)
+			w.As(B, B.S.Tick)
+			for _, job in ipairs(w.wire) do if job.msg == ("MS~1~P~%d"):format(e4.at) then asked[#asked + 1] = Fold(Full(job.target)) end end
+			w.Run()
+		end
+		eq(asked[1], Fold(Au.name), "the first of the team who kept it")
+		eq(asked[2], Fold(K.name), "then the next one, not the same again")
+		eq(w.As(B, B.S.Block), nil, "the King's client knew it: the hold is over")
+		eq(B.S.Store().mine[#B.S.Store().mine].decided.op, "R")
+		eq(Au.S.Store().cases[key4].decided, nil, "(the author's page: told no more after three tries)")
+	end)
+end)
+
+-- (The review: the hold is the account's, but "Let them chat" was whispered only to the character
+-- that typed the line, and another character of his never asked: it stayed blocked.)
+test("watch: chat moderation: strikes: \"Let them chat\" while he plays another character of his account: that character, linked, is told; away then, it asks when back", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local Alt = w.Client("Alternate", X, 3)
+		Alt.ns.rdb = B.ns.rdb -- (the account's other character, the same saved store)
+		Alt.ns.Workshop.AuthorOnline, Alt.ns.Workshop.AuthorName = B.ns.Workshop.AuthorOnline, B.ns.Workshop.AuthorName
+		w.links[Fold(B.name)], w.links[Fold(Alt.name)] = { Alt.name }, { B.name }
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		B.online = false -- (he logs out, and plays the alt)
+		eq(select(2, w.As(Alt, Alt.C.Send, "A", "from the alt")), "paused", "the account is held")
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e3)))
+		w.Run()
+		eq(w.As(Alt, Alt.S.Block), nil, "told on the alt")
+		assert(w.Printed(Alt, Alt.ns.L.WATCHCHAT_STRIKE_RELEASED))
+		w.Say(Alt, "A", "the alt chats")
+		assert(w.Line(D, "A", Alt.name, "the alt chats"))
+		-- Again, both characters away at the decision and through its tries: back on the alt, it asks.
+		B.online = true
+		local e4 = Strike(w, B, "fourth " .. WORD)
+		w.Run(); Tick(w, B)
+		B.online, Alt.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e4)))
+		w.Run()
+		Tick(w, Mo, Mo.S.RETRY); Tick(w, Mo, Mo.S.RETRY)
+		Alt.online = true
+		eq(w.As(Alt, Alt.S.Block).kind, "hold")
+		local heads = #w.Sent("MS~1~H~")
+		w.epoch = w.epoch + Alt.S.PING
+		Refresh(w)
+		w.As(Alt, Alt.S.Tick)
+		eq(#w.wire, 1); eq(w.wire[1].msg, ("MS~1~P~%d"):format(e4.at)); eq(w.wire[1].from, Alt, "the alt asks")
+		w.Run()
+		eq(#w.Sent("MS~1~H~"), heads, "it never reports: the character that typed it does")
+		eq(w.As(Alt, Alt.S.Block), nil, "the team's answer ended it")
+		eq((w.As(Alt, Alt.C.Send, "A", "free again")), true)
+	end)
+end)
+
+-- (The review: SamePerson's links and the receiver's limits had no test of their own.)
+test("watch: chat moderation: strikes: an Olympus moderator's timeout on a character his player linked decides the hold too, on his client and on the team's", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local Alt = w.Client("Alternate", X, 3) -- (a saved store of its own here: only the links tie them)
+		w.links[Fold(B.name)], w.links[Fold(Alt.name)] = { Alt.name }, { B.name }
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		w.epoch = w.epoch + 5
+		Refresh(w)
+		assert(w.As(Mo, Mo.WC.Timeout, Alt.name, 3600, "the team's call"))
+		w.Run()
+		eq(B.S.Store().mine[3].decided.op, "T", "decided by the alt's timeout")
+		eq(w.As(B, B.S.Block), nil)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "T", cl.short) end
+	end)
+end)
+
+test("watch: chat moderation: strikes: the team's side keeps its limits: 30 reports in ten minutes from everyone, 20 still coming, 6 \"decided?\" an hour from one name, one notice a name in ten minutes and one open case; a report heard after the team's timeout comes decided; his client sends nothing while Comm's queue is short", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		local id = w.epoch
+		local function Head(n) return ("MS~1~H~%d~3~3~3~1~%s"):format(n, X) end
+		local function Line(n) return ("MS~1~L~%d~1~%d~3~A~%s~a %s"):format(n, n, WORD, WORD) end
+		-- 30 reports from 30 names in ten minutes: the 31st is refused.
+		for i = 1, 30 do
+			local who = "Sender" .. i .. "-Realm"
+			eq(w.Inject("WHISPER", who, Co, Head(id)), true, who)
+			eq(w.Inject("WHISPER", who, Co, Line(id)), true, who)
+		end
+		local ok, why = w.Inject("WHISPER", "Sender31-Realm", Co, Head(id))
+		eq(ok, false); eq(why, "rate", "all senders' budget")
+		-- 20 reports whose lines are still coming: the 21st is refused until a slot frees.
+		w.epoch = w.epoch + 601
+		for i = 1, 20 do eq(w.Inject("WHISPER", "Waiter" .. i .. "-Realm", Co, Head(id)), true) end
+		ok, why = w.Inject("WHISPER", "Waiter21-Realm", Co, Head(id))
+		eq(ok, false); eq(why, "busy")
+		w.epoch = w.epoch + Co.S.PENDING_FOR + 1
+		eq(w.Inject("WHISPER", "Waiter21-Realm", Co, Head(id)), true, "two minutes on: the slots free")
+		-- "Decided?": 6 an hour from one name.
+		for i = 1, 6 do eq(w.Inject("WHISPER", "Sender1-Realm", Co, ("MS~1~P~%d"):format(id)), true, "ping " .. i) end
+		ok, why = w.Inject("WHISPER", "Sender1-Realm", Co, ("MS~1~P~%d"):format(id))
+		eq(ok, false); eq(why, "rate")
+		-- One notice a name in ten minutes; his newer report replaces his open one.
+		w.epoch = w.epoch + 601
+		local function Notices(name)
+			local n = 0
+			for _, p in ipairs(Co.prints) do if p:find(Co.ns.L.WATCHCHAT_STRIKE_IN:format(name, 3), 1, true) then n = n + 1 end end
+			return n
+		end
+		local t = w.epoch
+		for i = 0, 1 do
+			eq(w.Inject("WHISPER", "Twice-Realm", Co, Head(t + i)), true)
+			eq(w.Inject("WHISPER", "Twice-Realm", Co, Line(t + i)), true)
+		end
+		eq(Notices("Twice"), 1, "one notice for two reports within ten minutes")
+		eq(Co.S.Store().cases[Fold("Twice-Realm") .. "#" .. t], nil, "one open case a name: the newer one")
+		assert(Co.S.Store().cases[Fold("Twice-Realm") .. "#" .. (t + 1)])
+		w.epoch = w.epoch + 601
+		eq(w.Inject("WHISPER", "Twice-Realm", Co, Head(w.epoch)), true)
+		eq(w.Inject("WHISPER", "Twice-Realm", Co, Line(w.epoch)), true)
+		eq(Notices("Twice"), 2, "ten minutes on: told again")
+		-- An Olympus moderator's timeout on him heard before his report: the case comes decided.
+		local before = w.epoch
+		Refresh(w)
+		assert(w.As(Mo, Mo.WC.Timeout, B.name, 3600, "the team's call"))
+		w.Run()
+		eq(w.Inject("WHISPER", B.name, Co, Head(before - 10)), true)
+		eq(w.Inject("WHISPER", B.name, Co, Line(before - 10)), true)
+		eq(Co.S.Store().cases[Fold(B.name) .. "#" .. (before - 10)].decided.op, "T", "decided by the timeout heard first")
+		-- His client, held: nothing while Comm's queue has less room than the report and its spare.
+		Words(w, WORD)
+		local room = 3 + 1 + D.S.QUEUE_SPARE - 1
+		D.ns.Comm.QueueRoom = function() return room end
+		Held(w, D)
+		eq(#w.wire, 0, "nothing queued")
+		Tick(w, D)
+		eq(#w.wire, 0)
+		room = room + 1
+		w.epoch = w.epoch + 60
+		w.As(D, D.S.Tick)
+		eq(#w.wire, 2 * 4, "room enough: the report goes")
+		w.Run()
+	end)
+end)
+
+-- (The review: one name's made-up reports, within the rates, could push a real case off a team
+-- member's client: the oldest open case went first once there were more than 100.)
+test("watch: chat moderation: strikes: a name's flood of made-up reports pushes out no one else's case: his own open one stays and is let chat; a team member who no longer keeps it says so and is sent it again", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		-- Six an hour (the most one name gets in) for 18 hours: 108 reports from Y1.
+		for _ = 1, 18 do
+			for i = 1, 6 do
+				local id = w.epoch + i
+				eq(w.Inject("WHISPER", Y1.name, Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id, Y)), true)
+				eq(w.Inject("WHISPER", Y1.name, Co, ("MS~1~L~%d~1~%d~3~A~%s~a %s"):format(id, id, WORD, WORD)), true)
+			end
+			w.epoch = w.epoch + 3600
+		end
+		assert(Co.S.Store().cases[key], "his case kept")
+		local his = 0
+		for _, c in pairs(Co.S.Store().cases) do if Fold(c.name) == Fold(Y1.name) then his = his + 1 end end
+		eq(his, 1, "one open case a name")
+		-- Past the cap, the name with the most cases goes first (here a hundred open ones of one name,
+		-- all newer than his: the oldest open one went first before).
+		local s = Mo.S.Store()
+		for i = 1, 100 do s.cases["flood#" .. i] = { name = "Flood-Realm", id = w.epoch - 1000 + i, n = 3, heard = w.epoch, lines = {} } end
+		w.As(Mo, Mo.S.Prune, s)
+		assert(s.cases[key], "a flood of one name's cases goes before his")
+		-- A team member who no longer keeps it (lost from his saved store): asked, he says so; sent again.
+		Au.S.Store().cases[key] = nil
+		w.epoch = w.epoch + B.S.PING
+		Refresh(w)
+		w.As(B, B.S.Tick)
+		eq(w.wire[#w.wire].msg, ("MS~1~P~%d"):format(e3.at)); eq(Fold(Full(w.wire[#w.wire].target)), Fold(Au.name))
+		w.Run()
+		eq(B.S.Store().out.to[Fold(Au.name)].acked, nil, "not kept there: to send again")
+		Tick(w, B)
+		assert(Au.S.Store().cases[key], "sent again, kept")
+		eq(B.S.Store().out.to[Fold(Au.name)].acked, true)
+		assert(w.As(Co, Co.S.Slash, "release", "Member"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+	end)
+end)
+
+-- (The review: the login's notice, The Watch's commands and CanWrite's telling had no test.)
+test("watch: chat moderation: strikes: at login a held player is told why in a pop-up, even right after another; CanWrite says why; the team's commands go through /oly watch", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		B = Rebuild(w, B) -- (his next login)
+		eq(select(2, w.As(B, B.C.Send, "A", "a clean line")), "paused")
+		local dialogs = #B.dialogs
+		eq(B.dialogs[dialogs].a, B.ns.L.WATCHCHAT_STRIKE_HELD, "a pop-up a moment ago")
+		local printed = #B.prints
+		eq(w.As(B, B.C.CanWrite, "A", true), false)
+		eq(#B.prints, printed + 1, "CanWrite says why (a red line within the minute)")
+		assert(B.prints[#B.prints]:find(B.ns.L.WATCHCHAT_STRIKE_HELD, 1, true), B.prints[#B.prints])
+		eq(#B.dialogs, dialogs)
+		for _, f in ipairs(B.listeners.LOGIN or {}) do w.As(B, f) end
+		w.epoch = w.epoch + 30
+		w.Run()
+		eq(#B.dialogs, dialogs + 1, "the login's pop-up, though one was shown a moment ago")
+		eq(B.dialogs[#B.dialogs].which, "OLYMPUS_WATCHCHAT_DECISION"); eq(B.dialogs[#B.dialogs].a, B.ns.L.WATCHCHAT_STRIKE_HELD)
+		-- /oly watch strikes and /oly watch release <name>: The Watch's own command.
+		local copied
+		Mo.ns.UI.ShowCopy = function(_, body) copied = body end
+		w.As(Mo, Mo.W.Slash, "strikes")
+		assert(copied and copied:find("third " .. WORD, 1, true), "the open cases to copy")
+		assert(w.As(Co, Co.W.Slash, "release Member"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		eq(Co.S.Store().cases[CaseKey(B, e3)].decided.op, "R")
 	end)
 end)

@@ -35,7 +35,11 @@ end
 -- API.lua (and its words) loaded into the client as the TOC loads it, after the boards it reads:
 -- with Wanted.lua too (the core's board, which the world's clients do not load), its tab kept off
 -- the harness's window. The global OlympusAPI is the client's (c.OlympusAPI), the host's put back.
-local function LoadAPI(w, c, wanted)
+-- The invented partner addons that exercise the reserved features (API.lua's Reserved) are
+-- authorized on that client's copy of the list, as the shipped list authorizes the real one; any
+-- other invented name is an ordinary addon. partners = false keeps the list as it ships.
+local PARTNERS = { "MapPins", "BountyBoard" }
+local function LoadAPI(w, c, wanted, partners)
 	local was = rawget(_G, "OlympusAPI")
 	w:As(c, function()
 		if wanted ~= false then
@@ -50,7 +54,11 @@ local function LoadAPI(w, c, wanted)
 	c.OlympusAPI = rawget(_G, "OlympusAPI")
 	rawset(_G, "OlympusAPI", was)
 	assert(c.OlympusAPI and c.OlympusAPI ~= was, "the client's own OlympusAPI")
-	return c.ns.API
+	local API = c.ns.API
+	if partners ~= false and type(API.AuthorizedKey) == "function" then
+		for _, name in ipairs(PARTNERS) do API.AUTHORIZED[w:As(c, API.AuthorizedKey, name)] = true end
+	end
+	return API
 end
 
 -- A handle's method, run as its client.
@@ -997,6 +1005,125 @@ test("1.2.5 the API LEADER_CHANGED: once per real change, after a burst settles,
 	W3.NoErrors(w)
 end)
 
+-- (Daniel, 2026-10-19) The leader's presence and the sightings searches answer only the addons the
+-- Olympus team authorized: a consenting ordinary addon gets "unauthorized" from each of their
+-- methods, cannot listen to their events and is asked only about what it can read, while the rest
+-- of the API is unchanged for it.
+test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"unauthorized\" from every leader and sightings method, no LEADER_CHANGED nor SIGHTING_CHANGED, and a privacy line without them", function()
+	local w, cast, viewer, API = Setup()
+	viewer.mapID = 1453
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local sightings = SightingHost(viewer)
+	local leader = LeaderHost(viewer)
+	leader.king = { name = "The Crown", realm = viewer.ns.realm }
+	eq(w:As(viewer, O.Has, "leader"), true, "Has still says what this build has")
+	eq(w:As(viewer, O.Has, "network.sightings"), true)
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "TownCrier", "Town Crier")
+	local partner = w:As(viewer, O.Register, "MapPins")
+	local crier = w:As(viewer, O.Register, "TownCrier")
+	assert(partner and crier, "both handles")
+	eq(Line(w, viewer, "api:mappins").text, "API_CONSENT_TEXT", "the authorized addon is asked about all it may do")
+	eq(Line(w, viewer, "api:towncrier").text, "API_CONSENT_TEXT_BASIC", "the ordinary addon only about what it can read")
+
+	-- Before any answer the reserved methods already say "unauthorized": nothing about the player.
+	eq(select(2, Do(w, viewer, crier, "GetLeaderPresence")), "unauthorized")
+	w:As(viewer, C.Choose, "api:towncrier", false)
+	eq(select(2, Do(w, viewer, crier, "StartPlayerSearch", "Tracked Name-Emberfall")), "unauthorized", "also after a No")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	w:As(viewer, C.Choose, "api:towncrier", true)
+	eq(Do(w, viewer, crier, "Status"), "granted")
+
+	local calls = {
+		GetLeaderPresence = {}, StartPlayerSearch = { "Tracked Name-Emberfall" }, GetPlayerSearch = { "7" },
+		GetPlayerSearches = {}, StartAreaSearch = { 1453 }, GetAreaSearch = { "7" }, GetAreaSearches = {},
+		CancelPlayerSearch = { "7" }, CancelAreaSearch = { "7" }, ShowAreaSearchOnMap = { "7" }, ClearAreaSearchMap = {},
+	}
+	local count = 0
+	for method, no in pairs(API.RESERVED_METHODS) do
+		count = count + 1
+		local args = assert(calls[method], "a call for " .. method)
+		local result, why = Do(w, viewer, crier, method, unpack(args))
+		eq(why, "unauthorized", method)
+		if no == "false" then eq(result, false, method) else eq(result, nil, method) end
+	end
+	eq(count, 11, "every leader and sightings method is reserved")
+	eq(#sightings.starts, 0, "no exact-name request went out for it")
+	eq(#sightings.areaStarts, 0, "no area request went out for it")
+	eq(Do(w, viewer, crier, "On", "LEADER_CHANGED", function() end), false)
+	eq(Do(w, viewer, crier, "On", "SIGHTING_CHANGED", function() end), false)
+
+	-- What it may read is unchanged.
+	eq(type(Do(w, viewer, crier, "GetWanted")), "table")
+	eq(type(Do(w, viewer, crier, "GetRankings")), "table")
+	eq(Do(w, viewer, crier, "GetProfile").member, true)
+	eq(Do(w, viewer, crier, "On", "WANTED_CHANGED", function() end), true)
+	eq(Do(w, viewer, crier, "On", "PERMISSION_CHANGED", function() end), true)
+
+	-- The authorized partner, in the same session, still has all of it.
+	local told = {}
+	eq(Do(w, viewer, partner, "On", "LEADER_CHANGED", function(_, presence) told[#told + 1] = presence end), true)
+	eq(type(Do(w, viewer, partner, "GetLeaderPresence")), "table")
+	local state = assert(Do(w, viewer, partner, "StartPlayerSearch", "Tracked Name-Emberfall"))
+	eq(#sightings.starts, 1)
+	eq(type(Do(w, viewer, partner, "GetPlayerSearch", state.id)), "table")
+	eq(select(2, Do(w, viewer, crier, "GetPlayerSearch", state.id)), "unauthorized", "never another addon's search")
+	Crown(w, cast.king, 0.42, 0.51)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, 1, "the partner is told")
+
+	-- Taken off the list during the session: its callbacks stop and its reads say "unauthorized".
+	API.AUTHORIZED[w:As(viewer, API.AuthorizedKey, "MapPins")] = nil
+	Crown(w, cast.king, 0.30, 0.40)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, 1, "no LEADER_CHANGED once it is not authorized")
+	eq(select(2, Do(w, viewer, partner, "GetLeaderPresence")), "unauthorized")
+	eq(type(Do(w, viewer, partner, "GetWanted")), "table", "its ordinary reads go on")
+	W3.NoErrors(w)
+end)
+
+test("1.2.5.1 the API reserved features: the list as it ships names nobody (one digest), a name folds before its digest, no hash means nobody, and every leader or search method is reserved", function()
+	local w, cast, viewer = Setup({ wanted = false })
+	local API = LoadAPI(w, viewer, false, false)
+	local n = 0
+	for key, on in pairs(API.AUTHORIZED) do
+		n = n + 1
+		eq(on, true)
+		assert(type(key) == "string" and #key == 128 and not key:find("[^0-9a-f]"), "a SHA-512 digest in hex: " .. tostring(key))
+	end
+	eq(n, 1, "one authorized addon ships")
+	local key = w:As(viewer, API.AuthorizedKey, "MapPins")
+	eq(API.AUTHORIZED[key], nil, "an invented name is not on the shipped list")
+	eq(w:As(viewer, API.AuthorizedKey, "mappins"), key, "the name folds as Register folds it")
+	assert(w:As(viewer, API.AuthorizedKey, "Map Pins") ~= key)
+	eq(w:As(viewer, API.AuthorizedKey, 42), nil)
+	-- Ed25519.lua not loaded (Core.lua's stand-in for a missing file).
+	local ed = rawget(viewer.ns, "Ed25519")
+	rawset(viewer.ns, "Ed25519", { missing = true })
+	eq(w:As(viewer, API.AuthorizedKey, "MapPins"), nil, "without the hash nobody is authorized")
+	rawset(viewer.ns, "Ed25519", ed)
+	-- A method a reserved feature adds later must join the list (and each listed one exists).
+	local src = Read(H.ADDON_DIR .. "API.lua")
+	local methods = {}
+	for m in src:gmatch("\nfunction METHODS%.(%u%a+)%(") do methods[m] = true end
+	for m in pairs(methods) do
+		if m:find("Leader", 1, true) or m:find("Search", 1, true) then
+			assert(API.RESERVED_METHODS[m], "reserved: " .. m)
+		end
+	end
+	for m, no in pairs(API.RESERVED_METHODS) do
+		assert(methods[m], "a real method: " .. m)
+		assert(no == "nil" or no == "false", m)
+	end
+	eq(Keys(API.RESERVED_EVENTS), "LEADER_CHANGED,SIGHTING_CHANGED")
+	-- The public page says it without naming any addon.
+	local doc = Read(H.ROOT .. "docs/API.md")
+	for _, word in ipairs({ "addons the Olympus team has authorized", '"unauthorized"' }) do
+		assert(doc:find(word, 1, true), "docs/API.md: " .. word)
+	end
+	W3.NoErrors(w)
+end)
+
 test("1.2.5 the API area rotation: one live map, one minute, and only current or owned fresh exact-result maps", function()
 	local w, cast, viewer = Setup()
 	viewer.mapID = 1453
@@ -1823,7 +1950,26 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	local en, pt = {}, {}
 	for k in head:gmatch("\nL%.([%w_]+) =") do en[k] = true end
 	for k in tail:gmatch("\n\tL%.([%w_]+) =") do pt[k] = true end
-	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT"); eq(Keys(pt), Keys(en))
+	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT,API_CONSENT_TEXT_BASIC"); eq(Keys(pt), Keys(en))
+	-- (1.2.5.1) An addon that is not authorized for the reserved features is asked only about its reads.
+	do
+		local k = "API_CONSENT_TEXT_BASIC"
+		local basic = assert(src:match("\nL%." .. k .. ' = "(.-)"\n'), k)
+		for _, word in ipairs({ "what Olympus shows you", "Never your location or the King's", "Authorize all", "Keep current choices",
+			"short host-owned profile-presentation session", "addons you trust" }) do
+			assert(basic:find(word, 1, true), k .. " says: " .. word)
+		end
+		for _, word in ipairs({ "King's presence", "search", "crown", " layer" }) do
+			eq(basic:find(word, 1, true), nil, k .. " never offers: " .. word)
+		end
+		local ptBasic = assert(tail:match("\n\tL%." .. k .. ' = "(.-)"\n'), k .. " (pt-BR)")
+		for _, word in ipairs({ "Nunca a sua localização nem a do Rei", "Autorizar tudo", "Manter escolhas atuais" }) do
+			assert(ptBasic:find(word, 1, true), k .. " (pt-BR) says: " .. word)
+		end
+		for _, word in ipairs({ "presença do Rei", "busca", "coroa", "camada" }) do
+			eq(ptBasic:find(word, 1, true), nil, k .. " (pt-BR) never offers: " .. word)
+		end
+	end
 	for _, word in ipairs({ "Seen nearby", "Exact last-seen point", "Visto nas proximidades", "Ponto exato do último avistamento",
 		"Not hostile, outside Olympus's guilds", "Não hostil, fora das guildas do Olympus" }) do
 		assert(src:find(word, 1, true), "the map tooltip says: " .. word)

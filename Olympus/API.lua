@@ -47,6 +47,12 @@ local L = ns.L
 --     callbacks per event. A callback runs protected: its error is logged with the addon's name
 --     (never Olympus's error report) and never stops Olympus or the other callbacks; one that keeps
 --     failing (CALLBACK_FAILS) is dropped.
+--   - Reserved (Daniel, 2026-10-19: no third-party addon may keep a log of where the King has been).
+--     The leader's presence and the sightings searches answer only the addons the Olympus team
+--     authorized (API.AUTHORIZED: a digest of each one's folded name, so the list names nobody). Any
+--     other addon gets "unauthorized" from those methods (RESERVED_METHODS), cannot listen to their
+--     events (RESERVED_EVENTS), and its privacy line says only what it may read
+--     (API_CONSENT_TEXT_BASIC). OlympusAPI.Has still says what this build has.
 -- A handle is the addon's own: Register gives it once a session for a name, to the first caller
 -- (a second Register for that name gets nil, "taken"), and only for an addon the game has installed
 -- (its TOC's Title, which the privacy line shows). That is a courtesy boundary, not a lock: every
@@ -89,6 +95,20 @@ API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_
 API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }
 API.AREA_SCOPES = { hostile = true, outsiders = true }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
+
+-- The reserved features (the header's Reserved): their methods, with the "no" an addon that is not
+-- authorized gets ("nil" for a read or a start, "false" for a cancel or a map call), and their events.
+-- A method a reserved feature adds later belongs here too (the tests look for it).
+API.RESERVED_METHODS = {
+	GetLeaderPresence = "nil", StartPlayerSearch = "nil", GetPlayerSearch = "nil", GetPlayerSearches = "nil",
+	StartAreaSearch = "nil", GetAreaSearch = "nil", GetAreaSearches = "nil",
+	CancelPlayerSearch = "false", CancelAreaSearch = "false", ShowAreaSearchOnMap = "false", ClearAreaSearchMap = "false",
+}
+API.RESERVED_EVENTS = { LEADER_CHANGED = true, SIGHTING_CHANGED = true }
+-- The authorized addons, each as API.AuthorizedKey(its name) gives it.
+API.AUTHORIZED = {
+	["2def22f6a5e0801fa6e2de4a41ff7be28858d142b209b6c180ebb930ce2cd7dc94aebbc21f452ab7d36e8cc0b2ad61285561c4bd29089f30dfd48e78a77ea072"] = true,
+}
 
 local IS_EVENT = {}
 for _, e in ipairs(API.EVENTS) do IS_EVENT[e] = true end
@@ -178,6 +198,18 @@ end
 local function Member() return ns.IsMember and ns.IsMember() == true end
 
 local function Busy() return InCombatLockdown and InCombatLockdown() and true or false end
+
+-- An addon's digest on API.AUTHORIZED: SHA-512 (Ed25519.lua's, loaded before this file) of
+-- "olympus-api-authorized:" and its folded name, in hex; nil without the hash, so nobody is
+-- authorized then.
+function API.AuthorizedKey(name)
+	if type(name) ~= "string" or not Has("Ed25519", "SHA512") then return nil end
+	local ok, digest = pcall(ns.Ed25519.SHA512, "olympus-api-authorized:" .. ns.Fold(name))
+	if not ok or type(digest) ~= "string" then return nil end
+	return (digest:gsub(".", function(ch) return string.format("%02x", ch:byte()) end))
+end
+
+local function Authorized(c) return c.authKey ~= nil and API.AUTHORIZED[c.authKey] == true end
 
 ---------------------------------------------------------------------------
 -- What an addon may read: each built from the page's own functions, field by field
@@ -711,6 +743,7 @@ end
 
 -- The addon's callbacks for the event, each protected; one that keeps failing goes.
 local function Tell(c, event, payload)
+	if API.RESERVED_EVENTS[event] and not Authorized(c) then return end
 	local list = c.callbacks[event]
 	if type(list) ~= "table" then return end
 	local now = {}
@@ -897,7 +930,8 @@ local function Line(c)
 	return ns.Consent.Register({
 		key = c.consentKey,
 		label = function() return L.API_CONSENT_LABEL:format(c.title) end,
-		text = "API_CONSENT_TEXT",
+		-- An addon that is not authorized is asked only about what it can read (the header's Reserved).
+		text = Authorized(c) and "API_CONSENT_TEXT" or "API_CONSENT_TEXT_BASIC",
 		explicit = true,
 		adopt = false,
 		version = API.CONSENT_VERSION,
@@ -1338,6 +1372,7 @@ function METHODS.RefreshSurface(c) return RegisteredSurfaceCall(c, "RefreshAPISu
 function METHODS.IsSurfaceOpen(c) return RegisteredSurfaceCall(c, "IsAPISurfaceOpen") end
 function METHODS.On(c, event, fn)
 	if not IS_EVENT[event] or type(fn) ~= "function" then return false end
+	if API.RESERVED_EVENTS[event] and not Authorized(c) then return false end
 	local list = c.callbacks[event] or {}
 	for _, f in ipairs(list) do if f == fn then return true end end
 	if #list >= API.MAX_CALLBACKS then return false end
@@ -1360,9 +1395,23 @@ local function ReadOnly(_, k) error("OlympusAPI: read-only (" .. tostring(k) .. 
 local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
 		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot), searches = {}, sightingTold = {}, sightingEnded = {},
-		areaMapOwner = {}, areaMapFrames = {}, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot) }
+		areaMapOwner = {}, areaMapFrames = {}, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot),
+		authKey = API.AuthorizedKey(key) }
 	local methods = {}
-	for k, fn in pairs(METHODS) do methods[k] = Method(c, fn) end
+	for k, fn in pairs(METHODS) do
+		local no = API.RESERVED_METHODS[k]
+		if no then
+			local inner = fn
+			fn = function(client, ...)
+				if not Authorized(client) then
+					if no == "false" then return false, "unauthorized" end
+					return nil, "unauthorized"
+				end
+				return inner(client, ...)
+			end
+		end
+		methods[k] = Method(c, fn)
+	end
 	c.handle = setmetatable({}, { __index = methods, __newindex = ReadOnly, __metatable = false })
 	return c
 end

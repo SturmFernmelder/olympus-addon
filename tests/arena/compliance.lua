@@ -725,7 +725,7 @@ test("1.2.0 the gate: the Wallet's, the banks' and a debt's fee actions wait for
 	eq(C.Action("wallet.deposit"), true, "the switch on (2.0)"); eq(C.Action("bank.open"), true)
 end)
 
-test("1.2.0 package: the companion without the files bets-only.txt names (the lab's animal lottery) loads clean through the core; the Lottery's practice and Bones are there", function()
+test("1.2.0 package: the Olympus Arena module without the files bets-only.txt names (the lab's animal lottery) loads clean through the core; the Lottery's practice and Bones are there", function()
 	local without = {}
 	for _, path in ipairs(BetsOnly()) do
 		local inArena = path:match("^Olympus_Arena/(.+%.lua)$")

@@ -114,9 +114,7 @@ WC.MAX_SEQ = 2147483647
 -- The game's own chat windows: off this switch and nothing of the game's is ever touched (the
 -- in-game taint check decides; the README then says the game's window keeps what it showed).
 WC.GAME_CHAT = true
--- Severe insults blocked at send: EMPTY until an approved word list is supplied.
--- Each entry: [folded word] = category. Nothing is blocked while it is empty.
-WC.SEVERE = {}
+-- (The words refused at send are the chat warnings' list now: ChatStrikes.lua, WatchChat.RefuseSevere.)
 WC.CATEGORIES = { "filtered", "timeout", "deleted", "severe" }
 
 local LADDER = ns.Watch and not ns.Watch.missing and ns.Watch.TIMEOUTS or { 0, 3600, 86400, 604800 }
@@ -1098,12 +1096,30 @@ function WC.TellTimeout(e, force)
 	return true
 end
 
--- Channels.Send, ChatRooms.Send, ArenaChat.Send: refused while timed out, and told why.
-function WC.RefuseSend()
+-- What keeps this character out of Olympus's chats now: "timeout" and a moderator's timeout (the
+-- one in force), "paused" and a chat warning's block (ChatStrikes.Block: a pause, or a hold until
+-- the team decides), or nil. The timeout first: it is the one he is told of and may appeal.
+function WC.ChatBlock()
 	local e = WC.SelfTimeout()
-	if not e then return nil end
-	WC.TellTimeout(e)
-	return e
+	if e then return "timeout", e end
+	local S = Live(ns.ChatStrikes)
+	local b = S and S.Block and S.Block()
+	if b then return "paused", b end
+	return nil
+end
+
+-- Channels.Send, Channels.SetPin, ChatRooms.Send, ArenaChat.Send: refused while timed out or a chat
+-- warning's block is on, and told why. The block and why ("timeout" or "paused"), or nil.
+function WC.RefuseSend()
+	local why, b = WC.ChatBlock()
+	if why == "timeout" then
+		WC.TellTimeout(b)
+		return b, why
+	elseif why == "paused" then
+		ns.ChatStrikes.TellBlock(b)
+		return b, why
+	end
+	return nil
 end
 
 -- Every other surface a sanction bars (WatchChat.Barred): what he cannot do, and until when.
@@ -1249,6 +1265,12 @@ local function Apply(a)
 		end
 	end
 	s.applied[id] = a.at
+	-- (The author, 2026-10-19.) An Olympus moderator's timeout on a player held by a chat warning
+	-- decides his case (ChatStrikes.Decided): the hold gives way to it. Never a guild's, nor a lift.
+	if a.op == "T" and a.scope == "O" and (tonumber(a.weight) or 0) >= LEVEL.mod then
+		local S = Live(ns.ChatStrikes)
+		if S and S.Decided then S.Decided("T", a.target, a.at, a.by) end
+	end
 	Record(a, words)
 	-- The punished player's own client: told; and, of a guild action, his own word on the channel.
 	if ns.me and Same(a.target, ns.me) and a.scope ~= "S" then
@@ -2134,24 +2156,16 @@ function WC.BlockedCounts(name)
 	return out, total
 end
 
--- The severe-insult block at send (empty until a word list is approved): whole
--- words, folded as the block terms fold them (Filter.WordsOf). Its category, or nil.
-function WC.Severe(text)
-	if next(WC.SEVERE) == nil then return nil end
-	local F = Live(ns.Filter)
-	for _, w in ipairs(F and F.WordsOf and F.WordsOf(text) or {}) do
-		if WC.SEVERE[w] then return WC.SEVERE[w] end
-	end
-	return nil
-end
-
--- Channels.Send, ChatRooms.Send: such a line is refused, the player told, and it is counted.
-function WC.RefuseSevere(text)
-	local cat = WC.Severe(text)
-	if not cat then return nil end
-	if ns.me then WC.CountBlocked(ns.me, "severe") end
-	ns.Print(Red(L.WATCHCHAT_SEVERE_REFUSED))
-	return cat
+-- The chat warnings' words (ChatStrikes.lua; its list ships empty: nothing is refused until the
+-- author adds the approved words) in what this character typed, before anything leaves
+-- (Channels.Send, Channels.SetPin, ChatRooms.Send, ArenaChat.Send): "severe" when refused (he was
+-- told, the line counted here among the blocked ones, never its words, and a warning given), or
+-- nil and the line to send: the raw line, or without its quote of another's line when only the
+-- quote holds such a word.
+function WC.RefuseSevere(raw, where)
+	local S = Live(ns.ChatStrikes)
+	if not S or not S.Refuse then return nil end
+	return S.Refuse(raw, where)
 end
 
 ---------------------------------------------------------------------------
@@ -2524,10 +2538,13 @@ function WC.Named(data, input, on)
 	return true
 end
 
--- The Chat tab's input hint and strip while timed out.
+-- The Chat tab's input hint and strip while timed out, or while a chat warning's block is on.
 function WC.StripText()
 	local e = WC.SelfTimeout()
-	if not e then return nil end
+	if not e then
+		local S = Live(ns.ChatStrikes)
+		return S and S.StripText and S.StripText() or nil
+	end
 	if (tonumber(e.untilAt) or 0) == 0 then return L.WATCHCHAT_STRIP_HOLD:format(WC.RoleText(e.role, true)) end
 	return L.WATCHCHAT_STRIP:format(Hour(e.untilAt), WC.RoleText(e.role, true))
 end
@@ -2584,7 +2601,8 @@ function WC.PageShown()
 	local V = Preview()
 	if V then return (W ~= nil and W.DeskShown and W.DeskShown() == true) or (V.Allows and V.Allows("judgments") == true) or false end
 	if not ns.IsMember() or WC.Barred("powers") then return false end
-	return (W ~= nil and W.DeskShown and W.DeskShown() == true) or CouncilSide()
+	-- (The Olympus moderators named too, since the chat warnings: their cases are here.)
+	return (W ~= nil and W.DeskShown and W.DeskShown() == true) or CouncilSide() or WC.InRoom(ns.me)
 end
 
 local function TimeoutRows(lines)
@@ -2742,6 +2760,9 @@ function WC.PageLines()
 	lines[#lines + 1] = { header = true, text = "|TInterface\\Icons\\INV_Misc_Eye_01:0|t " .. L.WATCHCHAT_PAGE }
 	lines[#lines + 1] = { text = Grey(L.WATCHCHAT_PAGE_SCOPE), gapAfter = true }
 	TimeoutRows(lines)
+	-- The chat warnings' cases sent to the team (ChatStrikes.Rows).
+	local S = Live(ns.ChatStrikes)
+	if S and S.Rows and WC.InRoom(ns.me) then S.Rows(lines) end
 	if desk and OwnGuild() then WatcherRows(lines) end
 	if CouncilSide() then
 		ModRows(lines)
@@ -2933,9 +2954,13 @@ ns.On("DATA_CHANGED", function() if #held > 0 then WC.RetryHeld() end end)
 ns.On("LOGIN", function()
 	WC.Prune()
 	if ns.Every then ns.Every(60, "chat moderation", function() WC.Tick() end) end
-	-- Told at login while a timeout is on him (once the guild and the lists are known).
+	-- Told at login while a timeout is on him (once the guild and the lists are known), or while
+	-- a chat warning's hold waits for the team.
 	WC.after(30, "chat moderation notice", function()
 		local e = WC.SelfTimeout()
-		if e then WC.TellTimeout(e, true) end
+		if e then WC.TellTimeout(e, true) return end
+		local S = Live(ns.ChatStrikes)
+		local b = S and S.Block and S.Block()
+		if b and b.kind == "hold" then S.TellBlock(b, true) end
 	end)
 end)

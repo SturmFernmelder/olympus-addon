@@ -13,9 +13,10 @@ printf 'Checking Lua syntax...\n'
 check_tmp=$(mktemp -d)
 trap 'rm -rf "$check_tmp"' EXIT
 lua_files="$check_tmp/lua-files"
-lua_dirs="Olympus tests"
-[ -d Olympus_Arena ] && lua_dirs="Olympus Olympus_Arena tests" # (1.2: the Blood Arena's companion)
-find $lua_dirs -type f -name '*.lua' -print0 > "$lua_files"
+lua_dirs=(Olympus tests)
+[ -d Olympus_Arena ] && lua_dirs+=(Olympus_Arena) # (1.2: the Olympus Arena module)
+[ -d OlympusCompanionBridge ] && lua_dirs+=(OlympusCompanionBridge)
+find "${lua_dirs[@]}" -type f -name '*.lua' -print0 > "$lua_files"
 while IFS= read -r -d '' file; do
 	# Compile to a listing without executing addon code or writing bytecode files.
 	luajit -bl "$file" >/dev/null
@@ -33,11 +34,15 @@ else
 	printf 'python3 not found: Python checks skipped.\n'
 fi
 
-printf 'Checking files listed in Olympus/Olympus.toc...\n'
+printf 'Checking files listed in addon TOCs...\n'
 luajit - <<'LUA'
 local failed = false
--- (1.2: the Blood Arena's companion, Olympus_Arena/Olympus_Arena.toc, when the folder is there.)
-for _, pair in ipairs({ { "Olympus", "Olympus/Olympus.toc" }, { "Olympus_Arena", "Olympus_Arena/Olympus_Arena.toc" } }) do
+-- (1.2: the Olympus Arena module, Olympus_Arena/Olympus_Arena.toc, when the folder is there.)
+for _, pair in ipairs({
+	{ "Olympus", "Olympus/Olympus.toc" },
+	{ "Olympus_Arena", "Olympus_Arena/Olympus_Arena.toc" },
+	{ "OlympusCompanionBridge", "OlympusCompanionBridge/OlympusCompanionBridge.toc" },
+}) do
 	local toc = io.open(pair[2], "r")
 	if not toc and pair[1] == "Olympus" then
 		io.stderr:write("Cannot read " .. pair[2] .. "\n")

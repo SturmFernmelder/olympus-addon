@@ -3547,6 +3547,11 @@ function Watch.Slash(rest)
 		Watch.Show("chat")
 		if ns.UI and ns.UI.SelectTab then ns.UI.SelectTab("watch") end
 		return true
+	elseif verb == "strikes" or verb == "release" then
+		-- The chat warnings' cases sent to the team (ChatStrikes.lua): the open ones, or let one chat.
+		local S = ns.ChatStrikes
+		if not (S and S.Slash) or S.missing then return ns.Print(L.RESTART_NEEDED) end
+		return S.Slash(verb, arg)
 	elseif verb == "timeout" or verb == "purge" or verb == "watchers" or verb == "justice" or verb == "mods" then
 		-- 1.1.6: a timeout, his recent lines, the guild master's Watchers, the Olympus moderators.
 		local WC = ns.WatchChat

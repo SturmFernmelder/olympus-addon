@@ -182,6 +182,12 @@ separate from the 16 addons that may register data handles.
 | `"callbacks"`, and each event's name | `handle:On(...)` |
 | `"ui.surface"` | one page through `handle:RegisterSurface(...)` and its lifecycle methods |
 
+**Reserved features.** `"leader"`, `"network.sightings"` and `"network.sightings.area-scope"` are
+reserved for addons the Olympus team has authorized. `Has` still says whether this build has them.
+For any other addon, their methods return `nil` and `"unauthorized"` (`false` and `"unauthorized"`
+for the cancel and map methods), `On` returns `false` for `LEADER_CHANGED` and `SIGHTING_CHANGED`,
+and its line on the privacy page lists only what it can read.
+
 ### `OlympusAPI.Register(addonName)`
 
 Returns your addon's **handle**, or `nil` and a reason:
@@ -209,7 +215,8 @@ The name you registered.
 ### `handle:StartPlayerSearch(name)`
 
 Starts one short request-bound sighting search and returns its initial session, or `nil` and a
-reason. This is available only when `OlympusAPI.Has("network.sightings")`, after that addon's
+reason. This is a reserved feature, for an authorized addon only. It is available when
+`OlympusAPI.Has("network.sightings")`, after that addon's
 permission is granted by its own Yes or **Authorize all**,
 to a locally verified signed role allowed to operate guild tools. `name` must be one exact
 `Name-Realm`; Olympus does not run `/who`, inspect, target, invite, move, attack or otherwise act on
@@ -584,8 +591,9 @@ use, 1.2.5.1), it is `{ member = false }`, and `GetWanted` and `GetRankings` ret
 
 The federation leader's presence (the King on Olympus's pages), built field by field from what this
 player's own Olympus pages show: the leader lines on the Census and Realm tabs, the leader's crown on
-the map, and the Realm tab's layer list. Available when `OlympusAPI.Has("leader")`; it needs the same
-permission, Olympus guild and rate checks as `GetWanted`.
+the map, and the Realm tab's layer list. Available when `OlympusAPI.Has("leader")`, to an authorized
+addon only (a reserved feature); it needs the same permission, Olympus guild and rate checks as
+`GetWanted`.
 
 ```lua
 {
@@ -615,8 +623,8 @@ nor a population, the census or a movement history.
 
 ### `handle:On(event, fn)` and `handle:Off(event[, fn])`
 
-`On` adds a callback and returns `true` (`false` for an unknown event, a non-function, or past 4
-callbacks for that event). `Off` removes that callback, or every one of yours for the event
+`On` adds a callback and returns `true` (`false` for an unknown event, a non-function, a reserved
+event your addon is not authorized for, or past 4 callbacks for that event). `Off` removes that callback, or every one of yours for the event
 without `fn`.
 
 | Event | `fn(event, ...)` | When |
@@ -657,6 +665,7 @@ Every data method returns `nil` and a reason when it gives nothing:
 | `"guild"` | the player is in no Olympus guild, or has not accepted the Olympus Accord |
 | `"busy"` | more than 20 data calls from your addon in 10 seconds: wait, or use the callbacks |
 | `"kind"` | `GetRankings` was given an unknown kind |
+| `"unauthorized"` | a reserved feature's method, from an addon the Olympus team has not authorized (see `OlympusAPI.Has`) |
 | `"unavailable"` | this build does not provide the requested optional capability |
 | `"member"`, `"authority"` | the player is not a current member or their signed Olympus role cannot start that guild-tools request |
 | `"netoff"`, `"instance"` | network access is disabled for this player, or the player is currently in an instance |

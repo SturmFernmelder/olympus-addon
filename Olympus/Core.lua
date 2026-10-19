@@ -317,6 +317,11 @@ local function MergeChat(dst, src)
 	end
 end
 
+-- Keys of a store whose own file merges two copies of it: its Merge(dst's, src's) returns the one
+-- kept (the chat warnings' struck lines and hold, ChatStrikes.Merge: they have no time of their own,
+-- and the copy merged first would be kept whole).
+local MERGED_BY = { chatStrikes = "ChatStrikes" }
+
 -- Moves one store into another, losing nothing that is newer. Our own guild's report (`mine`)
 -- is kept like any other: an alt's own guild is a report nobody else may be sending. The
 -- realm key is settled by OpenStore, which sees every store at once.
@@ -343,7 +348,12 @@ local function MergeStore(dst, src)
 	for k, v in pairs(src) do
 		if k ~= "guilds" and k ~= "seen" and k ~= "inspect" and k ~= "chat" and k ~= "realmKey" then
 			local old = dst[k]
-			if old == nil or (type(v) == "table" and type(old) == "table" and (tonumber(v.t) or 0) > (tonumber(old.t) or 0)) then dst[k] = v end
+			local file = MERGED_BY[k] and rawget(ns, MERGED_BY[k])
+			local merge = type(file) == "table" and not file.missing and rawget(file, "Merge")
+			if old ~= nil and type(merge) == "function" then
+				local ok, merged = pcall(merge, old, v)
+				if ok and merged ~= nil then dst[k] = merged end
+			elseif old == nil or (type(v) == "table" and type(old) == "table" and (tonumber(v.t) or 0) > (tonumber(old.t) or 0)) then dst[k] = v end
 		end
 	end
 end
@@ -1781,6 +1791,7 @@ StandIn("Watch", { "Slash" }) -- 1.2: the guild-local moderation desk
 StandIn("Judgment", {}) -- 1.2: a case to the King, the High Council's votes, his final word
 StandIn("Church", { "Slash" }) -- 1.1.6: the Missionary Church of Olympus (Church.lua)
 StandIn("WatchChat", {}) -- 1.1.6: chat moderation (deleted lines, timeouts, sanctions' bars)
+StandIn("ChatStrikes", {}) -- the chat warnings: three in 24 hours (ChatStrikes.lua)
 StandIn("Wanted", { "SightingsSlash", "Slash" }) -- 1.2: the Horde Most Wanted ledger and its sightings (1.2.3: /oly wanted)
 StandIn("Board", { "Slash" }) -- (1.1: the Board)
 StandIn("Week", {}) -- (1.1: the King's week)
@@ -2006,7 +2017,7 @@ ns.RegisterEvent("PLAYER_LOGIN", function()
 	local missing = {}
 	-- (1.2: the file of a key named otherwise: the Blood Arena's core is ArenaNet.lua.)
 	local FILES = { Arena = "ArenaNet.lua" }
-	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees" }) do
+	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes" }) do
 		if ns[key].missing then missing[#missing + 1] = FILES[key] or (key .. ".lua") end
 	end
 	if ns.Gate.missing then missing[#missing + 1] = "Gamepad.lua" end -- (1.1.5, the gamepad gate)

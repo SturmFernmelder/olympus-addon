@@ -1635,7 +1635,9 @@ and its bounties, the public rankings (the Slayers, the Church's top three, the 
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
 title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
 show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
-and his zone's layers with their "~N with Olympus" counts while you are there). An addon that asks gets its own line on the privacy
+and his zone's layers with their "~N with Olympus" counts while you are there). The King's
+presence and the player-sighting searches below are reserved for addons the Olympus team has
+authorized; any other addon is asked only about the rest. An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
 (`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
 send nothing. A compatible addon can also let an authorized player start a short exact-name
@@ -1820,6 +1822,8 @@ message (the game adds it). What goes where:
 | A claim on a request, and the two parties' words after it (1.2): your guild, the terms (the price, the rail, how it is paid), the start, the delivery (quantity, price and how), the confirmation, a cancel, a dispute | the other party alone (logged whispers) | when you claim, propose or confirm terms, start, deliver, confirm, cancel or dispute |
 | A request's private chat (1.2): your lines | the other party alone (logged whispers) | when you write in it |
 | A line in a role room (1.2.4): your words, your guild | one logged whisper to each member of that room your addon verifies (40 at most; the Church's rooms 30, heard online), and the author's character in every room but the High Council's and the Secretariat's while his presence is heard | when you write one, with the rooms' consent on |
+| Your chat-warning report: the lines Olympus refused to send (up to 5, 140 bytes each around the word), the matched words, when, which chat, your guild | The moderation team online: the author while online, the King, the High Council, the Olympus moderators. By logged whisper | From your third warning in 24 hours, again until each one's client confirms (3 tries each), and again to one who says he no longer has it. Kept 30 days on their clients and on yours. |
+| A chat-warning decision: your character's name and that your block was lifted or a timeout given | Your client, the characters you linked, and the team online, by logged whisper (a timeout as today's moderator timeout) | When a moderator decides, again until each one's client confirms (3 tries each), and when your blocked client asks. |
 | The guild-mediated rail and a dispute's review (1.2): the parties, the item, quantity and price, what reached the custodian, a dispute's reason and its verdict | the custodian (the treasury keeper who holds the goods and the gold), the reviewer the parties put the dispute to, and the parties (logged whispers) | while that deal or its dispute is open |
 | Your word of a direct sale to the guild's fee desk (1.2): the request, the buyer's and the seller's names, the price, the item and quantity, the seller's guild | the Treasurer's characters alone (logged whispers), from the buyer's addon and the seller's | when the buyer confirms the sale, when it completes, or 3 days after a sale the buyer never confirmed; again each 30 minutes while the seller's fee is open; only while a Treasurer's character's addon is heard online |
 | The fee desk's answer (1.2): the fee, what was paid, its deadline, and whether it is due, paid or waived | that party alone (a whisper from the Treasurer's character) | once for each word of a sale |
@@ -2087,6 +2091,7 @@ few characters working together can still reach is said plainly further down
   time more than a minute ahead of the server's clock refused, and each player can ignore it.
   Its words are 4 letters at least and it never hides the King's writs (1.1, Konig's review:
   one editor adding "the" or "de" could hide nearly every decree and writ for everyone).
+  Blocked words for chat warnings are a separate built-in list.
 
 ### What colluding characters can reach
 
