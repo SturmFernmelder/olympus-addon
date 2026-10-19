@@ -15,7 +15,7 @@ local L = ns.L
 -- Treasury.Consent, King's OnInspect, Workshop.Answers, Channels.ChatOn, Inspect.Sharing).
 -- The page also says what always goes out once the Olympus Accord (Accord.lua, 1.2.5.1) was
 -- accepted, while the player is in an Olympus guild (the census the elected member sends, names
--- included, the hello, and the BattleTag to the moderation team alone), so it never promises that
+-- included, the hello, and the BattleTag to the moderation team alone in game), so it never promises that
 -- nothing does; until the Accord is accepted this page never shows (Consent.Ask, ns.IsMember). The window works whatever the answers: the census, the Realm and
 -- the player's own guild roster need none of them, location included.
 -- `/oly privacy` opens it again to change any answer; each answer also has its own command.

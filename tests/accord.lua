@@ -829,6 +829,10 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 		assert(pt.ACCORD_T5_3:find(must, 1, true), "pt-BR ACCORD_T5_3: " .. must)
 	end
 	assert(en.ACCORD_TAG_TO:find("staff", 1, true) and pt.ACCORD_TAG_TO:find("staff", 1, true), "the band's note says staff too")
+	-- The privacy page that opens right after I accept (Consent.lua) says the same: the moderation
+	-- team alone in game, as with the Companion (the letter's T5_3) the online census gets it too.
+	assert(en.CONSENT_INTRO:find("And in game, your BattleTag goes privately to the moderation team alone", 1, true), "the privacy page: in game")
+	assert(pt.CONSENT_INTRO:find("E no jogo a sua BattleTag vai em privado apenas para a equipe de moderação", 1, true), "pt-BR privacy page: no jogo")
 	-- Each topic's bullets are the letter's (Accord.TOPICS), in both languages: none past its count.
 	for _, t in ipairs(ns.Accord.TOPICS) do
 		for _, lang in ipairs({ en, pt }) do

@@ -24,7 +24,7 @@ local L = ns.L
 -- King's screen (Stream: his character, any character of his game account once it was seen
 -- there, his preview) no part of it, with no Show (he streams).
 --
--- Who gets it: the moderation team alone (WatchChat.InRoom: the author, the King, the High
+-- Who gets it in game: the moderation team alone (WatchChat.InRoom: the author, the King, the High
 -- Council and the Olympus moderators they named). A team member's client asks on the Olympus
 -- channel (BQ, ASK_FIRST after login, then every ASK_EVERY); each player's client that accepted
 -- answers that one asker by a logged whisper (BT), after a random delay, at most once every
