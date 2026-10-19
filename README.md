@@ -2162,7 +2162,9 @@ and its bounties, the public rankings (the Slayers, the Church's top three, the 
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
 title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
 show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
-and his zone's layers with their "~N with Olympus" counts while you are there). An addon that asks gets its own line on the privacy
+and his zone's layers with their "~N with Olympus" counts while you are there). The King's
+presence and the player-sighting searches below are reserved for addons the Olympus team has
+authorized; any other addon is asked only about the rest. An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
 (`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
 send nothing. A compatible addon can also let an authorized player start a short exact-name
