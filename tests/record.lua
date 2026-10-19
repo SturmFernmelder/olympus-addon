@@ -419,12 +419,21 @@ test("record mode: the chain verifies; an edited line breaks it at that line; an
 					copy.lines[i] = line:gsub("|5|8|5|", "|6|8|6|", 1)
 					local good, at, why = R.Verify(copy)
 					eq(good, false); eq(at, i, why)
+					-- Marks and head left out are no way round it: every stored hash must be there.
+					copy.marks, copy.head = {}, nil
+					eq(select(3, R.Verify(copy)), "no mark for its line")
 					-- Every hash computed again (no secret goes in): the edit verifies. The chain proves
 					-- only what a head published at the time pins down (docs/RECORD-FORMAT.md, 7.1).
-					copy.marks, copy.head = {}, nil
-					local again, newHead = R.Verify(copy)
-					eq(again, true); copy.head = newHead
-					eq(R.Verify(copy), true); eq(newHead ~= s.head, true, "only its head differs from the published one")
+					local f = R.Split(copy.lines[1])
+					local again = R.Seed(f[5], f[3])
+					for k, v in ipairs(copy.lines) do
+						again = R.Link(again, v)
+						if v:find("^[SCZ]|") then copy.marks[#copy.marks + 1] = R.Mark(k, again) end
+					end
+					copy.head = again
+					local good2, newHead = R.Verify(copy)
+					eq(good2, true); eq(newHead, again)
+					eq(newHead ~= s.head, true, "only its head differs from the published one")
 				end
 			end
 		end
@@ -1162,4 +1171,108 @@ test("record mode: a session that repeats is kept once, by VerifyFile in one fil
 	for _, own in ipairs({ "Unbitmap", "Split", "Verify(", "Link", "Seed", "SHA256" }) do
 		eq(src:find(own, 1, true), nil, "record-check has no " .. own .. " of its own")
 	end
+end)
+
+-- A regression: the check read only the commitments a session had, and the last of two marks for one
+-- line, so a session with its marks, n and head left out, or with a wrong mark before the right one,
+-- verified; section 7 asks for every one of them, and every mark equal to its hash.
+test("record mode: Record.Verify refuses a session whose id, marks, n or head are left out, repeated or out of place; a wrong mark is found at its line even with the right one after it", function()
+	local R, sha = Sandboxed()
+	local function Edited(edit)
+		local s = SampleDb("record-sample.lua").sessions[1]
+		edit(s)
+		return R.Verify(s, sha)
+	end
+	local function Index(s, i)
+		for k, m in ipairs(s.marks) do
+			if m:match("^(%d+):") == tostring(i) then return k end
+		end
+	end
+	local function Hash(s, upto)
+		local f = R.Split(s.lines[1])
+		local h = R.Seed(f[5], f[3], sha)
+		for i = 1, upto do h = R.Link(h, s.lines[i], sha) end
+		return h
+	end
+	local zero = string.rep("0", 64)
+	local h5, h10 = Hash(SampleDb("record-sample.lua").sessions[1], 5), Hash(SampleDb("record-sample.lua").sessions[1], 10)
+	local function Is(edit, at, why, label)
+		local ok, a, b = Edited(edit)
+		eq(ok, false, label); eq(a, at, label); eq(b, why, label)
+	end
+	-- A wrong mark for line 13 before the right one, and after it.
+	Is(function(s) table.insert(s.marks, Index(s, 13), "13:" .. zero) end, 13, "its mark is not its hash", "a wrong mark first")
+	Is(function(s) table.insert(s.marks, Index(s, 13) + 1, "13:" .. zero) end, 13, "its mark is not its hash", "a wrong mark after")
+	Is(function(s) table.insert(s.marks, Index(s, 13), s.marks[Index(s, 13)]) end, 13, "two marks for one line", "the right mark twice")
+	-- Left out: each commitment alone, then marks, n and head together.
+	Is(function(s) s.marks = nil end, 0, "no marks")
+	Is(function(s) s.n = nil end, 0, "no n")
+	Is(function(s) s.head = nil end, 0, "no head")
+	Is(function(s) s.id = nil end, 0, "no id")
+	Is(function(s) s.marks, s.n, s.head = nil, nil, nil end, 0, "no marks", "marks, n and head left out")
+	Is(function(s) s.marks = {} end, 1, "no mark for its line", "an empty list of marks")
+	Is(function(s) table.remove(s.marks, Index(s, 13)) end, 13, "no mark for its line", "one mark left out")
+	-- Out of place: a right hash on an M line, two marks swapped, line 0, a line number written otherwise.
+	Is(function(s) table.insert(s.marks, 2, R.Mark(5, h5)) end, 5, "a mark on a line that is no S, C or Z line")
+	Is(function(s) s.marks[2], s.marks[3] = s.marks[3], s.marks[2] end, 10, "the marks are not in line order")
+	Is(function(s) table.insert(s.marks, 1, "0:" .. zero) end, 0, "a mark for line 0: 0:" .. zero)
+	Is(function(s) s.marks[Index(s, 10)] = "010:" .. h10 end, 0, "a mark that is no mark: 010:" .. h10)
+	Is(function(s) s.n = tostring(s.n) end, 0, "n is not the number of lines", "n as text")
+	-- The lines still come first: a line edited in a session with no head is found at its mark.
+	Is(function(s) s.head = nil; s.lines[15] = s.lines[15]:gsub("|Olympus Example|8|", "|Olympus Example|9|", 1) end, 15, "its mark is not its hash")
+	-- Untouched, it verifies, and VerifyFile refuses the file of any of them.
+	eq(Edited(function() end), true)
+	local db = SampleDb("record-sample.lua")
+	db.sessions[1].head = nil
+	local r = R.VerifyFile(db, sha)
+	eq(r.ok, false); eq(r.sessions[1].ok, false); eq(r.sessions[1].brokenAt, 0); eq(r.sessions[1].why, "no head")
+end)
+
+-- A regression: the copy's hash left out the stored id, and a stored id that is no text fell back to
+-- the S line's, so a copy that differed from the genuine one only by such an id was its exact repeat:
+-- the first file's copy was kept, counted or not by the order of the files, and no conflict was told.
+test("record mode: a copy whose stored id is no text is not the genuine copy: VerifyFile and record-check leave both out, whatever the order", function()
+	local R, sha = Sandboxed()
+	local genuine = SampleDb("record-sample.lua")
+	local odd = SampleDb("record-sample.lua")
+	odd.sessions[1].id = 12345
+	eq(R.Verify(odd.sessions[1], sha), false, "(the odd copy alone is refused)")
+	local both = Copied(genuine)
+	both.sessions[2] = Copied(odd.sessions[1])
+	local r = R.VerifyFile(both, sha)
+	eq(r.ok, false); eq(r.duplicates, 0); eq(#r.conflicts, 1); eq(r.conflicts[1].id, genuine.sessions[1].id)
+	eq(#r.sessions, 2); eq(r.sessions[1].ok, false); eq(r.sessions[2].ok, false)
+	eq(r.sessions[1].copy ~= r.sessions[2].copy, true)
+	local C = assert(loadfile(ROOT .. "scripts/record-check.lua"))("--module")
+	local CR = C.Load()
+	for _, order in ipairs({ { { "day1", genuine }, { "day2", odd } }, { { "day2", odd }, { "day1", genuine } } }) do
+		local all = {}
+		for _, pair in ipairs(order) do
+			for _, e in ipairs(C.Sessions(CR, pair[2], pair[1])) do all[#all + 1] = e end
+		end
+		local kept, conflicts = C.Dedupe(all)
+		eq(#kept, 0, "neither copy counted, " .. order[1][1] .. " first"); eq(#conflicts, 1)
+		eq(table.concat(conflicts[1].files, ","), order[1][1] .. "," .. order[2][1])
+	end
+	-- Any stored value the check tells apart makes another copy: n as a number and as text.
+	local text = SampleDb("record-sample.lua")
+	text.sessions[1].n = tostring(text.sessions[1].n)
+	eq(R.VerifyFile(text, sha).sessions[1].copy ~= R.VerifyFile(genuine, sha).sessions[1].copy, true)
+end)
+
+-- A regression: VerifyFile leaves out a session that repeats an earlier one in the same file, and
+-- record-check then printed only the sessions kept, so a file of one session written twice showed one
+-- session and nothing else.
+test("record mode: record-check says how many exact repeats of a session it left out of a file", function()
+	local db = SampleDb("record-sample.lua")
+	db.sessions[2] = Copied(db.sessions[1])
+	local path = os.tmpname()
+	WriteFile(path, SavedFile({ { "OlympusRecordDB", db } }))
+	local pipe = assert(io.popen(("%s %sscripts/record-check.lua %s; echo \"exit=$?\""):format((arg and arg[-1]) or "luajit", ROOT, path)))
+	local out = pipe:read("*a")
+	pipe:close()
+	os.remove(path)
+	assert(out:find(path .. ": 1 session(s), 1 exact repeat(s) left out\n", 1, true), out)
+	assert(out:find("chain OK, head " .. DOC_HEAD.A, 1, true), out)
+	assert(out:find("exit=0", 1, true), out)
 end)

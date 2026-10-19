@@ -135,13 +135,19 @@ end
 local function Line(...) return table.concat({ ... }, "|") end
 
 -- A written session's chain, computed again from its seed: { ok, at, why, first, last, count }. ok
--- when its lines are an S line, then no S or Z line, then one Z line last, and every stored hash
--- (marks, head), n and id is what its lines give; else at and why are the first fault found (at 0:
--- the session itself). The lines are hashed first and n is compared after them, so a line removed
--- or moved is found at the first mark after it. first and last are the hashes after line 1 and
--- after the last line, from the lines as they are, whatever else is wrong (nil when line 1 is no S
--- line or a line is no text); count is the number of lines. (A session is written only after its Z
--- line and all its hashes: a logout, an off, a change of guild or a full file ends it first.)
+-- when its lines are an S line, then no S or Z line, then one Z line last, and every stored
+-- commitment is there and is what its lines give (docs/RECORD-FORMAT.md, section 7): the id; one
+-- mark for each S, C and Z line and for no other, in line order, each written as Record.Mark
+-- writes it; n; and the head. Else at and why are the first fault found (at 0: the session
+-- itself). The lines are hashed first, and a mark that is not its line's hash is found before a
+-- mark missing, repeated, out of order or on another line, and before n and the head, so a line
+-- edited, removed or moved is found at the first mark after it. first and last are the hashes
+-- after line 1 and after the last line, from the lines as they are, whatever else is wrong (nil
+-- when line 1 is no S line or a line is no text); count is the number of lines. (A session is
+-- written only after its Z line and all its hashes: a logout, an off, a change of guild or a full
+-- file ends it first.) Copy below hashes everything this reads, so two sessions with one copy
+-- always check the same.
+local MARKED = { ["S|"] = true, ["C|"] = true, ["Z|"] = true }
 local function Check(s, sha)
 	local r = { ok = true, count = 0 }
 	local function Fault(at, why)
@@ -159,11 +165,30 @@ local function Check(s, sha)
 		return r
 	end
 	local f = Record.Split(first)
-	if s.id ~= nil and s.id ~= Record.Id(f[5], f[3]) then Fault(0, "the id is not the S line's GUID and start") end
-	local marks = {}
+	if s.id == nil then
+		Fault(0, "no id")
+	elseif s.id ~= Record.Id(f[5], f[3]) then
+		Fault(0, "the id is not the S line's GUID and start")
+	end
+	-- marks[i]: the hashes stored for line i, in the file's order; order: each mark's line, likewise.
+	local marks, order = {}, {}
+	if type(s.marks) ~= "table" then Fault(0, "no marks") end
 	for _, m in ipairs(type(s.marks) == "table" and s.marks or {}) do
 		local i, hash = Record.ReadMark(m)
-		if i then marks[i] = hash else Fault(0, "a mark that is no mark: " .. tostring(m)) end
+		if not i or m ~= Record.Mark(i, hash) then
+			Fault(0, "a mark that is no mark: " .. tostring(m))
+		elseif i < 1 then
+			Fault(0, "a mark for line 0: " .. m)
+		else
+			marks[i] = marks[i] or {}
+			marks[i][#marks[i] + 1] = hash
+			order[#order + 1] = i
+		end
+	end
+	-- (The faults of the marks' places, found after the hashes.)
+	local later
+	local function Later(at, why)
+		if not later then later = { at = at, why = why } end
 	end
 	local h = Record.Seed(f[5] or "", f[3] or "", sha)
 	for i = 1, n do
@@ -178,15 +203,42 @@ local function Check(s, sha)
 		if i == n and kind ~= "Z|" then Fault(i, "the last line is no Z line") end
 		h = Record.Link(h, line, sha)
 		if i == 1 then r.first = h end
-		if marks[i] and marks[i] ~= h then Fault(i, "its mark is not its hash") end
-		marks[i] = nil
+		local stored = marks[i]
+		if stored then
+			for _, hash in ipairs(stored) do
+				if hash ~= h then Fault(i, "its mark is not its hash") end
+			end
+			if not MARKED[kind] then
+				Later(i, "a mark on a line that is no S, C or Z line")
+			elseif #stored > 1 then
+				Later(i, "two marks for one line")
+			end
+			marks[i] = nil
+		elseif MARKED[kind] then
+			Later(i, "no mark for its line")
+		end
 	end
 	r.last = h
 	local past
 	for i in pairs(marks) do past = math.min(past or i, i) end
 	if past then Fault(past, "a mark past the last line") end
-	if s.n ~= nil and tonumber(s.n) ~= n then Fault(0, "n is not the number of lines") end
-	if s.head ~= nil and s.head ~= h then Fault(n, "the head is not the hash of line n") end
+	if later then Fault(later.at, later.why) end
+	for k = 2, #order do
+		if order[k] <= order[k - 1] then
+			Fault(order[k], "the marks are not in line order")
+			break
+		end
+	end
+	if s.n == nil then
+		Fault(0, "no n")
+	elseif s.n ~= n then
+		Fault(0, "n is not the number of lines")
+	end
+	if s.head == nil then
+		Fault(0, "no head")
+	elseif s.head ~= h then
+		Fault(n, "the head is not the hash of line n")
+	end
 	return r
 end
 
@@ -198,21 +250,26 @@ function Record.Verify(s, sha)
 	return false, r.at, r.why
 end
 
--- The copy of a session as stored (its lines, marks, n and head) as one hash: two copies of one
+-- The copy of a session as stored (its lines, marks, n, head and id) as one hash: two copies of one
 -- session, in one file or in two, are the same when it is (docs/RECORD-FORMAT.md, section 8,
--- step 3). The lines enter by their chain's last hash, which already covers each of them.
+-- step 3). The lines enter by their chain's last hash, which already covers each of them; every
+-- other value with its type and length, so that no two values Check tells apart give one copy.
+local function Stored(v)
+	local text = tostring(v)
+	return type(v) .. ":" .. #text .. ":" .. text
+end
 local function Copy(s, r, sha)
 	local t = type(s) == "table" and s or {}
-	local parts, marks = { "olympus-record-copy" }, {}
+	local parts, marks = { "olympus-record-copy" }, { type(t.marks) }
 	if r.last then
 		parts[2] = r.last .. "|" .. r.count
 	else
-		local text = {}
-		for i, line in ipairs(type(t.lines) == "table" and t.lines or {}) do text[i] = type(line) .. ":" .. tostring(line) end
+		local text = { type(t.lines) }
+		for _, line in ipairs(type(t.lines) == "table" and t.lines or {}) do text[#text + 1] = Stored(line) end
 		parts[2] = table.concat(text, "\n")
 	end
-	for i, m in ipairs(type(t.marks) == "table" and t.marks or {}) do marks[i] = tostring(m) end
-	parts[3], parts[4], parts[5] = tostring(t.n), tostring(t.head), table.concat(marks, ",")
+	for _, m in ipairs(type(t.marks) == "table" and t.marks or {}) do marks[#marks + 1] = Stored(m) end
+	parts[3], parts[4], parts[5], parts[6] = Stored(t.n), Stored(t.head), table.concat(marks, ","), Stored(t.id)
 	return Record.Hash(table.concat(parts, "\n"), sha)
 end
 

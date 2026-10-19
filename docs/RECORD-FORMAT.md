@@ -104,13 +104,14 @@ the player is still in the guild (`IsInGuild()` is true), and record mode waits.
 | `char` | string | the character, `Name-Realm`, a convenience copy of S field 4 |
 | `start` | number | the session's start in server time, a convenience copy of S field 3 |
 | `lines` | array of strings | **the records**, in order. These are the only chained data |
-| `marks` | array of strings | `"<i>:<hash>"`: the chain's hash after line `i`, stored for every S, C and Z line |
+| `marks` | array of strings | `"<i>:<hash>"`: the chain's hash after line `i`, stored for every S, C and Z line and no other, in line order (`i` in decimal, no leading zero) |
 | `head` | string | the chain's hash after line `n` (64 lowercase hex digits) |
-| `n` | number | how many lines `head` covers. It equals `#lines` in every written file, because a session is hashed in full when it ends; any other `n` is refused |
+| `n` | number | how many lines `head` covers. It equals `#lines` in every written file, because a session is hashed in full when it ends; any other `n`, or none, is refused |
 | `ended` | number | the server time of the Z line |
 
-Only `lines` is evidence. `marks`, `head` and `n` are commitments that the verifier recomputes
-and compares. Everything else is a convenience and must agree with the lines.
+Only `lines` is evidence. `id`, `marks`, `head` and `n` are commitments that the verifier
+recomputes and compares: a session that lacks any of them is refused. Everything else is a
+convenience and must agree with the lines.
 
 ## 5. Lines
 
@@ -271,12 +272,17 @@ members {1..7, 9}         -> "fe8"
 - **Stored.** `head = h_n` with `n = #lines`. `marks` holds `"i:h_i"` for every S, C and Z line.
 - **Check.** Recompute every `h_i`. The session is valid when line 1 is its only S line, the
   last line is its only Z line, `n` equals `#lines`, every mark equals its `h_i`, `head` equals
-  `h_n`, and `id` equals `S[5] .. ":" .. S[3]`. A line after the Z line is refused even when
-  every hash was computed again for it. Marks exist only for S, C and Z
-  lines, so the first mark that differs, at line `i`, places the change after the previous
-  mark's line and at or before line `i`. An M or E line edited after the last C line breaks
-  only the Z mark and `head`. A line removed or moved is found in the same way, at the first
-  mark after it: compare the marks before `n`, since a removed line also changes `n`.
+  `h_n`, and `id` equals `S[5] .. ":" .. S[3]`. Each of `id`, `marks`, `n` and `head` must be
+  present, and `marks` must hold exactly one mark for each S, C and Z line, none for any other
+  line, in line order, each written `i:h_i` with `i` in decimal and no leading zero: a mark left
+  out, repeated, out of order, on an M or E line or for line 0 is refused, and so is a wrong mark
+  even when the right one for the same line is also there. A line after the Z line is refused
+  even when every hash was computed again for it. Marks exist only for S, C and Z lines, so the
+  first mark that differs, at line `i`, places the change after the previous mark's line and at
+  or before line `i`. An M or E line edited after the last C line breaks only the Z mark and
+  `head`. A line removed or moved is found in the same way, at the first mark after it: compare
+  each mark with its hash before the marks' places, `n` and `head`, since a removed line also
+  moves the S, C and Z lines away from their marks and changes `n`.
 
 Vectors (checked against Python's `hashlib`):
 
@@ -336,11 +342,11 @@ It does not prove:
 2. For each session, check the chain (section 7). Report the first broken line, and keep a
    broken session out of the counts.
 3. Deduplicate sessions by `id` across files. Copies with the same `id` must be identical: the
-   same lines, `marks`, `n` and `head`. Flag any that are not, whatever the files' order, and keep
-   every copy of that `id` out of the counts. (The game writes a session's marks with its lines,
-   so two genuine copies always have the same marks. A copy with only its marks edited has a
-   broken chain; without this rule, whether the session counted would depend on which file came
-   first.)
+   same lines, `marks`, `n`, `head` and stored `id`, each of the same type. Flag any that are not,
+   whatever the files' order, and keep every copy of that `id` out of the counts. (The game writes
+   a session's marks with its lines, so two genuine copies always have the same marks. A copy
+   with only its marks, `n`, `head` or `id` edited is refused by the check in section 7; without
+   this rule, whether the session counted would depend on which file came first.)
 4. Rebuild each session's dictionary from its M lines (`number -> name|GUID`), and each
    member's level from the M lines and the C lines' field 12.
 5. Decode each C line's fields 10 and 11 into sets of `name|GUID`.
@@ -378,7 +384,9 @@ It does not prove:
 
 `luajit scripts/record-check.lua FILE...` already does steps 1 to 7 for the quarter hours, with
 `Record.VerifyFile` and `Record.Dedupe` (section 8.1) for steps 1 to 5. It counts each witness
-once, prints each reading's `at − slot` and lists readings more than 30 s after the slot apart. It
+once, prints each reading's `at − slot` and lists readings more than 30 s after the slot apart. A
+session that repeats an earlier one exactly in the same file is listed once, and the file's line
+says how many repeats were left out; copies in one file that differ are each listed as such. It
 exits 1 when a chain breaks or two copies of one session differ.
 
 ### 8.1 The check in Lua: `Record.VerifyFile`
@@ -419,7 +427,7 @@ Each session:
 
 | Field | Meaning |
 |---|---|
-| `id` | the stored `id`; when there is none, `S[5] .. ":" .. S[3]` |
+| `id` | the stored `id`; when it is not text, `S[5] .. ":" .. S[3]` (the session is then not `ok`) |
 | `character` | S field 4, `Name-Realm` |
 | `witness` | S field 5, the witness's GUID |
 | `guild` | S field 6 |
@@ -429,9 +437,9 @@ Each session:
 | `firstHash` | `h_1`, the chain's hash after the S line (its mark `1:...`) |
 | `lastHash` | `h_n`, computed again from the lines as they are, even in a broken session. It is the value to compare with a head published at the time, and equals `head` when `ok` |
 | `ok` | the chain and every stored commitment agree (section 7) and no other copy in the file differs |
-| `brokenAt` | when not `ok` because of the session itself: the first line found wrong, or `0` for the session's own fields (no `lines`, a wrong `id` or `n`, a mark that is not `i:hash`). `nil` when only the copies differ |
+| `brokenAt` | when not `ok` because of the session itself: the first line found wrong, or `0` for the session's own fields (no `lines`; no `id`, `marks`, `n` or `head`; a wrong `id` or `n`; a mark that is not `i:hash` as section 7 writes it, or one for line 0). `nil` when only the copies differ |
 | `why` | when not `ok`: the reason, with the line, such as `"line 15: its mark is not its hash"` |
-| `copy` | a hash of the copy as stored (its lines, `marks`, `n` and `head`). Two sessions with one `id` are the same copy when their `copy` is equal |
+| `copy` | a hash of the copy as stored (its lines, `marks`, `n`, `head` and `id`, each with its type). Two sessions with one `id` are the same copy when their `copy` is equal, and then they check the same |
 | `observations` | each C and E line, in order (below) |
 | `roster` | `[checkpoint] = { present = {...}, online = {...}, presentKeys = {...}, onlineKeys = {...} }` |
 
@@ -539,4 +547,7 @@ ways without a new version:
   and only readings within 30 s of the slot make the figure at one instant (8, steps 7 and 8);
 - copies of one session must also have the same `marks` (8, step 3), and the check compares
   `n` after the marks, so a removed line is found at the first mark after it (7). The check is
-  available in Lua as `Record.VerifyFile` (8.1).
+  available in Lua as `Record.VerifyFile` (8.1);
+- the check refuses a session with no `id`, `marks`, `n` or `head`, and requires exactly one mark
+  per S, C and Z line in line order (7); copies of one session must also have the same stored
+  `id`, of the same type (8, step 3).

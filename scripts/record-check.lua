@@ -158,7 +158,8 @@ end
 M.BOUND = 30
 
 -- Each session of a parsed file, as Record.VerifyFile reads it: { id, char, guild, tag, file, ok,
--- head, n, at, why, lines, copy, checkpoints = { ... } }. A checkpoint: { guild, kind, slot, at,
+-- head, n, at, why, lines, copy, checkpoints = { ... } }; then why the file is refused, if it is, and
+-- how many exact repeats of a session in it were left out. A checkpoint: { guild, kind, slot, at,
 -- late, total, online, rows, rowsOnline, members, onlineSet } with the sets as sorted "name|GUID"
 -- lists and late = at - slot.
 function M.Sessions(R, db, file)
@@ -179,7 +180,7 @@ function M.Sessions(R, db, file)
 		end
 		out[#out + 1] = e
 	end
-	return out, result.why
+	return out, result.why, result.duplicates
 end
 
 -- The sessions of all files, each id once (Record.Dedupe): { kept, conflicts }. Copies of one id
@@ -299,8 +300,9 @@ for _, path in ipairs(arg) do
 		print(("%s: %s"):format(path, tostring(parsed)))
 		broken = broken + 1
 	else
-		local sessions, why = M.Sessions(R, parsed.OlympusRecordDB, path)
-		print(("%s: %d session(s)%s"):format(path, #sessions, why and (" (" .. why .. ")") or ""))
+		local sessions, why, repeats = M.Sessions(R, parsed.OlympusRecordDB, path)
+		print(("%s: %d session(s)%s%s"):format(path, #sessions, (repeats or 0) > 0 and (", %d exact repeat(s) left out"):format(repeats) or "",
+			why and (" (" .. why .. ")") or ""))
 		for _, e in ipairs(sessions) do
 			local when = os.date("!%Y-%m-%d %H:%M UTC", tonumber(e.start) or 0)
 			if e.ok then
