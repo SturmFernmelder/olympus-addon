@@ -45931,7 +45931,10 @@ do
 			-- 1.2.4: the ranking of the treasuries.
 			"TREASURY_RANK_HEAD", "TREASURY_RANK_TOTAL", "TREASURY_RANK_TIP", "TREASURY_RANK_FEDERAL", "TREASURY_RANK_ROW",
 			"TREASURY_RANK_NO_CORR", "TREASURY_RANK_DETAIL", "TREASURY_RANK_ATLEAST", "TREASURY_RANK_VALUE", "TREASURY_RANK_PENDING",
-			"TREASURY_RANK_UNPRICED", "TREASURY_RANK_CORR", "TREASURY_RANK_CORR_KEPT", "TREASURY_RANK_CORR_NONE", "TREASURY_GUILD_VALUE_TIP" }) do
+			"TREASURY_RANK_UNPRICED", "TREASURY_RANK_CORR", "TREASURY_RANK_CORR_KEPT", "TREASURY_RANK_CORR_NONE", "TREASURY_GUILD_VALUE_TIP",
+			-- 1.2.6: the relayed ranking totals (two authorized viewers' word, no bank behind them here).
+			"TREASURY_RANK_RELAY_BY", "TREASURY_RANK_RELAY_STATE", "TREASURY_RANK_RELAY_TIP", "TREASURY_RANK_DIR_TOTAL",
+			"TREASURY_RANK_DIR_TOTAL_TIP" }) do
 			assert(type(rawget(ns.L, key)) == "string", "English " .. key)
 			assert(type(rawget(pt.L, key)) == "string" and (same[key] or pt.L[key] ~= ns.L[key]), "Portuguese " .. key)
 			eq(select(2, pt.L[key]:gsub("%%[ds]", "")), select(2, ns.L[key]:gsub("%%[ds]", "")), key)
@@ -46350,6 +46353,53 @@ do
 			home = Find(lines, "[+] <Olympus>", total)
 			assert(home and lines[home + 1].text:find(ns.L.TREASURY_DIR_LEDGER:format(ns.L.TREASURY_DIR_LEDGER_HIDDEN), 1, true), Texts(lines))
 			assert(not Texts(lines):find(T.GoldText(r.balance), 1, true), "the balance nowhere: " .. Texts(lines))
+		end)
+	end)
+
+	-- 1.2.6 (the author's "todos os rankings precisam fazer o relay"): a guild's ranking total two
+	-- authorized viewers relayed (TY) joins the list without its bank. The total line said "All 3
+	-- banks" of rows that were not all banks any more: with bank snapshots alone it still says banks,
+	-- with a relayed row in it, treasuries, and its tip says no bank's contents came with that row.
+	test("1.2.6 Guild treasuries: a ranking total two authorized viewers relayed joins the list's total, which then says treasuries, never banks; its row opens no bank", function()
+		WithDirectory(function(w, K, Run)
+			local T, L = ns.Treasury, ns.L
+			local tabs = { { i = 1, name = "Tab 1", items = { { id = 2589, n = 60, s = 3 } } } }
+			AsKing()
+			Hear(Snap(w, "Olympus Zeus", "Zed-Realm", 424242, tabs, 3600), "Zed-Realm")
+			T.Show("summary")
+			local lines = T.Build()
+			assert(Find(lines, L.TREASURY_DIR_TOTAL:format(1)), "a bank snapshot alone: banks, as before: " .. Texts(lines))
+			assert(not Find(lines, L.TREASURY_RANK_DIR_TOTAL:format(1)), Texts(lines))
+			local wire = assert(T.RankRelayWire({ guild = "Olympus Ares", by = "Ares Lead-Realm", t = w.clock - 60, money = 300000,
+				units = 10, stacks = 2, value = 0, pending = 0, unpriced = 0, total = 300000, level = 50, home = false }))
+			-- (No realm group or faction yet, as before INIT: the row is refused, never an error.)
+			-- (This test's relayed rows in a store of its own: the saved one, as an earlier test left
+			-- it, is put back untouched at the end.)
+			local group, faction, relays = ns.group, ns.faction, ns.rdb.treasuryRankRelay
+			ns.group, ns.faction, ns.rdb.treasuryRankRelay = nil, nil, nil
+			local okNone, whyNone = T.HandleRankRelay("WHISPER", SAGE, wire)
+			eq(okNone, false); eq(whyNone, "store")
+			ns.group, ns.faction = "Realm", "Alliance"
+			local ok, err = pcall(function()
+				eq(ns.rdb.treasuryRankRelay, nil, "a refused row keeps nothing")
+				eq(select(2, T.HandleRankRelay("WHISPER", SAGE, wire)), "witness", "one viewer is no consensus")
+				assert(not Find(T.Build(), L.TREASURY_RANK_DIR_TOTAL:format(2)), "one witness shows nothing")
+				eq(select(2, T.HandleRankRelay("WHISPER", TREASURER, wire)), "accepted")
+				lines = T.Build()
+				local total = Find(lines, L.TREASURY_RANK_DIR_TOTAL:format(2))
+				assert(total, Texts(lines))
+				assert(not Find(lines, L.TREASURY_DIR_TOTAL:format(2)), "never 'All 2 banks' with a relayed row: " .. Texts(lines))
+				eq(lines[total].right, T.Coins(424242 + 300000), "the relayed row's gold in the total")
+				local tip = { lines = {} }
+				function tip:AddLine(text) self.lines[#self.lines + 1] = text end
+				lines[total].tooltip(tip)
+				eq(tip.lines[1], L.TREASURY_RANK_DIR_TOTAL:format(2)); eq(tip.lines[2], L.TREASURY_RANK_DIR_TOTAL_TIP)
+				local ares = KeyAt(lines, "sister:Olympus Ares")
+				assert(ares, Texts(lines))
+				assert(not lines[ares].text:find("[+] ", 1, true) and lines[ares].onClick == nil, "no bank behind a relayed total: " .. lines[ares].text)
+			end)
+			ns.group, ns.faction, ns.rdb.treasuryRankRelay = group, faction, relays
+			if not ok then error(err, 0) end
 		end)
 	end)
 

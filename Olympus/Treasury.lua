@@ -2534,6 +2534,7 @@ function Treasury.HandleRankRelay(dist, sender, text)
 		or type(B.LordOrCaptain) == "function" and B.LordOrCaptain(row.by, row.guild)
 	if not source then return false, "source" end
 	local s = RankRelayRoot(true)
+	if not s then return false, "store" end -- (no realm group or faction yet: nothing to keep it under)
 	local key = ns.Fold(row.guild)
 	s.rows[key] = type(s.rows[key]) == "table" and s.rows[key] or {}
 	local e = s.rows[key][wire]
@@ -4155,16 +4156,20 @@ local function SisterLines(lines, role)
 	if #banks > 0 then
 		-- The total: every bank's gold as its snapshot last saw it (of different times), and the
 		-- ledger apart (<Olympus>'s books, where this viewer sees them).
-		local gold, units, stacks, ledger = 0, 0, 0, L.TREASURY_DIR_LEDGER_NONE
+		local gold, units, stacks, ledger, relayed = 0, 0, 0, L.TREASURY_DIR_LEDGER_NONE, false
 		for _, b in ipairs(banks) do
 			gold, units, stacks = gold + b.money, units + b.units, stacks + b.stacks
 			if b.home and b.snap then ledger = (DirLedger(b)) end
+			if b.relay then relayed = true end
 		end
+		-- (1.2.6: every row a bank snapshot held here is "All 3 banks", as before; once a row is a
+		-- relayed ranking total (no bank behind it here), the line says treasuries and its tip says so.)
+		local label = relayed and L.TREASURY_RANK_DIR_TOTAL or L.TREASURY_DIR_TOTAL
 		local function TotalTip(tt)
-			tt:AddLine(L.TREASURY_RANK_DIR_TOTAL:format(#banks), 1, 0.82, 0)
-			tt:AddLine(L.TREASURY_RANK_DIR_TOTAL_TIP, 1, 1, 1, true)
+			tt:AddLine(label:format(#banks), 1, 0.82, 0)
+			tt:AddLine(relayed and L.TREASURY_RANK_DIR_TOTAL_TIP or L.TREASURY_DIR_TOTAL_TIP, 1, 1, 1, true)
 		end
-		lines[#lines + 1] = { text = Gold(L.TREASURY_RANK_DIR_TOTAL:format(#banks)), right = Treasury.Coins(gold), key = "dir:total", tooltip = TotalTip }
+		lines[#lines + 1] = { text = Gold(label:format(#banks)), right = Treasury.Coins(gold), key = "dir:total", tooltip = TotalTip }
 		lines[#lines + 1] = { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format(ledger) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(units, stacks)),
 			tooltip = TotalTip, gapAfter = true }
 	end
