@@ -39,6 +39,19 @@ test("shared records diagnostics include every registered ranking type", functio
 	Errors(w)
 end)
 
+-- The weight rule (the design): 1.2.6's first build loaded the records on every login and sent an
+-- empty digest of each type (RD letter~~) from clients that hold nothing, so a practice game, a
+-- client that only heard the King's word, or any idle member sent RD and ran a records timer.
+test("records: the weight rule: a client that holds nothing loads nothing at login, runs no records timer and sends no records message", function()
+	local w, _, _, c = Setup()
+	w:Run(3600)
+	for _, t in ipairs(w:Timers(c, true)) do
+		assert(not tostring(t.where):find("^records") and not tostring(t.where):find("^craft ranking"), "an idle client's timer: " .. tostring(t.where))
+	end
+	for _, kind in ipairs({ "RK", "RD", "RA", "RR", "RV", "RS", "RT" }) do eq(#w:Sent({ from = c, type = kind }), 0, kind .. " from an idle client") end
+	Errors(w)
+end)
+
 test("1.2.4 records: both original signatures and firsthand keys admit one Bones result; repeated bodies never count twice", function()
 	local w, a, b, c = Setup() local body = Pair(w, a, b, "Kr1") Keys(w, a, b)
 	Take(w, c, body) eq(Do(w, c, "Count", "b"), 1)
@@ -316,7 +329,13 @@ test("global records: two validating holders recover Bones ranking for a late cl
 	c.ns.Records.random = function() return 0 end
 	second.ns.Records.random = function() return 0 end
 	late.ns.Records.random = function() return 0 end
-	w:Run(120) -- login discovery, digest, ask, body, two independently signed validations
+	-- (Changed on purpose, the weight rule: a client that holds nothing sends nothing at its login,
+	-- so the late client makes no discovery call of its own. A holder's periodic digest (Tick,
+	-- DIGEST_EVERY) is the path, as the author asked: "a rede precisa armazenar aquele estado e
+	-- republicar para as pessoas quando a fonte original não tiver online". The holders' digest,
+	-- the late client's ask, the body and two independently signed validations, within one round.)
+	w:Run(c.ns.Records.DIGEST_EVERY + 120)
+	eq(#w:Sent({ from = late, type = "RD" }), 0, "the late, empty client asked nobody at its login")
 
 	local count = Do(w, late, "Count", "b")
 	local refused = {}

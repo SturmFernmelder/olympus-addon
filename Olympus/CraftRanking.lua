@@ -294,11 +294,38 @@ if ns.RankingRules then
 	})
 end
 
+-- A completed delivery of this player's whose other half has not come yet: the only work the
+-- resend has. (Retained RETAIN after its completion, as Tick's own window.)
+local function Waiting(r)
+	if type(r) ~= "table" or r.state ~= "completed" or r.kind ~= "c" or Now() - (tonumber(r.completedAt) or Now()) > Craft.RETAIN then return false end
+	local role = Same(ns.me, r.requester) and "r" or (Same(ns.me, r.crafter) and "c" or nil)
+	if not role then return false end
+	local halves = type(r.craftRank) == "table" and type(r.craftRank.halves) == "table" and r.craftRank.halves or {}
+	return not halves[role == "r" and "c" or "r"]
+end
+function Craft.Due()
+	local Q = ns.CraftRequests
+	for _, r in ipairs(Q and Q.All and Q.All() or {}) do if Waiting(r) then return true end end
+	return false
+end
+
+local ticker
 function Craft.Tick(force)
 	local Q = ns.CraftRequests
 	for _, r in ipairs(Q and Q.All and Q.All() or {}) do
 		if r.state == "completed" and r.kind == "c" and Now() - (tonumber(r.completedAt) or Now()) <= Craft.RETAIN then SendHalf(r, force) end
 	end
+	-- Both halves everywhere: nothing left to resend, the timer stops (the weight rule).
+	if ticker and not Craft.Due() then
+		if ticker.Cancel then ticker.Cancel() end
+		ticker = nil
+	end
+end
+-- The weight rule (the design: an idle client runs no arena-family timer): the hourly resend of an
+-- own half runs only while a delivery of this player's waits for the other party's half.
+local function EnsureTicker()
+	if ticker or not Craft.Due() then return end
+	ticker = ns.Every(600, "craft ranking", Craft.Tick)
 end
 
 if ns.Records and ns.Records.Register then
@@ -331,9 +358,11 @@ if ns.Records and ns.Records.Register then
 	})
 end
 
-ns.On("CRAFT_REQUEST_COMPLETED", function(r) SendHalf(r, true) end)
+ns.On("CRAFT_REQUEST_COMPLETED", function(r) SendHalf(r, true) EnsureTicker() end)
 ns.On("LOGIN", function()
+	ticker = nil -- (a timer of the session before is gone with it)
+	if not Craft.Due() then return end
 	ns.After(15, "craft ranking", function() Craft.Tick(true) end)
-	ns.Every(600, "craft ranking", Craft.Tick)
+	EnsureTicker()
 end)
 

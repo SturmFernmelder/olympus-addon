@@ -853,15 +853,6 @@ function R.SendDigest(letter)
 	return sent
 end
 
--- A client with no records has no digest body, but it still needs a way to find the durable
--- network after logging in.  One empty inventory per registered type makes existing holders send
--- their digest back; the normal ask/answer path then supplies only the records this client lacks.
--- This is discovery, not evidence: it contains no rows and grants no identity or score.
-function R.SendDiscovery(letter)
-	if not R.TYPES[letter] then return false end
-	return A().Send("RD", "L", letter .. "~~", { dist = "CHANNEL", key = "records discover " .. letter, low = true }) == true
-end
-
 -- An ask for one day's records: the prefixes of the ids this client holds of it.
 function R.Ask(letter, d, remoteCount)
 	local s = Store(letter)
@@ -1360,9 +1351,7 @@ end
 -- key looked at again, the sealed months' old records gone, the clock started, our key declared
 -- when records name us.
 function R.Load()
-	local letters = {}
 	for letter, spec in pairs(R.TYPES) do
-		letters[#letters + 1] = letter
 		if spec.Pins then
 			local ok, list = pcall(spec.Pins)
 			for name, pk in pairs(ok and type(list) == "table" and list or {}) do R.Pin(name, pk, nil, true) end
@@ -1376,16 +1365,21 @@ function R.Load()
 	for letter in pairs(R.TYPES) do R.Compact(letter) end
 	EnsureTicker()
 	if Named(Low(Me())) then KeyLater() end
-	-- Do not wait up to DIGEST_EVERY for the first convergence.  Every login asks the network once,
-	-- staggered across types so the low lane and the shared channel stay quiet.
-	table.sort(letters)
-	for i, letter in ipairs(letters) do
-		ns.After((i - 1) * 2, "records discover " .. letter, function() R.SendDiscovery(letter) end)
-	end
 end
+-- The weight rule (the design): a client that holds nothing of the records loads nothing, runs no
+-- timer and sends nothing at login. It still takes every RD, RA, RR and RV it hears (their handlers
+-- are registered at load), so a late login receives the rankings from any holder's digest (Tick,
+-- DIGEST_EVERY, drawn among the army's holders), even while both original players are offline.
+-- The holders' signed, validated relay is that path, never an empty client's own call.
 ns.On("LOGIN", function()
-	-- Empty clients must also load: their discovery is what lets a durable holder find them.
-	ns.After(R.LOAD_DELAY, "records load", R.Load)
+	local any = Root(false) ~= nil
+	for _, spec in pairs(R.TYPES) do
+		if not any and spec.Has then
+			local ok, has = pcall(spec.Has)
+			any = ok and has == true
+		end
+	end
+	if any then ns.After(R.LOAD_DELAY, "records load", R.Load) end
 end)
 
 -- `/oly arena records`: what this client holds, and the author's seal requests, in a window to copy
