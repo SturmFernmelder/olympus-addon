@@ -35,7 +35,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with the moderation team only.
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with Olympus's staff only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his
@@ -1871,8 +1871,8 @@ masked (**Show** reveals them for ten seconds; on the King's screen, and on any 
 game account once his own was seen there, no part of it shows and there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
 reached the letter says so and tries again by itself, and an account that accepted is never locked
 out by an outage. Only 8 bits of its hash are kept on your client, to see whether it changed (one
-change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. Your
-BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
+change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. In
+game, your BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
 moderators they named), by a logged whisper, only to a team member whose addon just asked on your
 channel and whose team level is yours or higher (a moderator's own goes to the moderators and
 above, a councillor's to the council, the King and the author, the King's to the author alone), at

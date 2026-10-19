@@ -59,6 +59,9 @@ local function Scene(fn, opts)
 		ns.Data.ClaimedGuild = function(name) return w.claims[ns.FullName(name)] end
 		-- (The privacy page that follows an accept: its own tests; here who asked it.)
 		ns.Consent.Ask = function(reason) w.consentAsked = reason return false end
+		-- This character is the harness's own, whatever an earlier file's test left in ns.me
+		-- (AsSoldier's "Soldier-Realm" made the team scenes fail in a full run; put back after).
+		ns.me = "Tester-Realm"
 		-- The moderation team: WatchChat.lua's own InRoom (the High Council's list here).
 		ns.rdb.council = { at = 1, names = { ["iron warden"] = "Iron Warden" } }
 		if opts.team then ns.rdb.council.names.tester = "Tester" end
@@ -670,15 +673,19 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 				end
 			end
 			assert(total <= 360, "the letter is " .. total .. " words")
-			-- Bold where it matters: the BattleTag's two promises and Blizzard's rules first, a deep red
-			-- ink and doubled strokes (the dot too); the other bullets in the plain ink.
+			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
+			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a
+			-- deep red ink and doubled strokes (the dot too); the other bullets in the plain ink.
+			-- (Changed on purpose, 2026-10-19: the owner's "sair para o Companion só" became a bullet
+			-- of its own, T5_3, in bold with the in-game promise it qualifies; the 360-word bound
+			-- stays, the letter trimmed elsewhere to fit.)
 			local bold = {}
 			for _, p in ipairs(f.parts) do
 				if p.kind == "bullet" and p.bold then bold[#bold + 1] = p.fs:GetText() end
 				if p.kind == "bullet" and not p.bold then eq(p.fs.textColor[1], 0.18, "plain ink") end
 			end
-			eq(#bold, 3)
-			for _, key in ipairs({ "ACCORD_T2_1", "ACCORD_T5_2", "ACCORD_T5_3" }) do
+			eq(#bold, 4)
+			for _, key in ipairs({ "ACCORD_T2_1", "ACCORD_T5_2", "ACCORD_T5_3", "ACCORD_T5_4" }) do
 				local found = false
 				for _, text in ipairs(bold) do if text == L[key] then found = true end end
 				assert(found, key .. " in bold")
@@ -812,6 +819,29 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 	-- The rules it states are the code's: the ladder, the 30 days, English only, no stakes, 180 days.
 	assert(en.ACCORD_T4_2:find("1 hour, 24 hours and 7 days", 1, true) and en.ACCORD_T4_2:find("30 days", 1, true))
 	eq(ns.Accord.KEEP, 180 * 86400); assert(en.ACCORD_T5_2:find("180 days", 1, true))
+	-- (2026-10-19) Where the BattleTag goes: the moderation team in game, and with the Companion
+	-- app the online census, staff only (BridgeSections.lua's self section), in both languages.
+	assert(en.ACCORD_T5_2:find("In game, only the moderation team", 1, true) and pt.ACCORD_T5_2:find("No jogo, só a equipe de moderação", 1, true))
+	for _, must in ipairs({ "Olympus Companion app", "online census", "staff only", "security and control" }) do
+		assert(en.ACCORD_T5_3:find(must, 1, true), "ACCORD_T5_3: " .. must)
+	end
+	for _, must in ipairs({ "Olympus Companion", "censo online", "staff", "segurança e controle" }) do
+		assert(pt.ACCORD_T5_3:find(must, 1, true), "pt-BR ACCORD_T5_3: " .. must)
+	end
+	assert(en.ACCORD_TAG_TO:find("staff", 1, true) and pt.ACCORD_TAG_TO:find("staff", 1, true), "the band's note says staff too")
+	-- Each topic's bullets are the letter's (Accord.TOPICS), in both languages: none past its count.
+	for _, t in ipairs(ns.Accord.TOPICS) do
+		for _, lang in ipairs({ en, pt }) do
+			assert(type(rawget(lang, "ACCORD_T" .. t[1] .. "_" .. t[2])) == "string", "topic " .. t[1] .. ": its last bullet")
+			eq(rawget(lang, "ACCORD_T" .. t[1] .. "_" .. (t[2] + 1)), nil, "topic " .. t[1] .. ": a bullet the letter never shows")
+		end
+	end
+	local enKeys, ptKeys = {}, {}
+	local ptAt = src:find("\nif GetLocale and GetLocale() == \"ptBR\" then", 1, true)
+	assert(ptAt, "the pt-BR block")
+	for k in src:sub(1, ptAt):gmatch("\nL%.(ACCORD_[%w_]+) = ") do enKeys[#enKeys + 1] = k end
+	for k in src:sub(ptAt):gmatch("\n\tL%.(ACCORD_[%w_]+) = ") do ptKeys[#ptKeys + 1] = k end
+	eq(table.concat(ptKeys, " "), table.concat(enKeys, " "), "the pt-BR block has every English key, in order")
 	assert(en.ACCORD_T3_2:find("English", 1, true))
 	local watch = assert(io.open(ROOT .. "Olympus/Watch.lua", "rb")):read("*a")
 	assert(watch:find("Watch.TIMEOUTS = { 0, 60 * 60, 24 * 60 * 60, 7 * 24 * 60 * 60 }", 1, true), "the ladder the letter states")
@@ -1076,4 +1106,160 @@ test("accord: the saved fingerprint keeps one byte: for a known name dozens of f
 		A.Check()
 		eq(ns.IsMember(), true, "not asked again")
 	end, { accepted = true })
+end)
+
+-- The Companion's "self" section (Olympus/BridgeSections.lua; the owner, 2026-10-19: the BattleTag
+-- goes to the Companion's online census, staff only, "para a gente poder saber quem é quem"): the
+-- player's own character and tag, once the Accord that says so is accepted. The real registry
+-- (Olympus/Bridge.lua) copies it; the sidecar's own tests are in tests/run.lua.
+local function Strings(v, out, depth)
+	out = out or {}
+	depth = depth or 0
+	if type(v) == "string" or type(v) == "number" then out[#out + 1] = tostring(v)
+	elseif type(v) == "table" and depth < 8 then
+		for k, x in pairs(v) do
+			out[#out + 1] = tostring(k)
+			Strings(x, out, depth + 1)
+		end
+	end
+	return out
+end
+
+local function WithServerTime(t, fn)
+	local saved = rawget(_G, "GetServerTime")
+	GetServerTime = t and function() return t end or nil
+	local ok, err = pcall(fn)
+	GetServerTime = saved
+	if not ok then error(err, 0) end
+end
+
+test("accord: the Companion's self section: nothing before the Olympus Accord is accepted, for an older version or while the tag can't be read; after it, this character, his own BattleTag, the Accord's version and the server's time, a fresh copy within the bridge's limits", function()
+	H.WithUI(function() Scene(function(w, A)
+		local B = OlympusBridge
+		local listed
+		for _, s in ipairs(B.Sections()) do if s.name == "self" then listed = s.version end end
+		eq(listed, 1, "registered as self, version 1")
+		WithServerTime(1800000777, function()
+			eq(ns.AccordAccepted(), false)
+			eq(B.GetSection("self"), nil, "not accepted: nothing")
+			ns.db.accord = { v = ns.ACCORD_VERSION - 1, yes = true, at = w.now - 100, fp = A.Fp(TAG), told = {} }
+			eq(B.GetSection("self"), nil, "an older version accepted: nothing")
+			ns.db.accord = nil
+			eq(A.Accept(), true)
+			local got = assert(B.GetSection("self"), "accepted: the section")
+			eq(got.name, "self"); eq(got.version, 1)
+			local d = got.data
+			eq(d.character, ns.me); eq(d.character, "Tester-Realm")
+			eq(d.battleTag, TAG, "his own, as his game gives it")
+			eq(d.accord, ns.ACCORD_VERSION); eq(d.accord, 1)
+			eq(d.at, 1800000777, "the server's clock, not this computer's")
+			for k, v in pairs(d) do
+				assert(({ character = true, battleTag = true, accord = true, at = true })[k], "field " .. tostring(k))
+				assert(type(v) ~= "table", "flat: " .. k)
+				if type(v) == "string" then assert(#v <= B.SECTION_LIMITS.string and not v:find("[|%c]"), k) end
+			end
+			d.battleTag = "Changed#1"
+			eq(B.GetSection("self").data.battleTag, TAG, "every call a fresh copy")
+			-- Read again each time: Battle.net down, a tag of another shape, a secret value: nothing.
+			w.bn.up = false
+			eq(B.GetSection("self"), nil, "Battle.net down: nothing")
+			w.bn.up = true
+			w.bn.tag = "No Digits Here"
+			eq(B.GetSection("self"), nil, "not Name#digits: nothing")
+			w.bn.tag = TAG
+			issecretvalue = function(v) return v == TAG end
+			eq(B.GetSection("self"), nil, "a secret value: never read")
+			issecretvalue = nil
+			eq(B.GetSection("self").data.battleTag, TAG)
+		end)
+		-- A client without the server's clock: this computer's.
+		WithServerTime(nil, function() eq(B.GetSection("self").data.at, w.now) end)
+		-- Asked again (another tag on the account): nothing until accepted again.
+		w.bn.tag = "Other Name#4321"
+		A.Check()
+		eq(ns.AccordAccepted(), false)
+		eq(B.GetSection("self"), nil, "the account asked again: nothing")
+	end) end)
+end)
+
+test("accord: the Companion's self section never carries another player's BattleTag: a moderation team client's kept tags stay out of every section, a kept row under his own name included; nothing printed or logged, the King's screen too", function()
+	Scene(function(w, A)
+		C_ChatInfo = { SendAddonMessageLogged = function() end }
+		local B = OlympusBridge
+		A.AskTeam()
+		eq(A.HandleTag("WHISPER", MEMBER, BT(nil, nil, "Other Player#5678")), true)
+		eq(A.HandleTag("WHISPER", "Brisk Lantern-Realm", BT(nil, nil, "Lantern#7777")), true)
+		-- A row under this very character's name (another addon's answer claiming it): the
+		-- section reads his own game, never the team's store.
+		ns.rdb.battletags.rows[ns.Fold(ns.me)] = { name = ns.me, tag = "Spoofed#9999", guild = "Olympus II", first = w.now, last = w.now }
+		eq(A.Count(), 3)
+		-- (What is logged meanwhile, as ns.Log is called: the saved log is a ring that stops growing.)
+		local printed, logged, realLog = #w.printed, {}, ns.Log
+		ns.Log = function(...)
+			logged[#logged + 1] = table.concat(Strings({ ... }), " ")
+			return realLog(...)
+		end
+		local ok, err = pcall(function()
+			local self = assert(B.GetSection("self"))
+			eq(self.data.battleTag, TAG)
+			eq(self.data.character, ns.me)
+			for _, s in ipairs(B.Sections()) do
+				local got = B.GetSection(s.name)
+				local all = table.concat(Strings(got and got.data), "\n")
+				for _, other in ipairs({ "5678", "7777", "9999", "Other Player#", "Lantern#", "Spoofed#" }) do
+					assert(not all:find(other, 1, true), s.name .. " carries another player's tag: " .. other)
+				end
+				if s.name ~= "self" then assert(not all:find(TAG, 1, true), s.name .. " carries the player's tag") end
+			end
+			-- The King's screen: a file on his own computer, not a screen; exported, never printed.
+			w.kingScreen = true
+			eq(B.GetSection("self").data.battleTag, TAG, "file-only: kept on his account")
+			w.kingScreen = false
+		end)
+		ns.Log = realLog
+		if not ok then error(err, 0) end
+		eq(#w.printed, printed, "nothing printed")
+		for _, line in ipairs(logged) do assert(not line:find("1234", 1, true) and not line:find("Tester#", 1, true), "a tag logged: " .. line) end
+	end, { accepted = true, team = true })
+end)
+
+test("accord: the private Companion sidecar saves the self section at logout once the Accord is accepted, never before, and the docs say where it goes", function()
+	Scene(function(w, A)
+		local saved = { db = rawget(_G, "OlympusCompanionDB") }
+		local before = #EVENT_SCRIPTS
+		local ok, err = pcall(function()
+			OlympusCompanionDB = nil
+			assert(loadfile(ROOT .. "OlympusCompanionBridge/Checkpoint.lua"))("OlympusCompanionBridge", {})
+			local OnEvent = assert(EVENT_SCRIPTS[before + 1], "the sidecar's event frame")
+			OnEvent(nil, "ADDON_LOADED", "OlympusCompanionBridge")
+			OnEvent(nil, "PLAYER_LOGOUT")
+			eq((OlympusCompanionDB.sections or {}).self, nil, "before the Accord: no self section")
+			eq(A.Accept(), true)
+			OnEvent(nil, "PLAYER_LOGOUT")
+			local s = assert(OlympusCompanionDB.sections and OlympusCompanionDB.sections.self, "after it: saved")
+			eq(s.version, 1); eq(s.data.battleTag, TAG); eq(s.data.character, ns.me); eq(s.data.accord, 1)
+		end)
+		for i = #EVENT_SCRIPTS, before + 1, -1 do EVENT_SCRIPTS[i] = nil end
+		OlympusCompanionDB = saved.db
+		if not ok then error(err, 0) end
+		-- The README's privacy table and the sidecar's README name it, as the code does it.
+		local function Read(path)
+			local f = assert(io.open(ROOT .. path, "rb"))
+			local text = f:read("*a")
+			f:close()
+			return text
+		end
+		local row
+		for line in Read("README.md"):gmatch("[^\n]+") do
+			if line:sub(1, 2) == "| " and line:find("`self` section", 1, true) then row = line end
+		end
+		assert(row, "README: the self section's privacy row")
+		for _, must in ipairs({ "Olympus Accord", "Olympus Companion", "online census", "staff", "never another player's BattleTag", "`OlympusBridge`" }) do
+			assert(row:find(must, 1, true), "README's self row: " .. must)
+		end
+		local sidecar = Read("OlympusCompanionBridge/README.md"):gsub("%s+", " ")
+		for _, must in ipairs({ "`self`", "character", "battleTag", "accord", "never another player's" }) do
+			assert(sidecar:find(must, 1, true), "the sidecar's README: " .. must)
+		end
+	end)
 end)

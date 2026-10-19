@@ -2443,6 +2443,7 @@ message (the game adds it). What goes where:
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 | Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named) at your team level or higher, by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
 | A moderation team member's ask for BattleTags (BQ, 1.2.5.1): nothing but his name | everyone on the Olympus channel | from a team member's addon, 90 seconds after login and every 30 minutes |
+| Your own character's name (Name-Realm) and BattleTag, the Olympus Accord's version and the server's time (the Companion's `self` section, 1.2.6) | the private Olympus Companion Bridge addon, only if you installed it with the Olympus Companion app: it saves them in its own file on your computer (`OlympusCompanionDB`), and the Companion takes them to Olympus's online census, where only staff see BattleTags, never other players or the public. Any addon in your game can read them through `OlympusBridge` too, as it can read your BattleTag from the game itself | only once you accepted the Olympus Accord, saved at logout or `/reload`; your BattleTag as your own game gives it, never another player's BattleTag (not the ones a moderation team client keeps); never shown or printed on screen, the King's included |
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
 position on the map).
@@ -2501,8 +2502,8 @@ masked (**Show** reveals them for ten seconds; on the King's screen, and on any 
 game account once his own was seen there, no part of it shows and there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
 reached the letter says so and tries again by itself, and an account that accepted is never locked
 out by an outage. Only 8 bits of its hash are kept on your client, to see whether it changed (one
-change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. Your
-BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
+change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. In
+game, your BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
 moderators they named), by a logged whisper, only to a team member whose addon just asked on your
 channel and whose team level is yours or higher (a moderator's own goes to the moderators and
 above, a councillor's to the council, the King and the author, the King's to the author alone), at
@@ -2514,6 +2515,11 @@ team: at once on its own sanction or a lost seat, else after two days. A player 
 his removed: `/oly accord forget <name>` on a team client. It never goes on the Olympus channel or
 guild chat, and no other player's client keeps or shows one. Nothing is done with a BattleTag automatically (no ban or match by tag): a
 modified addon can send someone else's.
+With the **Olympus Companion** app (its private bridge addon installed), your own character's name
+and BattleTag also go, once you accepted, to Olympus's online census, for security and control
+(knowing who is who): the bridge addon saves them in its own file at logout or `/reload`, and the
+Companion takes them there, where only staff see BattleTags, never other players or the public.
+Never another player's BattleTag: the ones a moderation team client keeps stay in the game.
 
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll

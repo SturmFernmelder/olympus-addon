@@ -29949,7 +29949,7 @@ test("1.2.6 companion sections: the registry takes each name once, copies plain 
 	eq(B.SECTIONS_API_VERSION, 1)
 	local names = {}
 	for _, s in ipairs(B.Sections()) do names[s.name] = s.version end
-	eq(names.census, 1); eq(names.guilds, 1); eq(names.rankings, 1); eq(names.wanted, 1)
+	eq(names.census, 1); eq(names.guilds, 1); eq(names.rankings, 1); eq(names.wanted, 1); eq(names.self, 1)
 
 	local function F() return {} end
 	eq(select(2, B.RegisterSection("Bad Name", 1, F)), "name")

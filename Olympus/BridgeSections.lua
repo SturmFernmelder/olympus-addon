@@ -3,8 +3,9 @@ local ADDON, ns = ...
 -- The Companion's sections beyond the census (Bridge.lua's registry). Each reads only a module's
 -- public function, what every member already sees on Olympus's own pages, and builds its rows
 -- field by field: a field a module adds later never reaches the Companion by itself.
--- Never a BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury
--- items, the Wanted page's victims or sightings, or Church/Watch detail meant for fewer people.
+-- Never another player's BattleTag (only "self", below, carries the player's own), chat text or
+-- chat-strike line, a council/High Council-only view, treasury items, the Wanted page's victims or
+-- sightings, or Church/Watch detail meant for fewer people.
 if type(OlympusBridge) ~= "table" or type(OlympusBridge.RegisterSection) ~= "function" then return end
 
 local ROWS = 50
@@ -90,4 +91,23 @@ OlympusBridge.RegisterSection("wanted", 1, function()
 		end
 	end
 	return { targets = targets }
+end)
+
+-- The player himself (Daniel, 2026-10-19: his BattleTag to the Companion's online census, so the
+-- staff know who is who; the Companion shows it to staff alone, never publicly): this character's
+-- Name-Realm and his own BattleTag, read from his own game as the Accord reads it (Accord.ReadTag),
+-- the Accord's version and the server's time now. Nothing until this account accepted the Olympus
+-- Accord, whose letter says so (ACCORD_T5_3), and nothing while the tag can't be read. Never the
+-- tags a moderation team client keeps of other players (ns.rdb.battletags). A file of the
+-- player's own computer, not a screen: the King's account exports it too, and it is never printed
+-- or logged.
+OlympusBridge.RegisterSection("self", 1, function()
+	if type(ns.AccordAccepted) ~= "function" or ns.AccordAccepted() ~= true then return nil end
+	local A = ns.Accord
+	if type(A) ~= "table" or A.missing or type(A.ReadTag) ~= "function" then return nil end
+	local tag = A.ReadTag()
+	local me = ns.me
+	if type(tag) ~= "string" or type(me) ~= "string" or not me:find("^[^%-]+%-.+$") then return nil end
+	local at = Call("Data", "ServerTime")
+	return { character = me, battleTag = tag, accord = ns.ACCORD_VERSION, at = Whole(at or (ns.Now and ns.Now())) }
 end)

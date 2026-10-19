@@ -207,10 +207,11 @@ end
 -- Sections: one versioned, read-only door per kind of data for the Companion (Daniel: more
 -- "ports" than the census). A module's exporter returns only what every member already sees on
 -- Olympus's own pages; this registry copies it into fresh plain tables, within fixed limits, and
--- the private sidecar (OlympusCompanionBridge) saves only the sections it knows at logout. Never a
--- BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury items or
--- anything private to an audience the player is not in: an exporter that would need one does not
--- belong here.
+-- the private sidecar (OlympusCompanionBridge) saves only the sections it knows at logout. The one
+-- exception is "self" (BridgeSections.lua): the player's own character and BattleTag, once his
+-- Olympus Accord is accepted. Never another player's BattleTag, chat text or chat-strike line, a
+-- council/High Council-only view, treasury items or anything private to an audience the player is
+-- not in: an exporter that would need one does not belong here.
 OlympusBridge.SECTIONS_API_VERSION = 1
 OlympusBridge.SECTION_LIMITS = { sections = 16, depth = 5, values = 1500, string = 120 }
 
