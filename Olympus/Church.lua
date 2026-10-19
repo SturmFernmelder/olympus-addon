@@ -1380,6 +1380,8 @@ function Church.SendPresence(force)
 	if not ns.IsMember() then return false end
 	local role = Church.Role(ns.me)
 	if not AUDIENCE_ROLES[role or ""] or Off() then return false end
+	-- Quiet presence (Core.lua): no presence of ours; the desk's lapses on its own (Church.Online).
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local now = Now()
 	if not force and now - lastPresence < Church.PresenceEvery(role) then return false end
 	lastPresence = now

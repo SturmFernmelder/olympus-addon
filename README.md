@@ -2194,6 +2194,13 @@ never gives another addon the census, other players' private data or Olympus's k
 its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
 you trust. After the update it loads once the game restarts (not on a `/reload`).
 
+A compatible addon can also turn on a quiet presence for the King, a High Councillor or the addon's
+author, for that session alone: other Olympus clients then see that player as offline, as Olympus
+sends nothing that says he is online or where he is (no hello, census report, layer, map dot,
+layer-hop offer or sighting answer, nor the King's crown). His guild roster, `/who` and chat still
+show him, Olympus chat lines he types still go out, reads go on working, and a `/reload` or logout
+ends it. A line on top of the Census and the Realm says so while it is on.
+
 The same registered handle can ask to contribute a client-owned page to the Olympus window when
 this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
 addons' data handles still work if that slot is occupied. Olympus keeps the window shell and puts

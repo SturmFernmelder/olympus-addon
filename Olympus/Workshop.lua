@@ -336,6 +336,8 @@ function Workshop.HandleRoll(dist, sender, text)
 	authorAt, authorName = ns.Now(), ns.FullName(sender)
 	local now = ns.Now()
 	if id == answeredRoll or now - lastRollAnswer < Workshop.ROLL_GAP then return end
+	-- Quiet presence (Core.lua): no answer, which would say we are online.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	answeredRoll = id
 	if Workshop.random(1, 100) > math.max(1, math.min(100, share)) then return end
 	lastRollAnswer = now
@@ -612,6 +614,9 @@ StaticPopupDialogs["OLYMPUS_AUTHOR_UPDATE"] = {
 
 function Workshop.SendPresence()
 	if not Workshop.IsAuthor() then return end
+	-- Quiet presence (Core.lua): his presence goes nowhere; the army's "author online" lapses on its
+	-- own (Workshop.AuthorOnline), as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local released = Workshop.Released()
 	ns.Comm.Send("CHANNEL", "V4~" .. Clean(ns.VERSION, 12) .. (released and ("~" .. released) or ""), "presence")
 end
@@ -2910,3 +2915,5 @@ ns.On("LOGIN", function()
 	ns.After(40, "author presence", Workshop.SendPresence)
 	ns.Every(Workshop.PRESENCE_EVERY, "author presence", Workshop.SendPresence)
 end)
+-- Quiet presence turned off (Core.lua): his presence at once again.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Workshop.SendPresence() end end)

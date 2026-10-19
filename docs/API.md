@@ -114,7 +114,7 @@ starts, not on a `/reload`. Always check for it.
 `/oly privacy` opens). The line shows your TOC's `## Title` (colour and texture codes removed) and
 says, in Olympus's own words, what a Yes lets your addon read and, where the signed role permits,
 which exact-name request, visible name-rotation session, five-minute hostile-area search or bounded
-host-owned profile presentation it may start. The page opens by itself once for a new line, outside combat and instances,
+host-owned profile presentation it may start, and the quiet presence it may turn on. The page opens by itself once for a new line, outside combat and instances,
 while the player is in an Olympus guild; the player can
 answer there at any time, and change the answer whenever he likes.
 
@@ -127,10 +127,11 @@ addon's; **Keep current choices** closes without granting it. Each addon also ha
 No. The answer is kept for the player's account and stays across sessions. When a later permission
 contract gives more, every addon's line is asked again. This answer gates the data methods, their
 events and starting an exact-name search, bounded rotation, hostile-area search or profile
-presentation. Cancelling a search, stopping a profile session and disabling that handle's own
-presentation do not require a grant because they can only remove state. Changing the answer to No
-first cancels and forgets every search owned by that handle, closes its profile session and disables
-its effect. A later Yes does not resume a stopped exact-name or area session: the player must use
+presentation, or turning on the quiet presence. Cancelling a search, stopping a profile session,
+disabling that handle's own presentation and turning off the quiet presence it turned on do not
+require a grant because they can only remove state. Changing the answer to No first cancels and
+forgets every search owned by that handle, closes its profile session, disables its effect and ends
+the quiet presence it turned on. A later Yes does not resume a stopped exact-name or area session: the player must use
 the visible Start action again. A registered UI surface works while the answer is pending or
 refused and receives no data from Olympus by doing so.
 
@@ -178,6 +179,7 @@ separate from the 16 addons that may register data handles.
 | `"network.sightings"` | request-bound exact-name and hostile-area searches through `StartPlayerSearch`, `StartAreaSearch`, their cancel/get methods, and explicit host-owned area map pins |
 | `"network.sightings.area-scope"` | `handle:StartAreaSearch(mapID, scope)` accepts `"outsiders"` as well as `"hostile"` |
 | `"network.profile-effects"` | one bounded host-owned profile-presentation session through `StartProfileSession`, `StopProfileSession`, `SetProfileEffect` and `GetProfileSession` |
+| `"presence.quiet"` | the session's quiet presence through `SetQuietPresence`, `GetQuietPresence` and `QUIET_PRESENCE_CHANGED` |
 | `"ui.guild-tools"` | `handle:OpenGuildTools([section[, target]])`, which opens an authorized section of Olympus's own Watch workspace without returning its records |
 | `"callbacks"`, and each event's name | `handle:On(...)` |
 | `"ui.surface"` | one page through `handle:RegisterSurface(...)` and its lifecycle methods |
@@ -433,6 +435,39 @@ apply. `expiresIn` is approximate and counts down, so do not poll it. Subscribe 
 before Olympus saves the No. All session and presentation state is memory-only and ends on UI
 reload or logout.
 
+### Quiet presence
+
+These methods exist only when `OlympusAPI.Has("presence.quiet")` is true.
+
+`handle:SetQuietPresence(on)` turns the player's own quiet presence on (`true`) or off (`false`) for
+the current session. It has no target. Only the King, a High Councillor (each while a current signed
+issuer) or the addon's author may turn it on: anyone else gets `false, "authority"`, and outside an
+Olympus guild the call returns `false, "guild"`. It needs the player's Yes (`"pending"`,
+`"refused"`) and counts against the rate limit (`"busy"`). It returns `true`, or `false` and a
+reason. The handle that turned it on may always turn it off (no Yes or role needed for that);
+another handle gets `false, "owner"`. A No for that handle ends it.
+
+While it is on, this client sends nothing that announces the player as online or places him: no
+hello, no census report (it is never the guild's reporter, so it answers no census request), no
+layer announcement, guildmate map dot or layer-hop offer or answer, no answer to a player-sighting or
+King's-layer request, no roll-call or version-check answer, no author, Church, Olympus Link or arena
+auditor presence and, for the King, no crown position or layer. No word says it went quiet and no
+earlier answer is withdrawn: other clients age the player out as after a logout. Reads keep working,
+this client's own requests included, and Olympus chat lines the player types still go out. The
+guild roster, `/who` and chat still show the player. A line on top of Olympus's Census and Realm
+says it is on. It is never saved: a `/reload` or a logout ends it.
+
+`handle:GetQuietPresence()` returns a fresh copy of its state, with the usual permission and rate
+checks:
+
+```lua
+{ on = true, since = 1792000000 } -- since: when it was turned on, as time() gives it
+{ on = false }
+```
+
+It never says which handle turned it on. Subscribe to `QUIET_PRESENCE_CHANGED`: its payload is the
+same table, after a change by any handle.
+
 ### `handle:OpenGuildTools([section[, target]])`
 
 Opens Olympus's own Watch workspace. `section` is optional (`"desk"` by default) and may be
@@ -626,6 +661,7 @@ without `fn`.
 | `LEADER_CHANGED` | `fn(event, presence)`: what `GetLeaderPresence()` returns | the leader came online or left, the crown moved, appeared or expired, a layer count or name changed, or the player changed zone or layer |
 | `SIGHTING_CHANGED` | `fn(event, search)`: the current full owned exact-name or area search for non-terminal changes; cancellation or disappearance may be the terminal marker `{ id = id, status = "cancelled" or "ended" }` | after a start method has returned, its queued send completes, a result arrives or is withdrawn, or the search is cancelled or disappears |
 | `PROFILE_EFFECT_SESSION_CHANGED` | `fn(event, session)`: the sanitized `{ style, expiresIn }` returned by `GetProfileSession()`, or `nil` | a bounded host-owned session opens, closes or expires; heartbeat renewals do not produce callbacks |
+| `QUIET_PRESENCE_CHANGED` | `fn(event, state)`: what `GetQuietPresence()` returns | the quiet presence was turned on or off, by any handle |
 | `PERMISSION_CHANGED` | `fn(event, status)`: `"granted"` or `"refused"` | the player answered your line |
 
 - The data events come only while the player's answer is Yes (`WANTED_CHANGED` and
@@ -657,7 +693,7 @@ Every data method returns `nil` and a reason when it gives nothing:
 | `"busy"` | more than 20 data calls from your addon in 10 seconds: wait, or use the callbacks |
 | `"kind"` | `GetRankings` was given an unknown kind |
 | `"unavailable"` | this build does not provide the requested optional capability |
-| `"member"`, `"authority"` | the player is not a current member or their signed Olympus role cannot start that guild-tools request |
+| `"member"`, `"authority"` | the player is not a current member or their signed Olympus role cannot start that guild-tools request or turn on the quiet presence |
 | `"netoff"`, `"instance"` | network access is disabled for this player, or the player is currently in an instance |
 | `"transport"`, `"channel"` | the guarded addon transport or the Olympus channel is not ready |
 | `"target"` | the exact `Name-Realm` is malformed or names the requester |

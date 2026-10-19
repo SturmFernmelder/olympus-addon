@@ -88,6 +88,8 @@ local crossedAt = -math.huge
 local peerGuild = GetGuildInfo("player")
 local guildChangedAt = 0
 local guildSession, lastHello = 0, 0
+-- Quiet presence (1.2.5.1, Core.lua) is on: see Comm.QUIET_WORDS.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 
 -- count[key] + 1, with at most MAX_KEYS distinct keys (senders choose some of them).
 local function Count(t, key)
@@ -184,6 +186,8 @@ function Comm.Stats()
 		-- 1.0.0: whom the election counts (our realm's peers, or every realm's on a shared channel),
 		-- how many before us keep us quiet, our guild's realms, and what our report's new fields say.
 		electAll = Comm.ElectsAcrossRealms(now), quietAfter = Comm.QuietAfter(now), presence = Comm.PresenceRealms(now),
+		-- 1.2.5.1: quiet presence on, and how many of our words it held (Comm.QuietHolds).
+		quietPresence = Quiet(), quietHeld = stats.quiet or 0,
 		reportSt = r and r.st, reportCap = r and r.cap, reportPres = r and r.pres,
 	}
 end
@@ -410,6 +414,39 @@ local function Held(msg)
 	local M = ns.Moderation
 	return M ~= nil and not M.missing and M.Blocks(msg) == true
 end
+-- Quiet presence (1.2.5.1, Core.lua): while it is on, no word that says this character is online,
+-- or where it is, leaves this client. Each module leaves its own out (the hello, the census report,
+-- the layer...); these words are held here too, on the whole message a module hands over (Send,
+-- Whisper, SendChunked, and Arena.Send for the arena's) and again on each part as the queue sends
+-- it, so what waited in the queue when it began stays home too. A census report goes in pieces
+-- that name no type: Comm.Broadcast holds it itself. Nothing says it went quiet: no withdrawal goes
+-- either, and what was told before expires on the other clients as after a logout. A read (a
+-- census, sighting or layer request) and a chat line the player types still go.
+Comm.QUIET_WORDS = {
+	"^H1~",         -- the hello
+	"^P1~",         -- a dot on the guildmates' maps (Positions.lua)
+	"^L[01]~",      -- a layer announced or taken back (Layers.lua)
+	"^L[ON]~",      -- a layer-hop offer, or its "not now" (Hop.lua)
+	"^LY~[RX]~",    -- an answer about the King's layer, or its withdrawal (HopSightings.lua)
+	"^PS~[RBXW]~",  -- a player-sighting answer, or its withdrawal (PlayerSightings.lua)
+	"^T1~[PQ]~",    -- the King's crown on the map, or its removal (King.lua)
+	"^CG~%d+~S~",   -- a global census snapshot (Data.lua)
+	"^V[248]~",     -- a roll call's answer, the author's presence, a version check's answer (Workshop.lua, Versions.lua)
+	"^NK~1~p~",     -- the Church's presence (Church.lua)
+	"^D[VW]~",      -- Olympus Link's confirmer and watcher presence (Link.lua)
+	"^ZQ~%u%d+~H~", -- the arena auditors' and fee receiver's hello (Wallet.lua)
+}
+local function QuietHolds(msg)
+	if type(msg) ~= "string" or not Quiet() then return false end
+	for _, pattern in ipairs(Comm.QUIET_WORDS) do
+		if msg:find(pattern) then
+			stats.quiet = (stats.quiet or 0) + 1
+			return true
+		end
+	end
+	return false
+end
+Comm.QuietHolds = QuietHolds
 local function Refuse(done, why)
 	if done then ns.SafeCall("send done", done, false, why) end
 	return false
@@ -427,6 +464,7 @@ function Comm.Send(dist, msg, key, urgent, logged, done, options)
 	if dist == "GUILD" and not IsInGuild() then return Refuse(done, "guild") end
 	if not ns.IsMember() then return Refuse(done, "left") end
 	if Held(msg) then return Refuse(done, "held") end
+	if QuietHolds(msg) then return Refuse(done, "quiet") end
 	return Enqueue(dist, { msg }, key, nil, urgent, logged, done, options)
 end
 -- An addon message to one player only (answers to the King, Throne tab). logged (1.1): a
@@ -438,6 +476,7 @@ function Comm.Whisper(target, msg, key, urgent, logged, done, options)
 	if type(msg) ~= "string" or #msg > 255 then return Refuse(done, "size") end
 	if not ns.IsMember() then return Refuse(done, "left") end
 	if Held(msg) then return Refuse(done, "held") end
+	if QuietHolds(msg) then return Refuse(done, "quiet") end
 	return Enqueue("WHISPER", { msg }, key, target, urgent, logged, done, options)
 end
 -- A bounded whole transfer: accept all pieces or none, finish once after their send
@@ -455,6 +494,7 @@ function Comm.SendBatch(dist, pieces, key, target, urgent, done, options)
 		local msg = pieces[i]
 		if type(msg) ~= "string" or #msg > 255 then return Refuse(done, "size") end
 		if Held(msg) then return Refuse(done, "held") end
+		if QuietHolds(msg) then return Refuse(done, "quiet") end
 		copy[i] = msg
 	end
 	return Enqueue(dist, copy, key, target, urgent, false, done, options)
@@ -471,6 +511,7 @@ function Comm.SendChunked(payload, urgent, dist, done, options)
 	dist = dist == "GUILD" and "GUILD" or "CHANNEL"
 	if type(payload) ~= "string" then return Refuse(done, "size") end
 	if Held(payload) then return Refuse(done, "held") end
+	if QuietHolds(payload) then return Refuse(done, "quiet") end
 	if options ~= nil and type(options) ~= "table" then return Refuse(done, "guard") end
 	msgId = (msgId + 1) % 1000
 	local guard = options and options.guard
@@ -480,7 +521,7 @@ function Comm.SendChunked(payload, urgent, dist, done, options)
 		permit = options and options.permit,
 		guardKey = options and options.guardKey,
 		guard = function()
-		return not Held(payload) and (not guard or guard() == true)
+		return not Held(payload) and not QuietHolds(payload) and (not guard or guard() == true)
 	end }
 	return Comm.SendBatch(dist, Codec.Chunk(payload, tostring(msgId)), nil, nil, urgent, done, guarded)
 end
@@ -666,6 +707,7 @@ local function Valid(job, now)
 		if valid ~= true then return false, why or "cancelled" end
 	end
 	if Held(job.parts[job.i]) then return false, "held" end
+	if QuietHolds(job.parts[job.i]) then return false, "quiet" end
 	return true
 end
 local function SendJob(job, now)
@@ -1303,6 +1345,9 @@ end
 function Comm.Hello(force)
 	SyncGuild()
 	if not IsInGuild() then return end
+	-- Quiet presence (Core.lua): no hello at all, forced or not; our guildmates' clients age us out
+	-- (COUNT_WINDOW) as after a logout, and we are never elected.
+	if Quiet() then return end
 	local now, before = ns.Now(), 0
 	for name, t in pairs(Comm.Electable(now)) do
 		if now - t <= PEER_WINDOW and name < (ns.me or "") then before = before + 1 end
@@ -1375,7 +1420,9 @@ end
 function Comm.MaybeBroadcast(report)
 	SyncGuild()
 	local now = ns.Now()
-	if Comm.BankOnDuty() then
+	-- Quiet presence (Core.lua) too: neither the reporter nor its runner-up, so no report and no
+	-- census answer (Q1) of ours says we are online.
+	if Comm.BankOnDuty() or Quiet() then
 		Comm.isReporter, Comm.isRunnerUp, watch = false, false, nil
 		Comm.lastReport = report
 		return
@@ -1444,6 +1491,9 @@ function Comm.Broadcast(report)
 		return
 	end
 	Comm.heldReport = nil
+	-- Quiet presence (Core.lua): no census of ours, which would say we are online (its pieces name no
+	-- type for QuietHolds: held here, and by the guard below for one already on its way).
+	if Quiet() then return end
 	lastBroadcast = ns.Now()
 	msgId = (msgId + 1) % 1000
 	-- Where people are goes out only with their yes (0.9.1): nothing of it unless we share our
@@ -1455,6 +1505,7 @@ function Comm.Broadcast(report)
 	Comm.SendBatch("CHANNEL", chunks, nil, nil, false, nil, { guard = function()
 		local current = ns.Moderation
 		if current and not current.missing and current.OwnGuildOff() then return false end
+		if Quiet() then return false end
 		return not sharing or (ns.Layers and ns.Layers.Sharing and ns.Layers.Sharing()) == true
 	end })
 	ns.Log("broadcast %s: %d bytes in %d chunks", report.guild, #payload, #chunks)
@@ -1865,6 +1916,12 @@ function Comm.CheckMembership()
 	DropQueue("left")
 	DropChat("left")
 end
+
+-- Quiet presence turned off (Core.lua): our hello at once, so our guildmates count us again (the
+-- census we may report follows at its own pace, MaybeBroadcast).
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on == false and ns.IsMember() then Comm.Hello(true) end
+end)
 
 ns.On("LOGIN", function()
 	Comm.loginAt = ns.Now()

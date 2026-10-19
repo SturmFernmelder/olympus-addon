@@ -279,6 +279,8 @@ function Versions.HandlePing(dist, sender, text)
 	if dist ~= "WHISPER" then return end
 	local id = tostring(text or ""):match("^V7~(%d+)$")
 	if not id or #id > 6 or Ignored(sender) then return end
+	-- Quiet presence (Core.lua): no answer, as when we are offline ("no answer" on their side).
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local w = W()
 	if w.IsAuthorName and w.IsAuthorName(sender) and not (w.Answers and w.Answers()) then return end
 	local now = ns.Now()

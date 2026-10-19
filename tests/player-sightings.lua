@@ -1076,3 +1076,43 @@ test("player sightings: replay, sender rate, cancellation and expiry are bounded
 		eq(select(2, requester.ns.PlayerSightings.Session(nextId)), "not-found")
 	end)
 end)
+
+-- 1.2.5.1, the quiet presence (Core.lua's ns.QuietPresence): an observer that has it on observes and
+-- answers nothing and withdraws nothing (what it answered before expires at the requester, as after
+-- a logout); a requester that has it on still sends its own request, a read.
+test("player sightings: quiet presence answers and withdraws nothing, its own request still goes, and it answers again once off", function()
+	WithWorld(function(world)
+		local requester, observer = world:Client("Requester"), world:Client("Observer")
+		for _, c in ipairs({ requester, observer }) do c.ns.QuietPresence = function() return c.quiet == true end end
+		Authorize(observer, requester.name); observer.members[requester.name:lower()] = requester.guild
+		requester.members[observer.name:lower()] = observer.guild
+		observer.ns.PlayerSightings.SetSharing(true, true)
+		-- An answer delivered before it began.
+		local id = StartAndDeliver(world, requester, observer)
+		observer.units.target = Player("Target-Realm")
+		eq(world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target"), true)
+		eq(world:Flush(observer, requester), true)
+		eq(#requester.ns.PlayerSightings.Results(id), 1)
+		-- On: no withdrawal of it, no new observation, no answer to a new request.
+		observer.quiet = true
+		world:As(observer, observer.ns.PlayerSightings.Tick)
+		eq(world:Flush(observer), false, "nothing queued, not even a withdrawal")
+		eq(#requester.ns.PlayerSightings.Results(id), 1, "the requester's row stays until it expires")
+		observer.units.mouseover = Player("Target-Realm")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "mouseover")), "quiet")
+		requester.quiet = true
+		local started = world:As(requester, requester.ns.PlayerSightings.Start, "Other-Realm")
+		eq(started, true)
+		local received, why, query = world:Flush(requester, observer)
+		assert(query and query.msg:match("^PS~Q~1~%d+~Other%-Realm$"), "a quiet requester's own request still leaves")
+		eq(received, false); eq(why, "quiet", "a quiet observer takes none")
+		eq(world:Flush(observer), false)
+		-- Off: it answers again.
+		observer.quiet = false
+		local laterId = StartAndDeliver(world, requester, observer, "Later-Realm")
+		observer.units.target = Player("Later-Realm")
+		eq(world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target"), true)
+		eq(world:Flush(observer, requester), true)
+		eq(#requester.ns.PlayerSightings.Results(laterId), 1)
+	end)
+end)

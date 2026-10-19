@@ -1152,6 +1152,9 @@ end
 
 local function SendLocation(force)
 	if not King.SharingLocation() or not King.IsKing() then return end
+	-- Quiet presence (Core.lua): his crown leaves no client; the army's copy expires on its own
+	-- (LOCATION_EXPIRE), as after a logout. His layer and hello are held by Layers.lua and Comm.lua.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local mapID, x, y = LocationPosition()
 	if not mapID then return end
 	local now = ns.Now()
@@ -1161,6 +1164,9 @@ local function SendLocation(force)
 	ns.Comm.Send("CHANNEL", ("T1~P~%d~%s~%d~%d~%d"):format(locationId, GetGuildInfo("player") or "", mapID,
 		math.floor(x * 1000 + 0.5), math.floor(y * 1000 + 0.5)), "kinglocation")
 end
+
+-- Quiet presence turned off (Core.lua): his crown at once again, while he shares it.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then SendLocation(true) end end)
 
 function King.ToggleLocation()
 	if King.Preview() then return ns.Print(L.THRONE_PREVIEW_NOTE) end
@@ -1179,7 +1185,10 @@ function King.ToggleLocation()
 	else
 		ns.Print(L.THRONE_LOCATION_HIDDEN)
 		lastLocation = { t = -math.huge }
-		ns.Comm.Send("CHANNEL", ("T1~Q~%d~%s"):format(locationId, GetGuildInfo("player") or ""), "kinglocation")
+		-- (Quiet presence, Core.lua: no removal either; the army's copy expires on its own.)
+		if not (ns.QuietPresence and ns.QuietPresence()) then
+			ns.Comm.Send("CHANNEL", ("T1~Q~%d~%s"):format(locationId, GetGuildInfo("player") or ""), "kinglocation")
+		end
 		-- His layer goes with it, at once, and his hello stops naming his zone (Layers.Sharing).
 		ns.Layers.Withdraw()
 		ns.Comm.Hello(true)

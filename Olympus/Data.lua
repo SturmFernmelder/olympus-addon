@@ -939,6 +939,8 @@ function Data.GlobalCensusPayload()
 end
 
 function Data.SendGlobalCensus()
+	-- Quiet presence (Core.lua): no snapshot of ours, which would name us as its sender online.
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local payload = Data.GlobalCensusPayload()
 	if not payload or payload:sub(-1) == "~" then return false end
 	local ok = ns.Comm.SendChunked(payload, false, "CHANNEL", nil, { owner = Data, key = "census-global" })

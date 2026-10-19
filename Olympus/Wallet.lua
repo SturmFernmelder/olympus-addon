@@ -2740,6 +2740,12 @@ function Wallet.Hello()
 		ns.Arena.Every(Wallet.HELLO_EVERY, "wallet hello", nil)
 		return false
 	end
+	-- Quiet presence (Core.lua): no hello while it lasts; the ticker goes on, so the first one after
+	-- it comes at its time.
+	if ns.QuietPresence and ns.QuietPresence() then
+		ns.Arena.Every(Wallet.HELLO_EVERY, "wallet hello", Wallet.Hello)
+		return false
+	end
 	ns.Arena.Send("ZQ", "L", "H~-~0", { dist = "CHANNEL", obligation = true })
 	if receiver then
 		local s = Store("L")

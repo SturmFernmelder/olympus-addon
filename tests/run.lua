@@ -62353,7 +62353,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -62366,6 +62366,7 @@ for _, name in ipairs(focused) do
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
+		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,
 			WithGamepadUI = WithGamepadUI, WithUI = WithUI }) or (name == "hop-sightings" and WithHop or nil)

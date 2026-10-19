@@ -130,6 +130,9 @@ local function NetOff()
 	local ok, off = pcall(M.SelfOff)
 	return not ok or (off ~= nil and off ~= false)
 end
+-- Quiet presence (1.2.5.1, Core.lua): this client observes and answers nothing, and withdraws
+-- nothing either (Comm.QUIET_WORDS). This client's own requests, which are reads, still go.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 
 local function SignedRequester(value)
 	local name = Canonical(value)
@@ -191,6 +194,7 @@ end
 local function ObserverEligible()
 	if type(ns.IsMember) ~= "function" or ns.IsMember() ~= true then return false, "member" end
 	if NetOff() then return false, "netoff" end
+	if Quiet() then return false, "quiet" end
 	if not Sharing() then return false, "consent" end
 	if not LocationSharing() then return false, "location" end
 	if InInstance() then return false, "instance" end
@@ -529,6 +533,18 @@ end
 
 local function Withdrawal(key, answer)
 	if answer.withdrawing then return false end
+	-- Quiet presence: forgotten, not withdrawn; the requester's row expires on its own
+	-- (RESULT_TTL) as after a logout.
+	if Quiet() then
+		if sent[key] == answer then
+			sent[key], sentCount = nil, sentCount - 1
+			if answer.mode == "area" then
+				local remote = remotes[tostring(answer.requester):lower() .. ":" .. tostring(answer.id)]
+				if remote then remote.sentCount = math.max(0, (remote.sentCount or 1) - 1) end
+			end
+		end
+		return false
+	end
 	local C = GuardedComm()
 	if not C then return false end
 	answer.withdrawing = true
