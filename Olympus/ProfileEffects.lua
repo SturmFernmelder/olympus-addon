@@ -16,7 +16,7 @@ local ADDON, ns = ...
 -- caption for their own character.  Receivers keep grants and presentations in memory only and
 -- show one only while directly targeting its sender.  Stops and closes win over older words; every
 -- missed close expires on its own.  Nothing here changes a protected unit frame or performs a
--- protected action: the two textures and the portrait copy belong to Olympus.
+-- protected action: the two textures belong to Olympus.
 
 local Effects = {}
 ns.ProfileEffects = Effects
@@ -26,6 +26,13 @@ Effects.HEARTBEAT = 10
 Effects.LEASE_TTL = 32
 Effects.SESSION_TTL = 32
 Effects.DISPLAY_FOR = 2.5
+-- The look the operators tuned in the effect sandbox (2026-10-19): a black winged frame with a
+-- violet glow over it, and no shade over the target's portrait.
+Effects.MAIN_COLOR = { 0, 0, 0, 1 }
+Effects.LIGHT_COLOR = { 0.190, 0.200, 0.690, 1 }
+Effects.MESSAGE_Y = 144
+Effects.MESSAGE_BG = { 0.015, 0.02, 0.03, 0.87 }
+Effects.CAPTION_SIZE = 19
 Effects.CAPTION_MAX = 160
 Effects.MAX_SENDERS = 128
 Effects.ORDER_MAX = 256
@@ -148,14 +155,24 @@ local function Member()
 	return type(ns.IsMember) == "function" and ns.IsMember() == true and CurrentGuild() ~= nil
 end
 
--- Only a signed Olympus authority may open the short shared session.  Once that authenticated
--- grant is live, an admitted member may present the one host-owned effect on themself; channel
--- admission alone can neither create nor prolong the grant.
+-- Only a signed Olympus authority, or the addon's pinned author (as PlayerSightings accepts, with no
+-- moderation power), may open the short shared session.  Once that authenticated grant is live, an
+-- admitted member may present the one host-owned effect on themself; channel admission alone can
+-- neither create nor prolong the grant.
 local function Authorized(name)
 	local M = ns.Moderation
 	if type(M) ~= "table" or type(M.IsIssuer) ~= "function" or type(name) ~= "string" then return false end
 	local ok, allowed = pcall(M.IsIssuer, name)
-	return ok and allowed == true
+	if ok and allowed == true then return true end
+	local W = ns.Workshop
+	if type(W) ~= "table" or W.missing or type(W.IsAuthorName) ~= "function" then return false end
+	local authorOK, author = pcall(W.IsAuthorName, name)
+	if not authorOK or author ~= true then return false end
+	if type(M.Hides) == "function" then
+		local safe, hidden = pcall(M.Hides, name)
+		if not safe or hidden then return false end
+	end
+	return true
 end
 
 local function AuthorizedSelf()
@@ -556,18 +573,6 @@ local function Texture(parent, layer, sublevel)
 	return ok and type(texture) == "table" and texture or nil
 end
 
-local function MakeMask(parent, texture, size, point)
-	if type(parent.CreateMaskTexture) ~= "function" or type(texture.AddMaskTexture) ~= "function" then return nil end
-	local ok, mask = pcall(parent.CreateMaskTexture, parent)
-	if not ok or type(mask) ~= "table" or type(mask.SetTexture) ~= "function" then return nil end
-	local set, loaded = pcall(mask.SetTexture, mask, "Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-	if not set or loaded == false then return nil end
-	mask:SetSize(size, size)
-	mask:SetPoint(unpack(point))
-	if not pcall(texture.AddMaskTexture, texture, mask) then return nil end
-	return mask
-end
-
 HideUI = function()
 	if not ui then return end
 	if ui.target then ui.target:Hide() end
@@ -719,38 +724,29 @@ local function EnsureUI()
 			if texture then texture:Hide() end
 		end
 	end
-	if main and type(main.SetVertexColor) == "function" then main:SetVertexColor(0.12, 0.14, 0.17, 1) end
-	if light and type(light.SetVertexColor) == "function" then light:SetVertexColor(0.20, 0.32, 0.40, 0.75) end
+	if main and type(main.SetVertexColor) == "function" then main:SetVertexColor(unpack(Effects.MAIN_COLOR)) end
+	if light and type(light.SetVertexColor) == "function" then light:SetVertexColor(unpack(Effects.LIGHT_COLOR)) end
 	if light and type(light.SetBlendMode) == "function" then light:SetBlendMode("ADD") end
 
-	local portrait = Texture(target, "OVERLAY", 5)
-	if portrait then
-		portrait:SetSize(58, 58)
-		portrait:SetPoint("TOPRIGHT", target, "TOPRIGHT", -26, -19)
-		if type(portrait.SetDesaturated) == "function" then portrait:SetDesaturated(true) end
-		if type(portrait.SetVertexColor) == "function" then portrait:SetVertexColor(0.035, 0.04, 0.055, 1) end
-		local point = { "TOPRIGHT", target, "TOPRIGHT", -26, -19 }
-		local mask = MakeMask(target, portrait, 58, point)
-		if not mask and type(portrait.SetMask) == "function" then
-			pcall(portrait.SetMask, portrait, "Interface\\CharacterFrame\\TempPortraitAlphaMask")
-		end
-	end
 	target:Hide()
-	ui = { target = target, portrait = portrait, main = main, light = light }
+	ui = { target = target, main = main, light = light }
 
 	local message = CreateFrame("Frame", nil, container) -- gp:borders
 	message.olympus = true
 	message:SetSize(660, 92)
-	message:SetPoint("CENTER", UIParent, "CENTER", 0, 145)
+	message:SetPoint("CENTER", UIParent, "CENTER", 0, Effects.MESSAGE_Y)
 	if type(message.SetFrameStrata) == "function" then message:SetFrameStrata("DIALOG") end
 	if type(message.EnableMouse) == "function" then message:EnableMouse(false) end
 	local bg = Texture(message, "BACKGROUND", 0)
-	if bg then bg:SetAllPoints(); if type(bg.SetColorTexture) == "function" then bg:SetColorTexture(0.015, 0.02, 0.03, 0.90) end end
+	if bg then bg:SetAllPoints(); if type(bg.SetColorTexture) == "function" then bg:SetColorTexture(unpack(Effects.MESSAGE_BG)) end end
 	local top = Texture(message, "BORDER", 0)
 	if top then top:SetColorTexture(0.52, 0.38, 0.21, 0.85); top:SetPoint("TOPLEFT", 8, -7); top:SetPoint("TOPRIGHT", -8, -7); top:SetHeight(1) end
 	local bottom = Texture(message, "BORDER", 0)
 	if bottom then bottom:SetColorTexture(0.20, 0.32, 0.40, 0.75); bottom:SetPoint("BOTTOMLEFT", 8, 7); bottom:SetPoint("BOTTOMRIGHT", -8, 7); bottom:SetHeight(1) end
 	local text = message:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+	-- GameFontNormalLarge's face and outline, at the tuned size.
+	local got, path, _, flags = pcall(text.GetFont, text)
+	if got and type(path) == "string" then pcall(text.SetFont, text, path, Effects.CAPTION_SIZE, flags) end
 	text:SetPoint("TOPLEFT", message, "TOPLEFT", 22, -19)
 	text:SetPoint("TOPRIGHT", message, "TOPRIGHT", -22, -19)
 	text:SetJustifyH("CENTER")
@@ -797,9 +793,6 @@ local function Show(lease)
 	if not CanRender() then HideUI() return false end
 	local view = EnsureUI()
 	if not view then return false end
-	if view.portrait and type(SetPortraitTexture) == "function" then
-		pcall(SetPortraitTexture, view.portrait, "target", true)
-	end
 	if view.text then view.text:SetText(lease.caption) end
 	if view.clue then view.clue:SetText(Coordinates()) end
 	if view.target then view.target:Show() end

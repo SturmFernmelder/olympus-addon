@@ -406,7 +406,7 @@ self-only: each admitted member can announce it only for their own character whi
 signed issuer's session remains live.
 
 `handle:StartProfileSession(style)` asks the host to open the short shared session and returns
-`true`, or `false` and a reason. Opening is restricted to a current signed issuer. The host renews
+`true`, or `false` and a reason. Opening is restricted to a current signed issuer or the addon's author. The host renews
 the session every 10 seconds while eligible; a missed lease expires after about 32 seconds.
 Only one API owner can hold the local outgoing session at a time.
 

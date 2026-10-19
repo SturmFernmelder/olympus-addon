@@ -1653,7 +1653,7 @@ map. The kind, observation time, expiry and layer are labelled, so this is last-
 not continuous tracking. Requests and answers expire, and turning either permission off cancels or
 withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
 world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
-can also host one bounded profile presentation. A current signed issuer opens it; an admitted
+can also host one bounded profile presentation. A current signed issuer or the addon's author opens it; an admitted
 member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
 and **No** closes that addon's state. Olympus
 never gives another addon the census, other players' private data or Olympus's keys; each addon gets
