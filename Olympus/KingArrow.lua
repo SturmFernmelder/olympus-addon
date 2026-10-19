@@ -558,6 +558,9 @@ end
 function Arrow.RepeatOwn()
 	local e = OwnChoice()
 	if not e or not Controller(e.scope, ns.me, e.guild) then return false end
+	-- (1.2.5.1, quiet presence, Core.lua: no repeat, which would say he is online; his word lasts
+	-- its CONTROL_LEASE where it was heard, and the repeats come back once it is off.)
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	-- (1.2.0: never stamped again past a higher rank's later word, in force or lapsed: the King's
 	-- "off" is not undone by a councillor's client repeating its older "on" once the King is gone.)
 	EnsureLoaded()

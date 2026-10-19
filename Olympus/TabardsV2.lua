@@ -154,8 +154,13 @@ local function StatusFits(level, status)
 	return status ~= "Y"
 end
 
+-- Quiet presence (1.2.5.1, Core.lua): the King's collector lease says he is online, and a report
+-- whispered to him says its sender is: none goes while it is on (Comm.QUIET_WORDS). The lease the
+-- others hold lapses (LEASE_FOR) as after a logout; the beat (T.Tick) brings both back once it is off.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+
 function T.SendSelf(force)
-	if T.Consent("self") ~= true or not ns.IsMember() or ns.King.IsKing() then return false end
+	if T.Consent("self") ~= true or not ns.IsMember() or ns.King.IsKing() or Quiet() then return false end
 	local c, now = FreshCollector(), ns.Now()
 	if not c or (not force and now - lastSelf < T.SELF_EVERY) then return false end
 	local status, level, guild = OwnStatus()
@@ -210,7 +215,7 @@ function T.Observe(p, direct)
 	local level = tonumber(p.level) or 0
 	if not name or not guild or not StatusFits(level, status) then return false end
 	if ns.King.IsKing() then return StoreObservation("king", ns.FullName(ns.me), name, guild, level, status, ns.Now(), true) end
-	if T.Consent("nearby") ~= true or not ns.IsMember() then return false end
+	if T.Consent("nearby") ~= true or not ns.IsMember() or Quiet() then return false end
 	local c, now = FreshCollector(), ns.Now()
 	if not c then return false end
 	local was = lastNearby[name]
@@ -292,6 +297,7 @@ end
 
 function T.Announce(force)
 	if not ns.King.IsKing() then ownLease = nil return false end
+	if Quiet() then return false end
 	local now = ns.Now()
 	if not force and ownLease and now - (ownLease.announced or 0) < T.LEASE_EVERY then return false end
 	local id, guild = NewLeaseId(), CleanGuild(GetGuildInfo("player"))

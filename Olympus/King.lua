@@ -416,9 +416,16 @@ local function SendHandsSoon()
 	end)
 end
 
+-- Quiet presence (1.2.5.1, Core.lua): the lists the King's (or a Steward's) client repeats for late
+-- logins (his Hands, the untabarded, the agenda) are not repeated while it is on: each repeat says
+-- he is online, and the army's copy lapses as after a logout (HandsFresh). A list he changes, or a
+-- switch he turns, still goes (force); the repeats come back once it is off.
+local function QuietRepeat(force) return not force and ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+King.QuietRepeat = QuietRepeat
+
 -- The King's list goes out whole: short in one message, long in pieces (Comm.SendChunked).
 function King.SendHands(force)
-	if not King.IsKing() then return end
+	if not King.IsKing() or QuietRepeat(force) then return end
 	local now = ns.Now()
 	if not force and now - lastHandsSent < King.HANDS_EVERY then return end
 	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, at his later sessions:
@@ -431,7 +438,7 @@ end
 
 -- A Steward's own list (1.0.0), from his client alone, the same way.
 function King.SendStewardHands(force)
-	if King.IsKing() or not King.IsSteward() then return end
+	if King.IsKing() or not King.IsSteward() or QuietRepeat(force) then return end
 	local now = ns.Now()
 	if not force and now - lastStewardSent < King.HANDS_EVERY then return end
 	-- (nobody named yet; 1.2.4: a list he emptied is said again, empty, the King's way)
@@ -923,7 +930,7 @@ local function TakeReports()
 end
 
 function King.SendUntabarded(force)
-	if not King.IsKing() then return end
+	if not King.IsKing() or QuietRepeat(force) then return end
 	local now = ns.Now()
 	local on = King.SharingUntabarded()
 	if not force and (not on or now - lastUntabardedSent < King.UNTABARDED_EVERY) then return end
@@ -1388,7 +1395,7 @@ ns.On("LOGIN", function()
 				Warn(L.THRONE_AGENDA_SOON:format(a.title, math.max(1, math.ceil(left / 60)), a.zone), false, "agenda", King.AgendaHeld(a))
 			end
 		end
-		if a.mine and (not a.sentAt or ns.Now() - a.sentAt >= King.AGENDA_RESEND) then
+		if a.mine and not QuietRepeat(false) and (not a.sentAt or ns.Now() - a.sentAt >= King.AGENDA_RESEND) then
 			a.sentAt = ns.Now()
 			King.SendAgenda()
 		end

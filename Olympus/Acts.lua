@@ -238,6 +238,9 @@ end
 -- counts), one a time. The writ said, or nil.
 function Acts.RepeatWrits()
 	if not ns.King.IsKing() or ns.King.Preview() then return nil end
+	-- (1.2.5.1, quiet presence, Core.lua: neither this repeat nor the answer to an ask below, which
+	-- would say he is online; a writ he gives still goes, and the repeats come back once it is off.)
+	if ns.QuietPresence and ns.QuietPresence() then return nil end
 	local best
 	for _, w in ipairs(RecentWrits()) do
 		local said = tonumber(w.saidAt) or tonumber(w.t) or 0
@@ -256,6 +259,7 @@ end
 -- WRIT_ANSWER_GAP whoever asks. The number to be said.
 function Acts.HandleAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or text ~= "T7~1" or not ns.King.IsKing() or ns.King.Preview() then return 0 end
+	if ns.QuietPresence and ns.QuietPresence() then return 0 end
 	local now = ns.Now()
 	if writAnswering or now - lastWritAnswer < Acts.WRIT_ANSWER_GAP then return 0 end
 	local list = RecentWrits()
@@ -265,7 +269,7 @@ function Acts.HandleAsk(dist, sender, text)
 	local function Next()
 		i = i + 1
 		local w = list[i]
-		if not w or not ns.King.IsKing() then writAnswering = false return end
+		if not w or not ns.King.IsKing() or (ns.QuietPresence and ns.QuietPresence()) then writAnswering = false return end
 		SayWrit(w)
 		if list[i + 1] then ns.After(Acts.WRIT_SPACING, "writs answer", Next) else writAnswering = false end
 	end

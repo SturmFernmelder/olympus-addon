@@ -239,7 +239,10 @@ function Muster.Tick()
 	if not s then return end
 	Prune(s)
 	local own = ns.me and s.active[Key(ns.me)]
-	if own and ns.Now() - lastSent >= Muster.REPEAT and Send(s, own) then lastSent = ns.Now() end
+	-- (1.2.5.1, quiet presence, Core.lua: the call he posted is not repeated, which would say he is
+	-- online; it lasts its LIFE where it was heard, and a post or withdrawal he makes still goes.)
+	local quiet = ns.QuietPresence and ns.QuietPresence()
+	if own and not quiet and ns.Now() - lastSent >= Muster.REPEAT and Send(s, own) then lastSent = ns.Now() end
 	Refresh()
 end
 function Muster.Link()

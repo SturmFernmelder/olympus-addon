@@ -128,11 +128,15 @@ local function WithWorld(fn)
 				end,
 			}
 			c.After = function(seconds, _, call) w.after[#w.after + 1] = { at = w.clock + seconds, call = call, client = c } end
-			c.Every = function(_, _, call)
+			c.tickers = {}
+			c.Every = function(_, where, call)
 				local handle = { call = call, cancelled = false }
 				function handle.Cancel() handle.cancelled = true end
+				c.tickers[where] = handle -- (1.2.5.1: a test beats one by its name)
 				return handle
 			end
+			-- (1.2.5.1: the quiet presence, Core.lua's answer for this client: c.quiet.)
+			c.QuietPresence = function() return c.quiet == true end
 			c.RegisterEvent = function(event, call) c.events[event] = call end
 			c.On = function(event, call) c.listeners[event] = call end
 			c.Fire = function(event, ...)
@@ -517,5 +521,56 @@ test("profile effects: issuer session churn is replay checked and both grant reg
 		stats = w.use(receiver, receiver.ProfileEffects.Stats)
 		assert(stats.sessions <= receiver.ProfileEffects.MAX_SESSIONS, tostring(stats.sessions))
 		assert(stats.sessionOrder <= receiver.ProfileEffects.SESSION_ORDER_MAX, tostring(stats.sessionOrder))
+	end)
+end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): each heartbeat (a member's presentation, an
+-- issuer's session) says its sender is online every 10 seconds, and the issuers are the very people
+-- who may turn it on.
+test("profile effects: while the quiet presence is on, no heartbeat, stop or close leaves; nothing new starts (\"quiet\"); the others drop the leases; once off they beat again", function()
+	WithWorld(function(w)
+		local issuer = w.client("Council")
+		local receiver = w.client("Observer", false)
+		w.openFor(issuer, { receiver })
+		w.trust(receiver, issuer, true)
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", true, CAPTION))
+		assert(w.deliver(issuer, receiver))
+		assert(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), "shown, before")
+		eq(#issuer.jobs, 0)
+		issuer.quiet = true
+		for _ = 1, 4 do
+			w.advance(issuer.ProfileEffects.HEARTBEAT)
+			w.use(issuer, issuer.tickers["profile effect session"].call)
+			w.use(issuer, issuer.tickers["profile effect"].call)
+		end
+		eq(#issuer.jobs, 0, "no heartbeat while it is on: " .. tostring(issuer.jobs[1] and issuer.jobs[1].message))
+		assert(w.use(issuer, issuer.ProfileEffects.Session), "his own session is kept here")
+		eq(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), nil, "the others drop it, as after a logout")
+		eq(w.use(receiver, receiver.ProfileEffects.Session), nil)
+		-- Nothing new: another session or presentation waits until it is off.
+		local other = w.client("CouncilTwo")
+		other.quiet = true
+		local ok, why = w.use(other, other.ProfileEffects.OpenSession, "owner", "shadow")
+		eq(ok, false); eq(why, "quiet"); eq(#other.jobs, 0)
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", true, CAPTION), "the live one: still on, nothing to do")
+		-- Off: both beat again, and the others take them.
+		issuer.quiet = false
+		w.advance(issuer.ProfileEffects.HEARTBEAT)
+		w.use(issuer, issuer.tickers["profile effect session"].call)
+		w.use(issuer, issuer.tickers["profile effect"].call)
+		eq(#issuer.jobs, 2, "the session and the presentation beat again")
+		assert(issuer.jobs[1].message:match("^FX~2~G~s~"), issuer.jobs[1].message)
+		assert(w.deliver(issuer, receiver))
+		assert(w.deliver(issuer, receiver))
+		assert(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), "shown again")
+		-- Quiet again: a stop and a close end it here at once; their words are handed to Comm, which
+		-- keeps every FX~ home while it is on (Comm.QUIET_WORDS, the transport's own test).
+		issuer.quiet = true
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", false))
+		assert(w.use(issuer, issuer.ProfileEffects.CloseSession, "session-owner"))
+		eq(#issuer.jobs, 2)
+		assert(issuer.jobs[1].message:match("^FX~2~X~") and issuer.jobs[2].message:match("^FX~2~C~"), issuer.jobs[1].message)
+		eq(w.use(issuer, issuer.ProfileEffects.Session), nil)
+		eq(w.use(issuer, issuer.ProfileEffects.Outgoing), nil)
 	end)
 end)

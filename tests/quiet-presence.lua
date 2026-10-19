@@ -96,10 +96,26 @@ test("quiet presence: the transport holds every word that says we are online or 
 			"PS~B~1~7~Olympus II~1453~1~2~3~5~Target-Realm~nearby", "PS~X~1~7~Target-Realm", "PS~W~1~7~Target-Realm",
 			"T1~P~5~Olympus~1453~420~510", "T1~Q~5~Olympus", "CG~1~S~1790000000~Olympus II,10,2,600,1790000000",
 			"V2~7~1.2.5.1~~E~~p~0~0~", "V4~1.2.5.1", "V8~7~1.2.5.1", "NK~1~p~M~-~Olympus II~-", "DV~1~OLK2.x", "DV~0", "DW~1", "DW~0",
-			"ZQ~L1~H~-~0" }
+			"ZQ~L1~H~-~0",
+			-- (Review: these said he was online, some where, while it was on.) An auditor's check of a
+			-- snapshot marks him as heard too; the court; the Wanted reviewer's lease, its No, a sighting
+			-- and its taking back; a councillor's help notice and "got it"; a keeper's donations; an
+			-- arbiter's availability; the tabard collector lease and its reports; a profile
+			-- presentation's words; a crafter's listing, unlisting, answer and recipe list.
+			"ZQ~L1~H~1a2b~3c", "T1~C~5~Olympus~1453~Stormwind City", "T1~Z~5~Olympus", "WS~R~1", "WS~R~0",
+			"WS~S~1~Olympus II~ab12~1790000000~1453~400~600~7~0A000001~Grom-Realm", "WS~X~1", "HA~1", "HA~0", "HK~1",
+			"TD~Olympus II~1~1790000000~1453", "TD~Olympus II~0~0~", "ZV~L1~f~-", "U2~2~abc~600~Olympus",
+			"U3~2~abc~1~60~Olympus II~G", "U4~2~abc~2~Grom-Realm~Horde Guild~60~O~Olympus II", "FX~2~G~s~1~1~1790000000~Olympus II~7",
+			"FX~2~S~s~1~2~1790000000~Olympus II~Issuer-Realm~7~caption", "FX~2~C~s~1~3~1790000000~Olympus II~7",
+			"W1~Olympus II~alch:Alchemy:300:300:5", "W0~", "WA~ab~Olympus II~Alchemy~300~1:2", "WL~alch~1/1~1:2" }
+		-- Reads, and what the player posts himself (a list he changed, a writ, his muster, his arrow
+		-- word), still go: their timed repeats are held in their modules (King.lua, Acts.lua, ...).
 		local passes = { "M1~A~Olympus II~1~~hello there", "Q1~", "K0~", "LQ~1~1453~8", "LR~1", "LX~1", "LY~Q~1~7~77~1453",
 			"PS~Q~1~7~Target-Realm", "PS~A~1~7~1453", "PS~C~1~7~Target-Realm", "CG~1~Q~1790000000", "T1~S~5~Olympus",
-			"V1~7~100", "V7~7", "ZQ~L1~R~-~0", "TA~Olympus II~1", "D1~ARMS~1~1~1~Olympus II~1~x" }
+			"V1~7~100", "V7~7", "ZQ~L1~R~-~0", "TA~Olympus II~1", "D1~ARMS~1~1~1~Olympus II~1~x",
+			"WQ~ab~t~flask", "WR~alch", "HR~a hand please", "T7~1", "T4~5~Olympus II", "T1~H~5~Olympus~", "T1~A~5~Olympus~1800~Gates~Muster",
+			"T1~W~5~Olympus~army~a writ", "OM~1~P~A~RealmGroup~1~1790000000~Olympus~1429~Gather", "K6~1~G~1~1790000000~",
+			"U1~x", "UP~x", "WC~x" }
 		for _, msg in ipairs(held) do eq(C.QuietHolds(msg), false, "off: " .. msg) end
 		Quiet(true)
 		for _, msg in ipairs(held) do eq(C.QuietHolds(msg), true, "held: " .. msg) end
@@ -290,8 +306,14 @@ end)
 test("quiet presence: a line on top of the Census and the Realm says so while it is on, in English and pt-BR, with what still goes", function()
 	AsCouncillor(function()
 		local L = ns.L
-		eq(L.QUIET_PRESENCE_LINE, "Quiet presence: other Olympus clients see you as offline. Your guild roster, /who and chat still show you.")
-		assert(L.QUIET_PRESENCE_TIP:find("Olympus chat lines you type still go out", 1, true), "the typed chat lines still go")
+		-- (Review: "other Olympus clients see you as offline" was untrue for a guild leader or officer,
+		-- whom the guildmates' census still shows online from the game's guild roster: the King first.)
+		eq(L.QUIET_PRESENCE_LINE, "Quiet presence: Olympus stops announcing you and where you are. Your guild roster, the census your guildmates build from it, /who and chat still show you.")
+		for _, words in ipairs({ "Olympus chat lines you type, what you post yourself and the records your client relays still go out",
+			"a guild leader or officer still shows online there, and your zone may show for up to 12 minutes",
+			"after a /reload, Olympus may say hello before that addon turns it on again" }) do
+			assert(L.QUIET_PRESENCE_TIP:find(words, 1, true), "the tooltip says: " .. words)
+		end
 		local function Has(lines)
 			for _, line in ipairs(lines) do
 				if type(line.text) == "string" and line.text:find(L.QUIET_PRESENCE_LINE, 1, true) then return line end
@@ -317,7 +339,9 @@ test("quiet presence: a line on top of the Census and the Realm says so while it
 		end)
 		GetLocale = savedLocale
 		assert(ok, err)
-		eq(pt.L.QUIET_PRESENCE_LINE, "Presença silenciosa: os outros clientes do Olympus veem você como offline. A lista da guilda, o /who e o chat ainda mostram você.")
-		assert(pt.L.QUIET_PRESENCE_TIP:find("linhas de chat do Olympus que você digitar ainda são enviadas", 1, true))
+		eq(pt.L.QUIET_PRESENCE_LINE, "Presença silenciosa: o Olympus para de anunciar você e onde você está. A lista da guilda, o censo que seus colegas de guilda montam com ela, o /who e o chat ainda mostram você.")
+		assert(pt.L.QUIET_PRESENCE_TIP:find("linhas de chat do Olympus que você digitar, o que você mesmo publicar e os registros que seu cliente repassa ainda são enviados", 1, true))
+		assert(pt.L.QUIET_PRESENCE_TIP:find("um mestre ou oficial de guilda ainda aparece online lá", 1, true))
+		assert(pt.L.QUIET_PRESENCE_HELD and pt.L.QUIET_PRESENCE_HELD ~= L.QUIET_PRESENCE_HELD, "the held line in pt-BR")
 	end)
 end)

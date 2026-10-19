@@ -2413,12 +2413,15 @@ function Workshop.SetCouncilHelp(on)
 	ns.db.councilHelp = on and true or false
 	ns.Print(on and L.COUNCIL_HELP_ON or L.COUNCIL_HELP_OFF)
 	lastAvailSent = -math.huge
-	-- Off: said at once, so nobody's request goes to us meanwhile.
-	if not on then ns.Comm.Send("CHANNEL", "HA~0", "counciladvert") end
+	-- Off: said at once, so nobody's request goes to us meanwhile (quiet presence, Core.lua: not
+	-- said; the others' copy lapses, HELP_FRESH).
+	if not on and not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Send("CHANNEL", "HA~0", "counciladvert") end
 	Workshop.SayAvailable()
 end
 function Workshop.SayAvailable()
 	if not ns.db.councilHelp or not ns.IsHighCouncillor(ns.me) then return end
+	-- Quiet presence (Core.lua): "available" says we are online; it waits until it is off.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local now = ns.Now()
 	if now - lastAvailSent < Workshop.HELP_EVERY then return end
 	lastAvailSent = now
@@ -2466,7 +2469,9 @@ function Workshop.HandleAsk(dist, sender, text)
 	local now, who = ns.Now(), ns.FullName(sender)
 	if now - (helpFrom[who] or -math.huge) < 60 then return end
 	helpFrom[who] = now
-	ns.Comm.Whisper(who, "HK~1", "councilack")
+	-- (Quiet presence, Core.lua: the ask still shows here, but no "got it" says we are online; the
+	-- asker is told nobody answered, ACK_WAIT, and may ask again.)
+	if not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Whisper(who, "HK~1", "councilack") end
 	local msg = ns.Codec.Plain(text:match("^HR~(.*)$") or "")
 	ns.Print(L.COUNCIL_ASKED:format("|Hplayer:" .. ns.TellName(who) .. "|h[" .. ns.DisplayName(who) .. "]|h", msg))
 	ns.PlayAlert("soft", "help")
@@ -2915,5 +2920,10 @@ ns.On("LOGIN", function()
 	ns.After(40, "author presence", Workshop.SendPresence)
 	ns.Every(Workshop.PRESENCE_EVERY, "author presence", Workshop.SendPresence)
 end)
--- Quiet presence turned off (Core.lua): his presence at once again.
-ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Workshop.SendPresence() end end)
+-- Quiet presence turned off (Core.lua): his presence at once again, and a councillor's help notice.
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on ~= false then return end
+	Workshop.SendPresence()
+	lastAvailSent = -math.huge
+	Workshop.SayAvailable()
+end)

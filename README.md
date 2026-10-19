@@ -2195,11 +2195,15 @@ its own bounded copy. What that addon then does with a copy is up to it, so auth
 you trust. After the update it loads once the game restarts (not on a `/reload`).
 
 A compatible addon can also turn on a quiet presence for the King, a High Councillor or the addon's
-author, for that session alone: other Olympus clients then see that player as offline, as Olympus
-sends nothing that says he is online or where he is (no hello, census report, layer, map dot,
-layer-hop offer or sighting answer, nor the King's crown). His guild roster, `/who` and chat still
-show him, Olympus chat lines he types still go out, reads go on working, and a `/reload` or logout
-ends it. A line on top of the Census and the Realm says so while it is on.
+author, for that session alone: Olympus then stops sending, on its own, the words that announce
+that player online or say where he is (no hello, census report, layer, map dot, layer-hop offer,
+court, donations or duty notice, help or crafter answer, Wanted sighting or sighting answer, profile
+presentation, nor the King's crown or the lists his client repeats), and other Olympus clients age
+him out as after a logout. His guild roster, `/who` and chat still show him, and so does the census
+his guildmates build from the roster: a guild leader or officer still shows online there, and his
+zone may show for up to 12 minutes. Olympus chat lines he types and what he posts himself still go
+out, reads go on working, and a `/reload` or logout ends it. A line on top of the Census and the
+Realm says so while it is on.
 
 The same registered handle can ask to contribute a client-owned page to the Olympus window when
 this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other

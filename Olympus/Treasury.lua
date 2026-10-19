@@ -2607,6 +2607,10 @@ function Treasury.Ask(fresh)
 	if not (Treasury.IsInsider() or (ns.Bank and ns.Bank.AsksSisters and ns.Bank.AsksSisters())) then return false end
 	if lastAsk == -math.huge then fresh = true end
 	if ns.Bank and ns.Bank.Lapsed and ns.Bank.Lapsed() then fresh = true end
+	-- Quiet presence (1.2.5.1, Core.lua): an insider who hears our ask counts us online
+	-- (Treasury.Online) for AUDIENCE_FRESH. A fresh ask (a session's first, a keeper just named)
+	-- still goes, for what is ours to see; the repeat for what changed waits until it is off.
+	if not fresh and ns.QuietPresence and ns.QuietPresence() then return false end
 	lastAsk = ns.Now()
 	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(Clean(GetGuildInfo("player")), fresh and 0 or 1), "treasuryask")
 	return true
@@ -3344,6 +3348,9 @@ end
 
 function Treasury.SendDonations(force)
 	if not donating or not RealKeeper() then return false end
+	-- Quiet presence (Core.lua): "taking donations" says he is online and where; it waits until it is
+	-- off, and the others' line lapses (DONATIONS_FRESH) as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local now = ns.Now()
 	if not force and now - lastDonationSent < Treasury.DONATIONS_EVERY then return false end
 	lastDonationSent = now
@@ -3360,9 +3367,10 @@ function Treasury.SetDonations(on)
 		donating = { since = ns.Now(), mapID = DonationZone() }
 		Treasury.SendDonations(true)
 		ns.Print(donating.mapID and L.DONATIONS_NOW_ON_ZONE or L.DONATIONS_NOW_ON)
+		if ns.QuietPresence and ns.QuietPresence() then ns.Print(L.QUIET_PRESENCE_HELD) end
 	elseif donating then
 		donating = nil
-		ns.Comm.Send("CHANNEL", DonationMessage(false), "treasurydonations")
+		if not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Send("CHANNEL", DonationMessage(false), "treasurydonations") end
 		ns.Print(L.DONATIONS_NOW_OFF)
 	end
 	ns.Fire("TREASURY_CHANGED")
@@ -3383,6 +3391,8 @@ end
 function Treasury.DonationsLogout()
 	if not donating then return end
 	donating = nil
+	-- (Quiet presence: nothing at logout either; the others' line had lapsed or lapses.)
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local name = ns.Comm.ChannelName and ns.Comm.ChannelName()
 	local id = name and GetChannelName and GetChannelName(name) or 0
 	if id and id > 0 and C_ChatInfo and C_ChatInfo.SendAddonMessage then
@@ -3453,6 +3463,9 @@ function Treasury.DonationLines()
 	end
 	return out
 end
+
+-- Quiet presence turned off (Core.lua): a keeper taking donations says so again at once.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Treasury.SendDonations(true) end end)
 
 ns.On("LOGIN", function()
 	ns.Every(30, "treasury donations", function() Treasury.SendDonations() end)

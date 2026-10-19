@@ -258,6 +258,12 @@ local function SendSession(kind, state)
 	return accepted == true, accepted == true and seq or "busy"
 end
 
+-- Quiet presence (1.2.5.1, Core.lua): each heartbeat says this character is online, so none goes
+-- while it is on (Comm.QUIET_WORDS), nor a stop or a close: the others drop the lease (LEASE_TTL,
+-- SESSION_TTL) as after a logout. Nothing new starts meanwhile ("quiet"); what is still live here
+-- beats again once it is off.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+
 local function Heartbeat()
 	if not outgoing then StopTicker() return end
 	if not Member() or SelfOff() or not FindGrant(outgoing.grantIssuer, outgoing.grantID, Mono()) then
@@ -265,6 +271,7 @@ local function Heartbeat()
 		StopTicker()
 		return
 	end
+	if Quiet() then return end
 	SendEffect("S", outgoing)
 end
 
@@ -287,6 +294,7 @@ local function SessionHeartbeat()
 		PutGrant({ issuer = ns.me, guild = CurrentGuild(), style = outgoingSession.style,
 			id = outgoingSession.id, key = outgoingSession.key, at = Clock(), expires = now + Effects.SESSION_TTL })
 	end
+	if Quiet() then return end
 	SendSession("G", outgoingSession)
 end
 
@@ -316,6 +324,7 @@ function Effects.SetSession(owner, style, enabled)
 		if not STYLES[style] then return false, "style" end
 		if outgoingSession and outgoingSession.owner ~= owner then return false, "busy" end
 		if outgoingSession and outgoingSession.style == style then return true end
+		if Quiet() then return false, "quiet" end
 		local id, key = NextGrantID()
 		if not id then return false, "full" end
 		local prior = outgoingSession
@@ -361,6 +370,7 @@ function Effects.Set(owner, style, enabled, caption)
 		if not grant or grant.style ~= style then return false, "session" end
 		if outgoing and outgoing.owner ~= owner then return false, "busy" end
 		if outgoing and outgoing.style == style and outgoing.caption == caption and outgoing.grantKey == grant.key then return true end
+		if Quiet() then return false, "quiet" end
 		local prior = outgoing
 		outgoing = { owner = owner, style = style, caption = caption, grantIssuer = grant.issuer,
 			grantID = grant.id, grantKey = grant.key }

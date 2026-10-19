@@ -421,7 +421,9 @@ end
 -- it, so what waited in the queue when it began stays home too. A census report goes in pieces
 -- that name no type: Comm.Broadcast holds it itself. Nothing says it went quiet: no withdrawal goes
 -- either, and what was told before expires on the other clients as after a logout. A read (a
--- census, sighting or layer request) and a chat line the player types still go.
+-- census, sighting or layer request) and a chat line the player types still go. The words a
+-- player's own click posts (a muster call, a decree, a list he changed) go too; only their timed
+-- repeats stay home, each in its module (King.lua, KingArrow.lua, Acts.lua, OfficerMuster.lua).
 Comm.QUIET_WORDS = {
 	"^H1~",         -- the hello
 	"^P1~",         -- a dot on the guildmates' maps (Positions.lua)
@@ -434,7 +436,18 @@ Comm.QUIET_WORDS = {
 	"^V[248]~",     -- a roll call's answer, the author's presence, a version check's answer (Workshop.lua, Versions.lua)
 	"^NK~1~p~",     -- the Church's presence (Church.lua)
 	"^D[VW]~",      -- Olympus Link's confirmer and watcher presence (Link.lua)
-	"^ZQ~%u%d+~H~", -- the arena auditors' and fee receiver's hello (Wallet.lua)
+	-- The arena auditors' and fee receiver's hello, and an auditor's whispered check of a bank
+	-- snapshot (ZQ~<mode>~H~<epoch>~<seq>, Wallet.CheckSnapshot), which marks him as heard too: a
+	-- check held back is not sent again, and the bank prunes at the next snapshot (Wallet.lua).
+	"^ZQ~%u%d+~H~",
+	"^T1~[CZ]~",    -- the King's court where he stands, or its closing (Court.lua)
+	"^WS~[RSX]~",   -- a Wanted reviewer's lease or its No, a sighting, or its taking back (Wanted.lua)
+	"^H[AK]~",      -- a councillor's "available for help", or his "got it" to an ask (Workshop.lua)
+	"^TD~",         -- a keeper's "taking donations", with his zone (Treasury.lua)
+	"^ZV~%u%d+~",   -- an arbiter's availability, with his zone (Stakes.lua)
+	"^U[234]~",     -- the King's tabard collector lease, and the tabard reports whispered to it (TabardsV2.lua)
+	"^FX~",         -- a profile presentation or its session: heartbeats, stop and close (ProfileEffects.lua)
+	"^W[01AL]~",    -- a crafter's listing or its removal, his answer to an ask, his recipe list (Crafters.lua)
 }
 local function QuietHolds(msg)
 	if type(msg) ~= "string" or not Quiet() then return false end

@@ -447,15 +447,38 @@ Olympus guild the call returns `false, "guild"`. It needs the player's Yes (`"pe
 reason. The handle that turned it on may always turn it off (no Yes or role needed for that);
 another handle gets `false, "owner"`. A No for that handle ends it.
 
-While it is on, this client sends nothing that announces the player as online or places him: no
-hello, no census report (it is never the guild's reporter, so it answers no census request), no
-layer announcement, guildmate map dot or layer-hop offer or answer, no answer to a player-sighting or
-King's-layer request, no roll-call or version-check answer, no author, Church, Olympus Link or arena
-auditor presence and, for the King, no crown position or layer. No word says it went quiet and no
-earlier answer is withdrawn: other clients age the player out as after a logout. Reads keep working,
-this client's own requests included, and Olympus chat lines the player types still go out. The
-guild roster, `/who` and chat still show the player. A line on top of Olympus's Census and Realm
-says it is on. It is never saved: a `/reload` or a logout ends it.
+While it is on, this client stops sending, on its own, the words that announce the player as
+online or place him: no hello, no census report (it is never the guild's reporter, so it answers no
+census request), no layer announcement, guildmate map dot or layer-hop offer or answer, no answer
+to a player-sighting or King's-layer request, no roll-call, version-check, council-help or crafter
+answer, no author, Church, Olympus Link, council-help, crafter listing, Wanted reviewer, arena
+auditor or arbiter presence, no Wanted sighting, no treasury "taking donations" notice, no repeated
+treasury ask (a session's first still goes), no profile-presentation heartbeat and, for the King,
+no crown position or layer, no court, no tabard collector lease and no timed repeat of his Hands,
+untabarded and agenda lists, writs or minimap-arrow word. No word says it went quiet and no earlier
+word is withdrawn, even when the player hides or stops something himself meanwhile: other clients
+age it out as after a logout (the crown within 45 seconds, a layer within 21 minutes). Reads keep
+working, this client's own requests included. What the player does himself still goes: the
+Olympus chat lines he types, a muster call, decree or writ he posts, a list he changes. Records and
+lists this client relays for others still go too, and any of them can show other clients that it
+is online.
+
+Olympus cannot change what guildmates' clients report from the game's guild roster: the census
+still shows a guild leader or officer online (the King's line on other clients, and
+`GetLeaderPresence()` on theirs, still say the King is online), and the zone the roster gives may
+appear in that census for up to 12 minutes after this client's last hello. The guild roster, `/who`
+and chat still show the player. A line on top of Olympus's Census and Realm says it is on.
+
+It is never saved: a `/reload` or a logout ends it. After a login or `/reload`, Olympus says hello
+about 6 seconds in (the King's crown, while he shares it, from about 5), and its other presence
+words follow within the first two minutes. Call
+`SetQuietPresence(true)` as early as you can, and while it returns `false, "guild"` (Olympus does
+not know the player's guild yet) try again on `PLAYER_GUILD_UPDATE` or a short timer: whatever left
+before it succeeds counts the player online on other clients for up to 12 minutes.
+
+While it is on, `StartProfileSession` and `SetProfileEffect` return `false, "quiet"` for anything
+new, and a session or presentation already live on this client stops renewing on the others: they
+drop it after about 32 seconds, as after a logout, and it renews again once quiet presence is off.
 
 `handle:GetQuietPresence()` returns a fresh copy of its state, with the usual permission and rate
 checks:
@@ -706,6 +729,7 @@ Every data method returns `nil` and a reason when it gives nothing:
 | `"none"` | no bounded profile-presentation session is live |
 | `"style"`, `"state"`, `"caption"` | an unknown host style, non-boolean enable state, or caption that is not the exact pre-approved text |
 | `"held"`, `"session"`, `"owner"` | the local moderation hold is active, no compatible profile session is live, or another API handle owns the local state |
+| `"quiet"` | the quiet presence is on: a new profile session or presentation waits until it is off |
 
 ## What it never gives
 

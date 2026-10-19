@@ -2932,6 +2932,12 @@ function Sight.CrownHidden()
 	return not okShown or shown ~= true
 end
 
+-- Quiet presence (1.2.5.1, Core.lua): a sighting says where this player stands and the lease says a
+-- reviewer is online, so neither goes while it is on, nor their withdrawals (Comm.QUIET_WORDS):
+-- what went before expires on the other clients as after a logout. This client still pins what
+-- it sees, and still takes the sightings whispered to it.
+function Sight.QuietPresence() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+
 function Sight.GuildName(guild)
 	if Secret(guild) or type(guild) ~= "string" or guild == "" or #guild > 48 or guild:find("[~|%c]") then return nil end
 	return ns.IsFederation and ns.IsFederation(guild) and guild or nil
@@ -3073,6 +3079,7 @@ local function SightPermit(job)
 	local ok, why = Collects()
 	if not ok then return false, why end
 	if Sight.CrownHidden() then return false, "crown" end
+	if Sight.QuietPresence() then return false, "quiet" end
 	if not Sight.Sharing() then return false, "private" end
 	local now = math.floor(Clock())
 	if now - job.at > Wanted.SIGHT_QUEUE_TTL then return false, "stale" end
@@ -3131,6 +3138,8 @@ function Sight.Withdraw()
 	local list = {}
 	for key, r in pairs(told.by) do list[#list + 1] = { key = key, name = r.name, target = r.target } end
 	for key in pairs(told.by) do told.by[key] = nil end
+	-- (Quiet presence: forgotten, not taken back; the reviewers' pins expire, SIGHT_TTL.)
+	if Sight.QuietPresence() then return 0 end
 	if type(C) ~= "table" or type(C.Whisper) ~= "function" then return 0 end
 	table.sort(list, function(a, b) return a.key < b.key end)
 	local n = 0
@@ -3148,6 +3157,7 @@ local function SendSighting(e)
 	-- (Only through a Comm that can cancel what waits: a No must reach every queued sighting.)
 	if type(C) ~= "table" or type(C.Whisper) ~= "function" or type(C.CancelQueued) ~= "function" then return 0, "transport" end
 	if Sight.CrownHidden() then return 0, "crown" end
+	if Sight.QuietPresence() then return 0, "quiet" end
 	-- (1.2.0: a sighting carries where this player stands and his layer: none goes while he keeps
 	-- his zone and layer private.)
 	if not Sight.Sharing() then return 0, "private" end
@@ -3262,8 +3272,9 @@ function Wanted.SetSightings(on, silent)
 		local C = ns.Comm
 		if leaseAt ~= nil and type(C) == "table" and type(C.Send) == "function" then
 			leaseAt = nil
-			-- (The lease's key: a lease still waiting in Comm is replaced, not sent before it.)
-			C.Send("CHANNEL", "WS~R~0", "wanted-reviewer", false, false, nil, { owner = Wanted })
+			-- (The lease's key: a lease still waiting in Comm is replaced, not sent before it. Quiet
+			-- presence: no No either; the members' copy of the lease lapses, REVIEWER_FOR.)
+			if not Sight.QuietPresence() then C.Send("CHANNEL", "WS~R~0", "wanted-reviewer", false, false, nil, { owner = Wanted }) end
 		end
 	end
 	Wanted.RefreshPins(true)
@@ -3285,10 +3296,13 @@ end
 function Wanted.AnnounceReviewer()
 	local C = ns.Comm
 	if not TakesSightings() then return false, "reviewer" end
+	if Sight.QuietPresence() then return false, "quiet" end
 	if type(C) ~= "table" or type(C.Send) ~= "function" then return false, "transport" end
 	leaseAt = math.floor(Clock())
-	return C.Send("CHANNEL", "WS~R~1", "wanted-reviewer", false, false, nil, { owner = Wanted, guard = TakesSightings })
+	return C.Send("CHANNEL", "WS~R~1", "wanted-reviewer", false, false, nil, { owner = Wanted, guard = Sight.Leases })
 end
+-- (Comm's check when the lease leaves: still a reviewer, and not quiet.)
+function Sight.Leases() return TakesSightings() and not Sight.QuietPresence() end
 
 local function HeardLease(dist, sender, text)
 	if dist ~= "CHANNEL" or (text ~= "WS~R~1" and text ~= "WS~R~0") then return false, "shape" end
@@ -3713,7 +3727,7 @@ function Wanted.HistoryFrames() return Sight.historyFrames end
 -- A reviewer's lease is due: he takes sightings and has not said so for a beat (a few seconds'
 -- slack: the timer's beat and the role's arrival may come close together).
 local function LeaseDue()
-	return TakesSightings() and (leaseAt == nil or math.floor(Clock()) - leaseAt >= Wanted.REVIEWER_EVERY - 5)
+	return Sight.Leases() and (leaseAt == nil or math.floor(Clock()) - leaseAt >= Wanted.REVIEWER_EVERY - 5)
 end
 
 -- The lease, LOGIN's REVIEWER_FIRST later, then every REVIEWER_EVERY while the reviewer stays.
@@ -6623,6 +6637,10 @@ ns.On("KING_LOCATION_CHANGED", function()
 		CancelSightings("crown")
 		Sight.Withdraw()
 	end
+end)
+-- Quiet presence turned off (Core.lua): a reviewer says at once that he takes them again.
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on == false and LeaseDue() then Wanted.AnnounceReviewer() end
 end)
 ns.On("LAYER_SHARING_CHANGED", function(on)
 	if on ~= true and (sightJobCount > 0 or next(told.by) ~= nil) then

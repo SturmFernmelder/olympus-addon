@@ -161,6 +161,10 @@ local function Off(name, guild)
 end
 -- This client's own character or guild is off: the word (nothing it sends would show); 1.1.6: or
 -- the sanction on this character (WatchChat.Barred: its .entry, told by WatchChat.TellBarred).
+-- Quiet presence (1.2.5.1, Core.lua): our listing and our answers say we are online, so none goes
+-- while it is on (Comm.QUIET_WORDS), nor an unlisting: the board forgets us as after a logout. Our
+-- own asks still go (reads); the listing comes back on the board's beat once it is off.
+function Crafters.Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 local function SelfOff()
 	local M = ns.Moderation
 	local off = M.SelfOff and M.SelfOff() or nil
@@ -316,7 +320,7 @@ function Crafters.Choose(key, yes)
 		-- Unlisted: the board forgets us at once (1.1 clients), or shows what is still listed.
 		if now == 0 then
 			lastListing, lastListingText, lastListingKeys = -math.huge, nil, nil
-			ns.Comm.Send("CHANNEL", "W0~", "crafterlist")
+			if not Crafters.Quiet() then ns.Comm.Send("CHANNEL", "W0~", "crafterlist") end
 		else
 			Crafters.SendListing(true)
 		end
@@ -347,8 +351,9 @@ local changedWaiting = false
 local loginWait = false -- after login, our first listing waits for its own draw (Crafters.OnLogin)
 function Crafters.SendListing(force)
 	-- (1.1, Konig's review: while the moderators have us off, nothing: the next tick sends it once
-	-- we are back on.)
+	-- we are back on. 1.2.5.1, quiet presence: the same, Crafters.Quiet.)
 	if not ns.IsMember() or SelfOff() then return false end
+	if Crafters.Quiet() then changedWaiting = true return false end
 	local listed = Crafters.Listed()
 	if #listed == 0 then return false end
 	local head = ("W1~%s~"):format(Clean(GetGuildInfo("player"), 72))
@@ -505,7 +510,7 @@ end
 -- Someone's ask on the channel: answered by whisper, 1 to 8 seconds later, when a profession we
 -- listed has a recipe for it (our budget of answers allowing).
 function Crafters.HandleAsk(dist, sender, text)
-	if dist ~= "CHANNEL" or not ns.IsMember() or #Crafters.Listed() == 0 or SelfOff() then return end
+	if dist ~= "CHANNEL" or not ns.IsMember() or #Crafters.Listed() == 0 or SelfOff() or Crafters.Quiet() then return end
 	local askId, kind, what = text:match("^WQ~([0-9a-z][0-9a-z]?)~([it])~(.+)$")
 	if not askId then return end
 	if kind == "i" then
@@ -598,7 +603,7 @@ local function PumpLists()
 end
 
 function Crafters.HandleListAsk(dist, sender, text)
-	if dist ~= "WHISPER" or not ns.IsMember() or SelfOff() then return end
+	if dist ~= "WHISPER" or not ns.IsMember() or SelfOff() or Crafters.Quiet() then return end
 	local key = text:match("^WR~([^~]+)$")
 	local p = key and Crafters.Mine()[key]
 	if not p or Crafters.Choices()[key] ~= true then return end
