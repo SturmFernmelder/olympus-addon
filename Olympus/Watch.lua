@@ -3065,8 +3065,9 @@ function Watch.ShowCard(key)
 end
 function Watch.Card() return cardFrame end
 
--- The right-click menu's line (PlayerMenu.lua): Report to Olympus, for any member, on any player
--- but himself and the King; greyed, with why, when it can't go now (in a dungeon or a raid too).
+-- The right-click menu's line (PlayerMenu.lua): Report to Olympus, for any member, on a player this
+-- client knows to be in Olympus (1.2.5.1: PlayerMenu.KnownOlympus) but himself and the King; greyed,
+-- with why, when it can't go now (in a dungeon or a raid too).
 function Watch.MenuLines(target, menu)
 	if type(target) ~= "table" or type(target.name) ~= "string" or not OwnGuild() or IsKingName(target.name) then return end
 	local why = Watch.ReportBlocked(target.name)
@@ -3075,7 +3076,7 @@ function Watch.MenuLines(target, menu)
 	menu.Button(L.WATCH_REPORT, function() Watch.AskReport(target.name) end, L.WATCH_REPORT, tip, not locked and not why)
 end
 if ns.PlayerMenu and ns.PlayerMenu.Add then
-	ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30)
+	ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30, { olympus = true })
 end
 
 -- What the reporter sees before he sends: the category, and the lines that go with it.

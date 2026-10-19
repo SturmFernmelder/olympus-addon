@@ -60662,6 +60662,84 @@ end)()
 		end)
 	end)
 
+	-- (1.2.5.1, the owner, right-clicking a portrait: Olympus's own lines, Report to Olympus among them,
+	-- "even for those who are not in Olympus".) A line added with { olympus = true } shows only for a
+	-- player this client knows to be in Olympus (PlayerMenu.KnownOlympus: the unit's guild as the game
+	-- gives it, our roster, our last /who, the guild his own Olympus messages spoke for, the signed
+	-- manifest); the version lines, Tell them about Olympus with them, for anyone (recruiting).
+	test("player menus (1.2.5.1): Olympus's own lines (the profile, Report to Olympus, the Arena's, the Church's) only for a player this client knows to be in Olympus; the version lines for anyone; the window's own rows keep every line", function()
+		WithVersions("Tester-Realm", function(w)
+			local saved = { guild = GetGuildInfo, player = UnitIsPlayer, is = UnitIsUnit, conn = UnitIsConnected, full = UnitFullName,
+				secret = rawget(_G, "issecretvalue"), claimed = ns.Data.ClaimedGuild, seen = ns.Who.SeenGuild, role = ns.Authority.Role }
+			local ok, err = pcall(function()
+				local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
+					GamepadUI = function() return false end }, { __index = ns })
+				assert(loadfile(ADDON_DIR .. "PlayerMenu.lua"))("Olympus", pns)
+				local P = pns.PlayerMenu
+				assert(P.Add("versions", function(target, menu) V.MenuLines(target, menu) end, 10))
+				assert(P.Add("report", function(target, menu) menu.Button("Report line", function() end) end, 30, { olympus = true }))
+				ns.UI.OpenPlayerProfile = function() end
+				local units, claims, seen, signed = {}, {}, {}, {}
+				GetGuildInfo = function(unit)
+					if unit == nil or unit == "player" then return "Olympus II", "Member", 3 end
+					local u = units[unit]
+					if u then return u.guild end
+				end
+				UnitIsPlayer, UnitIsConnected = function() return true end, function() return true end
+				UnitIsUnit = function(a, b) return a == b end
+				UnitFullName = function(unit) local u = units[unit] if u then return u.name, "Realm" end return "Tester", "Realm" end
+				ns.Data.ClaimedGuild = function(name) return claims[ns.FullName(name)] end
+				ns.Who.SeenGuild = function(name) local e = seen[ns.FullName(name)] if e then return e[1], e[2] end end
+				ns.Authority.Role = function(name) return signed[ns.FullName(name)] end
+				local function Texts(which, ctx) local r = MenuRoot(); P.Build(which, r, ctx); return r.Texts() end
+				local function Olympus(t) return t:find("Report line", 1, true) ~= nil and t:find(L.ARENA_MENU_PROFILE, 1, true) ~= nil end
+				local function Versions(t) return t:find(L.VERSION_CHECK, 1, true) ~= nil end
+				-- A unit in a guild outside Olympus (Trade's stranger, his portrait): the version lines alone.
+				units.target = { name = "Far Stranger", guild = "Quiet Hollow" }
+				local t = Texts("PLAYER", { unit = "target" })
+				eq(Olympus(t), false, "no Olympus lines for him: " .. t); assert(t:find("Report line", 1, true) == nil and t:find(L.ARENA_MENU_PROFILE, 1, true) == nil)
+				eq(Versions(t), true, "the version lines stay, for recruiting")
+				-- In an Olympus guild, as the game gives his guild: everything.
+				units.target.guild = "Olympus III"
+				t = Texts("PLAYER", { unit = "target" })
+				eq(Olympus(t), true, t); eq(Versions(t), true)
+				-- No guild: unknown, so no; his guild hidden as a secret value: unknown too.
+				units.target.guild = nil
+				eq(Olympus(Texts("PLAYER", { unit = "target" })), false)
+				units.target.guild = "Olympus III"
+				issecretvalue = function(v) return v == "Olympus III" end
+				eq(Olympus(Texts("PLAYER", { unit = "target" })), false, "a secret guild is unknown")
+				issecretvalue = saved.secret
+				-- A name alone (a line in chat): what this client knows of him.
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "unknown: no")
+				claims["Lone Voice-Realm"] = "Olympus IV"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "his own Olympus messages spoke for an Olympus guild")
+				claims["Lone Voice-Realm"] = "Quiet Hollow"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "or for another one")
+				claims["Lone Voice-Realm"] = nil
+				seen["Lone Voice-Realm"] = { "Olympus IV", 60 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "our /who showed him in one")
+				seen["Lone Voice-Realm"] = { "Olympus IV", 7200 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "an old /who says nothing")
+				seen["Lone Voice-Realm"] = { "", 60 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "our /who showed him in none")
+				seen["Lone Voice-Realm"] = nil
+				signed["Lone Voice-Realm"] = "Olympus IV"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "the signed manifest names him")
+				signed["Lone Voice-Realm"] = nil
+				ns.Roster.Scan() -- (the harness's roster: Member1 to Member1000)
+				eq(Olympus(Texts("FRIEND", { name = "Member7" })), true, "a guildmate in our roster")
+				-- The Olympus window's own rows list Olympus players: every line there.
+				eq(Olympus(Texts(P.ROW, { name = "Lone Voice" })), true)
+				eq(#w.whispered + #w.sent, 0, "opening a menu sends nothing")
+				eq(P.KnownOlympus("Lone Voice-Realm"), false)
+			end)
+			GetGuildInfo, UnitIsPlayer, UnitIsUnit, UnitIsConnected, UnitFullName = saved.guild, saved.player, saved.is, saved.conn, saved.full
+			issecretvalue, ns.Data.ClaimedGuild, ns.Who.SeenGuild, ns.Authority.Role = saved.secret, saved.claimed, saved.seen, saved.role
+			if not ok then error(err, 0) end
+		end)
+	end)
+
 	test("1.1.2 versions: a guildmate's hello names it (by the short name too); up to date, out of date, newer, unreadable; the author's released version is the newest known", function()
 		local cns, Deliver = FreshComm()
 		Deliver("GUILD", "Ann", "H1~" .. ns.VERSION .. "~Realm~p")

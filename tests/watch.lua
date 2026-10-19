@@ -46,7 +46,8 @@ local function WithWatch(fn)
 		c.ChatLocked = function() return w.locked == true end
 		-- 1.1.6: the right-click menu's entries, the Olympus channels' history (Channels.History) and
 		-- the copy box, as the Watch's report and case pages use them.
-		c.PlayerMenu = { Add = function(key, build, order) w.menu = { key = key, build = build, order = order } return true end }
+		-- (1.2.5.1: with its options too: Report to Olympus is an Olympus line, PlayerMenu.KnownOlympus.)
+		c.PlayerMenu = { Add = function(key, build, order, opts) w.menu = { key = key, build = build, order = order, opts = opts } return true end }
 		c.Channels = { ORDER = { "A", "C", "L" }, TIERS = { A = { label = "CHAN_ALL" }, C = { label = "CHAN_CAPTAINS" }, L = { label = "CHAN_LORDS" } },
 			History = function(tier) return w.chat[tier] or {} end }
 		c.Ago = function(at) return tostring(w.epoch - (tonumber(at) or 0)) .. "s ago" end
@@ -359,18 +360,22 @@ end)
 
 -- The game's own chat: an Olympus line there carries the player's link, and its right-click menu
 -- (MENU_UNIT_FRIEND, PlayerMenu.lua's) has Report to Olympus for an ordinary member.
-test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report", function()
+-- (1.2.5.1) For a player this client knows to be in Olympus: his Olympus line claimed his guild
+-- (Channels.VerifiedLevel, Data.ClaimGuild), so here Data.ClaimedGuild names it; a stranger
+-- this client knows nothing of gets no Report line.
+test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report; not for a player not known to be in Olympus", function()
 	local line = ns.Channels.FormatLine("A", "Rude Guy-Realm", "Olympus II", "WA", "rude words")
 	assert(line:find("|Hplayer:" .. ns.TellName("Rude Guy-Realm") .. "|h", 1, true), "the name is the game's player link: " .. line)
 	WithWatch(function(w, W, c)
 		w.setRank(c.me, 3); w.setRank("Captain One-Realm", 1); w.online(c.me, "Captain One-Realm")
 		w.chat.A = { { sender = "Rude Guy-Realm", t = w.epoch - 10, text = "rude words" } }
+		c.Data.ClaimedGuild = function(name) return c.FullName(name) == "Rude Guy-Realm" and "Olympus II" or nil end
 		local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
 			GamepadUI = function() return false end }, { __index = c })
 		assert(loadfile(ROOT .. "Olympus/PlayerMenu.lua"))("Olympus", pns)
 		local PM = pns.PlayerMenu
-		eq(w.menu.key, "report")
-		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order))
+		eq(w.menu.key, "report"); eq(w.menu.opts and w.menu.opts.olympus, true, "an Olympus line")
+		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order, w.menu.opts))
 		local root = { items = {} }
 		local function Desc(kind, text, cb)
 			local d = { kind = kind, text = text, cb = cb, enabled = true }
@@ -389,6 +394,10 @@ test("watch: in the game's chat an ordinary member right-clicks the name on an O
 		assert(button, "the line"); eq(button.text, ns.L.WATCH_REPORT); eq(button.enabled, true)
 		button.cb()
 		eq(w.dialogs[#w.dialogs].which, "OLYMPUS_WATCH_REPORT_WHAT"); eq(w.dialogs[#w.dialogs].data.name, "Rude Guy-Realm")
+		-- A stranger: no Report to Olympus (nor any Olympus line).
+		root.items = {}
+		eq(PM.Build("FRIEND", root, { name = "Passing Stranger-Realm" }), 0)
+		eq(#root.items, 0, "no Olympus line for him")
 	end)
 end)
 
