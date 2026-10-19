@@ -63333,7 +63333,7 @@ for _, name in ipairs(focused) do
 	local extra = name == "weekly-brief" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier, LoadUI = LoadUI,
 			WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or name == "guild-charter" and { WithGamepadUI = WithGamepadUI, WithUI = WithUI, FreshComm = FreshComm }
-		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
+		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, LoadUI = LoadUI } -- (the Decrees tab's page)
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		-- (1.2.5.1: the Olympus Accord's, its letter and the window's page.)
 		or name == "accord" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, FreshComm = FreshComm, LoadUI = LoadUI }

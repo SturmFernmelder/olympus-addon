@@ -353,6 +353,12 @@ author's signed list counts. The King can't take back a Hand his Steward named: 
 does, or the author, by removing him. The King's Steward (1.0.0, below) sends the Crown's
 decrees for `<Olympus>` on every client, whatever his rank, like the King.
 
+**Officer musters (1.2.1).** Under the royal decrees, the Decrees tab's **Officer musters** link
+opens its page (it used to be a page of the Realm): quiet 20-minute calls with a title and a zone,
+the whole army's from the King, a Steward, a Hand or the master of `<Olympus>`, and another guild
+master's for his own guild alone. Each shows how many players sharing their location were seen in
+that zone, never who; no popup or alert comes of it.
+
 **Alert sounds (1.1).** Each kind of alert has a sound switch of its own, at the bottom of the
 Decrees tab (a click on its line, with the gamepad UI too) or with `/oly sound <kind> on|off`:
 `arms` (Call to Arms), `muster`, `royal` (Royal decrees and Tabard inspections), `court`, `vox`,

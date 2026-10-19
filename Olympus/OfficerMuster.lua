@@ -95,7 +95,7 @@ local function Valid(row)
 		and (row.dist == nil or row.dist == "CHANNEL" or row.dist == "GUILD")
 end
 local function Refresh()
-	if ns.Views and ns.Views.PageShown and ns.Views.PageShown() == "officermuster" and ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
+	if ns.Views and ns.Views.DecreePageShown and ns.Views.DecreePageShown() == "officermuster" and ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
 end
 local function Changed() ns.Fire("OFFICER_MUSTER_CHANGED"); Refresh() end
 local function Headcount(row)
@@ -247,11 +247,11 @@ function Muster.Tick()
 end
 function Muster.Link()
 	if not ns.IsMember() then return nil end
-	return { text = "|cffffd200> " .. L.OFFICER_MUSTER_TITLE .. "|r", onClick = function() ns.Views.ShowPage("officermuster") end }
+	return { text = "|cffffd200> " .. L.OFFICER_MUSTER_TITLE .. "|r", onClick = function() ns.Views.ShowDecreePage("officermuster") end }
 end
 function Muster.Lines(q)
 	if not ns.IsMember() then return {} end
-	local lines = { { text = L.OFFICER_MUSTER_BACK, onClick = function() ns.Views.ShowPage(nil) end, gapAfter = true },
+	local lines = { { text = L.OFFICER_MUSTER_BACK, onClick = function() ns.Views.ShowDecreePage(nil) end, gapAfter = true },
 		{ header = true, text = L.OFFICER_MUSTER_TITLE }, { text = L.OFFICER_MUSTER_HINT }, { text = L.OFFICER_MUSTER_COUNTS_NOTE, gapAfter = true } }
 	local can, guild, dist = Muster.CanPost()
 	if not q and can then
@@ -287,8 +287,10 @@ function Muster.Lines(q)
 	if shown == 0 then lines[#lines + 1] = { text = q and L.SEARCH_NO_MATCH or L.OFFICER_MUSTER_EMPTY } end
 	return lines
 end
-ns.RealmPages = ns.RealmPages or {}
-table.insert(ns.RealmPages, { key = "officermuster", Link = Muster.Link, Lines = Muster.Lines, tip = "OFFICER_MUSTER_TITLE" })
+-- A page of the Decrees tab (2026-10-19, Daniel: "Deveria estar no Decrees, né? Não no The Realm"):
+-- its link under the royal decrees, for the same members (Link), its lines in place of the list.
+ns.DecreePages = ns.DecreePages or {}
+table.insert(ns.DecreePages, { key = "officermuster", Link = Muster.Link, Lines = Muster.Lines, tip = "OFFICER_MUSTER" })
 ns.Comm.Handle("OM", Muster.Handle)
 for _, event in ipairs({ "DATA_CHANGED", "THRONE_CHANGED", "WATCH_CHANGED", "MODERATION_CHANGED" }) do
 	ns.On(event, function() local s = Store(); if s then Prune(s) end; Refresh() end)

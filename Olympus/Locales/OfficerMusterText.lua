@@ -1,7 +1,7 @@
 local ADDON, ns = ...
 local L = ns.L
 L.OFFICER_MUSTER_TITLE = "Officer musters"
-L.OFFICER_MUSTER_BACK = "< Back to the Realm"
+L.OFFICER_MUSTER_BACK = "< Back to the Decrees"
 L.OFFICER_MUSTER_HINT = "The King, a Steward, a Hand or the master of <Olympus> may post a title and zone for 20 minutes for the whole army; another guild's master posts for his own guild alone. Only this faction and linked realm group see it; unknown or unlinked realms are not combined. No coordinates, markers or invitations are sent."
 -- (1.2.3) Another guild's master's musters: his own guild alone.
 L.OFFICER_MUSTER_GUILD_ONLY = "Your musters reach <%s> alone: the whole army's are the Crown's."
@@ -21,9 +21,11 @@ L.OFFICER_MUSTER_ENDED = "Muster in %s ended: %d observed sharing players (%s)."
 L.OFFICER_MUSTER_END_EXPIRED = "20 minutes elapsed"
 L.OFFICER_MUSTER_END_WITHDRAWN = "withdrawn by its poster"
 L.OFFICER_MUSTER_END_REPLACED = "replaced by its poster"
+-- (The page's search box, on the Decrees tab.)
+L.SEARCH_TIP_OFFICER_MUSTER = "Words of a muster's title, its zone or who posted it, any case: only the musters that match show."
 if GetLocale and GetLocale() == "ptBR" then
 	L.OFFICER_MUSTER_TITLE = "Concentrações dos oficiais"
-	L.OFFICER_MUSTER_BACK = "< Voltar ao Reino"
+	L.OFFICER_MUSTER_BACK = "< Voltar aos Decretos"
 	L.OFFICER_MUSTER_HINT = "O Rei, um Steward, uma Mão ou o líder da <Olympus> pode publicar título e zona por 20 minutos pra todo o exército; o líder de outra guilda publica só pra própria guilda. Só esta facção e o grupo de reinos vinculados recebem; reinos desconhecidos ou não vinculados não são combinados. Não envia coordenadas, marcadores nem convites."
 	L.OFFICER_MUSTER_GUILD_ONLY = "Suas concentrações chegam só à <%s>: as de todo o exército são da Coroa."
 	L.OFFICER_MUSTER_BY_GUILD = "Publicada por %s, só pra <%s>"
@@ -42,4 +44,5 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.OFFICER_MUSTER_END_EXPIRED = "20 minutos decorridos"
 	L.OFFICER_MUSTER_END_WITHDRAWN = "retirada por quem publicou"
 	L.OFFICER_MUSTER_END_REPLACED = "substituída por quem publicou"
+	L.SEARCH_TIP_OFFICER_MUSTER = "Palavras do título de uma concentração, da zona ou de quem publicou, maiúsculas ou não: só aparecem as concentrações que batem."
 end
