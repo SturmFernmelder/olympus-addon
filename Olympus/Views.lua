@@ -462,6 +462,47 @@ function Views.SplitPageNav(lines, separateSearch)
 	return body, navigation, search
 end
 
+-- A filter's open menu, one row per choice of `spec` (the selected one lit), as wide as its longest.
+local function FillChoices(menu, spec)
+	local menuWidth = 100
+	for j, option in ipairs(spec.options) do
+		local pick = menu.buttons[j]
+		if not pick then
+			pick = CreateFrame("Button", nil, menu)
+			pick:SetPoint("TOPLEFT", 6, -6 - (j - 1) * 22)
+			pick:SetPoint("TOPRIGHT", -6, -6 - (j - 1) * 22)
+			pick:SetHeight(22)
+			pick.label = pick:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			pick.label:SetPoint("LEFT", 8, 0)
+			pick.label:SetPoint("RIGHT", -8, 0)
+			pick.label:SetJustifyH("LEFT")
+			local hl = pick:CreateTexture(nil, "HIGHLIGHT")
+			hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.12)
+			pick:SetScript("OnClick", function(button)
+				menu:Hide()
+				if button.choice and button.choice.onClick then ns.SafeCall("view filter", button.choice.onClick) end
+			end)
+			menu.buttons[j] = pick
+		end
+		pick.choice = option
+		pick.label:SetText(option.text)
+		pick.label:SetTextColor(unpack(option.selected and Views.SUBTAB_STYLE.selected or Views.SUBTAB_STYLE.inactive))
+		menuWidth = math.max(menuWidth, math.ceil(StringWidth(pick.label)) + 28)
+		pick:Show()
+	end
+	for j = #spec.options + 1, #menu.buttons do menu.buttons[j]:Hide() end
+	menu:SetSize(menuWidth, 12 + #spec.options * 22)
+end
+
+-- The same filter offering the same choices (its label, each choice's words, in order).
+local function SameChoices(a, b)
+	if type(a) ~= "table" or type(b) ~= "table" or a.label ~= b.label or #(a.options or {}) ~= #(b.options or {}) then return false end
+	for j, option in ipairs(a.options) do
+		if option.text ~= b.options[j].text then return false end
+	end
+	return true
+end
+
 function Views.DrawFilters(holder, filters, width)
 	holder.filters = holder.filters or {}
 	local cell = math.floor(width / math.max(1, #filters))
@@ -514,41 +555,18 @@ function Views.DrawFilters(holder, filters, width)
 				menu:SetFrameLevel(menu.catcher:GetFrameLevel() + 1)
 				menu:ClearAllPoints()
 				menu:SetPoint(self.rightmost and "TOPRIGHT" or "TOPLEFT", self, self.rightmost and "BOTTOMRIGHT" or "BOTTOMLEFT", 0, -2)
-				local menuWidth = 100
-				for j, option in ipairs(spec.options) do
-					local pick = menu.buttons[j]
-					if not pick then
-						pick = CreateFrame("Button", nil, menu)
-						pick:SetPoint("TOPLEFT", 6, -6 - (j - 1) * 22)
-						pick:SetPoint("TOPRIGHT", -6, -6 - (j - 1) * 22)
-						pick:SetHeight(22)
-						pick.label = pick:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-						pick.label:SetPoint("LEFT", 8, 0)
-						pick.label:SetPoint("RIGHT", -8, 0)
-						pick.label:SetJustifyH("LEFT")
-						local hl = pick:CreateTexture(nil, "HIGHLIGHT")
-						hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.12)
-						pick:SetScript("OnClick", function(button)
-							menu:Hide()
-							if button.choice and button.choice.onClick then ns.SafeCall("view filter", button.choice.onClick) end
-						end)
-						menu.buttons[j] = pick
-					end
-					pick.choice = option
-					pick.label:SetText(option.text)
-					pick.label:SetTextColor(unpack(option.selected and Views.SUBTAB_STYLE.selected or Views.SUBTAB_STYLE.inactive))
-					menuWidth = math.max(menuWidth, math.ceil(StringWidth(pick.label)) + 28)
-					pick:Show()
-				end
-				for j = #spec.options + 1, #menu.buttons do menu.buttons[j]:Hide() end
-				menu:SetSize(menuWidth, 12 + #spec.options * 22)
+				FillChoices(menu, spec)
 				menu.catcher:Show()
 				menu:Show()
 			end)
 			holder.filters[i] = b
 		end
-		-- A reused row can belong to another page; its previous choices are no longer valid.
-		if b.choices then b.choices:Hide() end
+		-- A reused row can belong to another page; its previous choices are no longer valid. (1.2.5: a
+		-- redraw that changed none of them, a census word or a Church answer arriving, keeps the open
+		-- menu, its rows this drawing's choices: it closed under the player's mouse, the author's
+		-- report of 10-06, "eles ficam sumindo".)
+		if b.choices and b.choices:IsShown() and SameChoices(b.filter, filter) then FillChoices(b.choices, filter)
+		elseif b.choices then b.choices:Hide() end
 		b.filter = filter
 		b.rightmost = i == #filters
 		b:ClearAllPoints()

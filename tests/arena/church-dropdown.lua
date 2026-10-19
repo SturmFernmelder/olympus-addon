@@ -43,10 +43,16 @@ test("Church dropdown: titleless menu clears the window border and selects the a
 		eq(c.View.window, "w", "actual Church time-window callback")
 		ns.Views.DrawFilters(row, Filters(w, c), 300)
 		when:Click()
+		-- (1.2.5) A redraw that changes none of its choices (a search typed elsewhere) keeps it open,
+		-- its rows the redrawn page's: closing it was the dropdown vanishing under the mouse (the
+		-- author's report of 10-06; tests/arena/church-dropdown.lua's next test).
 		ns.Views.SetFilter("church", "apostle")
 		ns.Views.DrawFilters(row, Filters(w, c), 300)
-		eq(when.choices:IsShown(), false, "query redraw closes the stale dropdown")
-		eq(when.choices.catcher:IsShown(), false)
+		eq(when.choices:IsShown(), true, "a redraw keeps the open dropdown")
+		eq(when.choices.catcher:IsShown(), true)
+		eq(when.choices.buttons[1].choice.selected, true, "the redrawn page's choices")
+		when.choices.catcher:Click()
+		eq(when.choices:IsShown(), false); eq(when.choices.catcher:IsShown(), false)
 		ns.Views.SetFilter("church", "")
 		who:Click(); who:Hide()
 		eq(menu:IsShown(), false, "hidden page/filter closes its detached menu")
@@ -69,5 +75,53 @@ test("Church dropdown: understated triggers retain Who, When and their active va
 			eq(b.label.font, "GameFontNormalSmall")
 			assert(b.label:GetText():find("|cff9d9d9d", 1, true), "caption is understated")
 		end
+	end)
+end)
+
+-- 1.2.5: the author's report of 10-06 ("ta dificil de navegar nos dropdowns eles ficam sumindo"): the
+-- Church page redraws on its own (a census word, a ranking answer: UI.RefreshSoon), and every redraw
+-- closed the Who or When dropdown open under the mouse. The page drawn as the window draws it
+-- (ChurchView.Build, Views.SplitPageNav, Views.Render), then drawn again.
+test("Church dropdown: a redraw that changes none of its choices keeps Who or When open; a page without that filter closes it", function()
+	local w = World.New()
+	local c = w:Client(World.AUTHOR, { view = true })
+	H.WithUI(function()
+		local content = CreateFrame("Frame", nil, UIParent)
+		content:SetWidth(300)
+		local function Draw()
+			local body = ns.Views.SplitPageNav((w:As(c, c.View.Build)))
+			ns.Views.Render(content, body)
+			for _, r in ipairs(content.rows) do
+				if r:IsShown() and r.filters and r.filters[1] and r.filters[1]:IsShown() then return r end
+			end
+			error("Church filter row missing")
+		end
+		local row = Draw()
+		local who = row.filters[1]
+		who:Click()
+		local menu = who.choices
+		eq(menu:IsShown(), true)
+		Draw(); Draw()
+		eq(menu:IsShown(), true, "Who stays open through the page's redraws")
+		eq(menu.catcher:IsShown(), true)
+		eq(row.filters[1], who, "the same trigger")
+		-- A choice still works, and is the page's now.
+		w:As(c, function() menu.buttons[2]:Click() end)
+		eq(c.View.list, "m"); eq(menu:IsShown(), false)
+		-- When, open while the window changes elsewhere: its lit choice follows the redraw.
+		row = Draw()
+		local when = row.filters[2]
+		when:Click()
+		c.View.window = "a"
+		Draw()
+		eq(when.choices:IsShown(), true, "When stays open")
+		eq(when.choices.buttons[3].choice.selected, true, "its lit choice redrawn")
+		eq(when.choices.buttons[2].choice.selected, false)
+		-- The correspondents' list has no When: that page closes the menu left open.
+		c.View.list = "c"
+		Draw()
+		eq(when:IsShown(), false)
+		eq(when.choices:IsShown(), false, "no stale menu on a page without its filter")
+		eq(when.choices.catcher:IsShown(), false)
 	end)
 end)
