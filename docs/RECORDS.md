@@ -7,8 +7,12 @@ claim; one relay never establishes another player's identity. Unknown keys leave
 record until a player's own key arrives. When both original players are offline, two independent
 holders that already validated the exact signed record can jointly attest the original key binding.
 Each holder signs its own attestation with a key the receiver heard directly from that holder, so
-one modified relay cannot bootstrap an invented player or result. Older clients continue using
-KN/AX and their existing ranking rules.
+one modified relay cannot bootstrap an invented player or result. Attestations are heard live,
+in one session: a receiver still holding a pending record names it again with each ask of its
+day, for attestations alone (never the body again), so a quorum left short by one holder drawn
+for an answer, or by a reload, completes in a later round. A holder declares its key once per
+answer and signs each attestation when its turn on the paced low lane comes. Older clients
+continue using KN/AX and their existing ranking rules.
 
 Accepted records are a union by stable game/pair identity. Repeats add no second game. Two different
 results for the same identity become a conflict only after both original signatures verify against

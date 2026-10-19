@@ -56,6 +56,7 @@ local L = ns.L
 --   RD letter~day.n.sum,...~month.hash8,...  a digest
 --   RA letter~d~day~prefixes                 an ask for a day's records (the prefixes it holds)
 --   RA letter~s~month~hash8|-                an ask for a month's seal and its totals
+--   RA letter~w~day~prefixes                 an ask for validations alone (RV) of records it holds, waiting
 --   RR letter~body                           a record
 --   RV letter~hash~t~pk~sig                  a live holder's validation of that exact record
 --   RS RS1~at~group~faction~letter~month~n~hash~sig   a seal (decimal; sig: RSA, Sign.lua)
@@ -738,13 +739,24 @@ local function Drawn() return R.random() <= min(1, R.RELAYS / Users()) end
 R.Drawn = Drawn
 
 -- What waits on the low lane: { kind, k (what makes it the same), body, day }, the newest days first.
+-- A body may be a function that makes it when its turn comes (a validation's signature: one a
+-- message, never a whole day's signed at once on one frame); one that makes nothing is skipped.
 local outq, outSet = {}, {}
 local function Producer()
-	local item = table.remove(outq, 1)
-	if not item then return nil end
-	outSet[item.k] = nil
-	stats.sent = stats.sent + 1
-	return { item.kind, "L", item.body, { dist = "CHANNEL" } }
+	while true do
+		local item = table.remove(outq, 1)
+		if not item then return nil end
+		outSet[item.k] = nil
+		local body = item.body
+		if type(body) == "function" then
+			local ok, made = pcall(body)
+			body = ok and made or nil
+		end
+		if type(body) == "string" then
+			stats.sent = stats.sent + 1
+			return { item.kind, "L", body, { dist = "CHANNEL" } }
+		end
+	end
 end
 local function Out(kind, k, body, day)
 	if outSet[k] then return false end
@@ -763,7 +775,10 @@ function R.OutSize() return #outq end
 
 -- A holder's signed validation follows its fresh key declaration. It is queued beside the record
 -- on the low lane and binds the full body hash, so it cannot be reused for another result.
-function R.SendWitness(letter, body, day)
+-- (keyed: the caller declared the key once for its whole answer. The signature is made when the
+-- validation's turn on the low lane comes, one a message: an answer of a day's records never
+-- signs them all, and the key with each, on one frame.)
+function R.SendWitness(letter, body, day, keyed)
 	if not R.TYPES[letter] or type(body) ~= "string" then return false end
 	local okRecord, rec = pcall(R.TYPES[letter].Read, body)
 	local heldDay = okRecord and type(rec) == "table" and Index(letter).ids[rec.id]
@@ -773,17 +788,19 @@ function R.SendWitness(letter, body, day)
 	if type(D) ~= "table" or type(D.MyKey) ~= "function" or type(D.Sign) ~= "function" then return false end
 	local ok, gk, pk = pcall(D.MyKey)
 	if not ok or not gk or type(pk) ~= "string" or #pk ~= 32 then return false end
-	local pk64, hash, t = B64(pk), RecordHash(letter, body), B36(Now())
-	local signed, sig = pcall(D.Sign, WitnessText(Me(), letter, hash, t, pk64))
-	if not signed or type(sig) ~= "string" or #sig ~= 64 then return false end
+	local pk64, hash = B64(pk), RecordHash(letter, body)
 	-- Repeated asks may come from clients that were absent for the last declaration.
-	R.SendKey()
-	return Out("RV", "v" .. letter .. hash .. (Low(Me()) or "?"),
-		table.concat({ letter, hash, t, pk64, B64(sig) }, "~"), day)
+	if not keyed then R.SendKey() end
+	return Out("RV", "v" .. letter .. hash .. (Low(Me()) or "?"), function()
+		local t = B36(Now())
+		local signed, sig = pcall(D.Sign, WitnessText(Me(), letter, hash, t, pk64))
+		if not signed or type(sig) ~= "string" or #sig ~= 64 then return nil end
+		return table.concat({ letter, hash, t, pk64, B64(sig) }, "~")
+	end, day)
 end
 
 local lastDigest, heardDigest = {}, {}
-local askedAt, heardAsk, answeredAt, heardRecordAt, answering, askCursor = {}, {}, {}, {}, {}, {}
+local askedAt, heardAsk, answeredAt, heardRecordAt, answering, askCursor, witnessedAt = {}, {}, {}, {}, {}, {}, {}
 local function Per(t, letter)
 	local x = t[letter]
 	if not x then x = {} t[letter] = x end
@@ -882,7 +899,30 @@ function R.Ask(letter, d, remoteCount)
 	end
 	Per(askedAt, letter)[d] = Now()
 	stats.asked = stats.asked + 1
-	return A().Send("RA", "L", letter .. "~d~" .. B36(d) .. "~" .. (bucket ~= "" and bucket .. ":" or "") .. table.concat(held), { dist = "CHANNEL", key = "records ask " .. letter .. d, low = true }) == true
+	local sent = A().Send("RA", "L", letter .. "~d~" .. B36(d) .. "~" .. (bucket ~= "" and bucket .. ":" or "") .. table.concat(held), { dist = "CHANNEL", key = "records ask " .. letter .. d, low = true }) == true
+	R.AskWitness(letter, d)
+	return sent
+end
+
+-- (1.2.6) The records of that day waiting here, whose bodies are here already, named again for
+-- the live holders' validations alone (RV, never the bodies again). The ask above lists them as
+-- held, so no holder answers them there; and the two validations that admit them are heard in
+-- this session only: one holder drawn for the first answer, a validation heard before its
+-- holder's key, or a reload left them short, and they waited for good. Asked with each ask of
+-- their day until they are kept. (Clients before 1.2.6 do not know "w" and take it for nothing.)
+function R.AskWitness(letter, d)
+	local s = Store(letter)
+	local list, seen = {}, {}
+	for _, p in pairs(s and s.pend or {}) do
+		if type(p) == "table" and tonumber(p.d) == d and type(p.b) == "string" then
+			local prefix = R.Fingerprint(letter, p.b)
+			if not seen[prefix] then seen[prefix] = true list[#list + 1] = prefix end
+		end
+	end
+	if not list[1] then return false end
+	table.sort(list)
+	while #list > R.ASK_PREFIX_MAX do list[#list] = nil end
+	return A().Send("RA", "L", letter .. "~w~" .. B36(d) .. "~" .. table.concat(list), { dist = "CHANNEL", key = "records witness ask " .. letter .. d, low = true }) == true
 end
 
 local AskSeal -- (below)
@@ -995,14 +1035,40 @@ local function OnAsk(dist, sender, mode, body)
 				Per(answeredAt, letter)[d] = Now()
 				stats.answered = stats.answered + 1
 			end
+			local keyed = false
 			for _, item in ipairs(missing) do
 				if held[item[1]] then
 					if not anotherAnswered then Out("RR", letter .. item[1] .. A().Hash36(item[2], 8), letter .. "~" .. item[2], d) end
 					-- A second holder still sends independent validation when another already
 					-- supplied the body. That is the quorum that transfers identity safely.
-					R.SendWitness(letter, item[2], d)
+					-- (The key declared once for the whole answer, not once a record.)
+					if not keyed then R.SendKey() keyed = true end
+					R.SendWitness(letter, item[2], d, true)
 				end
 			end
+		end)
+	elseif kind == "w" then
+		-- (1.2.6) Validations alone, for records of that day the asker holds and still waits on
+		-- (R.AskWitness): a holder of exactly that record signs its own, never sends the body.
+		local d = N36(what, 0, 400000)
+		if not d or #rest % R.PREFIX ~= 0 or #rest > R.ASK_PREFIX_MAX * R.PREFIX or rest:find("[^0-9a-z]") then return Count("shape") end
+		local list = s and s.days[d]
+		if not list or not next(list) then return end
+		local wanted, bodies = {}, {}
+		for i = 1, #rest, R.PREFIX do wanted[rest:sub(i, i + R.PREFIX - 1)] = true end
+		for id, record in pairs(list) do
+			if wanted[R.Fingerprint(letter, record)] then bodies[#bodies + 1] = { id, record } end
+		end
+		if not bodies[1] then return end
+		local key = "w" .. letter .. d
+		if answering[key] or now - (Per(witnessedAt, letter)[d] or -math.huge) < R.ANSWER_GAP or not Drawn() then return end
+		answering[key] = true
+		A().After(R.ANSWER_MIN + R.random() * R.ANSWER_SPREAD, "records witness " .. key, function()
+			answering[key] = nil
+			Per(witnessedAt, letter)[d] = Now()
+			table.sort(bodies, function(a, b) return a[1] < b[1] end)
+			R.SendKey()
+			for _, item in ipairs(bodies) do R.SendWitness(letter, item[2], d, true) end
 		end)
 	elseif kind == "s" then
 		local m = tonumber(N36(what, 0, 100000))
@@ -1452,7 +1518,7 @@ StaticPopupDialogs["OLYMPUS_RECORDS_SEAL"] = {
 function R.Reset()
 	idx, checking, checkingBy, inflight, waitq = {}, {}, {}, 0, {}
 	outq, outSet = {}, {}
-	lastDigest, heardDigest, askedAt, heardAsk, answeredAt, heardRecordAt, answering, askCursor = {}, {}, {}, {}, {}, {}, {}, {}
+	lastDigest, heardDigest, askedAt, heardAsk, answeredAt, heardRecordAt, answering, askCursor, witnessedAt = {}, {}, {}, {}, {}, {}, {}, {}, {}
 	askedSeal, heardSealAsk, asm = {}, {}, {}
 	from, attempts, fromDay = {}, {}, -1
 	keySentAt, keyDue = nil, false
