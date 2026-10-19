@@ -638,7 +638,8 @@ local function Red(s) return "|cffff5050" .. s .. "|r" end
 
 -- Opens the Arena window on a place: "events", "rankings", "history", "profile", "bone",
 -- "bone.live", "lottery", "wallet", "director", "games.mine" and "games.all" (the games' ledger's
--- page, 1.1.6) ... with an argument (an event, a name).
+-- page, 1.1.6), "duel.watch" (the duel view, 1.2.6: ArenaSpectate's subject) ... with an argument
+-- (an event, a name).
 function ArenaHome.Open(where, arg)
 	if (where == "wallet" or where == "bets" or where == "bank" or where == "ledgers") and not WalletShown() then return false end
 	local A = ns.Arena
@@ -1978,7 +1979,8 @@ function ArenaHome.ResetLetters() queue = {} end -- (tests)
 
 ---------------------------------------------------------------------------
 -- The right-click lines on a player (the design): "Challenge to a duel", "Invite to Bones",
--- "Watch" (when his table lets spectators in), "Arena profile". Through PlayerMenu.lua's shared
+-- "Watch" (when his table lets spectators in), "Watch duel" (1.2.6, when he fights a duel in
+-- sight), "Arena profile". Through PlayerMenu.lua's shared
 -- hook where this build has it (1.1.2), with its target and its menu helper; else through
 -- Blizzard's Menu.ModifyMenu directly, with the same checks. Opening a menu sends nothing.
 ---------------------------------------------------------------------------
@@ -1995,6 +1997,13 @@ function ArenaHome.MenuLines(target, menu)
 	local table_ = ArenaHome.WatchableTable(name)
 	if table_ then
 		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+		n = n + 1
+	end
+	-- (1.2.6) His duel, when he fights one in sight (ArenaSpectate.Watchable): the pair taken now.
+	local S = ns.ArenaSpectate
+	local duel = type(S) == "table" and type(S.Watchable) == "function" and S.Watchable(target) or nil
+	if duel then
+		menu.Button(L.ARENA_MENU_WATCH_DUEL, function() S.Open(duel) end, L.ARENA_MENU_WATCH_DUEL, L.ARENA_MENU_WATCH_DUEL_TIP, true)
 		n = n + 1
 	end
 	if not target.profileAdded then

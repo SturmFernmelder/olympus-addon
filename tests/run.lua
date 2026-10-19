@@ -42944,7 +42944,9 @@ local function WithGear(fn)
 		return u
 	end
 	local ok, err = pcall(fn, w, ns.Inspect)
-	-- (Whatever was left waiting goes: the next test starts from an empty queue.)
+	-- (Whatever was left waiting goes: the next test starts from an empty queue, and with no
+	-- duel view's want, 1.2.6.)
+	ns.Inspect.ResetWants()
 	w.combat, w.range = false, true
 	for _ = 1, 10 do
 		w.clock = w.clock + 5
@@ -43211,6 +43213,223 @@ test("1.1 gear (#28): the click waits its turn: one inspection at a time, the Ro
 		fox.items = GEAR_BOB
 		I.OnInspectReady(fox.guid)
 		assert(I.Players()["Fox"].gear, "his gear kept")
+	end)
+end)
+
+---------------------------------------------------------------------------
+-- 1.2.6, the duel view (Daniel's duel-view request, 2026-10-19): Inspect.Want, a feature's
+-- inspection of one player through the patrol's own pump and pace, display only.
+---------------------------------------------------------------------------
+
+local Secret = assert(loadfile(ROOT .. "tests/arena/lib/secret.lua"))()
+-- A want for `who` (a unit of w.units, under `token`): each read noted in `order`.
+local function Wanted(I, who, token, order, key)
+	return I.Want(who.guid, key or ("test:" .. who.name), {
+		unit = function() return token end,
+		read = function(unit, guid) order[#order + 1] = "read " .. unit .. " " .. guid end,
+	})
+end
+local function Bob(w, token, items)
+	local u = { name = "Bob", guid = "Player-1-Bob", guild = "Olympus Zeus", level = 60, items = items or GEAR_BOB }
+	w.units[token or "nameplate3"] = u
+	return u
+end
+
+test("watch duel inspect: a want goes ahead of the patrol's line; out of range it waits (\"range\") instead of being dropped and is asked once in range; its reader runs inside the game's answer, before ClearInspectPlayer", function()
+	WithGear(function(w, I)
+		local order = {}
+		ClearInspectPlayer = function() order[#order + 1] = "clear" end
+		local ann = w.target("Ann")
+		I.InspectTarget()
+		eq(table.concat(w.notified, ","), "Ann", "the patrol's request is out")
+		local cid = w.target("Cid")
+		I.InspectTarget()
+		local bob = Bob(w)
+		eq(Wanted(I, bob, "nameplate3", order), true)
+		eq(I.WantStatus(bob.guid), "queued")
+		I.OnInspectReady(ann.guid)
+		eq(table.concat(order, ","), "clear", "Ann's answer is the patrol's alone: no reader")
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(table.concat(w.notified, ","), "Ann,Bob", "the want first, Cid's patrol item after it")
+		eq(I.WantStatus(bob.guid), "pending")
+		I.OnInspectReady(bob.guid)
+		eq(table.concat(order, ","), "clear,read nameplate3 Player-1-Bob,clear", "read inside the answer, before ClearInspectPlayer")
+		local status, at = I.WantStatus(bob.guid)
+		eq(status, "done"); eq(at, ns.Now())
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(table.concat(w.notified, ","), "Ann,Bob,Cid", "then the patrol's turn")
+		I.OnInspectReady(cid.guid)
+		-- Out of range: kept, looked at again at each turn, one request once in range.
+		local dan = { name = "Dan", guid = "Player-1-Dan", guild = "Olympus Zeus", level = 60, items = {} }
+		w.units.focus = dan
+		Wanted(I, dan, "focus", order)
+		w.range = false
+		for _ = 1, 4 do
+			w.clock = w.clock + 2
+			I.Pump()
+		end
+		eq(I.WantStatus(dan.guid), "range"); eq(#w.notified, 3, "nothing asked out of range")
+		w.range = true
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(w.notified[4], "Dan")
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 4, "one request, its answer awaited")
+		I.OnInspectReady(dan.guid)
+		eq(I.WantStatus(dan.guid), "done")
+	end)
+end)
+
+test("watch duel inspect: a want's inspection alone records nothing: no tabard row, no chat line, no sound, no nearby report, nothing sent (the patrol's of the same player does all of it)", function()
+	WithGear(function(w, I)
+		local alerts, savedAlert = 0, ns.PlayAlert
+		ns.PlayAlert = function() alerts = alerts + 1 end
+		local ok, err = pcall(function()
+			local sent = ns.Comm.QueueSize()
+			-- Gear but no tabard: a patrol would call him out.
+			local bob = Bob(w, "target", { [1] = GEAR_BOB[1] })
+			local order = {}
+			Wanted(I, bob, "target", order)
+			I.Pump()
+			eq(table.concat(w.notified, ","), "Bob")
+			local printed = #w.printed
+			I.OnInspectReady(bob.guid)
+			eq(#order, 1, "read"); eq(I.WantStatus(bob.guid), "done")
+			eq(I.Players()["Bob"], nil, "no tabard row")
+			eq(#w.printed, printed, "no chat line"); eq(alerts, 0, "no sound")
+			eq(#w.observed, 0, "no nearby report (TabardsV2.Observe)")
+			eq(ns.Comm.QueueSize(), sent, "nothing sent")
+			-- The same answer to the patrol's request: the row, the line, the sound, the report.
+			I.Unwant("test:Bob")
+			w.clock = w.clock + 2
+			I.InspectTarget()
+			I.OnInspectReady(bob.guid)
+			eq(I.Players()["Bob"].status, "NONE"); eq(#w.printed, printed + 1); eq(alerts, 1); eq(#w.observed, 1)
+		end)
+		ns.PlayAlert = savedAlert
+		if not ok then error(err, 0) end
+	end)
+end)
+
+test("watch duel inspect: the patrol's item and a want for the same player are one request, either way round; the patrol's outcome is as ever and the reader runs too", function()
+	WithGear(function(w, I)
+		local order = {}
+		local ann = w.target("Ann")
+		I.InspectTarget()
+		w.units.focus = ann                   -- (still in sight once the target is Bob)
+		local bob = w.target("Bob", { items = GEAR_BOB })
+		I.InspectTarget()                     -- Bob's patrol item waits
+		Wanted(I, bob, "target", order)
+		I.OnInspectReady(ann.guid)
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(table.concat(w.notified, ","), "Ann,Bob")
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 2, "one request for both")
+		I.OnInspectReady(bob.guid)
+		eq(I.Players()["Bob"].status, "GUILD", "recorded as the patrol's")
+		eq(#w.observed, 2, "reported nearby as ever (Ann's and his)")
+		eq(order[1], "read target Player-1-Bob", "the want read the same answer")
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 2, "nothing left to ask")
+		-- The want's request is out, then the patrol asks for him: no second request.
+		local cid = w.target("Cid", { items = GEAR_BOB })
+		Wanted(I, cid, "target", order)
+		I.Pump()
+		eq(w.notified[3], "Cid")
+		I.InspectTarget()
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 3, "the patrol takes the want's request")
+		I.OnInspectReady(cid.guid)
+		eq(I.Players()["Cid"].status, "GUILD", "recorded: the patrol asked for him too")
+		eq(order[2], "read target Player-1-Cid")
+	end)
+end)
+
+test("watch duel inspect: in combat \"combat\", the game's inspect window open \"busy\", the game's no \"refused\", no unit \"sight\"; no answer: asked again WANT_RETRY later, WANT_TRIES times, then given up", function()
+	WithGear(function(w, I)
+		local bob = Bob(w)
+		local token = "nameplate3"
+		eq(I.Want(Secret.New(), "test:secret", { unit = function() end, read = function() end }), false, "a secret GUID is refused")
+		eq(I.Want("Creature-0-1", "test:npc", { unit = function() end, read = function() end }), false, "players only")
+		eq(I.Want(bob.guid, "test:bob", { unit = function() return token end, read = function() end }), true)
+		w.combat = true
+		I.Pump()
+		eq(I.WantStatus(bob.guid), "combat"); eq(#w.notified, 0)
+		w.combat = false
+		InspectFrame = { IsShown = function() return true end }
+		I.Pump()
+		eq(I.WantStatus(bob.guid), "busy"); eq(#w.notified, 0)
+		InspectFrame = nil
+		local can = CanInspect
+		CanInspect = function() return false end
+		I.Pump()
+		eq(I.WantStatus(bob.guid), "refused"); eq(#w.notified, 0)
+		CanInspect = can
+		token = nil
+		I.Pump()
+		eq(I.WantStatus(bob.guid), "sight"); eq(#w.notified, 0)
+		token = "nameplate3"
+		-- INSPECT_READY never comes.
+		for try = 1, I.WANT_TRIES do
+			I.Pump()
+			eq(#w.notified, try, "request " .. try)
+			w.clock = w.clock + 5
+			I.Pump()
+			local st, _, tries = I.WantStatus(bob.guid)
+			eq(st, "timeout"); eq(tries, try)
+			w.clock = w.clock + 4
+			I.Pump()
+			eq(#w.notified, try, "not before WANT_RETRY")
+			w.clock = w.clock + I.WANT_RETRY
+		end
+		for _ = 1, 5 do
+			I.Pump()
+			w.clock = w.clock + 20
+		end
+		eq(#w.notified, I.WANT_TRIES, "given up after WANT_TRIES")
+		eq(I.WantStatus(bob.guid), "timeout")
+		I.Unwant("test:bob")
+		eq(I.WantStatus(bob.guid), nil)
+	end)
+end)
+
+-- The regression (1.2.6): on Forever, UnitGUID of a token whose unit is not a player's is secret
+-- (SecretWhenUnitIdentityRestricted), and the target queued as a player may be a creature by the
+-- pump's turn or the game's answer. Each comparison of that secret raised an error: the pump's
+-- (Inspect.lua's queue), the answer's unit search (FindUnit) and the patrol's own queueing
+-- (Enqueue). Each asks issecretvalue first now. A strict FFI stand-in plays the secret
+-- (tests/arena/lib/secret.lua: a table's __eq is never called against a string); with the guards
+-- taken out this fails on "a secret value was used".
+test("watch duel inspect: a secret UnitGUID is no error in the pump's turn, the answer's unit search or the patrol's queueing: that unit is passed over", function()
+	WithGear(function(w, I)
+		issecretvalue = Secret.Is
+		local creature = setmetatable({ name = "Wolf", level = 60, items = {} }, { __index = function(_, k)
+			if k == "guid" then return Secret.New() end
+		end })
+		local ann = w.target("Ann")
+		I.InspectTarget()                    -- Ann's request out, from "target"
+		w.target("Cid")
+		I.InspectTarget()                    -- Cid's item waits, its unit "target"
+		w.units.target = creature            -- the target is a creature now
+		local asked = 0
+		local can = CanInspect
+		CanInspect = function(unit) asked = asked + 1 return can(unit) end
+		I.OnInspectReady(ann.guid)           -- the answer's hint, "target", is the creature
+		eq(I.Players()["Ann"], nil, "Ann not found in sight: nothing recorded for her")
+		w.clock = w.clock + 2
+		I.Pump()                             -- Cid's turn: "target" is not his any more
+		eq(table.concat(w.notified, ","), "Ann", "nothing asked for the creature"); eq(asked, 0, "CanInspect never asked")
+		I.InspectTarget()                    -- the patrol meets the creature: nothing queued
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 1); eq(asked, 0)
 	end)
 end)
 
