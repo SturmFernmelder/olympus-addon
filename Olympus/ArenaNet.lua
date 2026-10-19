@@ -60,7 +60,9 @@ Arena.PARK_TRIES = 36         -- ...this many times at most (about six hours)
 -- winners, LW (its bank's word for the Games tab's rankings), and the games' rankings'
 -- publish word AU (ArenaRoles, 2026-10-04), the games' ledger AY (ArenaLedger, 1.1.6), and the
 -- duels' signed halves AX (ArenaLedger, 1.2.3), and (1.2.4) the shared records' RK RD RA RR RS RT
--- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals): 75.
+-- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals), and
+-- (1.2.6) RV (Records.lua: a live holder's signed validation of one record, the author's "todos os
+-- rankings precisam fazer o relay"): 76.
 -- Arena.Send refuses any other type.
 Arena.TYPES = {
 	EP = "ArenaNet", EC = "ArenaChat", EM = "ArenaChat", ER = "ArenaTest", EH = "ArenaTest",
