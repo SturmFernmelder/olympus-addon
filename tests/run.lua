@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge", "BridgeSections" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -29937,6 +29937,146 @@ test("1.1 private companion bridge: logout checkpoints, tombstones block old res
 	OlympusCompanionDB, ns.rdb, ns.Now, D.ServerTime = saved.db, saved.rdb, saved.now, saved.server
 	ns.realm, ns.group, ns.faction, OlympusBridge = saved.realm, saved.group, saved.faction, saved.bridge
 	if not ok then error(err, 0) end
+end)
+
+test("1.2.6 companion sections: the registry takes each name once, copies plain tables within its limits, a failing exporter gives nothing", function()
+	local B = OlympusBridge
+	eq(B.SECTIONS_API_VERSION, 1)
+	local names = {}
+	for _, s in ipairs(B.Sections()) do names[s.name] = s.version end
+	eq(names.census, 1); eq(names.guilds, 1); eq(names.rankings, 1); eq(names.wanted, 1)
+
+	local function F() return {} end
+	eq(select(2, B.RegisterSection("Bad Name", 1, F)), "name")
+	eq(select(2, B.RegisterSection("t_version", 0, F)), "version")
+	eq(select(2, B.RegisterSection("t_exporter", 1, "nope")), "exporter")
+	eq(select(2, B.RegisterSection("census", 2, F)), "taken", "a name is its first exporter's")
+
+	local deep = {}
+	local cursor = deep
+	for _ = 1, 9 do cursor.next = {} cursor = cursor.next end
+	local long = {}
+	for i = 1, 3000 do long[i] = i end -- (under "z_long": copied last, so the budget cuts it alone)
+	local cyclic = {}
+	cyclic.self = cyclic
+	assert(B.RegisterSection("t_shape", 3, function()
+		return { name = "|cffff0000Red|r " .. string.rep("x", 400), fn = print, nan = 0 / 0, inf = math.huge,
+			ok = true, deep = deep, z_long = long, cyclic = cyclic, ["bad key"] = 1, [0] = "zero" }
+	end))
+	local got = assert(B.GetSection("t_shape"))
+	eq(got.name, "t_shape"); eq(got.version, 3)
+	local d = got.data
+	assert(#d.name <= B.SECTION_LIMITS.string and not d.name:find("|", 1, true), d.name)
+	eq(d.fn, nil); eq(d.nan, nil); eq(d.inf, nil); eq(d.ok, true)
+	eq(d["bad key"], nil); eq(d[0], nil)
+	local depth, node = 0, d.deep
+	while type(node) == "table" and node.next do depth = depth + 1 node = node.next end
+	assert(depth < 9, "nesting is cut")
+	assert(#d.z_long < 3000, "the value budget stops the copy")
+	d.ok = false
+	eq(B.GetSection("t_shape").data.ok, true, "every call is a fresh copy")
+
+	assert(B.RegisterSection("t_fails", 1, function() error("boom") end))
+	eq(B.GetSection("t_fails"), nil)
+	assert(B.RegisterSection("t_nothing", 1, function() return nil end))
+	eq(B.GetSection("t_nothing"), nil)
+	eq(B.GetSection("missing"), nil)
+end)
+
+test("1.2.6 companion sections: guilds, rankings and wanted carry only public rows and allowlisted fields", function()
+	local D = ns.Data
+	local saved = { rdb = ns.rdb, now = ns.Now, realm = ns.realm, group = ns.group, faction = ns.faction, api = ns.API }
+	local ok, err = pcall(function()
+		-- The API's own rows are built field by field (tests/arena/api.lua); a stand-in with extra
+		-- fields shows the sections keep only theirs.
+		ns.API = {
+			Wanted = function()
+				return { { place = 1, name = "Horde Guy", guid = "Player-1-0001", bounty = 50, kills = 3, cycle = 1,
+					victims = { "Someone" }, addedBy = "A Mod" } }
+			end,
+			Rankings = function()
+				return { slayers = { month = {} }, church = { missionaries = { "Pious" } }, staff = { secret = true } }
+			end,
+		}
+		local now = 1800000000
+		ns.Now = function() return now end
+		ns.realm, ns.group, ns.faction = "Realm", "Realm", "Alliance"
+		ns.rdb = { guilds = {
+			["Olympus Alpha"] = { guild = "Olympus Alpha", total = 900, online = 200, t = now - 5, mine = true, avgLevel = 47.9,
+				leader = "SECRET LEADER", battleTag = "Secret#1234" },
+			["Olympus Beta"] = { guild = "Olympus Beta", total = 120, online = 30, t = now - 10, mine = true },
+		}, seen = {}, treasuryFlags = {} }
+		local guilds = assert(OlympusBridge.GetSection("guilds")).data
+		eq(#guilds.guilds, 2)
+		eq(guilds.guilds[1].name, "Olympus Alpha"); eq(guilds.guilds[1].members, 900); eq(guilds.guilds[1].avgLevel, 47.9)
+		eq(guilds.characters, 1020)
+		for _, row in ipairs(guilds.guilds) do
+			for k in pairs(row) do
+				assert(({ name = true, members = true, online = true, fresh = true, avgLevel = true })[k], "guild field " .. k)
+			end
+		end
+
+		local rankings = assert(OlympusBridge.GetSection("rankings")).data
+		eq(rankings.treasury, nil, "no treasury numbers while the King keeps the balance private")
+		eq(type(rankings.crafting), "table")
+		for k in pairs(rankings) do
+			assert(({ slayers = true, donors = true, church = true, games = true, crafting = true, treasury = true })[k], "ranking " .. k)
+		end
+
+		eq(rankings.church.missionaries[1], "Pious"); eq(rankings.staff, nil, "only the public kinds")
+		local wanted = assert(OlympusBridge.GetSection("wanted")).data
+		eq(#wanted.targets, 1); eq(wanted.targets[1].bounty, 50)
+		eq(wanted.targets[1].victims, nil); eq(wanted.targets[1].addedBy, nil)
+		for _, row in ipairs(wanted.targets) do
+			for k in pairs(row) do
+				assert(({ place = true, name = true, guid = true, bounty = true, kills = true, cycle = true })[k], "wanted field " .. k)
+			end
+		end
+	end)
+	ns.rdb, ns.Now, ns.realm, ns.group, ns.faction, ns.API = saved.rdb, saved.now, saved.realm, saved.group, saved.faction, saved.api
+	assert(ok, err)
+end)
+
+test("1.2.6 companion sections: the sidecar saves only the sections it knows, at their version, even when the census fails", function()
+	local saved = { db = OlympusCompanionDB, bridge = OlympusBridge }
+	local before = #EVENT_SCRIPTS
+	local ok, err = pcall(function()
+		OlympusCompanionDB = nil
+		assert(loadfile(ROOT .. "OlympusCompanionBridge/Checkpoint.lua"))("OlympusCompanionBridge", {})
+		local OnEvent = assert(EVENT_SCRIPTS[before + 1], "the private bridge event frame")
+		local asked = {}
+		OlympusBridge = {
+			CENSUS_CHECKPOINT_API_VERSION = 1,
+			GetCensusCheckpoint = function() return nil end,
+			SECTIONS_API_VERSION = 1,
+			GetSection = function(name)
+				asked[name] = true
+				if name == "guilds" then return { name = name, version = 1, data = { people = 3 } } end
+				if name == "rankings" then return { name = name, version = 2, data = { slayers = {} } } end
+				if name == "wanted" then error("boom") end
+				if name == "self" then return { name = name, version = 1, data = { character = "Me-Realm" } } end
+				return { name = name, version = 1, data = { leaked = true } }
+			end,
+		}
+		OnEvent(nil, "ADDON_LOADED", "OlympusCompanionBridge")
+		OnEvent(nil, "PLAYER_LOGOUT")
+		local db = OlympusCompanionDB
+		eq(db.checkpoint, nil, "no census this time")
+		eq(db.sections.guilds.version, 1); eq(db.sections.guilds.data.people, 3)
+		eq(db.sections.rankings, nil, "a version it does not know is skipped")
+		eq(db.sections.wanted, nil, "a failing section is skipped, the others still go")
+		eq(db.sections.self.data.character, "Me-Realm")
+		eq(asked.chat, nil, "it only asks for the sections it knows")
+		for name in pairs(db.sections) do
+			assert(({ guilds = true, self = true })[name], "unexpected section " .. name)
+		end
+
+		OlympusBridge.GetSection = nil
+		OnEvent(nil, "PLAYER_LOGOUT")
+		eq(OlympusCompanionDB.sections, nil, "an Olympus without sections writes none")
+	end)
+	OlympusCompanionDB, OlympusBridge = saved.db, saved.bridge
+	assert(ok, err)
 end)
 
 test("1.1 private companion bridge: its TOC has one separate SavedVariable and docs state the logout flush boundary", function()

@@ -108,6 +108,21 @@ table is finalized during `PLAYER_LOGOUT`, but the client writes
 `/reload`, logout or game exit. The desktop companion must wait for that write to finish,
 read a stable file, and keep the preceding valid checkpoint if parsing fails.
 
+## Sections
+
+Besides the census checkpoint, Olympus offers versioned read-only sections through
+`OlympusBridge.RegisterSection(name, version, exporter)` / `GetSection(name)` (`Olympus/Bridge.lua`,
+exporters in `Olympus/BridgeSections.lua`). Olympus copies each into fresh plain tables within
+`OlympusBridge.SECTION_LIMITS`. At logout this sidecar saves only the sections it knows, at the
+version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `wanted` and `self`.
+A failing or unknown section is skipped and never blocks the census.
+
+What a section may carry: only what every member already sees on Olympus's own pages, plus the
+`self` section (the player's own character and BattleTag, only after the terms letter is
+accepted; the Companion shows BattleTags to staff only). Never chat text or chat-strike lines,
+council or High Council-only data, treasury items (numbers only, and only while the King
+publishes the balance), or anything private to an audience the player is not in.
+
 LAN synchronization and encryption are deliberately not responsibilities of this Bridge slice.
 The Companion core has an encrypted-envelope/replay protocol foundation, but discovery, pairing,
 production cryptography, sockets, persistence, and actual desktop/mobile exchange are not live.

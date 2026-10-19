@@ -204,6 +204,89 @@ function OlympusBridge.GetCensusCheckpoint()
 	return checkpoint
 end
 
+-- Sections: one versioned, read-only door per kind of data for the Companion (Daniel: more
+-- "ports" than the census). A module's exporter returns only what every member already sees on
+-- Olympus's own pages; this registry copies it into fresh plain tables, within fixed limits, and
+-- the private sidecar (OlympusCompanionBridge) saves only the sections it knows at logout. Never a
+-- BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury items or
+-- anything private to an audience the player is not in: an exporter that would need one does not
+-- belong here.
+OlympusBridge.SECTIONS_API_VERSION = 1
+OlympusBridge.SECTION_LIMITS = { sections = 16, depth = 5, values = 1500, string = 120 }
+
+local sections, sectionNames = {}, {}
+
+-- Registers `name` (lowercase letters, digits, "_"); a name is taken once, by its first exporter.
+function OlympusBridge.RegisterSection(name, version, exporter)
+	if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or #name > 32 then return false, "name" end
+	if type(version) ~= "number" or version < 1 or version ~= math.floor(version) then return false, "version" end
+	if type(exporter) ~= "function" then return false, "exporter" end
+	if sections[name] then return false, "taken" end
+	if #sectionNames >= OlympusBridge.SECTION_LIMITS.sections then return false, "full" end
+	sections[name] = { version = version, exporter = exporter }
+	sectionNames[#sectionNames + 1] = name
+	table.sort(sectionNames)
+	return true
+end
+
+-- The registered sections, by name: { { name = , version = }, ... } (a fresh list).
+function OlympusBridge.Sections()
+	local out = {}
+	for i, name in ipairs(sectionNames) do out[i] = { name = name, version = sections[name].version } end
+	return out
+end
+
+-- A plain copy within the limits: strings cut and cleaned, finite numbers, booleans, tables with
+-- string or whole-number keys; anything else (functions, frames, cycles) is dropped. Past the value
+-- budget the copy stops: a section is never half a secret, only shorter.
+local function SectionCopy(value, depth, budget)
+	local t = type(value)
+	if t == "string" then
+		budget.left = budget.left - 1
+		return Plain(value, OlympusBridge.SECTION_LIMITS.string)
+	elseif t == "number" then
+		budget.left = budget.left - 1
+		if value ~= value or value == math.huge or value == -math.huge then return nil end
+		return value
+	elseif t == "boolean" then
+		budget.left = budget.left - 1
+		return value
+	elseif t ~= "table" or depth >= OlympusBridge.SECTION_LIMITS.depth then
+		return nil
+	end
+	local keys = {}
+	for k in pairs(value) do
+		local kt = type(k)
+		if (kt == "string" and k:match("^[%a_][%w_]*$") and #k <= 32) or (kt == "number" and k >= 1 and k == math.floor(k)) then
+			keys[#keys + 1] = k
+		end
+	end
+	table.sort(keys, function(a, b)
+		if type(a) ~= type(b) then return type(a) == "number" end
+		return a < b
+	end)
+	local out = {}
+	for _, k in ipairs(keys) do
+		if budget.left <= 0 then break end
+		local v = SectionCopy(value[k], depth + 1, budget)
+		if v ~= nil then out[k] = v end
+	end
+	return out
+end
+
+-- One section now, as a fresh plain table: { name, version, data }; nil when unknown or when its
+-- exporter has nothing or fails (logged nowhere: the Companion just shows nothing new).
+function OlympusBridge.GetSection(name)
+	local entry = type(name) == "string" and sections[name]
+	if not entry then return nil end
+	local ok, data = pcall(entry.exporter)
+	if not ok or type(data) ~= "table" then return nil end
+	return { name = name, version = entry.version,
+		data = SectionCopy(data, 0, { left = OlympusBridge.SECTION_LIMITS.values }) }
+end
+
+OlympusBridge.RegisterSection("census", 1, OlympusBridge.GetCensusCheckpoint)
+
 -- The King's screen while the councillors' names are hidden there (his stream, ns.CouncilMasked,
 -- 0.9.9): the chats put no mark on a councillor's line and /oly council cuts each name short, so
 -- the bridge names nobody either, until he clicks the eye. An error there counts as hidden.

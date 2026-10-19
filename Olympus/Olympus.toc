@@ -136,6 +136,7 @@ Bridge.lua
 Wanted.lua
 PlayerSightings.lua
 API.lua
+BridgeSections.lua
 ArenaMath.lua
 Compliance.lua
 ArenaRating.lua

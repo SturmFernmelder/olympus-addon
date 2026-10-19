@@ -429,19 +429,40 @@ local function LoadDB()
 	return ResetDB(checkpoint)
 end
 
+-- The sections this sidecar knows, at the version it knows (Bridge.lua's registry). Olympus has
+-- already copied each into plain tables within its limits; an unknown name or version is skipped.
+local KNOWN_SECTIONS = { guilds = 1, rankings = 1, self = 1, wanted = 1 }
+
+local function CopySections(bridge)
+	if type(bridge) ~= "table" or bridge.SECTIONS_API_VERSION ~= 1 or type(bridge.GetSection) ~= "function" then return nil end
+	local out, any = {}, false
+	for name, version in pairs(KNOWN_SECTIONS) do
+		local ok, section = pcall(bridge.GetSection, name)
+		if ok and type(section) == "table" and section.version == version and type(section.data) == "table" then
+			out[name] = { version = version, data = section.data }
+			any = true
+		end
+	end
+	return any and out or nil
+end
+
 local function Finalize()
 	local db = CurrentDB() or LoadDB()
 	local previous = CopyFinal(db.checkpoint)
 	local bridge = rawget(_G, "OlympusBridge")
+	local sections = CopySections(bridge)
+	local function Keep(checkpoint)
+		ResetDB(checkpoint).sections = sections
+	end
 	if type(bridge) ~= "table" or bridge.CENSUS_CHECKPOINT_API_VERSION ~= VERSION
-		or type(bridge.GetCensusCheckpoint) ~= "function" then return false end
+		or type(bridge.GetCensusCheckpoint) ~= "function" then Keep(previous) return false end
 	local ok, raw = pcall(bridge.GetCensusCheckpoint)
-	if not ok then return false end
+	if not ok then Keep(previous) return false end
 	local source = CopySource(raw)
-	if not source then return false end
+	if not source then Keep(previous) return false end
 	local checkpoint = FinalizeSource(source, previous)
-	if not checkpoint then return false end
-	ResetDB(checkpoint)
+	if not checkpoint then Keep(previous) return false end
+	Keep(checkpoint)
 	return true
 end
 
