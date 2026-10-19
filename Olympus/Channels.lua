@@ -889,7 +889,25 @@ end
 -- checked and sanitized, to a companion reading along (CHAT_LINE, for
 -- OlympusBridge.RegisterChatObserver). The mute and the flood guard only decide what this chat
 -- frame shows.
+-- 1.2.5.1: the senders this session heard on the Olympus channels and the guild their line
+-- spoke for (PlayerMenu.KnownOlympus: an Olympus player, whatever the signed boundary lets
+-- Data.ClaimGuild record). Bounded: past SPOKE_MAX it starts again.
+Channels.SPOKE_MAX = 2000
+local spoke, spokeCount = {}, 0
+function Channels.SpokeFor(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	return spoke[ns.Fold(ns.FullName(name))]
+end
+
 local function Keep(tier, sender, guild, class, text, mine, id)
+	if not mine and type(sender) == "string" and type(guild) == "string" then
+		local key = ns.Fold(ns.FullName(sender))
+		if spoke[key] == nil then
+			spokeCount = spokeCount + 1
+			if spokeCount > Channels.SPOKE_MAX then wipe(spoke); spokeCount = 1 end
+		end
+		spoke[key] = guild
+	end
 	AddHistory(tier, { sender = sender, guild = guild, class = class, text = text, mine = mine or nil, id = tonumber(id) })
 	ns.Fire("CHAT_CHANGED", tier)
 	if not mine then ns.Fire("CHAT_LINE", tier, sender, text) end
@@ -941,7 +959,7 @@ function Channels.Send(tier, text, now, keepMute)
 	local t = TIERS[tier]
 	if not t then return false, "tier" end
 	if not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return false, "member"
 	end
 	if not Channels.CanUse(tier) then
@@ -2158,7 +2176,7 @@ function Channels.CanWrite(tier, tell)
 	if not t then return false end
 	local why
 	if not ns.IsMember() then
-		why = L.MEMBERS_ONLY
+		why = ns.MembersOnlyText()
 	elseif not Channels.CanUse(tier) then
 		why = L[t.deny]:format(Label(tier))
 	elseif not Channels.ChatOn() then

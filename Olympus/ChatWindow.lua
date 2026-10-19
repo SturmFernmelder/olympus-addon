@@ -4191,7 +4191,7 @@ function ChatWindow.Open(want)
 		return nil
 	end
 	if C.MyLevel() == 0 then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return nil
 	end
 	local d = want ~= nil and C.TIERS[want] or nil

@@ -469,7 +469,7 @@ Inspect.OnInspectReady = OnInspectReady -- (tests)
 
 function Inspect.SetPatrol(on)
 	if on and not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return
 	end
 	patrol = on and true or false
@@ -494,7 +494,7 @@ end
 -- again. Nothing scored, nothing sent, nobody told how to play. Officers: the guild master and the
 -- officer rank right below (Roster.IsOfficer).
 function Inspect.InspectGear()
-	if not ns.IsMember() then return ns.Print(L.MEMBERS_ONLY) end
+	if not ns.IsMember() then return ns.Print(ns.MembersOnlyText()) end
 	if not ns.Roster.IsOfficer() then return ns.Print(L.GEAR_OFFICERS_ONLY) end
 	if not UnitIsPlayer("target") or UnitIsUnit("target", "player") then return ns.Print(L.NEED_PLAYER_TARGET) end
 	local name = ns.ShortName(ns.UnitFullName("target") or "?")

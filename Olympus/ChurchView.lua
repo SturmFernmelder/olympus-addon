@@ -839,7 +839,8 @@ function View.MenuLines(target, menu)
 	end
 end
 if ns.PlayerMenu and ns.PlayerMenu.Add then
-	ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40)
+	-- (1.2.5.1: an Olympus line, for a player this client knows to be in Olympus alone.)
+	ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40, { olympus = true })
 end
 
 for _, event in ipairs({ "CHURCH_CHANGED", "CHURCH_COUNT_CHANGED", "CHURCH_PUBLIC_CHANGED", "CHURCH_FULLNESS_CHANGED" }) do

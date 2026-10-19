@@ -46,7 +46,8 @@ local function WithWatch(fn)
 		c.ChatLocked = function() return w.locked == true end
 		-- 1.1.6: the right-click menu's entries, the Olympus channels' history (Channels.History) and
 		-- the copy box, as the Watch's report and case pages use them.
-		c.PlayerMenu = { Add = function(key, build, order) w.menu = { key = key, build = build, order = order } return true end }
+		-- (1.2.5.1: with its options too: Report to Olympus is an Olympus line, PlayerMenu.KnownOlympus.)
+		c.PlayerMenu = { Add = function(key, build, order, opts) w.menu = { key = key, build = build, order = order, opts = opts } return true end }
 		c.Channels = { ORDER = { "A", "C", "L" }, TIERS = { A = { label = "CHAN_ALL" }, C = { label = "CHAN_CAPTAINS" }, L = { label = "CHAN_LORDS" } },
 			History = function(tier) return w.chat[tier] or {} end }
 		c.Ago = function(at) return tostring(w.epoch - (tonumber(at) or 0)) .. "s ago" end
@@ -359,18 +360,22 @@ end)
 
 -- The game's own chat: an Olympus line there carries the player's link, and its right-click menu
 -- (MENU_UNIT_FRIEND, PlayerMenu.lua's) has Report to Olympus for an ordinary member.
-test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report", function()
+-- (1.2.5.1) For a player this client knows to be in Olympus: his Olympus line claimed his guild
+-- (Channels.VerifiedLevel, Data.ClaimGuild), so here Data.ClaimedGuild names it; a stranger
+-- this client knows nothing of gets no Report line.
+test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report; not for a player not known to be in Olympus", function()
 	local line = ns.Channels.FormatLine("A", "Rude Guy-Realm", "Olympus II", "WA", "rude words")
 	assert(line:find("|Hplayer:" .. ns.TellName("Rude Guy-Realm") .. "|h", 1, true), "the name is the game's player link: " .. line)
 	WithWatch(function(w, W, c)
 		w.setRank(c.me, 3); w.setRank("Captain One-Realm", 1); w.online(c.me, "Captain One-Realm")
 		w.chat.A = { { sender = "Rude Guy-Realm", t = w.epoch - 10, text = "rude words" } }
+		c.Data.ClaimedGuild = function(name) return c.FullName(name) == "Rude Guy-Realm" and "Olympus II" or nil end
 		local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
 			GamepadUI = function() return false end }, { __index = c })
 		assert(loadfile(ROOT .. "Olympus/PlayerMenu.lua"))("Olympus", pns)
 		local PM = pns.PlayerMenu
-		eq(w.menu.key, "report")
-		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order))
+		eq(w.menu.key, "report"); eq(w.menu.opts and w.menu.opts.olympus, true, "an Olympus line")
+		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order, w.menu.opts))
 		local root = { items = {} }
 		local function Desc(kind, text, cb)
 			local d = { kind = kind, text = text, cb = cb, enabled = true }
@@ -389,6 +394,10 @@ test("watch: in the game's chat an ordinary member right-clicks the name on an O
 		assert(button, "the line"); eq(button.text, ns.L.WATCH_REPORT); eq(button.enabled, true)
 		button.cb()
 		eq(w.dialogs[#w.dialogs].which, "OLYMPUS_WATCH_REPORT_WHAT"); eq(w.dialogs[#w.dialogs].data.name, "Rude Guy-Realm")
+		-- A stranger: no Report to Olympus (nor any Olympus line).
+		root.items = {}
+		eq(PM.Build("FRIEND", root, { name = "Passing Stranger-Realm" }), 0)
+		eq(#root.items, 0, "no Olympus line for him")
 	end)
 end)
 
@@ -463,6 +472,72 @@ test("watch: an integration opens one authorized member review without receiving
 		eq(ok, false); eq(why, "access")
 		eq(W.Record(target), nil); eq(#W.Audit(), 0)
 		W.ResetForTests(); eq(W.profileKey, nil, "test/session reset forgets the selected private target")
+	end)
+end)
+
+-- 1.2.5.1: the BattleTags each player's addon sent the moderation team (Accord.lua), in The Watch: on
+-- a team client alone (WatchChat.InRoom), its own section and a line on the person page.
+test("watch: the BattleTags (1.2.5.1) are the moderation team's alone: an Olympus moderator with no desk gets the tab for them; an officer outside the team never sees them, on any page", function()
+	WithWatch(function(w, W, c)
+		local L = ns.L
+		local team = {}
+		c.WatchChat = { InRoom = function(name) return team[c.Fold(c.FullName(name))] == true end,
+			Sanction = function() return nil end, RecordLines = function() return {} end, PageShown = function() return false end }
+		assert(loadfile(ROOT .. "Olympus/Accord.lua"))("Olympus", c)
+		local function Row(name, guild, via)
+			return { name = name, tag = "Target#1111", guild = guild, via = via, first = w.epoch, last = w.epoch, av = 1, aat = w.epoch }
+		end
+		c.rdb.battletags = { v = 1, rows = { [c.Fold("Target Person-Realm")] = Row("Target Person-Realm", "Olympus II", "roster"),
+			[c.Fold("Target Alt-Realm")] = Row("Target Alt-Realm", "Olympus III", "self") } }
+		local function Page()
+			local out = {}
+			for _, l in ipairs(W.Build()) do
+				out[#out + 1] = tostring(l.text or "") .. " " .. tostring(l.right or "")
+				for _, item in ipairs(l.nav or {}) do out[#out + 1] = tostring(item.text) end
+			end
+			return table.concat(out, "\n")
+		end
+		w.setRank("Target Person-Realm", 3); w.online(c.me, "Target Person-Realm")
+		-- An officer outside the team: his desk, and no BattleTag on any page.
+		eq(W.TabVisible(), true)
+		assert(not Page():find(L.ACCORD_TEAM_TITLE, 1, true), "no BattleTags page in his navigation")
+		W.Show("tags"); eq(W.PageId(), "desk", "no such page for him")
+		assert(W.OpenMember("Target Person-Realm"))
+		assert(not Page():find("Target#", 1, true) and not Page():find(L.ACCORD_TEAM_PROFILE_NONE, 1, true), "nothing on the person page")
+		-- On the team: the line on the person page, the others sharing the tag; the page itself.
+		team[c.Fold(c.me)] = true
+		assert(W.OpenMember("Target Person-Realm"))
+		local page = Page()
+		-- (Changed on purpose, 1.2.5.1's review: the digits stay hidden until the page's Show.)
+		assert(page:find(L.ACCORD_TEAM_PROFILE:format("Target#****"), 1, true), page)
+		assert(not page:find("1111", 1, true), "no digits until Show")
+		assert(page:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Target Alt"), 1, true), page)
+		assert(page:find(L.ACCORD_TEAM_NAV:format(2), 1, true), "in his navigation")
+		W.Show("tags")
+		eq(W.PageId(), "tags"); eq(W.ViewKey(), "judgments", "no desk buttons")
+		local _, title, detail = W.Build()
+		eq(title, L.TAB_WATCH); eq(detail, L.ACCORD_TEAM_DETAIL)
+		page = Page()
+		assert(page:find(L.ACCORD_TEAM_SHARED:format(2), 1, true) and page:find("Target#****", 1, true), page)
+		assert(c.Accord.RevealTeam(), "the page's Show")
+		assert(Page():find("Target#1111", 1, true), "the digits a moment")
+		c.Accord.RevealTeam()
+		-- On the King's screen (his stream): masked.
+		w.masked = true
+		c.KingsScreen = function() return true end
+		page = Page()
+		assert(not page:find("1111", 1, true), "never a tag on the King's screen")
+		c.KingsScreen, w.masked = nil, nil
+		-- An Olympus moderator with no desk (not an officer): the tab, opened on the BattleTags.
+		w.setRank(c.me, 3)
+		W.Show(nil)
+		eq(W.CanRead(), false); eq(W.TabVisible(), true, "the BattleTags give him the tab")
+		eq(W.PageId(), "member", "his own page first, as everyone's")
+		assert(Page():find(L.ACCORD_TEAM_NAV:format(2), 1, true), "the BattleTags in its navigation")
+		W.Show("tags"); eq(W.PageId(), "tags")
+		-- Off the team: none of it.
+		team = {}
+		eq(W.TabVisible(), false); eq(W.PageId() ~= "tags", true)
 	end)
 end)
 

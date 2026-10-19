@@ -212,7 +212,7 @@ end
 function Decree.Send(kind, text)
 	local steward = Steward()
 	if not steward and not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return
 	end
 	local scope = Decree.Scope(kind)

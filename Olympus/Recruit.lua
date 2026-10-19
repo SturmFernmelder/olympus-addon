@@ -128,7 +128,8 @@ end
 -- again whenever he did not answer our last J1 (lost, or held back while his addon was busy),
 -- so a do-not-contact flag closes the question before the player sends.
 local function AskRoute(name, check, confirm)
-	if ns.IsMember() or not name then return false end
+	-- (1.2.5.1: in an Olympus guild, Olympus Accord accepted or not, nobody is asked where to go.)
+	if ns.InOlympusGuild() or not name then return false end
 	local key, now = Key(name), ns.Now()
 	local asked = routeAsked[key]
 	local answered = asked and (routeAnswered[key] or -math.huge) >= asked
@@ -156,7 +157,7 @@ end
 function Recruit.OnFound(list)
 	Recruit.found = list
 	ns.Log("recruit: /who lists %d Olympus members", #list)
-	if not ns.IsMember() then
+	if not ns.InOlympusGuild() then
 		local r, now = Recruit.Route(), ns.Now()
 		if not r or now - (r.t or 0) > Recruit.ROUTE_FRESH or (GatesUnconfirmed(now) and AskedLately(now) < Recruit.ROUTE_ASKS) then
 			AskAnother()
@@ -228,7 +229,7 @@ ns.Comm.HandleOutside(Recruit.OnRoute)
 -- The first reported card needs an independent source. This is another bounded route ask,
 -- not a chat whisper or a contact chosen by the card.
 function Recruit.ConfirmCharters()
-	if ns.IsMember() or AskedLately(ns.Now()) >= Recruit.ROUTE_ASKS then return false end
+	if ns.InOlympusGuild() or AskedLately(ns.Now()) >= Recruit.ROUTE_ASKS then return false end
 	return AskAnother(true)
 end
 
@@ -389,9 +390,10 @@ function Recruit.Roast()
 	return L.ROAST_NOGUILD, L.ROAST_NOGUILD_SUB
 end
 
--- Once a day, a reminder in chat for players outside Olympus.
+-- Once a day, a reminder in chat for players outside Olympus (1.2.5.1: never for a member of an
+-- Olympus guild who has not accepted the Olympus Accord yet: the Accord asks him, Accord.lua).
 local function DailyNag()
-	if ns.IsMember() then return end
+	if ns.InOlympusGuild() then return end
 	local today = date("%Y-%m-%d")
 	if ns.db.lastNag == today then return end
 	ns.db.lastNag = today
@@ -735,6 +737,8 @@ function Recruit.OnWhisper(text, sender)
 		if key then whispers[key] = { text = text, t = now } end
 		return
 	end
+	-- (1.2.5.1) In an Olympus guild before the Olympus Accord: neither part (he asked nobody).
+	if ns.InOlympusGuild() then return end
 	local who = ns.ShortName(sender)
 	for name in pairs(Recruit.asked) do
 		if ns.ShortName(name) == who then

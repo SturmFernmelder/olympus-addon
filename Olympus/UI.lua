@@ -280,6 +280,10 @@ local RECRUIT_BUTTONS = {
 	{ "RECRUIT_FIND", function() ns.Recruit.Search() end },
 	{ "RECRUIT_NEXT", function() ns.Recruit.PromptNext(ns.Recruit.lastContact and ns.Recruit.lastContact.guild) end },
 }
+-- 1.2.5.1: the Olympus Accord's page (Accord.lua): its letter again.
+local ACCORD_BUTTONS = {
+	{ "ACCORD_READ", function() ns.Accord.Show("window") end },
+}
 
 -- Small extra buttons inside the detail box (only where needed).
 local function KingOnly() return ns.King.IsKing() or ns.King.Preview() end
@@ -1141,10 +1145,15 @@ local function AuthorView()
 end
 
 -- The Join screen alone: outside an Olympus guild, or the author's "Not in Olympus" preview.
+-- (1.2.5.1: in an Olympus guild before the Olympus Accord is accepted, the Accord's page alone.)
 function UI.Locked()
 	if not ns.IsMember() then return true end
 	local V = AuthorView()
 	return V ~= nil and V.Is("outsider") == true
+end
+-- Locked by the Olympus Accord alone (Accord.lua): in an Olympus guild, not accepted yet.
+function UI.AccordLocked()
+	return ns.InOlympusGuild() == true and not ns.AccordAccepted()
 end
 
 -- The portrait belongs to the Olympus shell. A registered surface may replace its picture while
@@ -1398,6 +1407,9 @@ local function CreateMain(style)
 	f:SetScript("OnShow", function()
 		UI.Refresh()
 		ns.SafeCall("issue reporter", ClearOfIssueReporter, MainClearOfIssueReporter)
+		-- 1.2.5.1: the Olympus Accord (Accord.lua) first, in an Olympus guild until it is accepted:
+		-- opening the window is a deliberate ask, whatever Not now said at login.
+		ns.SafeCall("olympus accord", ns.Accord.Ask, "window")
 		-- 1.1 (Fern's #11): the first-open page, over the window, while anything is unanswered
 		-- (Consent.lua: once a session, never in combat or an instance). The window works anyway.
 		ns.SafeCall("privacy page", ns.Consent.Ask, "window")
@@ -1988,7 +2000,8 @@ UI.PLACE_HOLD = 1  -- seconds a redraw's place is given again when the client me
 
 -- Which page of its tab the list shows: another one starts at the top.
 local function PageOf(tab, locked)
-	if locked then return "join" end
+	-- (1.2.5.1: in an Olympus guild before the Olympus Accord, its page, UI.AccordLocked.)
+	if locked then return UI.AccordLocked() and "accord" or "join" end
 	if playerProfile then
 		local id = "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm))
 		-- (1.2.4: his own page's sections, "My profile", each a page of its own, each from the top.)
@@ -2336,7 +2349,15 @@ function UI.Refresh()
 				return
 			end
 		local lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt
-		if locked then
+		if locked and not inert and UI.AccordLocked() then
+			-- 1.2.5.1: in an Olympus guild, the Olympus Accord not accepted yet: its page alone.
+			local A = ns.Accord
+			lines = A.LockedLines and A.LockedLines() or {}
+			if A.missing then lines[#lines + 1] = { text = L.RESTART_NEEDED, wrap = true } end
+			title, text = L.ACCORD_LOCKED_TITLE, L.ACCORD_LOCKED_HINT
+			main.total:SetText(L.ACCORD_NAME)
+			main.sub:SetText(L.ACCORD_LOCKED_HINT)
+		elseif locked then
 			-- Not an Olympus member yet: the only thing on offer is joining one.
 			lines = ns.Views.RecruitLines()
 			if inert then lines = views.Inert(lines) end
@@ -2387,7 +2408,7 @@ function UI.Refresh()
 		main.detailText:SetText(text or "")
 		ShowOwnPortrait(not locked and playerProfile and profileArt or nil)
 		local recruit = inert and InertButtons(RECRUIT_BUTTONS) or RECRUIT_BUTTONS
-		SetButtons(main.buttons, locked and recruit or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
+		SetButtons(main.buttons, locked and (not inert and UI.AccordLocked() and ACCORD_BUTTONS or recruit) or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
 			-- Preserve the internal tab contract: its builder runs before a role or surface rule sends
 			-- the window back to Census (some builders create state used by the next interaction).
 		if only[main.tab] == false then return ShowTab("census") end
@@ -3061,6 +3082,9 @@ end)
 -- The court's public line tops the Census and Realm; its restricted queue lives in The Watch.
 ns.On("COURT_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm" or main.tab == "watch") then UI.RefreshSoon() end end)
 ns.On("WATCH_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
+-- 1.2.5.1: a BattleTag kept, dropped or its digits shown or hidden again (Accord.lua): The Watch's
+-- BattleTags page, its count and the person page follow.
+ns.On("ACCORD_TEAM_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
 -- A page of the Realm tab changed (1.1: the loot notes), or the standalone Crafters board changed.
 ns.On("REALM_PAGE_CHANGED", function(key)
 	if not main then return end

@@ -2052,7 +2052,9 @@ function ArenaHome.Challenge(name, prefill)
 end
 
 -- Without PlayerMenu.lua (a 1.1.1 base): Blizzard's hook, our own lines, the same rules as its
--- (never ourselves, an offline name, a Battle.net account, a secret value).
+-- (never ourselves, an offline name, a Battle.net account, a secret value). (1.2.5.1: this build
+-- always has PlayerMenu.lua, so this path is not used here; its Olympus-only rule,
+-- PlayerMenu.KnownOlympus, is the shared list's.)
 ArenaHome.MENUS = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_GUILD_MEMBER", "COMMUNITIES_WOW_MEMBER", "GUILD", "CHAT_ROSTER" }
 local function Secret(...)
 	if type(issecretvalue) ~= "function" then return false end
@@ -2107,7 +2109,8 @@ function ArenaHome.HookMenus()
 	if hooked then return hooked end
 	local P = ns.PlayerMenu
 	if type(P) == "table" and type(P.Add) == "function" then
-		hooked = P.Add("arena", ArenaHome.MenuLines, 60) and "shared" or false
+		-- (1.2.5.1: an Olympus line, for a player this client knows to be in Olympus alone.)
+		hooked = P.Add("arena", ArenaHome.MenuLines, 60, { olympus = true }) and "shared" or false
 		return hooked
 	end
 	-- (A client without PlayerMenu.lua's list: Blizzard's menus with mouse and keyboard alone.)

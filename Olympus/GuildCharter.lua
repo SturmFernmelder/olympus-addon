@@ -190,7 +190,7 @@ function Charter.SetField(field, input, expectedGuild)
 	return true
 end
 function Charter.Ask(name)
-	if ns.IsMember() then return false end
+	if ns.InOlympusGuild() then return false end -- (1.2.5.1: an outsider's ask, Accord or not)
 	name = Key(name)
 	if not name or not RealmOK(name) then return false end
 	local now = ns.Now()
@@ -247,7 +247,7 @@ function Charter.Reported(guild)
 	return n >= 2 and card.purpose ~= "" and card or nil
 end
 function Charter.OnReported(sender, text)
-	if ns.IsMember() then return false end
+	if ns.InOlympusGuild() then return false end
 	local source, now = Key(sender), ns.Now()
 	if not source or not asked[source] or now - asked[source] > Charter.ASK_WAIT then return false end
 	local found

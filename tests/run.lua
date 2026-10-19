@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge", "BridgeSections" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge", "BridgeSections" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -172,7 +172,11 @@ ns.db = { guilds = {}, log = {}, errors = {}, blocked = {}, demo = false, showMa
 	treasurerShares = true, -- (0.9.3: the Treasurer said yes; the question has its own test)
 	-- (1.1, Fern's #11: these are off until the player answers. Here they said yes, as 1.0's
 	-- defaults were, for the tests written before; the first-open page has its own tests.)
-	addonChat = true, chatRooms = true, royalInspection = true, rollCall = true, layerHelp = true }
+	addonChat = true, chatRooms = true, royalInspection = true, rollCall = true, layerHelp = true,
+	-- (1.2.5.1: an account that accepted the Olympus Accord, as every account using Olympus does from
+	-- now on: without it no member's code runs, ns.IsMember. No fp, the tag's hash, and no BNGetInfo
+	-- here, so Accord.Check never asks again; the Accord's own tests, tests/accord.lua, start without it.)
+	accord = { v = 1, yes = true, at = 0 } }
 ns.me = "Tester-Realm"
 ns.realm = "Realm"
 -- (0.9.2: the King and the Treasurer are theirs on their realm group; here that is "Realm".)
@@ -2366,8 +2370,9 @@ local function WithUI(fn)
 	PTR_IssueReporter, UISpecialFrames, tinsert = nil, nil, nil
 	ns.rdb.guilds = {}
 	-- (1.1: the first-open page a window opened here showed is gone with the toolkit, and the
-	-- questions it asked this "session" with it.)
+	-- questions it asked this "session" with it. 1.2.5.1: the Olympus Accord's letter too.)
 	ns.Consent.Reset()
+	ns.Accord.Reset()
 	if not ok then error(err, 0) end
 	eq(captured, nil, "error caught")
 end
@@ -61429,6 +61434,118 @@ end)()
 		end)
 	end)
 
+	-- (1.2.5.1, the owner, right-clicking a portrait: Olympus's own lines, Report to Olympus among them,
+	-- "even for those who are not in Olympus".) A line added with { olympus = true } shows only for a
+	-- player this client knows to be in Olympus (PlayerMenu.KnownOlympus: the unit's guild as the game
+	-- gives it, our roster, our last /who, the guild his own Olympus messages spoke for, the signed
+	-- manifest); the version lines, Tell them about Olympus with them, for anyone (recruiting).
+	test("player menus (1.2.5.1): Olympus's own lines (the profile, Report to Olympus, the Arena's, the Church's) only for a player this client knows to be in Olympus; the version lines for anyone; the window's own rows keep every line", function()
+		WithVersions("Tester-Realm", function(w)
+			local saved = { guild = GetGuildInfo, player = UnitIsPlayer, is = UnitIsUnit, conn = UnitIsConnected, full = UnitFullName,
+				secret = rawget(_G, "issecretvalue"), claimed = ns.Data.ClaimedGuild, seen = ns.Who.SeenGuild, role = ns.Authority.Role }
+			local ok, err = pcall(function()
+				local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
+					GamepadUI = function() return false end }, { __index = ns })
+				assert(loadfile(ADDON_DIR .. "PlayerMenu.lua"))("Olympus", pns)
+				local P = pns.PlayerMenu
+				assert(P.Add("versions", function(target, menu) V.MenuLines(target, menu) end, 10))
+				assert(P.Add("report", function(target, menu) menu.Button("Report line", function() end) end, 30, { olympus = true }))
+				ns.UI.OpenPlayerProfile = function() end
+				local units, claims, seen, signed = {}, {}, {}, {}
+				GetGuildInfo = function(unit)
+					if unit == nil or unit == "player" then return "Olympus II", "Member", 3 end
+					local u = units[unit]
+					if u then return u.guild end
+				end
+				UnitIsPlayer, UnitIsConnected = function() return true end, function() return true end
+				UnitIsUnit = function(a, b) return a == b end
+				UnitFullName = function(unit) local u = units[unit] if u then return u.name, "Realm" end return "Tester", "Realm" end
+				ns.Data.ClaimedGuild = function(name) return claims[ns.FullName(name)] end
+				ns.Who.SeenGuild = function(name) local e = seen[ns.FullName(name)] if e then return e[1], e[2] end end
+				ns.Authority.Role = function(name) return signed[ns.FullName(name)] end
+				local function Texts(which, ctx) local r = MenuRoot(); P.Build(which, r, ctx); return r.Texts() end
+				local function Olympus(t) return t:find("Report line", 1, true) ~= nil and t:find(L.ARENA_MENU_PROFILE, 1, true) ~= nil end
+				local function Versions(t) return t:find(L.VERSION_CHECK, 1, true) ~= nil end
+				-- A unit in a guild outside Olympus (Trade's stranger, his portrait): the version lines alone.
+				units.target = { name = "Far Stranger", guild = "Quiet Hollow" }
+				local t = Texts("PLAYER", { unit = "target" })
+				eq(Olympus(t), false, "no Olympus lines for him: " .. t); assert(t:find("Report line", 1, true) == nil and t:find(L.ARENA_MENU_PROFILE, 1, true) == nil)
+				eq(Versions(t), true, "the version lines stay, for recruiting")
+				-- In an Olympus guild, as the game gives his guild: everything.
+				units.target.guild = "Olympus III"
+				t = Texts("PLAYER", { unit = "target" })
+				eq(Olympus(t), true, t); eq(Versions(t), true)
+				-- No guild: unknown, so no; his guild hidden as a secret value: unknown too.
+				units.target.guild = nil
+				eq(Olympus(Texts("PLAYER", { unit = "target" })), false)
+				units.target.guild = "Olympus III"
+				issecretvalue = function(v) return v == "Olympus III" end
+				eq(Olympus(Texts("PLAYER", { unit = "target" })), false, "a secret guild is unknown")
+				issecretvalue = saved.secret
+				-- A name alone (a line in chat): what this client knows of him.
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "unknown: no")
+				claims["Lone Voice-Realm"] = "Olympus IV"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "his own Olympus messages spoke for an Olympus guild")
+				claims["Lone Voice-Realm"] = "Quiet Hollow"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "or for another one")
+				claims["Lone Voice-Realm"] = nil
+				seen["Lone Voice-Realm"] = { "Olympus IV", 60 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "our /who showed him in one")
+				seen["Lone Voice-Realm"] = { "Olympus IV", 7200 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "an old /who says nothing")
+				seen["Lone Voice-Realm"] = { "", 60 }
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), false, "our /who showed him in none")
+				seen["Lone Voice-Realm"] = nil
+				signed["Lone Voice-Realm"] = "Olympus IV"
+				eq(Olympus(Texts("FRIEND", { name = "Lone Voice" })), true, "the signed manifest names him")
+				signed["Lone Voice-Realm"] = nil
+				ns.Roster.Scan() -- (the harness's roster: Member1 to Member1000)
+				eq(Olympus(Texts("FRIEND", { name = "Member7" })), true, "a guildmate in our roster")
+				-- The Olympus window's own rows list Olympus players: every line there.
+				eq(Olympus(Texts(P.ROW, { name = "Lone Voice" })), true)
+				eq(#w.whispered + #w.sent, 0, "opening a menu sends nothing")
+				eq(P.KnownOlympus("Lone Voice-Realm"), false)
+			end)
+			GetGuildInfo, UnitIsPlayer, UnitIsUnit, UnitIsConnected, UnitFullName = saved.guild, saved.player, saved.is, saved.conn, saved.full
+			issecretvalue, ns.Data.ClaimedGuild, ns.Who.SeenGuild, ns.Authority.Role = saved.secret, saved.claimed, saved.seen, saved.role
+			if not ok then error(err, 0) end
+		end)
+	end)
+
+	-- (1.2.5.1's review) Once the author's signed leadership boundary is enforced, a chat line claims
+	-- no guild (Channels.VerifiedLevel skips Data.ClaimGuild), so an ordinary member of another
+	-- Olympus guild was unknown and his Report to Olympus line was gone. His line itself, heard on
+	-- the Olympus channel, makes him known (Channels.SpokeFor), fed here through the real Receive.
+	test("player menus (1.2.5.1): with the signed boundary enforced, a name heard on the Olympus channel this session gets Olympus's own lines (Report to Olympus), though his line claimed no guild", function()
+		WithVersions("Tester-Realm", function(w)
+			local saved = { enforced = ns.Authority.Enforced, role = ns.Authority.Role, chat = ns.rdb.chat }
+			local ok, err = pcall(function()
+				local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
+					GamepadUI = function() return false end }, { __index = ns })
+				assert(loadfile(ADDON_DIR .. "PlayerMenu.lua"))("Olympus", pns)
+				local P = pns.PlayerMenu
+				assert(P.Add("report", function(target, menu) menu.Button("Report line", function() end) end, 30, { olympus = true }))
+				ns.UI.OpenPlayerProfile = function() end
+				ns.Authority.Enforced = function() return true end
+				ns.Authority.Role = function() return nil end
+				local function Texts(ctx) local r = MenuRoot(); P.Build("FRIEND", r, ctx); return r.Texts() end
+				local who = "Rude Voice-Elsewhere"
+				eq(P.KnownOlympus(who), false, "unknown before his line")
+				assert(not Texts({ name = who }):find("Report line", 1, true))
+				AsRank(3, function()
+					local shown, why = Chan.Receive("CHANNEL", who, Msg("A", "Olympus III", 901, "rude words"), 5000)
+					assert(shown or why == "muted", tostring(why))
+				end)
+				eq(ns.Data.ClaimedGuild(who), nil, "his line claimed no guild (the boundary)")
+				eq(P.KnownOlympus(who), true, "heard on the Olympus channel")
+				assert(Texts({ name = who }):find("Report line", 1, true), "Report to Olympus for him")
+				eq(ns.Channels.SpokeFor(who), "Olympus III")
+			end)
+			ns.Authority.Enforced, ns.Authority.Role, ns.rdb.chat = saved.enforced, saved.role, saved.chat
+			if not ok then error(err, 0) end
+		end)
+	end)
+
 	test("1.1.2 versions: a guildmate's hello names it (by the short name too); up to date, out of date, newer, unreadable; the author's released version is the newest known", function()
 		local cns, Deliver = FreshComm()
 		Deliver("GUILD", "Ann", "H1~" .. ns.VERSION .. "~Realm~p")
@@ -63068,8 +63185,23 @@ end)()
 		assert(at["Wanted.lua"] < at["ArenaMath.lua"], "Wanted is a core board, not part of the Arena-only load tail")
 		local comm = assert(ReadFile(ADDON_DIR .. "Comm.lua"))
 		assert(comm:find("Versions V7 V8 V9 | Workshop VR", 1, true))
+		-- The Olympus Accord (Accord.lua): its words with the other locales, the file after the
+		-- window's (its page) and The Watch's (its section), before the privacy page that follows it;
+		-- its two message types in Comm.lua's list.
+		local locales = { first = math.huge, last = 0 }
+		for line, i in pairs(at) do if line:find("^Locales\\") then locales.first, locales.last = math.min(locales.first, i), math.max(locales.last, i) end end
+		assert(at["Locales\\AccordText.lua"] and at["Locales\\AccordText.lua"] <= locales.last and at["Locales\\AccordText.lua"] < at["Core.lua"], "with the locales")
+		assert(at["UI.lua"] < at["Accord.lua"] and at["Watch.lua"] < at["Accord.lua"] and at["Accord.lua"] < at["Consent.lua"], "Accord.lua's place")
+		assert(comm:find("Accord BT BQ", 1, true), "BT and BQ in Comm.lua's list")
+		-- Olympus's own right-click lines (1.2.5.1): for a player known to be in Olympus alone.
+		for file, line in pairs({ ["Watch.lua"] = 'ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30, { olympus = true })',
+			["ArenaHome.lua"] = 'P.Add("arena", ArenaHome.MenuLines, 60, { olympus = true })',
+			["ChurchView.lua"] = 'ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40, { olympus = true })',
+			["Versions.lua"] = 'ns.PlayerMenu.Add("versions", function(target, menu) Versions.MenuLines(target, menu) end, 10)\n' }) do
+			assert(assert(ReadFile(ADDON_DIR .. file)):find(line, 1, true), file .. ": " .. line)
+		end
 		-- A client updated without a restart: the new files' stand-ins.
-		for _, key in ipairs({ "PlayerMenu", "Versions", "Answers", "Watch" }) do
+		for _, key in ipairs({ "PlayerMenu", "Versions", "Answers", "Watch", "Accord" }) do
 			local core = assert(ReadFile(ADDON_DIR .. "Core.lua"))
 			assert(core:find('StandIn("' .. key .. '"', 1, true), key)
 		end
@@ -63119,7 +63251,7 @@ end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
-		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
+		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
 		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
@@ -63129,6 +63261,8 @@ for _, name in ipairs(focused) do
 		or name == "guild-charter" and { WithGamepadUI = WithGamepadUI, WithUI = WithUI, FreshComm = FreshComm }
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
+		-- (1.2.5.1: the Olympus Accord's, its letter and the window's page.)
+		or name == "accord" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, FreshComm = FreshComm, LoadUI = LoadUI }
 		or name == "campaign" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
@@ -63835,6 +63969,34 @@ end)()
 			eq(#w.after, 1, "only the letter's own wait"); eq(w.after[1].sec, Lt.LOGIN_WAIT)
 			w.run()
 			assert(Lt.Frame() and Lt.Frame():IsShown())
+		end)
+	end)
+
+	-- (1.2.5.1) The Olympus Accord (Accord.lua): before it is accepted nothing of Olympus shows, the
+	-- letter included; once accepted (ACCORD_CHANGED, true) the letter comes HANDOFF after, as after
+	-- the privacy page's close (the page asks first when it has a line to ask: PageFirst).
+	test("1.2.5.1 version letters: never before the Olympus Accord is accepted; HANDOFF after it is", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			local accord = ns.db.accord
+			local ok, err = pcall(function()
+				ns.Consent.Show():Hide() -- (nothing the privacy page still has to ask)
+				ns.db.accord = nil
+				w.login()
+				w.run() -- (its own wait)
+				w.tick()
+				eq(Lt.Frame(), nil, "not before the Accord")
+				for _, f in ipairs(w.on.ACCORD_CHANGED or {}) do f(false) end
+				eq(#w.after, 0, "asked again: nothing")
+				ns.db.accord = { v = ns.ACCORD_VERSION, yes = true, at = 0 }
+				for _, f in ipairs(w.on.ACCORD_CHANGED or {}) do f(true) end
+				local a = w.after[1]
+				assert(a, "the letter is asked once the Accord is accepted"); eq(a.sec, Lt.HANDOFF)
+				w.run()
+				assert(Lt.Frame() and Lt.Frame():IsShown(), "the letter")
+			end)
+			ns.db.accord = accord
+			if not ok then error(err, 0) end
 		end)
 	end)
 

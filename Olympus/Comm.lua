@@ -406,6 +406,8 @@ end
 --   1.2.4, ChurchFullness NF (private coverage recovery between a current nominee and the guild desk).
 --   1.2.6, global census CG (trusted anti-entropy snapshots; counts only, never census authority).
 --   1.2.5, PlayerSightings PS (request-bound queries; private last-seen answers and withdrawals).
+--   1.2.5.1, the Olympus Accord: Accord BT BQ (the first, a player's BattleTag to a moderation team
+--   member who asked, a logged whisper; the second, that member's ask, on the Olympus channel).
 local handlers = {}
 -- 1.1 (Moderation.lua): a client the moderators took off (net-off) sends none of what they hide.
 local function Held(msg)
@@ -571,7 +573,8 @@ end
 -- non-member). A member of an Olympus guild sends neither.
 local OUTSIDE_TYPES = { J1 = true, J3 = true, QC = true }
 function Comm.WhisperOutside(target, msg)
-	if ns.IsMember() or type(target) ~= "string" or target == "" or type(msg) ~= "string" then return false end
+	-- (1.2.5.1: a member who has not accepted the Olympus Accord yet sends none of these either.)
+	if ns.InOlympusGuild() or type(target) ~= "string" or target == "" or type(msg) ~= "string" then return false end
 	if not OUTSIDE_TYPES[msg:sub(1, 2)] or msg:sub(3, 3) ~= "~" or #msg > 255 then return false end
 	return SendNow("WHISPER", msg, false, target)
 end
@@ -1702,10 +1705,11 @@ local function OnAddonMessage(prefix, text, dist, sender, target, zoneChannelID,
 		-- Outside an Olympus guild the addon hears nothing of the army, but for two things (1.1): the
 		-- Join screen's route/card answers, J2 and QD, whispered by a member it asked, and the
 		-- author's signed titles list over its own guild, which may make that guild an Olympus guild
-		-- (Comm.Outsider).
+		-- (Comm.Outsider). (1.2.5.1) In an Olympus guild before the Olympus Accord is accepted
+		-- (Accord.lua) the titles list alone: such a member asked nobody for a route.
 		local outsideType = text:sub(1, 3)
-		if dist == "WHISPER" and (outsideType == "J2~" or outsideType == "QD~") and outsideHandler and not ns.db.blocked[sender:lower()]
-			and Comm.Admit(sender, GetTime()) then
+		if dist == "WHISPER" and (outsideType == "J2~" or outsideType == "QD~") and outsideHandler and not ns.InOlympusGuild()
+			and not ns.db.blocked[sender:lower()] and Comm.Admit(sender, GetTime()) then
 			ns.SafeCall("join route", outsideHandler, sender, text)
 		end
 		if dist == "GUILD" then Comm.Outsider(sender, text) end

@@ -365,3 +365,52 @@ anti-farming, universally portable historical office proof, linked-alt merger co
 moderation-record transport and complete sister-guild negative dues coverage remain separate
 from the implemented original-signature archives, named-heir route, response metrics and
 own-guild private grace. Keep these limits distinct from every unobserved live gate above.
+
+## 5. The Olympus Accord and BattleTag (1.2.5.1) live checks
+
+None of these has been observed yet. Run each on Classic Era 1.15.9, TBC Anniversary 2.5.6 and
+WoW: Forever 1.60.1 where it applies, and record **Pass / Fail / Not run** as in section 4. The
+offline tests stub Battle.net (`BNGetInfo`, `BNConnected`), which proves nothing about a client.
+
+1. Battle.net's answers, on each client: `/dump BNGetInfo()`, `/dump BNConnected()` and
+   `/dump BNFeaturesEnabledAndConnected()`; on Forever also `/dump issecretvalue(select(2, BNGetInfo()))`.
+   Expected: the second value of `BNGetInfo()` is your own `Name#digits`, and connected is true.
+   On the author's PC run `luajit scripts/forever-api.lua <Interface folder> --check`: the fixture's
+   `BNGetInfo`, `BNConnected`, `BNFeaturesEnabledAndConnected` and `BN_*` entries were added by
+   hand for 1.2.5.1 and must match what the script writes.
+2. A fresh account (no saved variables) in an Olympus guild: the Accord's letter appears about 30
+   seconds after login, or when the Olympus window opens. Check the parchment, the Morpheus title,
+   the scroll with the mouse wheel, and that nothing is cut at normal and smaller UI scales. The tag
+   shows as `Name#****`; **Show** reveals it for ten seconds. **I accept** leads to the privacy page
+   and then the version letter; `/oly status` says `accord: v1 accepted`.
+3. **Not now**: Olympus stays dark (no channel, no census, no chats; `/oly status` says not
+   accepted). The window shows the Accord's page; opening the window shows the letter again.
+4. Battle.net disconnected, if it can be reproduced: **I accept** is greyed and the wait text shows;
+   an account that already accepted keeps working.
+5. The gamepad UI: open, scroll, **I accept** and **Not now** with the controller. No Lua error, no
+   game popup, no taint message.
+6. Two clients: log the player in first, then the moderator's (or a High Councillor's) client, or
+   `/reload` it. Its client asks 90 seconds after its login and the player's answer comes up to 4
+   minutes later, so **BattleTags (n)** shows in The Watch within about 5.5 minutes of the
+   moderator's login, and the open page counts up by itself. A player who logs in while the
+   moderator is already online is reached at the moderator's next ask, up to about 35 minutes
+   later. The digits show as `#****` until the page's **Show**, and hide again after ten seconds.
+   Two alts of one account are grouped, and the person page says "Same BattleTag". An ordinary
+   member's client never shows one. The King's client shows no part of a tag, even after the eye
+   button. Answers that arrive after a `/reload` of the moderator (within about 70 minutes of his
+   ask) are still kept.
+7. The moderator logs off within a minute of his ask: the player's chat shows no "No player named"
+   line with mouse and keyboard (with the gamepad UI the line may show: the filter stays off there),
+   and his `/oly status` accord line counts `gone`. `/oly accord forget <player>` on the moderator's
+   client removes that player's characters from the page.
+8. Right-click a player in a guild outside Olympus (Trade, his portrait): only the Olympus version
+   line, **Check version** and, when his addon does not answer, **Tell them about Olympus**. Right-click
+   an Olympus guildmate: the profile, **Report to Olympus** and the Arena's lines too.
+   A member of another Olympus guild who just wrote on `/ol` gets **Report to Olympus** too.
+9. An update with the game running, then `/reload`: the restart message, and Olympus stays off
+   until the game restarts.
+10. Census: with one guildmate who has not accepted, the guild stays in the census from the others.
+11. In an Olympus guild, **Not now**, then `/ol hello` or `/oly profile`: the chat says Olympus stays
+    off until the Accord is accepted (`/oly accord`), not "Olympus members only".
+12. Battle.net disconnected (step 4) in pt-BR too: the red note sits under "Your BattleTag:", never
+    over it, and the band and the words above it make room for its second line.

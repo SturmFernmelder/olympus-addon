@@ -697,7 +697,7 @@ end
 -- sent at once. kind "c" a character (the target's by default), "g" an Olympus guild (the
 -- target's by default). Returns true when given.
 function Moderation.Set(kind, input, off, reason)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	if not Moderation.KINDS[kind] then return false end
 	local name
@@ -1373,7 +1373,7 @@ end
 -- Exiles `input` (an Olympus guild; the target's by default) `delay` seconds from now (one of
 -- EXILE_DELAYS), with a reason: this client's timed word, kept and sent at once. True when given.
 function Moderation.Exile(input, delay, reason)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	local name = GuildName(input, true)
 	if not name then ns.Print(L.NETOFF_GUILD_BAD) return false end
@@ -1398,7 +1398,7 @@ end
 
 -- Cancels the timed word that waits on `input` (its giver, or one from higher up). True when done.
 function Moderation.CancelExile(input)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	local name = GuildName(input, true)
 	if not name then ns.Print(L.NETOFF_GUILD_BAD) return false end

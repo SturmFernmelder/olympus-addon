@@ -486,7 +486,10 @@ function Roster.TryScan()
 	r.pres = ns.Comm.Presence and ns.Comm.Presence() or nil
 	r.cap = ns.Comm.CAPABILITY
 	ns.Data.SetLocal(r)
-	ns.Comm.MaybeBroadcast(r)
+	-- (1.2.5.1) Only a client whose player accepted the Olympus Accord takes part in the election:
+	-- another would elect itself, and its report, refused at the send, would hold its first real
+	-- one back (Comm.Broadcast moves on its time and id). Its guild's census comes from the others.
+	if ns.IsMember() then ns.Comm.MaybeBroadcast(r) end
 end
 
 function Roster.RequestScan(force)

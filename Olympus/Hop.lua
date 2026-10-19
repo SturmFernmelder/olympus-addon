@@ -409,7 +409,7 @@ end
 -- Rechecked when sending a queued ask, choosing a helper and receiving an invite.
 -- These checks do not change the player's group or their sharing preferences.
 local function RequestProblem(allowGroup)
-	if not ns.IsMember() then return L.MEMBERS_ONLY end
+	if not ns.IsMember() then return ns.MembersOnlyText() end
 	local off = ns.Moderation.SelfOff and ns.Moderation.SelfOff()
 	if off then return ns.Moderation.YouText(off) end
 	if IsInInstance and IsInInstance() then return L.HOP_INSTANCE end
@@ -559,7 +559,7 @@ end
 
 -- Ask for an invite to a layer (a zone and its zone UID), named for the messages.
 function Hop.Ask(mapID, zoneUID, label)
-	if not ns.IsMember() then return ns.Print(L.MEMBERS_ONLY) end
+	if not ns.IsMember() then return ns.Print(ns.MembersOnlyText()) end
 	-- 1.1: the moderators took this character off (net-off, Moderation.lua): nobody would answer.
 	local off = ns.Moderation.SelfOff and ns.Moderation.SelfOff()
 	if off then return ns.Print(ns.Moderation.YouText(off)) end

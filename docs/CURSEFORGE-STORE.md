@@ -46,7 +46,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned).
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with the moderation team only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his
@@ -254,9 +254,7 @@ window's **Edit my profile**): **Look** (frame, title, nickname, emblem; one not
 grey), **Icons**, **Who sees what**, **Letters** (the King's), and you as others see you.
 Any soldier can reach the Lord of another Olympus guild in two clicks.
 
-A High Councillor's tooltip (1.1.5) says so too: their mark and own icon after their name, then
-**High Councillor**, their department and their title, for whoever may see the council (the
-same as their card); none on the King's screen while the council's names are hidden.
+*Continued in the README: [Person details](https://github.com/dnl-gentile/olympus-addon#person-details).*
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the

@@ -785,6 +785,15 @@ local function NewClient(opts)
 	E.PlaySound = function() end
 	E.GetMaxPlayerLevel = function() return 60 end
 	E.GetMoney = function() return C.money or 0 end
+	-- 1.2.5.1, the Olympus Accord's BattleTag (Accord.ReadTag): Battle.net connected (BNConnected, as
+	-- Blizzard_FriendsFrame's FriendsFrame_CheckBattlenetStatus asks it) and the player's own tag,
+	-- BNGetInfo's second value (a test tag, nobody's). C.bnet = false: disconnected, no tag. (The
+	-- fixture says Forever's source never calls BNFeaturesEnabledAndConnected: nil here.)
+	E.BNConnected = function() return C.bnet ~= false end
+	E.BNGetInfo = function()
+		if C.bnet == false then return nil end
+		return 1, C.battleTag or "Tester#1234", nil, "", false, false, false
+	end
 
 	-- The input style (fidelity rule 1): values from the documentation.
 	local ENUM = {}
@@ -1955,9 +1964,11 @@ local function TypeSlash(C, line)
 end
 
 -- A player who answered the first-open page (Consent.lua) before: the window opens on its tabs.
+-- (1.2.5.1: and the Olympus Accord accepted, as every account using Olympus has it; a fresh session,
+-- opts.fresh, is asked it first.)
 local function Answered()
 	return { addonChat = true, royalInspection = true, rollCall = true, layerHelp = true, treasurerShares = true,
-		chatWarned = { A = true, C = true, L = true }, shareLocation = true }
+		chatWarned = { A = true, C = true, L = true }, shareLocation = true, accord = { v = 1, yes = true, at = 0 } }
 end
 local function Session(gamepad, opts)
 	opts = opts or {}
@@ -2935,6 +2946,59 @@ test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login
 	C.Switch(false); C.Advance(1); eq(ns.MainKey.Held(), true)
 	Check(C.ledger, "main key and native bindings")
 	GP.Covers("main-key")
+end)
+
+-- 1.2.5.1: the Olympus Accord (Accord.lua) on a fresh account's first session, gamepad UI on from the
+-- login: the Accord asks first, in Olympus's own window (no game popup, nothing of the game's UI
+-- reached); the controller's click on I accept starts Olympus; the privacy page comes after it.
+test("gamepad: a fresh account's first session: the Olympus Accord first, in Olympus's own window; I accept by the controller's click, then the privacy page", function()
+	local C, ns = Session(true, { fresh = true })
+	eq(ns.IsMember(), false, "nothing of Olympus before it is accepted")
+	local f = ns.Accord.Frame()
+	assert(f and f:IsShown(), "the letter, LOGIN_WAIT after login")
+	eq(f.acceptEnabled, true, "the test tag is read")
+	assert(f.tag:GetText():find("#****", 1, true), "its digits masked")
+	local page = ns.Consent.Frame()
+	eq(page ~= nil and page:IsShown(), false, "the privacy page waits for it")
+	InClick(C, function() f.accept:Click() end)
+	eq(ns.IsMember(), true); eq(f:IsShown(), false)
+	eq(ns.db.accord.v, ns.ACCORD_VERSION)
+	C.Advance(5)
+	page = ns.Consent.Frame()
+	assert(page and page:IsShown(), "then the privacy page")
+	Check(C.ledger, "the Olympus Accord with the gamepad UI")
+	NoErrors(C, "the Olympus Accord with the gamepad UI")
+	-- Not now, on another fresh session: Olympus stays off, nothing of the game's reached either.
+	local C2, ns2 = Session(true, { fresh = true })
+	InClick(C2, function() ns2.Accord.Frame().notNow:Click() end)
+	eq(ns2.IsMember(), false); eq(ns2.Accord.Frame():IsShown(), false)
+	C2.Advance(120)
+	eq(ns2.Accord.Frame():IsShown(), false, "not again by itself this session")
+	Check(C2.ledger, "Not now with the gamepad UI")
+	NoErrors(C2, "Not now with the gamepad UI")
+end)
+
+-- 1.2.5.1's review: the server's no-such-player line for the BattleTag's whisper to a team member
+-- who just left (Accord.Quiet): no chat filter with the gamepad UI; registered once with mouse and
+-- keyboard; doing nothing from its first line after a switch back to the gamepad UI.
+test("gamepad: the Olympus Accord's quiet not-found line: no chat filter with the gamepad UI, one with mouse and keyboard, inert after the switch back", function()
+	local A = Session(true)
+	local ns = A.ns
+	local before = A.Mark()
+	ns.Accord.Quiet("Iron Warden-Realm")
+	eq(#A.Since(before), 0, "no chat filter with the gamepad UI")
+	A.Switch(false); A.Advance(1)
+	ns.Accord.Quiet("Iron Warden-Realm"); ns.Accord.Quiet("Iron Warden-Realm")
+	local filters = {}
+	for _, cb in ipairs(A.callbacks) do
+		if cb.kind == "AddMessageEventFilter" and cb.fn == ns.Accord.QuietLine then filters[#filters + 1] = cb end
+	end
+	eq(#filters, 1, "registered once, with mouse and keyboard"); eq(filters[1].key, "CHAT_MSG_SYSTEM")
+	A.Switch(true); A.Advance(1)
+	eq(filters[1].fn(nil, "CHAT_MSG_SYSTEM", "No player named 'Iron Warden' is currently playing."), false, "inert with the gamepad UI")
+	GP.Covers("system-filters")
+	Check(A.ledger, "the Olympus Accord's quiet line")
+	NoErrors(A, "the Olympus Accord's quiet line")
 end)
 
 if MODE == "--discover" then

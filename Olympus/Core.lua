@@ -1590,9 +1590,28 @@ function ns.IsFederation(guild)
 	return known
 end
 
--- The addon only works for members of an Olympus guild.
-function ns.IsMember()
+-- 1.2.5.1: the Olympus Accord (Accord.lua), Olympus's terms of use, accepted once per game account
+-- (ns.db.accord). Until then the addon works for nobody: nothing is sent or heard (Comm.lua) and the
+-- window shows the Accord alone. A field compare only: it is asked on every addon message and every
+-- pump, and never reads Battle.net (Accord.ReadTag does, at login and on Battle.net's events).
+ns.ACCORD_VERSION = 1
+function ns.AccordAccepted()
+	local a = ns.db and ns.db.accord
+	return type(a) == "table" and a.v == ns.ACCORD_VERSION and a.yes == true
+end
+-- In an Olympus guild, Accord or not: where "not a member" meant "an outsider".
+function ns.InOlympusGuild()
 	return IsInGuild() and ns.IsFederation(GetGuildInfo("player"))
+end
+-- The addon only works for members of an Olympus guild who accepted the Olympus Accord.
+function ns.IsMember()
+	return ns.AccordAccepted() and ns.InOlympusGuild()
+end
+-- What a "members only" refusal says: in an Olympus guild before the Olympus Accord, that it waits
+-- for the Accord (and where it is), never that he is no member; elsewhere the usual line.
+function ns.MembersOnlyText()
+	if ns.InOlympusGuild() and not ns.AccordAccepted() then return ns.L.ACCORD_DECLINED end
+	return ns.L.MEMBERS_ONLY
 end
 
 ---------------------------------------------------------------------------
@@ -1768,6 +1787,7 @@ StandIn("Borders", { "SetEnabled", "Report" })
 StandIn("Nameplates", { "SetEnabled", "Report" })
 StandIn("Members", { "Show", "SetWarnDays" }) -- (1.1)
 StandIn("Consent", { "Show" }) -- 1.1: the first-open page (Consent.lua)
+StandIn("Accord", { "Show", "Slash" }) -- 1.2.5.1: the Olympus Accord, the terms of use (Accord.lua)
 StandIn("ViewAs", {}) -- 1.2: the author's local role preview
 StandIn("TabardsV2", {}) -- 1.2: versioned tabard reports and publication lease
 StandIn("Letters", { "Slash", "ShowHistory", "Show" }) -- 1.1.5: the version letters (Letters.lua)
@@ -2003,7 +2023,7 @@ ns.RegisterEvent("PLAYER_LOGIN", function()
 	local missing = {}
 	-- (1.2: the file of a key named otherwise: the Blood Arena's core is ArenaNet.lua.)
 	local FILES = { Arena = "ArenaNet.lua" }
-	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes" }) do
+	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes" }) do
 		if ns[key].missing then missing[#missing + 1] = FILES[key] or (key .. ".lua") end
 	end
 	if ns.Gate.missing then missing[#missing + 1] = "Gamepad.lua" end -- (1.1.5, the gamepad gate)
@@ -2093,6 +2113,7 @@ local function Help()
 	print(L.HELP_SIGHTINGS) -- (1.2)
 	print(L.HELP_WANTED) -- (1.2.3)
 	print(L.HELP_ROLLCALL)
+	print(L.HELP_ACCORD) -- (1.2.5.1)
 	print(L.HELP_PRIVACY_PAGE)
 	print(L.HELP_PROFILE)
 	print(L.HELP_CHAT)
@@ -2347,15 +2368,19 @@ local function Slash(input)
 		elseif cmd == "log" then
 			-- 1.1 (Fern's #12): the acts this client saw (Chronicle.lua): [n], a word, copy, clear.
 			ns.Chronicle.Slash(rest)
+		elseif cmd == "accord" or cmd == "acordo" then
+			-- 1.2.5.1: the Olympus Accord, Olympus's terms of use (Accord.lua), accepted or not.
+			ns.Accord.Slash(rest)
 		elseif cmd == "privacy" or cmd == "privacidade" then
 			-- 1.1 (Fern's #11): the page of what this addon shares, each answer to change (Consent.lua).
-			ns.Consent.Show()
+			-- (1.2.5.1: the Olympus Accord comes first; the page follows once it is accepted.)
+			if ns.InOlympusGuild() and not ns.AccordAccepted() then ns.Accord.Show("privacy") else ns.Consent.Show() end
 		elseif cmd == "profile" or cmd == "perfil" then
 			-- 1.2: a player's profile in the Olympus window (PlayerProfile.OpenName), your own with no name.
 			local P = ns.PlayerProfile
 			local ok, why
 			if P and not P.missing and P.OpenName then ok, why = P.OpenName(rest ~= "" and rest or ns.me) end
-			if not ok then ns.Print(why == "member" and L.MEMBERS_ONLY or L.PLAYER_PROFILE_USAGE) end
+			if not ok then ns.Print(why == "member" and ns.MembersOnlyText() or L.PLAYER_PROFILE_USAGE) end
 		elseif cmd == "letters" or cmd == "letter" or cmd == "cartas" then
 			-- 1.1.5: the version letters (Letters.lua): every one, or one version's.
 			ns.Letters.Slash(rest)

@@ -463,7 +463,7 @@ end
 
 -- An ask: an item link (or "item:<id>") or words (3 to 40 bytes). On a click or /oly craft.
 function Crafters.Ask(what)
-	if not ns.IsMember() then return ns.Print(L.MEMBERS_ONLY) end
+	if not ns.IsMember() then return ns.Print(ns.MembersOnlyText()) end
 	what = tostring(what or "")
 	local id = tonumber(what:match("|Hitem:(%d+)") or what:match("^%s*item:(%d+)"))
 	local words = not id and Clean(what, 40) or nil
