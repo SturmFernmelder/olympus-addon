@@ -627,3 +627,35 @@ test("chat rooms (1.2.4): a whisper refused at once, the room's only one, gives 
 		eq(R.Own("church"), true, "the Church's room is this file's")
 	end)
 end)
+
+-- CH-04 (the author, 2026-10-19: "Quando você responde uma mensagem, ela aparece menorzinha em
+-- cima"): a reply in a role room, through ChatRooms' own send and arrival (Comm the only stand-in).
+-- 1.2.5's newline between the quote and the answer was dropped by Codec.SanitizeChat on both ends,
+-- and its prefix could take the room's 150 bytes: the answer was cut. ChatWindow makes the line, as
+-- the Chat tab's Enter does, loaded on its own (its listeners go nowhere).
+test("chat rooms (CH-04): a reply crosses a role room's whispers with its quote and its whole answer apart", function()
+	WithRooms(function(w, R, c)
+		local cw = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+		assert(loadfile(ROOT .. "Olympus/ChatWindow.lua"))("Olympus", cw)
+		local CW = cw.ChatWindow
+		local me = c.me:lower()
+		w.council[me], w.council["alpha-realm"] = true, true
+		c.rdb.council.names = { [me] = "Member", alpha = "Alpha" }
+		local asked = "do we vote tonight on the new dues table, or wait for the guild masters to answer first?"
+		local answer = "tonight, at nine: the guild masters had their week to answer and most of them did already"
+		local line = assert(CW.EncodeReply({ sender = "Alpha-Realm", text = asked }, answer, CW.ReplyLimit(nil, true)))
+		assert(#line <= R.TEXT_MAX, #line .. " bytes")
+		assert(R.Send("council", line))
+		local job = assert(w.jobs[1], "a whisper")
+		eq(job.dist, "WHISPER")
+		-- At the other end: another councillor's client hears it.
+		eq(R.Receive("WHISPER", "Alpha-Realm", job.msg, w.mono + 1), true)
+		local heard
+		for _, e in ipairs(R.History("council")) do if not e.mine then heard = e end end
+		assert(heard, "the line kept")
+		local quote, body = CW.DecodeReply(heard.text)
+		assert(quote, heard.text)
+		eq(quote.who, "Alpha-Realm"); eq(body, answer, "the answer whole")
+		assert(quote.text:sub(-3) == "..." and asked:find(quote.text:sub(1, -4), 1, true) == 1, quote.text)
+	end)
+end)

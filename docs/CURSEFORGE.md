@@ -569,9 +569,17 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   none), and a click there shows them all (another hides them again). A link shows its tooltip
   when you hover it, and a Shift-click puts it in the tab's box.
 - Right-click any saved line and choose **Reply**. The box shows a compact reference to its writer
-  and words; the sent bubble draws that reference above your answer. Older addon versions still
-  see a readable text prefix. Replying changes no identity, delivery, permissions or moderation
-  authority, and the **x** beside the reference cancels it without sending.
+  and words, and the **x** beside it cancels it without sending. Your answer's bubble, on your
+  screen and everyone else's, shows the quoted line over the answer: smaller, on a darker inset,
+  with its writer's name (**You** for a line of yours). A client draws the quote only when it holds
+  the quoted line itself, by that writer and with those words; without it (you came online later,
+  or the line is no longer among those kept) the answer shows as it was written, with its
+  `[reply @Name-Realm: ...]` prefix, which is also what older addon versions show. So typing that
+  prefix by hand puts no quote in anyone's mouth. A quoted line a moderator deleted shows as
+  deleted in the quote too. The quote gives up words to keep your answer whole (a room keeps 150
+  bytes of a line, a fight room 180); an answer too long to go with any quote stays in the box,
+  and the chat says why. Replying changes no identity, delivery, permissions or moderation
+  authority.
 - **The box** runs across the bottom, where the other tabs have their buttons, with no Send
   button: Enter sends. It is Olympus's own, not the game's chat box: it takes the keyboard only
   when you click into it or press your open-chat key (Enter, unless you changed it) while the tab
