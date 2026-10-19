@@ -44,7 +44,7 @@ while true; do
 		sha=$(git rev-parse FETCH_HEAD)
 		if [ "$sha" != "$last" ]; then
 			rm -rf "$WORK/tree" && mkdir -p "$WORK/tree"
-			# (1.2: the Blood Arena's companion folder too, on a branch that has it.)
+			# (1.2: the Olympus Arena module folder too, on a branch that has it.)
 			paths="Olympus scripts"
 			git cat-file -e "$sha:Olympus_Arena" 2>/dev/null && paths="Olympus Olympus_Arena scripts"
 			git archive "$sha" $paths | tar -xf - -C "$WORK/tree"
