@@ -1071,7 +1071,28 @@ right-clicks it; on a case's page in The Watch the same choices are lines of the
   his word). The punished player sees his
   own record, without the actor's name or identifying role, in the Chat tab's settings (the gear).
   A short reason is optional. Lines
-  a client did not show are counted per sender and why for 7 days, never their words.
+  a client did not show are counted per sender and why for 7 days, never their words, except your
+  own chat warnings: your client keeps the lines it refused for 30 days, and sends them only to the
+  moderation team from the third warning.
+- **Chat warnings.** A word of Olympus's built-in list in what you type is refused by your own
+  client before anything leaves, in every Olympus chat (the three channels, a pin, the rooms and
+  the fight rooms; never The Watch's own room, where its staff quote what was said), and that is a
+  warning. They are counted over a rolling 24 hours, by the server's clock: the **first** pauses
+  your Olympus chats for 5 minutes and the **second** for 30, each with a pop-up saying why, and
+  nothing of either leaves your client. From the **third**, your chats are blocked until the
+  moderation team (the author while online, the King, the High Council and the Olympus moderators)
+  decides, and your client sends them, by logged whisper, the lines it refused (up to five: three of
+  the last 24 hours and two earlier, 140 bytes each around the word), the words, when and in which
+  chat. A moderator lets you chat again, or gives you a timeout, which replaces the block. A decision
+  never restarts the count: another warning that day goes straight back to them. A block nobody
+  decides ends after 30 days. It is the chats only: no power, game, map or wallet, and other
+  players' clients never hide you for it. The King and the author have the line refused and nothing
+  more. Moderators see the cases on The Watch's Chat moderation page (`/oly watch strikes`). Its
+  limits: a player on an older client gets no warning, nor does a line typed in the game's own guild
+  box; a modified client, or saved variables deleted, escapes it; the warnings count for the
+  account's characters on one realm group and faction; the list matches whole words, so a new
+  spelling slips through and the moderators' own tools still cover it. Until the author adds the
+  approved words to the list, nothing is refused.
 - **Limits, plainly.** Clients before 1.1.6 still show a deleted line and a timed-out player's
   lines. The game's own chat windows keep what they already showed under the gamepad UI, with
   Chattynator (its API cannot change a line), with a chat addon that rewrites lines, and for lines
@@ -2358,6 +2379,8 @@ message (the game adds it). What goes where:
 | A claim on a request, and the two parties' words after it (1.2): your guild, the terms (the price, the rail, how it is paid), the start, the delivery (quantity, price and how), the confirmation, a cancel, a dispute | the other party alone (logged whispers) | when you claim, propose or confirm terms, start, deliver, confirm, cancel or dispute |
 | A request's private chat (1.2): your lines | the other party alone (logged whispers) | when you write in it |
 | A line in a role room (1.2.4): your words, your guild | one logged whisper to each member of that room your addon verifies (40 at most; the Church's rooms 30, heard online), and the author's character in every room but the High Council's and the Secretariat's while his presence is heard | when you write one, with the rooms' consent on |
+| Your chat-warning report: the lines Olympus refused to send (up to 5, 140 bytes each around the word), the matched words, when, which chat, your guild | The moderation team online: the author while online, the King, the High Council, the Olympus moderators. By logged whisper | From your third warning in 24 hours, again until each one's client confirms (3 tries each). Kept 30 days on their clients and on yours. |
+| A chat-warning decision: your character's name and that your block was lifted or a timeout given | Your client and the team online, by logged whisper (a timeout as today's moderator timeout) | When a moderator decides, and when your blocked client asks. |
 | The guild-mediated rail and a dispute's review (1.2): the parties, the item, quantity and price, what reached the custodian, a dispute's reason and its verdict | the custodian (the treasury keeper who holds the goods and the gold), the reviewer the parties put the dispute to, and the parties (logged whispers) | while that deal or its dispute is open |
 | Your word of a direct sale to the guild's fee desk (1.2): the request, the buyer's and the seller's names, the price, the item and quantity, the seller's guild | the Treasurer's characters alone (logged whispers), from the buyer's addon and the seller's | when the buyer confirms the sale, when it completes, or 3 days after a sale the buyer never confirmed; again each 30 minutes while the seller's fee is open; only while a Treasurer's character's addon is heard online |
 | The fee desk's answer (1.2): the fee, what was paid, its deadline, and whether it is due, paid or waived | that party alone (a whisper from the Treasurer's character) | once for each word of a sale |
@@ -2671,6 +2694,7 @@ few characters working together can still reach is said plainly further down
   time more than a minute ahead of the server's clock refused, and each player can ignore it.
   Its words are 4 letters at least and it never hides the King's writs (1.1, Konig's review:
   one editor adding "the" or "de" could hide nearly every decree and writ for everyone).
+  Blocked words for chat warnings are a separate built-in list.
 
 ### What colluding characters can reach
 
@@ -2880,6 +2904,7 @@ Other limits:
 | `/oly watch` · `/oly watch warn\|add\|ban <name>: <reason>` · `/oly watch clear <name>` | authorized officers of this guild: open its private moderation desk, record a warning or Watch/Ban status, or clear the status; every action is audited, but none kicks, demotes, ignores or automatically rejects anyone (1.2) |
 | `/oly watch judgments` | the King, each High Councillor and the author: The Watch's Judgments, the cases sent to the King, the council's 24-hour vote and his final word (1.2) |
 | `/oly watch chat` | Watchers, the High Council, the King and the author: The Watch's Chat moderation page (1.1.6) |
+| `/oly watch strikes` · `/oly watch release <name>` | the chat warnings' team (the author, the King, the High Council, the Olympus moderators): the open cases in a pop-up to copy, or let that player chat again |
 | `/oly watch timeout <name> 5m\|30m\|1h\|24h\|7d\|hold\|lift [: reason]` · `/oly watch purge <name> [: reason]` | a moderator: a timeout in Olympus's chats, its lift, or delete his recent lines (also from a line in the Chat tab) (1.1.6) |
 | `/oly watch watchers add\|remove <name>` · `/oly watch justice <name>\|none` | the guild master: name or remove a Watcher (10 at most), or the guild's Justice correspondent (1.1.6) |
 | `/oly watch mods add\|remove <name>` | the author, the King or a High Councillor: name or remove one of his Olympus moderators (10 at most) (1.1.6) |
