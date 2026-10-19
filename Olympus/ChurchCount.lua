@@ -130,7 +130,8 @@ Count.PUBLIC_EVERY, Count.PUBLIC_FRESH, Count.TOP_EVERY = 1800, 7200, 1800
 Count.ASK_GAP, Count.ANSWERS_PER, Count.ANSWER_WINDOW = 60, 12, 300
 Count.CATCHUP_EVERY, Count.CATCHUP_LINES = 1800, 150
 -- (1.2.1) Just logged in, a keeper answers no audience ask while other keepers are online, until its
--- first catch-up ends (this long at most): its ledger missed what came while it was away.
+-- first catch-up ends (this long at most, from the end of its wait to hear them, Count.Settled): its
+-- ledger missed what came while it was away. Nor does the desk send the public rows (Count.SendPublic).
 Count.SETTLE_MAX = 900
 Count.SEND_ROOM = 20
 
@@ -196,13 +197,22 @@ local function Out() return Sub("out", function() return {} end) end
 local function Claims() return Sub("claims", function() return {} end) end
 local function Fills() return Sub("fill", function() return {} end) end
 local function View() return Sub("view", function() return {} end) end
+-- A keeper's ledger is led; any other client's copy of the keepers' word is copy. (One account's
+-- characters of a realm group share ns.rdb: a council character's copy, which takes a council relay's
+-- lines too, was its Apostle alt's ledger, and went from there to every keeper. A keeper reads no line
+-- taken while not one.) Its credits are worked out again when the one read changes (a role taken or
+-- lost this session).
+local LEDGERS = { led = true, copy = true }
+local ledWhich
 local function Led()
+	local which = Church.IsKeeper(ns.me) and "led" or "copy"
+	if which ~= ledWhich then ledWhich, ledRev, credits = which, ledRev + 1, nil end
 	-- (wv 2: its archive keeps each record's join, 1.2.1's Archive: a new ledger's from the start.)
-	local l = Sub("led", function() return { v = 1, wv = 2, r = {}, p = {}, from = {} } end)
+	local l = Sub(which, function() return { v = 1, wv = 2, r = {}, p = {}, from = {} } end)
 	if l and (l.v ~= 1 or type(l.r) ~= "table" or type(l.p) ~= "table" or type(l.from) ~= "table") then
 		local c = Church.Store()
-		c.led = { v = 1, wv = 2, r = {}, p = {}, from = {} }
-		l = c.led
+		c[which] = { v = 1, wv = 2, r = {}, p = {}, from = {} }
+		l = c[which]
 	end
 	return l
 end
@@ -1757,10 +1767,12 @@ end
 -- The records and the person lines changed after `since`, in one order (their time, then their
 -- id), CATCHUP_LINES a round. A round ends only between two different times: the next round asks
 -- for what is newer than the last one sent, so nothing of the same second is left behind (if
--- more than a round share one second, they all go in this one).
+-- more than a round share one second, they all go in this one). A keeper answers keepers only (as
+-- in 1.2.5.1, Count.TakeLine).
 function Count.AnswerCatchUp(sender, since)
 	if not Church.IsLedgerRelay(ns.me) or not Church.IsLedgerRelay(sender) then return Drop("relay") end
 	if Church.IsKing(ns.me) or Church.IsKing(sender) then return Drop("king") end
+	if Church.IsKeeper(ns.me) and not Church.IsKeeper(sender) then return Drop("keeper") end
 	local l = Led()
 	local list = {}
 	for id, r in pairs(l.r) do if (r.u or 0) > since then list[#list + 1] = { id = id, r = r, u = r.u or 0 } end end
@@ -1841,19 +1853,21 @@ local function RecheckRecord(id, rec)
 end
 
 -- (As in 1.2.5.1: the King's client neither asks for a catch-up nor answers one, and holds no copy.
--- On a keeper, every line but an ask only from a keeper: a council relay holds copies of the keepers'
--- word and is no source of it. Taken from one, any council or King client could add records and
--- raise the counts every keeper shows.)
+-- On a keeper, every line only from a keeper: a council relay holds copies of the keepers' word and
+-- is no source of it. Taken from one, any council or King client could add records and raise the
+-- counts every keeper shows. Its asks for a catch-up too: a council client asks only council relays,
+-- while no keeper is online (Count.CatchUp); answered here, every ask cost the keeper a round of up to
+-- CATCHUP_LINES whispers.)
 function Count.TakeLine(sender, text)
 	local kind = tostring(text or ""):match("^NL~1~(%a)~")
 	if not Church.IsLedgerRelay(ns.me) or not Church.IsLedgerRelay(sender) then return Drop("relay") end
 	if Church.IsKing(ns.me) or Church.IsKing(sender) then return Drop("king") end
+	if Church.IsKeeper(ns.me) and not Church.IsKeeper(sender) then return Drop("keeper") end
 	if kind == "q" then
 		local since = UnB36(text:match("^NL~1~q~([0-9a-z]+)$"))
 		if not since then return Drop("shape") end
 		return Count.AnswerCatchUp(sender, since)
 	end
-	if Church.IsKeeper(ns.me) and not Church.IsKeeper(sender) then return Drop("keeper") end
 	if kind == "r" then
 		local id, rec = ParseRecord(text)
 		if not id then return Drop("shape") end
@@ -1953,11 +1967,17 @@ local function RowText(list, window, row)
 		row.joins, row.stays, row.net, row.pub and "1" or "0")
 end
 
--- Caught up since this session began (Count.SETTLE_MAX), or no other keeper online to be behind of.
+-- Caught up since this session began, or no other keeper online to be behind of; either only once
+-- every keeper online has been heard (Count.SettledSinceLogin: just logged in, it has heard none, and
+-- its ledger may be behind every one of them), and SETTLE_MAX after that at most. (The first catch-up
+-- waits for the same, so SETTLE_MAX counted from the login left it 240 of its 900 seconds: a desk with
+-- a long catch-up answered pages from a ledger still behind.)
 function Count.Settled()
 	if catch.settled then return true end
 	local online = Church.OnlineFor and Church.OnlineFor()
-	if online == nil or online >= Count.SETTLE_MAX then return true end
+	if online == nil then return true end
+	if not Count.SettledSinceLogin() then return false end
+	if online >= Church.KEEPER_EVERY * Church.FRESH_FACTOR + Count.SETTLE_MAX then return true end
 	return #Church.KeepersOnline(false) == 0
 end
 
@@ -2169,10 +2189,12 @@ Count.SettledSinceLogin = SettledSinceLogin
 
 -- The desk while the author's switch is open: the opted-in rows of the two rankings (last 30 days
 -- and all time), PUBLIC_EVERY apart and as soon as it opens; each list ends with its count of rows
--- (NR n), so a client drops the rows of people who no longer show theirs, an empty list too.
+-- (NR n), so a client drops the rows of people who no longer show theirs, an empty list too. Just
+-- logged in, only once its first catch-up ended (Count.Settled, as for the pages): the rows it sent
+-- from the ledger it had before were every client's for PUBLIC_EVERY.
 function Count.SendPublic(now)
 	local open, at = Church.Public()
-	if not open or not Church.IsDesk() or Church.IsKing(ns.me) or Off() or not SettledSinceLogin() then return false end
+	if not open or not Church.IsDesk() or Church.IsKing(ns.me) or Off() or not SettledSinceLogin() or not Count.Settled() then return false end
 	local t = ns.Now()
 	if lastPublicAt == at and t - lastPublic < Count.PUBLIC_EVERY then return false end
 	-- (Its rows go together: only with room for all of them past what the chat and the census keep.)
@@ -2435,26 +2457,28 @@ end
 function Count.CheckSaved()
 	local c = Church.Store()
 	if not c then return end
-	local l = c.led
-	if l ~= nil then
-		local ok = type(l) == "table" and l.v == 1 and type(l.r) == "table" and type(l.p) == "table" and type(l.from) == "table"
-		if ok then
-			-- (1.2.1: a record that fails goes alone. One record of a guild this build no longer counts as
-			-- Olympus took the whole ledger with it, and the catch-up then refilled it from another keeper's,
-			-- maybe smaller, one.)
-			local bad = {}
-			for id, r in pairs(l.r) do
-				local okLine, line = pcall(Count.RecordLine, id, r)
-				local pid, rec = ParseRecord(okLine and line or "")
-				if pid ~= id or not rec then bad[#bad + 1] = id end
+	for which in pairs(LEDGERS) do
+		local l = c[which]
+		if l ~= nil then
+			local ok = type(l) == "table" and l.v == 1 and type(l.r) == "table" and type(l.p) == "table" and type(l.from) == "table"
+			if ok then
+				-- (1.2.1: a record that fails goes alone. One record of a guild this build no longer counts as
+				-- Olympus took the whole ledger with it, and the catch-up then refilled it from another keeper's,
+				-- maybe smaller, one.)
+				local bad = {}
+				for id, r in pairs(l.r) do
+					local okLine, line = pcall(Count.RecordLine, id, r)
+					local pid, rec = ParseRecord(okLine and line or "")
+					if pid ~= id or not rec then bad[#bad + 1] = id end
+				end
+				for _, id in ipairs(bad) do l.r[id] = nil end
+				if #bad > 0 then ns.Log("church ledger (%s): %d saved records dropped at load", which, #bad) end
+				WindowsFromGone(l, Clock())
+				if l.caught ~= nil and type(l.caught) ~= "table" then l.caught = nil end
+				if l.asked ~= nil and type(l.asked) ~= "table" then l.asked = nil end
 			end
-			for _, id in ipairs(bad) do l.r[id] = nil end
-			if #bad > 0 then ns.Log("church ledger: %d saved records dropped at load", #bad) end
-			WindowsFromGone(l, Clock())
-			if l.caught ~= nil and type(l.caught) ~= "table" then l.caught = nil end
-			if l.asked ~= nil and type(l.asked) ~= "table" then l.asked = nil end
+			if not ok then c[which] = nil end
 		end
-		if not ok then c.led = nil end
 	end
 	for _, key in ipairs({ "mem", "ev", "inv", "att", "claims", "fill", "view", "me" }) do
 		if c[key] ~= nil and type(c[key]) ~= "table" then c[key] = nil end
