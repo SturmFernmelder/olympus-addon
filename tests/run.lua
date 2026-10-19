@@ -57057,7 +57057,9 @@ test("watch: chat moderation: the Chat tab: a deleted line keeps its greyed name
 			"CHATWIN_WHY_ALONE", "CHATWIN_WHY_FAST", "CHATWIN_WHY_BUSY", "CHATWIN_WHY_QUEUE", "CHATWIN_WHY_CANCELLED",
 			"CHATWIN_WHY_REVOKED", "CHATWIN_WHY_ACCESS", "CHATWIN_WHY_OFF", "CHATWIN_WHY_NETOFF", "CHATWIN_WHY_TIMEOUT",
 			"CHATWIN_WHY_SEVERE", "CHATWIN_WHY_LOCKDOWN", "CHATWIN_WHY_GUILD", "CHATWIN_WHY_EMPTY", "CHATWIN_WHY_SIZE",
-			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING", "CHATWIN_PART_SENT" }) do
+			"CHATWIN_WHY_PREVIEW", "CHATWIN_WHY_GAMEPAD", "CHATWIN_SENDING", "CHATWIN_PART_SENT",
+			-- (A chat warning's pause, ChatStrikes.lua.)
+			"CHATWIN_WHY_PAUSED" }) do
 			assert(type(rawget(ns.L, k)) == "string" and rawget(ns.L, k) ~= "", "English: " .. k)
 			assert(type(rawget(pt.L, k)) == "string" and rawget(pt.L, k) ~= rawget(ns.L, k), "pt-BR: " .. k)
 			eq(Codes(rawget(pt.L, k)), Codes(rawget(ns.L, k)), "codes: " .. k)
@@ -62350,8 +62352,8 @@ test("hop sighting mixed versions: a client without LY ignores the new word", fu
 	if not ok then error(err, 0) end
 end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
-local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
-		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
+local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
+		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
 		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
 for _, name in ipairs(focused) do
@@ -62364,6 +62366,7 @@ for _, name in ipairs(focused) do
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "campaign" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
+		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }

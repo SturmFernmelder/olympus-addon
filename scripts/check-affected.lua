@@ -9,7 +9,8 @@ local groups = {
 		"bones-venue.lua", "compliance.lua", "farkle-board.lua",
 		"farkle-ledger.lua", "farkle-notices-cap.lua", "farkle-table.lua", "games-ledger.lua", "house-move-regression.lua",
 		"match.lua", "net.lua", "places.lua", "player-ui-polish.lua", "rehearsal-consent.lua", "ui-look-wave1.lua" },
-	watch = { "compliance.lua", "craft-requests.lua", "markets.lua", "net.lua", "role-chat-audiences.lua",
+	-- (bones-chat.lua: real WatchChat and ChatStrikes in the fight rooms.)
+	watch = { "bones-chat.lua", "compliance.lua", "craft-requests.lua", "markets.lua", "net.lua", "role-chat-audiences.lua",
 		"tabards-v2.lua", "ui-look-wave1.lua", "wallet-release.lua" },
 }
 local files = {
@@ -17,6 +18,7 @@ local files = {
 	["Olympus_Arena/FarkleBoard.lua"] = "bones", ["Olympus_Arena/Games/Farkle.lua"] = "bones",
 	["Olympus_Arena/Locales/FarkleText.lua"] = "bones",
 	["Olympus/Watch.lua"] = "watch", ["Olympus/WatchChat.lua"] = "watch", ["Olympus/ViewAs.lua"] = "watch",
+	["Olympus/ChatStrikes.lua"] = "watch", ["tests/chat-strikes.lua"] = "watch",
 	["tests/innkeeper-arrow.lua"] = "bones", ["tests/watch-council-view.lua"] = "watch",
 }
 -- Test-only changes may use their whole mapped dependency group. Shared fixtures/harness fall back.

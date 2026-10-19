@@ -414,3 +414,36 @@ test("Bones chat history: Games picker indexes actual live Bones and retained re
 	eq(cw.DynamicRoom("arena:" .. rooms.everyone).spec.kind, "bones")
 	eq(w:As(s, s.ns.ArenaChat.Open, "Kpractice:all"), nil, "no fabricated or innkeeper peer chat")
 end)
+
+-- The chat warnings (ChatStrikes.lua): a fight room's line (the Bones pane's, /ola, an arena action:
+-- all ArenaChat.Send) with a word of the list is refused before it leaves, a warning given; the
+-- pause after it closes his rooms (ArenaChat.MaySend: the Bones pane's composer, BonesChat's
+-- Writable) until it ends. A synthetic word, by its real digest.
+test("watch: chat moderation: strikes: a fight room's line with a listed word is refused before it leaves, and the pause after it closes his rooms until it ends", function()
+	local w, a, b, _, _, rooms = Live()
+	Watch(w, a, rooms)
+	local shown = {}
+	w:As(a, function()
+		-- (This world has no game popups: the pop-ups' calls are kept, ns.ShowDialog's own routing has its tests.)
+		a.ns.ShowDialog = function(which, text) shown[#shown + 1] = { which = which, text = text } return true end
+		assert(loadfile(H.ADDON_DIR .. "ChatStrikes.lua"))("Olympus", a.ns)
+		local S = a.ns.ChatStrikes
+		local form = assert(S.Canon("plainword"))
+		S.LIST[S.Digest(form)] = #form
+		S.Index()
+	end)
+	local ok, why = w:As(a, a.ns.ArenaChat.Send, rooms.players, "a plainword here")
+	eq(ok, false); eq(why, "severe")
+	Drain(w, a)
+	eq(Count(w, "EC"), 0, "nothing left his client")
+	eq(#w:As(b, b.ns.ArenaChat.Lines, rooms.players), 0)
+	eq(#w:As(a, a.ns.ArenaChat.Lines, rooms.players), 0, "nor kept as said")
+	local e = a.ns.ChatStrikes.Store().mine[1]
+	eq(e.where, "F"); eq(e.n, 1); eq(e.text, "a plainword here")
+	eq(shown[1].which, "OLYMPUS_WATCHCHAT_DECISION"); eq(shown[1].text, a.ns.L.WATCHCHAT_STRIKE_1:format(a.ns.WatchChat.Span(300)))
+	eq(select(2, w:As(a, a.ns.ArenaChat.MaySend, rooms.players)), "paused", "the pane's composer closes")
+	eq(select(2, w:As(a, a.ns.ArenaChat.Send, rooms.everyone, "clean words")), "paused")
+	w.clock = e.untilAt + 1
+	eq(w:As(a, a.ns.ArenaChat.MaySend, rooms.players), true, "open again after the pause")
+	eq(w:As(a, a.ns.ArenaChat.Send, rooms.players, "clean words"), true)
+end)

@@ -396,6 +396,8 @@ end
 --   1.1.6, chat moderation: WatchChat MD (lines deleted, recent lines deleted, timeouts and their
 --   lifts, a guild master's Watchers, the Olympus moderators, a target's own word, appeals and their
 --   answers, a case's decision told to its player; logged, over GUILD or the channel).
+--   The chat warnings: ChatStrikes MS (from a third warning, the player's own report of the lines his
+--   client refused to the moderation team, and its decisions; logged whispers only).
 --   1.1.6, the War Room's squads: WarSquads WU (a guild's squad assignments, over GUILD) SC (a squad's chat, logged whispers).
 --   1.2.4, voluntary Campaign VG (the King's public aggregate and keepers' private reports).
 --   1.2.4, JusticeTasks JT (original signatures; private recovery by actual King, Council and verified author).

@@ -759,3 +759,54 @@ test("Chat tab (1.2.4): a provider's room refusing a line gets no note from the 
 		end)
 	end)
 end)
+
+-- The chat warnings (ChatStrikes.lua; the author, 2026-10-19: "apaga e esconde a mensagem que a
+-- pessoa mandou"): a line refused for a warning ("severe") leaves the Chat tab's box with its reply
+-- and lets the keyboard go (the pop-up's OK takes the next Enter); a line refused while paused keeps
+-- both, as every other refusal. The same in an embedded pane (the Bones pane), whose composer, while
+-- paused, says why instead of doing nothing.
+test("watch: chat moderation: strikes: the Chat tab and an embedded pane: a struck line leaves the box with its reply and lets the keyboard go; a paused one keeps both; a paused pane says why", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = rawget(ns, "WatchChat")
+		local result, told = { false, "severe" }, 0
+		C.Send = function() return result[1], result[2] end
+		rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+			CanModerateAny = function() return false end, CanModerateEntry = function() return false end,
+			RefuseSend = function() told = told + 1 return {}, "paused" end })
+		local ok, err = pcall(function()
+			local f = w.CW.Open("A")
+			local function Try(box, owner, why)
+				result = { false, why }
+				owner.reply = { who = "Other", sender = "Other-Realm", text = "their line" }
+				w.CW.UpdateReplyComposer(owner)
+				box:SetText("typed words"); box.focused = true
+				box:Fire("OnEnterPressed")
+			end
+			Try(f.input, f, "severe")
+			eq(f.input:GetText(), "", "the struck line leaves the box"); eq(f.reply, nil, "its reply too")
+			eq(f.input.focused, false, "the keyboard goes")
+			Try(f.input, f, "paused")
+			eq(f.input:GetText(), "typed words", "a paused line stays"); assert(f.reply, "with its reply")
+			eq(f.input.focused, true, "and the cursor (mouse and keyboard)")
+			WithGamepadUI(true, function()
+				Try(f.input, f, "severe")
+				eq(f.input:GetText(), ""); eq(f.input.focused, false, "the gamepad UI: the box lets go")
+			end)
+			-- An embedded pane (the Bones pane's).
+			local writable, sent = true, {}
+			local p = w.CW.CreateEmbedded(f, { room = function() return "r1" end, lines = function() return {} end,
+				maySend = function() return writable end, label = function() return "Bones" end,
+				send = function(text) sent[#sent + 1] = text return result[1], result[2] end })
+			Try(p.input, p, "severe")
+			eq(#sent, 1); eq(p.input:GetText(), ""); eq(p.reply, nil); eq(p.input.focused, false)
+			Try(p.input, p, "paused")
+			eq(p.input:GetText(), "typed words"); assert(p.reply)
+			writable = false
+			Try(p.input, p, "paused")
+			eq(#sent, 2, "nothing sent while it may not"); eq(told, 1, "told why")
+		end)
+		rawset(ns, "WatchChat", saved)
+		if not ok then error(err, 0) end
+	end)
+end)

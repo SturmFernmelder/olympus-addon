@@ -964,17 +964,26 @@ function Channels.Send(tier, text, now, keepMute)
 		ns.Print(ns.Moderation.YouText(off))
 		return false, "netoff"
 	end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua): refused, and told who (the role), until when, why.
+	-- 1.1.6: a moderator's timeout (WatchChat.lua): refused, and told who (the role), until when, why;
+	-- and a chat warning's pause or hold ("paused", ChatStrikes.lua), before any word is read.
 	local WC = ns.WatchChat
-	if WC and WC.RefuseSend and WC.RefuseSend() then return false, "timeout" end
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
+	-- The chat warnings (the author, 2026-10-19): a word of their list in what he typed is never
+	-- sent (refused here, before the privacy warning and in a lockdown too). Read on the raw line:
+	-- SanitizeChat drops the separator of a reply's quote. A quote alone holding one goes without it.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, tier)
+		if severe then return false, severe end
+		text = body or text
+	end
 	text = Codec.SanitizeChat(text)
 	if text == "" then
 		ns.Print(L.CHAN_USAGE:format(t.slash, Label(tier)))
 		return false, "empty"
 	end
-	-- 1.1.6: a severe insult (WatchChat.SEVERE: empty until the author approves the list) is never
-	-- sent; it is counted on this client, never kept.
-	if WC and WC.RefuseSevere and WC.RefuseSevere(text) then return false, "severe" end
 	if Locked() then
 		ns.Print(L.CHAN_LOCKDOWN)
 		return false, "lockdown"
@@ -1622,6 +1631,18 @@ function Channels.SetPin(text, now)
 		ns.Print(ns.Moderation.YouText(off))
 		return false, "netoff"
 	end
+	-- A chat warning's pause or hold, and the warnings' words, as for a line (Channels.Send): a
+	-- warning leaves his powers alone (MyPin's sanction), not his words.
+	local WC = ns.WatchChat
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, "P")
+		if severe then return false, severe end
+		text = body or text
+	end
 	text = Channels.CleanPin(text)
 	if #text < 3 then
 		ns.Print(L.PIN_USAGE)
@@ -2150,8 +2171,14 @@ function Channels.CanWrite(tier, tell)
 		else
 			local WC = ns.WatchChat
 			local timeout = WC and WC.SelfTimeout and WC.SelfTimeout()
-			if not timeout then return true end
-			if tell and WC.TellTimeout then WC.TellTimeout(timeout) end
+			if timeout then
+				if tell and WC.TellTimeout then WC.TellTimeout(timeout) end
+				return false
+			end
+			-- (A chat warning's pause or hold, ChatStrikes.lua: told as Channels.Send tells it.)
+			local block = WC and WC.ChatBlock and WC.ChatBlock()
+			if not block then return true end
+			if tell and WC.RefuseSend then WC.RefuseSend() end
 			return false
 		end
 	end

@@ -131,6 +131,7 @@ ProfileEffects.lua
 Nameplates.lua
 ChatWindow.lua
 WatchChat.lua
+ChatStrikes.lua
 OfficerMuster.lua
 Bridge.lua
 Wanted.lua
