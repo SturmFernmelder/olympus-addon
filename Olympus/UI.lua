@@ -1051,6 +1051,18 @@ end
 -- (RinglessHelpPlateButtonTemplate).
 UI.HELP_ICON = "Interface\\Common\\help-i"
 
+-- CR-02 / KH-08: the header's people count, dimmer gold than the characters before it and lit
+-- while the mouse is on the count (a click opens the census's own page, UI.OpenCensusStats).
+UI.PEOPLE_COLOR, UI.PEOPLE_LIT, UI.PEOPLE_GAP = { 0.72, 0.6, 0.34 }, { 1, 0.82, 0 }, 6
+UI.PEOPLE_CODE = ("|cff%02x%02x%02x"):format(math.floor(UI.PEOPLE_COLOR[1] * 255 + 0.5), math.floor(UI.PEOPLE_COLOR[2] * 255 + 0.5),
+	math.floor(UI.PEOPLE_COLOR[3] * 255 + 0.5)) -- (the same colour inside a line of text: the minimap button's)
+-- CensusStats.lua loaded (a client updated without a restart has not got it yet).
+local function CensusStatsReady()
+	local CS = ns.CensusStats
+	return type(CS) == "table" and not CS.missing and type(CS.Open) == "function" and type(CS.Build) == "function"
+end
+local function CensusStatsShown() return CensusStatsReady() and ns.CensusStats.Shown() == true end
+
 -- The help button in the title bar, just left of the close button, where Blizzard puts a
 -- window's minimize button (0.9.9, asked for by Max of Asmongold's moderators). A plain button:
 -- a click opens the copy box (UI.ShowHelp), which already keeps to the gamepad UI's rules.
@@ -1239,21 +1251,37 @@ local function CreateMain(style)
 	f.total:SetPoint("TOPLEFT", hx, -28)
 	f.sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.sub:SetPoint("TOPLEFT", f.total, "BOTTOMLEFT", 0, -1)
-	for _, fs in ipairs({ f.total, f.sub }) do
+	-- CR-02 (the author's ask): the people, each player once (Data.Summary's total), next to the
+	-- characters, smaller and darker; set and placed by UI.Refresh and FitHeader.
+	f.people = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.people:SetPoint("BOTTOMLEFT", f.total, "BOTTOMLEFT", 0, 1)
+	f.people:SetTextColor(unpack(UI.PEOPLE_COLOR))
+	f.people:Hide()
+	for _, fs in ipairs({ f.total, f.sub, f.people }) do
 		fs:SetJustifyH("LEFT")
 		fs:SetWordWrap(false)
 	end
 	-- The count explains itself on hover: how the census is gathered, why two players can see
-	-- different totals for a while. The window still drags from there.
+	-- different totals for a while. The window still drags from there; a click (no drag) opens the
+	-- census's own page in the Census tab (KH-08, UI.OpenCensusStats), the people lit meanwhile.
 	local hover = CreateFrame("Frame", nil, f)
 	hover:SetPoint("TOPLEFT", f.total, "TOPLEFT", 0, 2)
 	hover:SetPoint("BOTTOMLEFT", f.sub, "BOTTOMLEFT", 0, -2)
 	hover:SetWidth(200)
 	hover:EnableMouse(true)
 	hover:RegisterForDrag("LeftButton")
-	hover:SetScript("OnDragStart", function() f:StartMoving() end)
+	hover:SetScript("OnMouseDown", function(self) self.dragged = false end)
+	hover:SetScript("OnDragStart", function(self)
+		self.dragged = true
+		f:StartMoving()
+	end)
 	hover:SetScript("OnDragStop", function() f:GetScript("OnDragStop")(f) end)
+	hover:SetScript("OnMouseUp", function(self, button)
+		if button ~= "LeftButton" or self.dragged then return end
+		ns.SafeCall("census page", UI.OpenCensusStats)
+	end)
 	hover:SetScript("OnEnter", function(self)
+		f.people:SetTextColor(unpack(UI.PEOPLE_LIT))
 		GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
 		GameTooltip:AddLine(L.HEADER_TIP_TITLE, 1, 0.82, 0)
 		GameTooltip:AddLine(L.HEADER_TIP, 1, 1, 1, true)
@@ -1266,9 +1294,14 @@ local function CreateMain(style)
 		GameTooltip:AddLine(L.HEADER_TIP_DIFFER, 0.8, 0.8, 0.8, true)
 		-- 1.1.2: why the list's columns don't add up to these totals (the answer bank's).
 		if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(GameTooltip, "count-columns-dont-add-up") end
+		-- (KH-08: and what a click opens.)
+		if CensusStatsReady() then GameTooltip:AddLine(L.HEADER_TIP_OPEN, 0.25, 1, 0.25, true) end
 		GameTooltip:Show()
 	end)
-	hover:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	hover:SetScript("OnLeave", function()
+		f.people:SetTextColor(unpack(UI.PEOPLE_COLOR))
+		GameTooltip:Hide()
+	end)
 	f.headerHover = hover
 
 	-- Column titles
@@ -1638,11 +1671,26 @@ function UI.LayoutTabs()
 	end
 end
 
+-- (CR-02) The people show with the characters (main.peopleText, UI.Refresh's): never on the Join
+-- screen, a person page, the Chat tab or a contributed surface, whose header is theirs.
+local function PeopleShown(locked)
+	if main.peopleText == nil or playerProfile or locked or APISurfaceByTab(main.tab) then return false end
+	return not (main.tab == "chat" and ChatPaneReady())
+end
+
 -- The small line drops to the tiny font (9 pt, also white) before it is cut: the census
 -- line with a long realm name is just over the width of Forever's window.
 local function FitHeader()
 	local room = main:GetWidth() - main.headerX
-	FitText(main.total, room - HEADER_RIGHT, { "GameFontNormalLarge", "GameFontNormal" })
+	-- (CR-02: the people right after the characters, in the room the characters leave them.)
+	local people = main.people and main.people:IsShown() and main.people or nil
+	local function Wide(fs) return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth() end
+	local peopleW = people and math.ceil(Wide(people)) + UI.PEOPLE_GAP or 0
+	FitText(main.total, room - HEADER_RIGHT - peopleW, { "GameFontNormalLarge", "GameFontNormal" })
+	if people then
+		people:ClearAllPoints()
+		people:SetPoint("BOTTOMLEFT", main.total, "BOTTOMLEFT", math.min(math.ceil(Wide(main.total)), main.total:GetWidth()) + UI.PEOPLE_GAP, 1)
+	end
 	FitText(main.sub, room - SUB_RIGHT, { "GameFontHighlightSmall", "GameFontWhiteTiny" })
 	if main.headerHover then main.headerHover:SetWidth(math.max(40, room - HEADER_RIGHT)) end
 end
@@ -1713,10 +1761,15 @@ function UI.Layout()
 	local g = GEOMETRY[main.style]
 	LayoutButtons()
 	LayoutDetailButtons()
-	FitHeader()
 	main.layoutLocked = UI.Locked()
+	-- (CR-02: the people shown or not before the header is fitted.)
+	if main.people then main.people:SetShown(PeopleShown(main.layoutLocked)) end
+	FitHeader()
 	local surface = APISurfaceByTab(main.tab)
+	-- (KH-08: the census's own page has no column titles.)
+	main.statsLaid = main.tab == "census" and CensusStatsShown()
 	local hasCols = not surface and not playerProfile and not main.layoutLocked and ns.Views.COLUMNS[main.tab] ~= nil and main.tab == "census"
+		and not main.statsLaid
 	main.colHeader:SetShown(hasCols)
 	-- The Chat tab: the header's counts, the list and the detail box give their place to its parts.
 	local chat = not surface and not playerProfile and not main.layoutLocked and main.tab == "chat" and ChatPaneReady()
@@ -1887,6 +1940,8 @@ local function ShowTab(key, focus)
 		ns.SafeCall("leave tab " .. previous.key, previous.onLeave)
 	end
 	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
+	-- (KH-08: a tab opened shows its own list, the Census's too: CensusStats.lua's page closes.)
+	if CensusStatsReady() then ns.CensusStats.Close() end
 	main.tab = key
 	for k, v in pairs(main.views) do v:SetShown(not surface and k == key) end
 	for k, v in pairs(main.apiSurfaceViews or {}) do v:SetShown(surface ~= nil and k == key) end
@@ -1966,6 +2021,22 @@ function UI.SelectTab(key, focus)
 	return ok, reason
 end
 
+-- KH-08 (the author's ask): a click on the header's count opens the census's own page
+-- (CensusStats.lua) in the Census tab, from any tab; never on the Join screen or a person page.
+function UI.OpenCensusStats()
+	if not CensusStatsReady() then
+		ns.Print(L.RESTART_NEEDED)
+		return false
+	end
+	if not main or UI.Locked() or playerProfile then return false end
+	if main.tab ~= "census" and not UI.SelectTab("census") then return false end
+	ns.CensusStats.Open()
+	main.scroll:SetVerticalScroll(0)
+	UI.Layout()
+	UI.Refresh()
+	return true
+end
+
 -- Whose census this is: our realm, or the realms sharing it ("A + B").
 function UI.CensusName()
 	local group = ns.group or ns.realm
@@ -2009,6 +2080,7 @@ local function PageOf(tab, locked)
 		sub = ns.King and ns.King.ThroneShown and not ns.King.ThroneShown() and "guild" or ns.King and ns.King.mode
 	elseif tab == "treasury" then sub = ns.Treasury and ns.Treasury.mode
 	elseif tab == "wanted" then sub = ns.Wanted and ns.Wanted.PageId and ns.Wanted.PageId()
+	elseif tab == "census" then sub = CensusStatsShown() and "stats" or nil -- (KH-08, CensusStats.lua)
 	elseif tab == "watch" then sub = ns.Watch and ns.Watch.PageId and ns.Watch.PageId() end -- (1.1.6: desk, reports, cases, case)
 	return tab .. "/" .. tostring(sub or "")
 end
@@ -2242,7 +2314,10 @@ function UI.Refresh()
 	ns.SafeCall("ui refresh", function()
 		local s = ns.Data.Summary()
 		local F = ns.FormatNumber
-		main.total:SetText(L.ARMY_TOTAL:format(F(s.total)))
+		-- CR-02 (the author's ask): the characters, and next to them, smaller and darker, the
+		-- people (each player once: Data.Summary's total, linked alts counted once).
+		main.total:SetText(L.ARMY_TOTAL:format(F(s.characters or s.total)))
+		main.peopleText = L.ARMY_PEOPLE:format(F(s.total))
 		main.sub:SetText(L.ARMY_SUB:format(F(s.online), #s.guilds, ns.Ago(s.newest)) .. "  ·  " .. UI.CensusName())
 		-- Right after login (1.1): the census is being rebuilt, and the header says so.
 		local heard = ns.Data.Rebuilding and ns.Data.Rebuilding()
@@ -2254,8 +2329,9 @@ function UI.Refresh()
 		local previewing = views ~= nil and views.Previewing() == true
 		local inert = locked and ns.IsMember() -- (locked by the preview alone)
 		if locked and playerProfile then LeaveProfile() end
-		-- Joined or left a guild while the window is open: lay it out again.
-		if locked ~= main.layoutLocked then UI.Layout() end
+		-- Joined or left a guild while the window is open: lay it out again (KH-08: and the census's
+		-- own page opened or closed: its column titles).
+		if locked ~= main.layoutLocked or (main.tab == "census" and CensusStatsShown()) ~= main.statsLaid then UI.Layout() end
 			-- Role-only native pages keep their existing rules. A contributed surface decides only
 			-- whether its own page is available; it never participates in Olympus's role-preview model.
 			local only = {
@@ -2344,24 +2420,31 @@ function UI.Refresh()
 			local header, sub = ns.Recruit.Roast()
 			main.total:SetText(header)
 			main.sub:SetText(sub)
+			main.peopleText = nil
 		elseif playerProfile and ns.PlayerProfile and ns.PlayerProfile.Build then
 			-- (1.2.4: his own page, "My profile", gives its portrait's art too: ShowOwnPortrait.)
 			lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt = ns.PlayerProfile.Build(playerProfile)
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
+			main.peopleText = nil
 		else
 			lines, title, text = ns.Views.Build(main.tab, s) -- (1.2.3: the header's summary, not a second one)
 			-- The treasury next to the soldiers, on the Treasury tab (Treasury.HeaderText; 1.1.5, the
 			-- author's call: no longer on the Throne, the treasury has its own tab).
 			if main.tab == "treasury" then
 				local gold = ns.Treasury and ns.Treasury.HeaderText and ns.Treasury.HeaderText()
-				if type(gold) == "string" then main.total:SetText(L.ARMY_TOTAL:format(F(s.total)) .. "   " .. gold) end
+				if type(gold) == "string" then
+					main.total:SetText(L.ARMY_TOTAL:format(F(s.characters or s.total)) .. "   " .. gold)
+					main.peopleText = nil -- (the gold after the characters; the people on every other tab)
+				end
 			end
 		end
 		-- 1.2: the author's View as says in the header that what shows is a role's preview.
 		SetParchment(not locked and not playerProfile and (main.tab == "throne"
 			or main.tab == "realm" and ns.Views.PageParchment and ns.Views.PageParchment() == true))
 		if previewing then main.sub:SetText("|cffff9933" .. L.VIEW_AS_PREVIEWING:format(views.Label()) .. "|r") end
+		main.people:SetText(main.peopleText or "")
+		main.people:SetShown(PeopleShown(locked))
 		FitHeader()
 		if main.viewAs then
 			main.viewAs:SetShown(views ~= nil)
@@ -3367,7 +3450,8 @@ local function CreateMinimapButton() -- gp:minimap
 		local s = ns.Data.Summary()
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:AddLine(L.TITLE, 1, 0.82, 0)
-		GameTooltip:AddLine(L.ARMY_TOTAL:format(ns.FormatNumber(s.total)), 1, 1, 1)
+		-- (CR-02: the characters, then the people, as the window's header has them.)
+		GameTooltip:AddLine(L.ARMY_TOTAL:format(ns.FormatNumber(s.characters or s.total)) .. "  " .. UI.PEOPLE_CODE .. L.ARMY_PEOPLE:format(ns.FormatNumber(s.total)) .. "|r", 1, 1, 1)
 		GameTooltip:AddLine(L.ARMY_SUB:format(ns.FormatNumber(s.online), #s.guilds, ns.Ago(s.newest)), 0.8, 0.8, 0.8)
 		local heard = ns.Data.Rebuilding and ns.Data.Rebuilding()
 		if heard then GameTooltip:AddLine(L.REBUILDING_SUB:format(heard), 1, 0.82, 0) end

@@ -787,6 +787,162 @@ function Views.DrawMeter(r, meter, width, left)
 	r.meterFill:SetWidth(math.max(0.01, size * ratio)); r.meterFill:SetShown(ratio > 0)
 end
 
+-- CR-02 / KH-08 (the Census's own page, CensusStats.lua): a row that is a small chart of one
+-- series (line.graph), drawn with plain textures only. graph = { n, values = { [i] = number or nil },
+-- min, max (its scale), color = { r, g, b }, top, bottom (the scale's ends, written on its left),
+-- left, right (under its first slot and its last), tips = { [i] = function(tt) }, tip = function(tt) }.
+-- One slot per value across the row: a step line at its value with a faint fill under it, the last
+-- slot (now) brighter, a slot with no value a dot on the baseline; each slot answers the mouse with
+-- its own tooltip, the scale on its left with graph.tip (the whole series). The row itself takes no
+-- mouse (its highlight would light the whole chart). The numbers stay in the text's own white and
+-- grey, the series' colour on its marks alone; the grid lines are recessive.
+Views.GRAPH_H, Views.GRAPH_GUTTER, Views.GRAPH_AXIS_H = 64, 46, 12
+local function Paint(t, r, g, b, a)
+	if t.SetColorTexture then t:SetColorTexture(1, 1, 1, 1) else t:SetTexture("Interface\\Buttons\\WHITE8X8") end
+	t:SetVertexColor(r, g, b, a)
+end
+local function GraphLabel(holder, justify)
+	local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	fs:SetJustifyH(justify)
+	fs:SetWordWrap(false)
+	fs:SetTextColor(0.62, 0.62, 0.62)
+	return fs
+end
+-- A part of the chart that shows its own tooltip (b.tip), lit faintly under the mouse (`lit`).
+local function TipButton(holder, lit)
+	local b = CreateFrame("Button", nil, holder)
+	if lit then
+		local hl = b:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		Paint(hl, 1, 1, 1, 0.08)
+	end
+	b:SetScript("OnEnter", function(self)
+		local tip = self.tip
+		if type(tip) ~= "function" then return end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		ns.SafeCall("graph tooltip", tip, GameTooltip)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	return b
+end
+local function GraphSlot(holder, k)
+	local s = {}
+	s.fill, s.cap, s.rise = holder:CreateTexture(nil, "BORDER"), holder:CreateTexture(nil, "ARTWORK"), holder:CreateTexture(nil, "ARTWORK")
+	s.hit = TipButton(holder, true)
+	holder.slots[k] = s
+	return s
+end
+-- Its row's height: the plot, the labels under it and 4 px above.
+function Views.GraphHeight(graph) return (tonumber(graph and graph.height) or Views.GRAPH_H) + Views.GRAPH_AXIS_H + 4 end
+function Views.DrawGraph(r, graph, width)
+	local holder = r.graph
+	if type(graph) ~= "table" then
+		if holder then holder:Hide() end
+		return nil
+	end
+	if not holder then
+		holder = CreateFrame("Frame", nil, r)
+		holder:SetAllPoints(r)
+		holder.grid = {}
+		for k = 1, 3 do holder.grid[k] = holder:CreateTexture(nil, "BACKGROUND") end
+		holder.top, holder.bottom = GraphLabel(holder, "RIGHT"), GraphLabel(holder, "RIGHT")
+		holder.left, holder.right = GraphLabel(holder, "LEFT"), GraphLabel(holder, "RIGHT")
+		holder.slots = {}
+		holder.scale = TipButton(holder, false)
+		r.graph = holder
+	end
+	holder:SetFrameLevel((r:GetFrameLevel() or 1) + 1)
+	local plotH, axis, gutter = tonumber(graph.height) or Views.GRAPH_H, Views.GRAPH_AXIS_H, Views.GRAPH_GUTTER
+	local x0 = gutter
+	local plotW = math.max(10, width - x0 - RIGHT_INSET - 2)
+	local base = axis -- the baseline's height from the row's bottom
+	-- The grid: the scale's top, its middle and the baseline, faint.
+	for k, at in ipairs({ plotH, plotH / 2, 0 }) do
+		local t = holder.grid[k]
+		Paint(t, 1, 1, 1, k == 3 and 0.22 or 0.07)
+		t:ClearAllPoints()
+		t:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", x0, base + at)
+		t:SetSize(plotW, 1)
+		t:Show()
+	end
+	holder.top:ClearAllPoints(); holder.top:SetPoint("RIGHT", holder, "BOTTOMLEFT", x0 - 4, base + plotH - 3)
+	holder.bottom:ClearAllPoints(); holder.bottom:SetPoint("RIGHT", holder, "BOTTOMLEFT", x0 - 4, base + 4)
+	holder.top:SetWidth(x0 - 4); holder.bottom:SetWidth(x0 - 4)
+	holder.left:ClearAllPoints(); holder.left:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", x0, 0)
+	holder.right:ClearAllPoints(); holder.right:SetPoint("BOTTOMRIGHT", holder, "BOTTOMLEFT", x0 + plotW, 0)
+	holder.top:SetText(graph.top or ""); holder.bottom:SetText(graph.bottom or "")
+	holder.left:SetText(graph.left or ""); holder.right:SetText(graph.right or "")
+	holder.scale:ClearAllPoints()
+	holder.scale:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, base)
+	holder.scale:SetSize(x0 - 2, plotH)
+	holder.scale.tip = type(graph.tip) == "function" and graph.tip or nil
+	holder.scale:EnableMouse(holder.scale.tip ~= nil)
+	local n = math.max(1, math.floor(tonumber(graph.n) or #(graph.values or {})))
+	local lo, hi = tonumber(graph.min) or 0, tonumber(graph.max) or 1
+	if hi <= lo then hi = lo + 1 end
+	local color = type(graph.color) == "table" and graph.color or { 1, 0.82, 0 }
+	local cr, cg, cb = tonumber(color[1]) or 1, tonumber(color[2]) or 1, tonumber(color[3]) or 1
+	local slotW = plotW / n
+	local function Y(v)
+		local y = (v - lo) / (hi - lo) * plotH
+		return math.max(0, math.min(plotH, y))
+	end
+	local before
+	for k = 1, n do
+		local s = holder.slots[k] or GraphSlot(holder, k)
+		local v = graph.values and tonumber(graph.values[k]) or nil
+		if v ~= v then v = nil end
+		local x = x0 + (k - 1) * slotW
+		local w = math.max(1, math.floor(x + slotW + 0.5) - math.floor(x + 0.5))
+		local left = math.floor(x + 0.5)
+		local latest = k == n
+		for _, t in ipairs({ s.fill, s.cap, s.rise }) do t:ClearAllPoints() end
+		if v then
+			local y = Y(v)
+			Paint(s.fill, cr, cg, cb, latest and 0.32 or 0.16)
+			s.fill:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base)
+			s.fill:SetSize(w, math.max(1, y))
+			s.fill:Show()
+			Paint(s.cap, latest and math.min(1, cr + 0.2) or cr, latest and math.min(1, cg + 0.2) or cg, latest and math.min(1, cb + 0.2) or cb, latest and 1 or 0.85)
+			s.cap:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base + math.max(0, y - 1))
+			s.cap:SetSize(w, 2)
+			s.cap:Show()
+			-- The step from the slot before, where both have a value.
+			if before then
+				local y0 = Y(before)
+				local low, high = math.min(y0, y), math.max(y0, y)
+				Paint(s.rise, cr, cg, cb, 0.85)
+				s.rise:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left - 1, base + math.max(0, low - 1))
+				s.rise:SetSize(2, math.max(2, high - low + 2))
+				s.rise:SetShown(high - low >= 1)
+			else
+				s.rise:Hide()
+			end
+		else
+			-- No value: a dot on the baseline, so the slot still shows where it is.
+			Paint(s.cap, 0.62, 0.62, 0.62, 0.6)
+			s.cap:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left + math.floor((w - 2) / 2), base)
+			s.cap:SetSize(2, 2)
+			s.cap:Show()
+			s.fill:Hide(); s.rise:Hide()
+		end
+		before = v
+		s.hit:ClearAllPoints()
+		s.hit:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base)
+		s.hit:SetSize(w, plotH)
+		s.hit.tip = type(graph.tips) == "table" and graph.tips[k] or nil
+		s.hit:EnableMouse(s.hit.tip ~= nil)
+		s.hit:Show()
+	end
+	for k = n + 1, #holder.slots do
+		local s = holder.slots[k]
+		s.fill:Hide(); s.cap:Hide(); s.rise:Hide(); s.hit:Hide()
+	end
+	holder:Show()
+	return Views.GraphHeight(graph)
+end
+
 function Views.Render(content, lines, layout)
 	local width = content:GetWidth()
 	local hd = content.style == "hd"
@@ -837,6 +993,11 @@ function Views.Render(content, lines, layout)
 			r.right:Hide()
 			for c = 1, #r.cols do r.cols[c]:Hide() end
 			height = Views.DrawNav(r, line.nav, width)
+		elseif line.graph then
+			r.left:Hide()
+			r.right:Hide()
+			for c = 1, #r.cols do r.cols[c]:Hide() end
+			height = Views.DrawGraph(r, line.graph, width) or height
 		elseif line.cols then
 			r.left:Hide()
 			r.right:Hide()
@@ -868,10 +1029,11 @@ function Views.Render(content, lines, layout)
 			end
 			if line.meter then height = height + 8 end
 		end
-		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and line.meter or nil, width, 4 + (line.indent or 0) * 12)
+		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and not line.graph and line.meter or nil, width, 4 + (line.indent or 0) * 12)
 		if not line.items then for k = 1, #(r.items or {}) do r.items[k]:Hide() end end
 		if not line.nav then for k = 1, #(r.nav or {}) do r.nav[k]:Hide() end end
 		if not line.filters then for k = 1, #(r.filters or {}) do r.filters[k]:Hide() end end
+		if not line.graph and r.graph then r.graph:Hide() end
 		r:SetHeight(height)
 		r:EnableMouse(line.onClick ~= nil or line.tooltip ~= nil)
 		if hd then
@@ -905,6 +1067,8 @@ function Views.LinesHeight(lines, hd, width)
 			return nil
 		elseif line.nav then
 			height = ROW_H_NAV
+		elseif line.graph then
+			height = Views.GraphHeight(line.graph)
 		elseif line.input and not line.cols and not input then
 			input, height = true, ROW_H_INPUT
 		else
@@ -3112,6 +3276,9 @@ end
 -- added) is an empty list.
 local BUILD = {
 	census = function(s)
+		-- (CR-02 / KH-08: the census's own page, opened from the header's count, CensusStats.lua.)
+		local stats = ns.CensusStats
+		if type(stats) == "table" and not stats.missing and type(stats.Shown) == "function" and stats.Shown() then return stats.Build(s) end
 		local title, text = CensusDetail(s)
 		return Searched(CensusLines(s, Views.Query("census")), "census", "CENSUS"), title, text
 	end,

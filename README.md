@@ -139,7 +139,19 @@ channels; the same charter and Join controls work for each side.
   slots, soldiers in a zone, a map pin, the Royal Inspection, the dues table after its members),
   the same count goes to the higher average level first, then the name, and the average level
   shows after the count (in the dues table, in each guild's hover).
-- **Total soldiers** and **online now** across the whole realm.
+- **Total soldiers** and **online now** across the whole realm. Next to the soldiers (every
+  character on the guilds' rosters), smaller and darker, the **people**: each player once, the
+  characters their players linked as alts counted once (see Alt links, below).
+- **The census in numbers**: a click on the header's count (from any tab) opens a page of its own
+  in the Census tab: characters, people, linked alts, online now, the guilds counted (and how many
+  report right now), the army's average level (each guild's, weighted by its size), the five
+  largest guilds against the game's 1,000 cap and the levels online. Two small graphs show how the
+  counts moved: the characters over the last 30 days (each day's highest) and who was online over
+  the last 24 hours (each hour's most); hover a day or an hour for its numbers. Your own addon
+  writes the census down every 15 minutes while you play, about 3 minutes after login once the
+  census is rebuilt, and keeps 30 days of it in your saved variables (the last two days sample by
+  sample). Nothing is sent: another player's client keeps its own history, so the curves can
+  differ. **< The Census**, or any tab, goes back to the list.
 - **Where the army stands**: top zones ("Stormwind City 742") and totals per continent
   (Eastern Kingdoms, Kalimdor), counted by the guilds whose census comes from a member who
   shares their zone (see Privacy, below).
@@ -1096,8 +1108,9 @@ alts and the census counts people:
   characters can be linked, each confirming on itself: an officer can't attach anyone's alt,
   and a character added later is linked only once it confirms too. An alt never starts a link
   (its main does), and it gains nothing of its main's (a Hand's alt is no Hand).
-- The army's total then counts each player once, whatever guilds their characters are in (each
-  guild's own size stays its roster's; the header's tooltip says how many were counted once).
+- The army's people count then counts each player once, whatever guilds their characters are in (each
+  guild's own size stays its roster's; the header shows the people next to the soldiers, and its
+  tooltip says how many were counted once).
   The treasury's ranking and its week's donors put a player's characters on one line, under the
   main's name, and a dues payment made from an alt counts for its main (1.1.5, see the dues
   below). Vox Populi takes one vote per player.

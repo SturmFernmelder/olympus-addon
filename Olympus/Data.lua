@@ -1137,7 +1137,8 @@ function Data.DiscordText()
 	local s = Data.Summary()
 	local F, D = ns.FormatNumber, ns.Codec.Discord
 	local out = {}
-	out[#out + 1] = L.DISCORD_HEADER:format(F(s.total), F(s.online), #s.guilds)
+	-- (CR-02: the characters, as the window's header has them, then the people.)
+	out[#out + 1] = L.DISCORD_HEADER:format(F(s.characters or s.total), F(s.online), #s.guilds) .. " · " .. L.ARMY_PEOPLE:format(F(s.total))
 	local where = {}
 	for i = 1, math.min(8, #s.zoneList) do
 		local z = s.zoneList[i]
