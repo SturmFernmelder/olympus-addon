@@ -114,7 +114,9 @@ starts, not on a `/reload`. Always check for it.
 `/oly privacy` opens). The line shows your TOC's `## Title` (colour and texture codes removed) and
 says, in Olympus's own words, what a Yes lets your addon read and, where the signed role permits,
 which exact-name request, visible name-rotation session, five-minute hostile-area search or bounded
-host-owned profile presentation it may start, and the quiet presence it may turn on. The page opens by itself once for a new line, outside combat and instances,
+host-owned profile presentation it may start, and the quiet presence it may turn on (an addon
+the Olympus team has not authorized for the reserved features below is asked only about the
+ordinary reads). The page opens by itself once for a new line, outside combat and instances,
 while the player is in an Olympus guild; the player can
 answer there at any time, and change the answer whenever he likes.
 
@@ -184,11 +186,14 @@ separate from the 16 addons that may register data handles.
 | `"callbacks"`, and each event's name | `handle:On(...)` |
 | `"ui.surface"` | one page through `handle:RegisterSurface(...)` and its lifecycle methods |
 
-**Reserved features.** `"leader"`, `"network.sightings"` and `"network.sightings.area-scope"` are
-reserved for addons the Olympus team has authorized. `Has` still says whether this build has them.
-For any other addon, their methods return `nil` and `"unauthorized"` (`false` and `"unauthorized"`
-for the cancel and map methods), `On` returns `false` for `LEADER_CHANGED` and `SIGHTING_CHANGED`,
-and its line on the privacy page lists only what it can read.
+**Reserved features.** `"leader"`, `"network.sightings"`, `"network.sightings.area-scope"`,
+`"network.profile-effects"` and `"presence.quiet"` are reserved for
+addons the Olympus team has authorized. `Has` still says whether this build has them. For any other
+addon, their methods return `nil` and `"unauthorized"` (`false` and `"unauthorized"` for the cancel and map methods,
+`SetQuietPresence`, `StartProfileSession`, `StopProfileSession` and `SetProfileEffect`), `On`
+returns `false` for `LEADER_CHANGED`, `SIGHTING_CHANGED`, `PROFILE_EFFECT_SESSION_CHANGED` and
+`QUIET_PRESENCE_CHANGED`, and its line on the privacy page lists only what it can read: it is asked
+about neither the profile presentation nor the quiet presence.
 
 ### `OlympusAPI.Register(addonName)`
 
@@ -407,7 +412,8 @@ addon's pins. Returns `true`, or `false, "unknown"` for a supplied id that is no
 
 ### Profile-presentation session
 
-These methods exist only when `OlympusAPI.Has("network.profile-effects")` is true. Olympus owns the
+These methods exist only when `OlympusAPI.Has("network.profile-effects")` is true. This is a
+reserved feature, for an authorized addon only (see **Reserved features**). Olympus owns the
 art, layout, transport, lifetime and target-frame rendering. The public contract accepts only a
 host-defined style identifier and the exact pre-approved caption for that style. It accepts no
 texture or atlas path, colour, coordinate, arbitrary message or target player. A presentation is
@@ -444,7 +450,8 @@ reload or logout.
 
 ### Quiet presence
 
-These methods exist only when `OlympusAPI.Has("presence.quiet")` is true.
+These methods exist only when `OlympusAPI.Has("presence.quiet")` is true. This is a reserved
+feature, for an authorized addon only (see **Reserved features**).
 
 `handle:SetQuietPresence(on)` turns the player's own quiet presence on (`true`) or off (`false`) for
 the current session. It has no target. Only the King, a High Councillor (each while a current signed

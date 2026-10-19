@@ -38,7 +38,8 @@ end
 -- The invented partner addons that exercise the reserved features (API.lua's Reserved) are
 -- authorized on that client's copy of the list, as the shipped list authorizes the real one; any
 -- other invented name is an ordinary addon. partners = false keeps the list as it ships.
-local PARTNERS = { "MapPins", "BountyBoard" }
+-- (1.2.5.1: QuietTool and OtherTool drive the quiet presence, a reserved feature too.)
+local PARTNERS = { "MapPins", "BountyBoard", "QuietTool", "OtherTool" }
 local function LoadAPI(w, c, wanted, partners)
 	local was = rawget(_G, "OlympusAPI")
 	w:As(c, function()
@@ -599,8 +600,8 @@ end)
 
 -- 1.2.5.1, the quiet presence (Core.lua, Comm.QUIET_WORDS): self only, for the session; only the
 -- King, a High Councillor (a current signed issuer) or the author may turn it on, with the player's
--- Yes, in an Olympus guild; the handle that turned it on owns it; QUIET_PRESENCE_CHANGED; a No and a
--- /reload end it. On the world's clients, with their own King, Workshop and Wallet: no crown, author
+-- Yes, in an Olympus guild, through an addon the Olympus team authorized (a reserved feature); the
+-- handle that turned it on owns it; QUIET_PRESENCE_CHANGED; a No and a /reload end it. On the world's clients, with their own King, Workshop and Wallet: no crown, author
 -- presence or auditor hello leaves while it is on, and each goes again once it is off.
 test("1.2.5.1 the API quiet presence: the King, a councillor or the author alone, with a Yes, in an Olympus guild; its owner, its event; a No and a /reload end it", function()
 	local w, cast = W3.New({ more = {
@@ -651,6 +652,20 @@ test("1.2.5.1 the API quiet presence: the King, a councillor or the author alone
 	eq(Do(w, king, hk, "GetQuietPresence").on, true, "each read is a fresh copy")
 	w:Run(API.DISPATCH_DELAY)
 	eq(#told, 1); eq(told[1].on, true); eq(Keys(told[1]), "on,since")
+	-- (A reserved feature, 2026-10-19) An addon the Olympus team has not authorized gets
+	-- "unauthorized", even on the King's own client with his Yes: it can neither turn it on nor off,
+	-- read it nor hear of it.
+	local crier, crierKey = Tool(king, "TownCrier")
+	Yes(king, crierKey)
+	eq(Do(w, king, crier, "Status"), "granted")
+	for _, on in ipairs({ true, false }) do
+		ok, why = Do(w, king, crier, "SetQuietPresence", on)
+		eq(ok, false); eq(why, "unauthorized", "SetQuietPresence " .. tostring(on))
+	end
+	local none, noWhy = Do(w, king, crier, "GetQuietPresence")
+	eq(none, nil); eq(noWhy, "unauthorized")
+	eq(Do(w, king, crier, "On", "QUIET_PRESENCE_CHANGED", function() end), false)
+	eq(Do(w, king, hk, "GetQuietPresence").on, true, "still on, and still its owner's")
 	-- Nothing of him leaves: no crown, no auditor hello (he is one), while his reads go on.
 	local crowns, hellos = SentFrom(king, "^T1~P~"), SentFrom(king, "^ZQ~L1~H~")
 	eq(w:As(king, king.ns.Wallet.Hello), false, "no hello of the arena's auditors")
@@ -1296,18 +1311,22 @@ test("1.2.5 the API LEADER_CHANGED: once per real change, after a burst settles,
 end)
 
 -- (Daniel, 2026-10-19) The leader's presence and the sightings searches answer only the addons the
--- Olympus team authorized: a consenting ordinary addon gets "unauthorized" from each of their
--- methods, cannot listen to their events and is asked only about what it can read, while the rest
--- of the API is unchanged for it.
-test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"unauthorized\" from every leader and sightings method, no LEADER_CHANGED nor SIGHTING_CHANGED, and a privacy line without them", function()
+-- Olympus team authorized, and so do the quiet presence and the profile presentation (the same
+-- rule, agreed with the authorized client's team): a consenting ordinary addon gets "unauthorized"
+-- from each of their methods, cannot listen to their events and is asked only about what it can
+-- read, while the rest of the API is unchanged for it.
+test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"unauthorized\" from every leader, sightings, quiet presence and profile-presentation method, none of their events, and a privacy line without them", function()
 	local w, cast, viewer, API = Setup()
 	viewer.mapID = 1453
 	local O, C = viewer.OlympusAPI, viewer.Consent
 	local sightings = SightingHost(viewer)
 	local leader = LeaderHost(viewer)
+	local profile = ProfileEffectsHost(viewer)
 	leader.king = { name = "The Crown", realm = viewer.ns.realm }
 	eq(w:As(viewer, O.Has, "leader"), true, "Has still says what this build has")
 	eq(w:As(viewer, O.Has, "network.sightings"), true)
+	eq(w:As(viewer, O.Has, "presence.quiet"), true)
+	eq(w:As(viewer, O.Has, "network.profile-effects"), true)
 	Install(viewer, "MapPins", "Map Pins")
 	Install(viewer, "TownCrier", "Town Crier")
 	local partner = w:As(viewer, O.Register, "MapPins")
@@ -1324,10 +1343,19 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 	w:As(viewer, C.Choose, "api:towncrier", true)
 	eq(Do(w, viewer, crier, "Status"), "granted")
 
+	-- (Its No above already ran Olympus's own revoke cleanup for its empty profile owner: a close and a
+	-- disable that hold nothing. From here on nothing it calls reaches the host.)
+	local profileBefore = #profile.calls
+	for _, call in ipairs(profile.calls) do
+		assert(call.op == "close" or call.op == "disable", "only the No's cleanup: " .. call.op)
+	end
+	local caption = "A fixed host-approved caption"
 	local calls = {
 		GetLeaderPresence = {}, StartPlayerSearch = { "Tracked Name-Emberfall" }, GetPlayerSearch = { "7" },
 		GetPlayerSearches = {}, StartAreaSearch = { 1453 }, GetAreaSearch = { "7" }, GetAreaSearches = {},
 		CancelPlayerSearch = { "7" }, CancelAreaSearch = { "7" }, ShowAreaSearchOnMap = { "7" }, ClearAreaSearchMap = {},
+		SetQuietPresence = { true }, GetQuietPresence = {},
+		StartProfileSession = { "shadow" }, StopProfileSession = {}, SetProfileEffect = { "shadow", true, caption }, GetProfileSession = {},
 	}
 	local count = 0
 	for method, no in pairs(API.RESERVED_METHODS) do
@@ -1337,11 +1365,18 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 		eq(why, "unauthorized", method)
 		if no == "false" then eq(result, false, method) else eq(result, nil, method) end
 	end
-	eq(count, 11, "every leader and sightings method is reserved")
+	eq(count, 17, "every leader, sightings, quiet presence and profile-presentation method is reserved")
+	-- Even a release: its own state is none, so another addon's cannot be touched through it.
+	eq(select(2, Do(w, viewer, crier, "SetQuietPresence", false)), "unauthorized")
+	eq(select(2, Do(w, viewer, crier, "SetProfileEffect", "shadow", false)), "unauthorized")
 	eq(#sightings.starts, 0, "no exact-name request went out for it")
 	eq(#sightings.areaStarts, 0, "no area request went out for it")
-	eq(Do(w, viewer, crier, "On", "LEADER_CHANGED", function() end), false)
-	eq(Do(w, viewer, crier, "On", "SIGHTING_CHANGED", function() end), false)
+	eq(#profile.calls, profileBefore, "no profile session or presentation word for it")
+	eq(profile.session, nil); eq(profile.effect, nil)
+	eq(w:As(viewer, viewer.ns.QuietPresenceState).on, false, "no quiet presence for it")
+	for _, event in ipairs({ "LEADER_CHANGED", "SIGHTING_CHANGED", "QUIET_PRESENCE_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }) do
+		eq(Do(w, viewer, crier, "On", event, function() end), false, event)
+	end
 
 	-- What it may read is unchanged.
 	eq(type(Do(w, viewer, crier, "GetWanted")), "table")
@@ -1361,6 +1396,19 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 	Crown(w, cast.king, 0.42, 0.51)
 	w:Run(API.DISPATCH_DELAY)
 	eq(#told, 1, "the partner is told")
+	-- Its quiet presence and profile presentation pass the list and meet their own rules: the
+	-- viewer, a member, may not turn the quiet presence on; the host opens the session for it.
+	eq(Do(w, viewer, partner, "On", "QUIET_PRESENCE_CHANGED", function() end), true)
+	eq(Do(w, viewer, partner, "On", "PROFILE_EFFECT_SESSION_CHANGED", function() end), true)
+	eq(Do(w, viewer, partner, "GetQuietPresence").on, false)
+	eq(select(2, Do(w, viewer, partner, "SetQuietPresence", true)), "authority", "a member: the role's rule, past the list")
+	eq(select(2, Do(w, viewer, partner, "GetProfileSession")), "none")
+	eq(Do(w, viewer, partner, "StartProfileSession", "shadow"), true)
+	eq(profile.calls[#profile.calls].op, "open")
+	eq(select(2, Do(w, viewer, crier, "GetProfileSession")), "unauthorized", "never another addon's session")
+	eq(select(2, Do(w, viewer, crier, "StopProfileSession")), "unauthorized")
+	eq(profile.session and profile.session.owner, "api-profile:1", "the partner's session stays open")
+	eq(Do(w, viewer, partner, "StopProfileSession"), true)
 
 	-- Taken off the list during the session: its callbacks stop and its reads say "unauthorized".
 	API.AUTHORIZED[w:As(viewer, API.AuthorizedKey, "MapPins")] = nil
@@ -1372,7 +1420,7 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 	W3.NoErrors(w)
 end)
 
-test("1.2.5.1 the API reserved features: the list as it ships names nobody (one digest), a name folds before its digest, no hash means nobody, and every leader or search method is reserved", function()
+test("1.2.5.1 the API reserved features: the list as it ships names nobody (one digest), a name folds before its digest, no hash means nobody, and every leader, search, quiet presence or presentation method and event is reserved", function()
 	local w, cast, viewer = Setup({ wanted = false })
 	local API = LoadAPI(w, viewer, false, false)
 	local n = 0
@@ -1392,20 +1440,36 @@ test("1.2.5.1 the API reserved features: the list as it ships names nobody (one 
 	rawset(viewer.ns, "Ed25519", { missing = true })
 	eq(w:As(viewer, API.AuthorizedKey, "MapPins"), nil, "without the hash nobody is authorized")
 	rawset(viewer.ns, "Ed25519", ed)
-	-- A method a reserved feature adds later must join the list (and each listed one exists).
+	-- A method a reserved feature adds later must join the list (and each listed one exists): the
+	-- leader's, the searches', and (1.2.5.1) the quiet presence's and the profile presentation's.
 	local src = Read(H.ADDON_DIR .. "API.lua")
 	local methods = {}
 	for m in src:gmatch("\nfunction METHODS%.(%u%a+)%(") do methods[m] = true end
+	local reserved = 0
 	for m in pairs(methods) do
-		if m:find("Leader", 1, true) or m:find("Search", 1, true) then
-			assert(API.RESERVED_METHODS[m], "reserved: " .. m)
+		if m:find("Leader", 1, true) or m:find("Search", 1, true) or m:find("Quiet", 1, true) or m:find("Profile", 1, true) then
+			-- (GetProfile, the player's own frame and title, is an ordinary read.)
+			if m ~= "GetProfile" then
+				assert(API.RESERVED_METHODS[m], "reserved: " .. m)
+				reserved = reserved + 1
+			end
 		end
 	end
+	eq(reserved, 17, "the leader's, the searches', the quiet presence's and the presentation's methods")
+	eq(API.RESERVED_METHODS.GetProfile, nil, "the player's own profile stays an ordinary read")
 	for m, no in pairs(API.RESERVED_METHODS) do
 		assert(methods[m], "a real method: " .. m)
 		assert(no == "nil" or no == "false", m)
 	end
-	eq(Keys(API.RESERVED_EVENTS), "LEADER_CHANGED,SIGHTING_CHANGED")
+	for m, no in pairs({ SetQuietPresence = "false", GetQuietPresence = "nil", StartProfileSession = "false",
+		StopProfileSession = "false", SetProfileEffect = "false", GetProfileSession = "nil" }) do
+		eq(API.RESERVED_METHODS[m], no, m)
+	end
+	eq(Keys(API.RESERVED_EVENTS), "LEADER_CHANGED,PROFILE_EFFECT_SESSION_CHANGED,QUIET_PRESENCE_CHANGED,SIGHTING_CHANGED")
+	-- Each event of a reserved feature is reserved, and each reserved one is a real event.
+	local events = {}
+	for _, e in ipairs(API.EVENTS) do events[e] = true end
+	for e in pairs(API.RESERVED_EVENTS) do assert(events[e], "a real event: " .. e) end
 	-- The public page says it without naming any addon.
 	local doc = Read(H.ROOT .. "docs/API.md")
 	for _, word in ipairs({ "addons the Olympus team has authorized", '"unauthorized"' }) do
@@ -2241,23 +2305,36 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	for k in head:gmatch("\nL%.([%w_]+) =") do en[k] = true end
 	for k in tail:gmatch("\n\tL%.([%w_]+) =") do pt[k] = true end
 	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT,API_CONSENT_TEXT_BASIC"); eq(Keys(pt), Keys(en))
-	-- (1.2.5.1) An addon that is not authorized for the reserved features is asked only about its reads.
+	-- (1.2.5.1) An addon that is not authorized for the reserved features is asked only about its
+	-- reads: since the quiet presence and the profile presentation are reserved too (2026-10-19), its
+	-- line offers neither, while the authorized addon's line still describes both.
 	do
 		local k = "API_CONSENT_TEXT_BASIC"
 		local basic = assert(src:match("\nL%." .. k .. ' = "(.-)"\n'), k)
 		for _, word in ipairs({ "what Olympus shows you", "Never your location or the King's", "Authorize all", "Keep current choices",
-			"short host-owned profile-presentation session", "addons you trust" }) do
+			"addons you trust", "No, Keep current choices, or no answer: it receives nothing." }) do
 			assert(basic:find(word, 1, true), k .. " says: " .. word)
 		end
-		for _, word in ipairs({ "King's presence", "search", "crown", " layer" }) do
+		for _, word in ipairs({ "King's presence", "search", "crown", " layer", "presentation", "caption", "issuer",
+			"quiet presence", "High Councillor" }) do
 			eq(basic:find(word, 1, true), nil, k .. " never offers: " .. word)
 		end
 		local ptBasic = assert(tail:match("\n\tL%." .. k .. ' = "(.-)"\n'), k .. " (pt-BR)")
-		for _, word in ipairs({ "Nunca a sua localização nem a do Rei", "Autorizar tudo", "Manter escolhas atuais" }) do
+		for _, word in ipairs({ "Nunca a sua localização nem a do Rei", "Autorizar tudo", "Manter escolhas atuais",
+			"Não, Manter escolhas atuais ou sem resposta: ele não recebe nada." }) do
 			assert(ptBasic:find(word, 1, true), k .. " (pt-BR) says: " .. word)
 		end
-		for _, word in ipairs({ "presença do Rei", "busca", "coroa", "camada" }) do
+		for _, word in ipairs({ "presença do Rei", "busca", "coroa", "camada", "apresentação", "legenda", "emissor",
+			"presença silenciosa", "Alto Conselho" }) do
 			eq(ptBasic:find(word, 1, true), nil, k .. " (pt-BR) never offers: " .. word)
+		end
+		local full = assert(src:match('\nL%.API_CONSENT_TEXT = "(.-)"\n'), "API_CONSENT_TEXT")
+		local ptFull = assert(tail:match('\n\tL%.API_CONSENT_TEXT = "(.-)"\n'), "API_CONSENT_TEXT (pt-BR)")
+		for _, word in ipairs({ "short host-owned profile-presentation session", "pre-approved caption", "quiet presence" }) do
+			assert(full:find(word, 1, true), "API_CONSENT_TEXT still says: " .. word)
+		end
+		for _, word in ipairs({ "sessão curta de apresentação de perfil controlada pelo Olympus", "legenda pré-aprovada", "presença silenciosa" }) do
+			assert(ptFull:find(word, 1, true), "API_CONSENT_TEXT (pt-BR) still says: " .. word)
 		end
 	end
 	for _, word in ipairs({ "Seen nearby", "Exact last-seen point", "Visto nas proximidades", "Ponto exato do último avistamento",
