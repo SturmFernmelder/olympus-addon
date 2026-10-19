@@ -98,7 +98,9 @@ local lastShare, sharePending = -math.huge, false
 local lastFlagsSent, lastKeepersSent = -math.huge, -math.huge
 local lastRelay = -math.huge
 local lastEarlySent, earlySending = -math.huge, nil
-local earlyPending           -- a list of early supporters coming in pieces: { at, pieces, got, count, from }
+-- Lists of early supporters coming in pieces, one per sender: from -> { at, pieces, got, count, from }
+-- (TreasurerSpeaking: his pinned characters alone, so a few at most).
+local earlyPending = {}
 local earlyAsks, lastEarlyAsk, earlyArmed, heardEarlyAsk = 0, -math.huge, false, -math.huge
 local earlyShown = Treasury.EARLY_SHOWN
 local earlyOpen = false
@@ -3162,7 +3164,9 @@ Treasury.OnPrivate("TE", { send = function(to) return MaySendEarly() and Insider
 -- A piece of the list: from one of the Treasurer's pinned characters (his name, set by the
 -- server). A list as new as ours changes nothing; a newer one replaces ours once all its
 -- pieces are in (an older list's piece meanwhile is dropped). By whisper (1.1) only to the King,
--- a Steward or a keeper.
+-- a Steward or a keeper. Each sender's pieces are put together apart: two of his characters
+-- cut the same list where their guild's name leaves room (EarlyPieces), so one's pieces never
+-- fill the gaps of the other's (a name at a cut lost for good once the list is taken).
 function Treasury.HandleEarly(dist, sender, text)
 	if (dist ~= "CHANNEL" and dist ~= "WHISPER") or type(text) ~= "string" or not ns.rdb then return end
 	if dist == "WHISPER" and not Treasury.IsInsider() then return end
@@ -3172,11 +3176,12 @@ function Treasury.HandleEarly(dist, sender, text)
 	if at < 1 or at > Clock() + 600 or n < 1 or n > Treasury.EARLY_PIECES or i < 1 or i > n then return end
 	local held = ns.rdb.treasuryEarly
 	if type(held) == "table" and (tonumber(held.at) or 0) >= at then return end
-	local p = earlyPending
+	local from = ns.FullName(sender)
+	local p = earlyPending[from]
 	if not p or p.at ~= at or p.pieces ~= n then
 		if p and p.at > at then return end
-		p = { at = at, pieces = n, got = {}, count = 0, from = ns.FullName(sender) }
-		earlyPending = p
+		p = { at = at, pieces = n, got = {}, count = 0, from = from }
+		earlyPending[from] = p
 	end
 	if p.got[i] then return end
 	local list = {}
@@ -3186,7 +3191,7 @@ function Treasury.HandleEarly(dist, sender, text)
 	end
 	p.got[i], p.count = list, p.count + 1
 	if p.count < p.pieces then return end
-	earlyPending = nil
+	for k, q in pairs(earlyPending) do if q.at <= at then earlyPending[k] = nil end end
 	local all = {}
 	for k = 1, p.pieces do
 		for _, name in ipairs(p.got[k]) do if #all < Treasury.EARLY_MAX then all[#all + 1] = name end end
@@ -4901,7 +4906,7 @@ function Treasury.Reset()
 	wipe(pending)
 	wipe(itemPending)
 	lastMoney, lastRelay = nil, -math.huge
-	lastEarlySent, earlySending, earlyPending, earlyCache = -math.huge, nil, nil, nil
+	lastEarlySent, earlySending, earlyPending, earlyCache = -math.huge, nil, {}, nil
 	Treasury.ResetPrivate()
 	donating, lastDonationSent = nil, -math.huge
 	wipe(donors); wipe(pinged)

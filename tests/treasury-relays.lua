@@ -68,3 +68,57 @@ test("1.0 the Treasurer's mail character's book passed on again unchanged: its w
 		if not ok then error(err, 0) end
 	end)
 end)
+
+test("1.0 the early supporters from two of the Treasurer's characters: each one's pieces put together apart, never one's filling the other's gaps", function()
+	h.WithThrone(function(w)
+		local T = ns.Treasury
+		local saved = { split = ns.splitNames, after = ns.After, inGuild = IsInGuild, archive = ns.rdb.treasuryArchive, early = ns.rdb.treasuryEarly }
+		local ok, err = pcall(function()
+			ns.splitNames = true
+			local timers = {}
+			ns.After = function(_, _, fn) timers[#timers + 1] = fn end
+			local function RunTimers() while #timers > 0 do table.remove(timers, 1)() end end
+			local function Pieces()
+				local out = {}
+				for _, s in ipairs(w.sent) do if s.msg:sub(1, 3) == "TE~" then out[#out + 1] = s.msg end end
+				return out
+			end
+			local function Early() local l = T.EarlySupporters() return l and table.concat(l.names, ",") end
+			-- 0.9's book on his account, read by both his characters: fifteen names of 21 letters.
+			local names, lines = {}, {}
+			for i = 1, 15 do names[i] = "Supporter " .. string.char(96 + i, 96 + i) .. "longnamex" end
+			for i, n in ipairs(names) do lines[i] = { name = n, money = 10, how = "mail", t = w.clock - 1000 } end
+			ns.rdb.treasuryArchive = { ["0.9"] = { lines = lines, closed = w.clock - 500 } }
+			ns.rdb.treasuryFlags = { ranking = true, at = w.clock - 1 }
+			ns.db.myCharacters = { [h.TREASURER_KEY] = true, [h.ANDARAI_KEY] = true }
+			ns.db.keeperShares = { [h.TREASURER_KEY] = true, [h.ANDARAI_KEY] = true }
+			-- The Treasurer in <Olympus> sends the list; later his mail character, in a guild of a
+			-- longer name, sends the same list: as many pieces, cut elsewhere.
+			h.AsTreasurer(); IsInGuild = saved.inGuild
+			local treasurer = ns.me
+			w.sent = {}
+			eq(T.SendEarly(true), true); RunTimers()
+			local his = Pieces()
+			h.AsAndarai("Olympus Zeus")
+			w.clock = w.clock + T.EARLY_GAP
+			w.sent = {}
+			eq(T.SendEarly(true), true); RunTimers()
+			local its = Pieces()
+			eq(#his, 2); eq(#its, 2, "as many pieces")
+			assert(his[1] ~= its[1]:gsub("~Olympus Zeus~", "~Olympus~"), "cut elsewhere: " .. his[1] .. " / " .. its[1])
+			-- A soldier hears its first piece (its sending cut short), then his second: no list yet.
+			h.AsSoldier()
+			T.HandleEarly("CHANNEL", h.ANDARAI, its[1])
+			T.HandleEarly("CHANNEL", treasurer, his[2])
+			eq(Early(), nil, "one's piece never completes the other's list")
+			-- Either one's list, once all its own pieces are in, every name.
+			T.HandleEarly("CHANNEL", treasurer, his[1])
+			eq(Early(), table.concat(names, ","))
+			T.HandleEarly("CHANNEL", h.ANDARAI, its[2])
+			eq(Early(), table.concat(names, ","), "the same list again changes nothing")
+		end)
+		ns.splitNames, ns.After, IsInGuild = saved.split, saved.after, saved.inGuild
+		ns.rdb.treasuryArchive, ns.rdb.treasuryEarly = saved.archive, saved.early
+		if not ok then error(err, 0) end
+	end)
+end)
