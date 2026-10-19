@@ -23117,6 +23117,8 @@ test("1.0 the Treasurer's client passes on his mail character's book (it never r
 		if not ok then error(err, 0) end
 	end)
 end)
+assert(loadfile(ROOT .. "tests/treasury-relays.lua"))(ns, test, eq, { WithThrone = WithThrone, MailWorld = MailWorld, AsTreasurer = AsTreasurer,
+	AsAndarai = AsAndarai, AsSoldier = AsSoldier, ANDARAI = ANDARAI, ANDARAI_KEY = ANDARAI_KEY, TREASURER_KEY = TREASURER_KEY })
 
 test("1.0 the early supporters: everyone who gave before 1.0, names only, alphabetical, with the ranking's switch, from the Treasurer alone", function()
 	WithThrone(function(w, K)

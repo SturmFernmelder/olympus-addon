@@ -1857,7 +1857,8 @@ ns.Comm.Handle("TB", function(...) Treasury.HandleReport(...) end)
 
 -- His mail character's book as the Treasurer's client passes it on (TR): from the Treasurer
 -- himself (his name, set by the server, in <Olympus>), about his mail character alone, of this
--- era; taken unless our copy of that book is as new (its own TB, dated when it came, always is).
+-- era; taken unless our copy of that book is newer, or as new and its own TB (dated when it came,
+-- it always is): a copy as new that was passed on too is replaced (its week moves on).
 -- The book is checked as a keeper's own is (ReadBook), and its date too: DATE_SLACK ahead of the
 -- server's clock at most (Konig's review of 1.0.0).
 function Treasury.HandleRelay(dist, sender, text)
@@ -1879,8 +1880,13 @@ function Treasury.HandleRelay(dist, sender, text)
 	-- part we hold takes its place.)
 	if dist == "WHISPER" and (r.part or not Treasury.IsInsider()) then return end
 	Treasury.Migrate()
+	-- A copy passed on again of the same book (its date unchanged) takes the place of the one
+	-- passed on before: its week is as the Treasurer's client counts it when it sends it (today
+	-- and the 6 days before: Treasury.Totals), so a book that stops changing no longer shows the
+	-- week it had when it first reached us. Its own TB as new still stays.
 	for from, old in pairs(Reports()) do
-		if SameChar(from, whose) and type(old) == "table" and (tonumber(old.t) or 0) >= r.t and (r.part or not old.part) then return end
+		local held = type(old) == "table" and (tonumber(old.t) or 0)
+		if SameChar(from, whose) and held and (held > r.t or (held == r.t and not old.relayed)) and (r.part or not old.part) then return end
 	end
 	r.relayed = true
 	Keep(r)
