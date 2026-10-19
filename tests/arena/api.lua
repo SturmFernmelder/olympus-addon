@@ -111,7 +111,8 @@ end
 -- must never forward, and returns numeric internal ids, so these tests exercise the adapter rather
 -- than duplicating its public shape in the fixture.
 local function SightingHost(c)
-	local host = { nextID = 7, starts = {}, areaStarts = {}, cancels = {}, sessions = {}, reads = 0 }
+	local host = { nextID = 7, starts = {}, areaStarts = {}, areaScopes = {}, cancels = {}, sessions = {}, reads = 0,
+		AREA_SCOPES = { hostile = true, outsiders = true } }
 	function host.Start(target)
 		host.starts[#host.starts + 1] = target
 		local id = host.nextID
@@ -141,12 +142,13 @@ local function SightingHost(c)
 		host.reads = host.reads + 1
 		return host.sessions[tostring(id)]
 	end
-	function host.StartArea(mapID)
+	function host.StartArea(mapID, scope)
 		host.areaStarts[#host.areaStarts + 1] = mapID
+		host.areaScopes[#host.areaStarts] = scope or "(none)"
 		local id = host.nextID
 		host.nextID = id + 1
 		host.sessions[tostring(id)] = {
-			id = id, mode = "area", scope = "hostile", mapID = mapID, phase = "waiting",
+			id = id, mode = "area", scope = scope or "hostile", mapID = mapID, phase = "waiting",
 			createdAt = 100 + id, expiresAt = 700 + id, rawSecret = "area-transport-secret",
 			results = {
 				{ target = "Enemy One-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
@@ -157,6 +159,10 @@ local function SightingHost(c)
 					mapID = mapID, x = 411, y = 521, layer = 4, kind = "exact-unit", accuracyYards = 0 },
 				{ target = "Wrong Map-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
 					seenAt = 112 + id, expiresAt = 902 + id, mapID = mapID + 1, x = 412, y = 522, layer = 3 },
+				-- A not-hostile row: only an "outsiders" session may show it.
+				{ target = "Passing Stranger-Emberfall", observer = "Hidden Scout-Emberfall", observerGuild = "Olympus",
+					seenAt = 113 + id, receivedAt = 114 + id, expiresAt = 903 + id, mapID = mapID, x = 413, y = 523,
+					layer = 3, kind = "nearby", hostile = false },
 			}
 		}
 		return true, id
@@ -617,7 +623,10 @@ test("1.2.5 the API area sightings: hostile-area shape, privacy, ownership, host
 	eq(state.id, "7"); eq(state.mode, "area"); eq(state.scope, "hostile"); eq(state.mapID, 1453)
 	eq(state.status, "searching"); eq(#state.sightings, 2, "wrong-map rows fail closed")
 	eq(Keys(state), "createdAt,expiresAt,id,mapID,mode,scope,sightings,status")
-	eq(Keys(state.sightings[1]), "expiresAt,kind,layer,mapID,receivedAt,seenAt,target,x,y")
+	-- (Each row now says whether its player is hostile; a hostile session drops a not-hostile row.)
+	eq(Keys(state.sightings[1]), "expiresAt,hostile,kind,layer,mapID,receivedAt,seenAt,target,x,y")
+	eq(state.sightings[1].hostile, true); eq(state.sightings[2].hostile, true)
+	eq(host.areaScopes[1], "(none)", "the default start passes no scope to the transport")
 	eq(state.sightings[1].observer, nil); eq(state.sightings[1].observerGuild, nil)
 	local exported = ""
 	for _, row in ipairs(state.sightings) do for _, value in pairs(row) do exported = exported .. tostring(value) .. "\n" end end
@@ -726,6 +735,265 @@ test("1.2.5 the API area sightings: a partial host reports unavailable without s
 		"an unavailable partial host does not spend the handle's request quota")
 	eq(state.mapID, 1453)
 	eq(Do(w, viewer, api, "CancelAreaSearch", state.id), true)
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API area scope: hostile by default, outsiders on request with labelled rows, refused when unknown or unsupported", function()
+	local w, cast, viewer, API = Setup()
+	viewer.mapID = 1453
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local host = SightingHost(viewer)
+	eq(w:As(viewer, O.Has, "network.sightings.area-scope"), true, "the wider scope is feature-detected")
+	Install(viewer, "MapPins", "Map Pins")
+	local a = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	local secret = setmetatable({}, { __tostring = function() error("secret used", 2) end })
+	viewer.globals.issecretvalue = function(value) return rawequal(value, secret) end
+	for _, bad in ipairs({ "everyone", "", 7, secret }) do
+		local state, why = Do(w, viewer, a, "StartAreaSearch", 1453, bad)
+		eq(state, nil); eq(why, "scope")
+	end
+	eq(#host.areaStarts, 0, "an unknown scope never reaches the transport")
+
+	local state = assert(Do(w, viewer, a, "StartAreaSearch", 1453, "outsiders"))
+	eq(host.areaScopes[1], "outsiders"); eq(state.scope, "outsiders")
+	eq(#state.sightings, 3, "the hostile rows and the labelled not-hostile one")
+	local byName = {}
+	for _, row in ipairs(state.sightings) do byName[row.target] = row end
+	eq(byName["Enemy One-Emberfall"].hostile, true); eq(byName["Enemy Exact-Emberfall"].hostile, true)
+	eq(byName["Passing Stranger-Emberfall"].hostile, false)
+	eq(Keys(byName["Passing Stranger-Emberfall"]), "expiresAt,hostile,kind,layer,mapID,receivedAt,seenAt,target,x,y",
+		"a not-hostile row omits the observer like any area row")
+	eq(Do(w, viewer, a, "GetAreaSearch", state.id).scope, "outsiders")
+	eq(Do(w, viewer, a, "GetAreaSearches")[1].scope, "outsiders")
+	eq(Do(w, viewer, a, "CancelAreaSearch", state.id), true)
+
+	-- A hostile session never shows a not-hostile row, whatever its transport holds.
+	w:Run(API.AREA_ROTATE_MIN + 1)
+	state = assert(Do(w, viewer, a, "StartAreaSearch", 1453, "hostile"))
+	eq(host.areaScopes[2], "(none)", "hostile asks the transport exactly as before")
+	eq(state.scope, "hostile"); eq(#state.sightings, 2)
+	for _, row in ipairs(state.sightings) do eq(row.hostile, true, row.target) end
+	eq(Do(w, viewer, a, "CancelAreaSearch", state.id), true)
+
+	-- A transport that does not list the wider scope: not advertised, and refused before any start.
+	host.AREA_SCOPES = { hostile = true }
+	eq(w:As(viewer, O.Has, "network.sightings.area-scope"), false)
+	w:Run(API.AREA_ROTATE_MIN + 1)
+	local refused, why = Do(w, viewer, a, "StartAreaSearch", 1453, "outsiders")
+	eq(refused, nil); eq(why, "scope"); eq(#host.areaStarts, 2)
+	state = assert(Do(w, viewer, a, "StartAreaSearch", 1453), "the default still starts")
+	eq(state.scope, "hostile")
+	W3.NoErrors(w)
+end)
+
+-- The leader's lines behind the public adapter: Hop.lua's census-driven King, his realm, the
+-- "on his layer" answer and its zone names, and the layers Layers.ForMap lists from the
+-- announcements, are this host (the world loads Hop and Layers once, shared); his crown is the
+-- client's own King.Location, and each layer's name the real Layers.Name.
+local function LeaderHost(c)
+	local host = { king = nil, onLayer = false, otherRealm = false, layers = {} }
+	local name = c.ns.Layers.Name
+	rawset(c.ns, "Layers", {
+		ForMap = function(mapID) return host.layers[mapID] or {} end,
+		Name = name,
+		CurrentMap = function() return c.mapID end,
+		Mine = function() return nil end,
+	})
+	rawset(c.ns, "Hop", {
+		King = function() return host.king and { name = host.king.name, mapID = host.king.mapID,
+			zoneUID = host.king.zoneUID, realm = host.king.realm } or nil end,
+		KingOtherRealm = function(k) return k ~= nil and host.otherRealm end,
+		OnKingLayer = function(strict) return strict == true and host.onLayer end,
+		ZoneName = function(mapID) return ({ [1453] = "Stormwind City", [1429] = "Elwynn Forest" })[mapID] or "?" end,
+	})
+	return host
+end
+
+-- The King's client shares his crown at that point of map 1453.
+local function Crown(w, king, x, y)
+	king.mapID, king.x, king.y = 1453, x, y
+	king.globals.C_Map = {
+		GetBestMapForUnit = function() return king.mapID end,
+		GetPlayerMapPosition = function() return { GetXY = function() return king.x, king.y end } end,
+	}
+	king.db.throneLocation = true
+	w:Run(6)
+end
+
+test("1.2.5 the API leader presence: only what the King's lines, his crown and the Realm tab's layers show; nothing while barred; consent, guild and rate gates", function()
+	local w, cast, viewer, API = Setup()
+	viewer.mapID = 1453
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	rawset(viewer.ns, "Hop", { missing = true }) -- (Core.lua's stand-in for a file not loaded yet)
+	Install(viewer, "MapPins", "Map Pins")
+	local a = w:As(viewer, O.Register, "MapPins")
+	eq(w:As(viewer, O.Has, "leader"), false, "no leader lines in this build: not advertised")
+	eq(select(2, Do(w, viewer, a, "GetLeaderPresence")), "unavailable")
+	local host = LeaderHost(viewer)
+	eq(w:As(viewer, O.Has, "leader"), true); eq(w:As(viewer, O.Has, "LEADER_CHANGED"), true)
+	eq(select(2, Do(w, viewer, a, "GetLeaderPresence")), "pending")
+	w:As(viewer, C.Choose, "api:mappins", false)
+	eq(select(2, Do(w, viewer, a, "GetLeaderPresence")), "refused")
+	w:As(viewer, C.Choose, "api:mappins", true)
+
+	-- No King online: that alone.
+	local p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(Keys(p), "online"); eq(p.online, false)
+
+	-- Online, his layer not announced and no crown: no place at all.
+	host.king = { name = "The Crown", realm = viewer.ns.realm }
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(Keys(p), "name,onYourLayer,online,otherRealm")
+	eq(p.name, "The Crown"); eq(p.online, true); eq(p.otherRealm, false); eq(p.onYourLayer, false)
+
+	-- His layer announced in the viewer's zone, his crown shared: the zone, the crown's point in
+	-- thousandths, and the Realm tab's layers with their "~N with Olympus" counts.
+	Crown(w, cast.king, 0.42, 0.51)
+	local at = assert(w:As(viewer, viewer.ns.King.Location), "the viewer's own crown")
+	host.king.mapID, host.king.zoneUID = 1453, 9
+	host.layers[1453] = {
+		{ zoneUID = 9, count = 2, head = { name = "Crown Bearer", rank = 0, guild = World.KING_GUILD }, mine = false, lastSeen = 1 },
+		{ zoneUID = 4, count = 1, head = { name = "Far Captain", rank = 1, guild = World.GUILD }, mine = false, lastSeen = 1 },
+	}
+	local shown = w:As(viewer, viewer.ns.Layers.ForMap, 1453)
+	eq(#shown, 2, "the Realm tab lists two layers")
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(Keys(p), "layer,layers,mapID,mapName,name,onYourLayer,online,otherRealm,position")
+	eq(p.mapID, 1453); eq(p.mapName, "Stormwind City")
+	eq(Keys(p.position), "mapID,seenAt,x,y")
+	eq(p.position.mapID, 1453); eq(p.position.x, 420); eq(p.position.y, 510); eq(p.position.seenAt, at.t)
+	eq(#p.layers, 2)
+	for i, layer in ipairs(p.layers) do
+		eq(Keys(layer), "leader,name,olympus,yours")
+		eq(layer.name, w:As(viewer, viewer.ns.Layers.Name, shown[i]), "the name the Realm tab shows")
+		eq(layer.olympus, shown[i].count, "its ~N with Olympus")
+		eq(layer.leader, shown[i].zoneUID == 9)
+		eq(layer.yours, false)
+	end
+	eq(p.layers[1].olympus, 2); eq(p.layers[1].leader, true); eq(p.layer, p.layers[1].name)
+	eq(p.layers[1].name, viewer.ns.L.LAYER_OF:format("Crown Bearer"))
+	host.onLayer = true
+	eq(Do(w, viewer, a, "GetLeaderPresence").onYourLayer, true, "the line 'on the King's layer'")
+	host.onLayer = false
+
+	-- In another zone: the zone the line names and the crown, never that zone's layers.
+	viewer.mapID = 1429
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(p.mapID, 1453); eq(p.layers, nil); eq(p.layer, nil); eq(p.position.x, 420)
+	viewer.mapID = 1453
+
+	-- Another realm: said so; his layer there is not this realm's, so no layers.
+	host.otherRealm, host.king.realm = true, "Farshore"
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(p.otherRealm, true); eq(p.realm, "Farshore"); eq(p.layers, nil); eq(p.onYourLayer, false)
+	eq(p.mapID, 1453, "the crown's map, which his crown shows")
+	host.otherRealm, host.king.realm = false, viewer.ns.realm
+
+	-- Barred from locations (as King.Location and the King's lines): no field of where he is.
+	local ownWC = rawget(viewer.ns, "WatchChat")
+	rawset(viewer.ns, "WatchChat", { Barred = function(kind) return kind == "locations" and { kind = "timeout" } or nil end })
+	eq(w:As(viewer, viewer.ns.King.Location), nil, "the crown is hidden from him as well")
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(Keys(p), "name,online")
+	rawset(viewer.ns, "WatchChat", ownWC)
+
+	-- The King himself: that, and nothing of where.
+	local K = viewer.ns.King
+	local isKing = K.IsKing
+	K.IsKing = function() return true end
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	eq(Keys(p), "isYou,name,online")
+	K.IsKing = isKing
+
+	-- A fresh copy each call.
+	p = assert(Do(w, viewer, a, "GetLeaderPresence"))
+	p.layers[1].olympus, p.position.x = 999, 1
+	local again = Do(w, viewer, a, "GetLeaderPresence")
+	eq(again.layers[1].olympus, 2); eq(again.position.x, 420)
+
+	-- Outside an Olympus guild, nothing; past the rate, busy.
+	viewer.guild = nil
+	eq(select(2, Do(w, viewer, a, "GetLeaderPresence")), "guild")
+	viewer.guild = World.GUILD
+	w:Run(API.RATE_WINDOW + 1)
+	for _ = 1, API.RATE_MAX do assert(Do(w, viewer, a, "GetLeaderPresence")) end
+	eq(select(2, Do(w, viewer, a, "GetLeaderPresence")), "busy")
+	W3.NoErrors(w)
+end)
+
+test("1.2.5 the API LEADER_CHANGED: once per real change, after a burst settles, on the crown's expiry, never without a Yes", function()
+	local w, cast, viewer, API = Setup()
+	viewer.mapID = 1453
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	local host = LeaderHost(viewer)
+	host.king = { name = "The Crown", realm = viewer.ns.realm }
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "BountyBoard", "Bounty Board")
+	local a = w:As(viewer, O.Register, "MapPins")
+	local b = w:As(viewer, O.Register, "BountyBoard")
+	local told, toldB = {}, {}
+	eq(Do(w, viewer, a, "On", "LEADER_CHANGED", function(_, presence) told[#told + 1] = presence end), true)
+	eq(Do(w, viewer, b, "On", "LEADER_CHANGED", function(_, presence) toldB[#toldB + 1] = presence end), true)
+	w:As(viewer, C.Choose, "api:mappins", true)
+	w:As(viewer, function() viewer.ns.Fire("LAYERS_CHANGED") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, 0, "nothing changed since the Yes: nothing told")
+
+	-- His crown goes up: once, with what GetLeaderPresence returns.
+	Crown(w, cast.king, 0.42, 0.51)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, 1); eq(told[1].position.x, 420)
+	local now = Do(w, viewer, a, "GetLeaderPresence")
+	eq(told[1].position.seenAt, now.position.seenAt); eq(told[1].mapID, now.mapID)
+	eq(#toldB, 0, "never for an addon without a Yes")
+
+	-- A burst of events with nothing new in his lines: nothing.
+	w:As(cast.king, cast.king.ns.King.ToggleLocation)
+	eq(cast.king.db.throneLocation, false)
+	w:Run(1)
+	local count = #told
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, count + 1, "his crown taken down: told once")
+	eq(told[#told].position, nil)
+	w:As(viewer, function()
+		viewer.ns.Fire("LAYERS_CHANGED"); viewer.ns.Fire("HOP_CHANGED"); viewer.ns.Fire("DATA_CHANGED")
+	end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, count + 1, "no change: no call")
+
+	-- His layer announced: a burst of two announcements, one call.
+	host.king.mapID, host.king.zoneUID = 1453, 9
+	host.layers[1453] = { { zoneUID = 9, count = 1, head = { name = "Crown Bearer", rank = 0, guild = World.KING_GUILD }, mine = false } }
+	w:As(viewer, function() viewer.ns.Fire("LAYERS_CHANGED") end)
+	host.layers[1453][1].count = 2
+	w:As(viewer, function() viewer.ns.Fire("LAYERS_CHANGED") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, count + 2, "one call for the burst")
+	eq(told[#told].layers[1].olympus, 2)
+
+	-- A crown that stops coming leaves the map with no event of its own: told when it expires.
+	local K = viewer.ns.King
+	local location = K.Location
+	local seenAt = w:As(viewer, viewer.ns.Now)
+	local shared = { mapID = 1453, x = 0.3, y = 0.6, t = seenAt }
+	K.Location = function() if viewer.ns.Now() - shared.t > K.LOCATION_EXPIRE then return nil end return shared end
+	w:As(viewer, function() viewer.ns.Fire("KING_LOCATION_CHANGED", "show") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, count + 3); eq(told[#told].position.x, 300)
+	w:Run(K.LOCATION_EXPIRE + 2)
+	eq(#told, count + 4, "the expiry told once, with no event from the crown")
+	eq(told[#told].position, nil)
+	w:Run(K.LOCATION_EXPIRE + 2)
+	eq(#told, count + 4, "and no timer keeps calling once nothing is shown")
+	K.Location = location
+
+	-- After a No: nothing more.
+	w:As(viewer, C.Choose, "api:mappins", false)
+	host.king = nil
+	w:As(viewer, function() viewer.ns.Fire("DATA_CHANGED") end)
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, count + 4)
 	W3.NoErrors(w)
 end)
 
@@ -1555,8 +1823,9 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	local en, pt = {}, {}
 	for k in head:gmatch("\nL%.([%w_]+) =") do en[k] = true end
 	for k in tail:gmatch("\n\tL%.([%w_]+) =") do pt[k] = true end
-	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_CONSENT_LABEL,API_CONSENT_TEXT"); eq(Keys(pt), Keys(en))
-	for _, word in ipairs({ "Seen nearby", "Exact last-seen point", "Visto nas proximidades", "Ponto exato do último avistamento" }) do
+	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT"); eq(Keys(pt), Keys(en))
+	for _, word in ipairs({ "Seen nearby", "Exact last-seen point", "Visto nas proximidades", "Ponto exato do último avistamento",
+		"Not hostile, outside Olympus's guilds", "Não hostil, fora das guildas do Olympus" }) do
 		assert(src:find(word, 1, true), "the map tooltip says: " .. word)
 	end
 	for _, word in ipairs({ "exact-name last-seen search", "target, nameplate or mouseover observation",

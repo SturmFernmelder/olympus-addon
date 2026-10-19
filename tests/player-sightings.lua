@@ -4,7 +4,7 @@ local base, test, eq = ...
 local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]player%-sightings%.lua$")) or "./"
 
 local GLOBALS = { "UnitExists", "UnitIsPlayer", "UnitGUID", "UnitIsVisible", "UnitIsUnit", "UnitPosition", "UnitCanAttack", "UnitIsEnemy",
-	"GetGuildInfo", "IsInInstance", "C_Map", "LibStub", "issecretvalue" }
+	"GetGuildInfo", "IsInInstance", "IsInGroup", "C_Map", "LibStub", "issecretvalue" }
 local SECRET = {}
 
 local function WithWorld(fn)
@@ -25,8 +25,14 @@ local function WithWorld(fn)
 			if not u or not u.worldPosition then return nil end
 			return u.worldY, u.worldX, 0, u.instanceID
 		end
-		GetGuildInfo = function(unit) return unit == "player" and current and current.guild or nil end
+		-- The observed player's guild as the observer's game reads it (nil: no guild).
+		GetGuildInfo = function(unit)
+			if unit == "player" then return current and current.guild or nil end
+			local u = Unit(unit)
+			return u and u.guildName or nil
+		end
 		IsInInstance = function() return current and current.instance == true or false end
+		IsInGroup = function() return current and current.inGroup == true or false end
 		issecretvalue = function(value) return value == SECRET end
 		C_Map = {
 			GetBestMapForUnit = function(unit)
@@ -150,7 +156,8 @@ local function WithWorld(fn)
 			end
 			c.Every = function() end
 			c.Print = function(message) client.printed[#client.printed + 1] = message end
-			world:As(client, function() assert(loadfile(ROOT .. "Olympus/PlayerSightings.lua"))("Olympus", c) end)
+			-- options.source: an older build's module (tests/fixtures), for the wire's compatibility.
+			world:As(client, function() assert(loadfile(ROOT .. (options.source or "Olympus/PlayerSightings.lua")))("Olympus", c) end)
 			return client
 		end
 
@@ -190,7 +197,7 @@ local function Player(name, options)
 	options = options or {}
 	return { name = name, player = true, guid = options.guid or "Player-4619-00001234",
 		visible = options.visible, directPosition = options.directPosition,
-		hostile = options.hostile == true,
+		hostile = options.hostile == true, guildName = options.guild,
 		mapID = options.mapID, x = options.x, y = options.y, worldPosition = options.worldPosition,
 		worldX = options.worldX, worldY = options.worldY, instanceID = options.instanceID }
 end
@@ -221,7 +228,8 @@ test("player sightings: consent is explicit, off by default and has practical bo
 	WithWorld(function(world)
 		local observer = world:Client("Observer")
 		eq(observer.ns.PlayerSightings.Sharing(), false)
-		eq(observer.ns.PlayerSightings.CONSENT_VERSION, 6)
+		-- (7: the wider area scope also reports not-hostile players outside Olympus guilds.)
+		eq(observer.ns.PlayerSightings.CONSENT_VERSION, 7)
 		eq(observer.consent.explicit, true)
 		eq(observer.consent.adopt, false, "a direct upgrade must still show this new question once")
 		eq(observer.consent.pending(), true)
@@ -231,12 +239,12 @@ test("player sightings: consent is explicit, off by default and has practical bo
 		eq(observer.ns.PlayerSightings.RESULT_KEEP, 15 * 60)
 		eq(observer.ns.PlayerSightings.RECENT_TTL, 15 * 60)
 		eq(observer.ns.PlayerSightings.RECENT_MAX, 64)
-		observer.db.playerSightings, observer.db.playerSightingsConsentVersion = true, 5
+		observer.db.playerSightings, observer.db.playerSightingsConsentVersion = true, 6
 		eq(observer.ns.PlayerSightings.Sharing(), false, "the older answer does not silently allow the expanded requester session")
 		eq(observer.consent.get(), nil); eq(observer.consent.pending(), true)
 		eq(observer.consent.set(true), nil)
 		eq(observer.ns.PlayerSightings.Sharing(), true)
-		eq(observer.db.playerSightingsConsentVersion, 6)
+		eq(observer.db.playerSightingsConsentVersion, 7)
 		observer.consent.set(false)
 		eq(observer.ns.PlayerSightings.Sharing(), false)
 		local language = { L = {} }
@@ -244,6 +252,8 @@ test("player sightings: consent is explicit, off by default and has practical bo
 		for _, words in ipairs({ "at most 64", "in memory", "up to 15 minutes", "never saved",
 			"selected map ID", "five-minute hostile-area search", "at most six",
 			"at most 48 distinct hostile players", "omits your identity and guild", "Authorize all",
+			"A wider area search", "not an Olympus guild", "who have no guild", "never a member of your group",
+			"labelled not hostile",
 			"last-seen information, not continuous tracking" }) do
 			assert(language.L.PLAYER_SIGHTINGS_CONSENT_TEXT:find(words, 1, true), "consent discloses: " .. words)
 		end
@@ -851,6 +861,177 @@ test("player sightings: malformed, unauthorized and wrong-map area traffic fails
 		eq(select(2, world:As(requester, requester.ns.PlayerSightings.StartArea, 0)), "map")
 		local secretStarted, secretWhy = world:As(requester, requester.ns.PlayerSightings.StartArea, SECRET)
 		eq(secretStarted, false); eq(secretWhy, "map", "a secret map value fails closed without conversion")
+	end)
+end)
+
+-- The wider "outsiders" area scope (an S after the A) and its compatibility with the build before it.
+local HOSTILE_ONLY_BUILD = "tests/fixtures/player-sightings-area-hostile.lua"
+
+local function AreaPair(world, options)
+	options = options or {}
+	local requester = world:Client("Requester", options.requester)
+	local observer = world:Client("Observer", options.observer)
+	Authorize(requester)
+	Authorize(observer, requester.name); observer.members[requester.name:lower()] = requester.guild
+	requester.members[observer.name:lower()] = observer.guild
+	observer.ns.PlayerSightings.SetSharing(true, true)
+	return requester, observer
+end
+
+local seenGUID = 0
+local function Remembered(world, observer, name, options)
+	options = options or {}
+	seenGUID = seenGUID + 1
+	options.guid = options.guid or ("Player-4619-%08d"):format(5000 + seenGUID)
+	observer.units.target = Player(name, options)
+	local _, why = world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target")
+	observer.units.target = nil
+	world.now = world.now + 1
+	return why, options.guid
+end
+
+local function Drain(world, from, to)
+	local msgs = {}
+	while true do
+		local delivered, why, item = world:Flush(from, to)
+		if not item then break end
+		eq(delivered, true, why)
+		msgs[#msgs + 1] = item.msg
+	end
+	return msgs
+end
+
+local function AreaRows(requester, id)
+	local out, n = {}, 0
+	for _, row in ipairs(requester.ns.PlayerSightings.AreaSession(id).sightings) do out[row.target], n = row, n + 1 end
+	return out, n
+end
+
+test("player sightings: the outsiders area scope adds not-hostile players outside Olympus guilds, never an Olympus guild, the observer or the group", function()
+	WithWorld(function(world)
+		local requester, observer = AreaPair(world)
+		eq(Remembered(world, observer, "Hostile Rider-Realm", { hostile = true }), "unrequested")
+		eq(Remembered(world, observer, "Lone Walker-Realm"), "unrequested", "no guild")
+		eq(Remembered(world, observer, "Far Trader-Realm", { guild = "Silver Hand" }), "unrequested")
+		eq(Remembered(world, observer, "Ember Friend-Realm", { guild = "Olympus Ember" }), "unrequested")
+		observer.inGroup = true
+		observer.units.party1 = Player("Party Friend-Realm", { guild = "Silver Hand", guid = "Player-4619-00000444" })
+		eq(Remembered(world, observer, "Party Friend-Realm", { guild = "Silver Hand", guid = "Player-4619-00000444" }), "unrequested")
+		observer.units.target = Player(observer.name, { guid = "Player-4619-00000001" })
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target")), "identity", "never the observer")
+		observer.units.target = nil
+
+		local started, id = world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, "outsiders")
+		eq(started, true)
+		eq(requester.ns.PlayerSightings.AreaSession(id).scope, "outsiders")
+		local delivered, why, query = world:Flush(requester, observer)
+		eq(delivered, true, why)
+		assert(query.msg:match("^PS~A~1~%d+~1453$"), "the area query itself is unchanged: " .. query.msg)
+		local widened, widenWhy, scope = world:Flush(requester, observer)
+		eq(widened, true, widenWhy)
+		eq(scope.msg, ("PS~S~1~%d~1453~outsiders"):format(id), "the scope follows the query")
+		eq(scope.dist, "CHANNEL")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.Receive, "CHANNEL", requester.name, scope.msg)), "replay",
+			"one widening per request")
+		local msgs = Drain(world, observer, requester)
+		eq(#msgs, 3, "the hostile row from the query, then the two outsiders from memory")
+		for _, msg in ipairs(msgs) do
+			if msg:find("Hostile Rider", 1, true) then eq(msg:find("~o$"), nil, msg)
+			else assert(msg:find("~nearby~o$"), "a not-hostile row is labelled on the wire: " .. msg) end
+		end
+		local rows, n = AreaRows(requester, id)
+		eq(n, 3)
+		eq(rows["Hostile Rider-Realm"].hostile, true)
+		eq(rows["Lone Walker-Realm"].hostile, false, "an unguilded player is an outsider")
+		eq(rows["Far Trader-Realm"].hostile, false)
+		eq(rows["Ember Friend-Realm"], nil, "an Olympus guild's player is never reported")
+		eq(rows["Party Friend-Realm"], nil, "the observer's group is never reported")
+		eq(rows[observer.name], nil)
+
+		-- Live: a native exact point keeps its kind and yards before the label.
+		observer.units.nameplate1 = Player("Exact Stranger-Realm", { guild = "Silver Hand", directPosition = true,
+			mapID = 1453, x = 0.3, y = 0.4, guid = "Player-4619-00000555" })
+		eq(world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "nameplate1"), true)
+		msgs = Drain(world, observer, requester)
+		eq(#msgs, 1); assert(msgs[1]:find("~exact%-unit~0~o$"), msgs[1])
+		rows = AreaRows(requester, id)
+		eq(rows["Exact Stranger-Realm"].hostile, false); eq(rows["Exact Stranger-Realm"].kind, "exact-unit")
+		eq(rows["Exact Stranger-Realm"].accuracyYards, 0)
+		-- Checked again as it leaves: a player who joined the group meanwhile is not sent.
+		observer.units.target = Player("Late Joiner-Realm", { guild = "Silver Hand", guid = "Player-4619-00000777" })
+		eq(world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target"), true)
+		observer.units.party2 = Player("Late Joiner-Realm", { guild = "Silver Hand", guid = "Player-4619-00000777" })
+		local sent, sentWhy = world:Flush(observer, requester)
+		eq(sent, false); eq(sentWhy, "target")
+		eq(AreaRows(requester, id)["Late Joiner-Realm"], nil)
+	end)
+	WithWorld(function(world)
+		local requester, observer = AreaPair(world)
+		for i = 1, 4 do
+			Remembered(world, observer, "Hostile " .. string.char(64 + i) .. "-Realm", { hostile = true })
+			Remembered(world, observer, "Outsider " .. string.char(64 + i) .. "-Realm", { guild = "Silver Hand" })
+		end
+		local started = world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, "outsiders")
+		eq(started, true)
+		eq(world:Flush(requester, observer), true); eq(world:Flush(requester, observer), true)
+		eq(#Drain(world, observer, requester), observer.ns.PlayerSightings.AREA_MAX_PER_OBSERVER,
+			"the wider scope shares the same six-row observer cap")
+	end)
+end)
+
+test("player sightings: a default area request stays hostile-only, and either side on the build before the scope still answers hostile rows", function()
+	WithWorld(function(world)
+		local requester, observer = AreaPair(world)
+		Remembered(world, observer, "Lone Walker-Realm")
+		Remembered(world, observer, "Hostile Rider-Realm", { hostile = true })
+		local id = StartAreaAndDeliver(world, requester, observer)
+		eq(requester.ns.PlayerSightings.AreaSession(id).scope, "hostile")
+		eq(world:Flush(requester), false, "no widening follows a default request")
+		local msgs = Drain(world, observer, requester)
+		eq(#msgs, 1); eq(msgs[1]:find("~o$"), nil)
+		local rows, n = AreaRows(requester, id)
+		eq(n, 1); eq(rows["Hostile Rider-Realm"].hostile, true)
+		observer.units.target = Player("Live Walker-Realm", { guid = "Player-4619-00000888" })
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target")), "unrequested",
+			"a hostile request takes no not-hostile player live either")
+		local forged = ("PS~B~1~%d~Olympus~1453~123~568~42~0~Lone Walker-Realm~nearby~o"):format(id)
+		eq(select(2, world:As(requester, requester.ns.PlayerSightings.Receive, "WHISPER", observer.name, forged)), "scope",
+			"a not-hostile row for a hostile request is refused")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.Receive, "CHANNEL", requester.name,
+			("PS~S~1~%d~1429~outsiders"):format(id))), "not-found", "a widening for another map")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.Receive, "CHANNEL", requester.name,
+			("PS~S~1~%d~1453~everyone"):format(id))), "shape")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.Receive, "WHISPER", requester.name,
+			("PS~S~1~%d~1453~outsiders"):format(id))), "lane")
+		eq(select(2, world:As(observer, observer.ns.PlayerSightings.Receive, "CHANNEL", "Unknown-Realm",
+			("PS~S~1~%d~1453~outsiders"):format(id))), "authority")
+		eq(select(2, world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, "everyone")), "scope")
+		eq(select(2, world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, SECRET)), "scope")
+	end)
+	-- A widened request reaching an observer on the older build: it drops the S and answers hostile rows.
+	WithWorld(function(world)
+		local requester, observer = AreaPair(world, { observer = { source = HOSTILE_ONLY_BUILD } })
+		Remembered(world, observer, "Lone Walker-Realm")
+		Remembered(world, observer, "Hostile Rider-Realm", { hostile = true })
+		local started, id = world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, "outsiders")
+		eq(started, true)
+		eq(world:Flush(requester, observer), true, "the older build takes the unchanged query")
+		local widened, why = world:Flush(requester, observer)
+		eq(widened, false); eq(why, "shape", "the older build ignores the S")
+		local msgs = Drain(world, observer, requester)
+		eq(#msgs, 1); eq(msgs[1]:find("~o$"), nil)
+		local rows, n = AreaRows(requester, id)
+		eq(n, 1); eq(rows["Hostile Rider-Realm"].hostile, true)
+	end)
+	-- An older requester's area query reaching this build: no S ever comes, so only hostile rows.
+	WithWorld(function(world)
+		local requester, observer = AreaPair(world, { requester = { source = HOSTILE_ONLY_BUILD } })
+		Remembered(world, observer, "Lone Walker-Realm")
+		Remembered(world, observer, "Hostile Rider-Realm", { hostile = true })
+		local id = StartAreaAndDeliver(world, requester, observer)
+		local msgs = Drain(world, observer, requester)
+		eq(#msgs, 1); eq(msgs[1]:find("~o$"), nil)
+		eq(#requester.ns.PlayerSightings.AreaSession(id).sightings, 1, "the older requester parses the row")
 	end)
 end)
 

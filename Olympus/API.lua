@@ -17,10 +17,12 @@ local L = ns.L
 --     and its bounties (the Wanted tab's rows), the public rankings (the Slayers boards of the Wanted
 --     tab and the signed top three, the donors' top three while the King shows the army the
 --     Treasury's ranking (Donors below), the Church's public top three, and each game's ranking the
---     King made public: never a staff view), the player's own frame and title, and his own Olympus
---     guild, rank and role. Never the census, another player's private data, the Wanted page's
---     victims or stored sightings, a movement history, a staff view or a secret (a key, sealed
---     channel name, signature or private list). The optional search returns only a fresh native
+--     King made public: never a staff view), the player's own frame and title, his own Olympus
+--     guild, rank and role, and the leader's presence as the King's lines on the Census and the
+--     Realm, his crown and the Realm tab's layer list show it (LeaderPresence below). Never the
+--     census, another player's private data, the Wanted page's victims or stored sightings, a
+--     movement history, a staff view or a secret (a key, sealed channel name, signature or private
+--     list). The optional search returns only a fresh native
 --     observation or bounded memory-only recent observation: the target's game-reported unit point
 --     when available, its matching group-unit point when it is in the observer's party/raid,
 --     otherwise the observer's encounter point. Each row is labelled with that distinction and
@@ -37,8 +39,8 @@ local L = ns.L
 --     changes it changes its own copy, never Olympus's state nor another addon's.
 --   - Versioned and pushed: OlympusAPI.VERSION and OlympusAPI.Has(feature) say what this build gives;
 --     handle:On(event, fn) tells of a change (WANTED_CHANGED, RANKINGS_CHANGED, PROFILE_CHANGED,
---     SIGHTING_CHANGED for a search that same handle owns, PROFILE_EFFECT_SESSION_CHANGED for the
---     sanitized host-owned profile session, and PERMISSION_CHANGED when the player answers), once
+--     LEADER_CHANGED, SIGHTING_CHANGED for a search that same handle owns,
+--     PROFILE_EFFECT_SESSION_CHANGED for the sanitized host-owned profile session, and PERMISSION_CHANGED when the player answers), once
 --     a burst settles (DISPATCH_DELAY, never in combat), and only when what that
 --     call would return changed: nobody needs to poll.
 --   - Bounded. RATE_MAX data calls a RATE_WINDOW per addon, MAX_ADDONS addons a session, MAX_CALLBACKS
@@ -65,7 +67,9 @@ API.VERSION = 1
 -- visible user-started consumer session must still declare the chosen/configured names or list
 -- sources it includes. Every older Yes must be asked again even though the compatible API version
 -- stays 1.
-API.CONSENT_VERSION = 8
+-- Version 9 adds the leader's presence (GetLeaderPresence, LEADER_CHANGED) and the wider "outsiders"
+-- area scope: what a Yes gives grew, so it is asked again.
+API.CONSENT_VERSION = 9
 API.MAX_ADDONS = 16       -- addons registered in one session
 API.SURFACE_LIMIT = 1     -- one client-owned page in the shared tab rail per session
 API.RATE_MAX = 20         -- data calls one addon makes...
@@ -78,10 +82,12 @@ API.AREA_ROTATE_MIN = 60  -- minimum seconds between successful area starts by o
 API.AREA_PROOF_MAX = 64   -- fresh exact result maps retained by one handle until those rows expire
 API.MAX_ROWS = 50         -- rows of one Slayers board
 API.MAX_WANTED = 200      -- Wanted rows (Wanted.MAX_TARGETS)
+API.MAX_LEADER_LAYERS = 16 -- layers of the leader's zone (the Realm tab's list)
 API.TITLE_MAX = 40        -- the addon's title on the privacy page
-API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "SIGHTING_CHANGED",
+API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "SIGHTING_CHANGED",
 	"PROFILE_EFFECT_SESSION_CHANGED", "PERMISSION_CHANGED" }
-API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }
+API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }
+API.AREA_SCOPES = { hostile = true, outsiders = true }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
 
 local IS_EVENT = {}
@@ -360,6 +366,68 @@ function API.ProfileSession()
 	return { style = style, expiresIn = expiresIn }
 end
 
+-- The leader's presence, as this player's own pages show it, field by field (review: nothing the
+-- lines do not say, nothing guessed):
+--   - name, online: the King's lines on the Census and the Realm (Hop.KingLines: Hop.King, the name
+--     those lines give him). Not online: { online = false } alone. The King himself: isYou.
+--   - Barred from locations (WatchChat.Barred, as King.Location and Hop.KingLines): no field of
+--     where he is.
+--   - otherRealm (and then realm): Hop.KingOtherRealm, which those lines say.
+--   - mapID, mapName: the zone those lines name (his announced layer's), else his crown's.
+--   - position: his crown on the map (King.Location: only while he shares it), in thousandths.
+--   - onYourLayer: the line "on the King's layer" (Hop.OnKingLayer, strict as the line).
+--   - layers, layer: only while this player is in that zone, the Realm tab's list of its layers
+--     (Layers.ForMap, Layers.Name, its "~N with Olympus" count, a sample), and the name of his.
+-- Never a population (the game gives none), the census, or a member's name beyond the layer
+-- names the Realm tab already shows.
+local function LeaderZone(mapID)
+	local name = Plain(Call("Hop", "ZoneName", mapID), 64)
+	return name ~= "?" and name or nil
+end
+
+function API.LeaderPresence()
+	if not Has("Hop", "King") then return nil end
+	local k = Call("Hop", "King")
+	if type(k) ~= "table" then return { online = false } end
+	local out = { name = Plain(k.name, 72), online = true }
+	if Call("King", "IsKing") == true then out.isYou = true return out end
+	if Call("WatchChat", "Barred", "locations") then return out end
+	local away = Call("Hop", "KingOtherRealm", k) == true
+	out.otherRealm = away
+	if away then out.realm = Plain(k.realm, 64) end
+	local zoneUID, kingMap = Num(k.zoneUID, true), Num(k.mapID, true)
+	local at = Call("King", "Location")
+	at = type(at) == "table" and at or nil
+	local mapID = (not away and zoneUID and kingMap) or (at and Num(at.mapID, true)) or nil
+	if mapID and mapID > 0 then out.mapID, out.mapName = mapID, LeaderZone(mapID) end
+	if at then
+		local am, ax, ay, seenAt = Num(at.mapID, true), Num(at.x), Num(at.y), Num(at.t, true)
+		if am and am > 0 and ax and ay and ax >= 0 and ax <= 1 and ay >= 0 and ay <= 1 then
+			out.position = { mapID = am, x = math.floor(ax * 1000 + 0.5), y = math.floor(ay * 1000 + 0.5), seenAt = seenAt }
+		end
+	end
+	out.onYourLayer = not away and Call("Hop", "OnKingLayer", true) == true or false
+	local here = Num(Call("Layers", "CurrentMap"), true)
+	if not away and here and mapID == here then
+		local mine = Call("Layers", "Mine")
+		local his = (zoneUID and kingMap == here) and zoneUID
+			or (out.onYourLayer and type(mine) == "table" and Num(mine.zoneUID, true)) or nil
+		out.layers = {}
+		for _, layer in ipairs(Call("Layers", "ForMap", here) or {}) do
+			if #out.layers >= API.MAX_LEADER_LAYERS then break end
+			if type(layer) == "table" then
+				local count, name = Num(layer.count, true), Plain(Call("Layers", "Name", layer), 72)
+				if count and count > 0 and name then
+					local leader = his ~= nil and Num(layer.zoneUID, true) == his
+					out.layers[#out.layers + 1] = { name = name, olympus = count, yours = layer.mine == true, leader = leader }
+					if leader then out.layer = name end
+				end
+			end
+		end
+	end
+	return out
+end
+
 -- One short, request-bound search owned by this client. PlayerSightings keeps the transport,
 -- authority, consent, expiry and observation rules; the API only copies the already-normalized
 -- public result. "exact-unit" and "exact-group" are native map/world unit points; "nearby" is the
@@ -427,7 +495,7 @@ function API.AreaSearch(id)
 		or "searching"
 	local out = {
 		id = Plain(type(state.id) == "number" and tostring(state.id) or state.id, 64), mode = "area",
-		scope = "hostile", mapID = Num(state.mapID, true), status = status,
+		scope = state.scope == "outsiders" and "outsiders" or "hostile", mapID = Num(state.mapID, true), status = status,
 		createdAt = Num(state.createdAt, true) or 0, expiresAt = Num(state.expiresAt, true) or 0,
 		sightings = {},
 	}
@@ -447,11 +515,14 @@ function API.AreaSearch(id)
 			local validAccuracy = accuracy == nil or accuracy >= 0 and accuracy <= 100000
 				and (kind ~= "exact-group" and kind ~= "exact-unit" or accuracy == 0)
 			local key = target and ns.Fold(target)
+			-- A not-hostile row only in the wider scope that asked for it.
+			local hostile = row.hostile ~= false
 			if key and not targets[key] and kind and validAccuracy and mapID == out.mapID
+				and (hostile or out.scope == "outsiders")
 				and x and x >= 0 and x <= 1000 and y and y >= 0 and y <= 1000 and at
 				and expiresAt and expiresAt >= at then
 				local sighting = { target = target, seenAt = at, expiresAt = expiresAt,
-					mapID = mapID, x = x, y = y, layer = Num(row.layer, true) or 0, kind = kind }
+					mapID = mapID, x = x, y = y, layer = Num(row.layer, true) or 0, kind = kind, hostile = hostile }
 				if receivedAt and receivedAt >= at then sighting.receivedAt = receivedAt end
 				if accuracy ~= nil then sighting.accuracyYards = accuracy end
 				out.sightings[#out.sightings + 1], targets[key] = sighting, true
@@ -597,6 +668,7 @@ local BUILD = {
 	WANTED_CHANGED = function() return Member() and API.Wanted() or nil end,
 	RANKINGS_CHANGED = function() return Member() and API.Rankings() or nil end,
 	PROFILE_CHANGED = function() return API.Profile() end,
+	LEADER_CHANGED = function() return Member() and API.LeaderPresence() or nil end,
 	PROFILE_EFFECT_SESSION_CHANGED = function() return Member() and API.ProfileSession() or nil end,
 }
 
@@ -657,16 +729,34 @@ local function Tell(c, event, payload)
 	end
 end
 
+local Dispatch, Mark
+
+-- The leader's crown leaves the map on its own (King.LOCATION_EXPIRE after his last word) with no
+-- event of Olympus's: while a built presence holds a position, one timer looks again just after it
+-- would expire. Never while nobody listens (only a built LEADER_CHANGED arms it), one at a time.
+local leaderTimer = false
+local function WatchLeaderExpiry(data)
+	if leaderTimer or not ns.After or type(data) ~= "table" or type(data.position) ~= "table" then return end
+	local seenAt = data.position.seenAt
+	local life = Has("King", "Location") and tonumber(ns.King.LOCATION_EXPIRE) or nil
+	if type(seenAt) ~= "number" or not life then return end
+	local now = ns.Now and ns.Now() or 0
+	leaderTimer = true
+	ns.After(math.max(1, seenAt + life + 1 - now), "api leader expiry", function()
+		leaderTimer = false
+		Mark("LEADER_CHANGED")
+	end)
+end
+
 -- What a data event would give this addon now becomes what it was last told (no call when it
 -- listens to nothing: nothing is built).
 local function Baseline(c, event)
 	local build = BUILD[event]
 	if not build or not Listens(c, event) or not Granted(c) then return end
 	local data = build()
+	if event == "LEADER_CHANGED" then WatchLeaderExpiry(data) end
 	if data ~= nil or NIL_DATA_EVENT[event] then c.told[event] = Signature(data) end
 end
-
-local Dispatch
 
 local function Schedule(delay)
 	if scheduled or not ns.After then return end
@@ -676,7 +766,7 @@ end
 
 -- A change Olympus saw: looked at once the burst settles, only for events a granted addon listens
 -- to (nobody listening: nothing is built and no timer starts).
-local function Mark(...)
+Mark = function(...)
 	local any = false
 	for i = 1, select("#", ...) do
 		local event = select(i, ...)
@@ -698,6 +788,7 @@ Dispatch = function()
 	for _, event in ipairs(API.DATA_EVENTS) do
 		if events[event] then
 			local data = BUILD[event]()
+			if event == "LEADER_CHANGED" then WatchLeaderExpiry(data) end
 			if data ~= nil or NIL_DATA_EVENT[event] then
 				local sig = Signature(data)
 				for _, c in ipairs(order) do
@@ -907,6 +998,7 @@ local function AreaPin(row) -- gp:worldmap-icons
 		GameTooltip:AddLine(self.row.target or "", 1, 0.82, 0)
 		local line = self.row.kind == "nearby" and (L.API_AREA_NEARBY or "Seen nearby")
 			or (L.API_AREA_EXACT or "Exact last-seen point")
+		if self.row.hostile == false then line = line .. "\n" .. (L.API_AREA_OUTSIDER or "Not hostile, outside Olympus's guilds") end
 		GameTooltip:AddLine(line, 0.75, 0.75, 0.75, true)
 		GameTooltip:Show()
 	end)
@@ -1013,6 +1105,10 @@ function METHODS.GetRankings(c, kind)
 	return Read(c, true, API.Rankings, kind)
 end
 function METHODS.GetProfile(c) return Read(c, false, API.Profile) end
+function METHODS.GetLeaderPresence(c)
+	if not Has("Hop", "King") then return nil, "unavailable" end
+	return Read(c, true, API.LeaderPresence)
+end
 function METHODS.StartProfileSession(c, style)
 	style = Plain(style, 32)
 	if not style then return false, "style" end
@@ -1094,12 +1190,21 @@ function METHODS.GetPlayerSearches(c)
 		return out
 	end)
 end
-function METHODS.StartAreaSearch(c, mapID)
+function METHODS.StartAreaSearch(c, mapID, scope)
 	if not Has("PlayerSightings", "StartArea") then return nil, "unavailable" end
 	return SightingRead(c, function()
 		if Secret(mapID) then return nil, "map" end
 		mapID = Num(mapID, false)
 		if not mapID or mapID <= 0 or mapID ~= math.floor(mapID) then return nil, "map" end
+		-- "hostile" (also nil: the original contract) or "outsiders", which this build's transport
+		-- must list too.
+		if Secret(scope) then return nil, "scope" end
+		if scope == nil then scope = "hostile" end
+		local scopes = ns.PlayerSightings.AREA_SCOPES
+		if type(scope) ~= "string" or not API.AREA_SCOPES[scope]
+			or (scope ~= "hostile" and not (type(scopes) == "table" and scopes[scope] == true)) then
+			return nil, "scope"
+		end
 		for _, search in ipairs(PruneOwnedSearches(c, "area")) do
 			if search.status == "searching" then return nil, "active" end
 		end
@@ -1108,7 +1213,9 @@ function METHODS.StartAreaSearch(c, mapID)
 			return nil, "cooldown"
 		end
 		if not AreaMapAllowed(c, mapID, now) then return nil, "map" end
-		local state, why = Call("PlayerSightings", "StartArea", mapID)
+		local state, why
+		if scope == "hostile" then state, why = Call("PlayerSightings", "StartArea", mapID)
+		else state, why = Call("PlayerSightings", "StartArea", mapID, scope) end
 		if state == true and (type(why) == "string" or type(why) == "number") then
 			local id = why
 			state, why = API.AreaSearch(id), nil
@@ -1280,8 +1387,15 @@ function API.Register(name)
 	return c.handle
 end
 
--- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile",
--- "callbacks", "ui.guild-tools", "ui.surface") or an event's name.
+-- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile", "leader",
+-- "callbacks", "network.sightings", "network.sightings.area-scope", "ui.guild-tools", "ui.surface")
+-- or an event's name.
+local function SightingsComplete()
+	for _, fn in ipairs({ "Start", "Cancel", "Session", "StartArea", "CancelArea", "AreaSession" }) do
+		if not Has("PlayerSightings", fn) then return false end
+	end
+	return true
+end
 local FEATURES = {
 	wanted = function() return Has("Wanted", "Targets") end,
 	rankings = function() return true end,
@@ -1290,12 +1404,13 @@ local FEATURES = {
 	["rankings.church"] = function() return Has("HonorsNet", "ChurchTop") end,
 	["rankings.games"] = function() return Has("ArenaHome", "RankingsPublic") end,
 	profile = function() return true end,
+	leader = function() return Has("Hop", "King") and Has("King", "Location") and Has("Layers", "ForMap") end,
 	callbacks = function() return true end,
-	["network.sightings"] = function()
-		for _, fn in ipairs({ "Start", "Cancel", "Session", "StartArea", "CancelArea", "AreaSession" }) do
-			if not Has("PlayerSightings", fn) then return false end
-		end
-		return true
+	["network.sightings"] = SightingsComplete,
+	["network.sightings.area-scope"] = function()
+		if not SightingsComplete() then return false end
+		local scopes = ns.PlayerSightings.AREA_SCOPES
+		return type(scopes) == "table" and scopes.outsiders == true
 	end,
 	["network.profile-effects"] = function()
 		for _, fn in ipairs({ "OpenSession", "CloseSession", "Set", "DisableOwner", "Session" }) do
@@ -1353,8 +1468,14 @@ end)
 -- The games: a result, a ranking made public or kept to the staff (ArenaRoles: Arena.Changed).
 ns.On("ARENA_CHANGED", function() Mark("RANKINGS_CHANGED") end)
 ns.On("LOTTERY_RESULT", function() Mark("RANKINGS_CHANGED") end)
--- A guild joined or left, a rank (Roster.lua: DATA_CHANGED), the signed lists (the role).
-ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED") end)
+-- A guild joined or left, a rank (Roster.lua: DATA_CHANGED), the signed lists (the role); the census
+-- that names the leader online.
+ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED", "LEADER_CHANGED") end)
+-- The leader's crown, the layers announced, a local layer sighting (HOP_CHANGED) and a sanction on
+-- locations (WATCHCHAT_CHANGED): what his lines and the Realm tab's layers show.
+for _, event in ipairs({ "KING_LOCATION_CHANGED", "LAYERS_CHANGED", "HOP_CHANGED", "WATCHCHAT_CHANGED" }) do
+	ns.On(event, function() Mark("LEADER_CHANGED") end)
+end
 -- A request started by one handle changed or received a fresh, normalized observation. Only the
 -- handle that owns that opaque request id is told; the event never exposes another addon's search.
 ns.On("PLAYER_SIGHTINGS_CHANGED", function(id) MarkSighting(id) end)

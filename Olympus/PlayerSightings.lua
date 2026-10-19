@@ -15,8 +15,17 @@ local ADDON, ns = ...
 --   PS~X~1~<request>~<Name-Realm>                                  private withdrawal
 --   PS~A~1~<request>~<map>                                         channel hostile-area query
 --   PS~D~1~<request>~<map>                                         channel hostile-area cancel
---   PS~B~1~<request>~<guild>~<map>~<x>~<y>~<layer>~<age>~<target>[~<kind>[~<yards>]]
+--   PS~S~1~<request>~<map>~outsiders                               channel area-scope extension
+--   PS~B~1~<request>~<guild>~<map>~<x>~<y>~<layer>~<age>~<target>[~<kind>[~<yards>]][~o]
 --   PS~W~1~<request>~<Name-Realm>                                  private area-row withdrawal
+--
+-- An area request is "hostile" (players the observer's client reports as attackable or enemy) unless
+-- the requester follows its A with an S for the same request and map: "outsiders" also covers a
+-- player the observer's client reports as not hostile when the guild that client reads for him is
+-- not an Olympus guild, or he has none; never the observer, a member of the observer's group or an
+-- Olympus guild's player. Builds before S ignore it (an unknown mode), so they keep answering only
+-- hostile rows; a request with no S stays "hostile". Only a not-hostile B row carries the final
+-- "~o", and only an S-extended request accepts one.
 --
 -- Q/C senders and R/X recipients are server-stamped by the addon channel. Q is accepted only
 -- from Olympus's existing signed authority (Moderation.IsIssuer), or from the addon's pinned
@@ -29,7 +38,8 @@ ns.PlayerSightings = Sightings
 Sightings.VERSION = 1
 -- Version 6 also covers a visible, explicitly started hostile-area session. That session reports
 -- only player units this client directly saw and never exposes the observer through the public API.
-Sightings.CONSENT_VERSION = 6
+-- Version 7 covers the wider "outsiders" area scope (not-hostile players outside Olympus guilds).
+Sightings.CONSENT_VERSION = 7
 Sightings.GRID = 1                 -- thousandths, rounded to 0.1% of the map
 Sightings.QUEUE_TTL = 5
 Sightings.REQUEST_TTL = 10 * 60
@@ -40,6 +50,7 @@ Sightings.RECENT_MAX = 64
 Sightings.AREA_REQUEST_TTL = 5 * 60
 Sightings.AREA_MAX_PER_OBSERVER = 6
 Sightings.AREA_MAX_RESULTS = 48
+Sightings.AREA_SCOPES = { hostile = true, outsiders = true }
 Sightings.LAYER_FRESH = 30
 Sightings.MAX_ACTIVE = 3
 Sightings.MAX_SESSIONS = 8
@@ -391,6 +402,39 @@ local function ExactGroupSpot(observedUnit, name, guid)
 	return nil
 end
 
+-- The observed GUID is one of the observer's party or raid members (the same native tokens that
+-- ExactGroupSpot reads). Outside a group nothing is enumerated.
+local function GroupMember(guid)
+	if type(guid) ~= "string" then return false end
+	if type(IsInGroup) == "function" and Ask(IsInGroup) ~= true then return false end
+	for _, group in ipairs({ { "party", 4 }, { "raid", 40 } }) do
+		for i = 1, group[2] do
+			if Ask(UnitGUID, group[1] .. i) == guid then return true end
+		end
+	end
+	return false
+end
+
+-- A not-hostile player the wider area scope may report: the guild this client's game reads for the
+-- observed player is not an Olympus guild, or he has none, and he is not in the observer's group. A
+-- secret or unreadable guild, or no federation check, fails closed.
+local function Outsider(unit, guid)
+	if type(GetGuildInfo) ~= "function" or type(ns.IsFederation) ~= "function" then return false end
+	local ok, guild = pcall(GetGuildInfo, unit)
+	if not ok or Secret(guild) or (guild ~= nil and type(guild) ~= "string") then return false end
+	if type(guild) == "string" and guild ~= "" then
+		local fine, federation = pcall(ns.IsFederation, guild)
+		if not fine or (federation ~= false and federation ~= nil) then return false end
+	end
+	return not GroupMember(guid)
+end
+
+-- Whether an area request of this scope takes a row with these flags.
+local function AreaTakes(remote, hostile, outsider)
+	if hostile == true then return true end
+	return remote.scope == "outsiders" and outsider == true
+end
+
 local RESPONSE_QUALITY = { nearby = 1, ["exact-group"] = 2, ["exact-unit"] = 3 }
 
 local function PreferResponse(existing, seenAt, kind)
@@ -408,7 +452,7 @@ local function Snapshot(request)
 		local key = request.mode == "area" and type(result.target) == "string" and result.target:lower() or nil
 		if not key or not targets[key] then n = n + 1; if key then targets[key] = true end end
 	end
-	return { id = request.id, mode = request.mode or "player", scope = request.mode == "area" and "hostile" or nil,
+	return { id = request.id, mode = request.mode or "player", scope = request.mode == "area" and (request.scope or "hostile") or nil,
 		target = request.target, mapID = request.mapID, status = request.phase, phase = request.phase,
 		createdAt = request.createdAt, sentAt = request.sentAt, expiresAt = request.expiresAt,
 		resultCount = n }
@@ -428,7 +472,7 @@ local function AreaResultCopy(result)
 	local out = { requestId = result.requestId, target = result.target,
 		mapID = result.mapID, x = result.x, y = result.y, layer = result.layer,
 		seenAt = result.seenAt, receivedAt = result.receivedAt, expiresAt = result.expiresAt,
-		kind = result.kind or "nearby" }
+		kind = result.kind or "nearby", hostile = result.hostile ~= false }
 	if result.accuracyYards ~= nil then out.accuracyYards = result.accuracyYards end
 	return out
 end
@@ -448,7 +492,7 @@ local function PruneRecent(now)
 	end
 end
 
-local function Remember(target, mapID, x, y, layer, kind, accuracyYards, hostile, now)
+local function Remember(target, mapID, x, y, layer, kind, accuracyYards, hostile, outsider, now)
 	PruneRecent(now)
 	local key = target:lower()
 	if not recent[key] and recentCount >= Sightings.RECENT_MAX then
@@ -459,7 +503,8 @@ local function Remember(target, mapID, x, y, layer, kind, accuracyYards, hostile
 		if oldest then recent[oldest], recentCount = nil, recentCount - 1 end
 	end
 	local record = { target = target, mapID = mapID, x = x, y = y, layer = layer, kind = kind,
-		accuracyYards = accuracyYards, hostile = hostile == true, at = now, epoch = recentEpoch }
+		accuracyYards = accuracyYards, hostile = hostile == true, outsider = hostile ~= true and outsider == true,
+		at = now, epoch = recentEpoch }
 	if not recent[key] then recentCount = recentCount + 1 end
 	recent[key] = record
 	return record
@@ -559,11 +604,43 @@ local function RemoveRequest(request, action, tell)
 	return true
 end
 
-local function StartRequest(mode, value)
+-- The wider area scope follows the area query on the same channel once that query has gone: an
+-- observer that never received the A has no request to widen, and one that cannot read S keeps
+-- answering hostile rows. A failed S leaves the request hostile, so its snapshot stays honest.
+local function SendScope(request)
+	local C = GuardedComm()
+	if not C or request.scope ~= "outsiders" then return false end
+	local msg = ("PS~S~%d~%d~%d~%s"):format(Sightings.VERSION, request.id, request.mapID, request.scope)
+	local key = "pss:" .. request.id
+	local function Narrow(why)
+		if requests[request.id] ~= request or request.scope ~= "outsiders" then return end
+		request.scope = "hostile"
+		Changed(request.id, why or "scope")
+	end
+	local accepted = C.Send("CHANNEL", msg, nil, true, false, function(sentOK)
+		if not sentOK then Narrow("scope") end
+	end, { owner = Sightings, key = key, permit = function(owner, permitKey, dist, recipient, permitMsg)
+		if owner ~= Sightings or permitKey ~= key or dist ~= "CHANNEL" or recipient ~= nil or permitMsg ~= msg then
+			return false, "target"
+		end
+		if requests[request.id] ~= request or request.phase ~= "waiting" then return false, "cancelled" end
+		local ok, why = Sightings.CanRequest()
+		if not ok then return false, why end
+		if not C.ChannelName or C.ChannelName() ~= request.channel then return false, "moved" end
+		return true
+	end })
+	if not accepted then Narrow("scope") end
+	return accepted and true or false
+end
+
+local function StartRequest(mode, value, scope)
 	local target, mapID
 	if mode == "area" then
 		mapID = Whole(value, 1, 9999999)
 		if not mapID or not OpenMap(mapID) then return false, "map" end
+		if Secret(scope) then return false, "scope" end
+		if scope == nil then scope = "hostile" end
+		if type(scope) ~= "string" or not Sightings.AREA_SCOPES[scope] then return false, "scope" end
 	else
 		target = Canonical(value)
 		if not target or Same(target, ns.me) then return false, "target" end
@@ -577,7 +654,8 @@ local function StartRequest(mode, value)
 	sequence = sequence % 99999 + 1
 	while requests[sequence] do sequence = sequence % 99999 + 1 end
 	local C = GuardedComm()
-	local request = { id = sequence, mode = mode, target = target, mapID = mapID, phase = "sending", createdAt = now,
+	local request = { id = sequence, mode = mode, target = target, mapID = mapID,
+		scope = mode == "area" and scope or nil, phase = "sending", createdAt = now,
 		queuedAt = now, expiresAt = now + Sightings.QUEUE_TTL, channel = C.ChannelName(), results = {} }
 	local msg = mode == "area" and ("PS~A~%d~%d~%d"):format(Sightings.VERSION, request.id, mapID)
 		or ("PS~Q~%d~%d~%s"):format(Sightings.VERSION, request.id, target)
@@ -593,6 +671,7 @@ local function StartRequest(mode, value)
 		end
 		request.phase, request.sentAt, request.expiresAt = "waiting", Now(),
 			Now() + (request.mode == "area" and Sightings.AREA_REQUEST_TTL or Sightings.REQUEST_TTL)
+		if request.mode == "area" and request.scope == "outsiders" then SendScope(request) end
 		Changed(request.id, "sent")
 	end, { owner = Sightings, key = key, permit = function(owner, permitKey, dist, recipient, permitMsg)
 		if owner ~= Sightings or permitKey ~= key or dist ~= "CHANNEL" or recipient ~= nil or permitMsg ~= msg then
@@ -606,7 +685,7 @@ local function StartRequest(mode, value)
 end
 
 function Sightings.Start(target) return StartRequest("player", target) end
-function Sightings.StartArea(mapID) return StartRequest("area", mapID) end
+function Sightings.StartArea(mapID, scope) return StartRequest("area", mapID, scope) end
 
 function Sightings.Cancel(id)
 	id = Whole(id, 1, 99999)
@@ -709,7 +788,8 @@ local function ResponsePermit(job)
 			or not Same(record.target, job.target) or record.mapID ~= job.mapID or record.x ~= job.x
 			or record.y ~= job.y or record.layer ~= job.layer or record.kind ~= job.kind
 			or record.accuracyYards ~= job.accuracyYards
-			or (job.remote.mode == "area" and (record.hostile ~= true or record.mapID ~= job.remote.mapID)) then
+			or (job.remote.mode == "area" and (not AreaTakes(job.remote, record.hostile, record.outsider)
+				or record.mapID ~= job.remote.mapID or (record.hostile == true) ~= job.hostile)) then
 			return false, "stale"
 		end
 		return true
@@ -717,6 +797,8 @@ local function ResponsePermit(job)
 	-- The send queue is asynchronous. A changed target/mouseover/nameplate must never inherit an
 	-- observation made for its predecessor, even when the observer has not moved.
 	if not UnitIdentity(job.unit, job.target, job.guid) then return false, "target" end
+	-- A not-hostile area row is checked again as it leaves: still outside Olympus guilds and the group.
+	if job.remote.mode == "area" and job.hostile == false and not Outsider(job.unit, job.guid) then return false, "target" end
 	local mapID, x, y, layer
 	if job.kind == "exact-unit" then
 		mapID, x, y = MapSpot(job.unit)
@@ -733,13 +815,15 @@ local function ResponsePermit(job)
 	return true
 end
 
-local function QueueResponse(remote, target, unit, guid, mapID, x, y, layer, kind, accuracyYards, groupUnit, seenAt, cached)
+local function QueueResponse(remote, target, unit, guid, mapID, x, y, layer, kind, accuracyYards, groupUnit, seenAt, cached, hostile)
 	local C = GuardedComm()
 	if not C then return false, "transport" end
 	local guild = OwnGuild()
 	if not guild then return false, "guild" end
 	local remoteKey = RemoteKey(remote.requester, remote.id)
 	local area = remote.mode == "area"
+	hostile = hostile ~= false
+	if area and not hostile and remote.scope ~= "outsiders" then return false, "scope" end
 	target = area and Canonical(target) or remote.target
 	if not target then return false, "target" end
 	if area and mapID ~= remote.mapID then return false, "map" end
@@ -762,6 +846,7 @@ local function QueueResponse(remote, target, unit, guid, mapID, x, y, layer, kin
 	local msg = ("PS~%s~%d~%d~%s~%d~%d~%d~%d~%d~%s~%s"):format(area and "B" or "R", Sightings.VERSION,
 		remote.id, guild, mapID, x, y, layer, age, target, kind)
 	if accuracyYards ~= nil then msg = msg .. "~" .. tostring(accuracyYards) end
+	if area and not hostile then msg = msg .. "~o" end
 	if #msg > 255 then return false, "size" end
 	-- Each candidate has a distinct transport capability. Keep the prior valid answer live until
 	-- Comm accepts its replacement; an immediate transport refusal must not erase the only answer.
@@ -770,7 +855,7 @@ local function QueueResponse(remote, target, unit, guid, mapID, x, y, layer, kin
 	local job = { key = key, slot = slot, sentKey = sentKey, remoteKey = remoteKey, remote = remote, requester = remote.requester,
 		queuedAt = now, unit = unit, target = target, guid = guid, groupUnit = groupUnit, cached = cached,
 		mapID = mapID, x = x, y = y, layer = layer, kind = kind, accuracyYards = accuracyYards,
-		seenAt = seenAt, msg = msg }
+		seenAt = seenAt, msg = msg, hostile = hostile }
 	local accepted = C.Whisper(remote.requester, msg, nil, true, false, function(sentOK)
 		if queued[slot] == job then
 			queued[slot], queuedCount = nil, queuedCount - 1
@@ -817,14 +902,14 @@ local function QueueAreaRecent(remote)
 	local now, rows = Now(), {}
 	PruneRecent(now)
 	for _, record in pairs(recent) do
-		if record.hostile == true and record.mapID == remote.mapID then rows[#rows + 1] = record end
+		if AreaTakes(remote, record.hostile, record.outsider) and record.mapID == remote.mapID then rows[#rows + 1] = record end
 	end
 	table.sort(rows, function(a, b) if a.at ~= b.at then return a.at > b.at end return a.target < b.target end)
 	local queuedAny = false
 	for i = 1, math.min(#rows, Sightings.AREA_MAX_PER_OBSERVER) do
 		local record = rows[i]
 		local ok = QueueResponse(remote, record.target, nil, nil, record.mapID, record.x, record.y, record.layer,
-			record.kind, record.accuracyYards, nil, record.at, record)
+			record.kind, record.accuracyYards, nil, record.at, record, record.hostile == true)
 		if ok then queuedAny = true end
 	end
 	return queuedAny
@@ -871,15 +956,16 @@ function Sightings.ObserveUnit(unit, remember)
 	if not mapID then return false, "position" end
 	local now, matched, queuedAny = Now(), false, false
 	local hostile = HostileUnit(unit)
-	if remember ~= false then Remember(name, mapID, x, y, layer, kind, accuracyYards, hostile, now) end
+	local outsider = not hostile and Outsider(unit, guid)
+	if remember ~= false then Remember(name, mapID, x, y, layer, kind, accuracyYards, hostile, outsider, now) end
 	local list = {}
 	for _, remote in pairs(remotes) do list[#list + 1] = remote end
 	for _, remote in ipairs(list) do
 		if remotes[RemoteKey(remote.requester, remote.id)] == remote and now < remote.expiresAt
-			and ((remote.mode == "area" and hostile and mapID == remote.mapID)
+			and ((remote.mode == "area" and AreaTakes(remote, hostile, outsider) and mapID == remote.mapID)
 				or (remote.mode ~= "area" and Same(name, remote.target))) then
 			matched = true
-			local ok = QueueResponse(remote, name, unit, guid, mapID, x, y, layer, kind, accuracyYards, groupUnit, now, nil)
+			local ok = QueueResponse(remote, name, unit, guid, mapID, x, y, layer, kind, accuracyYards, groupUnit, now, nil, hostile)
 			if ok then queuedAny = true end
 		end
 	end
@@ -944,6 +1030,28 @@ local function ReceiveAreaQuery(sender, text)
 	local remote = { requester = requester, id = id, mode = "area", mapID = mapID, sentCount = 0, pendingCount = 0,
 		receivedAt = now, expiresAt = now + Sightings.AREA_REQUEST_TTL }
 	remotes[key], remoteCount = remote, remoteCount + 1
+	Sightings.ObserveUnit("target", false)
+	Sightings.ObserveUnit("mouseover", false)
+	QueueAreaRecent(remote)
+	return true, "ok"
+end
+
+-- The requester widened its own live area request (SendScope). Only the same signed requester,
+-- request and map, once; the observer then answers again from what it sees and remembers, within
+-- the same six-row cap.
+local function ReceiveAreaScope(sender, text)
+	local version, id, mapID, scope = text:match("^PS~S~(%d+)~(%d+)~(%d+)~(%a+)$")
+	version, id, mapID = Whole(version, 1, 9), Whole(id, 1, 99999), Whole(mapID, 1, 9999999)
+	if version ~= Sightings.VERSION or not id or not mapID or scope ~= "outsiders" then return false, "shape" end
+	local eligible, why = ObserverEligible()
+	if not eligible then return false, why end
+	local requester = SignedRequester(sender)
+	if not requester or Same(requester, ns.me) then return false, "authority" end
+	local remote = remotes[RemoteKey(requester, id)]
+	if not remote or remote.mode ~= "area" or remote.mapID ~= mapID then return false, "not-found" end
+	if remote.scope == scope then return false, "replay" end
+	if Now() >= remote.expiresAt then return false, "stale" end
+	remote.scope = scope
 	Sightings.ObserveUnit("target", false)
 	Sightings.ObserveUnit("mouseover", false)
 	QueueAreaRecent(remote)
@@ -1050,6 +1158,12 @@ local function ReceiveAreaResult(sender, text)
 	local version, id, guild, mapID, x, y, layer, age, target, suffix =
 		text:match("^PS~B~(%d+)~(%d+)~([^~]+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~([^~]+)(.*)$")
 	if type(suffix) ~= "string" then return false, "shape" end
+	-- A not-hostile row of the wider scope ends in "~o", after its kind (and yards).
+	local hostile = true
+	if suffix:sub(-2) == "~o" then
+		suffix, hostile = suffix:sub(1, -3), false
+		if suffix == "" then return false, "shape" end
+	end
 	version, id = Whole(version, 1, 9), Whole(id, 1, 99999)
 	mapID, x, y = Whole(mapID, 1, 9999999), Whole(x, 0, 1000), Whole(y, 0, 1000)
 	layer, age, target = Whole(layer, 0, 2147483647), Whole(age, 0, Sightings.RECENT_TTL), Canonical(target)
@@ -1070,6 +1184,7 @@ local function ReceiveAreaResult(sender, text)
 	if not request or request.mode ~= "area" or request.phase ~= "waiting" or request.mapID ~= mapID then
 		return false, "request"
 	end
+	if not hostile and request.scope ~= "outsiders" then return false, "scope" end
 	local now = Now()
 	PruneBounded(now)
 	if now >= request.expiresAt or InInstance() or NetOff() or not SignedRequester(ns.me) then return false, "stale" end
@@ -1115,7 +1230,7 @@ local function ReceiveAreaResult(sender, text)
 	request.results[reporter:lower() .. "\0" .. target:lower()] = { requestId = id, target = target,
 		reporter = reporter, observerGuild = guild, mapID = mapID, x = x, y = y, layer = layer,
 		seenAt = seenAt, receivedAt = now, expiresAt = seenAt + Sightings.RESULT_TTL,
-		kind = kind, accuracyYards = accuracyYards }
+		kind = kind, accuracyYards = accuracyYards, hostile = hostile }
 	Changed(id, "result")
 	return true, "ok"
 end
@@ -1150,12 +1265,13 @@ end
 
 function Sightings.Receive(dist, sender, text)
 	if Secret(dist, sender, text) or type(text) ~= "string" or type(sender) ~= "string" then return false, "secret" end
-	local mode = text:match("^PS~([QCARXBDW])~")
-	if mode == "Q" or mode == "C" or mode == "A" or mode == "D" then
+	local mode = text:match("^PS~([QCARXBDWS])~")
+	if mode == "Q" or mode == "C" or mode == "A" or mode == "D" or mode == "S" then
 		if dist ~= "CHANNEL" then return false, "lane" end
 		if mode == "Q" then return ReceiveQuery(sender, text) end
 		if mode == "C" then return ReceiveCancel(sender, text) end
 		if mode == "A" then return ReceiveAreaQuery(sender, text) end
+		if mode == "S" then return ReceiveAreaScope(sender, text) end
 		return ReceiveAreaCancel(sender, text)
 	elseif mode == "R" or mode == "X" or mode == "B" or mode == "W" then
 		if dist ~= "WHISPER" then return false, "lane" end

@@ -735,13 +735,16 @@ account, `/oly discord forget` drops this character's request and proof.
 Another addon can read, with your permission, what Olympus already shows you: the Wanted list
 and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
-title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
+title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
+show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
+and his zone's layers with their "~N with Olympus" counts while you are there). An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
 (`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
 send nothing. A compatible addon can also let an authorized player start a short exact-name
 last-seen search, maintain a bounded set of exact-name searches while a visible tool session the
 player started remains on, or start a five-minute hostile-area search for one selected zone or
-micro-map. Its visible Start declares selected/configured names and any included list source. A
+micro-map, which may be widened to labelled not-hostile players outside Olympus guilds (or with
+none), never the observer's group. Its visible Start declares selected/configured names and any included list source. A
 handle has one area at a time: current map or an owned exact-result map until its row expires, then cancel
 and wait 60 seconds to rotate. Its UI shows map/position and Stop/Off; it never opens the map or
 resumes after No or `/reload` automatically. Olympus sends each exact **Name-Realm** sought, or the
@@ -766,13 +769,7 @@ never gives another addon the census, other players' private data or Olympus's k
 its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
 you trust. After the update it loads once the game restarts (not on a `/reload`).
 
-The same registered handle can ask to contribute a client-owned page to the Olympus window when
-this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
-addons' data handles still work if that slot is occupied. Olympus keeps the window shell and puts
-the page in a fixed slot before Workshop; the addon builds and updates the content inside it. That
-page works while the data answer is pending or refused, and hosting it grants no Olympus data. Its
-behavior remains the responsibility of the addon that supplied it.
-For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
+*Continued in the README: [Other addons: the Olympus API (1.2.4)](https://github.com/dnl-gentile/olympus-addon#other-addons-the-olympus-api-124).*
 
 ## Install
 
