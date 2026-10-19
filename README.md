@@ -2954,13 +2954,15 @@ Council signing round trip: a throwaway key in a temporary folder, lists signed 
 `scripts/council-sign.py` and checked by `Olympus/Sign.lua` (never the author's key). This
 is the same command CI uses; it stops with a nonzero exit status on failure.
 The TOC file check also catches filename case mismatches on CI's Linux filesystem.
-From 1.2 the same checks cover the Blood Arena's companion folder, `Olympus_Arena/` (its Lua files,
+From 1.2 the same checks cover the Olympus Arena module folder, `Olympus_Arena/` (its Lua files,
 the files `Olympus_Arena/Olympus_Arena.toc` lists, its lint), and `bash tests/check-scripts.sh`
 builds both packages in a temporary copy: the release zip holds both folders and no test build, and
 `scripts/package.sh --test N` writes `Olympus/TestBuild.lua` (never committed: `.gitignore`) after
-`Core.lua` in its own copy of `Olympus.toc` alone, the companion keeping the base version. The
-arena's tests live in `tests/arena/` (one file per part, run by `tests/run.lua`), on the test world
-of `tests/arena/lib/world.lua`.
+`Core.lua` in its own copy of `Olympus.toc` alone, the Olympus Arena module keeping the base
+version. Packaging refuses a commit missing either folder or giving the two TOCs different base
+versions. The arena's tests live in `tests/arena/` (one file per part, run by `tests/run.lua`), on
+the test world of `tests/arena/lib/world.lua`.
+
 Remote rehearsal enrollment requires `/oly arena rehearsals on`; the default refuses it without
 creating a rehearsal store. `off` leaves a current rehearsal locally (a director closes their
 own rehearsal). A director's explicit Start remains available. Copper rehearsals are refused

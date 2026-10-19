@@ -1,0 +1,10 @@
+## Interface: 11509, 16001, 20506
+## Title: Olympus Companion Bridge
+## Notes: Private, read-only census checkpoint handoff for the Olympus Companion.
+## Author: Olympus addon contributors
+## Version: 0.1.0
+## Dependencies: Olympus
+## SavedVariables: OlympusCompanionDB
+## X-License: MIT
+
+Checkpoint.lua

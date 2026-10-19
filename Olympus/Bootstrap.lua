@@ -17,7 +17,7 @@ local others, nOthers = {}, 0 -- the other addons' errors seen, 200 at most
 
 -- Ours: the message names one of our files, or a line of the stack does. Not this handler's
 -- own line, which tops every stack it reads (the culprit comes below it).
--- 1.2: the Blood Arena's load-on-demand companion (Olympus_Arena) is ours too.
+-- 1.2: the load-on-demand Olympus Arena module (Olympus_Arena) is ours too.
 local OURS = "AddOns[\\/]Olympus[\\/]"
 local OURS_ARENA = "AddOns[\\/]Olympus_Arena[\\/]"
 local HANDLER = "AddOns[\\/]Olympus[\\/]Bootstrap%.lua"

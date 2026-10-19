@@ -10,8 +10,8 @@
 #                                 (the same no-wager policy as every other package)
 # A test build: dist/testN/Olympus/TestBuild.lua (ns.TEST_BUILD: its number, the base version, the
 # build time, an expiry 21 days later, the short commit), and only that copy of Olympus.toc edited
-# (its Version and Title, TestBuild.lua after Core.lua). The companion's Version stays the base
-# version, ns.VERSION, which its handoff compares (Olympus_Arena/Handoff.lua).
+# (its Version and Title, TestBuild.lua after Core.lua). The Olympus Arena module's Version stays
+# the base version, ns.VERSION, which its handoff compares (Olympus_Arena/Handoff.lua).
 # Every package: each file bets-only.txt names is left out of the stage and its line out of its
 # folder's TOC (the repository is not touched); every line left in each TOC must name a file of
 # the stage. Shared paths remain refused by the compliance gate (Olympus/Compliance.lua).
@@ -56,9 +56,7 @@ sha256_file() {
 	fi
 }
 
-VERSION=$(grep '^## Version:' Olympus/Olympus.toc | awk '{print $3}' | tr -d '\r')
-FOLDERS=(Olympus)
-if git cat-file -e HEAD:Olympus_Arena/Olympus_Arena.toc 2>/dev/null; then FOLDERS+=(Olympus_Arena); fi
+FOLDERS=(Olympus Olympus_Arena)
 
 MODE=release
 N=
@@ -81,6 +79,20 @@ if [ "$MODE" != test ] && [ -e Olympus/TestBuild.lua ]; then
 	fail "Olympus/TestBuild.lua exists: a release never carries a test build (delete it first)"
 fi
 clean_source
+
+# Olympus and Olympus_Arena are one release bundle. Refuse an incomplete commit instead of
+# silently producing a package that drops the load-on-demand Arena module. The module handoff
+# already requires the two base versions to match at runtime; enforce the same invariant before
+# publishing so a mixed install cannot be created by this script.
+for toc in Olympus/Olympus.toc Olympus_Arena/Olympus_Arena.toc; do
+	git cat-file -e "HEAD:$toc" 2>/dev/null || fail "package.sh requires $toc in the Olympus release bundle"
+done
+VERSION=$(git show HEAD:Olympus/Olympus.toc | awk '/^## Version:/ { sub(/\r$/, "", $3); print $3; exit }')
+ARENA_VERSION=$(git show HEAD:Olympus_Arena/Olympus_Arena.toc | awk '/^## Version:/ { sub(/\r$/, "", $3); print $3; exit }')
+[ -n "$VERSION" ] || fail "package.sh cannot read Olympus/Olympus.toc Version"
+[ -n "$ARENA_VERSION" ] || fail "package.sh cannot read Olympus_Arena/Olympus_Arena.toc Version"
+[ "$ARENA_VERSION" = "$VERSION" ] || fail "package.sh requires one bundle version: Olympus is $VERSION but Olympus_Arena is $ARENA_VERSION"
+
 if ! command -v zip >/dev/null 2>&1; then fail "package.sh requires zip"; fi
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1 && ! command -v openssl >/dev/null 2>&1; then
 	fail "package.sh requires sha256sum, shasum, or openssl"

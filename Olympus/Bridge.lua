@@ -7,9 +7,285 @@ local ADDON, ns = ...
 
 OlympusBridge = OlympusBridge or {}
 OlympusBridge.API_VERSION = 1
+OlympusBridge.CENSUS_CHECKPOINT_API_VERSION = 1
 
 local COUNCIL_MAX = 64  -- a copy never grows past this (the signed list itself stops at 30)
 local OBSERVERS_MAX = 8 -- one companion listens, realistically
+local CHECKPOINT_SCHEMA = "olympus-census-checkpoint"
+local CHECKPOINT_VERSION = 1
+local CHECKPOINT_MAX_GUILDS = 256
+local CHECKPOINT_MAX_SEEN = 256
+local CHECKPOINT_MAX_TIME = 9999999999
+
+-- The private desktop bridge gets census aggregates through this separate contract. It never
+-- receives OlympusDB (or a reference into it), chat, settings, keys, moderation records, member
+-- names, officers, reporters or the High Council. Every call builds fresh plain tables so a
+-- consumer can change its copy without changing Olympus.
+local function Whole(value, maximum)
+	local n = tonumber(value)
+	if not n or n ~= n then return 0 end
+	n = math.floor(n)
+	if n < 0 then return 0 end
+	if maximum and n > maximum then return maximum end
+	return n
+end
+
+local function Plain(value, maximum)
+	if type(value) ~= "string" then return nil end
+	local C = ns.Codec
+	local s = C and C.Plain and C.Plain(value) or value:gsub("[|%c]", "")
+	s = s:gsub("^%s+", ""):gsub("%s+$", "")
+	if maximum and #s > maximum then s = ns.Cut(s, maximum) end
+	return s ~= "" and s or nil
+end
+
+local function GuildKey(faction, realmGroup, name)
+	return ("g1:%s:%s:%s"):format(faction:lower(), realmGroup:lower(), name:lower())
+end
+
+local function ReporterCount(vouch)
+	local n = 0
+	if type(vouch) == "table" then
+		for _ in pairs(vouch) do
+			n = n + 1
+			if n >= 8 then break end
+		end
+	end
+	return n
+end
+
+local function CensusScope()
+	local realm = Plain(ns.realm or (ns.CurrentRealm and ns.CurrentRealm()), 80)
+	local realmGroup = Plain(ns.group, 160) or realm
+	local faction = ns.faction == "Alliance" and "Alliance" or ns.faction == "Horde" and "Horde" or nil
+	if not realm or not realmGroup or not faction then return nil end
+	return { realm = realm, realmGroup = realmGroup, faction = faction }
+end
+
+local function GuildEntry(source, scope, now)
+	local g = type(source) == "table" and source.g
+	local name = type(source) == "table" and Plain(source.name, 96)
+	if type(g) ~= "table" or not name then return nil end
+
+	local observedAt = Whole(g.t, CHECKPOINT_MAX_TIME)
+	local members = Whole(g.total, ns.Codec and ns.Codec.GUILD_CAP or 1000)
+	local counted = source.counted == true
+	-- Data.Summary guarantees that a fresh guild is inside the longer counted window. Keep
+	-- that invariant explicit at this narrow boundary too, so online can never exceed the
+	-- exported character total even if an incomplete source slips through during startup.
+	local fresh = source.fresh == true and counted
+	local online = fresh and math.min(members, Whole(g.online, members)) or 0
+	local dispute
+	if ns.Data and type(ns.Data.Dispute) == "function" then
+		local ok, result = pcall(ns.Data.Dispute, g, now)
+		if ok and type(result) == "table" then dispute = result end
+	end
+	local provenance = {
+		source = g.mine and "roster" or "relay",
+		reporters = g.mine and 1 or ReporterCount(g.vouch),
+		disputed = dispute and dispute.disputed == true or false,
+		singleSource = dispute and dispute.single ~= nil or false,
+	}
+	provenance.realm = Plain(g.realm or g.from, 80)
+	provenance.heardOn = Plain(g.heardOn, 80)
+
+	local out = {
+		key = GuildKey(scope.faction, scope.realmGroup, name),
+		name = name,
+		members = members,
+		online = online,
+		fresh = fresh,
+		counted = counted,
+		observedAt = observedAt,
+		provenance = provenance,
+	}
+	local serverTime = Whole(g.st, CHECKPOINT_MAX_TIME)
+	if serverTime > 0 then out.observedAtServer = serverTime end
+	return out
+end
+
+local function SeenEntry(source, scope)
+	if type(source) ~= "table" then return nil end
+	local name = Plain(source.name, 96)
+	if not name then return nil end
+	return {
+		key = GuildKey(scope.faction, scope.realmGroup, name),
+		name = name,
+		online = Whole(source.online, ns.Codec and ns.Codec.GUILD_CAP or 1000),
+		capped = source.capped == true,
+		observedAt = Whole(source.t, CHECKPOINT_MAX_TIME),
+	}
+end
+
+local function SortAndBound(byKey, maximum)
+	local out = {}
+	for _, value in pairs(byKey) do out[#out + 1] = value end
+	table.sort(out, function(a, b) return a.key < b.key end)
+	while #out > maximum do out[#out] = nil end
+	return out
+end
+
+local function Summary(guilds, seen, linkedAlts)
+	local out = {
+		members = 0,
+		characters = 0,
+		linkedAlts = 0,
+		online = 0,
+		guilds = #guilds,
+		freshGuilds = 0,
+		seenOnlyGuilds = #seen,
+		newestObservedAt = 0,
+	}
+	for _, g in ipairs(guilds) do
+		if g.counted then out.characters = out.characters + g.members end
+		if g.fresh then
+			out.freshGuilds = out.freshGuilds + 1
+			out.online = out.online + g.online
+		end
+		if g.observedAt > out.newestObservedAt then out.newestObservedAt = g.observedAt end
+	end
+	out.linkedAlts = math.min(out.characters, Whole(linkedAlts, out.characters))
+	out.members = out.characters - out.linkedAlts
+	return out
+end
+
+-- Versioned, additive, read-only census checkpoint source for the private bridge addon. The
+-- bridge addon adds checkpoint identity, previousKey and tombstones in its own SavedVariables;
+-- Olympus deliberately knows nothing about that file.
+function OlympusBridge.GetCensusCheckpoint()
+	local D = ns.Data
+	if type(D) ~= "table" or type(D.Summary) ~= "function" then return nil end
+	local ok, source = pcall(D.Summary)
+	if not ok or type(source) ~= "table" then return nil end
+
+	local scope = CensusScope()
+	if not scope then return nil end
+	local now = Whole(ns.Now and ns.Now(), CHECKPOINT_MAX_TIME)
+	local serverNow
+	if type(D.ServerTime) == "function" then
+		local serverOK, value = pcall(D.ServerTime)
+		if serverOK then
+			value = Whole(value, CHECKPOINT_MAX_TIME)
+			if value > 0 then serverNow = value end
+		end
+	end
+
+	local guildByKey = {}
+	for _, candidate in ipairs(source.guilds or {}) do
+		local entry = GuildEntry(candidate, scope, now)
+		if entry then
+			local old = guildByKey[entry.key]
+			if not old or entry.observedAt > old.observedAt then guildByKey[entry.key] = entry end
+		end
+	end
+	local guilds = SortAndBound(guildByKey, CHECKPOINT_MAX_GUILDS)
+
+	local seenByKey = {}
+	for _, candidate in ipairs(source.seen or {}) do
+		local entry = SeenEntry(candidate, scope)
+		if entry and not guildByKey[entry.key] then
+			local old = seenByKey[entry.key]
+			if not old or entry.observedAt > old.observedAt then seenByKey[entry.key] = entry end
+		end
+	end
+	local seen = SortAndBound(seenByKey, CHECKPOINT_MAX_SEEN)
+
+	local checkpoint = {
+		schema = CHECKPOINT_SCHEMA,
+		version = CHECKPOINT_VERSION,
+		capturedAt = now,
+		timeSource = serverNow and "server" or "local",
+		scope = scope,
+		guilds = guilds,
+		seenOnly = seen,
+		summary = Summary(guilds, seen, source.alts),
+	}
+	if serverNow then checkpoint.capturedAtServer = serverNow end
+	return checkpoint
+end
+
+-- Sections: one versioned, read-only door per kind of data for the Companion (Daniel: more
+-- "ports" than the census). A module's exporter returns only what every member already sees on
+-- Olympus's own pages; this registry copies it into fresh plain tables, within fixed limits, and
+-- the private sidecar (OlympusCompanionBridge) saves only the sections it knows at logout. Never a
+-- BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury items or
+-- anything private to an audience the player is not in: an exporter that would need one does not
+-- belong here.
+OlympusBridge.SECTIONS_API_VERSION = 1
+OlympusBridge.SECTION_LIMITS = { sections = 16, depth = 5, values = 1500, string = 120 }
+
+local sections, sectionNames = {}, {}
+
+-- Registers `name` (lowercase letters, digits, "_"); a name is taken once, by its first exporter.
+function OlympusBridge.RegisterSection(name, version, exporter)
+	if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or #name > 32 then return false, "name" end
+	if type(version) ~= "number" or version < 1 or version ~= math.floor(version) then return false, "version" end
+	if type(exporter) ~= "function" then return false, "exporter" end
+	if sections[name] then return false, "taken" end
+	if #sectionNames >= OlympusBridge.SECTION_LIMITS.sections then return false, "full" end
+	sections[name] = { version = version, exporter = exporter }
+	sectionNames[#sectionNames + 1] = name
+	table.sort(sectionNames)
+	return true
+end
+
+-- The registered sections, by name: { { name = , version = }, ... } (a fresh list).
+function OlympusBridge.Sections()
+	local out = {}
+	for i, name in ipairs(sectionNames) do out[i] = { name = name, version = sections[name].version } end
+	return out
+end
+
+-- A plain copy within the limits: strings cut and cleaned, finite numbers, booleans, tables with
+-- string or whole-number keys; anything else (functions, frames, cycles) is dropped. Past the value
+-- budget the copy stops: a section is never half a secret, only shorter.
+local function SectionCopy(value, depth, budget)
+	local t = type(value)
+	if t == "string" then
+		budget.left = budget.left - 1
+		return Plain(value, OlympusBridge.SECTION_LIMITS.string)
+	elseif t == "number" then
+		budget.left = budget.left - 1
+		if value ~= value or value == math.huge or value == -math.huge then return nil end
+		return value
+	elseif t == "boolean" then
+		budget.left = budget.left - 1
+		return value
+	elseif t ~= "table" or depth >= OlympusBridge.SECTION_LIMITS.depth then
+		return nil
+	end
+	local keys = {}
+	for k in pairs(value) do
+		local kt = type(k)
+		if (kt == "string" and k:match("^[%a_][%w_]*$") and #k <= 32) or (kt == "number" and k >= 1 and k == math.floor(k)) then
+			keys[#keys + 1] = k
+		end
+	end
+	table.sort(keys, function(a, b)
+		if type(a) ~= type(b) then return type(a) == "number" end
+		return a < b
+	end)
+	local out = {}
+	for _, k in ipairs(keys) do
+		if budget.left <= 0 then break end
+		local v = SectionCopy(value[k], depth + 1, budget)
+		if v ~= nil then out[k] = v end
+	end
+	return out
+end
+
+-- One section now, as a fresh plain table: { name, version, data }; nil when unknown or when its
+-- exporter has nothing or fails (logged nowhere: the Companion just shows nothing new).
+function OlympusBridge.GetSection(name)
+	local entry = type(name) == "string" and sections[name]
+	if not entry then return nil end
+	local ok, data = pcall(entry.exporter)
+	if not ok or type(data) ~= "table" then return nil end
+	return { name = name, version = entry.version,
+		data = SectionCopy(data, 0, { left = OlympusBridge.SECTION_LIMITS.values }) }
+end
+
+OlympusBridge.RegisterSection("census", 1, OlympusBridge.GetCensusCheckpoint)
 
 -- The King's screen while the councillors' names are hidden there (his stream, ns.CouncilMasked,
 -- 0.9.9): the chats put no mark on a councillor's line and /oly council cuts each name short, so
