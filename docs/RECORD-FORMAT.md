@@ -242,8 +242,10 @@ members {1..7, 9}         -> "fe8"
   64-character hex string, not raw bytes.
 - **Stored.** `head = h_n` with `n = #lines`. `marks` holds `"i:h_i"` for every S, C and Z line.
 - **Check.** Recompute every `h_i`. The session is valid when every mark equals its `h_i`,
-  `head` equals `h_n`, and `id` equals `S[5] .. ":" .. S[3]`. The first line whose mark
-  differs is where the file was changed.
+  `head` equals `h_n`, and `id` equals `S[5] .. ":" .. S[3]`. Marks exist only for S, C and Z
+  lines, so the first mark that differs, at line `i`, places the change after the previous
+  mark's line and at or before line `i`. An M or E line edited after the last C line breaks
+  only the Z mark and `head`.
 
 Vectors (checked against Python's `hashlib`):
 
