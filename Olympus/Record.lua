@@ -9,7 +9,9 @@ local L = ns.L
 --     first sight), then per checkpoint who is on the roster, who is online and whose level changed;
 --   - the first census report this client accepts (Data.Receive) from each guild in each quarter
 --     hour;
---   - who wrote it: character, GUID, guild and rank, faction, realm, versions, BattleTag if any.
+--   - who wrote it: character, GUID, guild and rank, faction, realm, versions, locale, and a
+--     SHA-256 hash of the BattleTag if the game gives one (never the tag itself).
+-- Only for a member of an Olympus guild (ns.IsMember): a session begins and stays only there.
 -- Every record is one line of text, and each line is hashed into a chain (SHA-256, Sign.SHA256)
 -- that starts from the witness's GUID and the session's start. Nothing secret goes into the chain,
 -- so whoever edits the file can compute it again: it proves that the file is unedited only up to
@@ -29,10 +31,11 @@ Record.SLOT = 15 * 60              -- checkpoints at each quarter hour of the se
 Record.SLOT_LATE = 5 * 60          -- a checkpoint not read this long after its time (combat) is missed
 Record.TICK = 5                    -- how often the clock is looked at while record mode is on
 Record.READ_WAIT = 4               -- the roster read this long after asking the server, at the latest
-Record.READ_TRIES = 3              -- asked again while the game gives fewer rows than members
+Record.READ_TRIES = 3              -- reads (one per ask, about 5 s apart) of a roster with fewer rows than members
+Record.EMPTY_WAIT = 10             -- a roster not given yet (no member, no row) asked again this often
 Record.MARK_GAP = 60               -- one /oly record mark a minute
 Record.EVENTS_PER_DAY = 7000       -- census report lines kept a UTC day at most (70 guilds: 6,720)
-Record.LINES_MAX = 30000           -- lines a file holds at most (about 2.5 MB): then nothing more
+Record.LINES_MAX = 120000          -- lines a file holds at most (about 10 MB): then nothing more
 Record.HASH_BUDGET = 2048          -- bytes of lines chained per frame (the rest on the next frames)
 
 ---------------------------------------------------------------------------
@@ -51,6 +54,10 @@ function Record.Hash(text) return Record.Hex(ns.Sign.SHA256(text)) end
 function Record.Link(prev, line) return Record.Hash(prev .. "|" .. line) end
 -- The seed, from the S line's GUID and start fields as they are written.
 function Record.Seed(guid, start) return Record.Hash(Record.SEED .. guid .. "|" .. start) end
+-- The S line's field 14: a BattleTag as a hash, never the tag (the checkers see two files of one
+-- person as one witness; anyone who guesses a tag can test it, so it is a pseudonym, not a secret).
+Record.TAG_SEED = "olympus-record-1|battletag|"
+function Record.TagHash(tag) return Record.Hash(Record.TAG_SEED .. tag) end
 
 -- A text field: every control byte, " \ | , and : becomes _ (bytes of UTF-8 letters stay as they
 -- are), so no line ever needs an escape in the saved file. nil is the empty field.
@@ -104,9 +111,11 @@ function Record.Split(line)
 end
 local function Line(...) return table.concat({ ... }, "|") end
 
--- A session as the file holds it: true, the chain's head and the lines it covers when every stored
--- hash (marks, head) is what its lines give; else false, the first line found wrong (0: the session
--- itself) and why.
+-- A written session as the file holds it: true, the chain's head and its number of lines when its
+-- lines are an S line, then no S or Z line, then one Z line last, and every stored hash (marks,
+-- head) and n is what its lines give; else false, the first line found wrong (0: the session
+-- itself) and why. (A session is written only after its Z line and all its hashes: a logout, an
+-- off, a change of guild or a full file ends it first.)
 function Record.Verify(s)
 	if type(s) ~= "table" or type(s.lines) ~= "table" then return false, 0, "no lines" end
 	local first = s.lines[1]
@@ -119,20 +128,22 @@ function Record.Verify(s)
 		if not i then return false, 0, "a mark that is no mark: " .. tostring(m) end
 		marks[tonumber(i)] = hex
 	end
-	local n, upto = #s.lines, tonumber(s.n) or #s.lines
-	if upto > n then return false, 0, "n is past the last line" end
-	local h, head = Record.Seed(f[5], f[3]), nil
+	local n = #s.lines
+	if s.n ~= nil and tonumber(s.n) ~= n then return false, 0, "n is not the number of lines" end
+	local h = Record.Seed(f[5], f[3])
 	for i = 1, n do
 		local line = s.lines[i]
 		if type(line) ~= "string" then return false, i, "a line that is not text" end
+		local kind = line:sub(1, 2)
+		if i > 1 and kind == "S|" then return false, i, "an S line after line 1" end
+		if i < n and kind == "Z|" then return false, i + 1, "a line after the Z line" end
+		if i == n and kind ~= "Z|" then return false, i, "the last line is no Z line" end
 		h = Record.Link(h, line)
 		if marks[i] and marks[i] ~= h then return false, i, "its mark is not its hash" end
 		marks[i] = nil
-		if i == upto then head = h end
 	end
 	if next(marks) then return false, next(marks), "a mark past the last line" end
-	if upto == 0 then head = Record.Seed(f[5], f[3]) end
-	if s.head ~= nil and s.head ~= head then return false, upto, "the head is not the hash of line n" end
+	if s.head ~= nil and s.head ~= h then return false, n, "the head is not the hash of line n" end
 	return true, h, n
 end
 
@@ -151,6 +162,8 @@ local function Text(v)
 end
 local function Now() return ns.Data and ns.Data.ServerTime and ns.Data.ServerTime() or nil end
 local function InCombat() return InCombatLockdown and InCombatLockdown() and true or false end
+-- A member of an Olympus guild (Core.lua): record mode writes nothing for anyone else.
+local function Member() return type(ns.IsMember) == "function" and ns.IsMember() == true end
 local function Clock(t, short)
 	if type(t) ~= "number" or not date then return "?" end
 	return date(short and "!%H:%M UTC" or "!%Y-%m-%d %H:%M:%S UTC", t)
@@ -161,7 +174,7 @@ local lines = 0      -- lines in the whole file (Record.LINES_MAX)
 local loaded = 0     -- sessions the game loaded back from the file at login
 local persisted = false -- the file loaded back holds a logout's write (the game loads saved data)
 local cur            -- the session being written (Begin)
-local pending        -- the checkpoint being read: { kind, slot, tries }
+local pending        -- the checkpoint being read: { kind, slot, seq (its asks), asked, read, tries, again }
 local markWanted, lastMark
 
 -- OlympusRecordDB, made when create (the first /oly record on). nil when it is another format's.
@@ -237,7 +250,7 @@ local function TestBuildN()
 	return n and n >= 1 and n <= 999 and n == math.floor(n) and n or nil
 end
 -- The player's own BattleTag (BNGetInfo's second return, as Blizzard's FriendsFrame reads it), nil
--- when the game gives none.
+-- when the game gives none. Only its hash is written (Record.TagHash), and it is never shown.
 local function BattleTag()
 	if type(BNGetInfo) ~= "function" then return nil end
 	local ok, _, tag = pcall(BNGetInfo)
@@ -250,18 +263,37 @@ local function ClientBuild()
 	return version, interface
 end
 
+-- The last quarter hour this character's latest session in the file read in this guild, so that a
+-- /reload just after a slot does not read it again (0 when the file holds no such session).
+local function LastSlot(guild)
+	for k = #db.sessions, 1, -1 do
+		local s = db.sessions[k]
+		if type(s) == "table" and s.char == ns.me and type(s.lines) == "table" then
+			if Record.Split(s.lines[1] or "")[6] ~= Field(guild) then return 0 end
+			for i = #s.lines, 2, -1 do
+				local line = s.lines[i]
+				if type(line) == "string" and line:sub(1, 4) == "C|Q|" then return tonumber(Record.Split(line)[3]) or 0 end
+			end
+			return 0
+		end
+	end
+	return 0
+end
+
 -- A session: one login (or /reload) of this character while record mode is on, in one guild.
 local function Begin(now, guild, rankName, rankIndex)
 	local guid = Text(UnitGUID and UnitGUID("player"))
 	local build, interface = ClientBuild()
+	local tag = BattleTag()
 	local first = Line("S", "1", Int(now), Field(ns.me), Field(guid), Field(guild), Int(rankIndex), Field(rankName),
 		Field(ns.faction or (ns.Faction and ns.Faction())), Field(ns.realm), Field(ns.group), Field(ns.VERSION),
-		Int(TestBuildN()), Field(BattleTag()), Int(interface), Field(build), Field(GetLocale and GetLocale()))
+		Int(TestBuildN()), tag and Record.TagHash(tag) or "", Int(interface), Field(build), Field(GetLocale and GetLocale()))
 	local f = Record.Split(first)
+	local lastSlot = LastSlot(guild)
 	local s = { id = f[5] .. ":" .. f[3], char = ns.me, start = now, lines = {}, marks = {}, n = 0 }
 	db.sessions[#db.sessions + 1] = s
 	cur = { s = s, guild = guild, dict = {}, levels = {}, top = 0, prev = Record.Seed(f[5], f[3]), hashed = 0,
-		markAt = {}, heard = {}, checkpoints = 0, events = 0, skipped = 0, lastSlot = 0, battleTag = f[14] }
+		markAt = {}, heard = {}, checkpoints = 0, events = 0, skipped = 0, lastSlot = lastSlot, battleTag = f[14] ~= "" }
 	s.head = cur.prev
 	Append(first, true)
 end
@@ -331,15 +363,18 @@ local function RequestRoster()
 		GuildRoster()
 	end
 end
+-- Each ask (seq) of the server is read once: 1 s after the game's GUILD_ROSTER_UPDATE, or READ_WAIT
+-- after the ask at the latest. Another ask, when one is needed, comes from the clock (Tick).
 local Read
 local function Ask(p)
 	pending = p
-	p.tries = (p.tries or 0) + 1
+	p.seq, p.asked, p.again = (p.seq or 0) + 1, Now(), nil
 	RequestRoster()
-	ns.After(Record.READ_WAIT, "record read", function() Read(p) end)
+	local seq = p.seq
+	ns.After(Record.READ_WAIT, "record read", function() Read(p, seq) end)
 end
-Read = function(p)
-	if pending ~= p or not cur then return end
+Read = function(p, seq)
+	if pending ~= p or not cur or seq ~= p.seq or p.read == seq then return end
 	if InCombat() then
 		p.waiting = true -- (the clock's next look reads it, out of combat)
 		return
@@ -347,8 +382,20 @@ Read = function(p)
 	local at = Now()
 	if not at then return end
 	local snap = ReadRoster()
-	-- (Right after login the game may give no roster yet: asked again too.)
-	if (#snap.rows < snap.total or snap.total == 0) and p.tries < Record.READ_TRIES then return Ask(p) end
+	p.read = seq
+	-- No roster yet (right after login the game may give none): never a checkpoint of nobody. Asked
+	-- again until the slot is too late, then missed (no C line).
+	if snap.total == 0 or #snap.rows == 0 then
+		p.again = (p.asked or at) + Record.EMPTY_WAIT
+		return
+	end
+	if #snap.rows < snap.total then
+		p.tries = (p.tries or 0) + 1
+		if p.tries < Record.READ_TRIES then
+			p.again = (p.asked or at) + Record.READ_WAIT
+			return
+		end
+	end
 	pending = nil
 	Store(p, snap, at)
 end
@@ -360,18 +407,26 @@ local function Tick()
 	if not now then return end
 	local guild, rankName, rankIndex = GetGuildInfo("player")
 	guild = Text(guild)
-	if cur and guild ~= cur.guild then End("guild") end
+	-- A loading screen's moment: still in a guild, its name not given yet (Bank.lua's Loading). It
+	-- ends nothing and begins nothing.
+	if not guild and IsInGuild and IsInGuild() then return end
+	local member = guild ~= nil and Member()
+	if cur and (not member or guild ~= cur.guild) then End("guild") end
 	if cur and lines >= Record.LINES_MAX then End("full") end
 	if not cur then
-		if not guild or lines >= Record.LINES_MAX then return end
+		if not member or lines >= Record.LINES_MAX then return end
 		Begin(now, guild, Text(rankName), tonumber(Public(rankIndex)))
 	end
 	if pending then
 		if now - pending.slot > Record.SLOT_LATE then
 			pending = nil -- (missed: the C lines show which checkpoints were read)
-		elseif pending.waiting and not InCombat() then
+		elseif InCombat() then
+			return
+		elseif pending.waiting then
 			pending.waiting = nil
-			Read(pending)
+			Read(pending, pending.seq)
+		elseif pending.again and now >= pending.again then
+			Ask(pending)
 		end
 		return
 	end
@@ -393,9 +448,10 @@ local function OnRoster()
 	local p = pending
 	if not p or p.soon then return end
 	p.soon = true
+	local seq = p.seq
 	ns.After(1, "record roster", function()
 		p.soon = nil
-		Read(p)
+		Read(p, seq)
 	end)
 end
 local function OnLogout()
@@ -471,8 +527,10 @@ function Record.StatusText()
 	elseif Record.On() then
 		Add(lines >= Record.LINES_MAX and L.RECORD_FULL:format(lines) or now and L.RECORD_WAITING or L.RECORD_NO_CLOCK)
 	end
-	local tag = cur and cur.battleTag or Field(BattleTag())
-	Add(tag ~= "" and L.RECORD_BATTLETAG:format(tag) or L.RECORD_NO_BATTLETAG)
+	-- (Never the tag itself, nor its hash: this window is the one witnesses screenshot and stream.)
+	local tagged
+	if cur then tagged = cur.battleTag else tagged = BattleTag() ~= nil end
+	Add(tagged and L.RECORD_BATTLETAG or L.RECORD_NO_BATTLETAG)
 	local today = now and db and db.eventsDay == math.floor(now / 86400) and db.events or 0
 	Add(L.RECORD_EVENTS:format(today, Record.EVENTS_PER_DAY, cur and cur.skipped or 0))
 	Add(persisted and L.RECORD_LOADED:format(loaded) or L.RECORD_NOT_LOADED)
@@ -503,6 +561,7 @@ function Record.Slash(rest)
 	local verb = (tostring(rest or "")):lower():match("^%s*(%S*)") or ""
 	if verb == "" or verb == "status" then return Record.ShowStatus() end
 	if verb == "on" then
+		if not Member() then return ns.Print(L.RECORD_NOT_MEMBER) end
 		local d = Open(true)
 		if not d then return ns.Print(L.RECORD_OTHER_FORMAT) end
 		if not Now() then return ns.Print(L.RECORD_NO_CLOCK) end

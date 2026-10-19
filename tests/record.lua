@@ -47,20 +47,22 @@ end
 -- w.step(t) runs the seconds up to t (its timers, its 5-second clock, the server's roster answer one
 -- second after each ask), w.event(name), w.login(), w.logout(), w.slash(text). Every way a message
 -- could leave is counted (w.sent); the game's globals it reads are the world's, put back by w.close().
-local GLOBALS = { "OlympusRecordDB", "GetGuildInfo", "GetNumGuildMembers", "GetGuildRosterInfo", "UnitGUID", "BNGetInfo",
+local GLOBALS = { "OlympusRecordDB", "GetGuildInfo", "IsInGuild", "GetNumGuildMembers", "GetGuildRosterInfo", "UnitGUID", "BNGetInfo",
 	"InCombatLockdown", "C_GuildInfo", "GuildRoster", "GetBuildInfo", "GetLocale", "C_ChatInfo", "SendChatMessage",
 	"SendAddonMessage", "GetServerTime", "issecretvalue" }
 local function RecordWorld(o)
 	o = o or {}
 	local w = { clock = o.clock or (T14 - 60), combat = false, roster = o.roster or SampleRoster(), guild = o.guild or "Olympus Example",
 		rank = o.rank or 4, rankName = o.rankName or "Soldier", sent = 0, timers = {}, tickers = {}, events = {}, on = {},
-		prints = {}, copies = {}, asks = 0, battleTag = o.battleTag }
+		prints = {}, copies = {}, asks = 0, askedAt = {}, battleTag = o.battleTag }
 	local saved = {}
 	for _, k in ipairs(GLOBALS) do saved[k] = rawget(_G, k) end
 	local function Count() w.sent = w.sent + 1 end
 	OlympusRecordDB = o.db
 	GetServerTime = function() return w.clock end
-	GetGuildInfo = function() if w.guild then return w.guild, w.rankName, w.rank end end
+	-- (w.loading: a loading screen's moment, still in the guild but its name not given yet.)
+	GetGuildInfo = function() if w.guild and not w.loading then return w.guild, w.rankName, w.rank end end
+	IsInGuild = function() return w.guild ~= nil end
 	GetNumGuildMembers = function()
 		local online = 0
 		for _, m in ipairs(w.roster) do if m.online then online = online + 1 end end
@@ -77,6 +79,7 @@ local function RecordWorld(o)
 	InCombatLockdown = function() return w.combat end
 	C_GuildInfo = { GuildRoster = function()
 		w.asks = w.asks + 1
+		w.askedAt[#w.askedAt + 1] = w.clock
 		w.timers[#w.timers + 1] = { at = w.clock + 1, fn = function() w.event("GUILD_ROSTER_UPDATE") end }
 	end }
 	GuildRoster = function() error("C_GuildInfo.GuildRoster comes first") end
@@ -169,8 +172,10 @@ test("record mode: the format's fields, bitmaps and hash rule (SHA-256, the vect
 		-- The vectors (checked against Python's hashlib when written).
 		local seed = R.Seed("Player-0000-00000001", "1792483200")
 		eq(seed, "fb8d3cadfb9b6377f6f6ca518a1953bdd8edb24e424ee1aef982ecdc7e638b9f")
-		local line = "S|1|1792483200|Witness Example-ClassicBetaPvP|Player-0000-00000001|Olympus Example|4|Soldier|Alliance|ClassicBetaPvP|ClassicBetaPvP|1.2.5.1||SampleWitness#0000|16001|1.60.1.70450|enUS"
-		eq(R.Link(seed, line), "fab4a9c5c564c053fdf89d00322d9c59b253f74af68cf346ce6b51ac9aa5c080")
+		local tag = R.TagHash("SampleWitness#0000")
+		eq(tag, "973dcf3aa89dd097c64d6764c475996c11ee2aa22b4ec83c542453d341eb76eb", "field 14: the BattleTag's hash")
+		local line = "S|1|1792483200|Witness Example-ClassicBetaPvP|Player-0000-00000001|Olympus Example|4|Soldier|Alliance|ClassicBetaPvP|ClassicBetaPvP|1.2.5.1||" .. tag .. "|16001|1.60.1.70450|enUS"
+		eq(R.Link(seed, line), "b4d70a7f064a26ed45d75604d8a4279db182e0551066bbdd07cb98e4b3e289bf")
 		eq(R.Hash(""), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "Sign.SHA256 itself")
 	end)
 end)
@@ -281,7 +286,7 @@ test("record mode: each member is written once (M), then each checkpoint's roste
 	end)
 end)
 
-test("record mode: a partial roster is asked again, then written as it is with its rows; no guild is no session", function()
+test("record mode: a partial roster is asked again, about 5 s apart, then written as it is with its rows; no guild is no session", function()
 	InWorld(nil, function(w)
 		local R = w.R
 		w.partial = 6
@@ -290,6 +295,9 @@ test("record mode: a partial roster is asked again, then written as it is with i
 		w.step(T14 + 20)
 		local c = Typed(R, w.session(), "C")[1]
 		eq(w.asks, 3, "three asks while the game gave 6 rows of 8")
+		-- (Each ask read once: the game's answer and the 4-second fallback are one read, not two tries.)
+		eq(table.concat(w.askedAt, ","), table.concat({ T14, T14 + 5, T14 + 10 }, ","), "on the clock's looks, not at once")
+		eq(c[4], tostring(T14 + 12), "the third read, 12 s after the slot")
 		eq(c[6], "8"); eq(c[8], "6", "the rows read")
 		w.slash("status")
 		assert(w.copies[#w.copies].text:find(L.RECORD_PARTIAL, 1, true), "the status says how to get every row")
@@ -299,6 +307,87 @@ test("record mode: a partial roster is asked again, then written as it is with i
 		local n = #OlympusRecordDB.sessions
 		w.step(T14 + 16 * 60)
 		eq(#OlympusRecordDB.sessions, n, "and none begins without a guild")
+		w.slash("status")
+		assert(w.copies[#w.copies].text:find(L.RECORD_WAITING, 1, true))
+	end)
+end)
+
+-- A regression: a loading screen gives no guild name while the player is still in the guild
+-- (Bank.lua's Loading). That moment once ended the session as "guild", began a new one, wrote every
+-- member again and read the same quarter hour twice.
+test("record mode: a loading screen's moment (in the guild, its name not given yet) ends no session and writes no member again", function()
+	InWorld(nil, function(w)
+		local R = w.R
+		w.login()
+		w.slash("on")
+		w.step(T14 + 60)
+		local s = w.session()
+		w.loading = true
+		w.step(T14 + 66) -- (the clock looks every 5 s: one look at least while it lasts)
+		w.loading = false
+		w.step(T14 + 15 * 60 + 5)
+		eq(#OlympusRecordDB.sessions, 1, "the same session goes on")
+		eq(#Typed(R, s, "Z"), 0, "no end written")
+		eq(#Typed(R, s, "M"), 8, "each member once")
+		local cs = Typed(R, s, "C")
+		eq(#cs, 2); eq(cs[1][3], tostring(T14)); eq(cs[2][3], tostring(T14 + 15 * 60), "14:00 and 14:15, each once")
+		-- Out of the guild for real (the game says so): the session ends as before.
+		w.guild = nil
+		w.step(T14 + 15 * 60 + 15)
+		eq(Typed(R, s, "Z")[1][3], "guild")
+	end)
+end)
+
+-- A regression: a roster the game had not given yet (0 members right after login) was written as a
+-- checkpoint of 0 members and 0 online after three asks in about 4 s.
+test("record mode: a roster the game has not given yet is never written as a checkpoint; it is asked again and written once it comes, or the slot is missed", function()
+	InWorld({ roster = {} }, function(w)
+		local R = w.R
+		w.login()
+		w.slash("on")
+		w.step(T14 + 6)
+		eq(#Typed(R, w.session(), "C"), 0, "no checkpoint of nobody")
+		w.roster = SampleRoster() -- (the roster arrives 6 s after the slot)
+		w.step(T14 + 60)
+		local cs = Typed(R, w.session(), "C")
+		eq(#cs, 1, "written once it came")
+		eq(cs[1][3], tostring(T14)); eq(cs[1][4], tostring(T14 + 12), "at the next ask, 10 s after the first"); eq(cs[1][6], "8"); eq(cs[1][8], "8")
+	end)
+	InWorld({ roster = {} }, function(w)
+		w.login()
+		w.slash("on")
+		w.step(T14 + 6 * 60)
+		eq(#Typed(w.R, w.session(), "C"), 0, "never given within 5 minutes: missed, no C line")
+		eq(w.asks, 31, "asked every 10 s until 5 minutes after the slot, then no more")
+		w.step(T14 + 15 * 60 + 5)
+		eq(#Typed(w.R, w.session(), "C"), 0)
+		eq(w.asks, 32, "the next quarter hour is asked again")
+	end)
+end)
+
+-- A regression: record mode began a session in any guild, so a guild outside Olympus could have
+-- its roster written (the 09-28 methodology: the addon runs only for members of Olympus guilds).
+test("record mode: only for a member of an Olympus guild: on is refused elsewhere, and a session ends in a guild that is not one", function()
+	local db, w0 = InWorld({ guild = "Plain Example Guild" }, function(w)
+		eq(w.ns.IsFederation("Plain Example Guild"), false, "(the test's other guild is no Olympus guild)")
+		w.login()
+		w.slash("on")
+		eq(w.prints[#w.prints], L.RECORD_NOT_MEMBER)
+		w.step(T14 + 16 * 60)
+		eq(w.asks, 0, "its roster never read")
+	end)
+	eq(db, nil, "nothing made or written")
+	eq(w0.sent, 0)
+	InWorld(nil, function(w)
+		local R = w.R
+		w.login()
+		w.slash("on")
+		w.step(T14 + 5)
+		w.guild = "Plain Example Guild"
+		w.step(T14 + 16 * 60)
+		eq(#OlympusRecordDB.sessions, 1, "none begins in the other guild")
+		eq(Typed(R, w.session(), "Z")[1][3], "guild")
+		for _, line in ipairs(w.session().lines) do eq(line:find("Plain Example", 1, true), nil, line) end
 		w.slash("status")
 		assert(w.copies[#w.copies].text:find(L.RECORD_WAITING, 1, true))
 	end)
@@ -388,27 +477,47 @@ test("record mode: census reports Data.Receive takes are kept once per guild per
 	if not ok then error(err, 0) end
 end)
 
-test("record mode: the status is a copy window: what is written, the file to send, /reload or log out first, the BattleTag or none", function()
-	InWorld({ battleTag = "SampleWitness#0000" }, function(w)
-		w.login()
-		w.slash("on")
-		w.step(T14 + 5)
-		w.slash("")
-		local text = w.copies[#w.copies].text
-		eq(w.copies[#w.copies].title, L.RECORD_TITLE)
-		for _, want in ipairs({ L.RECORD_WHAT, L.RECORD_SEND, L.RECORD_FILE, L.RECORD_NOTHING_SENT, L.RECORD_NOT_LOADED,
-			L.RECORD_BATTLETAG:format("SampleWitness#0000"), L.RECORD_NEXT:format("14:15 UTC") }) do
-			assert(text:find(want, 1, true), want)
-		end
-		assert(L.RECORD_FILE:find("SavedVariables\\Olympus.lua", 1, true))
-		assert(L.RECORD_SEND:find("/reload", 1, true))
-		assert(text:find("Chain head after", 1, true))
-	end)
+test("record mode: the status is a copy window: what is written, the file to send, /reload or log out first; the BattleTag only as a hash in the file, never shown", function()
+	-- SHA-256 of "olympus-record-1|battletag|SampleWitness#0000" (checked against Python's hashlib).
+	local TAG_HASH = "973dcf3aa89dd097c64d6764c475996c11ee2aa22b4ec83c542453d341eb76eb"
+	for _, kings in ipairs({ false, true }) do
+		InWorld({ battleTag = "SampleWitness#0000" }, function(w)
+			w.ns.KingsScreen = function() return kings end -- (the King's stream too: the same window)
+			w.login()
+			w.slash("on")
+			w.step(T14 + 5)
+			w.slash("")
+			local text = w.copies[#w.copies].text
+			for _, never in ipairs({ "SampleWitness", "#0000", TAG_HASH:sub(1, 8) }) do
+				eq(text:find(never, 1, true), nil, "the window never shows the tag or its hash: " .. never)
+			end
+			eq(w.R.Split(w.session().lines[1])[14], TAG_HASH, "the S line holds the tag's hash, not the tag")
+			eq(w.R.TagHash("SampleWitness#0000"), TAG_HASH)
+			eq(w.copies[#w.copies].title, L.RECORD_TITLE)
+			for _, want in ipairs({ L.RECORD_WHAT, L.RECORD_SEND, L.RECORD_FILE, L.RECORD_NOTHING_SENT, L.RECORD_NOT_LOADED,
+				L.RECORD_BATTLETAG, L.RECORD_NEXT:format("14:15 UTC") }) do
+				assert(text:find(want, 1, true), want)
+			end
+			w.logout()
+			for _, line in ipairs(OlympusRecordDB.sessions[1].lines) do eq(line:find("SampleWitness", 1, true), nil, line) end
+			assert(L.RECORD_FILE:find("SavedVariables\\Olympus.lua", 1, true))
+			assert(L.RECORD_SEND:find("/reload", 1, true))
+			assert(text:find("Chain head after", 1, true))
+		end)
+	end
 	InWorld(nil, function(w)
 		w.login()
 		w.slash("status")
 		assert(w.copies[1].text:find(L.RECORD_NO_BATTLETAG, 1, true), "no BattleTag given: says so")
+		w.slash("on")
+		eq(w.R.Split(w.session().lines[1])[14], "", "and none is written")
 	end)
+	-- The units: characters on the roster, never "members" online; what it writes names the locale and
+	-- the test build too.
+	for _, k in ipairs({ "RECORD_MARK_DONE", "RECORD_LAST" }) do
+		eq(L[k]:find("members", 1, true), nil, k); assert(L[k]:find("characters", 1, true), k)
+	end
+	assert(L.RECORD_WHAT:find("language", 1, true) and L.RECORD_WHAT:find("test build", 1, true))
 	-- Every line in both languages.
 	local en, pt = {}, {}
 	assert(loadfile(ROOT .. "Olympus/Locales/RecordText.lua"))("Olympus", { L = en })
@@ -646,7 +755,7 @@ test("record mode: the sample files (tests/fixtures/record-sample.lua and -b.lua
 	for _, which in ipairs({ "A", "B" }) do
 		local parsed = C.Parse(files[which])
 		eq(parsed.OlympusDB.sessions, 3, "the reader reads the other variable too")
-		local sessions = C.Sessions(R, parsed.OlympusRecordDB)
+		local sessions = C.Sessions(R, parsed.OlympusRecordDB, names[which])
 		eq(#sessions, 1)
 		local e = sessions[1]
 		assert(e.ok, tostring(e.at) .. ": " .. tostring(e.why))
@@ -654,7 +763,8 @@ test("record mode: the sample files (tests/fixtures/record-sample.lua and -b.lua
 		print(("       sample %s: %s, %d lines, chain head %s"):format(which, e.id, e.n, e.head))
 		all[#all + 1] = e
 	end
-	eq(all[1].head, "8d4b9293d2601663f36c667d0ab4853a827023ddae3797ed0af6b2158b8d19ac", "witness A's head, as docs/RECORD-FORMAT.md gives it")
+	eq(all[1].head, "95bd06d6c5853eaad1af8e9e3d42c6c93cea3e8893226b367b586ba648683344", "witness A's head, as docs/RECORD-FORMAT.md gives it")
+	eq(all[2].head, "d50c51179f068b5bffa0a396a70f33f037f941e6659c4eb0771cbc20cfb8dbf0", "witness B's head, as docs/RECORD-FORMAT.md gives it")
 	local groups = C.Compare(all)
 	eq(#groups, 2, "14:00 (A alone) and 14:15 (both)")
 	eq(groups[2].slot, T14 + 15 * 60); eq(#groups[2].seen, 2); eq(groups[2].agree, true, "the same members and online members, though their numbers differ")
@@ -662,4 +772,184 @@ test("record mode: the sample files (tests/fixtures/record-sample.lua and -b.lua
 	local B = all[2].checkpoints[1]
 	B.onlineSet[1] = "Someone Else|Player-0000-000000FF"
 	eq(C.Compare(all)[2].agree, false)
+end)
+
+-- Regressions: a copy of a session with a line removed and every hash computed again passed
+-- record-check (it compared copies only when their n was equal, and used whichever file came
+-- first), and a copy with a line added after its Z line verified.
+test("record mode: copies of one session must be identical whatever the files' order, and nothing may follow the Z line; record-check exits 1", function()
+	local C = assert(loadfile(ROOT .. "scripts/record-check.lua"))("--module")
+	local R = C.Load()
+	local db = Witness("A")
+	local s = db.sessions[1]
+	-- Every hash computed again from the lines, as anyone holding the file can.
+	local function Rechained(lines)
+		local c = { id = s.id, char = s.char, start = s.start, lines = lines, marks = {} }
+		local f = R.Split(lines[1])
+		local h = R.Seed(f[5], f[3])
+		for i, line in ipairs(lines) do
+			h = R.Link(h, line)
+			local k = line:sub(1, 2)
+			if k == "S|" or k == "C|" or k == "Z|" then c.marks[#c.marks + 1] = i .. ":" .. h end
+		end
+		c.head, c.n = h, #lines
+		return { format = db.format, version = db.version, sessions = { c } }
+	end
+	eq(R.Verify(Rechained(s.lines).sessions[1]), true, "(the same lines chained again are the same session)")
+	local cut, added = {}, {}
+	for i, line in ipairs(s.lines) do
+		if i ~= 16 then cut[#cut + 1] = line end
+		added[i] = line
+	end
+	eq(s.lines[16]:sub(1, 2), "E|", "(line 16 of the sample is an E line)")
+	added[#added + 1] = ("C|Q|%d|%d|Olympus Example|8|9|8|9|ff|ff|"):format(T14 + 30 * 60, T14 + 30 * 60 + 2)
+	local cutDb, addedDb = Rechained(cut), Rechained(added)
+	eq(R.Verify(cutDb.sessions[1]), true, "a line removed, every hash again: the chain alone cannot tell")
+	local ok, at, why = R.Verify(addedDb.sessions[1])
+	eq(ok, false); eq(at, #s.lines + 1); eq(why, "a line after the Z line")
+	local noZ = Rechained({ s.lines[1], s.lines[2] })
+	eq(select(3, R.Verify(noZ.sessions[1])), "the last line is no Z line")
+	local twoS = Rechained({ s.lines[1], s.lines[1], s.lines[17] })
+	eq(select(3, R.Verify(twoS.sessions[1])), "an S line after line 1")
+	local wrongN = Rechained(s.lines)
+	wrongN.sessions[1].n = 16
+	eq(select(3, R.Verify(wrongN.sessions[1])), "n is not the number of lines")
+	local function Dedupe(...)
+		local all = {}
+		for _, pair in ipairs({ ... }) do
+			for _, e in ipairs(C.Sessions(R, pair[2], pair[1])) do all[#all + 1] = e end
+		end
+		return C.Dedupe(all)
+	end
+	for _, other in ipairs({ cutDb, addedDb }) do
+		for _, order in ipairs({ { { "day1", db }, { "day2", other } }, { { "day2", other }, { "day1", db } } }) do
+			local kept, conflicts = Dedupe(order[1], order[2])
+			eq(#conflicts, 1, "flagged whichever file comes first"); eq(#kept, 0, "and neither copy counted")
+			eq(table.concat(conflicts[1].files, ","), order[1][1] .. "," .. order[2][1])
+		end
+	end
+	local kept, conflicts = Dedupe({ "day1", db }, { "day2", Witness("A") })
+	eq(#conflicts, 0); eq(#kept, 1, "the same session in two days' files: kept once")
+	-- The command itself: the edited copy makes it exit 1.
+	local a, b = os.tmpname(), os.tmpname()
+	WriteFile(a, SavedFile({ { "OlympusRecordDB", db } }))
+	WriteFile(b, SavedFile({ { "OlympusRecordDB", cutDb } }))
+	local lua = (arg and arg[-1]) or "luajit"
+	local pipe = assert(io.popen(("%s %sscripts/record-check.lua %s %s; echo \"exit=$?\""):format(lua, ROOT, b, a)))
+	local out = pipe:read("*a")
+	pipe:close()
+	os.remove(a); os.remove(b)
+	assert(out:find("the copies differ", 1, true), out)
+	assert(out:find("exit=1", 1, true), out)
+end)
+
+-- A regression: record-check counted each session as a witness, so one character's two sessions
+-- in one quarter hour (a /reload just after it) showed as two witnesses agreeing.
+test("record mode: record-check counts each witness once per slot, its reading nearest the slot, and lists a reading more than 30 s after the slot apart", function()
+	local C = assert(loadfile(ROOT .. "scripts/record-check.lua"))("--module")
+	local R = C.Load()
+	-- Witness A takes 14:00 and logs out at 14:03; the game did not load the file back (the beta's bug),
+	-- so the next session, on again at 14:03, is in another file and reads 14:00 again.
+	local first = InWorld(nil, function(w) w.login(); w.slash("on"); w.step(T14 + 3 * 60); w.logout() end)
+	local second = InWorld({ clock = T14 + 3 * 60 }, function(w) w.login(); w.slash("on"); w.step(T14 + 4 * 60); w.logout() end)
+	eq(Typed(R, second.sessions[1], "C")[1][4], tostring(T14 + 3 * 60 + 2), "(the second session read 14:00 again)")
+	-- Witness B turns it on at 14:04:50: its 14:00 is read almost 5 minutes after the slot.
+	local late = InWorld({ clock = T14 + 4 * 60 + 50, me = "Witness Second-ClassicBetaPvP", guid = "Player-0000-0000000B" }, function(w)
+		w.login(); w.slash("on"); w.step(T14 + 5 * 60 + 30); w.logout()
+	end)
+	local all = {}
+	for _, f in ipairs({ { "a-1", first }, { "a-2", second }, { "b", late } }) do
+		for _, e in ipairs(C.Sessions(R, f[2], f[1])) do all[#all + 1] = e end
+	end
+	local g = C.Compare(all)[1]
+	eq(g.slot, T14)
+	eq(#g.seen, 1, "one witness, not two"); eq(g.seen[1].readings, 2); eq(g.seen[1].c.late, 2, "its reading nearest the slot")
+	eq(#g.late, 1, "B's reading is not one instant with A's"); eq(g.late[1].c.late, 4 * 60 + 52)
+	-- The command prints it so: one witness, how late each reading was, B's apart.
+	local paths, args = {}, {}
+	for k, db in ipairs({ first, second, late }) do
+		paths[k] = os.tmpname()
+		WriteFile(paths[k], SavedFile({ { "OlympusRecordDB", db } }))
+		args[k] = paths[k]
+	end
+	local pipe = assert(io.popen(("%s %sscripts/record-check.lua %s; echo \"exit=$?\""):format((arg and arg[-1]) or "luajit", ROOT, table.concat(args, " "))))
+	local out = pipe:read("*a")
+	pipe:close()
+	for _, path in ipairs(paths) do os.remove(path) end
+	assert(out:find("<Olympus Example>  1 witness(es), latest +2s: Witness Example-ClassicBetaPvP 8/5 +2s (2 readings)", 1, true), out)
+	assert(out:find("read more than 30 s after the slot, not one instant: Witness Second-ClassicBetaPvP 8/5 +292s", 1, true), out)
+	assert(out:find("exit=0", 1, true), out)
+	-- Two accounts' files of one person (one BattleTag hash) are one witness too.
+	local x = InWorld({ battleTag = "SampleWitness#0000" }, function(w) w.login(); w.slash("on"); w.step(T14 + 5); w.logout() end)
+	local y = InWorld({ battleTag = "SampleWitness#0000", me = "Witness Second-ClassicBetaPvP", guid = "Player-0000-0000000B" }, function(w)
+		w.login(); w.slash("on"); w.step(T14 + 5); w.logout()
+	end)
+	local both = {}
+	for _, f in ipairs({ { "x", x }, { "y", y } }) do
+		for _, e in ipairs(C.Sessions(R, f[2], f[1])) do both[#both + 1] = e end
+	end
+	eq(#C.Compare(both)[1].seen, 1, "one BattleTag: one witness")
+	-- With the file loaded back, a /reload just after 14:00 does not read 14:00 again.
+	local carried = InWorld({ db = first, clock = T14 + 3 * 60 }, function(w) w.login(); w.step(T14 + 4 * 60); w.logout() end)
+	eq(#carried.sessions, 2); eq(#Typed(R, carried.sessions[2], "C"), 0, "14:00 is already in the file")
+end)
+
+-- A regression: a file held 30,000 lines at most. A 1,000-member guild's witness who logs in again
+-- often filled it in about 20 hours, and then recorded nothing for the rest of the attempt.
+test("record mode: a day of 50-minute sessions in a 1000-member guild, with 70 guilds' reports, fills under a third of the file; a full file stops", function()
+	local roster = {}
+	for i = 1, 1000 do
+		roster[i] = Member(("Member %04d-ClassicBetaPvP%s"):format(i, i % 2 == 0 and "2" or ""), ("Player-0000-%08X"):format(i), "WARRIOR", 1 + i % 60, false)
+	end
+	local db, w = InWorld({ roster = roster }, function(w)
+		w.login()
+		w.slash("on")
+		local stop, nextRelog = T14 + 24 * 3600, T14 + 50 * 60
+		while w.clock < stop do
+			if w.clock % 900 == 0 then
+				local q = math.floor(w.clock / 900)
+				for i, m in ipairs(roster) do m.online = (i * 7 + q) % 10 < 4 end
+			end
+			if w.clock % 170 == 0 then
+				for g = 1, 70 do
+					w.R.Heard({ guild = ("Olympus Guild %02d"):format(g), total = 900 + g, online = 300, users = 9, st = w.clock - 1,
+						reporterFull = ("Reporter %02d-ClassicBetaPvP"):format(g) })
+				end
+			end
+			if w.clock >= nextRelog then
+				w.logout()
+				w.login()
+				nextRelog = nextRelog + 50 * 60
+			end
+			w.step(w.clock + 1)
+		end
+		w.logout()
+	end)
+	local lines, checkpoints = 0, 0
+	for _, s in ipairs(db.sessions) do
+		lines = lines + #s.lines
+		local z = w.R.Split(s.lines[#s.lines])
+		eq(z[1] .. z[3], "Zlogout", "no session ended full")
+		for _, line in ipairs(s.lines) do if line:sub(1, 2) == "C|" then checkpoints = checkpoints + 1 end end
+	end
+	eq(#db.sessions, 29)
+	eq(checkpoints, 96, "every quarter hour of the day, each once")
+	assert(lines * 3 < w.R.LINES_MAX, "both days of the attempt fit, with room to spare: " .. lines)
+	local bytes = #SavedFile({ { "OlympusRecordDB", db } })
+	print(("       a day, 29 sessions: %d lines, %d bytes on disk (%.0f a line)"):format(lines, bytes, bytes / lines))
+	-- The limit itself: a full file ends the session, and none begins until the file is sent.
+	InWorld(nil, function(w2)
+		w2.R.LINES_MAX = 11
+		w2.login()
+		w2.slash("on")
+		w2.step(T14 + 15 * 60 + 10)
+		local s = w2.session()
+		eq(s.lines[#s.lines], ("Z|%d|full|0"):format(T14 + 15 * 60 + 5))
+		w2.logout()
+		w2.login()
+		w2.step(T14 + 31 * 60)
+		eq(#OlympusRecordDB.sessions, 1)
+		w2.slash("status")
+		assert(w2.copies[#w2.copies].text:find(L.RECORD_FULL:format(12), 1, true))
+	end)
 end)
