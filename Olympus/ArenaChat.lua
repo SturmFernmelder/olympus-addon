@@ -330,9 +330,12 @@ local function MaySend(room)
 	local M = ns.Moderation
 	local off = M and M.SelfOff and M.SelfOff()
 	if off then return false, "netoff" end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers the fight rooms too (ArenaChat.Send tells why).
+	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers the fight rooms too (ArenaChat.Send tells why);
+	-- so does a chat warning's pause or hold ("paused", ChatStrikes.lua: WatchChat.ChatBlock).
 	local WC = ns.WatchChat
 	if WC and WC.SelfTimeout and WC.SelfTimeout() then return false, "timeout" end
+	local block = WC and WC.ChatBlock and WC.ChatBlock()
+	if block then return false, block end
 	local ev = Event(room)
 	if not ev then return false, "room" end
 	if not ArenaChat.IsOpen(room) then return false, "closed" end
@@ -427,14 +430,22 @@ function ArenaChat.Send(room, text)
 		return false, "room"
 	end
 	local A = ns.Arena
+	local WC = ns.WatchChat
 	local ok, why = A.Can("chat", room)
 	if not ok then
-		-- 1.1.6: a moderator's timeout: its own pop-up (who, until when, why).
-		local WC = ns.WatchChat
-		if why == "timeout" and WC and WC.RefuseSend and WC.RefuseSend() then return false, why end
+		-- 1.1.6: a moderator's timeout: its own pop-up (who, until when, why); a chat warning's
+		-- pause or hold, its own too.
+		if (why == "timeout" or why == "paused") and WC and WC.RefuseSend and WC.RefuseSend() then return false, why end
 		local key = "ARENA_CHAT_WHY_" .. tostring(why):upper()
 		ns.Print(rawget(L, key) or L.ARENA_CHAT_REFUSED)
 		return false, why
+	end
+	-- The chat warnings' words (WatchChat.RefuseSevere), on the line as typed: the fight rooms, /ola,
+	-- the arena's actions and the Bones pane all come here.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, "F")
+		if severe then return false, severe end
+		text = body or text
 	end
 	text = ArenaChat.Clean(text)
 	if text == "" then return false, "empty" end

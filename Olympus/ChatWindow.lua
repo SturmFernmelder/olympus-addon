@@ -91,7 +91,7 @@ local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "
 	alone = "CHATWIN_WHY_ALONE", fast = "CHATWIN_WHY_FAST", busy = "CHATWIN_WHY_BUSY", full = "CHATWIN_WHY_QUEUE",
 	dropped = "CHATWIN_WHY_QUEUE", cancelled = "CHATWIN_WHY_CANCELLED", revoked = "CHATWIN_WHY_REVOKED",
 	access = "CHATWIN_WHY_ACCESS", off = "CHATWIN_WHY_OFF", netoff = "CHATWIN_WHY_NETOFF", held = "CHATWIN_WHY_NETOFF",
-	timeout = "CHATWIN_WHY_TIMEOUT", severe = "CHATWIN_WHY_SEVERE", lockdown = "CHATWIN_WHY_LOCKDOWN",
+	timeout = "CHATWIN_WHY_TIMEOUT", severe = "CHATWIN_WHY_SEVERE", lockdown = "CHATWIN_WHY_LOCKDOWN", paused = "CHATWIN_WHY_PAUSED",
 	guild = "CHATWIN_WHY_GUILD", empty = "CHATWIN_WHY_EMPTY", size = "CHATWIN_WHY_SIZE", preview = "CHATWIN_WHY_PREVIEW",
 	gamepad = "CHATWIN_WHY_GAMEPAD" }
 -- The pointer's arrow: the game's tutorial arrow (Blizzard_TutorialTemplates), else the chat
@@ -3016,7 +3016,7 @@ local function Submit()
 		elseif logical then
 			local R = ns.ChatRooms
 			if type(R) == "table" and type(R.Send) == "function" then ok, why, left = R.Send(tier, outgoing) else ok, why = false, "room" end
-			if not ok and type(R) == "table" and type(R.Own) == "function" and R.Own(tier) then ChatWindow.Refused(tier, why) end
+			if not ok and why ~= "severe" and type(R) == "table" and type(R.Own) == "function" and R.Own(tier) then ChatWindow.Refused(tier, why) end
 		else
 			ok, why = ns.Channels.Send(tier, outgoing, nil, true)
 		end
@@ -3034,6 +3034,14 @@ local function Submit()
 			MarkDirty()
 		end
 		if why == "confirm" then keep = false end
+		-- A chat warning (WatchChat.RefuseSevere; the author: "apaga e esconde a mensagem"): the line
+		-- leaves the box, its reply too, and the keyboard goes (the pop-up's OK takes the next Enter).
+		if why == "severe" then
+			eb:SetText("")
+			ChatWindow.ClearReply(frame)
+			keep = false
+			MarkDirty()
+		end
 	end
 	if not keep then eb:ClearFocus() end
 	Hint()
@@ -3547,10 +3555,15 @@ function ChatWindow.CreateEmbedded(parent, opts)
 		elseif text:sub(1, 1) == "/" then ns.Print(L.CHATWIN_NO_SLASH:format(opts.label and opts.label() or "Bones"))
 		elseif opts.maySend() then
 			local sent, why = opts.send(ChatWindow.EncodeReply(p.reply, text))
-			if sent or why == "confirm" then
+			-- (A chat warning's refused line goes from the box too, as from the Chat tab's.)
+			if sent or why == "confirm" or why == "severe" then
 				self:SetText(""); ChatWindow.ClearReply(p); p:Render(true)
 			end
-			if why == "confirm" then keep = false end
+			if why == "confirm" or why == "severe" then keep = false end
+		else
+			-- Paused or held by a chat warning (or timed out): told why rather than nothing happening.
+			local WC = ChatWindow.Mod()
+			if WC and type(WC.RefuseSend) == "function" then WC.RefuseSend() end
 		end
 		if not keep then self:ClearFocus() end
 	end)
