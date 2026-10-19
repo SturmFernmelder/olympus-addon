@@ -122,3 +122,73 @@ test("1.0 the early supporters from two of the Treasurer's characters: each one'
 		if not ok then error(err, 0) end
 	end)
 end)
+
+test("1.0 the early supporters: an ask inside EARLY_GAP is answered once the gap is over, not at the asker's next ask; once a gap still", function()
+	h.WithThrone(function(w)
+		local T = ns.Treasury
+		local saved = { split = ns.splitNames, after = ns.After, inGuild = IsInGuild, archive = ns.rdb.treasuryArchive, early = ns.rdb.treasuryEarly }
+		local ok, err = pcall(function()
+			ns.splitNames = true
+			local timers = {}
+			ns.After = function(seconds, _, fn) timers[#timers + 1] = { at = w.clock + seconds, fn = fn } end
+			local function RunDue()
+				local due = timers
+				timers = {}
+				for _, t in ipairs(due) do if t.at <= w.clock then t.fn() else timers[#timers + 1] = t end end
+			end
+			local function Pieces()
+				local out = {}
+				for _, s in ipairs(w.sent) do if s.msg:sub(1, 3) == "TE~" then out[#out + 1] = s.msg end end
+				return out
+			end
+			ns.rdb.treasuryArchive = { ["0.9"] = { lines = { { name = "Alice Early", money = 100, how = "mail", t = w.clock - 1000 } }, closed = w.clock - 500 } }
+			ns.rdb.treasuryFlags = { ranking = true, at = w.clock - 1 }
+			ns.db.myCharacters = { [h.TREASURER_KEY] = true }
+			ns.db.keeperShares = { [h.TREASURER_KEY] = true }
+			h.AsTreasurer(); IsInGuild = saved.inGuild
+			-- An ask answered at once.
+			w.sent = {}
+			T.HandleEarlyAsk("CHANNEL", "Early Bird-Realm", "TQ~0")
+			eq(#Pieces(), 1)
+			-- A late login asks 100 seconds later: nothing yet (EARLY_GAP), its answer when the gap is over.
+			w.clock = w.clock + 100
+			w.sent = {}
+			T.HandleEarlyAsk("CHANNEL", "Late Login-Realm", "TQ~0")
+			T.HandleEarlyAsk("CHANNEL", "Later Login-Realm", "TQ~0")
+			eq(#Pieces(), 0, "EARLY_GAP apart")
+			w.clock = w.clock + T.EARLY_GAP - 100 - 1
+			RunDue()
+			eq(#Pieces(), 0, "not before the gap is over")
+			w.clock = w.clock + 1
+			RunDue()
+			eq(#Pieces(), 1, "answered once the gap is over, once however many asked")
+			w.clock = w.clock + T.EARLY_GAP - 30
+			RunDue()
+			eq(#Pieces(), 1, "and only then")
+			-- The list sent meanwhile by his own sending: the waiting answer sends nothing more.
+			w.clock = w.clock + 10
+			w.sent = {}
+			T.HandleEarlyAsk("CHANNEL", "Late Login-Realm", "TQ~0")
+			eq(#Pieces(), 0)
+			w.clock = w.clock + 20
+			T.SendEarly(true)
+			eq(#Pieces(), 1, "his own sending, forced")
+			w.clock = w.clock + T.EARLY_GAP
+			RunDue()
+			eq(#Pieces(), 1, "nothing more: the list went out inside that gap")
+			-- An ask inside the next gap waits again; his no meanwhile: it sends nothing.
+			w.sent = {}
+			T.SendEarly(true)
+			w.clock = w.clock + 10
+			T.HandleEarlyAsk("CHANNEL", "Late Login-Realm", "TQ~0")
+			eq(#Pieces(), 1)
+			ns.db.keeperShares = { [h.TREASURER_KEY] = false }
+			w.clock = w.clock + T.EARLY_GAP
+			RunDue()
+			eq(#Pieces(), 1, "his no: nothing more")
+		end)
+		ns.splitNames, ns.After, IsInGuild = saved.split, saved.after, saved.inGuild
+		ns.rdb.treasuryArchive, ns.rdb.treasuryEarly = saved.archive, saved.early
+		if not ok then error(err, 0) end
+	end)
+end)
