@@ -1687,14 +1687,14 @@ local function SendLines(target, list)
 end
 Count.SendLines = SendLines
 
--- A ledger line to every keeper online, then to the other ledger relays online while Comm's queue
--- has room past SEND_ROOM. (Sent to every relay alike, with room wanted for each before a push, a
--- council or King client online cost the other keepers a keeper's word; a 1.2.5.1 councillor drops
--- the line anyway.)
+-- A ledger line to every keeper online, then to the council relays online while Comm's queue has
+-- room past SEND_ROOM. (Sent to every relay alike, with room wanted for each before a push, a council
+-- or King client online cost the other keepers a keeper's word; a 1.2.5.1 councillor drops the line
+-- anyway.) Never to the King's client: as in 1.2.5.1, it does no background Church work.
 function Count.ToRelays(line)
 	for _, k in ipairs(Church.KeepersOnline(false)) do ns.Comm.Whisper(k.name, line, nil, false, false, nil, { owner = Count }) end
 	for _, k in ipairs(Church.LedgerRelaysOnline(false)) do
-		if not Church.IsKeeper(k.name) or Church.IsKing(k.name) then
+		if not Church.IsKeeper(k.name) and not Church.IsKing(k.name) then
 			if ns.Comm.QueueRoom() <= Count.SEND_ROOM then break end
 			ns.Comm.Whisper(k.name, line, nil, false, false, nil, { owner = Count })
 		end
@@ -1713,29 +1713,44 @@ end
 -- up from least lately, the desk first (1.2.1: each keeper online in turn. Asking only the first,
 -- nobody ever asked one further down the list, and the records only he held, taken while he was the
 -- only keeper online, never reached the others). When a catch-up from each last completed is saved,
--- Led().caught: with whom it asked kept only for the session, every /reload began with the first by
--- name again, one more each half hour, and a keeper far down the list was never caught up from. A
--- relay that is no keeper is asked only when one from him completed before or no keeper is online:
--- a 1.2.5.1 councillor answers none, and asking him took a keeper's turn.
+-- Led().caught, and when each was last asked, Led().asked: with whom it asked kept only for the
+-- session, every /reload began with the first by name again, one more each half hour, and a keeper
+-- far down the list was never caught up from; with only the completed ones saved, a keeper that
+-- never answered (a busy desk) was asked first in every session. One whose last catch-up brought
+-- something but was cut short before its end is asked first again (TakeLine clears his ask).
+-- A keeper asks only keepers: it takes ledger lines from no other relay (Count.TakeLine). A council
+-- relay asks only while no keeper is online, its pages asking a keeper then (Count.Ask), and never
+-- the King's client, which, as in 1.2.5.1, does no background Church work: it asks for none either.
+-- Just logged in, it waits until every keeper online has been heard (SettledSinceLogin, as the desk
+-- does before it speaks for its switch): at once, the first keeper heard was the one asked, whatever
+-- the saved turn said, and the next catch-up came CATCHUP_EVERY later.
 function Count.CatchUp(force)
-	if not Church.IsLedgerRelay(ns.me) or Off() then return false end
+	if not Church.IsLedgerRelay(ns.me) or Church.IsKing(ns.me) or Off() then return false end
 	local t = ns.Now()
-	if not force and t - catch.last < Count.CATCHUP_EVERY then return false end
-	local caught = type(Led().caught) == "table" and Led().caught or {}
-	local keepers = #Church.KeepersOnline(false) > 0
+	if not force and (t - catch.last < Count.CATCHUP_EVERY or not Count.SettledSinceLogin()) then return false end
+	local list = Church.KeepersOnline(false)
+	if not Church.IsKeeper(ns.me) then
+		if #list > 0 then return false end
+		list = Church.LedgerRelaysOnline(false)
+	end
+	local l = Led()
+	local caught = type(l.caught) == "table" and l.caught or {}
+	local asked = type(l.asked) == "table" and l.asked or {}
 	local k, at
-	for _, o in ipairs(Church.LedgerRelaysOnline(false)) do
-		local rk = Key(o.name)
-		if (Church.IsKeeper(o.name) and not Church.IsKing(o.name)) or not keepers or caught[rk] then
-			local seen = math.max(tonumber(caught[rk]) or -math.huge, catch.asked[rk] or -math.huge)
+	for _, o in ipairs(list) do
+		if not Church.IsKing(o.name) then
+			local rk = Key(o.name)
+			local seen = math.max(tonumber(caught[rk]) or -math.huge, tonumber(asked[rk]) or -math.huge, catch.asked[rk] or -math.huge)
 			if not k or seen < at then k, at = o, seen end
 		end
 	end
 	if not k then return false end
+	local rk = Key(k.name)
 	catch.last = t
-	catch.asked[Key(k.name)] = t
-	local since = Led().from[Key(k.name)] or 0
-	ns.Comm.Whisper(k.name, "NL~1~q~" .. B36(since), nil, false, false, nil, { owner = Count })
+	catch.asked[rk] = t
+	if type(l.asked) ~= "table" then l.asked = {} end
+	l.asked[rk] = t
+	ns.Comm.Whisper(k.name, "NL~1~q~" .. B36(l.from[rk] or 0), nil, false, false, nil, { owner = Count })
 	return true
 end
 
@@ -1745,6 +1760,7 @@ end
 -- more than a round share one second, they all go in this one).
 function Count.AnswerCatchUp(sender, since)
 	if not Church.IsLedgerRelay(ns.me) or not Church.IsLedgerRelay(sender) then return Drop("relay") end
+	if Church.IsKing(ns.me) or Church.IsKing(sender) then return Drop("king") end
 	local l = Led()
 	local list = {}
 	for id, r in pairs(l.r) do if (r.u or 0) > since then list[#list + 1] = { id = id, r = r, u = r.u or 0 } end end
@@ -1824,14 +1840,21 @@ local function RecheckRecord(id, rec)
 	return true
 end
 
+-- (As in 1.2.5.1: the King's client neither asks for a catch-up nor answers one, and holds no copy.
+-- On a keeper, every line but an ask only from a keeper: a council relay holds copies of the keepers'
+-- word and is no source of it. Taken from one, any council or King client could add records and
+-- raise the counts every keeper shows.)
 function Count.TakeLine(sender, text)
 	local kind = tostring(text or ""):match("^NL~1~(%a)~")
 	if not Church.IsLedgerRelay(ns.me) or not Church.IsLedgerRelay(sender) then return Drop("relay") end
+	if Church.IsKing(ns.me) or Church.IsKing(sender) then return Drop("king") end
 	if kind == "q" then
 		local since = UnB36(text:match("^NL~1~q~([0-9a-z]+)$"))
 		if not since then return Drop("shape") end
 		return Count.AnswerCatchUp(sender, since)
-	elseif kind == "r" then
+	end
+	if Church.IsKeeper(ns.me) and not Church.IsKeeper(sender) then return Drop("keeper") end
+	if kind == "r" then
 		local id, rec = ParseRecord(text)
 		if not id then return Drop("shape") end
 		local ok, why = RecheckRecord(id, rec)
@@ -1858,14 +1881,18 @@ function Count.TakeLine(sender, text)
 	elseif kind == "e" then
 		local more, u = text:match("^NL~1~e~([01])~([0-9a-z]+)$")
 		u = UnB36(u)
-		local k = Key(sender)
+		local k, l = Key(sender), Led()
 		if not u or not catch.asked[k] then return Drop("unasked") end
-		Led().from[k] = math.max(Led().from[k] or 0, u)
+		local before = l.from[k] or 0
+		l.from[k] = math.max(before, u)
 		if more == "0" then
 			catch.settled = true
-			-- (Only a completed one: a catch-up a logout cut short before its last round is asked first again.)
-			if type(Led().caught) ~= "table" then Led().caught = {} end
-			Led().caught[k] = ns.Now()
+			if type(l.caught) ~= "table" then l.caught = {} end
+			l.caught[k] = ns.Now()
+		elseif l.from[k] > before and type(l.asked) == "table" then
+			-- (A catch-up that brought something, a logout may cut short before its last round: its keeper
+			-- is asked first again, from where it stopped. One never answered stays behind the others.)
+			l.asked[k] = nil
 		end
 		if more == "1" then
 			local who = ns.FullName(sender)
@@ -2039,9 +2066,10 @@ function Count.TakeAnswerLine(sender, text)
 end
 
 -- What the tab shows: a keeper's own numbers, else the last answer kept. rows (ranking) or lines
--- (detail), the time they are as of, and whether they came from another client. A relay that is no
--- keeper shows its own copy only with no answer kept and no keeper online to ask.
-local function OwnCopy() return Church.IsLedgerRelay(ns.me) and #Church.KeepersOnline(false) == 0 end
+-- (detail), the time they are as of, and whether they came from another client. A council relay
+-- shows its own copy only with no answer kept and no keeper online to ask; the King's client, which
+-- keeps none (Count.TakeLine), never.
+local function OwnCopy() return Church.IsLedgerRelay(ns.me) and not Church.IsKing(ns.me) and #Church.KeepersOnline(false) == 0 end
 function Count.RankingView(list, window)
 	if list == "c" then return ns.ChurchFullness.Ranking(), Clock(), false end
 	if Church.IsKeeper(ns.me) and not Church.IsKing(ns.me) then return Count.Ranking(list, window), Clock(), false end
@@ -2424,6 +2452,7 @@ function Count.CheckSaved()
 			if #bad > 0 then ns.Log("church ledger: %d saved records dropped at load", #bad) end
 			WindowsFromGone(l, Clock())
 			if l.caught ~= nil and type(l.caught) ~= "table" then l.caught = nil end
+			if l.asked ~= nil and type(l.asked) ~= "table" then l.asked = nil end
 		end
 		if not ok then c.led = nil end
 	end
