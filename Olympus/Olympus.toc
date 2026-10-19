@@ -173,5 +173,6 @@ InnkeeperGossip.lua
 InnkeeperArrow.lua
 ArenaMatch.lua
 ArenaChat.lua
+ArenaSpectate.lua
 ArenaTest.lua
 ArenaHome.lua

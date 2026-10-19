@@ -399,6 +399,7 @@ return {
 		["PartyFrame"] = "frame",
 		["PlaySound"] = "value",
 		["PlayerFrame"] = "frame",
+		["PlayerSpellsFrame"] = "frame",
 		["Professions"] = "table",
 		["QueryGuildBankTab"] = "used",
 		["QueryGuildEventLog"] = false,

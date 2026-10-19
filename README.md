@@ -2411,6 +2411,7 @@ message (the game adds it). What goes where:
 | The games' rankings ask (AU, 1.2.4): the letters of the games whose publish word your addon lacks, nothing else | everyone on the Olympus channel, and your guild when it spans the realm group's realms | once a session, when you open the Games tab without one of them (never the King's, the High Council's or the author's, who see the rankings anyway) |
 | A games' rankings publish word you hold (AU, 1.2.4): the game, shown or hidden, when, and who gave it (the King or a councillor he named) | the lane the ask came on: the Olympus channel, or your guild | only in answer to an ask, a few seconds after it, from about three holders whatever the army's size, unless the same word went out meanwhile; once every 30 seconds at most |
 | A Bones game's ask for its other half (KN, 1.2.4): the game's id, its two players and its target, nothing else; and the answer, your own signed half of that game (the one your addon said on the channel when it ended) | the ask: the game's other player, alone (a whisper); the answer: the player who asked, alone (a whisper) | the ask only when your client holds your own half of a counted game of this month or the last and never got his: at a later login, an hour apart at least, 8 times at most; the answer only to that game's other player's ask, once a session per game |
+| What your duel view reads (1.2.6, **Watch duel**): the two fighters' health, power and casts while they are in sight, and their gear and talents from your own inspection | nobody: shown on your screen only, never sent or saved | while the view is open; an inspection only within inspect range and out of combat, with no tabard record, chat line, sound or report |
 | The Royal Writs' ask (T7, 1.2.4): nothing but your name | everyone on the Olympus channel | once a login, a minute and a half after it; only the King's addon answers, with his writs of the last seven days, once every 5 minutes at most |
 | A Most Wanted sighting (WS, 1.2.0): a listed Horde player's name and GUID, your map position (rounded) and layer, the time, your name and guild | the one reviewer you chose (**Sightings to** on the Most Wanted page; 1.2.2: the one you sent evidence to), alone (whispers), three a minute at most | only after your own Yes on its privacy line, or **Authorize all** while that visible line is pending; only while you share your zone and layer, only for players on your Most Wanted list, never in an instance; `/oly sightings off` stops it |
 | A requested player sighting (PS, 1.2.5): an exact query carries one Name-Realm; a hostile-area query carries one selected zone or micro-map ID and lasts five minutes. Both use a short opaque request id. Exact answers carry the consenting observer's name and guild; public area rows omit both. Every answer carries target, observation time, expiry, layer, point kind and map position. The point is the target's native visible-unit or matching party/raid-unit position when WoW returns one; otherwise it is the observer's encounter position, rounded to 0.1% of the map | the query: everyone on the Olympus channel, only from a currently signed authorized requester; each answer: that requester alone (a whisper). One observer contributes at most six rows to an area search and the requester keeps at most 48 distinct players. On an explicit action Olympus can show sanitized rows as host-owned world-map pins, cleared on cancel, expiry, permission revocation or reload | only after the requester's addon permission is enabled by its own **Yes** or the page's deliberate **Authorize all** action; an observer answers only after the separate **Guild tools: player sightings** permission is enabled the same way and while sharing location. The exact-name session's visible Start declares selected/configured names and any included list source. One handle has one live area, on its current map or an owned exact-result map until its row expires, and rotates only after cancel plus 60 seconds. Its visible UI shows the map and rotation position, never opens the world map automatically, and stops on Off, No or reload without automatic resume. The game must have shown the exact or hostile target, mouseover or nameplate either now or within the last 15 minutes while both choices stayed on. Each client keeps at most 64 such observations only in memory and clears them on permission, location-sharing or network opt-out. A live answer rechecks the visible identity and coordinate before send; a cached answer rechecks its age and fields plus current eligibility. Requests and results expire; cancellation, either No and net-off cancel queued data and withdraw or discard live results |
@@ -2830,6 +2831,10 @@ Other limits:
   (see the Throne), and the quiet `/who` a click in the window makes goes once a minute at most.
 - Tabard inspections are kept for two weeks, 2000 players at most (marked and caught players
   first); The Watch's Tabards list the first 200.
+- Watching a duel (1.2.6) sends nothing: the view reads only what your own client sees, and its
+  two inspections share the tabard patrol's line (one request at a time, at most one every 1.5 s,
+  never in combat or while the game's own inspect window is in use); a fighter is inspected again
+  at most every 30 seconds when his gear changes.
 - Messages are spaced 1.2 s apart, below Blizzard's addon message limits, and alert sounds
   play at most once every 15 seconds (1.1: a softer one never silences the Call to Arms or a
   louder alert after it).
@@ -2920,6 +2925,7 @@ Other limits:
 | `/oly sound` · `/oly sound on\|off` | every alert sound on or off |
 | `/oly alerts quiet\|always` | in an instance or Busy, Olympus's raid warnings, sounds and popups wait until you are out (quiet, the default), or show at once (1.1) |
 | `/oly sound <kind> on\|off` | one kind's sound (1.1): `arms`, `muster`, `royal`, `court`, `vox`, `agenda`, `throne`, `help`, `hop`, `treasury`, `patrol`, `update`; also a click on its line at the bottom of the Decrees tab |
+| `/oly arena watch [name]` · `/oly arena watch off` | 1.2.6: the duel view (also **Watch duel** in a duelling player's right-click menu): your own duel, your target and his target, your target and your focus, or a named fighter in sight and his target; off closes it |
 | `/oly bug` | copyable bug report (also: the help button left of the window's X, then **Report a bug**) |
 | `/oly log [n \| word \| copy \| clear]` | the acts this client saw (decrees, gates, pardons, visibility switches), each with the sender's name; kept on this computer, never sent (1.1) |
 | `/oly status` | diagnostics in chat (1.0.0: whom your addon knows as the King's Steward, and the lists of Hands it holds, whose each is; 1.1.2: the author's in a copy window) |
@@ -3047,6 +3053,15 @@ are ranked by distance band first, then players searching too, the same layer an
 level gap (`tests/arena/match.lua`).
 In 1.1.6 every search is casual (a stake waits for the gate). It has no spectators filter: a duel
 has no spectators setting of its own (a Bones table's is chosen when the table is made).
+**Watch duel** (1.2.6, `Olympus/ArenaSpectate.lua` its data, `Olympus_Arena/Spectate.lua` its
+window): any member watches two players duelling in sight, from a fighter's right-click menu or
+`/oly arena watch`. One window split down the middle shows each fighter's health, power and casts
+while he is in sight, his 3D model in his gear with the slots and the stats from gear, and his
+talent trees, both from this client's own inspection (`Inspect.Want`: the patrol's pump and pace,
+display only); a compact bar takes its place while either fighter is in combat. Nothing is sent
+or saved, and the values Forever keeps secret go from the game straight into the bars and texts
+(`tests/arena/spectate-data.lua`, `tests/arena/spectate-view.lua`, the Inspect section of
+`tests/run.lua`, `tests/gamepad.lua`).
 **Bones can be played at a tavern or at a camp** (1.1.6, `Olympus/FarkleTable.lua`'s place rule,
 for every game between players that counts, staked or not): the two in one party, within about
 10 yards of each other, and either both resting at the same inn, both near a real Forever

@@ -1493,6 +1493,7 @@ local function World(C, opts)
 	for _, n in ipairs({ "SendMailSendMoneyButton", "SendMailCODButton" }) do E[n] = Blizz(n, "CheckButton") end
 	E.SendMailMoney = Blizz("SendMailMoney", "Frame")
 	C.Absent("InspectFrame", "Blizzard_InspectUI loads on demand: not loaded in the pass")
+	C.Absent("PlayerSpellsFrame", "Blizzard_PlayerSpells loads on demand: not loaded in the pass")
 	C.Absent("CalendarFrame", "Blizzard_Calendar loads on demand: not loaded in the pass")
 	C.Absent("GuildFrame", "Forever has no old guild window: no Blizzard_GuildUI in the client's source (its guild window is Communities)")
 	C.Absent("PTR_IssueReporter", "Blizzard_PTRFeedback's frame shows on test clients only (a flow of its own adds it)")
@@ -2746,6 +2747,118 @@ test("gamepad pass 6: the Arena's integrations: restricted calls from a click al
 	eq(A.loadedAddOns.Olympus_Arena, true)
 	GP.Covers("load-companion")
 	Check(A.ledger, "the Arena")
+end)
+
+-- 1.2.6, Watch duel (Daniel's duel-view request, 2026-10-19). Two players duelling in front of the
+-- player: target and his target. The game's functions a watch reads that the pass doesn't model
+-- (the fixture's build 70205 lists UnitHealthMax, UnitRace, UnitSex, UnitTokenFromGUID and
+-- GetPlayerInfoByGUID; it predates the others) are stood in as Forever 1.60.1's own documentation
+-- gives them (UnitDocumentation.lua: UnitCanAttack :763, UnitAffectingCombat :614, UnitCastingInfo
+-- :828, UnitChannelInfo :870, UnitHealthMax :1472, UnitHealth :1526, UnitInParty :1637, UnitInRaid
+-- :1683, UnitPower :2732, UnitPowerMax :2801, UnitPowerType :2859), with plain values (the pass has
+-- no secret ones). UnitCanAttack is true between the two duellists only.
+local function DuelScene(C)
+	local E = C.env
+	C.units.target = { name = "Duelist", realm = "Realm", guid = "Player-1-00000003" }
+	C.units.targettarget = { name = "Rival", realm = "Realm", guid = "Player-1-00000004" }
+	local function U(unit) return C.units[unit] end
+	E.UnitCanAttack = function(a, b) return a == "target" and b == "targettarget" end
+	E.UnitTokenFromGUID = function(guid)
+		for _, t in ipairs({ "player", "target", "focus", "mouseover" }) do local u = U(t) if u and u.guid == guid then return t end end
+		return nil
+	end
+	E.GetPlayerInfoByGUID = function(guid)
+		for _, u in pairs(C.units) do if u.guid == guid then return "Warrior", "WARRIOR", "Human", "Human", 2, u.name, u.realm end end
+		return nil
+	end
+	E.UnitRace = function(unit) if U(unit) then return "Human", "Human", 1 end end
+	E.UnitSex = function(unit) if U(unit) then return 2 end end
+	E.UnitPowerType = function(unit) if U(unit) then return 1, "RAGE" end end
+	E.UnitHealth = function(unit) if U(unit) then return 800 end end
+	E.UnitHealthMax = function(unit) if U(unit) then return 1000 end end
+	E.UnitPower = function(unit) if U(unit) then return 30 end end
+	E.UnitPowerMax = function(unit) if U(unit) then return 100 end end
+	E.UnitAffectingCombat = function(unit) return U(unit) ~= nil and C.duelling == true end
+	E.UnitCastingInfo = function() return nil end
+	E.UnitChannelInfo = function() return nil end
+	E.UnitInParty = function() return false end
+	E.UnitInRaid = function() return nil end
+	E.CanInspect = function() return true end
+	E.CheckInteractDistance = function() return true end
+end
+-- The player menu's callbacks the game's way, on his target: the lines Olympus adds (text, click).
+local function MenuLines(C)
+	local lines = {}
+	local function Element()
+		local d = {}
+		function d.SetTooltip() end
+		function d.SetEnabled() end
+		return d
+	end
+	local root = {}
+	function root.CreateTitle() return Element() end
+	function root.CreateButton(_, text, fn) lines[#lines + 1] = { text = text, fn = fn } return Element() end
+	function root.CreateDivider() return Element() end
+	for _, list in pairs(C.menus) do
+		for _, fn in ipairs(list) do C.Isolated(fn, {}, root, { unit = "target", name = "Duelist", server = "Realm" }) end
+	end
+	return lines
+end
+test("gamepad duel view (1.2.6): Watch duel's line only through the player menu's hook with mouse and keyboard, its click asking for the companion alone; a watch with the gamepad UI on, and across switches both ways, reads the fighters and asks their inspection (inspect-patrol, not protected) and reaches nothing else of the game's", function()
+	-- Mouse and keyboard: the line in the player menu (player-menu), the companion asked for on its click.
+	local M = Session(false)
+	DuelScene(M)
+	local watch
+	for _, l in ipairs(MenuLines(M)) do if l.text == M.ns.L.ARENA_MENU_WATCH_DUEL then watch = l end end
+	assert(watch, "Watch duel in the player menu on a duellist")
+	local mark = M.Mark()
+	InClick(M, function() watch.fn() end)
+	local loaded = false
+	for _, r in ipairs(M.Since(mark)) do if r.sym == "C_AddOns.LoadAddOn" then loaded = true end end
+	assert(loaded, "the click asks for the companion")
+	Check(M.Since(mark), "the menu line")
+	NoErrors(M, "the menu line")
+	GP.Covers("player-menu"); GP.Covers("load-companion")
+	-- The gamepad UI: no menu hook, so no line; a watch's own work allowed there.
+	local C, ns = Session(true)
+	DuelScene(C)
+	eq(#MenuLines(C), 0, "no player menu line with the gamepad UI")
+	local S = ns.ArenaSpectate
+	local subject = assert(S.PairFromUnit("target"), "the pair: target and his target")
+	eq(subject.A.name, "Duelist-Realm"); eq(subject.B.name, "Rival-Realm")
+	local before = Snapshot(C)
+	mark = C.Mark()
+	assert(S.Start(subject))
+	local bar = C.env.CreateFrame("StatusBar", nil, C.env.UIParent)
+	local text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	local w = { health = bar, healthText = text, power = bar, powerText = text }
+	local function Ticks()
+		S.Track(true)
+		eq(S.Push("A", w), true); eq(S.Push("B", w), true)
+		eq(S.Cast("A", { bar = bar }), nil)
+		C.duelling = not C.duelling
+		eq(S.Fighting(), C.duelling == true)
+		assert(S.Text():find("Duelist", 1, true))
+		C.Advance(5)
+	end
+	Ticks()
+	local asked = 0
+	for _, r in ipairs(C.Since(mark)) do if r.sym == "NotifyInspect" then asked = asked + 1 end end
+	assert(asked >= 1, "his inspection asked for, with the gamepad UI too (not protected)")
+	GP.Covers("inspect-patrol")
+	OnlyAllowed(C.Since(mark), "a duel watch")
+	local diff = Diff(before, Snapshot(C))
+	eq(#diff, 0, "the game's state written: " .. table.concat(diff, ", "))
+	-- Across switches both ways, the same watch goes on (the gate's own work at each switch aside).
+	for _, gamepad in ipairs({ false, true }) do
+		C.Switch(gamepad); C.Advance(1)
+		mark = C.Mark()
+		Ticks()
+		Check(C.Since(mark), "a duel watch after a switch")
+	end
+	S.Stop()
+	eq(S.Watching(), nil)
+	NoErrors(C, "a duel watch")
 end)
 
 -- 1.2.1: [Olympus], [Captains] and [Lords] before a line in the game's chat, links where the player

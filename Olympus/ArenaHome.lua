@@ -589,6 +589,19 @@ local UI_FIELDS = {
 	find = function(v) return type(v) == "table" and v or nil end,
 	sounds = function(v) return type(v) == "boolean" and v or nil end,
 	seen = function(v) return type(v) == "table" and v or nil end,
+	-- (1.2.6) The duel view's place and the bar's, its scale, pin and tab (Olympus_Arena/Spectate.lua).
+	watch = function(v)
+		if type(v) ~= "table" then return nil end
+		local function Point(p)
+			if type(p) ~= "table" or type(p[1]) ~= "string" or type(p[2]) ~= "string" or not tonumber(p[3]) or not tonumber(p[4]) then return nil end
+			return { p[1], p[2], tonumber(p[3]), tonumber(p[4]) }
+		end
+		local scale = tonumber(v.scale)
+		local out = { point = Point(v.point), barPoint = Point(v.barPoint), scale = scale and math.max(0.6, math.min(1.6, scale)) or nil,
+			pin = (v.pin == "auto" or v.pin == "full" or v.pin == "compact") and v.pin or nil,
+			tab = (v.tab == "gear" or v.tab == "talents") and v.tab or nil }
+		return next(out) and out or nil
+	end,
 }
 function ArenaHome.CheckUI()
 	if not ns.db then return end
@@ -638,7 +651,8 @@ local function Red(s) return "|cffff5050" .. s .. "|r" end
 
 -- Opens the Arena window on a place: "events", "rankings", "history", "profile", "bone",
 -- "bone.live", "lottery", "wallet", "director", "games.mine" and "games.all" (the games' ledger's
--- page, 1.1.6) ... with an argument (an event, a name).
+-- page, 1.1.6), "duel.watch" (the duel view, 1.2.6: ArenaSpectate's subject) ... with an argument
+-- (an event, a name).
 function ArenaHome.Open(where, arg)
 	if (where == "wallet" or where == "bets" or where == "bank" or where == "ledgers") and not WalletShown() then return false end
 	local A = ns.Arena
@@ -1978,7 +1992,8 @@ function ArenaHome.ResetLetters() queue = {} end -- (tests)
 
 ---------------------------------------------------------------------------
 -- The right-click lines on a player (the design): "Challenge to a duel", "Invite to Bones",
--- "Watch" (when his table lets spectators in), "Arena profile". Through PlayerMenu.lua's shared
+-- "Watch" (when his table lets spectators in), "Watch duel" (1.2.6, when he fights a duel in
+-- sight), "Arena profile". Through PlayerMenu.lua's shared
 -- hook where this build has it (1.1.2), with its target and its menu helper; else through
 -- Blizzard's Menu.ModifyMenu directly, with the same checks. Opening a menu sends nothing.
 ---------------------------------------------------------------------------
@@ -1995,6 +2010,13 @@ function ArenaHome.MenuLines(target, menu)
 	local table_ = ArenaHome.WatchableTable(name)
 	if table_ then
 		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+		n = n + 1
+	end
+	-- (1.2.6) His duel, when he fights one in sight (ArenaSpectate.Watchable): the pair taken now.
+	local S = ns.ArenaSpectate
+	local duel = type(S) == "table" and type(S.Watchable) == "function" and S.Watchable(target) or nil
+	if duel then
+		menu.Button(L.ARENA_MENU_WATCH_DUEL, function() S.Open(duel) end, L.ARENA_MENU_WATCH_DUEL, L.ARENA_MENU_WATCH_DUEL_TIP, true)
 		n = n + 1
 	end
 	if not target.profileAdded then
