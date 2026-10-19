@@ -17,7 +17,7 @@ local L = ns.L
 -- so whoever edits the file can compute it again: it proves that the file is unedited only up to
 -- a head published at the time (shown in the status), and the count's truth rests on independent
 -- witnesses whose files agree. docs/RECORD-FORMAT.md gives the exact format and hash rule, for the
--- offline verifier.
+-- offline verifier, and Record.VerifyFile below is that check in Lua, on the recorder's own code.
 -- Nothing here sends anything: no addon message, no chat line, no whisper (tests/record.lua reads
 -- this file's source for it). SavedVariables reach the disk only at /reload, logout or quit.
 
@@ -39,8 +39,10 @@ Record.LINES_MAX = 120000          -- lines a file holds at most (about 10 MB): 
 Record.HASH_BUDGET = 2048          -- bytes of lines chained per frame (the rest on the next frames)
 
 ---------------------------------------------------------------------------
--- The format (docs/RECORD-FORMAT.md). Pure functions: the tests and scripts/record-check.lua use
--- them as they are.
+-- The format (docs/RECORD-FORMAT.md). Pure functions, the one copy of the hash rule and of how a
+-- line is read: the recorder below writes with them, and Record.VerifyFile reads a whole file with
+-- them for scripts/record-check.lua and the Companion's verifier. Nothing here reads a global of
+-- the game, at load or after (tests/record.lua runs it with none).
 ---------------------------------------------------------------------------
 
 local HEXBYTE, NIBBLE = {}, {}
@@ -49,15 +51,20 @@ for i = 0, 15 do NIBBLE[i] = ("%x"):format(i) end
 
 -- 32 bytes as 64 lowercase hex digits.
 function Record.Hex(bytes) return (bytes:gsub(".", HEXBYTE)) end
-function Record.Hash(text) return Record.Hex(ns.Sign.SHA256(text)) end
+-- SHA-256 as hex. sha: a SHA-256 that gives the 32 bytes (Sign.SHA256's way); nil: Sign.SHA256.
+function Record.Hash(text, sha)
+	local digest = (sha or ns.Sign.SHA256)(text)
+	if type(digest) ~= "string" or #digest ~= 32 then error("record: the SHA-256 function must give 32 bytes", 2) end
+	return Record.Hex(digest)
+end
 -- A line's hash from the one before it (or the seed).
-function Record.Link(prev, line) return Record.Hash(prev .. "|" .. line) end
+function Record.Link(prev, line, sha) return Record.Hash(prev .. "|" .. line, sha) end
 -- The seed, from the S line's GUID and start fields as they are written.
-function Record.Seed(guid, start) return Record.Hash(Record.SEED .. guid .. "|" .. start) end
+function Record.Seed(guid, start, sha) return Record.Hash(Record.SEED .. guid .. "|" .. start, sha) end
 -- The S line's field 14: a BattleTag as a hash, never the tag (the checkers see two files of one
 -- person as one witness; anyone who guesses a tag can test it, so it is a pseudonym, not a secret).
 Record.TAG_SEED = "olympus-record-1|battletag|"
-function Record.TagHash(tag) return Record.Hash(Record.TAG_SEED .. tag) end
+function Record.TagHash(tag, sha) return Record.Hash(Record.TAG_SEED .. tag, sha) end
 
 -- A text field: every control byte, " \ | , and : becomes _ (bytes of UTF-8 letters stay as they
 -- are), so no line ever needs an escape in the saved file. nil is the empty field.
@@ -73,6 +80,22 @@ function Record.Int(v)
 	return ("%.0f"):format(math.floor(n))
 end
 local Field, Int = Record.Field, Record.Int
+-- A number field read back: the number when it is written as Int writes one, else nil.
+function Record.Number(v)
+	if v == "0" then return 0 end
+	if type(v) ~= "string" or not v:find("^[1-9]%d*$") then return nil end
+	return tonumber(v)
+end
+local Number = Record.Number
+
+-- A session's id, from the S line's GUID (field 5) and start (field 3) as they are written.
+function Record.Id(guid, start) return (guid or "") .. ":" .. (start or "") end
+-- A mark: the chain's hash after line i, as "i:hash"; and read back (nil for a text that is none).
+function Record.Mark(i, hash) return Int(i) .. ":" .. hash end
+function Record.ReadMark(text)
+	local i, hash = tostring(text):match("^(%d+):(%x+)$")
+	if i then return tonumber(i), hash end
+end
 
 -- A set of member numbers (set[i] = true, i from 1 to top) as hex digits: digit d holds members
 -- 4d-3 (8), 4d-2 (4), 4d-1 (2) and 4d (1); the zero digits at the end are left out.
@@ -111,40 +134,207 @@ function Record.Split(line)
 end
 local function Line(...) return table.concat({ ... }, "|") end
 
--- A written session as the file holds it: true, the chain's head and its number of lines when its
--- lines are an S line, then no S or Z line, then one Z line last, and every stored hash (marks,
--- head) and n is what its lines give; else false, the first line found wrong (0: the session
--- itself) and why. (A session is written only after its Z line and all its hashes: a logout, an
--- off, a change of guild or a full file ends it first.)
-function Record.Verify(s)
-	if type(s) ~= "table" or type(s.lines) ~= "table" then return false, 0, "no lines" end
-	local first = s.lines[1]
-	if type(first) ~= "string" or first:sub(1, 4) ~= "S|1|" then return false, 1, "the first line is no S line of format 1" end
-	local f = Record.Split(first)
-	if s.id ~= nil and s.id ~= f[5] .. ":" .. f[3] then return false, 0, "the id is not the S line's GUID and start" end
-	local marks = {}
-	for _, m in ipairs(type(s.marks) == "table" and s.marks or {}) do
-		local i, hex = tostring(m):match("^(%d+):(%x+)$")
-		if not i then return false, 0, "a mark that is no mark: " .. tostring(m) end
-		marks[tonumber(i)] = hex
+-- A written session's chain, computed again from its seed: { ok, at, why, first, last, count }. ok
+-- when its lines are an S line, then no S or Z line, then one Z line last, and every stored hash
+-- (marks, head), n and id is what its lines give; else at and why are the first fault found (at 0:
+-- the session itself). The lines are hashed first and n is compared after them, so a line removed
+-- or moved is found at the first mark after it. first and last are the hashes after line 1 and
+-- after the last line, from the lines as they are, whatever else is wrong (nil when line 1 is no S
+-- line or a line is no text); count is the number of lines. (A session is written only after its Z
+-- line and all its hashes: a logout, an off, a change of guild or a full file ends it first.)
+local function Check(s, sha)
+	local r = { ok = true, count = 0 }
+	local function Fault(at, why)
+		if r.ok then r.ok, r.at, r.why = false, at, why end
+	end
+	if type(s) ~= "table" or type(s.lines) ~= "table" then
+		Fault(0, "no lines")
+		return r
 	end
 	local n = #s.lines
-	if s.n ~= nil and tonumber(s.n) ~= n then return false, 0, "n is not the number of lines" end
-	local h = Record.Seed(f[5], f[3])
+	r.count = n
+	local first = s.lines[1]
+	if type(first) ~= "string" or first:sub(1, 4) ~= "S|1|" then
+		Fault(1, "the first line is no S line of format 1")
+		return r
+	end
+	local f = Record.Split(first)
+	if s.id ~= nil and s.id ~= Record.Id(f[5], f[3]) then Fault(0, "the id is not the S line's GUID and start") end
+	local marks = {}
+	for _, m in ipairs(type(s.marks) == "table" and s.marks or {}) do
+		local i, hash = Record.ReadMark(m)
+		if i then marks[i] = hash else Fault(0, "a mark that is no mark: " .. tostring(m)) end
+	end
+	local h = Record.Seed(f[5] or "", f[3] or "", sha)
 	for i = 1, n do
 		local line = s.lines[i]
-		if type(line) ~= "string" then return false, i, "a line that is not text" end
+		if type(line) ~= "string" then
+			Fault(i, "a line that is not text")
+			return r
+		end
 		local kind = line:sub(1, 2)
-		if i > 1 and kind == "S|" then return false, i, "an S line after line 1" end
-		if i < n and kind == "Z|" then return false, i + 1, "a line after the Z line" end
-		if i == n and kind ~= "Z|" then return false, i, "the last line is no Z line" end
-		h = Record.Link(h, line)
-		if marks[i] and marks[i] ~= h then return false, i, "its mark is not its hash" end
+		if i > 1 and kind == "S|" then Fault(i, "an S line after line 1") end
+		if i < n and kind == "Z|" then Fault(i + 1, "a line after the Z line") end
+		if i == n and kind ~= "Z|" then Fault(i, "the last line is no Z line") end
+		h = Record.Link(h, line, sha)
+		if i == 1 then r.first = h end
+		if marks[i] and marks[i] ~= h then Fault(i, "its mark is not its hash") end
 		marks[i] = nil
 	end
-	if next(marks) then return false, next(marks), "a mark past the last line" end
-	if s.head ~= nil and s.head ~= h then return false, n, "the head is not the hash of line n" end
-	return true, h, n
+	r.last = h
+	local past
+	for i in pairs(marks) do past = math.min(past or i, i) end
+	if past then Fault(past, "a mark past the last line") end
+	if s.n ~= nil and tonumber(s.n) ~= n then Fault(0, "n is not the number of lines") end
+	if s.head ~= nil and s.head ~= h then Fault(n, "the head is not the hash of line n") end
+	return r
+end
+
+-- A written session as the file holds it: true, the chain's head and its number of lines; else
+-- false, the first line found wrong (0: the session itself) and why. sha as for Record.Hash.
+function Record.Verify(s, sha)
+	local r = Check(s, sha)
+	if r.ok then return true, r.last, r.count end
+	return false, r.at, r.why
+end
+
+-- The copy of a session as stored (its lines, marks, n and head) as one hash: two copies of one
+-- session, in one file or in two, are the same when it is (docs/RECORD-FORMAT.md, section 8,
+-- step 3). The lines enter by their chain's last hash, which already covers each of them.
+local function Copy(s, r, sha)
+	local t = type(s) == "table" and s or {}
+	local parts, marks = { "olympus-record-copy" }, {}
+	if r.last then
+		parts[2] = r.last .. "|" .. r.count
+	else
+		local text = {}
+		for i, line in ipairs(type(t.lines) == "table" and t.lines or {}) do text[i] = type(line) .. ":" .. tostring(line) end
+		parts[2] = table.concat(text, "\n")
+	end
+	for i, m in ipairs(type(t.marks) == "table" and t.marks or {}) do marks[i] = tostring(m) end
+	parts[3], parts[4], parts[5] = tostring(t.n), tostring(t.head), table.concat(marks, ",")
+	return Record.Hash(table.concat(parts, "\n"), sha)
+end
+
+-- The members a C line's bitmap names, from the session's M lines so far: their "Name-Realm"
+-- (present, online) and their "Name-Realm|GUID" (presentKeys, onlineKeys), each list sorted. A
+-- number no M line gave is "?<number>".
+local function Names(dict, hex)
+	local names, keys = {}, {}
+	for i in pairs(Record.Unbitmap(hex) or {}) do
+		local m = dict[i]
+		names[#names + 1] = m and m.name or ("?" .. i)
+		keys[#keys + 1] = m and (m.name .. "|" .. m.guid) or ("?" .. i)
+	end
+	table.sort(names)
+	table.sort(keys)
+	return names, keys
+end
+
+-- One session of a file, checked and read (VerifyFile's entry; docs/RECORD-FORMAT.md, 8.1).
+local function ReadSession(s, sha)
+	local r = Check(s, sha)
+	local e = { ok = r.ok, brokenAt = r.at, records = r.count, firstHash = r.first, lastHash = r.last,
+		copy = Copy(s, r, sha), observations = {}, roster = {} }
+	if not r.ok then e.why = r.at > 0 and ("line %d: %s"):format(r.at, r.why) or r.why end
+	local lines = type(s) == "table" and type(s.lines) == "table" and s.lines or {}
+	local f = type(lines[1]) == "string" and Record.Split(lines[1]) or {}
+	if f[1] == "S" then
+		e.character, e.witness, e.guild, e.start = f[4], f[5], f[6], Number(f[3])
+		e.battleTagHash = f[14] ~= "" and f[14] or nil
+	end
+	e.id = type(s) == "table" and type(s.id) == "string" and s.id or (f[1] == "S" and Record.Id(f[5], f[3])) or nil
+	local dict = {}
+	for i = 1, r.count do
+		local line = lines[i]
+		local g = type(line) == "string" and Record.Split(line) or {}
+		if g[1] == "M" then
+			local k = Number(g[2])
+			if k then dict[k] = { name = g[3] or "", guid = g[4] or "" } end
+		elseif g[1] == "C" then
+			local slot = Number(g[3])
+			local checkpoint = g[2] == "Q" and slot or (g[2] == "M" and slot and ("mark:" .. g[3])) or nil
+			e.observations[#e.observations + 1] = { kind = "C", guild = g[5], checkpoint = checkpoint, slot = slot,
+				readAt = Number(g[4]), total = Number(g[6]), online = Number(g[7]), rows = Number(g[8]),
+				rowsOnline = Number(g[9]), line = i }
+			if checkpoint ~= nil and not e.roster[checkpoint] then
+				local present, presentKeys = Names(dict, g[10])
+				local online, onlineKeys = Names(dict, g[11])
+				e.roster[checkpoint] = { present = present, online = online, presentKeys = presentKeys, onlineKeys = onlineKeys }
+			end
+		elseif g[1] == "E" then
+			local at = Number(g[2])
+			e.observations[#e.observations + 1] = { kind = "E", guild = g[4], checkpoint = at and (at - at % Record.SLOT),
+				readAt = at, reportedAt = Number(g[3]), total = Number(g[5]), online = Number(g[6]), users = Number(g[7]),
+				reporter = g[8] ~= "" and g[8] or nil, line = i }
+		end
+	end
+	return e
+end
+
+-- Sessions read by VerifyFile, from one file or several, each id once (docs/RECORD-FORMAT.md,
+-- section 8, step 3): kept (the first copy of each id whose copies are all the same copy), conflicts
+-- ({ id, copies } for each id whose copies differ, in the order given: none of them is kept,
+-- whatever the order) and how many same copies were left out. A session with no id is its own.
+function Record.Dedupe(entries)
+	local groups, order = {}, {}
+	for k, e in ipairs(entries) do
+		local key = type(e.id) == "string" and e.id or ("\0" .. k)
+		local g = groups[key]
+		if not g then
+			g = { id = e.id, copies = {} }
+			groups[key], order[#order + 1] = g, key
+		end
+		g.copies[#g.copies + 1] = e
+	end
+	local kept, conflicts, repeats = {}, {}, 0
+	for _, key in ipairs(order) do
+		local g, same = groups[key], true
+		for i = 2, #g.copies do
+			if g.copies[i].copy ~= g.copies[1].copy then same = false end
+		end
+		if same then
+			kept[#kept + 1] = g.copies[1]
+			repeats = repeats + #g.copies - 1
+		else
+			conflicts[#conflicts + 1] = g
+		end
+	end
+	return kept, conflicts, repeats
+end
+
+-- A witness's whole file checked and read: db is OlympusRecordDB as the file holds it, sha a
+-- SHA-256 that gives the 32 bytes (Sign.SHA256; nil: this namespace's). Every chain is computed
+-- again from its seed with the functions the recorder uses, each M line's member and each C line's
+-- bitmaps are read back into names, and a session that repeats is kept once (Record.Dedupe). The
+-- result's fields: docs/RECORD-FORMAT.md, section 8.1.
+function Record.VerifyFile(db, sha)
+	sha = sha or ns.Sign.SHA256
+	local out = { ok = false, sessions = {}, conflicts = {}, duplicates = 0 }
+	if type(db) ~= "table" or db.format ~= Record.FORMAT or db.version ~= Record.VERSION then
+		out.why = "no OlympusRecordDB of format 1"
+		return out
+	end
+	local all = {}
+	for k, s in ipairs(type(db.sessions) == "table" and db.sessions or {}) do all[k] = ReadSession(s, sha) end
+	local kept, conflicts, repeats = Record.Dedupe(all)
+	local keep = {}
+	for _, e in ipairs(kept) do keep[e] = true end
+	for _, g in ipairs(conflicts) do
+		out.conflicts[#out.conflicts + 1] = { id = g.id, copies = #g.copies }
+		for _, e in ipairs(g.copies) do
+			keep[e] = true
+			if e.ok then e.ok, e.why = false, ("the copies of session %s in this file differ"):format(g.id) end
+		end
+	end
+	out.ok, out.duplicates = #conflicts == 0, repeats
+	for _, e in ipairs(all) do
+		if keep[e] then
+			out.sessions[#out.sessions + 1] = e
+			if not e.ok then out.ok = false end
+		end
+	end
+	return out
 end
 
 ---------------------------------------------------------------------------
@@ -217,7 +407,7 @@ local function HashSome(budget)
 		c.prev, c.hashed = Record.Link(c.prev, line), i
 		spent = spent + #line + 65
 		if c.markAt[i] then
-			s.marks[#s.marks + 1] = Int(i) .. ":" .. c.prev
+			s.marks[#s.marks + 1] = Record.Mark(i, c.prev)
 			c.markAt[i] = nil
 		end
 	end
@@ -290,7 +480,7 @@ local function Begin(now, guild, rankName, rankIndex)
 		Int(TestBuildN()), tag and Record.TagHash(tag) or "", Int(interface), Field(build), Field(GetLocale and GetLocale()))
 	local f = Record.Split(first)
 	local lastSlot = LastSlot(guild)
-	local s = { id = f[5] .. ":" .. f[3], char = ns.me, start = now, lines = {}, marks = {}, n = 0 }
+	local s = { id = Record.Id(f[5], f[3]), char = ns.me, start = now, lines = {}, marks = {}, n = 0 }
 	db.sessions[#db.sessions + 1] = s
 	cur = { s = s, guild = guild, dict = {}, levels = {}, top = 0, prev = Record.Seed(f[5], f[3]), hashed = 0,
 		markAt = {}, heard = {}, checkpoints = 0, events = 0, skipped = 0, lastSlot = lastSlot, battleTag = f[14] ~= "" }
@@ -494,15 +684,19 @@ function Record.Heard(r)
 	Append(Line("E", Int(at), Int(r.st), Field(r.guild), Int(r.total), Int(r.online), Int(r.users), Field(r.reporterFull)))
 end
 
-ns.On("INIT", function()
-	local t = OlympusRecordDB
-	loaded = type(t) == "table" and type(t.sessions) == "table" and #t.sessions or 0
-	persisted = type(t) == "table" and (tonumber(t.saves) or 0) > 0
-	if Open(false) then Events() end
-end)
-ns.On("LOGIN", function()
-	if Record.On() then Start() end
-end)
+-- (Offline, scripts/record-check.lua and the Companion's verifier load this file for its format
+-- functions alone, in a namespace with no ns.On: no client runs there.)
+if ns.On then
+	ns.On("INIT", function()
+		local t = OlympusRecordDB
+		loaded = type(t) == "table" and type(t.sessions) == "table" and #t.sessions or 0
+		persisted = type(t) == "table" and (tonumber(t.saves) or 0) > 0
+		if Open(false) then Events() end
+	end)
+	ns.On("LOGIN", function()
+		if Record.On() then Start() end
+	end)
+end
 
 ---------------------------------------------------------------------------
 -- The command, the status and the window's line

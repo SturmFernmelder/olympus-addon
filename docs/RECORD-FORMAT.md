@@ -3,9 +3,10 @@
 This page describes the file that Olympus's record mode writes for the Guinness World Records
 attempt (recording on 2026-10-20 and 2026-10-21). It gives everything an offline verifier needs:
 where the data is, its exact layout, the hash rule and how to compare witnesses. The verifier can be
-built from this page alone, without reading any Lua. The code is `Olympus/Record.lua`. The tests are
-in `tests/record.lua`, and the two sample files are `tests/fixtures/record-sample.lua` and
-`tests/fixtures/record-sample-b.lua`.
+built from this page alone, without reading any Lua. The code is `Olympus/Record.lua`. A verifier
+in Lua can also call the check itself, `Record.VerifyFile` (section 8.1), which uses the recorder's
+own hash and line functions. The tests are in `tests/record.lua`, and the two sample files are
+`tests/fixtures/record-sample.lua` and `tests/fixtures/record-sample-b.lua`.
 
 ## 1. What is recorded, and the units
 
@@ -57,7 +58,7 @@ in `tests/record.lua`, and the two sample files are `tests/fixtures/record-sampl
     after each login.
 - **Duplicates.** The verifier must expect the same session in several files, for example
   day 1's sessions again in day 2's file. A session is identified by its `id` (section 4). Its
-  lines, `n` and `head` must be identical wherever it appears.
+  lines, `marks`, `n` and `head` must be identical wherever it appears.
 
 ## 3. The file's syntax
 
@@ -274,7 +275,8 @@ members {1..7, 9}         -> "fe8"
   every hash was computed again for it. Marks exist only for S, C and Z
   lines, so the first mark that differs, at line `i`, places the change after the previous
   mark's line and at or before line `i`. An M or E line edited after the last C line breaks
-  only the Z mark and `head`.
+  only the Z mark and `head`. A line removed or moved is found in the same way, at the first
+  mark after it: compare the marks before `n`, since a removed line also changes `n`.
 
 Vectors (checked against Python's `hashlib`):
 
@@ -334,8 +336,11 @@ It does not prove:
 2. For each session, check the chain (section 7). Report the first broken line, and keep a
    broken session out of the counts.
 3. Deduplicate sessions by `id` across files. Copies with the same `id` must be identical: the
-   same lines, `n` and `head`. Flag any that are not, whatever the files' order, and keep every
-   copy of that `id` out of the counts.
+   same lines, `marks`, `n` and `head`. Flag any that are not, whatever the files' order, and keep
+   every copy of that `id` out of the counts. (The game writes a session's marks with its lines,
+   so two genuine copies always have the same marks. A copy with only its marks edited has a
+   broken chain; without this rule, whether the session counted would depend on which file came
+   first.)
 4. Rebuild each session's dictionary from its M lines (`number -> name|GUID`), and each
    member's level from the M lines and the C lines' field 12.
 5. Decode each C line's fields 10 and 11 into sets of `name|GUID`.
@@ -371,9 +376,104 @@ It does not prove:
 9. Manual marks (`M` checkpoints) are extra points, at the time the witness asked for them.
    Compare them only where several witnesses marked within a few seconds of each other.
 
-`luajit scripts/record-check.lua FILE...` already does steps 1 to 7 for the quarter hours. It
-counts each witness once, prints each reading's `at − slot` and lists readings more than 30 s
-after the slot apart. It exits 1 when a chain breaks or two copies of one session differ.
+`luajit scripts/record-check.lua FILE...` already does steps 1 to 7 for the quarter hours, with
+`Record.VerifyFile` and `Record.Dedupe` (section 8.1) for steps 1 to 5. It counts each witness
+once, prints each reading's `at − slot` and lists readings more than 30 s after the slot apart. It
+exits 1 when a chain breaks or two copies of one session differ.
+
+### 8.1 The check in Lua: `Record.VerifyFile`
+
+`Olympus/Record.lua` holds the hash rule and the reading of lines once. The recorder writes with
+them. `Record.VerifyFile` uses the same functions to check a whole file (steps 1 to 5; the caller
+parses the file), so `scripts/record-check.lua` and the Companion's verifier have no copy of their
+own. It calls no WoW API, neither when the file loads nor when it runs. It needs Lua 5.1 or
+LuaJIT, and the `bit` library that `Olympus/Sign.lua` reads as `_G.bit` (built into LuaJIT).
+`tests/record.lua` runs it with no other global.
+
+```lua
+local ns = { L = {} }                         -- ns.L: any table (only the game's text reads it)
+assert(loadfile("Olympus/Sign.lua"))("Olympus", ns)    -- ns.Sign.SHA256
+assert(loadfile("Olympus/Record.lua"))("Olympus", ns)  -- ns.Record
+local result = ns.Record.VerifyFile(db, ns.Sign.SHA256)
+```
+
+- `db` is `OlympusRecordDB` as the file holds it, parsed as data (section 3;
+  `scripts/record-check.lua`'s `M.Parse` reads it).
+- `sha256(text)` returns the 32 raw bytes of SHA-256, as `ns.Sign.SHA256` does. When it is
+  `nil`, `ns.Sign.SHA256` is used. A function that returns anything other than 32 bytes, such as
+  a hex string, raises an error.
+- The namespace needs nothing beyond `ns.Sign` and `ns.L`. `ns.On`, the game client's event
+  hook, is optional: without it nothing is hooked. Loading adds only `ns.Record`.
+
+`result`:
+
+| Field | Meaning |
+|---|---|
+| `ok` | `true` when the file is format 1, every session verifies and no two copies of one session differ |
+| `why` | set when the file itself is refused (step 1): `"no OlympusRecordDB of format 1"`; `sessions` is then empty |
+| `sessions` | the sessions, in the file's order, each copy that repeats an earlier one exactly left out |
+| `conflicts` | `{ id = ..., copies = <n> }` for each `id` whose copies in this file differ (step 3). Every copy stays in `sessions`, with `ok = false` |
+| `duplicates` | how many exact copies were left out |
+
+Each session:
+
+| Field | Meaning |
+|---|---|
+| `id` | the stored `id`; when there is none, `S[5] .. ":" .. S[3]` |
+| `character` | S field 4, `Name-Realm` |
+| `witness` | S field 5, the witness's GUID |
+| `guild` | S field 6 |
+| `battleTagHash` | S field 14, or `nil` when it is empty |
+| `start` | S field 3, in server time |
+| `records` | the number of lines, `#lines` |
+| `firstHash` | `h_1`, the chain's hash after the S line (its mark `1:...`) |
+| `lastHash` | `h_n`, computed again from the lines as they are, even in a broken session. It is the value to compare with a head published at the time, and equals `head` when `ok` |
+| `ok` | the chain and every stored commitment agree (section 7) and no other copy in the file differs |
+| `brokenAt` | when not `ok` because of the session itself: the first line found wrong, or `0` for the session's own fields (no `lines`, a wrong `id` or `n`, a mark that is not `i:hash`). `nil` when only the copies differ |
+| `why` | when not `ok`: the reason, with the line, such as `"line 15: its mark is not its hash"` |
+| `copy` | a hash of the copy as stored (its lines, `marks`, `n` and `head`). Two sessions with one `id` are the same copy when their `copy` is equal |
+| `observations` | each C and E line, in order (below) |
+| `roster` | `[checkpoint] = { present = {...}, online = {...}, presentKeys = {...}, onlineKeys = {...} }` |
+
+`firstHash` and `lastHash` are `nil` when line 1 is not an S line of format 1, and `lastHash` is
+also `nil` when a line is not text. The observations and rosters of a broken session are still
+read, but a broken session stays out of the counts (step 2).
+
+Each observation:
+
+| Field | C line | E line |
+|---|---|---|
+| `kind` | `"C"` | `"E"` |
+| `guild` | field 5 | field 4 |
+| `checkpoint` | for `Q`, the slot (field 3, a number); for `M`, `"mark:" ..` field 3, the time the mark was asked | the quarter hour of field 2 (`t − t % 900`) |
+| `readAt` | field 4 | field 2 |
+| `total` | field 6 | field 5 |
+| `online` | field 7, the game's count (`nil` when empty) | field 6 |
+| `slot` | field 3 | |
+| `rows`, `rowsOnline` | fields 8 and 9 | |
+| `reportedAt`, `users`, `reporter` | | fields 3, 7 and 8 (`reporter` is `nil` when empty) |
+| `line` | the line's index in the session | the same |
+
+Number fields are read only when they are written as section 5.1 says (decimal, no sign, no
+leading zero); otherwise they are `nil`.
+
+`roster[checkpoint]` decodes the C line's fields 10 (`present`) and 11 (`online`) with the
+session's M lines up to that line (steps 4 and 5): `present` and `online` hold `"Name-Realm"`, and
+`presentKeys` and `onlineKeys` hold `"Name-Realm|GUID"`, the identity to compare across witnesses.
+Each list is sorted. A member number that no M line gave appears as `"?<number>"`. A session as the
+game writes it never holds two C lines for one checkpoint. If an edited file does, `roster` keeps
+the first, and `observations` lists both.
+
+Across files, `Record.Dedupe(sessions)` applies step 3 to the sessions of several results:
+
+```lua
+local kept, conflicts, duplicates = ns.Record.Dedupe(allSessions)
+-- kept: the first copy of each id whose copies all have one `copy`
+-- conflicts: { id = ..., copies = { session, ... } } for each id whose copies differ; none is kept
+```
+
+`VerifyFile` applies the same function within one file. `Record.Verify(session, sha256)` checks a
+single session and returns `true, head, n`, or `false, line, why`.
 
 ## 9. Limits and sizes
 
@@ -436,4 +536,7 @@ ways without a new version:
 - the limit is 120,000 lines per file (9);
 - the check refuses a line after the Z line, a second S line and any `n` other than `#lines`
   (7); copies of one session must be identical (8, step 3); each witness counts once per slot,
-  and only readings within 30 s of the slot make the figure at one instant (8, steps 7 and 8).
+  and only readings within 30 s of the slot make the figure at one instant (8, steps 7 and 8);
+- copies of one session must also have the same `marks` (8, step 3), and the check compares
+  `n` after the marks, so a removed line is found at the first mark after it (7). The check is
+  available in Lua as `Record.VerifyFile` (8.1).

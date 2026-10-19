@@ -5,9 +5,11 @@
 --   luajit scripts/record-check.lua FILE...   each FILE a witness's SavedVariables\Olympus.lua
 --
 -- The files are read as data, never run: a small reader of the table syntax the game writes
--- (strings, numbers, true/false/nil, tables, "-- [n]" comments). It uses Olympus/Sign.lua's
--- SHA-256 and Olympus/Record.lua's format functions as they are. Exit 1 when a chain breaks or
--- two copies of one session differ. Each witness counts once per slot (one file, one character or
+-- (strings, numbers, true/false/nil, tables, "-- [n]" comments). The chains and the lines are
+-- checked and read by Olympus/Record.lua's Record.VerifyFile, and the copies of one session
+-- compared by its Record.Dedupe (with Olympus/Sign.lua's SHA-256): the same code as the recorder's
+-- and the Companion's, none of its own. Exit 1 when a chain breaks or two copies of one session
+-- differ. Each witness counts once per slot (one file, one character or
 -- one BattleTag hash is one witness), and every reading shows how long after its slot it was read.
 -- Loaded with "--module" first, it returns its functions instead (tests/record.lua).
 
@@ -143,10 +145,11 @@ M.NIL = setmetatable({}, { __tostring = function() return "nil" end })
 ---------------------------------------------------------------------------
 
 function M.Load()
-	local ns = { L = setmetatable({}, { __index = function(_, k) return k end }), On = function() end }
+	local ns = { L = setmetatable({}, { __index = function(_, k) return k end }) }
 	_G.bit = _G.bit or require("bit")
 	assert(loadfile(ROOT .. "Olympus/Sign.lua"))("Olympus", ns)
 	assert(loadfile(ROOT .. "Olympus/Record.lua"))("Olympus", ns)
+	M.R = ns.Record
 	return ns.Record
 end
 
@@ -154,75 +157,42 @@ end
 -- (docs/RECORD-FORMAT.md, section 8, step 8); a later one is listed apart, with how late it was.
 M.BOUND = 30
 
--- Each session of a parsed file: { id, char, guild, tag, file, ok, head, n, why, at, lines, text,
--- checkpoints = { ... } }. A checkpoint: { guild, kind, slot, at, late, total, online, rows,
--- rowsOnline, members, onlineSet } with the sets as sorted "name|GUID" lists and late = at - slot.
+-- Each session of a parsed file, as Record.VerifyFile reads it: { id, char, guild, tag, file, ok,
+-- head, n, at, why, lines, copy, checkpoints = { ... } }. A checkpoint: { guild, kind, slot, at,
+-- late, total, online, rows, rowsOnline, members, onlineSet } with the sets as sorted "name|GUID"
+-- lists and late = at - slot.
 function M.Sessions(R, db, file)
 	local out = {}
-	if type(db) ~= "table" or db.format ~= R.FORMAT or db.version ~= R.VERSION then return out, "no OlympusRecordDB of format 1" end
-	for _, s in ipairs(type(db.sessions) == "table" and db.sessions or {}) do
-		local ok, a, b = R.Verify(s)
-		local lines = type(s) == "table" and type(s.lines) == "table" and s.lines or {}
-		local text = {}
-		for i, line in ipairs(lines) do text[i] = tostring(line) end
-		local e = { id = type(s) == "table" and s.id or nil, char = type(s) == "table" and s.char or nil,
-			start = type(s) == "table" and s.start or nil, file = file, ok = ok, head = ok and a or nil, n = ok and b or nil,
-			at = not ok and a or nil, why = not ok and b or nil, checkpoints = {}, lines = #lines,
-			-- (the copy as stored, to compare with the same session in another file)
-			text = table.concat(text, "\n") .. "\0" .. tostring(type(s) == "table" and s.n) .. "\0" .. tostring(type(s) == "table" and s.head) }
-		local dict = {}
-		for _, line in ipairs(lines) do
-			local f = R.Split(line)
-			if f[1] == "S" then
-				e.guild, e.tag = f[6], f[14] ~= "" and f[14] or nil
-			elseif f[1] == "M" then
-				dict[tonumber(f[2])] = f[3] .. "|" .. f[4]
-			elseif f[1] == "C" then
-				local function Names(hex)
-					local set = R.Unbitmap(hex) or {}
-					local names = {}
-					for i in pairs(set) do names[#names + 1] = dict[i] or ("?" .. i) end
-					table.sort(names)
-					return names
-				end
-				local slot, at = tonumber(f[3]), tonumber(f[4])
-				e.checkpoints[#e.checkpoints + 1] = { guild = f[5], kind = f[2], slot = slot, at = at,
-					late = slot and at and at - slot or nil, total = tonumber(f[6]), online = tonumber(f[7]), rows = tonumber(f[8]),
-					rowsOnline = tonumber(f[9]), members = Names(f[10]), onlineSet = Names(f[11]) }
+	local result = R.VerifyFile(db, nil) -- (nil: the SHA-256 of R's own namespace, Olympus/Sign.lua's)
+	for _, v in ipairs(result.sessions) do
+		local e = { id = v.id, char = v.character, start = v.start, guild = v.guild, tag = v.battleTagHash, file = file,
+			ok = v.ok, head = v.ok and v.lastHash or nil, n = v.ok and v.records or nil, at = v.brokenAt, why = v.why,
+			lines = v.records, copy = v.copy, checkpoints = {} }
+		for _, o in ipairs(v.observations) do
+			if o.kind == "C" then
+				local sets = o.checkpoint ~= nil and v.roster[o.checkpoint] or {}
+				e.checkpoints[#e.checkpoints + 1] = { guild = tostring(o.guild), kind = type(o.checkpoint) == "number" and "Q" or "M",
+					slot = o.slot, at = o.readAt, late = o.slot and o.readAt and o.readAt - o.slot or nil, total = o.total,
+					online = o.online, rows = o.rows, rowsOnline = o.rowsOnline, members = sets.presentKeys or {},
+					onlineSet = sets.onlineKeys or {} }
 			end
 		end
 		out[#out + 1] = e
 	end
-	return out
+	return out, result.why
 end
 
--- The sessions of all files, each id once: { kept, conflicts }. Copies of one id must be identical
--- (the same lines, n and head) whatever the files' order; when any differs, no copy of that id is
--- kept, and conflicts lists it with every file that holds it.
+-- The sessions of all files, each id once (Record.Dedupe): { kept, conflicts }. Copies of one id
+-- must be the same copy (the same lines, marks, n and head) whatever the files' order; when any
+-- differs, no copy of that id is kept, and conflicts lists it with every file that holds it.
 function M.Dedupe(entries)
-	local byId, order = {}, {}
-	for _, e in ipairs(entries) do
-		local key = e.id or ("\0no id " .. #order)
-		if not byId[key] then
-			byId[key] = { e }
-			order[#order + 1] = key
-		else
-			table.insert(byId[key], e)
-		end
-	end
-	local kept, conflicts = {}, {}
-	for _, key in ipairs(order) do
-		local copies, same = byId[key], true
-		for i = 2, #copies do
-			if copies[i].text ~= copies[1].text then same = false end
-		end
-		if same then
-			kept[#kept + 1] = copies[1]
-		else
-			local files = {}
-			for _, c in ipairs(copies) do files[#files + 1] = tostring(c.file) end
-			conflicts[#conflicts + 1] = { id = key, files = files }
-		end
+	local R = M.R or M.Load()
+	local kept, found = R.Dedupe(entries)
+	local conflicts = {}
+	for _, g in ipairs(found) do
+		local files = {}
+		for _, c in ipairs(g.copies) do files[#files + 1] = tostring(c.file) end
+		conflicts[#conflicts + 1] = { id = g.id, files = files }
 	end
 	return kept, conflicts
 end
@@ -338,7 +308,7 @@ for _, path in ipairs(arg) do
 					tostring(e.guild), when, e.n, #e.checkpoints, e.head))
 			else
 				broken = broken + 1
-				print(("  %s  %s: chain BROKEN at line %s (%s)"):format(tostring(e.id), tostring(e.char), tostring(e.at), tostring(e.why)))
+				print(("  %s  %s: %s"):format(tostring(e.id), tostring(e.char), e.at and ("chain BROKEN, " .. tostring(e.why)) or tostring(e.why)))
 			end
 			entries[#entries + 1] = e
 		end

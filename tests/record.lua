@@ -953,3 +953,213 @@ test("record mode: a day of 50-minute sessions in a 1000-member guild, with 70 g
 		assert(w2.copies[#w2.copies].text:find(L.RECORD_FULL:format(12), 1, true))
 	end)
 end)
+
+---------------------------------------------------------------------------
+-- Record.VerifyFile: the check the Companion's verifier and record-check.lua run, the recorder's
+-- own hash rule and line reading (docs/RECORD-FORMAT.md, section 8.1).
+---------------------------------------------------------------------------
+
+local DOC_HEAD = {
+	A = "95bd06d6c5853eaad1af8e9e3d42c6c93cea3e8893226b367b586ba648683344",
+	B = "d50c51179f068b5bffa0a396a70f33f037f941e6659c4eb0771cbc20cfb8dbf0",
+}
+
+-- Olympus/Sign.lua and Olympus/Record.lua loaded as an offline verifier loads them, in a namespace
+-- of ns.L alone, with no global but Lua's own library and the bit library Sign.lua reads (as
+-- _G.bit): any other name read or written is recorded in touched, and fails.
+local LUA_ONLY = { "assert", "error", "ipairs", "next", "pairs", "pcall", "rawequal", "rawget", "rawset", "select",
+	"setmetatable", "getmetatable", "tonumber", "tostring", "type", "unpack", "xpcall", "string", "table", "math" }
+local function Sandboxed()
+	local touched, env = {}, { bit = rawget(_G, "bit") or require("bit") }
+	for _, k in ipairs(LUA_ONLY) do env[k] = _G[k] end
+	env._G = env
+	setmetatable(env, {
+		__index = function(_, k) touched[#touched + 1] = "read " .. tostring(k); error("no global " .. tostring(k), 2) end,
+		__newindex = function(_, k) touched[#touched + 1] = "write " .. tostring(k); error("no global " .. tostring(k), 2) end,
+	})
+	local sns = { L = {} }
+	for _, file in ipairs({ "Sign.lua", "Record.lua" }) do
+		local chunk = assert(loadfile(ROOT .. "Olympus/" .. file))
+		setfenv(chunk, env)
+		chunk("Olympus", sns)
+	end
+	return sns.Record, sns.Sign.SHA256, touched, sns
+end
+-- A committed sample's OlympusRecordDB, read from the file by record-check.lua's reader.
+local function SampleDb(name)
+	local C = assert(loadfile(ROOT .. "scripts/record-check.lua"))("--module")
+	return C.Parse(assert(ReadFile(ROOT .. "tests/fixtures/" .. name))).OlympusRecordDB
+end
+local function Copied(v)
+	if type(v) ~= "table" then return v end
+	local out = {}
+	for k, x in pairs(v) do out[k] = Copied(x) end
+	return out
+end
+-- Each observation as one text: kind, guild, checkpoint, read at, total, online, reporter, line.
+local function Seen(e)
+	local out = {}
+	for _, o in ipairs(e.observations) do
+		out[#out + 1] = table.concat({ o.kind, tostring(o.guild), tostring(o.checkpoint), tostring(o.readAt), tostring(o.total),
+			tostring(o.online), tostring(o.reporter), tostring(o.line) }, "|")
+	end
+	return table.concat(out, "\n")
+end
+
+test("record mode: Record.VerifyFile reads both committed samples: each chain computed again from its seed gives the documented head, and members and checkpoints come back as names", function()
+	local R, sha = Sandboxed()
+	local a = R.VerifyFile(SampleDb("record-sample.lua"), sha)
+	local b = R.VerifyFile(SampleDb("record-sample-b.lua"), sha)
+	for _, r in ipairs({ a, b }) do
+		eq(r.ok, true); eq(r.why, nil); eq(#r.sessions, 1); eq(#r.conflicts, 0); eq(r.duplicates, 0)
+	end
+	local A, B = a.sessions[1], b.sessions[1]
+	eq(A.ok, true, tostring(A.why)); eq(A.why, nil); eq(A.brokenAt, nil)
+	eq(A.lastHash, DOC_HEAD.A, "witness A's head, as docs/RECORD-FORMAT.md gives it")
+	eq(B.ok, true, tostring(B.why))
+	eq(B.lastHash, DOC_HEAD.B, "witness B's head, as docs/RECORD-FORMAT.md gives it")
+	eq(A.firstHash, "6cac157f898125f1892460687e68b5651d850a922d7633bea5a79ad9731648c4", "the hash after the S line: its mark 1 in the file")
+	eq(A.id, "Player-0000-0000000A:" .. (T14 - 60))
+	eq(A.character, "Witness Example-ClassicBetaPvP"); eq(A.witness, "Player-0000-0000000A"); eq(A.guild, "Olympus Example")
+	eq(A.battleTagHash, "973dcf3aa89dd097c64d6764c475996c11ee2aa22b4ec83c542453d341eb76eb"); eq(A.start, T14 - 60); eq(A.records, 17)
+	eq(B.character, "Witness Second-ClassicBetaPvP"); eq(B.witness, "Player-0000-0000000B"); eq(B.guild, "Olympus Example")
+	eq(B.battleTagHash, nil, "B's game gave no BattleTag"); eq(B.start, T14 + 5 * 60); eq(B.records, 13)
+	-- Every C and E line in order: a quarter hour by its slot, a mark by the time it was asked, a census
+	-- report by the quarter hour this client took it in.
+	eq(Seen(A), table.concat({
+		("C|Olympus Example|%d|%d|8|5|nil|10"):format(T14, T14 + 2),
+		("E|Olympus Second|%d|%d|950|310|Sample Reporter-ClassicBetaPvP2|11"):format(T14, T14 + 70),
+		("E|Olympus Third|%d|%d|420|96|Sample Herald-ClassicBetaPvP|12"):format(T14, T14 + 5 * 60),
+		("C|Olympus Example|mark:%d|%d|8|6|nil|13"):format(T14 + 10 * 60, T14 + 10 * 60 + 2),
+		("C|Olympus Example|%d|%d|8|7|nil|15"):format(T14 + 15 * 60, T14 + 15 * 60 + 2),
+		("E|Olympus Second|%d|%d|955|330|Sample Reporter-ClassicBetaPvP2|16"):format(T14 + 15 * 60, T14 + 16 * 60),
+	}, "\n"))
+	local c, e = A.observations[1], A.observations[2]
+	eq(c.slot, T14); eq(c.rows, 8); eq(c.rowsOnline, 5)
+	eq(e.reportedAt, T14 + 68, "the report's own time, field 3"); eq(e.users, 12); eq(e.slot, nil)
+	-- The rosters, by checkpoint. Between 14:00 and 14:15 Charlie levels, Alpha logs in, Echo leaves and
+	-- Foxtrot joins.
+	local function List(t) return table.concat(t, ", ") end
+	local at14 = A.roster[T14]
+	eq(List(at14.present), "Leader Example-ClassicBetaPvP, Member Alpha-ClassicBetaPvP, Member Bravo-ClassicBetaPvP2, Member Charlie-ClassicBetaPvP, "
+		.. "Member Delta-ClassicBetaPvP2, Member Echo-ClassicBetaPvP, Witness Example-ClassicBetaPvP, Witness Second-ClassicBetaPvP")
+	eq(List(at14.online), "Leader Example-ClassicBetaPvP, Member Bravo-ClassicBetaPvP2, Member Delta-ClassicBetaPvP2, Witness Example-ClassicBetaPvP, Witness Second-ClassicBetaPvP")
+	eq(List(A.roster["mark:" .. (T14 + 10 * 60)].online), "Leader Example-ClassicBetaPvP, Member Alpha-ClassicBetaPvP, Member Bravo-ClassicBetaPvP2, "
+		.. "Member Delta-ClassicBetaPvP2, Witness Example-ClassicBetaPvP, Witness Second-ClassicBetaPvP")
+	local at15 = A.roster[T14 + 15 * 60]
+	eq(List(at15.present), "Leader Example-ClassicBetaPvP, Member Alpha-ClassicBetaPvP, Member Bravo-ClassicBetaPvP2, Member Charlie-ClassicBetaPvP, "
+		.. "Member Delta-ClassicBetaPvP2, Member Foxtrot-ClassicBetaPvP, Witness Example-ClassicBetaPvP, Witness Second-ClassicBetaPvP")
+	eq(List(at15.online), "Leader Example-ClassicBetaPvP, Member Alpha-ClassicBetaPvP, Member Bravo-ClassicBetaPvP2, Member Delta-ClassicBetaPvP2, "
+		.. "Member Foxtrot-ClassicBetaPvP, Witness Example-ClassicBetaPvP, Witness Second-ClassicBetaPvP")
+	eq(at15.presentKeys[6], "Member Foxtrot-ClassicBetaPvP|Player-0000-00000007", "with the GUID too")
+	-- B's 14:15 is A's, though Foxtrot is member 9 for A and 8 for B.
+	local b15 = B.roster[T14 + 15 * 60]
+	for _, k in ipairs({ "present", "online", "presentKeys", "onlineKeys" }) do eq(List(b15[k]), List(at15[k]), k) end
+	eq(B.roster[T14], nil, "B arrived after 14:00")
+end)
+
+-- A regression: the check compared n with the lines before it hashed them, so a line removed from a
+-- session said only "n is not the number of lines", not where.
+test("record mode: Record.VerifyFile says where an edited sample breaks: an edited total at its own line, a dropped or a reordered line at the first mark after it", function()
+	local R, sha = Sandboxed()
+	local function Edited(edit)
+		local db = SampleDb("record-sample.lua")
+		edit(db.sessions[1].lines)
+		local r = R.VerifyFile(db, sha)
+		eq(#r.sessions, 1)
+		return r, r.sessions[1]
+	end
+	-- 14:15's checkpoint (line 15) says 9 members instead of 8.
+	local r, e = Edited(function(lines) lines[15] = lines[15]:gsub("|Olympus Example|8|", "|Olympus Example|9|", 1) end)
+	eq(r.ok, false); eq(e.ok, false); eq(e.brokenAt, 15); eq(e.why, "line 15: its mark is not its hash")
+	eq(e.lastHash ~= DOC_HEAD.A, true, "the head computed again is no longer the published one")
+	eq(e.observations[5].total, 9, "(the edited claim is still read: the session is broken, kept out of the counts)")
+	-- An E line edited after the last checkpoint: only the Z line's mark finds it (section 7).
+	r, e = Edited(function(lines) lines[16] = lines[16]:gsub("|955|", "|999|", 1) end)
+	eq(e.why, "line 17: its mark is not its hash")
+	-- A line dropped: an E line (11), then a member's line (5).
+	r, e = Edited(function(lines) table.remove(lines, 11) end)
+	eq(e.ok, false); eq(e.records, 16); eq(e.why, "line 13: its mark is not its hash", "the first mark after line 10, the last mark before it")
+	r, e = Edited(function(lines) table.remove(lines, 5) end)
+	eq(e.why, "line 10: its mark is not its hash")
+	r, e = Edited(function(lines) table.remove(lines) end)
+	eq(e.why, "line 16: the last line is no Z line", "the Z line dropped")
+	-- Two lines swapped, each of them intact: two census reports (11, 12), then two members (2, 3).
+	r, e = Edited(function(lines) lines[11], lines[12] = lines[12], lines[11] end)
+	eq(e.records, 17); eq(e.why, "line 13: its mark is not its hash")
+	r, e = Edited(function(lines) lines[2], lines[3] = lines[3], lines[2] end)
+	eq(e.why, "line 10: its mark is not its hash")
+	-- Untouched, the same file verifies.
+	r, e = Edited(function() end)
+	eq(r.ok, true); eq(e.lastHash, DOC_HEAD.A)
+end)
+
+-- A regression: Record.lua needed ns.On to load, which a verifier's namespace has no use for.
+test("record mode: Record.VerifyFile never calls any WoW API: Sign.lua and Record.lua load and verify with no global but Lua's own and bit, in a namespace of ns.L alone", function()
+	local R, sha, touched, sns = Sandboxed()
+	local A, B = SampleDb("record-sample.lua"), SampleDb("record-sample-b.lua")
+	local edited = Copied(A)
+	edited.sessions[1].lines[15] = edited.sessions[1].lines[15]:gsub("|8|7|8|7|", "|8|8|8|8|", 1)
+	local odd = Copied(B)
+	odd.sessions[2], odd.sessions[3], odd.sessions[4] = "no session", { lines = { 5 } }, Copied(odd.sessions[1])
+	for _, db in ipairs({ A, B, edited, odd }) do R.VerifyFile(db, sha) end
+	eq(R.VerifyFile(A).sessions[1].lastHash, DOC_HEAD.A, "with no sha given: the namespace's own Sign.SHA256")
+	local refused = R.VerifyFile({ format = "olympus-record", version = 2, sessions = A.sessions }, sha)
+	eq(refused.ok, false); eq(refused.why, "no OlympusRecordDB of format 1"); eq(#refused.sessions, 0)
+	eq(R.VerifyFile(nil, sha).why, "no OlympusRecordDB of format 1")
+	local r = R.VerifyFile(odd, sha)
+	eq(#r.sessions, 3, "the repeat left out"); eq(r.duplicates, 1); eq(r.ok, false)
+	eq(r.sessions[2].why, "no lines"); eq(r.sessions[2].brokenAt, 0); eq(r.sessions[3].why, "line 1: the first line is no S line of format 1")
+	eq(#touched, 0, "globals touched: " .. table.concat(touched, ", "))
+	local keys = {}
+	for k in pairs(sns) do keys[#keys + 1] = k end
+	table.sort(keys)
+	eq(table.concat(keys, ","), "L,Record,Sign", "nothing else added to the namespace")
+	-- A SHA-256 that gives hex instead of the 32 bytes is refused, not hashed into wrong heads.
+	local ok, err = pcall(R.VerifyFile, A, function(text) return R.Hex(sha(text)) end)
+	eq(ok, false); assert(tostring(err):find("32 bytes", 1, true), tostring(err))
+end)
+
+-- A regression: copies of one session were compared by their lines, n and head, not their marks,
+-- so a copy whose marks were edited was kept or left out by the order of the files.
+test("record mode: a session that repeats is kept once, by VerifyFile in one file and record-check across files; copies that differ, even by one mark, are all left out whatever the order", function()
+	local R, sha = Sandboxed()
+	local db = SampleDb("record-sample.lua")
+	local twice = Copied(db)
+	twice.sessions[2] = Copied(db.sessions[1])
+	local r = R.VerifyFile(twice, sha)
+	eq(r.ok, true); eq(#r.sessions, 1); eq(r.duplicates, 1); eq(#r.conflicts, 0)
+	local marked = Copied(db)
+	marked.sessions[1].marks[3] = marked.sessions[1].marks[3]:gsub(":6e", ":7e", 1)
+	local both = Copied(db)
+	both.sessions[2] = marked.sessions[1]
+	r = R.VerifyFile(both, sha)
+	eq(r.ok, false); eq(#r.conflicts, 1); eq(r.conflicts[1].id, db.sessions[1].id); eq(r.conflicts[1].copies, 2)
+	eq(#r.sessions, 2, "both copies listed"); eq(r.sessions[1].ok, false); eq(r.sessions[2].ok, false)
+	eq(r.sessions[1].why, ("the copies of session %s in this file differ"):format(db.sessions[1].id))
+	eq(r.sessions[2].why, "line 13: its mark is not its hash")
+	-- record-check, across two days' files in either order.
+	local C = assert(loadfile(ROOT .. "scripts/record-check.lua"))("--module")
+	local CR = C.Load()
+	for _, order in ipairs({ { { "day1", db }, { "day2", marked } }, { { "day2", marked }, { "day1", db } } }) do
+		local all = {}
+		for _, pair in ipairs(order) do
+			for _, e in ipairs(C.Sessions(CR, pair[2], pair[1])) do all[#all + 1] = e end
+		end
+		local kept, conflicts = C.Dedupe(all)
+		eq(#kept, 0, "neither copy counted"); eq(#conflicts, 1)
+		eq(table.concat(conflicts[1].files, ","), order[1][1] .. "," .. order[2][1])
+	end
+	local all = {}
+	for _, f in ipairs({ { "day1", db }, { "day2", SampleDb("record-sample.lua") } }) do
+		for _, e in ipairs(C.Sessions(CR, f[2], f[1])) do all[#all + 1] = e end
+	end
+	local kept, conflicts = C.Dedupe(all)
+	eq(#kept, 1, "the same copy in two files: kept once"); eq(#conflicts, 0)
+	-- record-check reads the files only through VerifyFile and Dedupe: no chain or line reading of its own.
+	local src = assert(ReadFile(ROOT .. "scripts/record-check.lua")):gsub("%-%-[^\n]*", "")
+	assert(src:find("R.VerifyFile(", 1, true) and src:find("R.Dedupe(", 1, true), "it calls them")
+	for _, own in ipairs({ "Unbitmap", "Split", "Verify(", "Link", "Seed", "SHA256" }) do
+		eq(src:find(own, 1, true), nil, "record-check has no " .. own .. " of its own")
+	end
+end)
