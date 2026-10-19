@@ -990,8 +990,8 @@ also saved in `WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua`.
 
 ## License
 
-MIT. A fan project, not affiliated with Blizzard Entertainment, Asmongold or the
-Olympus leadership. The Olympus emblem belongs to its owners and is used for the community.
+MIT. Not made or endorsed by Blizzard Entertainment. The Olympus emblem belongs to its owners
+and is used for the community.
 
 *Sources for the Olympus description: the Olympus Discord welcome message,
 [Prism on X](https://x.com/fwprism/status/2101809316382847172) (10K+ members in the beta),

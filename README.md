@@ -2491,7 +2491,8 @@ client may send anyway, his own killing blows or a reviewer's relays.
 **The Olympus Accord (1.2.5.1).** Before anything else the addon asks every game account once to
 accept its terms of use, the Olympus Accord: a letter on parchment in Olympus's own window (no X,
 never on the escape list, never the game's popup, the gamepad UI included), its version and date at
-the bottom. It says what Olympus is (a fan addon, not Blizzard's), that Blizzard's rules come first,
+the bottom. It says what Olympus is (the free addon of Asmongold's Olympus guilds, not
+Blizzard's), that Blizzard's rules come first,
 what is not allowed (the rules the addon already keeps: abuse, slurs, harassment, spam or scams,
 any language but English in Olympus's chats, bets or gold stakes, another player's BattleTag or
 personal details, coming back on another character to get around a sanction, a modified addon),
@@ -3345,8 +3346,8 @@ Gundlach and contributors (speedata, 3-clause BSD) for Olympus Link's QR code
 
 ## License
 
-MIT. A fan project, not affiliated with Blizzard Entertainment, Asmongold or the
-Olympus leadership. The Olympus emblem belongs to its owners and is used for the community.
+MIT. Not made or endorsed by Blizzard Entertainment. The Olympus emblem belongs to its owners
+and is used for the community.
 
 *Sources for the Olympus description: the Olympus Discord welcome message,
 [Prism on X](https://x.com/fwprism/status/2101809316382847172) (10K+ members in the beta),
