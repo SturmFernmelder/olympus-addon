@@ -91,6 +91,15 @@ end
 function Inspect.Want(guid, key, o)
 	if Secret(guid) or type(guid) ~= "string" or not guid:find("^Player%-") or type(key) ~= "string" or key == "" then return false end
 	if type(o) ~= "table" or type(o.unit) ~= "function" or type(o.read) ~= "function" then return false end
+	-- Asked again while it still waits: the same want. Its request out stays out and its answer is
+	-- read (one request, one read); one not out yet goes at the next turn; its timeouts still count
+	-- (WANT_TRIES). Only one done, given up or for another player is replaced.
+	local was = WantOf(key)
+	if was and was.guid == guid and was.status ~= "done" and not Stopped(was) then
+		was.unit, was.read = o.unit, o.read
+		if was.status ~= "pending" then was.status, was.retryAt = "queued", -math.huge end
+		return true
+	end
 	Inspect.Unwant(key)
 	if #wants >= Inspect.WANTS_MAX then return false end
 	wants[#wants + 1] = { key = key, guid = guid, unit = o.unit, read = o.read, status = "queued", tries = 0, retryAt = -math.huge }
@@ -286,6 +295,31 @@ local function ScanNearby()
 	end
 end
 
+-- The game's own inspection in use (1.2.6: the duel view puts the pump on every member who
+-- watches): its inspect window shown; its request out, the window not shown yet (InspectFrame_Show
+-- sets InspectFrame.unit and calls NotifyInspect, and shows the window only at the answer); or its
+-- talent window on the inspected player (Forever: PlayerSpellsFrame:IsInspecting(), and the game's
+-- own inspect window then keeps the inspection when it closes). Then no NotifyInspect of ours (it
+-- would replace the game's inspected player) and no ClearInspectPlayer. A request of the game's that
+-- found no window to show (no answer, or the target changed before it) leaves the unit set: past
+-- HAND_WAIT it is the game's no more.
+Inspect.HAND_WAIT = TIMEOUT
+local handUnit, handAt
+local function GameInspecting()
+	local f = InspectFrame
+	if f and f:IsShown() then handUnit, handAt = nil, nil return true end
+	local spells = PlayerSpellsFrame
+	if spells and type(spells.IsInspecting) == "function" and spells:IsShown() then
+		local ok, on = pcall(spells.IsInspecting, spells) -- gp:inspect-patrol
+		if ok and on == true then return true end
+	end
+	local unit = type(f) == "table" and rawget(f, "unit") or nil
+	if Secret(unit) or type(unit) ~= "string" then handUnit, handAt = nil, nil return false end -- gp:inspect-patrol
+	if unit ~= handUnit then handUnit, handAt = unit, GetTime() end -- gp:inspect-patrol
+	return GetTime() - handAt < Inspect.HAND_WAIT
+end
+Inspect.GameInspecting = GameInspecting -- (tests)
+
 -- The one request to the server (how: { patrol, gear, want }); the wants for that player wait for it.
 local function Request(unit, guid, how)
 	pending = { guid = guid, unit = unit, at = GetTime(), gear = how.gear, patrol = how.patrol, want = how.want }
@@ -331,8 +365,8 @@ local function Pump()
 		pending = nil
 	end
 	if InCombatLockdown() then Mark(nil, "combat") return end
-	-- the player is inspecting by hand
-	if InspectFrame and InspectFrame:IsShown() then Mark(nil, "busy") return end
+	-- the player is inspecting by hand (the game's inspect or talent window, or its request out)
+	if GameInspecting() then Mark(nil, "busy") return end
 	if pace and GetTime() - lastRequest < pace then return end
 	-- (Back from combat or the inspect window: those wait their turn again.)
 	Mark(nil, "queued", "combat"); Mark(nil, "queued", "busy")
@@ -429,7 +463,7 @@ local function OnInspectReady(guid)
 	if wanted then
 		if unit then ReadWants(unit, guid) else Mark(guid, "sight", "pending") end
 	end
-	if not (InspectFrame and InspectFrame:IsShown()) and ClearInspectPlayer then ClearInspectPlayer() end -- gp:inspect-patrol
+	if not GameInspecting() and ClearInspectPlayer then ClearInspectPlayer() end -- gp:inspect-patrol
 end
 Inspect.OnInspectReady = OnInspectReady -- (tests)
 

@@ -42897,7 +42897,7 @@ do
 -- (w.rank: 1 an officer). The inspections kept start empty.
 local GEAR_GLOBALS = { "UnitExists", "UnitIsPlayer", "UnitIsUnit", "UnitGUID", "GetGuildInfo", "UnitFactionGroup", "UnitLevel", "UnitClass",
 	"CanInspect", "CheckInteractDistance", "NotifyInspect", "GetInventoryItemID", "GetInventoryItemLink", "InCombatLockdown",
-	"InspectFrame", "ClearInspectPlayer", "UnitFullName", "GetTime", "GetItemInfo", "GameTooltip", "issecretvalue" }
+	"InspectFrame", "ClearInspectPlayer", "UnitFullName", "GetTime", "GetItemInfo", "GameTooltip", "issecretvalue", "PlayerSpellsFrame" }
 local GEAR_BOB = {
 	[1] = { id = 16866, link = "|cffa335ee|Hitem:16866:0:0:0:0:0:0:0:60|h[Helm of Might]|h|r" },
 	[5] = { id = 16865 }, -- (no link from the client yet: its id alone)
@@ -42934,7 +42934,7 @@ local function WithGear(fn)
 	GetInventoryItemID = function(unit, slot) local u = U(unit) local it = u and u.items and u.items[slot] return it and it.id end
 	GetInventoryItemLink = function(unit, slot) local u = U(unit) local it = u and u.items and u.items[slot] return it and it.link end
 	InCombatLockdown = function() return w.combat end
-	InspectFrame, ClearInspectPlayer = nil, function() end
+	InspectFrame, ClearInspectPlayer, PlayerSpellsFrame = nil, function() end, nil
 	UnitFullName = function(unit) local u = U(unit) if u then return u.name, "Realm" end return "Tester", "Realm" end
 	GetItemInfo = nil
 	w.target = function(name, extra)
@@ -43397,6 +43397,117 @@ test("watch duel inspect: in combat \"combat\", the game's inspect window open \
 		eq(I.WantStatus(bob.guid), "timeout")
 		I.Unwant("test:bob")
 		eq(I.WantStatus(bob.guid), nil)
+	end)
+end)
+
+-- The regression (1.2.6): asking again for a want whose request was out replaced it with a new
+-- "queued" one (its timeouts back to 0): the game's answer then found no "pending" want to read and
+-- was dropped, and a second NotifyInspect followed. The duel view asks again on the fighter's
+-- UNIT_INVENTORY_CHANGED and on Inspect again. With the fix taken out the first read is missing.
+test("watch duel inspect: asked again while its request is out: the same want, one NotifyInspect, its answer read; asked again while it waits its turn: one request; once done, a new one; its timeouts still count to WANT_TRIES", function()
+	WithGear(function(w, I)
+		local bob = Bob(w)
+		local order = {}
+		eq(Wanted(I, bob, "nameplate3", order), true)
+		I.Pump()
+		eq(table.concat(w.notified, ","), "Bob"); eq(I.WantStatus(bob.guid), "pending")
+		eq(Wanted(I, bob, "nameplate3", order), true, "asked again while it is out")
+		eq(I.WantStatus(bob.guid), "pending", "the same request out")
+		I.OnInspectReady(bob.guid)
+		eq(table.concat(order, ","), "read nameplate3 Player-1-Bob", "its answer read")
+		eq(I.WantStatus(bob.guid), "done")
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 1, "no second request")
+		-- Done: asked again, a new request; twice before its turn, still one.
+		Wanted(I, bob, "nameplate3", order)
+		eq(I.WantStatus(bob.guid), "queued")
+		Wanted(I, bob, "nameplate3", order)
+		I.Pump()
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 2, "one request for both asks")
+		I.OnInspectReady(bob.guid)
+		eq(#order, 2, "one read")
+		-- No answer: asked again after each timeout, its timeouts counted on, then given up; asked
+		-- again after that, a new want.
+		Wanted(I, bob, "nameplate3", order)
+		for try = 1, I.WANT_TRIES do
+			I.Pump()
+			eq(#w.notified, 2 + try, "request " .. try)
+			w.clock = w.clock + 5
+			I.Pump()
+			local st, _, tries = I.WantStatus(bob.guid)
+			eq(st, "timeout"); eq(tries, try, "timeouts counted on")
+			if try < I.WANT_TRIES then
+				Wanted(I, bob, "nameplate3", order)
+				eq(I.WantStatus(bob.guid), "queued", "back in line at once")
+			end
+		end
+		I.Pump()
+		eq(#w.notified, 2 + I.WANT_TRIES, "given up")
+		Wanted(I, bob, "nameplate3", order)
+		local st, _, tries = I.WantStatus(bob.guid)
+		eq(st, "queued"); eq(tries, 0, "asked again once given up: a new want")
+	end)
+end)
+
+-- The regression (1.2.6): the pump counted the game's own inspection in use only while its inspect
+-- window showed. Between InspectFrame_Show and its answer the game has set InspectFrame.unit and
+-- shows the window only at INSPECT_READY; its talent window on the inspected player
+-- (PlayerSpellsFrame:IsInspecting, Forever) keeps the inspection with the inspect window closed
+-- (Forever's Blizzard_InspectUI.lua: InspectFrame_Show, OnEvent, OnHide). In both a want's
+-- NotifyInspect replaced the game's inspected player and its answer ended in ClearInspectPlayer.
+test("watch duel inspect: the game's own inspection in use with its window not shown, its request out (InspectFrame.unit) or its talent window inspecting (PlayerSpellsFrame:IsInspecting): no NotifyInspect (\"busy\") and no ClearInspectPlayer at an answer; a request of the game's never answered is its no more after HAND_WAIT", function()
+	WithGear(function(w, I)
+		local cleared = 0
+		ClearInspectPlayer = function() cleared = cleared + 1 end
+		local bob = Bob(w)
+		local order = {}
+		-- The game's request out: the unit set, the window shown only at its answer.
+		InspectFrame = { unit = "target", IsShown = function() return false end }
+		Wanted(I, bob, "nameplate3", order)
+		I.Pump()
+		eq(#w.notified, 0, "no request over the game's"); eq(I.WantStatus(bob.guid), "busy")
+		InspectFrame.unit = nil -- (answered, shown, closed: its OnHide clears the unit)
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(table.concat(w.notified, ","), "Bob", "asked once the game's is over")
+		-- The player clicks Inspect while ours is out, and our handler hears the answer first.
+		InspectFrame.unit = "nameplate3"
+		I.OnInspectReady(bob.guid)
+		eq(#order, 1, "read"); eq(cleared, 0, "the game's inspection kept for its window")
+		InspectFrame.unit = nil
+		-- Its talent window on the inspected player, the inspect window closed.
+		local inspecting = true
+		PlayerSpellsFrame = { IsShown = function() return true end, IsInspecting = function() return inspecting end }
+		local cid = { name = "Cid", guid = "Player-1-Cid", guild = "Olympus Zeus", level = 60, items = {} }
+		w.units.focus = cid
+		Wanted(I, cid, "focus", order)
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(#w.notified, 1, "no request while it inspects"); eq(I.WantStatus(cid.guid), "busy")
+		inspecting = false
+		w.clock = w.clock + 2
+		I.Pump()
+		eq(w.notified[2], "Cid")
+		inspecting = true -- (opened while ours was out)
+		I.OnInspectReady(cid.guid)
+		eq(#order, 2); eq(cleared, 0, "kept for its talent window")
+		PlayerSpellsFrame = nil
+		-- A request of the game's never answered: its unit stays set, its window never shows.
+		local dan = { name = "Dan", guid = "Player-1-Dan", guild = "Olympus Zeus", level = 60, items = {} }
+		w.units.mouseover = dan
+		InspectFrame.unit = "target"
+		Wanted(I, dan, "mouseover", order)
+		w.clock = w.clock + 1
+		I.Pump()
+		eq(I.WantStatus(dan.guid), "busy"); eq(#w.notified, 2)
+		w.clock = w.clock + I.HAND_WAIT
+		I.Pump()
+		eq(w.notified[3], "Dan", "the game's no more after HAND_WAIT")
+		I.OnInspectReady(dan.guid)
+		eq(#order, 3); eq(cleared, 1, "cleared as ever")
 	end)
 end)
 

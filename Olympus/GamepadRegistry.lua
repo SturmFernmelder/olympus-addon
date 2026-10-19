@@ -164,7 +164,7 @@ ns.GAMEPAD = {
 	{ id = "inspect-patrol", kind = "inspect", files = { "Inspect.lua" },
 		guard = "exempt", toPad = "stays", toMouse = "nothing", safe = "off",
 		approved = APPROVED .. "; widened 2026-10-19, Daniel's duel-view request",
-		why = "NotifyInspect and ClearInspectPlayer for the tabard patrol, and (1.2.6) for the duel view's gear and talents (Inspect.Want, the same pump and pace, display only): not protected, and no gamepad path reads them." },
+		why = "NotifyInspect and ClearInspectPlayer for the tabard patrol, and (1.2.6) for the duel view's gear and talents (Inspect.Want, the same pump and pace, display only): not protected, and no gamepad path reads them. Neither while the game's own inspection is in use (its inspect window shown or its request out, InspectFrame.unit; its talent window inspecting, PlayerSpellsFrame:IsInspecting), which is only read." },
 	{ id = "mail-hooks", kind = "hook", files = { "Treasury.lua", "ArenaMoney.lua", "CraftRequests.lua" },
 		guard = "exempt", toPad = "stays", toMouse = "nothing", safe = "keep", approved = APPROVED,
 		why = "Post-hooks on the mail functions (hooksecurefunc keeps them the game's own) that only read what was sent and taken (1.2: the Arena's gold and the crafting requests' items too)." },

@@ -1493,6 +1493,7 @@ local function World(C, opts)
 	for _, n in ipairs({ "SendMailSendMoneyButton", "SendMailCODButton" }) do E[n] = Blizz(n, "CheckButton") end
 	E.SendMailMoney = Blizz("SendMailMoney", "Frame")
 	C.Absent("InspectFrame", "Blizzard_InspectUI loads on demand: not loaded in the pass")
+	C.Absent("PlayerSpellsFrame", "Blizzard_PlayerSpells loads on demand: not loaded in the pass")
 	C.Absent("CalendarFrame", "Blizzard_Calendar loads on demand: not loaded in the pass")
 	C.Absent("GuildFrame", "Forever has no old guild window: no Blizzard_GuildUI in the client's source (its guild window is Communities)")
 	C.Absent("PTR_IssueReporter", "Blizzard_PTRFeedback's frame shows on test clients only (a flow of its own adds it)")
