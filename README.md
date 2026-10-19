@@ -2802,6 +2802,10 @@ Other limits:
   (see the Throne), and the quiet `/who` a click in the window makes goes once a minute at most.
 - Tabard inspections are kept for two weeks, 2000 players at most (marked and caught players
   first); The Watch's Tabards list the first 200.
+- Watching a duel (1.2.6) sends nothing: the view reads only what your own client sees, and its
+  two inspections share the tabard patrol's line (one request at a time, at most one every 1.5 s,
+  never in combat or while the game's own inspect window is in use); a fighter is inspected again
+  at most every 30 seconds when his gear changes.
 - Messages are spaced 1.2 s apart, below Blizzard's addon message limits, and alert sounds
   play at most once every 15 seconds (1.1: a softer one never silences the Call to Arms or a
   louder alert after it).

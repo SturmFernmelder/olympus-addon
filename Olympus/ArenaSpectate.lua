@@ -29,6 +29,7 @@ local L = ns.L
 --     S.Stop()               the view's Hide: the inspections dropped, the retries cancelled, all forgotten
 --     S.Close()              /oly arena watch off: the view hidden (ArenaUI.Spectate.Hide), then Stop
 --     S.Watching() -> subject | nil
+--     S.Active() -> bool     a view open (the view's per-tick guard: nothing copied)
 --   Each tick of the view (0.2 s; the sight pass every 5th, or forced on the target, focus and
 --   nameplate events):
 --     S.Track(force)         each side's unit token now (a full scan at most each SCAN_GAP on a miss)
@@ -49,11 +50,13 @@ local L = ns.L
 --           icon, points (nil: hidden), tiers, columns, talents = { { name, icon, tier, column, rank,
 --           max, spellID, entryID (Forever), talentID (Era/TBC), tab, index } } } } } | nil }
 --     S.StatusLine(side) -> text | nil     the status line's words
+--     S.RoundResult(m) -> bool             the result read is one round's of a longer fight going on
 --     S.TalentLines(talent) -> { title, kind ("Passive" | "Active" | nil), desc, rank ("Rank 4 / 5") }
 --     S.Text(m) -> text      the copyable text: names, numbers and the game's own words only
 --   Forwarded by the view while shown:
 --     S.OnSystem(text)       CHAT_MSG_SYSTEM: the duel's line (the result banner) -> side | nil
---     S.OnInventory(unit)    UNIT_INVENTORY_CHANGED: inspected again, REINSPECT_GAP apart at most
+--     S.OnInventory(unit)    UNIT_INVENTORY_CHANGED: inspected again, REINSPECT_GAP apart at most,
+--                            never while his inspection is on its way (then once it is read)
 --     S.Reinspect(side)      the Refresh button
 --   Layout and rows: S.GEAR_LEFT, S.GEAR_RIGHT, S.GEAR_BOTTOM (slots), S.STATS, S.RESISTS ({ key, label }).
 --   Readers (inside the game's inspect answer; tests): S.ReadInspect(side, unit, guid, own),
@@ -276,11 +279,14 @@ end
 local state -- { subject, sides = { A, B }, result, t } while a view is open
 
 local function NewSide(f)
+	-- (rev: bumped at each read of his gear, stats or talents, which the model copies once per rev.)
 	return { name = f.name, short = ns.ShortName(f.name), gk = f.gk, guid = f.guid, hint = Str(f.unit), scanAt = -math.huge,
-		own = Same(f.name, ns.me) or nil }
+		own = Same(f.name, ns.me) or nil, rev = 0 }
 end
 
 function S.Watching() return state and Copy(state.subject) or nil end
+-- Is a view open (the view's per-tick and per-event guard: nothing copied)?
+function S.Active() return state ~= nil end
 function S.Token(side) local s = state and state.sides[side] return s and s.token or nil end
 
 local function HimNow(token, s)
@@ -357,6 +363,15 @@ function S.Track(force)
 		-- (A fighter whose GUID only his unit gave: his inspection asked now.)
 		if s.guid and not hadGuid and not s.own and state then Ask(key) end
 	end
+	-- The result read stays until they fight again: a calm seen after it, then combat (the combat
+	-- flag lingers a few seconds after a duel's end, so the calm first). A re-duel or the next
+	-- round of a best of 3 starts with no old winner.
+	local r = state and state.result
+	if r then
+		local fighting = S.Fighting()
+		if fighting == false then r.calm = true
+		elseif fighting == true and r.calm then state.result = nil end
+	end
 end
 
 ---------------------------------------------------------------------------
@@ -417,6 +432,7 @@ local function Stats(side, tries)
 	if not s then return end
 	local sums, resist, missing, known = S.GearStats(s.links)
 	s.stats, s.resist, s.statsPending, s.statsKnown = sums, resist, missing > 0, known
+	s.rev = s.rev + 1
 	tries = tries or 0
 	if missing > 0 and tries < S.STATS_TRIES then
 		local session = state
@@ -446,10 +462,16 @@ local function SpellIcon(id)
 end
 local function Icon(v) if Num(v) or Str(v) then return v end return nil end
 
+-- A spell's ID, a real one only: Era's and TBC's TalentInfoResult gives 0 by default (its
+-- documentation's Default = 0), and spell 0's description or Passive is no talent's.
+local function SpellID(v)
+	v = Num(v)
+	return v and v > 0 and v or nil
+end
 local function Talent(name, icon, tier, column, rank, max, spellID)
 	name, tier, column = Str(name), Num(tier), Num(column)
 	if not name or not tier or not column then return nil end
-	return { name = name, icon = Icon(icon), tier = tier, column = column, rank = Num(rank) or 0, max = Num(max) or 1, spellID = Num(spellID) }
+	return { name = name, icon = Icon(icon), tier = tier, column = column, rank = Num(rank) or 0, max = Num(max) or 1, spellID = SpellID(spellID) }
 end
 
 -- Tree names, icons and points (C_SpecializationInfo.GetSpecializationInfo: specId, name,
@@ -578,7 +600,7 @@ local function TraitGrid(inspect)
 			local defID = type(entry) == "table" and Num(entry.definitionID) or nil
 			local def = defID and Plain(T.GetDefinitionInfo, defID) or nil
 			def = type(def) == "table" and def or {}
-			local spellID = Num(def.spellID)
+			local spellID = SpellID(def.spellID)
 			local name = Str(def.overrideName) or SpellName(spellID)
 			local x, y = Num(info.posX), Num(info.posY)
 			local tree
@@ -666,6 +688,14 @@ end
 -- The inspection: asked of Inspect.lua (its pump, its pace), read inside the game's answer
 ---------------------------------------------------------------------------
 
+-- Inspected again `left` seconds from now (one timer a side, this session's only).
+local function Later(side, left)
+	local session = state
+	Arena.After(left, "spectate reinspect " .. side, function()
+		if state == session then S.Reinspect(side) end
+	end)
+end
+
 function S.ReadInspect(side, unit, guid, own)
 	local s = state and state.sides[side]
 	if not s or (guid and s.guid and guid ~= s.guid) then return false end
@@ -687,6 +717,12 @@ function S.ReadInspect(side, unit, guid, own)
 	s.classID = Num(classID) or s.classID
 	s.talents = S.ReadTalents(unit, s.classID, not own)
 	s.inspected = ns.Now()
+	s.rev = s.rev + 1
+	-- (His gear changed while this inspection was on its way: looked at again REINSPECT_GAP later.)
+	if s.again then
+		s.again = nil
+		Later(side, S.REINSPECT_GAP)
+	end
 	return true
 end
 
@@ -696,7 +732,7 @@ Ask = function(side)
 	local I = ns.Inspect
 	if not s or not s.guid or type(I) ~= "table" or type(I.Want) ~= "function" then return false end
 	local session = state
-	return I.Want(s.guid, WantKey(side), {
+	local ok = I.Want(s.guid, WantKey(side), {
 		unit = function()
 			if state ~= session then return nil end
 			return Find(s, false, GetTime(), state.sides[side == "A" and "B" or "A"])
@@ -706,6 +742,8 @@ Ask = function(side)
 			S.ReadInspect(side, unit, guid)
 		end,
 	}) == true
+	if ok then s.askedAt = ns.Now() end
+	return ok
 end
 -- The viewer's own side: his own gear and talents, read at once (no inspection).
 local function ReadOwn(side)
@@ -720,17 +758,30 @@ function S.Reinspect(side)
 	return Ask(side)
 end
 
+-- His inspection asked and not answered nor given up yet (Inspect.WantStatus).
+local function Asking(s)
+	local I = ns.Inspect
+	if s.own or not s.guid or type(I) ~= "table" or type(I.WantStatus) ~= "function" then return false end
+	local status, _, tries = I.WantStatus(s.guid)
+	if status == nil or status == "done" then return false end
+	return not (status == "timeout" and (tries or 0) >= (tonumber(I.WANT_TRIES) or 3))
+end
+
 function S.OnInventory(unit)
 	if not state or Secret(unit) or type(unit) ~= "string" then return false end
 	for _, key in ipairs(SIDES) do
 		local s = state.sides[key]
 		if s.guid and GuidIs(unit, s.guid) then
-			local left = S.REINSPECT_GAP - (ns.Now() - (s.inspected or -math.huge))
+			-- Not read yet, or his inspection on its way: never asked again at once (the answer on its
+			-- way would be lost); its read looks again REINSPECT_GAP later. Else REINSPECT_GAP after
+			-- the last read or ask at the soonest.
+			if not s.inspected or Asking(s) then
+				s.again = true
+				return false
+			end
+			local left = S.REINSPECT_GAP - (ns.Now() - math.max(s.inspected, s.askedAt or -math.huge))
 			if left <= 0 then return S.Reinspect(key) end
-			local session = state
-			Arena.After(left, "spectate reinspect " .. key, function()
-				if state == session then S.Reinspect(key) end
-			end)
+			Later(key, left)
 			return false
 		end
 	end
@@ -878,13 +929,31 @@ function S.OnSystem(text)
 	return side
 end
 
+-- The duel line read is one round's, of a longer fight of this client's knowledge still going on
+-- (a best of 3 after its first round): its words then say "Last round", never who won the fight.
+local OVER = { R = true, F = true, V = true, N = true, W = true }
+function S.RoundResult(m)
+	if type(m) ~= "table" or type(m.result) ~= "table" or type(m.fight) ~= "table" then return false end
+	return (tonumber(m.fight.bo) or 1) > 1 and not OVER[m.fight.state or ""]
+end
+
 local KEEP = { "name", "short", "gk", "guid", "token", "inSight", "seenAt", "class", "className", "classID", "race", "raceName",
 	"level", "sex", "faction", "guild", "powerType", "powerToken", "own", "gear", "gearN", "stats", "resist", "statsPending",
 	"statsKnown", "talents", "inspected" }
 
+-- (Copied once per read, the same copy after: the slow pass reads the model every second.)
+local HEAVY = { gear = true, stats = true, resist = true, talents = true }
+
 local function SideModel(s)
 	local out = {}
-	for _, k in ipairs(KEEP) do out[k] = Copy(s[k]) end
+	if s.copied ~= s.rev or not s.copies then
+		s.copies = {}
+		for k in pairs(HEAVY) do s.copies[k] = Copy(s[k]) end
+		s.copied = s.rev
+	end
+	for _, k in ipairs(KEEP) do
+		if HEAVY[k] then out[k] = s.copies[k] else out[k] = Copy(s[k]) end
+	end
 	if s.own then
 		out.inspect = { status = "own", at = s.inspected }
 	else
@@ -948,7 +1017,12 @@ function S.Text(m)
 	if m.fight then out[#out + 1] = L.ARENA_WATCH_FIGHT_LINE:format(m.fight.bo, m.fight.round, m.fight.a, m.fight.b) end
 	if m.result then
 		local w, l = m.sides[m.result.w], m.sides[m.result.w == "A" and "B" or "A"]
-		out[#out + 1] = m.result.m == "R" and L.ARENA_WATCH_WON_FLED:format(Display(w.name), Display(l.name)) or L.ARENA_WATCH_WON_KO:format(Display(w.name))
+		local round = S.RoundResult(m)
+		if m.result.m == "R" then
+			out[#out + 1] = (round and L.ARENA_WATCH_ROUND_FLED or L.ARENA_WATCH_WON_FLED):format(Display(w.name), Display(l.name))
+		else
+			out[#out + 1] = (round and L.ARENA_WATCH_ROUND_KO or L.ARENA_WATCH_WON_KO):format(Display(w.name))
+		end
 	end
 	for _, key in ipairs(SIDES) do
 		local s = m.sides[key]

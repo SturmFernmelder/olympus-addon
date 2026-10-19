@@ -159,10 +159,22 @@ local function Scene(w, c, o)
 end
 
 -- Inspect.lua at its boundary (the arena world loads none): Want/Unwant/WantStatus kept here,
--- ReadGear the real one (it only reads GetInventoryItemLink/GetInventoryItemID).
+-- ReadGear the real one (it only reads GetInventoryItemLink/GetInventoryItemID). Want behaves as
+-- Inspect.lua's: asked again while the want still waits (not done, not given up), the same want
+-- is kept (its answer read; one not out yet back to "queued"); I.asked counts the asks per key.
 local function StubInspect(c)
-	local I = { wants = {}, WANT_TRIES = 3, ReadGear = H.ns.Inspect.ReadGear }
-	function I.Want(guid, key, o) I.wants[key] = { guid = guid, unit = o.unit, read = o.read, status = "queued", tries = 0 } return true end
+	local I = { wants = {}, asked = {}, WANT_TRIES = 3, ReadGear = H.ns.Inspect.ReadGear }
+	function I.Want(guid, key, o)
+		I.asked[key] = (I.asked[key] or 0) + 1
+		local was = I.wants[key]
+		if was and was.guid == guid and was.status ~= "done" and not (was.status == "timeout" and (was.tries or 0) >= I.WANT_TRIES) then
+			was.unit, was.read = o.unit, o.read
+			if was.status ~= "pending" then was.status = "queued" end
+			return true
+		end
+		I.wants[key] = { guid = guid, unit = o.unit, read = o.read, status = "queued", tries = 0 }
+		return true
+	end
 	function I.Unwant(key) I.wants[key] = nil end
 	function I.WantStatus(guid)
 		for _, x in pairs(I.wants) do

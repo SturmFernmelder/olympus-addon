@@ -296,6 +296,41 @@ test("watch duel view: the cast: hidden when none; a secret cast's name, icon an
 	W3.NoErrors(w)
 end)
 
+-- A frame shown with all its parents (what the player sees).
+local function Visible(f)
+	while f do
+		if rawget(f, "shown") == false then return false end
+		f = rawget(f, "parent")
+	end
+	return true
+end
+
+-- The regression (1.2.6): a half's cast bar was a child of the gear stage, hidden with it on the
+-- Talents tab: the cast was filled and its ticker ran, and nothing showed (Daniel's screenshots 42
+-- and 43 show the trees with the cast bar under them).
+test("watch duel view: a cast shows on the Talents tab too (the half's own bar, under the trees) and on Gear above the weapons; its ticker runs while it shows", function()
+	local e = Watch(nil, false)
+	local w, V, o, cast = e.w, e.V, e.o, e.cast
+	o.units.targettarget, o.units.focus = nil, cast.B
+	o.bodies[cast.A], o.bodies[cast.B] = {}, {}
+	assert(S(w, V).Open(assert(S(w, V).PairFromUnits("target", "focus"))))
+	local A = View(V).Frame().halves.A
+	assert(w:As(V, View(V).SetTab, "talents"))
+	o.bodies[cast.A].cast = { name = "First Aid", texture = 133685, start = w.clock * 1000, finish = (w.clock + 8) * 1000, channel = true }
+	w:Run(0.4)
+	eq(A.gear.shown, false); eq(A.talents.shown, true)
+	eq(A.cast.shown, true); eq(Visible(A.cast), true, "seen on the Talents tab"); eq(A.cast.name.text, "First Aid")
+	eq(A.cast.anchors[1][2], A.talents, "under the trees")
+	eq(select(2, View(V).Ticking()), true)
+	assert(w:As(V, View(V).SetTab, "gear"))
+	w:Run(0.2)
+	eq(Visible(A.cast), true, "and on Gear"); eq(A.cast.anchors[1][2], A.stage, "on the stage, above the weapons")
+	o.bodies[cast.A].cast = nil
+	w:Run(0.2)
+	eq(A.cast.shown, false); eq(select(2, View(V).Ticking()), false, "the cast ticker gone with the cast")
+	W3.NoErrors(w)
+end)
+
 print("Spectate: Auto, the bar, the result")
 
 test("watch duel view: Auto: the bar while either fighter is in combat, the full view back after a short hold and at once at the result (whatever the lingering combat flag says); a pin wins; the session lives across the swaps", function()
@@ -374,6 +409,89 @@ test("watch duel view: a fighter's own duel: the strip says best of, round, scor
 	eq(#w.sent, sent, "watching sends nothing")
 	w:As(A, View(A).Pin, "auto")
 	W3.NoErrors(w)
+end)
+
+-- The regression (1.2.6): every round's duel line set the result for the rest of the session: in a
+-- best of 3 the strip said the first round's winner had won the duel while it stood 1 : 0, and
+-- kept saying so through the later rounds (the copied text too).
+test("watch duel view: a best of 3: after a round the strip keeps the fight's line with that round's outcome (\"Last round\"), never \"wins\" before the fight is won; the next round clears it; the winner once the fight is over", function()
+	local w, cast = W3.New({ live = false, world = { compliance = "shipped" } })
+	local A, B = cast.A, cast.B
+	A.target, B.target = B.name, A.name
+	local oid = assert(W3.M(w, A, "ArenaFights").Challenge(B.name, { bo = 3 }))
+	w:Run(0)
+	assert(W3.M(w, B, "ArenaFights").Answer(oid, true))
+	w:Run(0)
+	local o = Scene(w, A, { units = { target = B }, bodies = { [A] = { combat = false }, [B] = { combat = false } } })
+	StubInspect(A)
+	Tooltip(A)
+	W3.Companion(w, A)
+	Recording(A)
+	w:As(A, A.ns.Arena.RunSlash, "watch")
+	local win = assert(View(A).Frame(), "his own duel opened")
+	local L = A.ns.L
+	local function Strip() return tostring(win.fight.text) end
+	-- A round as the game plays it, the duel line on the fighters' clients and in the view.
+	local function Round(winner, loser, during)
+		w:Combat(A, true); w:Combat(B, true)
+		o.bodies[A].combat, o.bodies[B].combat = true, true
+		w:Run(10)
+		if during then during() end
+		w:Run(10)
+		W3.Duel(w, { A, B }, winner, loser)
+		Event(w, A, "CHAT_MSG_SYSTEM", W3.DUEL_KO:format(winner.short, loser.short))
+		w:Fire(A, "DUEL_FINISHED"); w:Fire(B, "DUEL_FINISHED")
+		w:Run(0)
+		w:Combat(A, false); w:Combat(B, false)
+		o.bodies[A].combat, o.bodies[B].combat = false, false
+		w:Run(3)
+	end
+	Round(A, B)
+	assert(not Strip():find(L.ARENA_WATCH_WON_KO:format("Torvin Hale"), 1, true), "no win at 1 : 0: " .. Strip())
+	assert(Strip():find(L.ARENA_WATCH_ROUND_KO:format("Torvin Hale"), 1, true), Strip())
+	assert(Strip():find("1 : 0", 1, true), Strip())
+	local text = w:As(A, A.ns.ArenaSpectate.Text)
+	assert(text:find(L.ARENA_WATCH_ROUND_KO:format("Torvin Hale"), 1, true) and not text:find(L.ARENA_WATCH_WON_KO:format("Torvin Hale"), 1, true), text)
+	Round(B, A, function()
+		assert(not Strip():find(L.ARENA_WATCH_ROUND_KO:format("Torvin Hale"), 1, true), "the next round: no old outcome: " .. Strip())
+	end)
+	assert(Strip():find(L.ARENA_WATCH_ROUND_KO:format("Selka Drummond"), 1, true), Strip())
+	assert(Strip():find("1 : 1", 1, true) and not Strip():find(L.ARENA_WATCH_WON_KO:format("Selka Drummond"), 1, true), Strip())
+	Round(A, B)
+	eq(Strip(), L.ARENA_WATCH_WON_KO:format("Torvin Hale"), "the fight won: the winner")
+	W3.NoErrors(w)
+end)
+
+-- (The same regression for a pair this client knows no fight of: a re-duel kept the old winner.)
+test("watch duel view: a pair with no Olympus fight: the result stays through the calm after it and goes when they fight again", function()
+	local e = Watch()
+	local w, V, o, cast, win = e.w, e.V, e.o, e.cast, e.win
+	o.bodies[cast.A], o.bodies[cast.B] = { combat = true }, { combat = true }
+	w:As(V, View(V).Pin, "full")
+	w:Run(1)
+	eq(Event(w, V, "CHAT_MSG_SYSTEM", W3.DUEL_KO:format(cast.A.short, cast.B.short)), true)
+	eq(win.fight.text, V.ns.L.ARENA_WATCH_WON_KO:format("Torvin Hale"))
+	w:Run(3)
+	eq(win.fight.text, V.ns.L.ARENA_WATCH_WON_KO:format("Torvin Hale"), "the combat flag lingering")
+	o.bodies[cast.A].combat, o.bodies[cast.B].combat = false, false
+	w:Run(5)
+	eq(win.fight.text, V.ns.L.ARENA_WATCH_WON_KO:format("Torvin Hale"), "kept through the calm")
+	o.bodies[cast.A].combat, o.bodies[cast.B].combat = true, true
+	w:Run(2)
+	assert(not tostring(win.fight.text):find(V.ns.L.ARENA_WATCH_WON_KO:format("Torvin Hale"), 1, true), "a re-duel: no old winner: " .. tostring(win.fight.text))
+	assert(tostring(win.fight.text):find(V.ns.L.ARENA_WATCH_NOT_OLYMPUS, 1, true), tostring(win.fight.text))
+	w:As(V, View(V).Pin, "auto")
+	W3.NoErrors(w)
+end)
+
+-- The regression (1.2.6): the bar looked for Bones' wood in the host's table (ns.Games), but the
+-- companion keeps it in its own (own.Games, as BracketView.lua reads it): the bar was a flat colour.
+test("watch duel view: the bar's strip is Bones' tavern wood (the companion's Games.WOOD) in its bronze edge", function()
+	local e = Watch()
+	local wood = e.V.companion.own.Games.WOOD
+	eq(e.bar.bg.texture, wood.file); eq(rawget(e.bar.bg, "color"), nil, "no flat colour")
+	eq(e.bar.bg.coords[3], wood.coords[3])
+	W3.NoErrors(e.w)
 end)
 
 print("Spectate: gear and talents")
@@ -458,9 +576,11 @@ test("watch duel view: each half's status line is the core's (\"Waiting for insp
 	I.wants["spectate:A"].status = "range"
 	w:Run(1.2)
 	eq(A.status.text, "Waiting for inspection – move within inspect range")
-	local before = I.wants["spectate:A"]
+	-- (Asked again while it waits: the same want, back in line; Inspect.Want keeps a want still
+	-- waiting rather than replacing it, so the ask is counted, not a new want.)
+	local asked = I.asked["spectate:A"] or 0
 	w:As(V, A.refresh.scripts.OnClick, A.refresh)
-	assert(I.wants["spectate:A"] ~= before, "asked again"); eq(I.wants["spectate:A"].status, "queued")
+	eq(I.asked["spectate:A"], asked + 1, "asked again"); eq(I.wants["spectate:A"].status, "queued")
 	eq(A.status.text, V.ns.L.ARENA_WATCH_ST_INSPECTING)
 	W3.NoErrors(w)
 end)

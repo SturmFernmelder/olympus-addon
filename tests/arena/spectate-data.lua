@@ -417,6 +417,135 @@ test("watch duel: Era's and TBC's talents (C_SpecializationInfo.GetTalentInfo on
 	W3.NoErrors(w)
 end)
 
+-- The regression (1.2.6): UNIT_INVENTORY_CHANGED from a fighter before his first read asked again
+-- at once (REINSPECT_GAP after "never": minus infinity), and asking again replaced his request on
+-- its way, so its answer was dropped and he was asked once more: a fighter changing gear at the
+-- start could keep the view from ever showing his gear. With the fix taken out, the asks counted
+-- below go up at each event.
+test("watch duel: his gear changing (UNIT_INVENTORY_CHANGED) before his first read or while his inspection is on its way asks nothing then, and he is looked at again REINSPECT_GAP after that read; after a read, REINSPECT_GAP after it at the soonest, one ask however many events", function()
+	local w, cast = Cast()
+	local V = cast.V
+	Scene(w, V, { units = { target = cast.A, targettarget = cast.B } })
+	local I = StubInspect(V)
+	local GAP = V.ns.ArenaSpectate.REINSPECT_GAP
+	assert(S(w, V).Start(assert(S(w, V).PairFromUnit("target"))))
+	eq(I.asked["spectate:A"], 1, "asked at the start")
+	I.wants["spectate:A"].status = "pending" -- (its request out)
+	for _ = 1, 3 do eq(S(w, V).OnInventory("target"), false) end
+	eq(I.asked["spectate:A"], 1, "nothing asked while it is on its way")
+	eq(I.wants["spectate:A"].status, "pending", "its request still the one out")
+	Answer(w, V, I, "spectate:A")
+	w:Run(GAP - 1)
+	eq(I.asked["spectate:A"], 1, "not before REINSPECT_GAP")
+	w:Run(2)
+	eq(I.asked["spectate:A"], 2, "the change seen on its way: looked at again once, after the read")
+	Answer(w, V, I, "spectate:A")
+	w:Run(5)
+	for _ = 1, 4 do S(w, V).OnInventory("target") end
+	eq(I.asked["spectate:A"], 2, "not at once after a read")
+	w:Run(GAP)
+	eq(I.asked["spectate:A"], 3, "one ask for the four events")
+	w:Run(GAP * 3)
+	eq(I.asked["spectate:A"], 3, "and no more without a change")
+	-- B: never read and given up (no answer, WANT_TRIES times): his gear changing asks nothing.
+	local wantB = I.wants["spectate:B"]
+	wantB.status, wantB.tries = "timeout", I.WANT_TRIES
+	S(w, V).OnInventory("targettarget")
+	w:Run(GAP * 2)
+	eq(I.asked["spectate:B"], 1, "Inspect again is his")
+	S(w, V).Stop()
+	eq(V.ns.Arena.Ticking(), false, "nothing left running")
+	W3.NoErrors(w)
+end)
+
+-- The regression (1.2.6): Era's and TBC's TalentInfoResult gives spellID 0 by default (classic_era
+-- SpecializationInfoDocumentation.lua), and the talent kept 0 as its spell: its tooltip asked spell
+-- 0 whether it is passive and what it does.
+test("watch duel: a talent whose result gives spellID 0 has no spell: nothing asked about spell 0, its tooltip its name and rank alone; a real spell's its Passive and what it does", function()
+	local w, cast = Cast()
+	local V = cast.V
+	Scene(w, V, { units = { target = cast.A, targettarget = cast.B } })
+	local g = V.globals
+	local asked = {}
+	g.C_Spell = nil -- (the legacy spell functions, below)
+	g.IsPassiveSpell = function(id) asked[#asked + 1] = id return true end
+	g.GetSpellDescription = function(id) asked[#asked + 1] = id return "What spell " .. id .. " does." end
+	g.GetNumTalentTabs = function() return 1 end
+	g.GetNumTalents = function() return 2 end
+	local TALENTS = { { talentID = 1, name = "Deflection", icon = 132269, tier = 1, column = 1, rank = 2, maxRank = 5, spellID = 0 },
+		{ talentID = 2, name = "Cruelty", icon = 132292, tier = 1, column = 2, rank = 1, maxRank = 5, spellID = 12320 } }
+	g.C_SpecializationInfo = {
+		GetActiveSpecGroup = function() return 1 end,
+		GetTalentInfo = function(q) return TALENTS[q.talentIndex] end,
+	}
+	local I = StubInspect(V)
+	assert(S(w, V).Start(assert(S(w, V).PairFromUnit("target"))))
+	Answer(w, V, I, "spectate:A")
+	local t = S(w, V).Model().sides.A.talents.trees[1].talents
+	eq(t[1].name, "Deflection"); eq(t[1].spellID, nil, "no spell 0")
+	local lines = S(w, V).TalentLines(t[1])
+	eq(lines.title, "Deflection"); eq(lines.kind, nil); eq(lines.desc, nil); eq(lines.rank, V.ns.L.ARENA_WATCH_RANK:format(2, 5))
+	eq(#asked, 0, "spell 0 never asked about")
+	lines = S(w, V).TalentLines(t[2])
+	eq(lines.kind, V.ns.L.ARENA_WATCH_PASSIVE); eq(lines.desc, "What spell 12320 does.")
+	W3.NoErrors(w)
+end)
+
+-- The weight (1.2.6): the view reads the model once a second; it deep-copied both fighters' gear,
+-- stats and whole talent trees each time (about 61 KB a model with Era's trees on both sides).
+test("watch duel: the model copies a fighter's gear, stats and talents once per read: the same copy until the next read, a model a second allocating little; S.Active says whether a view is open, copying nothing", function()
+	local w, cast = Cast()
+	local V = cast.V
+	local items = {}
+	for slot = 1, 16 do items[slot] = { id = 2000 + slot, link = "|cff1eff00|Hitem:" .. (2000 + slot) .. "::::::::60:::::|h[Item]|h|r" } end
+	local stats = {}
+	for slot = 1, 16 do stats[2000 + slot] = { ITEM_MOD_STAMINA_SHORT = slot, ITEM_MOD_STRENGTH_SHORT = 2 } end
+	Scene(w, V, { units = { target = cast.A, targettarget = cast.B }, items = { [cast.A] = items, [cast.B] = items }, stats = stats })
+	local g = V.globals
+	g.GetNumTalentTabs = function() return 3 end
+	g.GetNumTalents = function() return 20 end
+	g.C_SpecializationInfo = {
+		GetActiveSpecGroup = function() return 1 end,
+		GetNumSpecializationsForClassID = function() return 3 end,
+		GetSpecializationInfo = function(i) return 0, ({ "Arms", "Fury", "Protection" })[i], "", 200 + i, nil, nil, 5 end,
+		GetTalentInfo = function(q)
+			local i = q.talentIndex
+			return { talentID = q.specializationIndex * 100 + i, name = "Talent " .. i, icon = 132000 + i, tier = math.floor((i - 1) / 4) + 1,
+				column = (i - 1) % 4 + 1, rank = i % 3, maxRank = 5, spellID = 12000 + i }
+		end,
+	}
+	local I = StubInspect(V)
+	eq(S(w, V).Active(), false)
+	assert(S(w, V).Start(assert(S(w, V).PairFromUnit("target"))))
+	eq(S(w, V).Active(), true)
+	Answer(w, V, I, "spectate:A")
+	Answer(w, V, I, "spectate:B")
+	local m1, m2 = S(w, V).Model(), S(w, V).Model()
+	eq(#m1.sides.A.talents.trees, 3); eq(#m1.sides.A.talents.trees[1].talents, 20); eq(m1.sides.A.gearN, 16)
+	eq(m1.sides.A.talents, m2.sides.A.talents, "the same copy until the next read"); eq(m1.sides.A.gear, m2.sides.A.gear)
+	local kb = w:As(V, function()
+		local Sp = V.ns.ArenaSpectate
+		collectgarbage("collect")
+		collectgarbage("stop")
+		local before = collectgarbage("count")
+		for _ = 1, 50 do Sp.Model() end
+		local used = (collectgarbage("count") - before) / 50
+		collectgarbage("restart")
+		return used
+	end)
+	assert(kb < 8, ("%.1f KB a model"):format(kb))
+	-- A new read: a new copy for that side, the other's kept.
+	S(w, V).Reinspect("A")
+	Answer(w, V, I, "spectate:A")
+	local m3 = S(w, V).Model()
+	assert(m3.sides.A.talents ~= m1.sides.A.talents, "A read again: copied again")
+	eq(m3.sides.B.talents, m1.sides.B.talents, "B's kept")
+	eq(Secret.Any(m3), false)
+	S(w, V).Stop()
+	eq(S(w, V).Active(), false)
+	W3.NoErrors(w)
+end)
+
 test("watch duel: each inspection status has its line: \"Waiting for inspection – move within inspect range\", Inspecting…, After combat, Close the Inspect window, cannot be inspected here (refused, or given up), not in sight, inspected just now / N min ago", function()
 	local w, cast = Cast()
 	local V = cast.V

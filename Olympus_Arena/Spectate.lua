@@ -12,18 +12,20 @@ local _, own = ...; local ns = own.host; if not ns then return end
 -- kept): the Olympus window's bronze metal without the portrait ring (Kit.Frame, ns.Window), the
 -- parchment inside, the title in its bar. Top to bottom:
 --   the strip: Gear | Talents (both halves), the fight's line (best of, round, score, its state;
---   the result as this client read it; "Not an Olympus duel"), the pins Auto | Full | Bar, -/+ and
+--   the result as this client read it, a round's "Last round" while a best of 3 goes on; "Not an
+--   Olympus duel"), the pins Auto | Full | Bar, -/+ and
 --   Copy (the text in Kit.Copy's pop-up, never in chat);
 --   the halves, A (red) left and B (blue) right, mirrored round the VS seal and a bronze line:
 --     the header (the portrait, the name in his class's colour darkened for the ink, "Class · Race
 --     · Level N", an Olympus guild's name, the side's banner at the seal);
 --     the health bar (432 x 18, "cur / max" or "NN%") and the power bar (8 high, "NN%");
 --     Gear: a dark framed stage (264 x 300: his 3D model in his gear while in sight, the last one
---     kept out of sight; the 19 slots round it with the game's own item tooltip; his cast bar) and
---     on the parchment, on the outer side, "Stats from gear" and "Resistances" in dark ink;
+--     kept out of sight; the 19 slots round it with the game's own item tooltip) and on the
+--     parchment, on the outer side, "Stats from gear" and "Resistances" in dark ink;
 --     Talents: each tree's icon grid (tiers by columns, "3/5", an untaken talent dimmed), its name
 --     and points, a talent's tooltip its name, Passive or Active, what it does and "Rank r / max";
 --     the points per tree alone where the client gives no grid, and the line saying so;
+--     his cast bar on either tab (the half's own: on the stage above the weapons, or under the trees);
 --     the status line ("Waiting for inspection – move within inspect range"...) and Inspect again.
 -- OlympusArenaWatchBar (560 x 56, its own place, on UIParent, HIGH): the compact bar on a bronze-
 -- edged wood strip, both fighters (class icon, name, health with "NN%", power, a thin cast bar)
@@ -69,6 +71,7 @@ local BODY_TOP, BODY_H, STATUS_TOP = 96, 300, 402
 local STAGE_W, SLOT, SLOT_GAP = 264, 30, 4
 local STATS_W = HALF - STAGE_W - 8                    -- 160
 local PORTRAIT = 44
+local POINTS_NOTE_Y = 92                              -- Talents, points only: the line under the trees' pictures
 -- The bar's: each side's box, the seal between.
 local BAR_SIDE, BAR_SEAL = 214, 44
 
@@ -251,6 +254,17 @@ local function CastBar(parent, w, h, iconSize)
 	return c
 end
 
+-- A half's cast bar where its tab shows it: the stage above the weapons (Gear), under the trees
+-- (Talents: their grid ends above it, the points-only line sits higher).
+local CAST_LIFT = 8 + SLOT + 8
+local function PlaceCast(h, tab)
+	if h.castTab == tab then return end
+	h.castTab = tab
+	h.cast:ClearAllPoints()
+	if tab == "talents" then h.cast:SetPoint("BOTTOM", h.talents, "BOTTOM", 8, 3)
+	else h.cast:SetPoint("BOTTOM", h.stage, "BOTTOM", 8, CAST_LIFT) end
+end
+
 local function TalentCell(parent)
 	local b = CreateFrame("Button", nil, parent)
 	b.icon = b:CreateTexture(nil, "ARTWORK")
@@ -386,8 +400,9 @@ local function Half(parent, side)
 		st.slots[slot] = b
 	end
 	for _, b in pairs(st.slots) do if b.SetFrameLevel and st.GetFrameLevel then b:SetFrameLevel((st:GetFrameLevel() or 1) + 3) end end
-	h.cast = CastBar(st, 150, 12, 12)
-	h.cast:SetPoint("BOTTOM", st, "BOTTOM", 8, 8 + SLOT + 8)
+	-- (His cast bar: the half's own, so it shows on both tabs; on the stage above the weapons, or
+	-- under the trees. Above the stage's model and slots.)
+	h.cast = CastBar(h, 150, 12, 12)
 	if h.cast.SetFrameLevel and st.GetFrameLevel then h.cast:SetFrameLevel((st:GetFrameLevel() or 1) + 4) end
 	-- The stats, in dark ink on the parchment.
 	local sx = CreateFrame("Frame", nil, h.gear)
@@ -429,6 +444,7 @@ local function Half(parent, side)
 	h.talents.note:SetPoint("BOTTOM", h.talents, "BOTTOM", 0, 2)
 	h.talents.note:SetWidth(HALF)
 	h.talents:Hide()
+	PlaceCast(h, "gear")
 	-- The status line and Inspect again, at the outer bottom.
 	h.refresh = Kit.Button(h, 60, 24, L.ARENA_WATCH_REFRESH, function()
 		local Sc = Core()
@@ -561,7 +577,7 @@ local function BuildBar()
 	Place(bar, "barPoint", { "BOTTOM", "BOTTOM", 0, 190 })
 	bar:SetScale(Clamp(Settings().scale))
 	-- Bones' wood (its table's strip, as the games' bottom bar), darker, in a bronze edge.
-	local G = ns.Games
+	local G = own.Games
 	local wood = type(G) == "table" and type(G.WOOD) == "table" and G.WOOD or nil
 	bar.bg = bar:CreateTexture(nil, "BACKGROUND")
 	bar.bg:SetAllPoints()
@@ -605,18 +621,28 @@ end
 -- score, its state), else "Not an Olympus duel"; "In combat" while either fighter is.
 function Spectate.FightLine(m, fighting)
 	if type(m) ~= "table" then return "" end
+	local S = Core()
+	-- (A best of 3 after a round: the fight's line and that round's, never "wins" before it is won.)
+	local round = m.result and S and S.RoundResult(m)
 	if m.result then
 		local w, l = m.sides[m.result.w], m.sides[Other(m.result.w)]
-		if m.result.m == "R" then return L.ARENA_WATCH_WON_FLED:format(Kit.Name(w.name), Kit.Name(l.name)) end
-		return L.ARENA_WATCH_WON_KO:format(Kit.Name(w.name))
+		if not round then
+			if m.result.m == "R" then return L.ARENA_WATCH_WON_FLED:format(Kit.Name(w.name), Kit.Name(l.name)) end
+			return L.ARENA_WATCH_WON_KO:format(Kit.Name(w.name))
+		end
 	end
 	local parts = {}
 	if m.fight then
 		parts[1] = L.ARENA_WATCH_FIGHT_LINE:format(m.fight.bo or 1, math.max(1, m.fight.round or 0), m.fight.a or 0, m.fight.b or 0)
-		local word = ns.ArenaHome.StateWord({ state = m.fight.state })
+		local word = not round and ns.ArenaHome.StateWord({ state = m.fight.state })
 		if word and word ~= "" then parts[#parts + 1] = word end
 	elseif not m.olympus then
 		parts[1] = L.ARENA_WATCH_NOT_OLYMPUS
+	end
+	if round then
+		local w, l = m.sides[m.result.w], m.sides[Other(m.result.w)]
+		parts[#parts + 1] = m.result.m == "R" and L.ARENA_WATCH_ROUND_FLED:format(Kit.Name(w.name), Kit.Name(l.name))
+			or L.ARENA_WATCH_ROUND_KO:format(Kit.Name(w.name))
 	end
 	if fighting == true then parts[#parts + 1] = L.ARENA_WATCH_IN_COMBAT end
 	return table.concat(parts, " · ")
@@ -797,8 +823,10 @@ local function DrawTalents(h, s, status)
 		box.note:SetPoint("CENTER", box, "CENTER", 0, 0)
 		box.note:SetText((s.inspected or s.own) and L.ARENA_WATCH_NO_TALENTS or (status or ""))
 	else
+		-- (Points only: the line under the trees' pictures, clear of the cast bar at the bottom.)
 		box.note:ClearAllPoints()
-		box.note:SetPoint("BOTTOM", box, "BOTTOM", 0, 2)
+		if tal.grid then box.note:SetPoint("BOTTOM", box, "BOTTOM", 0, 2)
+		else box.note:SetPoint("TOP", box, "TOP", 0, -POINTS_NOTE_Y) end
 		box.note:SetText(not tal.grid and L.ARENA_WATCH_POINTS_ONLY or "")
 	end
 end
@@ -812,6 +840,7 @@ local function DrawHalf(h, s)
 	h.refresh:SetShown(not s.own)
 	h.gear:SetShown(view.tab == "gear")
 	h.talents:SetShown(view.tab == "talents")
+	PlaceCast(h, view.tab)
 	local key = table.concat({ view.tab, tostring(s.inspected), tostring(s.statsPending), tostring(s.gearN),
 		tostring(s.talents and s.talents.total), tostring(s.talents and s.talents.source), tostring(s.stats ~= nil), view.tab == "talents" and tostring(status) or "" }, "|")
 	if h.sig.body == key then return end
@@ -968,7 +997,7 @@ end
 
 local function OnEvent(event, ...)
 	local S = Core()
-	if not S or not S.Watching() then return end
+	if not S or not S.Active() then return end
 	if event == "CHAT_MSG_SYSTEM" then
 		local side = S.OnSystem((...))
 		if side then
@@ -1043,7 +1072,7 @@ end
 
 local function Tick()
 	local S = Core()
-	if not S or not S.Watching() then return Spectate.Hide() end
+	if not S or not S.Active() then return Spectate.Hide() end
 	view.ticks = view.ticks + 1
 	local slow = view.ticks % Spectate.SIGHT_EVERY == 0
 	if slow then S.Track(false) end
