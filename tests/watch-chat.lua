@@ -2839,3 +2839,293 @@ test("watch: chat moderation: strikes: /oly watch release <name> lets the newest
 		eq(Co.S.Store().cases[CaseKey(B, e3)].decided.op, "R")
 	end)
 end)
+
+-- (The review: "decided?" always went to the first of the team who kept the report, and a "Let them
+-- chat" reached only who was online then. One who missed it kept the case open on his page, and the
+-- player asked him alone every 10 minutes for 30 days: held, though the team had decided.)
+test("watch: chat moderation: strikes: \"Let them chat\" reaches whoever missed it: a team member away at the decision is told when back; and the held player's \"decided?\" goes round the team in turn, so one who knows answers", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(B.S.Store().out.to[Fold(cl.name)].acked, true, cl.short) end
+		-- The author and the player away; the moderator lets him chat.
+		Au.online, B.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, key))
+		w.Run()
+		for _, cl in ipairs({ K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "R", cl.short) end
+		eq(Au.S.Store().cases[key].decided, nil, "away: not heard")
+		local tell = Mo.S.Store().cases[key].tell
+		eq(tell[Fold(K.name)].acked, true, "the King's client said it keeps it"); eq(tell[Fold(Au.name)].acked, nil)
+		-- Back within the tries: the moderator's client tells him again, and only him and the player.
+		Au.online = true
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(Au.S.Store().cases[key].decided.op, "R", "told when back")
+		eq(Fold(Au.S.Store().cases[key].decided.by), Fold(Mo.name))
+		eq(tell[Fold(Au.name)].acked, true)
+		local function ToAuthor()
+			local n = 0
+			for _, s in ipairs(w.Sent("MS~1~D~")) do if Fold(Full(s.target)) == Fold(Au.name) then n = n + 1 end end
+			return n
+		end
+		local before = ToAuthor()
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(ToAuthor(), before, "kept: not told again")
+		Tick(w, Mo, Mo.S.RETRY)
+		eq(tell[Fold(B.name)].tries, 3, "the player away: three times at most")
+		-- Back, the player asks; the author's client knows it now.
+		B.online = true
+		B = Rebuild(w, B)
+		w.epoch = w.epoch + B.S.PING
+		Refresh(w)
+		w.As(B, B.S.Tick)
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		-- The next hold the same day; this time the author misses the decision entirely (away through
+		-- every try). Back, the player's "decided?" asks the author first, then the next of the team.
+		local e4 = Strike(w, B, "fourth " .. WORD)
+		w.Run(); Tick(w, B)
+		local key4 = CaseKey(B, e4)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(B.S.Store().out.to[Fold(cl.name)].acked, true, cl.short) end
+		Au.online, B.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, key4))
+		w.Run()
+		Tick(w, Mo, Mo.S.RETRY); Tick(w, Mo, Mo.S.RETRY)
+		Au.online = true
+		B = Rebuild(w, B) -- (his next login)
+		eq(w.As(B, B.S.Block).kind, "hold", "away through every try: not heard")
+		local asked = {}
+		for _ = 1, 2 do
+			w.epoch = w.epoch + B.S.PING
+			Refresh(w)
+			w.As(B, B.S.Tick)
+			for _, job in ipairs(w.wire) do if job.msg == ("MS~1~P~%d"):format(e4.at) then asked[#asked + 1] = Fold(Full(job.target)) end end
+			w.Run()
+		end
+		eq(asked[1], Fold(Au.name), "the first of the team who kept it")
+		eq(asked[2], Fold(K.name), "then the next one, not the same again")
+		eq(w.As(B, B.S.Block), nil, "the King's client knew it: the hold is over")
+		eq(B.S.Store().mine[#B.S.Store().mine].decided.op, "R")
+		eq(Au.S.Store().cases[key4].decided, nil, "(the author's page: told no more after three tries)")
+	end)
+end)
+
+-- (The review: the hold is the account's, but "Let them chat" was whispered only to the character
+-- that typed the line, and another character of his never asked: it stayed blocked.)
+test("watch: chat moderation: strikes: \"Let them chat\" while he plays another character of his account: that character, linked, is told; away then, it asks when back", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local Alt = w.Client("Alternate", X, 3)
+		Alt.ns.rdb = B.ns.rdb -- (the account's other character, the same saved store)
+		Alt.ns.Workshop.AuthorOnline, Alt.ns.Workshop.AuthorName = B.ns.Workshop.AuthorOnline, B.ns.Workshop.AuthorName
+		w.links[Fold(B.name)], w.links[Fold(Alt.name)] = { Alt.name }, { B.name }
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		B.online = false -- (he logs out, and plays the alt)
+		eq(select(2, w.As(Alt, Alt.C.Send, "A", "from the alt")), "paused", "the account is held")
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e3)))
+		w.Run()
+		eq(w.As(Alt, Alt.S.Block), nil, "told on the alt")
+		assert(w.Printed(Alt, Alt.ns.L.WATCHCHAT_STRIKE_RELEASED))
+		w.Say(Alt, "A", "the alt chats")
+		assert(w.Line(D, "A", Alt.name, "the alt chats"))
+		-- Again, both characters away at the decision and through its tries: back on the alt, it asks.
+		B.online = true
+		local e4 = Strike(w, B, "fourth " .. WORD)
+		w.Run(); Tick(w, B)
+		B.online, Alt.online = false, false
+		w.epoch = w.epoch + 5
+		assert(w.As(Mo, Mo.S.Release, CaseKey(B, e4)))
+		w.Run()
+		Tick(w, Mo, Mo.S.RETRY); Tick(w, Mo, Mo.S.RETRY)
+		Alt.online = true
+		eq(w.As(Alt, Alt.S.Block).kind, "hold")
+		local heads = #w.Sent("MS~1~H~")
+		w.epoch = w.epoch + Alt.S.PING
+		Refresh(w)
+		w.As(Alt, Alt.S.Tick)
+		eq(#w.wire, 1); eq(w.wire[1].msg, ("MS~1~P~%d"):format(e4.at)); eq(w.wire[1].from, Alt, "the alt asks")
+		w.Run()
+		eq(#w.Sent("MS~1~H~"), heads, "it never reports: the character that typed it does")
+		eq(w.As(Alt, Alt.S.Block), nil, "the team's answer ended it")
+		eq((w.As(Alt, Alt.C.Send, "A", "free again")), true)
+	end)
+end)
+
+-- (The review: SamePerson's links and the receiver's limits had no test of their own.)
+test("watch: chat moderation: strikes: an Olympus moderator's timeout on a character his player linked decides the hold too, on his client and on the team's", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local Alt = w.Client("Alternate", X, 3) -- (a saved store of its own here: only the links tie them)
+		w.links[Fold(B.name)], w.links[Fold(Alt.name)] = { Alt.name }, { B.name }
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		w.epoch = w.epoch + 5
+		Refresh(w)
+		assert(w.As(Mo, Mo.WC.Timeout, Alt.name, 3600, "the team's call"))
+		w.Run()
+		eq(B.S.Store().mine[3].decided.op, "T", "decided by the alt's timeout")
+		eq(w.As(B, B.S.Block), nil)
+		for _, cl in ipairs({ Au, K, Co, Mo }) do eq(cl.S.Store().cases[key].decided.op, "T", cl.short) end
+	end)
+end)
+
+test("watch: chat moderation: strikes: the team's side keeps its limits: 30 reports in ten minutes from everyone, 20 still coming, 6 \"decided?\" an hour from one name, one notice a name in ten minutes and one open case; a report heard after the team's timeout comes decided; his client sends nothing while Comm's queue is short", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		local id = w.epoch
+		local function Head(n) return ("MS~1~H~%d~3~3~3~1~%s"):format(n, X) end
+		local function Line(n) return ("MS~1~L~%d~1~%d~3~A~%s~a %s"):format(n, n, WORD, WORD) end
+		-- 30 reports from 30 names in ten minutes: the 31st is refused.
+		for i = 1, 30 do
+			local who = "Sender" .. i .. "-Realm"
+			eq(w.Inject("WHISPER", who, Co, Head(id)), true, who)
+			eq(w.Inject("WHISPER", who, Co, Line(id)), true, who)
+		end
+		local ok, why = w.Inject("WHISPER", "Sender31-Realm", Co, Head(id))
+		eq(ok, false); eq(why, "rate", "all senders' budget")
+		-- 20 reports whose lines are still coming: the 21st is refused until a slot frees.
+		w.epoch = w.epoch + 601
+		for i = 1, 20 do eq(w.Inject("WHISPER", "Waiter" .. i .. "-Realm", Co, Head(id)), true) end
+		ok, why = w.Inject("WHISPER", "Waiter21-Realm", Co, Head(id))
+		eq(ok, false); eq(why, "busy")
+		w.epoch = w.epoch + Co.S.PENDING_FOR + 1
+		eq(w.Inject("WHISPER", "Waiter21-Realm", Co, Head(id)), true, "two minutes on: the slots free")
+		-- "Decided?": 6 an hour from one name.
+		for i = 1, 6 do eq(w.Inject("WHISPER", "Sender1-Realm", Co, ("MS~1~P~%d"):format(id)), true, "ping " .. i) end
+		ok, why = w.Inject("WHISPER", "Sender1-Realm", Co, ("MS~1~P~%d"):format(id))
+		eq(ok, false); eq(why, "rate")
+		-- One notice a name in ten minutes; his newer report replaces his open one.
+		w.epoch = w.epoch + 601
+		local function Notices(name)
+			local n = 0
+			for _, p in ipairs(Co.prints) do if p:find(Co.ns.L.WATCHCHAT_STRIKE_IN:format(name, 3), 1, true) then n = n + 1 end end
+			return n
+		end
+		local t = w.epoch
+		for i = 0, 1 do
+			eq(w.Inject("WHISPER", "Twice-Realm", Co, Head(t + i)), true)
+			eq(w.Inject("WHISPER", "Twice-Realm", Co, Line(t + i)), true)
+		end
+		eq(Notices("Twice"), 1, "one notice for two reports within ten minutes")
+		eq(Co.S.Store().cases[Fold("Twice-Realm") .. "#" .. t], nil, "one open case a name: the newer one")
+		assert(Co.S.Store().cases[Fold("Twice-Realm") .. "#" .. (t + 1)])
+		w.epoch = w.epoch + 601
+		eq(w.Inject("WHISPER", "Twice-Realm", Co, Head(w.epoch)), true)
+		eq(w.Inject("WHISPER", "Twice-Realm", Co, Line(w.epoch)), true)
+		eq(Notices("Twice"), 2, "ten minutes on: told again")
+		-- An Olympus moderator's timeout on him heard before his report: the case comes decided.
+		local before = w.epoch
+		Refresh(w)
+		assert(w.As(Mo, Mo.WC.Timeout, B.name, 3600, "the team's call"))
+		w.Run()
+		eq(w.Inject("WHISPER", B.name, Co, Head(before - 10)), true)
+		eq(w.Inject("WHISPER", B.name, Co, Line(before - 10)), true)
+		eq(Co.S.Store().cases[Fold(B.name) .. "#" .. (before - 10)].decided.op, "T", "decided by the timeout heard first")
+		-- His client, held: nothing while Comm's queue has less room than the report and its spare.
+		Words(w, WORD)
+		local room = 3 + 1 + D.S.QUEUE_SPARE - 1
+		D.ns.Comm.QueueRoom = function() return room end
+		Held(w, D)
+		eq(#w.wire, 0, "nothing queued")
+		Tick(w, D)
+		eq(#w.wire, 0)
+		room = room + 1
+		w.epoch = w.epoch + 60
+		w.As(D, D.S.Tick)
+		eq(#w.wire, 2 * 4, "room enough: the report goes")
+		w.Run()
+	end)
+end)
+
+-- (The review: one name's made-up reports, within the rates, could push a real case off a team
+-- member's client: the oldest open case went first once there were more than 100.)
+test("watch: chat moderation: strikes: a name's flood of made-up reports pushes out no one else's case: his own open one stays and is let chat; a team member who no longer keeps it says so and is sent it again", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		local key = CaseKey(B, e3)
+		-- Six an hour (the most one name gets in) for 18 hours: 108 reports from Y1.
+		for _ = 1, 18 do
+			for i = 1, 6 do
+				local id = w.epoch + i
+				eq(w.Inject("WHISPER", Y1.name, Co, ("MS~1~H~%d~3~3~3~1~%s"):format(id, Y)), true)
+				eq(w.Inject("WHISPER", Y1.name, Co, ("MS~1~L~%d~1~%d~3~A~%s~a %s"):format(id, id, WORD, WORD)), true)
+			end
+			w.epoch = w.epoch + 3600
+		end
+		assert(Co.S.Store().cases[key], "his case kept")
+		local his = 0
+		for _, c in pairs(Co.S.Store().cases) do if Fold(c.name) == Fold(Y1.name) then his = his + 1 end end
+		eq(his, 1, "one open case a name")
+		-- Past the cap, the name with the most cases goes first (here a hundred open ones of one name,
+		-- all newer than his: the oldest open one went first before).
+		local s = Mo.S.Store()
+		for i = 1, 100 do s.cases["flood#" .. i] = { name = "Flood-Realm", id = w.epoch - 1000 + i, n = 3, heard = w.epoch, lines = {} } end
+		w.As(Mo, Mo.S.Prune, s)
+		assert(s.cases[key], "a flood of one name's cases goes before his")
+		-- A team member who no longer keeps it (lost from his saved store): asked, he says so; sent again.
+		Au.S.Store().cases[key] = nil
+		w.epoch = w.epoch + B.S.PING
+		Refresh(w)
+		w.As(B, B.S.Tick)
+		eq(w.wire[#w.wire].msg, ("MS~1~P~%d"):format(e3.at)); eq(Fold(Full(w.wire[#w.wire].target)), Fold(Au.name))
+		w.Run()
+		eq(B.S.Store().out.to[Fold(Au.name)].acked, nil, "not kept there: to send again")
+		Tick(w, B)
+		assert(Au.S.Store().cases[key], "sent again, kept")
+		eq(B.S.Store().out.to[Fold(Au.name)].acked, true)
+		assert(w.As(Co, Co.S.Slash, "release", "Member"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+	end)
+end)
+
+-- (The review: the login's notice, The Watch's commands and CanWrite's telling had no test.)
+test("watch: chat moderation: strikes: at login a held player is told why in a pop-up, even right after another; CanWrite says why; the team's commands go through /oly watch", function()
+	World(function(w)
+		local G, A, B, D, Y1 = Standard(w)
+		local Au, K, Co, Mo = Team(w)
+		Words(w, WORD)
+		local e3 = Held(w, B)
+		w.Run(); Tick(w, B)
+		B = Rebuild(w, B) -- (his next login)
+		eq(select(2, w.As(B, B.C.Send, "A", "a clean line")), "paused")
+		local dialogs = #B.dialogs
+		eq(B.dialogs[dialogs].a, B.ns.L.WATCHCHAT_STRIKE_HELD, "a pop-up a moment ago")
+		local printed = #B.prints
+		eq(w.As(B, B.C.CanWrite, "A", true), false)
+		eq(#B.prints, printed + 1, "CanWrite says why (a red line within the minute)")
+		assert(B.prints[#B.prints]:find(B.ns.L.WATCHCHAT_STRIKE_HELD, 1, true), B.prints[#B.prints])
+		eq(#B.dialogs, dialogs)
+		for _, f in ipairs(B.listeners.LOGIN or {}) do w.As(B, f) end
+		w.epoch = w.epoch + 30
+		w.Run()
+		eq(#B.dialogs, dialogs + 1, "the login's pop-up, though one was shown a moment ago")
+		eq(B.dialogs[#B.dialogs].which, "OLYMPUS_WATCHCHAT_DECISION"); eq(B.dialogs[#B.dialogs].a, B.ns.L.WATCHCHAT_STRIKE_HELD)
+		-- /oly watch strikes and /oly watch release <name>: The Watch's own command.
+		local copied
+		Mo.ns.UI.ShowCopy = function(_, body) copied = body end
+		w.As(Mo, Mo.W.Slash, "strikes")
+		assert(copied and copied:find("third " .. WORD, 1, true), "the open cases to copy")
+		assert(w.As(Co, Co.W.Slash, "release Member"))
+		w.Run()
+		eq(w.As(B, B.S.Block), nil)
+		eq(Co.S.Store().cases[CaseKey(B, e3)].decided.op, "R")
+	end)
+end)

@@ -151,6 +151,85 @@ test("watch: chat moderation: strikes: the line kept and reported is the report 
 	end)
 end)
 
+-- (The review: the window looked for the word as Hits names it, "plainword" or "p l a i n w o r d",
+-- in the line as typed: a disguised word was not found there, the window started at byte 1, and on
+-- a long line the word was cut out of what the team sees.)
+test("watch: chat moderation: strikes: a disguised word in a long line is kept and reported with the 140 bytes around it, as typed: @ for a, dotted or spaced letters, digits, a zero-width character inside", function()
+	KeepDialogs(function()
+		local filler = ("filler words "):rep(12)
+		local typed = {
+			["pl@inword"] = "pl@inword", ["p.l.a.i.n.w.o.r.d"] = "p.l.a.i.n.w.o.r.d", ["P L A I N W O R D"] = "P L A I N W O R D",
+			["pl4inw0rd"] = "pl4inw0rd", ["plain\226\128\139word"] = "plainword", ["plain\194\173word"] = "plainword",
+			["p\226\128\162l\226\128\162a\226\128\162i\226\128\162n\226\128\162w\226\128\162o\226\128\162r\226\128\162d"] = "p\226\128\162l\226\128\162a",
+		}
+		for spelling, kept in pairs(typed) do
+			local S = Client({ words = WORDS })
+			local line = filler .. spelling .. " end"
+			assert(#line > 150, spelling)
+			eq(S.Refuse(line, "A"), "severe", spelling)
+			local e = S.Store().mine[1]
+			assert(#e.text <= 140, spelling .. ": " .. #e.text)
+			eq(e.text:sub(1, 3), "...", spelling)
+			assert(e.text:find(kept, 1, true), spelling .. ": the word in what the team sees: " .. e.text)
+			assert(not e.text:find("\226\128\139", 1, true) and not e.text:find("\194\173", 1, true), "nothing invisible kept")
+			-- (About 40 bytes of what came before it.)
+			local at = e.text:find(kept, 1, true)
+			assert(at > 30 and at < 50, spelling .. ": " .. at)
+		end
+	end)
+end)
+
+-- (The review: Core's MergeStore kept the copy of a key it saw first unless the other had a newer
+-- `t`; chatStrikes has none and every login makes an empty one, so linking a realm whose store
+-- sorts first dropped the hold, which only his own client enforces.)
+test("watch: chat moderation: strikes: two realms' stores made one (a realm group learned) keep the hold of either, whichever sorts first, with its report; a pause of the other store's after it does not end it", function()
+	KeepDialogs(function()
+		local S, cl = Client({ words = WORDS })
+		local keep = { db = ns.db, rdb = ns.rdb, realm = ns.realm, group = ns.group, Fire = ns.Fire, print = print,
+			strikes = rawget(ns, "ChatStrikes"), Join = ns.Comm.JoinChannel, Name = ns.Comm.ChannelName, Ask = ns.Comm.RequestKey }
+		local ok, err = pcall(function()
+			print = function() end
+			ns.Fire = function() end
+			ns.Comm.JoinChannel, ns.Comm.ChannelName, ns.Comm.RequestKey = function() end, function() return nil end, function() end
+			rawset(ns, "ChatStrikes", S)
+			local now = cl.clock
+			local function Held()
+				return { v = 1, cases = {}, mine = { { at = now - 100, n = 3, char = "Typer-Bbb", where = "A", words = "plainword",
+					text = "a plainword", untilAt = 0 } }, out = { id = now - 100, to = { ["teller-realm"] = { tries = 1, last = now - 90, acked = true } } } }
+			end
+			local function Empty() return { v = 1, mine = {}, cases = {} } end
+			local function Paused()
+				return { v = 1, cases = {}, mine = { { at = now - 10, n = 1, char = "Typer-Aaa", where = "C", words = "plainword",
+					text = "another plainword", untilAt = now + 290 } } }
+			end
+			-- (Aaa sorts before Bbb: OpenStore merges the group's stores in that order.)
+			for _, scene in ipairs({ { Aaa = Empty(), Bbb = Held(), name = "the empty store first" },
+				{ Aaa = Held(), Bbb = Empty(), name = "the held store first" },
+				{ Aaa = Paused(), Bbb = Held(), name = "a later pause in the other store" } }) do
+				local Aaa, Bbb = { guilds = {}, chatStrikes = scene.Aaa }, { guilds = {}, chatStrikes = scene.Bbb }
+				ns.db = { log = {}, realms = { Aaa = Aaa, Bbb = Bbb } }
+				ns.realm, ns.group, ns.rdb = "Bbb", "Bbb", Bbb
+				eq(ns.LinkRealms("Bbb", "Aaa"), true, scene.name)
+				eq(ns.group, "Aaa+Bbb", scene.name)
+				cl.ns.rdb = ns.rdb
+				local b = S.Block()
+				assert(b and b.kind == "hold", scene.name .. ": still held")
+				eq(b.entry.text, "a plainword", scene.name)
+				eq(S.Store().out.to["teller-realm"].acked, true, scene.name .. ": its report's acknowledgements kept")
+				if scene.name:find("pause", 1, true) then
+					eq(#S.Store().mine, 2, "both stores' lines"); eq(S.Store().mine[2].text, "another plainword", "in time order")
+				end
+				-- And the same merged again changes nothing.
+				eq(#S.Merge(S.Store(), S.Store()).mine, #S.Store().mine, scene.name)
+			end
+		end)
+		ns.db, ns.rdb, ns.realm, ns.group, ns.Fire, print = keep.db, keep.rdb, keep.realm, keep.group, keep.Fire, keep.print
+		ns.Comm.JoinChannel, ns.Comm.ChannelName, ns.Comm.RequestKey = keep.Join, keep.Name, keep.Ask
+		rawset(ns, "ChatStrikes", keep.strikes)
+		if not ok then error(err, 0) end
+	end)
+end)
+
 test("watch: chat moderation: strikes: source and fixture: the list ships as 16-hex digests of lengths, the script's digests are ChatStrikes.Digest's, and no word of strike-clean.txt is on the list", function()
 	KeepDialogs(function()
 		local S = Client()

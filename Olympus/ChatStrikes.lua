@@ -29,11 +29,15 @@ local L = ns.L
 --   MS~1~H~<id>~<n>~<c24>~<c30>~<k>~<guild>               the head (id: the hold's time)
 --   MS~1~L~<id>~<i>~<at>~<n>~<where>~<words>~<text>        k lines: up to 3 of the window, 2 earlier
 --   MS~1~K~<id>                                            team -> him: kept
---   MS~1~P~<id>                                            him -> one of the team: decided?
+--   MS~1~P~<id>                                            him -> one of the team, in turn: decided?
+--   MS~1~N~<id>                                            team -> him: not kept here (sent again)
 --   MS~1~D~<Name-Realm>~<id>~<R|T>~<at>                    decided: R let him chat, T a timeout
+--   MS~1~K~<id>~<Name-Realm>                               -> the one who told it: decision kept
 -- A case is kept under the name the server stamped on its sender (a modified client can only
--- incriminate itself); a decision counts from someone who may act on him in Olympus scope
--- (WatchChat.Authority "O"), or from an Olympus moderator's own timeout on him (WatchChat's Apply).
+-- incriminate itself), one open case a name; a decision counts from someone who may act on him in
+-- Olympus scope (WatchChat.Authority "O"), or from an Olympus moderator's own timeout on him
+-- (WatchChat's Apply). "Let them chat" is told to him, the characters his player linked (Alts) and
+-- the team online, and again to whom did not say they kept it; a linked character of his asks too.
 -- Never on the channel or over GUILD. Clients without this file ignore MS.
 -- Limits: an older client's player gets no warning, nor does a line typed in the game's own guild
 -- box; matching is whole words (ChatStrikes.Hits says which spellings), so a new spelling, a word
@@ -61,7 +65,8 @@ S.LINES_MAX = 5
 S.PER_TICK = 2                -- team members sent a report a minute
 S.RETRY = 900                 -- an unacknowledged one is sent again this long after...
 S.TRIES = 3                   -- ...this many times at most for one hold
-S.PING = 600                  -- "decided?" to one of the team this often while held
+S.PING = 600                  -- "decided?" to one of the team this often while held, each in turn
+S.TELL_FOR = 3 * 86400        -- "Let them chat" told again to whom it missed this long at most (WatchChat.DECISION_FOR)
 S.QUEUE_SPARE = 20            -- Comm's queue keeps this much room for everything else
 S.HEADS_HOUR = 6              -- reports taken from one sender an hour...
 S.HEADS_ALL = 30              -- ...and from all senders in ten minutes
@@ -332,10 +337,13 @@ local function Prune(s)
 		else n = n + 1 end
 	end
 	while n > S.CASES_MAX do
+		-- (The name with the most cases goes first, so one name's flood of made-up reports pushes
+		-- out nobody else's; of its cases a decided one before an open one, the oldest first.)
+		local per = {}
+		for _, c in pairs(s.cases) do per[Key(c.name)] = (per[Key(c.name)] or 0) + 1 end
 		oldest, at = nil, nil
 		for key, c in pairs(s.cases) do
-			-- (a decided case goes before any open one)
-			local rank = (c.decided and 0 or S.KEEP * 2) + c.id
+			local rank = -per[Key(c.name)] * S.KEEP * 4 + (type(c.decided) == "table" and 0 or S.KEEP * 2) + c.id
 			if not at or rank < at then oldest, at = key, rank end
 		end
 		s.cases[oldest] = nil
@@ -353,21 +361,53 @@ local function Within(s, from, span)
 	return n
 end
 
--- The block on this account's chats now, from its newest struck line: { kind = "pause", entry, ends }
--- while a 1st or 2nd warning's pause lasts, { kind = "hold", entry } while a later one waits for
--- the team (until HOLD_MAX), else nil.
-function S.Block(now)
-	local s = Store()
-	local e = s and s.mine[#s.mine]
-	if not Entry(e) then return nil end
+-- The block on this account's chats now: { kind = "hold", entry } while a 3rd or later warning
+-- waits for the team (until HOLD_MAX), else { kind = "pause", entry, ends } while the newest struck
+-- line's 1st or 2nd warning pause lasts, else nil. (A hold is the newest line of one store: no
+-- line is struck while held. Two realms' stores made one, ChatStrikes.Merge, may put the other
+-- store's lines after it: it still holds.)
+local function Current(s, now)
+	if type(s) ~= "table" or type(s.mine) ~= "table" then return nil end
 	now = now or Clock()
-	if e.n < S.HOLD_AT then
+	for i = #s.mine, 1, -1 do
+		local e = s.mine[i]
+		if Entry(e) and e.n >= S.HOLD_AT and type(e.decided) ~= "table" and now < e.at + S.HOLD_MAX then return { kind = "hold", entry = e } end
+	end
+	local e = s.mine[#s.mine]
+	if Entry(e) and e.n < S.HOLD_AT then
 		local ends = tonumber(e.untilAt) or 0
 		if ends > now then return { kind = "pause", entry = e, ends = ends } end
-		return nil
 	end
-	if type(e.decided) ~= "table" and now < e.at + S.HOLD_MAX then return { kind = "hold", entry = e } end
 	return nil
+end
+function S.Block(now) return Current(Store(), now) end
+
+-- Core's MergeStore, as two realms' stores become one (ns.LinkRealms, a realm group learned): both
+-- stores' struck lines, each once and in time order, both stores' cases (a decided copy before an
+-- open one), and the report of the hold on after it. (Without it the store merged first was kept
+-- whole: an empty one dropped the other's hold, which only his own client enforces.)
+function S.Merge(a, b)
+	local function Valid(x) return type(x) == "table" and x.v == 1 end
+	if not Valid(a) then return Valid(b) and b or a end
+	if not Valid(b) then return a end
+	local out, seen = { v = 1, mine = {}, cases = {} }, {}
+	for _, x in ipairs({ a, b }) do
+		for _, e in ipairs(type(x.mine) == "table" and x.mine or {}) do
+			local key = Entry(e) and (e.at .. "#" .. Key(e.char))
+			if key and not seen[key] then seen[key] = true; out.mine[#out.mine + 1] = e end
+		end
+		for key, c in pairs(type(x.cases) == "table" and x.cases or {}) do
+			local old = out.cases[key]
+			if type(c) == "table" and (type(old) ~= "table" or (type(old.decided) ~= "table" and type(c.decided) == "table")) then out.cases[key] = c end
+		end
+	end
+	table.sort(out.mine, function(x, y) return x.at < y.at end)
+	while #out.mine > S.MINE_MAX do table.remove(out.mine, 1) end
+	local held = Current(out)
+	for _, x in ipairs({ a, b }) do
+		if held and held.kind == "hold" and type(x.out) == "table" and x.out.id == held.entry.at then out.out = x.out end
+	end
+	return out
 end
 
 ---------------------------------------------------------------------------
@@ -442,12 +482,32 @@ local function WhereCode(where)
 	return Code(where)
 end
 
--- The struck line as kept and reported: The Watch's report form, at most TEXT_MAX bytes from about
+-- Where the first word of the list starts in the line as kept, though typed in disguise (Prepare
+-- reads it so): in a copy of the line of the same length, @ $ ! as letters and the punctuation
+-- blocks as spaces; the word itself, else its letters with anything else between them (Build's
+-- joined letters, "p.l.a.i.n.w.o.r.d", which Hits names "p l a i n w o r d").
+local function WordAt(line, first)
+	if type(first) ~= "string" or first == "" then return nil end
+	local copy = ns.Fold(line):gsub("\226\128[\128-\191]", "   "):gsub("\194[\128-\191]", "  ")
+	copy = copy:gsub("(%w)([@%$!])%f[%w]", function(a, sym) return a .. SYMBOL[sym] end)
+	local at = not first:find(" ", 1, true) and copy:find(first, 1, true)
+	if at then return at end
+	local parts = {}
+	for ch in first:gmatch("[%z\1-\127\192-\255][\128-\191]*") do
+		if ch ~= " " then parts[#parts + 1] = (ch:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0")) end
+	end
+	if #parts == 0 then return nil end
+	return (copy:find(table.concat(parts, "[^%w\128-\255]*")))
+end
+
+-- The struck line as kept and reported: The Watch's report form without the invisible characters
+-- (nobody sees them; a word with one inside is found as it reads), at most TEXT_MAX bytes from about
 -- LEAD before the first word, never inside a character, "..." where it was cut.
 local function Window(body, first)
 	local line = Clean(body, S.MESSAGE_MAX)
+	for _, p in ipairs(INVISIBLE) do line = line:gsub(p, "") end
 	if #line <= S.TEXT_MAX then return line end
-	local at = type(first) == "string" and ns.Fold(line):find(first, 1, true) or 1
+	local at = WordAt(line, first) or 1
 	local from = math.max(1, at - S.LEAD)
 	local b = line:byte(from)
 	while from > 1 and b and b >= 128 and b < 192 do from = from - 1; b = line:byte(from) end
@@ -585,45 +645,132 @@ local function ReportMessages(s, e)
 end
 S.ReportMessages = ReportMessages -- (tests)
 
+local function Linked(name)
+	local A = Live(ns.Alts)
+	local list = A and A.Linked and A.Linked(name)
+	return type(list) == "table" and list or {}
+end
+-- The same player: the name, or a name his player linked (both ways, as WatchChat's actions read it).
+local function SamePerson(a, b)
+	if Same(a, b) then return true end
+	for _, other in ipairs(Linked(a)) do if Same(other, b) then return true end end
+	for _, other in ipairs(Linked(b)) do if Same(other, a) then return true end end
+	return false
+end
+
+local function Reply(to, msg) return Whisper(to, msg, ReplyPermit(to), "r") end
+
+local function DecisionWire(c)
+	return ("MS~1~D~%s~%d~%s~%d"):format(c.name, c.id, c.decided.op, tonumber(c.decided.at) or 0)
+end
+
+-- Whom "Let them chat" is told: him, the characters his player linked (the hold is the account's:
+-- one of them may be the one playing) and the team online; never this character.
+local function TellTo(c)
+	local out, seen = {}, {}
+	local function Add(name)
+		if type(name) == "string" and name ~= "" and not seen[Key(name)] and not Same(name, ns.me) then
+			seen[Key(name)] = true
+			out[#out + 1] = name
+		end
+	end
+	Add(c.name)
+	for _, name in ipairs(Linked(c.name)) do Add(name) end
+	for _, name in ipairs(Team()) do Add(name) end
+	return out
+end
+
+-- A "Let them chat" decided on this client, told to whom has not said he keeps it: each RETRY
+-- apart and TRIES times at most (as the report), for TELL_FOR; `budget` whispers at most, the
+-- budget left returned. (A team member away at the decision is told when back, so his page stops
+-- showing the case open; one away through every try still shows it open. The player himself is
+-- told, and asks too, each of the team in turn: Tick.)
+local function TellCase(c, budget)
+	local d = c.decided
+	if type(d) ~= "table" or d.op ~= "R" or not Same(d.by, ns.me) or type(c.tell) ~= "table" then return budget end
+	if Clock() - (tonumber(d.at) or 0) > S.TELL_FOR then c.tell = nil return budget end
+	local msg, now = DecisionWire(c), Now()
+	for _, name in ipairs(TellTo(c)) do
+		if budget <= 0 then break end
+		local key = Key(name)
+		local r = type(c.tell[key]) == "table" and c.tell[key] or { tries = 0 }
+		c.tell[key] = r
+		local tries = tonumber(r.tries) or 0
+		if not r.acked and tries < S.TRIES and (not tonumber(r.last) or now - r.last >= S.RETRY) then
+			r.tries, r.last = tries + 1, now
+			Reply(name, msg)
+			budget = budget - 1
+		end
+	end
+	return budget
+end
+
+-- The one of the team asked "decided?" next: in turn after the one asked last, among those who said
+-- they keep the report (all of them while none did). One who missed the decision is asked once;
+-- the next one knows it.
+local function NextAsked(out, team)
+	local list = {}
+	for _, name in ipairs(team) do
+		local r = out.to[Key(name)]
+		if type(r) == "table" and r.acked then list[#list + 1] = name end
+	end
+	if #list == 0 then list = team end
+	for i, name in ipairs(list) do
+		if Key(name) == out.asked then return list[i % #list + 1] end
+	end
+	return list[1]
+end
+
 -- Every minute (and at once from a third warning): while a hold waits for the team, this
 -- character (the one that typed it) sends its report to PER_TICK of the team online who have not
 -- said they keep it, each RETRY apart and TRIES times at most (saved: a /reload starts nothing
--- over), and asks one of them every PING whether it was decided. Not in a lockdown (the game
--- holds addon messages there: the report waits for it to end), nor out of Olympus.
+-- over), and asks one of them every PING, each in turn, whether it was decided; another character
+-- his player linked (the account's hold holds it too) only asks. A team member's client tells
+-- its own "Let them chat" again (TellCase). Not in a lockdown (the game holds addon messages
+-- there: the report waits for it to end), nor out of Olympus.
 function S.Tick()
 	local s = Store()
 	if not s then return end
-	local b = S.Block()
+	local ready = ns.me ~= nil and ns.IsMember() and not (ns.ChatLocked and ns.ChatLocked())
+	local C = ns.Comm
+	if ready and not (C and C.QueueRoom and C.QueueRoom() < 1 + S.QUEUE_SPARE) then
+		local budget = S.PER_TICK
+		for _, c in pairs(s.cases) do
+			if budget <= 0 then break end
+			if type(c) == "table" and c.tell ~= nil then budget = TellCase(c, budget) end
+		end
+	end
+	local b = Current(s)
 	local e = b and b.kind == "hold" and b.entry or nil
 	if not e then s.out = nil return end
 	if type(s.out) ~= "table" or s.out.id ~= e.at then s.out = { id = e.at, to = {}, pinged = Now() } end
-	if not ns.me or not Same(e.char, ns.me) or not ns.IsMember() or (ns.ChatLocked and ns.ChatLocked()) then return end
+	if not ready then return end
+	local own = Same(e.char, ns.me)
+	if not own and not SamePerson(ns.me, e.char) then return end
 	local out, now = s.out, Now()
 	if type(out.to) ~= "table" then out.to = {} end
-	local msgs = ReportMessages(s, e)
-	if not msgs then return end
-	local C = ns.Comm
-	local team, sent = Team(), 0
-	for _, name in ipairs(team) do
-		if sent >= S.PER_TICK then break end
-		local key = Key(name)
-		local r = type(out.to[key]) == "table" and out.to[key] or { tries = 0 }
-		out.to[key] = r
-		local tries = tonumber(r.tries) or 0
-		if not r.acked and tries < S.TRIES and (not tonumber(r.last) or now - r.last >= S.RETRY) then
-			if C and C.QueueRoom and C.QueueRoom() < #msgs + S.QUEUE_SPARE then break end
-			r.name, r.tries, r.last = name, tries + 1, now
-			for _, m in ipairs(msgs) do Whisper(name, m, ReportPermit(e.at, name), e.at) end
-			sent = sent + 1
+	local team = Team()
+	if own then
+		local msgs = ReportMessages(s, e)
+		if not msgs then return end
+		local sent = 0
+		for _, name in ipairs(team) do
+			if sent >= S.PER_TICK then break end
+			local key = Key(name)
+			local r = type(out.to[key]) == "table" and out.to[key] or { tries = 0 }
+			out.to[key] = r
+			local tries = tonumber(r.tries) or 0
+			if not r.acked and tries < S.TRIES and (not tonumber(r.last) or now - r.last >= S.RETRY) then
+				if C and C.QueueRoom and C.QueueRoom() < #msgs + S.QUEUE_SPARE then break end
+				r.name, r.tries, r.last = name, tries + 1, now
+				for _, m in ipairs(msgs) do Whisper(name, m, ReportPermit(e.at, name), e.at) end
+				sent = sent + 1
+			end
 		end
 	end
 	if now - (tonumber(out.pinged) or -math.huge) >= S.PING and #team > 0 then
-		local to = team[1]
-		for _, name in ipairs(team) do
-			local r = out.to[Key(name)]
-			if type(r) == "table" and r.acked then to = name break end
-		end
-		out.pinged = now
+		local to = NextAsked(out, team)
+		out.pinged, out.asked = now, Key(to)
 		Whisper(to, ("MS~1~P~%d"):format(e.at), ReportPermit(e.at, to), e.at)
 	end
 end
@@ -673,21 +820,6 @@ local function ShownBy(name)
 	return ns.DisplayName(name) or tostring(name or "?")
 end
 local function Masked() return ns.CouncilMasked ~= nil and ns.CouncilMasked() == true end
-
-local function Linked(name)
-	local A = Live(ns.Alts)
-	local list = A and A.Linked and A.Linked(name)
-	return type(list) == "table" and list or {}
-end
--- The same player: the name, or a name his player linked (both ways, as WatchChat's actions read it).
-local function SamePerson(a, b)
-	if Same(a, b) then return true end
-	for _, other in ipairs(Linked(a)) do if Same(other, b) then return true end end
-	for _, other in ipairs(Linked(b)) do if Same(other, a) then return true end end
-	return false
-end
-
-local function Reply(to, msg) return Whisper(to, msg, ReplyPermit(to), "r") end
 
 local function Changed()
 	ns.Fire("WATCH_CHANGED")
@@ -749,6 +881,11 @@ local function TakeLine(sender, f)
 	local W = WC()
 	local e = W and W.TimeoutOf and W.TimeoutOf(sender)
 	if type(e) == "table" and e.scope == "O" and (tonumber(e.at) or 0) >= p.id then c.decided = { op = "T", by = e.by, at = e.at } end
+	-- (One open case a name: his client takes a decision on its newest hold alone, and a name's
+	-- flood of made-up reports pushes out nothing but its own.)
+	for key, old in pairs(s.cases) do
+		if type(old) == "table" and type(old.decided) ~= "table" and Same(old.name, sender) then s.cases[key] = nil end
+	end
 	s.cases[who .. "#" .. p.id] = c
 	Prune(s)
 	stats.taken = stats.taken + 1
@@ -762,26 +899,66 @@ local function TakeLine(sender, f)
 	return true
 end
 
+-- K: his report kept (K~<id>, on his client), or a decision this client told kept (K~<id>~<name>).
 local function TakeAck(sender, f)
-	if #f ~= 4 then return Refused("shape", sender) end
+	if #f ~= 4 and #f ~= 5 then return Refused("shape", sender) end
 	local s, id = Store(), Int(f[4], 1, 2147483647)
-	local out = s and s.out
-	local r = type(out) == "table" and out.id == id and type(out.to) == "table" and out.to[Key(sender)] or nil
+	local r
+	if #f == 4 then
+		local out = s and s.out
+		r = type(out) == "table" and out.id == id and type(out.to) == "table" and out.to[Key(sender)] or nil
+	else
+		local W = WC()
+		local name = W and W.CharName and W.CharName(f[5])
+		local c = s and id and name and s.cases[Key(name) .. "#" .. id]
+		r = type(c) == "table" and type(c.tell) == "table" and c.tell[Key(sender)] or nil
+	end
 	if type(r) ~= "table" or not r.last then return Refused("audience", sender) end
 	r.acked = true
 	return true
 end
 
-local function DecisionWire(c)
-	return ("MS~1~D~%s~%d~%s~%d"):format(c.name, c.id, c.decided.op, tonumber(c.decided.at) or 0)
+-- N, on his own client: the one of the team he asked last does not keep his report (never had it,
+-- or a flood pushed it out): sent to him again, TRIES more at most, once a PING. (Another
+-- character of his account only asks.)
+local function TakeMissing(sender, f)
+	if #f ~= 4 then return Refused("shape", sender) end
+	local s, id = Store(), Int(f[4], 1, 2147483647)
+	local out = s and s.out
+	local b = S.Block()
+	local r = type(out) == "table" and out.id == id and type(out.to) == "table" and out.to[Key(sender)] or nil
+	if type(r) ~= "table" or not r.last or out.asked ~= Key(sender) or Now() - (tonumber(out.missed) or -math.huge) < S.PING
+		or not (b and b.kind == "hold" and b.entry.at == id and Same(b.entry.char, ns.me)) then
+		return Refused("audience", sender)
+	end
+	out.missed = Now()
+	r.acked, r.tries, r.last = nil, 0, nil
+	return true
+end
+
+-- The case a "decided?" asks about: his, or (from another character his player linked) the one of
+-- that hold.
+local function CaseOf(s, sender, id)
+	local c = s.cases[Key(sender) .. "#" .. id]
+	if type(c) == "table" then return c end
+	for _, x in pairs(s.cases) do
+		if type(x) == "table" and x.id == id and SamePerson(sender, x.name) then return x end
+	end
+	return nil
 end
 
 local function TakePing(sender, f)
 	if #f ~= 4 then return Refused("shape", sender) end
+	local W = WC()
+	if not (W and W.InRoom and W.InRoom(ns.me)) then return Refused("audience", sender) end
 	local s, id = Store(), Int(f[4], 1, 2147483647)
-	local c = s and id and s.cases[Key(sender) .. "#" .. id]
-	if type(c) ~= "table" then return Refused("case", sender) end
+	if not s or not id then return Refused("shape", sender) end
 	if not Budget(Each(pings, Key(sender)), S.PINGS_HOUR, 3600) then return Refused("rate", sender) end
+	local c = CaseOf(s, sender, id)
+	if type(c) ~= "table" then
+		Reply(sender, ("MS~1~N~%d"):format(id))
+		return Refused("case", sender)
+	end
 	if type(c.decided) == "table" and (c.decided.op == "R" or c.decided.op == "T") then Reply(sender, DecisionWire(c)) end
 	return true
 end
@@ -821,6 +998,8 @@ local function TakeDecision(sender, f)
 			Changed()
 		end
 	end
+	-- (Said kept to whoever told it: a "Let them chat" is told again until it is, TellCase.)
+	if taken or result == "repeat" then Reply(sender, ("MS~1~K~%d~%s"):format(id, name)) end
 	if taken then return true end
 	if result == "repeat" then return true, "repeat" end
 	return Refused(result, sender)
@@ -843,6 +1022,7 @@ function S.Handle(dist, sender, text)
 	if op == "L" then return TakeLine(sender, f) end
 	if op == "K" then return TakeAck(sender, f) end
 	if op == "P" then return TakePing(sender, f) end
+	if op == "N" then return TakeMissing(sender, f) end
 	if op == "D" then return TakeDecision(sender, f) end
 	return Refused("op", sender)
 end
@@ -874,7 +1054,8 @@ function S.Decided(op, target, at, by)
 end
 
 -- "Let them chat": this client's decision on a case, if it may act on him in Olympus scope; told to
--- him and to the team online.
+-- him, the characters his player linked and the team online at once, and again to whom it missed
+-- (TellCase).
 function S.Release(key)
 	local s = Store()
 	local c = s and s.cases[key]
@@ -887,9 +1068,8 @@ function S.Release(key)
 	end
 	if type(c.decided) == "table" then return false, "decided" end
 	c.decided = { op = "R", by = ns.me, at = math.max(math.floor(Clock()), c.id) }
-	local msg = DecisionWire(c)
-	Reply(c.name, msg)
-	for _, name in ipairs(Team()) do if not Same(name, c.name) then Reply(name, msg) end end
+	c.tell = {}
+	TellCase(c, math.huge)
 	ns.Print(Green(L.WATCHCHAT_STRIKE_DONE:format(ShownBy(c.name))))
 	Changed()
 	return true
