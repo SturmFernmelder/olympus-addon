@@ -81,6 +81,8 @@ local function SelfOff()
 	local M = ns.Moderation
 	return type(M) == "table" and type(M.SelfOff) == "function" and M.SelfOff() or nil
 end
+-- Quiet presence (1.2.5.1, Core.lua): no answer of ours, nor a withdrawal (Comm.QUIET_WORDS).
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 local function Ignored(sender)
 	if type(sender) ~= "string" then return true end
 	local blocked = ns.db and ns.db.blocked
@@ -248,6 +250,7 @@ local function ObservationEligible(mapID, zoneUID)
 end
 
 local function HelperEligible(mapID, zoneUID)
+	if Quiet() then return false, "quiet" end
 	local eligible, why = ObservationEligible(mapID, zoneUID)
 	if not eligible then return false, why end
 	if not (ns.Hop and ns.Hop.CanHelpKing and ns.Hop.CanHelpKing(mapID, zoneUID)) then return false, "helper" end
@@ -289,6 +292,12 @@ end
 
 local function SendWithdrawal(wire, answer)
 	if answer.withdrawing then return end
+	-- Quiet presence: the answer is forgotten, not withdrawn; the requester's copy expires on its
+	-- own (TTL) as after a logout, and no word of ours says we went quiet.
+	if Quiet() then
+		if sentAnswers[wire] == answer then sentAnswers[wire] = nil end
+		return
+	end
 	answer.withdrawing = true
 	-- A withdrawal names no map/layer/guild. Moderation deliberately lets this safety word
 	-- leave even when the opt-out that caused it was net-off itself. Keep failed admissions for

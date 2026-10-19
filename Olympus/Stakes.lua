@@ -620,6 +620,9 @@ local function State(mode)
 end
 local function SendAvail()
 	if not dutyMode then return end
+	-- Quiet presence (1.2.5.1, Core.lua): free, busy or off says the arbiter is online, with his
+	-- zone; nothing until it is off, and the others' copy lapses (FRESH) as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local mapID = "-"
 	local Layers = ns.Layers
 	if Layers and Layers.Sharing and Layers.Sharing() and C_Map and C_Map.GetBestMapForUnit then
@@ -630,6 +633,8 @@ local function SendAvail()
 	ns.Arena.Send("ZV", dutyMode, st .. "~" .. mapID, { key = "zv", evenBlocked = st == "b" })
 end
 Stakes.SendAvail = SendAvail
+-- Quiet presence turned off (Core.lua): an arbiter on duty says so again at once.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then SendAvail() end end)
 
 function Stakes.OnDuty(on, mode)
 	mode = Mode(mode)

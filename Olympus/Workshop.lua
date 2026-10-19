@@ -336,6 +336,8 @@ function Workshop.HandleRoll(dist, sender, text)
 	authorAt, authorName = ns.Now(), ns.FullName(sender)
 	local now = ns.Now()
 	if id == answeredRoll or now - lastRollAnswer < Workshop.ROLL_GAP then return end
+	-- Quiet presence (Core.lua): no answer, which would say we are online.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	answeredRoll = id
 	if Workshop.random(1, 100) > math.max(1, math.min(100, share)) then return end
 	lastRollAnswer = now
@@ -612,6 +614,9 @@ StaticPopupDialogs["OLYMPUS_AUTHOR_UPDATE"] = {
 
 function Workshop.SendPresence()
 	if not Workshop.IsAuthor() then return end
+	-- Quiet presence (Core.lua): his presence goes nowhere; the army's "author online" lapses on its
+	-- own (Workshop.AuthorOnline), as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local released = Workshop.Released()
 	ns.Comm.Send("CHANNEL", "V4~" .. Clean(ns.VERSION, 12) .. (released and ("~" .. released) or ""), "presence")
 end
@@ -2411,12 +2416,15 @@ function Workshop.SetCouncilHelp(on)
 	ns.db.councilHelp = on and true or false
 	ns.Print(on and L.COUNCIL_HELP_ON or L.COUNCIL_HELP_OFF)
 	lastAvailSent = -math.huge
-	-- Off: said at once, so nobody's request goes to us meanwhile.
-	if not on then ns.Comm.Send("CHANNEL", "HA~0", "counciladvert") end
+	-- Off: said at once, so nobody's request goes to us meanwhile (quiet presence, Core.lua: not
+	-- said; the others' copy lapses, HELP_FRESH).
+	if not on and not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Send("CHANNEL", "HA~0", "counciladvert") end
 	Workshop.SayAvailable()
 end
 function Workshop.SayAvailable()
 	if not ns.db.councilHelp or not ns.IsHighCouncillor(ns.me) then return end
+	-- Quiet presence (Core.lua): "available" says we are online; it waits until it is off.
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local now = ns.Now()
 	if now - lastAvailSent < Workshop.HELP_EVERY then return end
 	lastAvailSent = now
@@ -2464,7 +2472,9 @@ function Workshop.HandleAsk(dist, sender, text)
 	local now, who = ns.Now(), ns.FullName(sender)
 	if now - (helpFrom[who] or -math.huge) < 60 then return end
 	helpFrom[who] = now
-	ns.Comm.Whisper(who, "HK~1", "councilack")
+	-- (Quiet presence, Core.lua: the ask still shows here, but no "got it" says we are online; the
+	-- asker is told nobody answered, ACK_WAIT, and may ask again.)
+	if not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Whisper(who, "HK~1", "councilack") end
 	local msg = ns.Codec.Plain(text:match("^HR~(.*)$") or "")
 	ns.Print(L.COUNCIL_ASKED:format("|Hplayer:" .. ns.TellName(who) .. "|h[" .. ns.DisplayName(who) .. "]|h", msg))
 	ns.PlayAlert("soft", "help")
@@ -2912,4 +2922,11 @@ ns.On("LOGIN", function()
 	-- The author says he is online once on the channel, then every PRESENCE_EVERY.
 	ns.After(40, "author presence", Workshop.SendPresence)
 	ns.Every(Workshop.PRESENCE_EVERY, "author presence", Workshop.SendPresence)
+end)
+-- Quiet presence turned off (Core.lua): his presence at once again, and a councillor's help notice.
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on ~= false then return end
+	Workshop.SendPresence()
+	lastAvailSent = -math.huge
+	Workshop.SayAvailable()
 end)

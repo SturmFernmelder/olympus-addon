@@ -1697,6 +1697,71 @@ function ns.Every(seconds, where, fn)
 end
 
 ---------------------------------------------------------------------------
+-- Quiet presence (1.2.5.1). An authorized addon (OlympusAPI's SetQuietPresence) may ask, for this
+-- session alone, that this client send nothing that says its character is online or where it is:
+-- the hello, the census it would report, its layer and its dot on the map, layer-hop offers,
+-- answers about the King's layer or a player sighting, the King's crown, and the other presence
+-- words Comm.QUIET_WORDS lists. Other clients age it out as they do a logout: no word ever says it
+-- went quiet. What this client reads goes on working, and its Olympus chat lines still go when the
+-- player types them. Only the King, a High Councillor (each while a current signed issuer,
+-- Moderation.IsIssuer) and the addon's pinned author may turn it on, for their own character. Never
+-- saved: a /reload or a logout ends it.
+---------------------------------------------------------------------------
+
+local quiet -- { since, owner } while it is on
+
+-- Who may turn it on: the rule of the profile presentation's sessions (ProfileEffects.lua), kept to
+-- the King and the High Council among the signed issuers (a Steward or a Hand alone is not enough).
+function ns.QuietPresenceAllowed(name)
+	if type(name) ~= "string" or name == "" then return false end
+	local M = ns.Moderation
+	if type(M) ~= "table" or M.missing or type(M.IsIssuer) ~= "function" then return false end
+	if ns.IsKingCharacter(name) or ns.IsHighCouncillor(name) == true then
+		local ok, issuer = pcall(M.IsIssuer, name)
+		if ok and issuer == true then return true end
+	end
+	local W = ns.Workshop
+	if type(W) ~= "table" or W.missing or type(W.IsAuthorName) ~= "function" then return false end
+	local authorOK, author = pcall(W.IsAuthorName, name)
+	if not authorOK or author ~= true then return false end
+	if type(M.Hides) == "function" then
+		local safe, hidden = pcall(M.Hides, name)
+		if not safe or hidden then return false end
+	end
+	return true
+end
+
+function ns.QuietPresence() return quiet ~= nil end
+-- { on, since }: since, when it was turned on (ns.Now), while it is on.
+function ns.QuietPresenceState() return { on = quiet ~= nil, since = quiet and quiet.since or nil } end
+function ns.QuietPresenceOwnedBy(owner) return quiet ~= nil and owner ~= nil and quiet.owner == owner end
+
+-- on: true or false; owner: who asks (an API handle's own key). Returns true, or false and why:
+-- "guild" (outside an Olympus guild), "authority" (not the King, a councillor or the author),
+-- "owner" (another owner turned it on), "state". The owner that turned it on may always turn it off.
+function ns.SetQuietPresence(on, owner)
+	if on ~= true and on ~= false then return false, "state" end
+	if type(owner) ~= "string" or owner == "" then return false, "owner" end
+	if on == false and quiet and quiet.owner == owner then
+		quiet = nil
+		ns.Log("quiet presence off")
+		ns.Fire("QUIET_PRESENCE_CHANGED", false)
+		return true
+	end
+	if not ns.IsMember() then return false, "guild" end
+	if not ns.QuietPresenceAllowed(ns.me) then return false, "authority" end
+	if quiet then
+		if quiet.owner ~= owner then return false, "owner" end
+		return true
+	end
+	if not on then return true end
+	quiet = { since = ns.Now(), owner = owner }
+	ns.Log("quiet presence on")
+	ns.Fire("QUIET_PRESENCE_CHANGED", true)
+	return true
+end
+
+---------------------------------------------------------------------------
 -- Startup
 ---------------------------------------------------------------------------
 

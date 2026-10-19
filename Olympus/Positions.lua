@@ -31,7 +31,9 @@ end
 Positions.Sanctioned = Sanctioned
 
 local function SendPosition()
+	-- Quiet presence (Core.lua): no dot of ours either; the guildmates' one expires (EXPIRE).
 	if not ns.db.sharePosition or not IsInGuild() or IsInInstance() or Sanctioned() then return end
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local mapID = C_Map.GetBestMapForUnit("player")
 	local pos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
 	if not pos then return end

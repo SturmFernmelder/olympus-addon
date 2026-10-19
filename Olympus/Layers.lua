@@ -61,7 +61,9 @@ local function Announces() return Layers.Sharing() end
 -- once (0.9.2), not when it expires. Clients before 0.9.2 keep it until then (EXPIRE).
 local announced = false
 function Layers.Withdraw()
-	if not announced then return end
+	-- Quiet presence (Core.lua): nothing goes, not even this; the layer we announced expires on the
+	-- other clients (EXPIRE) as after a logout.
+	if not announced or (ns.QuietPresence and ns.QuietPresence()) then return end
 	announced = false
 	ns.Comm.Send("CHANNEL", "L0~", "layer")
 end
@@ -70,6 +72,8 @@ local retryQueued = false
 
 local function Announce(force)
 	if not mine or not IsInGuild() or not Announces() then return end
+	-- Quiet presence (Core.lua): our layer is not announced (nor our zone: Comm.Hello, Comm.Broadcast).
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local now = ns.Now()
 	local K = ns.King
 	local every = (K and K.IsKing and K.IsKing()) and Layers.KING_EVERY or ANNOUNCE_EVERY
@@ -148,6 +152,8 @@ Layers.Observe = Observe -- tests
 -- The King turned his crown on (King.ToggleLocation): his layer goes out now, not when the next
 -- announcement is due (up to ten minutes when he had shown it before hiding it, 1.0.0).
 function Layers.AnnounceNow() Announce(true) end
+-- Quiet presence turned off (Core.lua): our layer at once, when we share it.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Announce(true) end end)
 local asked = false -- the sharing question was put to the player this session
 function Layers.Reset() mine, pending, asked = nil, nil, false; wipe(seen); wipe(where); lastFire, fireQueued = -math.huge, false; lastAnnounce, announced, sentAt = 0, false, nil end -- tests
 

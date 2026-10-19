@@ -922,6 +922,26 @@ test("king arrow controls: rank before recency: a High Councillor's newer 'on' n
 	end)
 end)
 
+-- 1.2.5.1, review of the quiet presence (Core.lua): a controller's client stamped his word again
+-- every five minutes, each repeat saying he was online. His own switch is his act and goes.
+test("king arrow controls: while the quiet presence is on, his word is not repeated (his own switch still goes); the repeat comes back once off", function()
+	WithWorld(function(w)
+		local c = w.client("Council")
+		c.council[c.me:lower()], c.issuers[c.me:lower()] = true, true
+		local quiet = true
+		c.QuietPresence = function() return quiet end
+		eq(w.use(c, c.KingArrow.SetEnabled, false, "global", true), true, "his own switch")
+		eq(#c.sent, 1)
+		w.clock = w.clock + c.KingArrow.CONTROL_REPEAT
+		eq(w.use(c, c.KingArrow.RepeatOwn), false)
+		eq(#c.sent, 1, "no repeat while it is on")
+		quiet = false
+		eq(w.use(c, c.KingArrow.RepeatOwn), true)
+		eq(#c.sent, 2)
+		assert(c.sent[2].msg:match("^K6~1~G~0~%d+~$"), c.sent[2].msg)
+	end)
+end)
+
 test("king arrow: disabling removes its pin and leaves every crown/location fact intact", function()
 	WithWorld(function(w)
 		local c = w.client("Viewer")

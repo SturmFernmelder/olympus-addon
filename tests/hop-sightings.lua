@@ -749,3 +749,32 @@ test("hop sighting integration: Hop never installs one sighting as King authorit
 			"the local UI says the player is already on the King's layer")
 	end)
 end)
+
+-- 1.2.5.1, the quiet presence (Core.lua's ns.QuietPresence): an observer that has it on answers
+-- nothing and withdraws nothing (the asker's copy expires on its own, as after a logout); an asker
+-- that has it on still sends its own query, a read.
+test("hop sighting: quiet presence answers and withdraws nothing, its own query still goes, and it answers again once off", function()
+	WithWorld(function(w)
+		local asker, observer, later = w.client("Asker"), w.client("Observer"), w.client("Later")
+		for _, c in ipairs({ asker, observer, later }) do c.QuietPresence = function() return c.quiet == true end end
+		Observe(w, observer)
+		asker.quiet = true
+		local query = Start(w, asker) -- (a read: it goes)
+		asker.members[observer.me:lower()] = true
+		local first = Answer(w, observer, asker, query)
+		eq(w.use(asker, asker.HopSightings.Receive, "WHISPER", observer.me, first.msg), true, "a quiet asker still takes answers")
+		observer.quiet = true
+		w.use(observer, observer.HopSightings.Tick)
+		eq(#observer.jobs, 0, "no withdrawal")
+		local second = Start(w, later)
+		observer.members[later.me:lower()] = true
+		eq(w.use(observer, observer.HopSightings.Receive, "CHANNEL", later.me, second.msg), true)
+		eq(#observer.jobs, 0, "no answer while it is on")
+		observer.quiet = false
+		w.use(observer, observer.HopSightings.Tick)
+		eq(#observer.jobs, 1, "the query still waiting is answered once it is off")
+		local ok, _, response = w.use(observer, observer.flush)
+		eq(ok, true); eq(response.target, later.me)
+		assert(response.msg:match("^LY~R~1~%d+~77~1453~8~2~%d+$"), response.msg)
+	end)
+end)

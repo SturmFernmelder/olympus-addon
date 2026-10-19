@@ -1662,12 +1662,23 @@ map. The kind, observation time, expiry and layer are labelled, so this is last-
 not continuous tracking. Requests and answers expire, and turning either permission off cancels or
 withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
 world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
-can also host one bounded profile presentation. A current signed issuer opens it; an admitted
+can also host one bounded profile presentation. A current signed issuer or the addon's author opens it; an admitted
 member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
 and **No** closes that addon's state. Olympus
 never gives another addon the census, other players' private data or Olympus's keys; each addon gets
 its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
 you trust. After the update it loads once the game restarts (not on a `/reload`).
+
+A compatible addon can also turn on a quiet presence for the King, a High Councillor or the addon's
+author, for that session alone: Olympus then stops sending, on its own, the words that announce
+that player online or say where he is (no hello, census report, layer, map dot, layer-hop offer,
+court, donations or duty notice, help or crafter answer, Wanted sighting or sighting answer, profile
+presentation, nor the King's crown or the lists his client repeats), and other Olympus clients age
+him out as after a logout. His guild roster, `/who` and chat still show him, and so does the census
+his guildmates build from the roster: a guild leader or officer still shows online there, and his
+zone may show for up to 12 minutes. Olympus chat lines he types and what he posts himself still go
+out, reads go on working, and a `/reload` or logout ends it. A line on top of the Census and the
+Realm says so while it is on.
 
 The same registered handle can ask to contribute a client-owned page to the Olympus window when
 this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other

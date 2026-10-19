@@ -1146,6 +1146,13 @@ function Arena.Send(kind, mode, body, o)
 		ns.Log("arena %s not sent: held (net-off)", tostring(kind))
 		return false, "held"
 	end
+	-- Quiet presence (1.2.5.1, Core.lua): its words that say this character is online stay home,
+	-- checked here on the whole message as Comm.QuietHolds does on its own.
+	local C = ns.Comm
+	if type(C) == "table" and type(C.QuietHolds) == "function" and C.QuietHolds(text) == true then
+		Count(stats.refused, "quiet")
+		return false, "quiet"
+	end
 	if #text > 255 and o.chat then Count(stats.refused, "long") return false, "long" end
 	if math.ceil(#text / Arena.PIECE) > Arena.PIECES_MAX then
 		Count(stats.refused, "long")

@@ -10336,6 +10336,46 @@ test("1.2.4 Royal Writs: each writ of the week said again, one at a time; a memb
 	end)
 end)
 
+-- 1.2.5.1, review of the quiet presence (Core.lua): the King's client repeated his writs and his
+-- untabarded list for late logins, and answered any member's T7 ask at once: each said he was
+-- online. A writ he gives, and a switch he turns, are his own acts and go.
+test("1.2.5.1 quiet presence: the King's writs and untabarded list are not repeated, nor an ask answered, while it is on; what he gives himself goes; the repeats come back once off", function()
+	local savedQuiet, savedUntabarded, quiet = ns.QuietPresence, ns.db.kingUntabarded, false
+	ns.QuietPresence = function() return quiet end
+	local ok, err = pcall(WithUI, function() LoadUI() WithThrone(function(w, K)
+		local A = ns.Acts
+		AsKing()
+		A.SendWrit("E", "Hold the northern pass")
+		local writ = LastSent(w)
+		quiet = true
+		local n = #w.sent
+		w.clock = w.clock + A.WRIT_REPEAT
+		eq(A.RepeatWrits(), nil, "no repeat")
+		eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 0, "no answer to an ask")
+		ns.db.kingUntabarded = true
+		K.SendUntabarded()
+		eq(#w.sent, n, "nothing of his own accord while it is on")
+		K.SendUntabarded(true)
+		assert(LastSent(w):find("^T1~U~%d+~Olympus~1~"), "a switch he turns still goes: " .. LastSent(w))
+		w.clock = w.clock + 120
+		A.SendWrit("E", "Muster at dawn")
+		assert(LastSent(w):find("~E~Muster at dawn$"), "a writ he gives still goes")
+		n = #w.sent
+		w.clock = w.clock + K.UNTABARDED_EVERY + 1
+		K.SendUntabarded()
+		eq(#w.sent, n)
+		quiet = false
+		eq(A.RepeatWrits() ~= nil, true, "the repeat once off")
+		eq(LastSent(w), writ, "the least lately said first")
+		K.SendUntabarded()
+		assert(LastSent(w):find("^T1~U~%d+~Olympus~1~"), "his untabarded list on its beat again")
+		w.clock = w.clock + A.WRIT_ANSWER_GAP
+		eq(A.HandleAsk("CHANNEL", "Away-Realm", "T7~1"), 2, "an ask answered again")
+	end) end)
+	ns.QuietPresence, ns.db.kingUntabarded = savedQuiet, savedUntabarded
+	if not ok then error(err, 0) end
+end)
+
 test("the King's Agenda arrives as a popup with the appointment, once per agenda", function()
 	WithThrone(function(w, K)
 		AsSoldier()
@@ -45655,6 +45695,40 @@ test("1.1 crafters (#24): who can make it: the ask (an item or words) on the cha
 	end)
 end)
 
+-- 1.2.5.1, review of the quiet presence (Core.lua): a crafter's answer came within seconds of any
+-- ask for what only he lists, his listing repeated every 45 minutes: each says he is online.
+test("1.2.5.1 crafters: while the quiet presence is on, no listing, unlisting, answer or recipe list leaves (our own ask still goes); the listing comes back once off", function()
+	local savedQuiet, quiet = ns.QuietPresence, false
+	ns.QuietPresence = function() return quiet end
+	local ok, err = pcall(WithCraft, function(w, Cr)
+		Cr.Opened()
+		w.sent = {}
+		quiet = true
+		Cr.Choose("197", true)
+		eq(#w.sent, 0, "no listing while it is on")
+		Cr.HandleAsk("CHANNEL", "Asker-Realm", "WQ~1~i~14342")
+		eq(#w.later, 0, "no answer to an ask")
+		Cr.HandleListAsk("WHISPER", "Asker-Realm", "WR~197")
+		w.run()
+		eq(#w.whispers, 0, "no recipe list")
+		local a = Cr.Ask(MOONCLOTH)
+		eq(w.sent[1], "CHANNEL WQ~1~i~14342 (urgent)", "our own ask is a read: it goes"); eq(a.label, "Mooncloth")
+		w.sent = {}
+		Cr.Choose(nil, false)
+		eq(#w.sent, 0, "no unlisting either: the board forgets us as after a logout")
+		Cr.Choose("197", true)
+		quiet = false
+		Cr.Tick()
+		assert(w.sent[1] and w.sent[1]:find("^CHANNEL W1~Olympus II~197:Tailoring:245:300:3$"), tostring(w.sent[1]))
+		w.clock = w.clock + 60
+		Cr.HandleAsk("CHANNEL", "Asker-Realm", "WQ~2~i~14342")
+		w.run()
+		eq(w.whispers[1], "Asker-Realm WA~2~Olympus II~Tailoring~245~18560:14342", "answers again")
+	end)
+	ns.QuietPresence = savedQuiet
+	if not ok then error(err, 0) end
+end)
+
 test("1.1 crafters (#24): a crafter's recipes on a click, by whisper, in parts; his addon sends them once each 2 minutes to the same player", function()
 	WithCraft(function(w, Cr)
 		for i = 1, 30 do w.recipes[#w.recipes + 1] = { id = 20000 + i, name = "Recipe " .. i, item = 30000 + i, learned = true } end
@@ -63252,7 +63326,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -63268,6 +63342,7 @@ for _, name in ipairs(focused) do
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
+		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
 		or (name == "court-calls" and { WithThrone = WithThrone, AsKing = AsKing, AsSoldier = AsSoldier,
 			WithGamepadUI = WithGamepadUI, WithUI = WithUI }) or (name == "hop-sightings" and WithHop or nil)

@@ -399,3 +399,29 @@ test("Officer muster: English and pt-BR text preserve placeholders", function()
 		eq(Formats(value), Formats(texts.ptBR[key]), key)
 	end
 end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): the poster's client repeated his call every five
+-- minutes, each repeat saying he was online. A call he posts or withdraws is his own act and goes.
+test("Officer muster: while the quiet presence is on, his call is not repeated (one he posts still goes); the repeat comes back once off", function()
+	World(function(w, c)
+		local quiet = false
+		c.QuietPresence = function() return quiet end
+		w.roles[c.me] = "lord"
+		eq(c.OfficerMuster.Post("Gather for patrol", 1429), true)
+		eq(#w.jobs, 1)
+		quiet = true
+		w.advance(c.OfficerMuster.REPEAT)
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 1, "no repeat while it is on")
+		w.advance(c.OfficerMuster.GAP)
+		eq(c.OfficerMuster.Post("Gather at the bridge", 1436), true, "a call he posts is his own act")
+		eq(#w.jobs, 2); assert(w.jobs[2].msg:find("^OM~1~P~.*~1436~Gather at the bridge$"), w.jobs[2].msg)
+		w.advance(c.OfficerMuster.REPEAT)
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 2)
+		quiet = false
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 3, "the repeat once off")
+		eq(w.jobs[3].msg, w.jobs[2].msg)
+	end)
+end)

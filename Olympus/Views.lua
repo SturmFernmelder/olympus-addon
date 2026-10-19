@@ -1196,6 +1196,18 @@ local function PublicLines(lines)
 end
 Views.PublicLines = PublicLines
 
+-- 1.2.5.1: while the quiet presence is on (Core.lua), one line on top says so, its tooltip what it
+-- holds back and what still goes.
+local function QuietLine(lines)
+	if not (ns.QuietPresence and ns.QuietPresence()) then return false end
+	lines[#lines + 1] = { text = Gold(L.QUIET_PRESENCE_LINE), gapAfter = true, tooltip = function(tt)
+		tt:AddLine(L.QUIET_PRESENCE_LINE, 1, 0.82, 0, true)
+		tt:AddLine(L.QUIET_PRESENCE_TIP, 1, 1, 1, true)
+	end }
+	return true
+end
+Views.QuietLine = QuietLine
+
 -- The pinned line (1.1, Channels.Pin): on top of the Olympus chats and the Realm, for everyone.
 -- Its setter, or a higher rank, takes it down with a click (after a question). Words the
 -- player's block terms hide (Channels.PinWords) show after a first click, as a decree's.
@@ -1545,6 +1557,7 @@ local function CensusLines(s, q)
 		if #lines == 0 then lines[1] = NoMatch() end
 		return lines
 	end
+	QuietLine(lines)
 	-- Recruits asking to join our guild (1.1, Recruit.lua): an officer's Invite and Decline.
 	for _, l in ipairs(ns.Recruit and ns.Recruit.RequestLines and ns.Recruit.RequestLines() or {}) do lines[#lines + 1] = l end
 	-- Clear party-invite whispers while the King is online (1.2.5.1): local, short-lived and
@@ -2013,8 +2026,8 @@ local function RealmLines(s, q)
 	local function Mark(name, home, online)
 		return ns.King and ns.King.RollCallMark and ns.King.RollCallMark(ns.FullName(name, home), online) or ""
 	end
-	-- The pinned line on top (1.1), for everyone.
-	if not q then PinLine(lines) end
+	-- The pinned line on top (1.1), for everyone; the quiet presence's under it (1.2.5.1).
+	if not q then PinLine(lines) QuietLine(lines) end
 	-- The King holds court in our zone (Court.lua), then his layer (Hop.lua).
 	local court = not q and ns.Court and ns.Court.Line and ns.Court.Line()
 	if court then lines[#lines + 1] = court end

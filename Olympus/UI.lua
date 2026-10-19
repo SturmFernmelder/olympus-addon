@@ -3064,6 +3064,8 @@ ns.On("LAYERS_CHANGED", function()
 	if main and (main.tab == "decrees" or main.tab == "realm" or main.tab == "census") then UI.RefreshSoon() end
 end)
 ns.On("HOP_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm") then UI.RefreshSoon() end end)
+-- 1.2.5.1: the quiet presence's line (Views.QuietLine) on top of the Census and the Realm.
+ns.On("QUIET_PRESENCE_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm") then UI.RefreshSoon() end end)
 ns.On("DECREES_CHANGED", function() UI.RefreshSoon() end)
 -- The King's calls show on the Throne, the roll call in the Realm, the inspection in the Tabards
 -- (The Watch's, 1.2); since 1.1.5 the Agenda's current event shows in the King's week on top of

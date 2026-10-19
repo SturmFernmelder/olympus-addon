@@ -597,6 +597,296 @@ test("1.2.5 the API profile presentation: bounded owners, sanitized session even
 	W3.NoErrors(w)
 end)
 
+-- 1.2.5.1, the quiet presence (Core.lua, Comm.QUIET_WORDS): self only, for the session; only the
+-- King, a High Councillor (a current signed issuer) or the author may turn it on, with the player's
+-- Yes, in an Olympus guild; the handle that turned it on owns it; QUIET_PRESENCE_CHANGED; a No and a
+-- /reload end it. On the world's clients, with their own King, Workshop and Wallet: no crown, author
+-- presence or auditor hello leaves while it is on, and each goes again once it is off.
+test("1.2.5.1 the API quiet presence: the King, a councillor or the author alone, with a Yes, in an Olympus guild; its owner, its event; a No and a /reload end it", function()
+	local w, cast = W3.New({ more = {
+		{ "councillor", N.councillor, { guild = World.KING_GUILD } },
+		{ "author", N.author },
+		{ "steward", N.steward, { guild = World.KING_GUILD } },
+	} })
+	local king, member = cast.king, cast.spectator
+	local function Tool(c, name)
+		if not rawget(c.ns, "API") then LoadAPI(w, c, false) end
+		name = name or "QuietTool"
+		Install(c, name, "Quiet Tool")
+		local h = assert(w:As(c, c.OlympusAPI.Register, name), "a handle for " .. name)
+		return h, "api:" .. name:lower()
+	end
+	local function Yes(c, key, on) w:As(c, c.ns.Consent.Choose, key, on ~= false) end
+	local function SentFrom(c, pattern)
+		local n = 0
+		for _, s in ipairs(w:Sent({ from = c })) do if s.msg:find(pattern) then n = n + 1 end end
+		return n
+	end
+	-- The King's crown is on (his position goes out every few seconds).
+	king.globals.C_Map = { GetBestMapForUnit = function() return 1453 end,
+		GetPlayerMapPosition = function() return { GetXY = function() return 0.42, 0.51 end } end }
+	king.db.throneLocation = true
+	w:Run(6)
+	assert(SentFrom(king, "^T1~P~") > 0, "his crown, before")
+
+	local hk, kingKey = Tool(king)
+	local API = king.ns.API
+	eq(w:As(king, king.OlympusAPI.Has, "presence.quiet"), true)
+	eq(w:As(king, king.OlympusAPI.Has, "QUIET_PRESENCE_CHANGED"), true)
+	local ok, why = Do(w, king, hk, "SetQuietPresence", true)
+	eq(ok, false); eq(why, "pending", "nothing before the player's Yes")
+	eq(select(2, Do(w, king, hk, "GetQuietPresence")), "pending")
+	Yes(king, kingKey)
+	local told = {}
+	eq(Do(w, king, hk, "On", "QUIET_PRESENCE_CHANGED", function(_, state) told[#told + 1] = state end), true)
+	local state = Do(w, king, hk, "GetQuietPresence")
+	eq(state.on, false); eq(state.since, nil)
+	eq(select(2, Do(w, king, hk, "SetQuietPresence", "on")), "state")
+	eq(Do(w, king, hk, "SetQuietPresence", false), true, "off while off: nothing to do")
+	-- On: for this session, his own; the addon is told, with a copy.
+	eq(Do(w, king, hk, "SetQuietPresence", true), true)
+	state = Do(w, king, hk, "GetQuietPresence")
+	eq(Keys(state), "on,since"); eq(state.on, true); eq(state.since, w.clock)
+	state.on = false
+	eq(Do(w, king, hk, "GetQuietPresence").on, true, "each read is a fresh copy")
+	w:Run(API.DISPATCH_DELAY)
+	eq(#told, 1); eq(told[1].on, true); eq(Keys(told[1]), "on,since")
+	-- Nothing of him leaves: no crown, no auditor hello (he is one), while his reads go on.
+	local crowns, hellos = SentFrom(king, "^T1~P~"), SentFrom(king, "^ZQ~L1~H~")
+	eq(w:As(king, king.ns.Wallet.Hello), false, "no hello of the arena's auditors")
+	w:Run(30)
+	eq(SentFrom(king, "^T1~P~"), crowns, "no crown while it is on")
+	eq(SentFrom(king, "^ZQ~L1~H~"), hellos)
+	eq(type(Do(w, king, hk, "GetProfile")), "table", "reads go on")
+	-- Another handle of his can neither turn it off nor take it over; it hears of it all the same.
+	local other, otherKey = Tool(king, "OtherTool")
+	Yes(king, otherKey)
+	local otherTold = {}
+	eq(Do(w, king, other, "On", "QUIET_PRESENCE_CHANGED", function(_, s) otherTold[#otherTold + 1] = s end), true)
+	eq(select(2, Do(w, king, other, "SetQuietPresence", false)), "owner")
+	eq(select(2, Do(w, king, other, "SetQuietPresence", true)), "owner")
+	eq(Do(w, king, other, "GetQuietPresence").on, true)
+	-- Its owner turns it off; everything goes again.
+	eq(Do(w, king, hk, "SetQuietPresence", false), true)
+	w:Run(API.DISPATCH_DELAY)
+	eq(told[#told].on, false); eq(Keys(told[#told]), "on")
+	eq(otherTold[#otherTold].on, false, "the other handle is told too")
+	w:Run(6)
+	assert(SentFrom(king, "^T1~P~") > crowns, "his crown again")
+	eq(w:As(king, king.ns.Wallet.Hello), true)
+	w:Run(2)
+	assert(SentFrom(king, "^ZQ~L1~H~") > hellos, "his auditor hello again")
+	-- A No for the handle that turned it on ends it.
+	eq(Do(w, king, hk, "SetQuietPresence", true), true)
+	Yes(king, kingKey, false)
+	eq(Do(w, king, other, "GetQuietPresence").on, false, "the No ended it")
+	eq(select(2, Do(w, king, hk, "SetQuietPresence", true)), "refused")
+	-- A councillor and the author may; a Steward (a signed issuer), a member and the guildless may not.
+	local hc, hcKey = Tool(cast.councillor)
+	Yes(cast.councillor, hcKey)
+	eq(Do(w, cast.councillor, hc, "SetQuietPresence", true), true, "a High Councillor")
+	eq(Do(w, cast.councillor, hc, "SetQuietPresence", false), true)
+	local ha, authorKey = Tool(cast.author)
+	Yes(cast.author, authorKey)
+	eq(Do(w, cast.author, ha, "SetQuietPresence", true), true, "the author")
+	local presence = SentFrom(cast.author, "^V4~")
+	w:As(cast.author, cast.author.ns.Workshop.SendPresence)
+	w:Run(1)
+	eq(SentFrom(cast.author, "^V4~"), presence, "no author presence while it is on")
+	eq(Do(w, cast.author, ha, "SetQuietPresence", false), true)
+	w:Run(1)
+	assert(SentFrom(cast.author, "^V4~") > presence, "his presence at once once off")
+	for _, c in ipairs({ cast.steward, member }) do
+		local h, key = Tool(c)
+		Yes(c, key)
+		ok, why = Do(w, c, h, "SetQuietPresence", true)
+		eq(ok, false); eq(why, "authority", c.name)
+		eq(Do(w, c, h, "GetQuietPresence").on, false)
+	end
+	-- Outside an Olympus guild, even a councillor may not.
+	cast.councillor.guild = nil -- (World:Client's guild = false gives the default guild)
+	eq(select(2, Do(w, cast.councillor, hc, "SetQuietPresence", true)), "guild")
+	cast.councillor.guild = World.KING_GUILD
+	-- A /reload ends it, and nothing of it was saved.
+	eq(Do(w, king, other, "SetQuietPresence", true), true)
+	w:Logout(king); w:Login(king)
+	for k in pairs(king.db) do eq(tostring(k):lower():find("quiet", 1, true), nil, "saved: " .. tostring(k)) end
+	local again = Tool(king, "OtherTool")
+	eq(Do(w, king, again, "Status"), "granted", "the Yes is kept")
+	eq(Do(w, king, again, "GetQuietPresence").on, false, "a new session starts without it")
+	W3.NoErrors(w)
+end)
+
+-- 1.2.5.1, review of the quiet presence: the King's court, the lists his client repeats for late
+-- logins, the treasury's repeated ask and his "taking donations", a councillor's help notice and his
+-- "got it", and an arbiter's availability still said the player was online (some of them where)
+-- while it was on. On the world's clients with their own King, Treasury, Workshop and Stakes (and
+-- Court.lua, loaded here as the TOC does): none of it while it is on, and each again once it is off.
+test("1.2.5.1 the API quiet presence on the world: no court, list repeat, treasury repeat ask, donations, help notice or arbiter availability while on; each again once off", function()
+	local w, cast = W3.New({ more = { { "councillor", N.councillor, { guild = World.KING_GUILD } } } })
+	local king, hc, arb, asker = cast.king, cast.councillor, cast.arbiter, cast.spectator
+	local L = king.ns.L
+	local function Tool(c)
+		LoadAPI(w, c, false)
+		Install(c, "QuietTool", "Quiet Tool")
+		local h = assert(w:As(c, c.OlympusAPI.Register, "QuietTool"), "a handle")
+		w:As(c, c.ns.Consent.Choose, "api:quiettool", true)
+		return h
+	end
+	local function Count(c, pattern)
+		local n = 0
+		for _, s in ipairs(w:Sent({ from = c })) do if s.msg:find(pattern) then n = n + 1 end end
+		return n
+	end
+	local function Printed(c, text)
+		for _, line in ipairs(c.printed) do if line:find(text, 1, true) then return true end end
+		return false
+	end
+	-- Court.lua as the TOC loads it, its LOGIN part (the zone event, the resend's ticker) run here once.
+	w:As(king, function()
+		local on, login = king.ns.On, {}
+		rawset(king.ns, "On", function(event, fn) if event == "LOGIN" then login[#login + 1] = fn else on(event, fn) end end)
+		local ok, err = pcall(function() assert(loadfile(H.ADDON_DIR .. "Court.lua"))("Olympus", king.ns) end)
+		rawset(king.ns, "On", on)
+		assert(ok, err)
+		for _, fn in ipairs(login) do fn() end
+	end)
+	local map = 1453
+	king.globals.C_Map = { GetBestMapForUnit = function() return map end }
+	king.globals.GetRealZoneText = function() return map == 1453 and "Stormwind City" or "Elwynn Forest" end
+	local Court, K, T = W3.M(w, king, "Court"), king.King, king.Treasury
+	-- Before: the court where he stands, his Hands (an empty list is said too), the agenda, his
+	-- donations, the treasury's ask, a councillor's help notice, an arbiter on duty.
+	king.rdb.kingHands = {}
+	hc.db.councilHelp = true
+	-- (The agenda's popup on the army's clients: the game's, a no-op on this world.)
+	for _, c in ipairs(w.clients) do c.globals.StaticPopup_Show = function() end end
+	assert(king.Roles.SetArbiters({ { name = N.arbiter, cap = 2 } }))
+	w:Run(301)
+	w:Logout(arb); w:Login(arb) -- (its saved data then persists: Arena.Persists)
+	w:Run(0)
+	local duty, dutyWhy = W3.M(w, arb, "Stakes").OnDuty(true)
+	eq(duty, true, "on duty: " .. tostring(dutyWhy))
+	Court.Toggle()
+	assert(K.SetAgenda("120 Muster at the gates"))
+	T.SetDonations(true)
+	w:Run(60)
+	for _, word in ipairs({ { king, "^T1~C~%d+~[^~]*~1453~Stormwind City$" }, { king, "^T1~H~" }, { king, "^T1~A~" }, { king, "^TD~[^~]*~1~" },
+		{ king, "^TA~" }, { hc, "^HA~1" }, { arb, "^ZV~" } }) do
+		assert(Count(word[1], word[2]) > 0, "before: " .. word[2])
+	end
+	-- On: the King's and the councillor's through their own handles; the arbiter's module asked as
+	-- Core.lua answers it (an arbiter alone may not turn it on).
+	local hk, hh = Tool(king), Tool(hc)
+	eq(Do(w, king, hk, "SetQuietPresence", true), true)
+	eq(Do(w, hc, hh, "SetQuietPresence", true), true)
+	local arbQuiet, arbCore = true, arb.ns.QuietPresence
+	rawset(arb.ns, "QuietPresence", function() return arbQuiet end)
+	local before = {}
+	local words = { { king, "^T1~[CZ]~" }, { king, "^T1~H~" }, { king, "^T1~A~" }, { king, "^TD~" }, { king, "^TA~" },
+		{ hc, "^HA~" }, { hc, "^HK~" }, { arb, "^ZV~" } }
+	for i, word in ipairs(words) do before[i] = Count(word[1], word[2]) end
+	local ok, err = pcall(function()
+		-- His court's resend, and his moving on: nothing; closed and opened again: nothing, and he is told.
+		w:Run(Court.RESEND + 30)
+		map = 1429
+		w:Fire(king, "ZONE_CHANGED_NEW_AREA")
+		Court.Toggle()
+		Court.Toggle()
+		assert(Printed(king, L.QUIET_PRESENCE_HELD), "told that the court waits")
+		-- His donations off and on again: nothing either.
+		T.SetDonations(false)
+		T.SetDonations(true)
+		-- An ask for help reaches the councillor: shown to him, no "got it". His help off and on
+		-- again: no "not available" either (the others' copy lapses, HELP_FRESH).
+		w:As(hc, hc.ns.Workshop.HandleAsk, "WHISPER", asker.name, "HR~a hand please")
+		assert(Printed(hc, "a hand please"), "the ask still shows to him")
+		hc.Workshop.SetCouncilHelp(false)
+		hc.Workshop.SetCouncilHelp(true)
+		-- Past every repeat's time: the hands', the agenda's, the treasury ask's (15 minutes).
+		w:Run(16 * 60)
+		for i, word in ipairs(words) do eq(Count(word[1], word[2]), before[i], "nothing while it is on: " .. word[2]) end
+		eq(T.Ask(true), true, "a fresh ask is a read, and goes")
+		w:Run(0)
+		eq(Count(king, "^TA~"), before[5] + 1)
+		before[5] = before[5] + 1
+		-- Off: the court where he stands now, his donations and the help notice at once; the
+		-- repeats at their time; the arbiter's availability at once.
+		eq(Do(w, king, hk, "SetQuietPresence", false), true)
+		eq(Do(w, hc, hh, "SetQuietPresence", false), true)
+		arbQuiet = false
+		w:As(arb, arb.ns.Fire, "QUIET_PRESENCE_CHANGED", false)
+		w:Run(0)
+		eq(Count(king, "^T1~C~%d+~[^~]*~1429~Elwynn Forest$"), 1, "the court at once, in his new zone")
+		assert(Count(king, "^TD~[^~]*~1~") > 0 and Count(king, "^TD~") > before[4], "his donations at once")
+		eq(Count(hc, "^HA~1"), before[6] + 1, "the help notice at once")
+		eq(Count(arb, "^ZV~"), before[8] + 1, "the arbiter's availability at once")
+		w:Run(61)
+		assert(Count(king, "^T1~H~") > before[2], "his Hands again")
+		assert(Count(king, "^T1~A~") > before[3], "the agenda again")
+		-- (The treasury's: ASK_EVERY after the fresh one he made meanwhile.)
+		w:Run(T.ASK_EVERY)
+		assert(Count(king, "^TA~[^~]*~1$") > 0 and Count(king, "^TA~") > before[5], "the treasury's ask again")
+		-- At logout a keeper's "off" goes by the game's own call (Comm is gone by then): not while
+		-- it is on either.
+		local raw = {}
+		king.globals.C_ChatInfo.SendAddonMessage = function(_, msg) raw[#raw + 1] = msg return 0 end
+		king.globals.GetChannelName = function() return 5 end
+		rawset(king.ns.Comm, "ChannelName", function() return "OlympusTest" end)
+		eq(Do(w, king, hk, "SetQuietPresence", true), true)
+		w:Fire(king, "PLAYER_LOGOUT")
+		eq(#raw, 0, "no word at logout while it is on: " .. tostring(raw[1]))
+		eq(Do(w, king, hk, "SetQuietPresence", false), true)
+		T.SetDonations(true)
+		w:Fire(king, "PLAYER_LOGOUT")
+		assert(raw[1] and raw[1]:find("^TD~[^~]*~0~"), "off: the logout's word goes as ever: " .. tostring(raw[1]))
+	end)
+	rawset(arb.ns, "QuietPresence", arbCore)
+	assert(ok, err)
+	W3.NoErrors(w)
+end)
+
+test("1.2.5.1 the API quiet presence: its permission line, docs/API.md, the README and the CurseForge page say who may, what it holds back and what still goes", function()
+	local src = Read(H.ADDON_DIR .. "Locales/APIText.lua")
+	local head, tail = src:match("^(.-)\nif GetLocale and GetLocale%(%) == \"ptBR\" then(\n.*)$")
+	-- (Review: "sends nothing that says you are online" and "other clients see you as offline" were
+	-- not true for a guild leader or officer, whom the guildmates' census still shows online from the
+	-- game's guild roster; the line now names what stops and what still shows.)
+	for _, word in ipairs({ "turn on a quiet presence for this session", "only for the King, a High Councillor or the addon's author",
+		"Olympus stops sending on its own the words that announce you online or say where you are",
+		"other Olympus clients age you out as after a logout", "your guild roster, the census your guildmates build from it",
+		"a guild leader or officer still shows online there, and your zone may for up to 12 minutes", "/who and chat still show you",
+		"Olympus chat lines you type and what you post yourself still go out", "a /reload or logout ends it",
+		"cannot enable the presentation or the quiet presence" }) do
+		assert(head:find(word, 1, true), "the line says: " .. word)
+	end
+	for _, word in ipairs({ "ligar uma presença silenciosa nesta sessão", "só para o Rei, um membro do Alto Conselho ou o autor do addon",
+		"as palavras que anunciam você online ou dizem onde você está", "o censo que seus colegas de guilda montam com ela",
+		"um mestre ou oficial de guilda ainda aparece online lá", "o /who e o chat ainda mostrarão você",
+		"as linhas de chat do Olympus que você digitar e o que você mesmo publicar ainda serão enviados",
+		"não pode ativar a apresentação nem a presença silenciosa" }) do
+		assert(tail:find(word, 1, true), "the pt-BR line says: " .. word)
+	end
+	assert(not head:find("see you as offline", 1, true) and not tail:find("verão você como offline", 1, true),
+		"no promise that other clients see the player as offline")
+	local doc = Read(H.ROOT .. "docs/API.md")
+	for _, word in ipairs({ '"presence.quiet"', "handle:SetQuietPresence(on)", "handle:GetQuietPresence()", "QUIET_PRESENCE_CHANGED",
+		'`false, "authority"`', '`false, "guild"`', '`false, "owner"`', '`false, "quiet"`', "No word says it went quiet",
+		"Olympus chat lines he types", "the census\nstill shows a guild leader or officer online", "for up to 12 minutes",
+		"PLAYER_GUILD_UPDATE", "It is never saved", "{ on = true, since = 1792000000 }" }) do
+		assert(doc:find(word, 1, true), "docs/API.md: " .. word)
+	end
+	for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md" }) do
+		local section = Read(H.ROOT .. path):match("\n### Other addons: the Olympus API %(1%.2%.4%)\n(.-)\n##")
+		for _, word in ipairs({ "quiet presence for the King, a High Councillor or the addon's", "age\nhim out as after a logout",
+			"a guild leader or officer still shows online there", "Olympus chat lines he types and what he posts himself still go\nout",
+			"A line on top of the Census and the\nRealm says so" }) do
+			assert(section and section:find(word, 1, true), path .. ": " .. word)
+		end
+		assert(section and not section:find("see that player as offline", 1, true), path .. ": no promise of offline")
+	end
+end)
+
 test("1.2.5 the API area sightings: hostile-area shape, privacy, ownership, host map pins and cancellation", function()
 	local w, cast, viewer, API = Setup()
 	viewer.mapID = 1453

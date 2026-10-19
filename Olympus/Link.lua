@@ -551,6 +551,9 @@ end
 -- for it, once the bot is ready (never before). A councillor taken off the signed list stops:
 -- DV~0 once, if it had announced.
 function Link.Announce(force)
+	-- Quiet presence (Core.lua): no announcement, nor its DV~0; the others' lapses on its own
+	-- (ANNOUNCE_FRESH), as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local k = Link.Key()
 	local c = k and Link.BotReady() and UsableCert(k)
 	if not c then
@@ -579,7 +582,7 @@ function Link.Watching()
 end
 
 function Link.AnnounceWatcher(force)
-	if not Link.Watching() then return false end
+	if not Link.Watching() or (ns.QuietPresence and ns.QuietPresence()) then return false end
 	local now = ns.Now()
 	if not force and now - lastWatch < Link.ANNOUNCE_EVERY then return false end
 	lastWatch = now

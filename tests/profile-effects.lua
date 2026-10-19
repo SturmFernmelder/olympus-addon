@@ -18,7 +18,7 @@ local function WithWorld(fn)
 		"UnitExists", "UnitIsPlayer", "SetPortraitTexture", "InCombatLockdown", "C_Map", "issecretvalue" }
 	local saved = {}
 	for _, name in ipairs(names) do saved[name] = _G[name] end
-		local w = { clock = 1000, current = nil, after = {}, frames = {}, created = {}, fonts = {} }
+		local w = { clock = 1000, current = nil, after = {}, frames = {}, created = {}, fonts = {}, textures = {}, portraits = 0 }
 	local ok, err = pcall(function()
 		GetTime = function() return w.clock end
 		GetServerTime = function() return w.clock end
@@ -30,11 +30,14 @@ local function WithWorld(fn)
 
 		local function Noop() end
 		local function Texture()
-			return { shown = true, SetAtlas = function() return true end, SetPoint = Noop, SetSize = Noop,
-				SetVertexColor = Noop, SetBlendMode = Noop, SetDesaturated = Noop, SetAllPoints = Noop,
+			local texture
+			texture = { shown = true, SetAtlas = function() return true end, SetPoint = Noop, SetSize = Noop,
+				SetVertexColor = function(self, r, g, b, a) self.color = { r, g, b, a } end, SetBlendMode = Noop, SetDesaturated = Noop, SetAllPoints = Noop,
 				SetColorTexture = Noop, SetHeight = Noop, AddMaskTexture = Noop,
 				SetTexture = function() return true end, SetMask = Noop,
 				Hide = function(self) self.shown = false end, Show = function(self) self.shown = true end }
+			w.textures[#w.textures + 1] = texture
+			return texture
 		end
 		local function Frame()
 			local frame = { shown = true }
@@ -43,6 +46,8 @@ local function WithWorld(fn)
 			frame.CreateMaskTexture = function() return Texture() end
 			frame.CreateFontString = function()
 				local font = { SetPoint = Noop, SetJustifyH = Noop, SetJustifyV = Noop, SetTextColor = Noop,
+					GetFont = function() return "Fonts\\FRIZQT__.TTF", 16, "" end,
+					SetFont = function(self, path, size) self.size = size end,
 					SetText = function(self, value) self.text = value end }
 				w.fonts[#w.fonts + 1] = font
 				return font
@@ -63,7 +68,7 @@ local function WithWorld(fn)
 			w.created[#w.created + 1] = frame
 			return frame
 		end
-		SetPortraitTexture = function(texture, unit) texture.unit = unit end
+		SetPortraitTexture = function(texture, unit) texture.unit = unit; w.portraits = w.portraits + 1 end
 		C_Map = {
 			GetBestMapForUnit = function(unit)
 				w.bestMapUnit = unit
@@ -104,6 +109,9 @@ local function WithWorld(fn)
 				Hides = function(sender) return c.hidden[Full(sender):lower()] and { off = true } or nil end,
 				IsIssuer = function(sender) return c.issuers[Full(sender):lower()] == true end,
 			}
+			c.Workshop = { IsAuthorName = function(who)
+				return type(who) == "string" and w.author ~= nil and Full(who):lower() == Full(w.author):lower()
+			end }
 			c.Channels = { Admit = function(sender, guild, _, _, options)
 				if type(options) == "table" and type(options.buckets) == "table"
 					and options.buckets[sender] == nil then
@@ -120,11 +128,15 @@ local function WithWorld(fn)
 				end,
 			}
 			c.After = function(seconds, _, call) w.after[#w.after + 1] = { at = w.clock + seconds, call = call, client = c } end
-			c.Every = function(_, _, call)
+			c.tickers = {}
+			c.Every = function(_, where, call)
 				local handle = { call = call, cancelled = false }
 				function handle.Cancel() handle.cancelled = true end
+				c.tickers[where] = handle -- (1.2.5.1: a test beats one by its name)
 				return handle
 			end
+			-- (1.2.5.1: the quiet presence, Core.lua's answer for this client: c.quiet.)
+			c.QuietPresence = function() return c.quiet == true end
 			c.RegisterEvent = function(event, call) c.events[event] = call end
 			c.On = function(event, call) c.listeners[event] = call end
 			c.Fire = function(event, ...)
@@ -221,6 +233,27 @@ test("profile effects: only an issuer opens the bounded session and its surface 
 	end)
 end)
 
+test("profile effects: the addon's author opens a session like an issuer, without moderation power", function()
+	WithWorld(function(w)
+		w.author = "Author"
+		local author = w.client("Author", false)
+		local receiver = w.client("Observer", false)
+		eq(w.use(author, author.Moderation.IsIssuer, author.me), false, "the author is not a moderation issuer")
+		assert(w.use(author, author.ProfileEffects.OpenSession, "owner", "shadow"))
+		local grantWord = author.jobs[1].message
+		w.trust(receiver, author, false)
+		assert(w.use(receiver, receiver.handlers.FX, "CHANNEL", author.me, grantWord), "receivers accept the author's grant")
+		assert(w.use(author, author.ProfileEffects.Set, "owner", "shadow", true, CAPTION))
+		assert(w.deliver(author, receiver, 2))
+		local active = w.use(receiver, receiver.ProfileEffects.Active, author.me)
+		assert(active and active.style == "shadow")
+		assert(w.use(author, author.ProfileEffects.Set, "owner", "shadow", false))
+		assert(w.use(author, author.ProfileEffects.CloseSession, "owner"))
+		author.hidden[author.me:lower()] = true
+		eq(w.use(author, author.ProfileEffects.OpenSession, "owner", "shadow"), false, "a hidden author is refused")
+	end)
+end)
+
 test("profile effects: one authenticated grant lets an admitted ordinary member present only themself", function()
 	WithWorld(function(w)
 		local issuer = w.client("Council")
@@ -300,6 +333,29 @@ test("profile effects: targeting shows the short non-chat presentation and scree
 		eq(w.use(receiver, receiver.ProfileEffects.Visible), true, "restored only after a timely client event")
 		w.advance(receiver.ProfileEffects.DISPLAY_FOR)
 		eq(w.use(receiver, receiver.ProfileEffects.Visible), false, "the presentation never persists")
+	end)
+end)
+
+test("profile effects: the tuned look is a black winged frame with a violet glow and no portrait shade", function()
+	WithWorld(function(w)
+		local issuer = w.client("Council")
+		local sender, receiver = w.client("UnitMember", false), w.client("Observer", false)
+		w.openFor(issuer, { sender, receiver })
+		w.trust(receiver, sender, false)
+		assert(w.use(sender, sender.ProfileEffects.Set, "one", "shadow", true, CAPTION))
+		assert(w.deliver(sender, receiver))
+		receiver.target = sender.me
+		assert(w.use(receiver, receiver.ProfileEffects.Refresh))
+		eq(w.use(receiver, receiver.ProfileEffects.Visible), true)
+		local colors = {}
+		for _, texture in ipairs(w.textures) do
+			if texture.color then colors[#colors + 1] = table.concat(texture.color, ",") end
+		end
+		eq(table.concat(colors, " "), "0,0,0,1 0.19,0.2,0.69,1", "only the dark and light layers are tinted")
+		local sizes = {}
+		for _, font in ipairs(w.fonts) do sizes[#sizes + 1] = tostring(font.size) end
+		eq(sizes[1], "19", "the caption is drawn at the tuned size")
+		eq(w.portraits, 0, "the target's portrait is not copied")
 	end)
 end)
 
@@ -465,5 +521,56 @@ test("profile effects: issuer session churn is replay checked and both grant reg
 		stats = w.use(receiver, receiver.ProfileEffects.Stats)
 		assert(stats.sessions <= receiver.ProfileEffects.MAX_SESSIONS, tostring(stats.sessions))
 		assert(stats.sessionOrder <= receiver.ProfileEffects.SESSION_ORDER_MAX, tostring(stats.sessionOrder))
+	end)
+end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): each heartbeat (a member's presentation, an
+-- issuer's session) says its sender is online every 10 seconds, and the issuers are the very people
+-- who may turn it on.
+test("profile effects: while the quiet presence is on, no heartbeat, stop or close leaves; nothing new starts (\"quiet\"); the others drop the leases; once off they beat again", function()
+	WithWorld(function(w)
+		local issuer = w.client("Council")
+		local receiver = w.client("Observer", false)
+		w.openFor(issuer, { receiver })
+		w.trust(receiver, issuer, true)
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", true, CAPTION))
+		assert(w.deliver(issuer, receiver))
+		assert(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), "shown, before")
+		eq(#issuer.jobs, 0)
+		issuer.quiet = true
+		for _ = 1, 4 do
+			w.advance(issuer.ProfileEffects.HEARTBEAT)
+			w.use(issuer, issuer.tickers["profile effect session"].call)
+			w.use(issuer, issuer.tickers["profile effect"].call)
+		end
+		eq(#issuer.jobs, 0, "no heartbeat while it is on: " .. tostring(issuer.jobs[1] and issuer.jobs[1].message))
+		assert(w.use(issuer, issuer.ProfileEffects.Session), "his own session is kept here")
+		eq(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), nil, "the others drop it, as after a logout")
+		eq(w.use(receiver, receiver.ProfileEffects.Session), nil)
+		-- Nothing new: another session or presentation waits until it is off.
+		local other = w.client("CouncilTwo")
+		other.quiet = true
+		local ok, why = w.use(other, other.ProfileEffects.OpenSession, "owner", "shadow")
+		eq(ok, false); eq(why, "quiet"); eq(#other.jobs, 0)
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", true, CAPTION), "the live one: still on, nothing to do")
+		-- Off: both beat again, and the others take them.
+		issuer.quiet = false
+		w.advance(issuer.ProfileEffects.HEARTBEAT)
+		w.use(issuer, issuer.tickers["profile effect session"].call)
+		w.use(issuer, issuer.tickers["profile effect"].call)
+		eq(#issuer.jobs, 2, "the session and the presentation beat again")
+		assert(issuer.jobs[1].message:match("^FX~2~G~s~"), issuer.jobs[1].message)
+		assert(w.deliver(issuer, receiver))
+		assert(w.deliver(issuer, receiver))
+		assert(w.use(receiver, receiver.ProfileEffects.Active, issuer.me), "shown again")
+		-- Quiet again: a stop and a close end it here at once; their words are handed to Comm, which
+		-- keeps every FX~ home while it is on (Comm.QUIET_WORDS, the transport's own test).
+		issuer.quiet = true
+		assert(w.use(issuer, issuer.ProfileEffects.Set, "effect-owner", "shadow", false))
+		assert(w.use(issuer, issuer.ProfileEffects.CloseSession, "session-owner"))
+		eq(#issuer.jobs, 2)
+		assert(issuer.jobs[1].message:match("^FX~2~X~") and issuer.jobs[2].message:match("^FX~2~C~"), issuer.jobs[1].message)
+		eq(w.use(issuer, issuer.ProfileEffects.Session), nil)
+		eq(w.use(issuer, issuer.ProfileEffects.Outgoing), nil)
 	end)
 end)

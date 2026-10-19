@@ -40,7 +40,8 @@ local L = ns.L
 --   - Versioned and pushed: OlympusAPI.VERSION and OlympusAPI.Has(feature) say what this build gives;
 --     handle:On(event, fn) tells of a change (WANTED_CHANGED, RANKINGS_CHANGED, PROFILE_CHANGED,
 --     LEADER_CHANGED, SIGHTING_CHANGED for a search that same handle owns,
---     PROFILE_EFFECT_SESSION_CHANGED for the sanitized host-owned profile session, and PERMISSION_CHANGED when the player answers), once
+--     PROFILE_EFFECT_SESSION_CHANGED for the sanitized host-owned profile session,
+--     QUIET_PRESENCE_CHANGED for the quiet presence, and PERMISSION_CHANGED when the player answers), once
 --     a burst settles (DISPATCH_DELAY, never in combat), and only when what that
 --     call would return changed: nobody needs to poll.
 --   - Bounded. RATE_MAX data calls a RATE_WINDOW per addon, MAX_ADDONS addons a session, MAX_CALLBACKS
@@ -91,8 +92,9 @@ API.MAX_WANTED = 200      -- Wanted rows (Wanted.MAX_TARGETS)
 API.MAX_LEADER_LAYERS = 16 -- layers of the leader's zone (the Realm tab's list)
 API.TITLE_MAX = 40        -- the addon's title on the privacy page
 API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "SIGHTING_CHANGED",
-	"PROFILE_EFFECT_SESSION_CHANGED", "PERMISSION_CHANGED" }
-API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED" }
+	"PROFILE_EFFECT_SESSION_CHANGED", "QUIET_PRESENCE_CHANGED", "PERMISSION_CHANGED" }
+API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED",
+	"QUIET_PRESENCE_CHANGED" }
 API.AREA_SCOPES = { hostile = true, outsiders = true }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
 
@@ -103,8 +105,11 @@ API.RESERVED_METHODS = {
 	GetLeaderPresence = "nil", StartPlayerSearch = "nil", GetPlayerSearch = "nil", GetPlayerSearches = "nil",
 	StartAreaSearch = "nil", GetAreaSearch = "nil", GetAreaSearches = "nil",
 	CancelPlayerSearch = "false", CancelAreaSearch = "false", ShowAreaSearchOnMap = "false", ClearAreaSearchMap = "false",
+	-- The quiet presence and the profile presentation: authorized addons only, as the leader's presence.
+	SetQuietPresence = "false", GetQuietPresence = "nil",
+	StartProfileSession = "false", StopProfileSession = "false", SetProfileEffect = "false", GetProfileSession = "nil",
 }
-API.RESERVED_EVENTS = { LEADER_CHANGED = true, SIGHTING_CHANGED = true }
+API.RESERVED_EVENTS = { LEADER_CHANGED = true, SIGHTING_CHANGED = true, QUIET_PRESENCE_CHANGED = true, PROFILE_EFFECT_SESSION_CHANGED = true }
 -- The authorized addons, each as API.AuthorizedKey(its name) gives it.
 API.AUTHORIZED = {
 	["2def22f6a5e0801fa6e2de4a41ff7be28858d142b209b6c180ebb930ce2cd7dc94aebbc21f452ab7d36e8cc0b2ad61285561c4bd29089f30dfd48e78a77ea072"] = true,
@@ -460,6 +465,16 @@ function API.LeaderPresence()
 	return out
 end
 
+-- 1.2.5.1, the quiet presence (Core.lua: ns.QuietPresenceState): { on, since }, since (ns.Now) only
+-- while it is on. Never who turned it on.
+function API.QuietPresence()
+	if type(ns.QuietPresenceState) ~= "function" then return nil end
+	local ok, state = pcall(ns.QuietPresenceState)
+	if not ok or type(state) ~= "table" then return { on = false } end
+	local on = state.on == true
+	return { on = on, since = on and Num(state.since, true) or nil }
+end
+
 -- One short, request-bound search owned by this client. PlayerSightings keeps the transport,
 -- authority, consent, expiry and observation rules; the API only copies the already-normalized
 -- public result. "exact-unit" and "exact-group" are native map/world unit points; "nearby" is the
@@ -702,6 +717,7 @@ local BUILD = {
 	PROFILE_CHANGED = function() return API.Profile() end,
 	LEADER_CHANGED = function() return Member() and API.LeaderPresence() or nil end,
 	PROFILE_EFFECT_SESSION_CHANGED = function() return Member() and API.ProfileSession() or nil end,
+	QUIET_PRESENCE_CHANGED = function() return API.QuietPresence() end,
 }
 
 local NIL_DATA_EVENT = { PROFILE_EFFECT_SESSION_CHANGED = true }
@@ -735,6 +751,11 @@ local function Granted(c) return Answer(c) == true end
 local function Status(c)
 	local a = Answer(c)
 	return a == true and "granted" or a == false and "refused" or "pending"
+end
+
+-- This handle turned the quiet presence on (Core.lua), and it is still on.
+local function QuietOwned(c)
+	return type(ns.QuietPresenceOwnedBy) == "function" and ns.QuietPresenceOwnedBy(c.quietOwner) == true
 end
 
 local function Listens(c, event)
@@ -897,6 +918,8 @@ local function SetAnswer(c, on)
 		-- an active boundary rather than waiting for the short network leases to expire.
 		if Has("ProfileEffects", "CloseSession") then pcall(ns.ProfileEffects.CloseSession, c.profileOwner) end
 		if Has("ProfileEffects", "DisableOwner") then pcall(ns.ProfileEffects.DisableOwner, c.profileOwner) end
+		-- The quiet presence this handle turned on ends with its No, as its profile session does.
+		if QuietOwned(c) then pcall(ns.SetQuietPresence, false, c.quietOwner) end
 		local ids = {}
 		for id in pairs(c.searches) do ids[#ids + 1] = id end
 		if Has("PlayerSightings", "Cancel") then
@@ -1168,6 +1191,30 @@ function METHODS.GetProfileSession(c)
 		return state, state and nil or "none"
 	end)
 end
+-- 1.2.5.1: the quiet presence (Core.lua). Self only, for this session: on, this client sends
+-- nothing that says the player is online or where he is; reads go on. Only the King, a High
+-- Councillor (a current signed issuer) or the addon's author may turn it on ("authority"; "guild"
+-- outside an Olympus guild). The handle that turned it on may always turn it off; another handle
+-- gets "owner". Never saved: a /reload or a logout ends it.
+function METHODS.SetQuietPresence(c, on)
+	if on ~= true and on ~= false then return false, "state" end
+	if type(ns.SetQuietPresence) ~= "function" then return false, "unavailable" end
+	if on == false and QuietOwned(c) then
+		local ok, done, why = pcall(ns.SetQuietPresence, false, c.quietOwner)
+		if not ok then return false, "failed" end
+		return done == true, why
+	end
+	if not Granted(c) then return false, Status(c) end
+	if not Member() then return false, "guild" end
+	if not Spend(c) then return false, "busy" end
+	local ok, done, why = pcall(ns.SetQuietPresence, on, c.quietOwner)
+	if not ok then return false, "failed" end
+	return done == true, why
+end
+function METHODS.GetQuietPresence(c)
+	if type(ns.QuietPresenceState) ~= "function" then return nil, "unavailable" end
+	return Read(c, false, API.QuietPresence)
+end
 function METHODS.StartPlayerSearch(c, target)
 	if not Has("PlayerSightings", "Start") then return nil, "unavailable" end
 	local state, why = SightingRead(c, function() return Call("PlayerSightings", "Start", target) end)
@@ -1396,7 +1443,7 @@ local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
 		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot), searches = {}, sightingTold = {}, sightingEnded = {},
 		areaMapOwner = {}, areaMapFrames = {}, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot),
-		authKey = API.AuthorizedKey(key) }
+		quietOwner = "api-quiet:" .. tostring(slot), authKey = API.AuthorizedKey(key) }
 	local methods = {}
 	for k, fn in pairs(METHODS) do
 		local no = API.RESERVED_METHODS[k]
@@ -1437,7 +1484,7 @@ function API.Register(name)
 end
 
 -- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile", "leader",
--- "callbacks", "network.sightings", "network.sightings.area-scope", "ui.guild-tools", "ui.surface")
+-- "callbacks", "network.sightings", "network.sightings.area-scope", "presence.quiet", "ui.guild-tools", "ui.surface")
 -- or an event's name.
 local function SightingsComplete()
 	for _, fn in ipairs({ "Start", "Cancel", "Session", "StartArea", "CancelArea", "AreaSession" }) do
@@ -1466,6 +1513,10 @@ local FEATURES = {
 			if not Has("ProfileEffects", fn) then return false end
 		end
 		return true
+	end,
+	["presence.quiet"] = function()
+		return type(ns.SetQuietPresence) == "function" and type(ns.QuietPresenceState) == "function"
+			and type(ns.QuietPresenceOwnedBy) == "function"
 	end,
 	["ui.guild-tools"] = function()
 		return Has("UI", "SelectTab") and Has("Watch", "Show") and Has("Watch", "PageId")
@@ -1534,3 +1585,5 @@ ns.On("PLAYER_SIGHTINGS_CHANGED", function(id) MarkSighting(id) end)
 -- The profile module owns the issuer, grant and transport. The public event rebuilds only its
 -- sanitized style and remaining lease, including nil when the session closes or expires.
 ns.On("PROFILE_EFFECT_SESSION_CHANGED", function() Mark("PROFILE_EFFECT_SESSION_CHANGED") end)
+-- The quiet presence turned on or off (Core.lua), by whichever handle.
+ns.On("QUIET_PRESENCE_CHANGED", function() Mark("QUIET_PRESENCE_CHANGED") end)
