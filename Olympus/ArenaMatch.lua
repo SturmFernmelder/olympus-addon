@@ -32,7 +32,8 @@ local L = ns.L
 -- flag lookup unless the player is findable or searching. A search, a popup or a match is
 -- Arena.Involve("match", true), with one 1-s Arena.Every; an answer's delay is an Arena.After.
 -- The card is built on first use (its OnUpdate, which keeps it clear of the popups, runs only
--- while it shows); no WoW event is registered.
+-- while it shows), and so is the meeting place's minimap pin (its OnUpdate, which turns its edge
+-- arrow, runs only while the pin shows); no WoW event is registered.
 --
 -- API (for the fights part, the Bones tables and the screens):
 --   ArenaMatch.Start(opts) -> true | false, why: opts = { game = "d"|"b"|"e", kind = "c"|"s"|"e",
@@ -1342,7 +1343,64 @@ end
 
 -- The pins: a minimap pin (and a world-map one only where ns.WorldMapIcons allows it: never with
 -- the gamepad UI), gone when the match ends.
+-- (1.2.6, the author's ask of 2026-10-06: an arrow that leads the two to the place they meet, a
+-- tavern, another spot, or where one of them stood.) Out of the minimap's range HereBeDragons floats
+-- the minimap pin on the edge; there the pin is the game's own minimap arrow, turned toward the
+-- place, as the King's (KingArrow.lua); in range, the icon again. It is the match's own place (an
+-- inn, a duel spot, an arena, a Where I am point): nothing more is sent, read or saved.
+ArenaMatch.ARROW_ATLAS = "UI-HUD-Minimap-Arrow-Player"
+ArenaMatch.ARROW_TEXTURE = "Interface\\Minimap\\MinimapArrow"
+ArenaMatch.ARROW_SIZE = 26
+ArenaMatch.ARROW_EVERY = 0.08 -- the arrow turns this often while the pin shows
 local pinFrames
+local function Atan2(y, x)
+	if math.atan2 then return math.atan2(y, x) end
+	if x > 0 then return math.atan(y / x) end
+	if x < 0 then return math.atan(y / x) + (y >= 0 and math.pi or -math.pi) end
+	if y > 0 then return math.pi / 2 end
+	if y < 0 then return -math.pi / 2 end
+	return 0
+end
+-- The game's minimap arrow on the minimap pin, or nil where the client has neither its atlas nor its
+-- texture (the pin then stays the icon, on the edge too, as before).
+local function EdgeArrow(f)
+	local t = f:CreateTexture(nil, "OVERLAY")
+	if not t or type(t.SetRotation) ~= "function" or type(t.SetAlpha) ~= "function" then return nil end
+	local art = false
+	if type(t.SetAtlas) == "function" and C_Texture and C_Texture.GetAtlasInfo then
+		local ok, info = pcall(C_Texture.GetAtlasInfo, ArenaMatch.ARROW_ATLAS)
+		if ok and info ~= nil then art = pcall(t.SetAtlas, t, ArenaMatch.ARROW_ATLAS, true) end
+	end
+	if not art and type(t.SetTexture) == "function" then art = pcall(t.SetTexture, t, ArenaMatch.ARROW_TEXTURE) end
+	if not art then return nil end
+	t:SetSize(ArenaMatch.ARROW_SIZE, ArenaMatch.ARROW_SIZE)
+	t:SetPoint("CENTER", f, "CENTER", 0, 0)
+	if t.SetBlendMode then t:SetBlendMode("ADD") end
+	t:SetAlpha(0)
+	return t
+end
+-- The minimap pin's look now: on the edge, the arrow turned toward the pin's spot from the minimap's
+-- centre (its parent, where HereBeDragons puts it: the on-screen vector, right with a rotating
+-- minimap too); otherwise the icon. Whether the arrow shows.
+function ArenaMatch.TurnArrow()
+	local f = pinFrames and pinFrames.mini
+	if not f or not f.arrow then return false end
+	local P = ns.Pins and ns.Pins()
+	local edge = P and type(P.IsMinimapIconOnEdge) == "function" and P:IsMinimapIconOnEdge(f)
+	local map = edge == true and f:GetParent()
+	local fx, fy, mx, my
+	if map and map.GetCenter then fx, fy = f:GetCenter(); mx, my = map:GetCenter() end
+	if type(fx) ~= "number" or type(fy) ~= "number" or type(mx) ~= "number" or type(my) ~= "number"
+		or (fx == mx and fy == my) then
+		f.arrow:SetAlpha(0); f.icon:SetAlpha(1)
+		return false
+	end
+	-- SetRotation turns counter-clockwise and the art points up: the angle from up to the pin,
+	-- clockwise, is atan2(dx, dy), so the art turns by its negative (KingArrow.UpdateDirection).
+	local ok = pcall(f.arrow.SetRotation, f.arrow, -Atan2(fx - mx, fy - my))
+	f.arrow:SetAlpha(ok and 1 or 0); f.icon:SetAlpha(ok and 0 or 1)
+	return ok
+end
 local function PinFrames()
 	if pinFrames then return pinFrames end
 	local function Pin(size)
@@ -1355,6 +1413,18 @@ local function PinFrames()
 		return f
 	end
 	pinFrames = { mini = Pin(14), world = Pin(18) }
+	local mini = pinFrames.mini
+	mini.arrow = EdgeArrow(mini)
+	-- (Only while the pin shows: the library hides it when the match ends or the place's map is left.)
+	if mini.arrow then
+		local elapsed = 0
+		mini:SetScript("OnUpdate", function(_, dt)
+			elapsed = elapsed + (tonumber(dt) or 0)
+			if elapsed < ArenaMatch.ARROW_EVERY then return end
+			elapsed = 0
+			ArenaMatch.TurnArrow()
+		end)
+	end
 	return pinFrames
 end
 local function Pins(mm)
@@ -1362,6 +1432,8 @@ local function Pins(mm)
 	if not P then return end
 	if P.RemoveAllMinimapIcons then P:RemoveAllMinimapIcons(ArenaMatch) end
 	if P.RemoveAllWorldMapIcons then P:RemoveAllWorldMapIcons(ArenaMatch) end
+	-- (A pin drawn again starts as the icon, until the library floats it on the edge.)
+	if pinFrames and pinFrames.mini.arrow then pinFrames.mini.arrow:SetAlpha(0); pinFrames.mini.icon:SetAlpha(1) end
 	if not mm or not mm.point then return end
 	local f = PinFrames()
 	local row = PlaceRow(mm)
