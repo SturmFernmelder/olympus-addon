@@ -400,8 +400,8 @@ friends list, a community roster) and the game's menu gets an **Olympus** part a
 
 **Olympus's own lines (1.2.5.1).** The profile, **Report to Olympus**, the Arena's lines and the
 Church's show only for a player your client knows to be in an Olympus guild: the guild the game
-gives for that player, your guild's roster, your last /who, the guild his own Olympus messages spoke
-for, or the signed leadership list. Opening a menu still sends nothing to find out. The version
+gives for that player, your guild's roster, your last /who, his line on the Olympus channel this
+session, the guild his own Olympus messages spoke for, or the signed leadership list. Opening a menu still sends nothing to find out. The version
 lines and **Tell them about Olympus** show for anyone, and the Olympus window's own rows keep every
 line. None of it shows before you accepted the Olympus Accord.
 
@@ -929,7 +929,7 @@ Personal report and restriction handlers remain separate from staff permissions;
 does not give anyone access to private rooms or other players' cases. The author's role preview
 never sends a member's report or appeal.
 
-**Report to Olympus** (1.1.6) is for any member, on any Olympus player but himself and the King (1.2.5.1: the right-click menus offer it only for a player this client knows to be in an Olympus guild: the guild the game gives for that unit, our roster, our last /who, the guild his own Olympus messages spoke for, or the signed manifest; the version lines and **Tell them about Olympus** stay for anyone): from a
+**Report to Olympus** (1.1.6) is for any member, on anyone but himself and the King (1.2.5.1: the right-click menus offer it only for a player this client knows to be in an Olympus guild: the guild the game gives for that unit, our roster, our last /who, his line on the Olympus channel this session, the guild his own Olympus messages spoke for, or the signed manifest; the version lines and **Tell them about Olympus** stay for anyone; `/oly watch report <name>` still takes any name): from a
 player's right-click menu (a name in the game's chat, an Olympus line's included), from
 `/oly watch report <name>`, and since 1.2.1 with a right-click on another player's line in the
 Chat tab's Olympus channel, or on their name there, which reports that very line. He picks what
@@ -986,8 +986,10 @@ Sharing the untabarded list does not make the staff tab appear for ordinary memb
   and the Olympus moderators they named). Each player's BattleTag, as his own addon read and sent
   it under the Olympus Accord (see [Privacy](#privacy)), grouped by tag, so the characters one
   player plays show together; the person page names his tag and the other characters sharing it.
-  Never on an ordinary member's client, never in a role preview, and on the King's screen always
-  masked, his eye button included. A modified addon can send someone else's tag: it is a lead for a
+  The digits stay hidden until the page's **Show** (ten seconds). Never on an ordinary member's
+  client, never in a role preview, and on the King's screen no part of a tag, his eye button
+  included. A client off the team drops them (at once on its own sanction or a lost seat, else after
+  two days), and `/oly accord forget <name>` drops one a player asked to have removed. A modified addon can send someone else's tag: it is a lead for a
   person to review, never proof, and nothing is done with one automatically.
 - **Judgment** gathers the King's court queue and the realm-wide net-off rows in one officer
   workspace. The King opens court from the Throne and calls its queue here. The
@@ -2438,7 +2440,7 @@ message (the game adds it). What goes where:
 | A requested player sighting (PS, 1.2.5): an exact query carries one Name-Realm; a hostile-area query carries one selected zone or micro-map ID and lasts five minutes. Both use a short opaque request id. Exact answers carry the consenting observer's name and guild; public area rows omit both. Every answer carries target, observation time, expiry, layer, point kind and map position. The point is the target's native visible-unit or matching party/raid-unit position when WoW returns one; otherwise it is the observer's encounter position, rounded to 0.1% of the map | the query: everyone on the Olympus channel, only from a currently signed authorized requester; each answer: that requester alone (a whisper). One observer contributes at most six rows to an area search and the requester keeps at most 48 distinct players. On an explicit action Olympus can show sanitized rows as host-owned world-map pins, cleared on cancel, expiry, permission revocation or reload | only after the requester's addon permission is enabled by its own **Yes** or the page's deliberate **Authorize all** action; an observer answers only after the separate **Guild tools: player sightings** permission is enabled the same way and while sharing location. The exact-name session's visible Start declares selected/configured names and any included list source. One handle has one live area, on its current map or an owned exact-result map until its row expires, and rotates only after cancel plus 60 seconds. Its visible UI shows the map and rotation position, never opens the world map automatically, and stops on Off, No or reload without automatic resume. The game must have shown the exact or hostile target, mouseover or nameplate either now or within the last 15 minutes while both choices stayed on. Each client keeps at most 64 such observations only in memory and clears them on permission, location-sharing or network opt-out. A live answer rechecks the visible identity and coordinate before send; a cached answer rechecks its age and fields plus current eligibility. Requests and results expire; cancellation, either No and net-off cancel queued data and withdraw or discard live results |
 | A bounded profile presentation (FX): one signed issuer's open/close word carries the fixed host style, a short session/grant id, time and guild. While that grant is live, an admitted member's self-presentation word carries the same fixed style and the one pre-approved caption; it names no target player and accepts no texture path, atlas, colour, coordinate, layout or arbitrary message | everyone on the Olympus channel. Receivers keep it only in memory and render it only while directly targeting that member. The issuer renews every 10 seconds; a missed session or presentation lease expires after about 32 seconds | only after the controlling addon's own API **Yes** or **Authorize all**. Only a current signed issuer can open the shared session; each member can enable the presentation only on themself while that session is live. No closes and disables that addon's own state before saving the answer. `/reload`, logout, guild/authority loss, the local moderation hold and network loss clear it. Screenshot events hide Olympus's own transient frames on a best-effort basis only; they cannot guarantee that pixels were not captured |
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
-| Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named), by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
+| Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named) at your team level or higher, by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
 | A moderation team member's ask for BattleTags (BQ, 1.2.5.1): nothing but his name | everyone on the Olympus channel | from a team member's addon, 90 seconds after login and every 30 minutes |
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
@@ -2494,16 +2496,22 @@ with the game running and then reloaded does not have the Accord's file yet: Oly
 there until the game restarts, and says so.
 The Accord asks for **your BattleTag**. Your own addon reads it from your own game (Battle.net's,
 locally: Olympus Link still needs no Battle.net login) and shows it on the letter with its digits
-masked (**Show** reveals them for ten seconds; on the King's screen the name is masked too and
-there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
+masked (**Show** reveals them for ten seconds; on the King's screen, and on any character of his
+game account once his own was seen there, no part of it shows and there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
 reached the letter says so and tries again by itself, and an account that accepted is never locked
-out by an outage. Only 16 bits of its hash are kept on your client, to see whether it changed, never
-the tag itself. Your BattleTag goes to the moderation team alone (the author, the King, the High
-Council and the Olympus moderators they named), by a logged whisper, only to a team member whose
-addon just asked on your channel, at most once every 20 hours to each from each of your
-characters, and his client keeps it up to 180 days after he last received it (The Watch's
-BattleTags). It never goes on the Olympus channel or guild chat, and no other player's client
-keeps or shows one. Nothing is done with a BattleTag automatically (no ban or match by tag): a
+out by an outage. Only 8 bits of its hash are kept on your client, to see whether it changed (one
+change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. Your
+BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
+moderators they named), by a logged whisper, only to a team member whose addon just asked on your
+channel and whose team level is yours or higher (a moderator's own goes to the moderators and
+above, a councillor's to the council, the King and the author, the King's to the author alone), at
+most once every 20 hours to each from each of your characters. If he logs off before it goes, the
+server's "No player named" line drops it, and with mouse and keyboard that line, for your own
+whisper, stays out of your chat. His client keeps it up to 180 days after he last received it (The
+Watch's BattleTags, the digits hidden until its **Show**), and drops them all once it is off the
+team: at once on its own sanction or a lost seat, else after two days. A player who asks to have
+his removed: `/oly accord forget <name>` on a team client. It never goes on the Olympus channel or
+guild chat, and no other player's client keeps or shows one. Nothing is done with a BattleTag automatically (no ban or match by tag): a
 modified addon can send someone else's.
 
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
@@ -2933,7 +2941,7 @@ Other limits:
 | `/oly need <count> <item>` · `/oly need` | Lords and Captains: ask the treasury for an item (shift-click it into the chat line, or its name or number); alone, your requests and where each stands (1.1) |
 | `/oly bank share on\|off` | the guild master or an officer of an Olympus guild other than the King's shows his guild bank's snapshot to the King, his Steward and his Hands (by whisper, never on the channel), or not (1.1) |
 | `/oly rollcall on\|off` | answer the author's roll calls (version, client, channel state) or not (1.1: not until you say yes) |
-| `/oly accord` | the Olympus Accord (Olympus's terms of use) again: its version and date; while it waits, I accept or Not now (1.2.5.1) |
+| `/oly accord` · `/oly accord forget <name>` | the Olympus Accord (Olympus's terms of use) again: its version and date; while it waits, I accept or Not now. On a moderation team client, forget drops the BattleTag a player asked to have removed (1.2.5.1) |
 | `/oly privacy` | the first-open page again: what the addon shares, and your Yes or No to each (1.1) |
 | `/oly profile [Name]` | a player's profile in the Olympus window, yours (**My profile**) with no name |
 | `/oly letters [version]` | the version letters (1.1.5): every one, newest first, a click opens one; with a version, that letter |

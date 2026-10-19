@@ -52,6 +52,9 @@ M.CUTS = {
 	-- (1.2.5: the API's leader presence and wider area scope pushed it past the budget again: the
 	-- API's opening paragraph stays; its page-surface paragraph and the authors' link are the README's.)
 	{ title = "Other addons: the Olympus API (1.2.4)", keep = 1 },
+	-- (1.2.5.1: the chat warnings, the Companion bridge and the Olympus Accord's line together passed
+	-- the budget: a High Councillor's tooltip paragraph is the README's.)
+	{ title = "Person details", keep = 1 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it. (1.2.4: the

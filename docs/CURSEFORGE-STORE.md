@@ -254,9 +254,7 @@ window's **Edit my profile**): **Look** (frame, title, nickname, emblem; one not
 grey), **Icons**, **Who sees what**, **Letters** (the King's), and you as others see you.
 Any soldier can reach the Lord of another Olympus guild in two clicks.
 
-A High Councillor's tooltip (1.1.5) says so too: their mark and own icon after their name, then
-**High Councillor**, their department and their title, for whoever may see the council (the
-same as their card); none on the King's screen while the council's names are hidden.
+*Continued in the README: [Person details](https://github.com/dnl-gentile/olympus-addon#person-details).*
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the

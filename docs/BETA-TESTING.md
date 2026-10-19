@@ -389,14 +389,28 @@ offline tests stub Battle.net (`BNGetInfo`, `BNConnected`), which proves nothing
    an account that already accepted keeps working.
 5. The gamepad UI: open, scroll, **I accept** and **Not now** with the controller. No Lua error, no
    game popup, no taint message.
-6. Two clients: a moderator's (or a High Councillor's) client shows **BattleTags (n)** in The Watch
-   within about five minutes of a player logging in, two alts of one account are grouped, and the
-   person page says "Same BattleTag". An ordinary member's client never shows one. The King's
-   client shows them masked, even after the eye button. The player's chat shows no "No player
-   named" line.
-7. Right-click a player in a guild outside Olympus (Trade, his portrait): only the Olympus version
+6. Two clients: log the player in first, then the moderator's (or a High Councillor's) client, or
+   `/reload` it. Its client asks 90 seconds after its login and the player's answer comes up to 4
+   minutes later, so **BattleTags (n)** shows in The Watch within about 5.5 minutes of the
+   moderator's login, and the open page counts up by itself. A player who logs in while the
+   moderator is already online is reached at the moderator's next ask, up to about 35 minutes
+   later. The digits show as `#****` until the page's **Show**, and hide again after ten seconds.
+   Two alts of one account are grouped, and the person page says "Same BattleTag". An ordinary
+   member's client never shows one. The King's client shows no part of a tag, even after the eye
+   button. Answers that arrive after a `/reload` of the moderator (within about 70 minutes of his
+   ask) are still kept.
+7. The moderator logs off within a minute of his ask: the player's chat shows no "No player named"
+   line with mouse and keyboard (with the gamepad UI the line may show: the filter stays off there),
+   and his `/oly status` accord line counts `gone`. `/oly accord forget <player>` on the moderator's
+   client removes that player's characters from the page.
+8. Right-click a player in a guild outside Olympus (Trade, his portrait): only the Olympus version
    line, **Check version** and, when his addon does not answer, **Tell them about Olympus**. Right-click
    an Olympus guildmate: the profile, **Report to Olympus** and the Arena's lines too.
-8. An update with the game running, then `/reload`: the restart message, and Olympus stays off
+   A member of another Olympus guild who just wrote on `/ol` gets **Report to Olympus** too.
+9. An update with the game running, then `/reload`: the restart message, and Olympus stays off
    until the game restarts.
-9. Census: with one guildmate who has not accepted, the guild stays in the census from the others.
+10. Census: with one guildmate who has not accepted, the guild stays in the census from the others.
+11. In an Olympus guild, **Not now**, then `/ol hello` or `/oly profile`: the chat says Olympus stays
+    off until the Accord is accepted (`/oly accord`), not "Olympus members only".
+12. Battle.net disconnected (step 4) in pt-BR too: the red note sits under "Your BattleTag:", never
+    over it, and the band and the words above it make room for its second line.
