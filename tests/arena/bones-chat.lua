@@ -443,6 +443,10 @@ test("watch: chat moderation: strikes: a fight room's line with a listed word is
 	eq(shown[1].which, "OLYMPUS_WATCHCHAT_DECISION"); eq(shown[1].text, a.ns.L.WATCHCHAT_STRIKE_1:format(a.ns.WatchChat.Span(300)))
 	eq(select(2, w:As(a, a.ns.ArenaChat.MaySend, rooms.players)), "paused", "the pane's composer closes")
 	eq(select(2, w:As(a, a.ns.ArenaChat.Send, rooms.everyone, "clean words")), "paused")
+	-- (The review: told why in the warnings' own pop-up, as a moderator's timeout is, not a bare line.)
+	eq(#shown, 2, "a pop-up says why")
+	eq(shown[2].which, "OLYMPUS_WATCHCHAT_DECISION")
+	eq(shown[2].text, a.ns.L.WATCHCHAT_STRIKE_PAUSED:format(date("%H:%M", e.untilAt)))
 	w.clock = e.untilAt + 1
 	eq(w:As(a, a.ns.ArenaChat.MaySend, rooms.players), true, "open again after the pause")
 	eq(w:As(a, a.ns.ArenaChat.Send, rooms.players, "clean words"), true)

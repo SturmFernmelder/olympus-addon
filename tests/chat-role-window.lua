@@ -810,3 +810,59 @@ test("watch: chat moderation: strikes: the Chat tab and an embedded pane: a stru
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- (The review: the Chat tab's own rooms (Guild, the role rooms, the Church's) put a "not sent" note
+-- under a refused line, and a struck one must leave none: nothing of it stays. The test above swaps
+-- Channels.Send, so it never reached ChatRooms' branch, nor a fight room's, ArenaChat's.) This
+-- harness's box fires no OnTextChanged on SetText: the note is the guard's to keep out.
+test("watch: chat moderation: strikes: the Chat tab's own rooms and a fight room: a struck line leaves the box, its reply and the keyboard, with no note in the room; a paused one stays, and the room says why", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room, R)
+			local saved, savedArena = rawget(ns, "WatchChat"), rawget(ns, "ArenaChat")
+			local result, send = { false, "severe" }, R.Send
+			rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+				CanModerateAny = function() return false end, CanModerateEntry = function() return false end })
+			R.Send = function() return result[1], result[2] end
+			local ok, err = pcall(function()
+				local L = ns.L
+				local f = w.CW.Open("A")
+				local function Try(why)
+					result = { false, why }
+					f.reply = { who = "Other", sender = "Other-Realm", text = "their line" }
+					w.CW.UpdateReplyComposer(f)
+					f.input:SetText("typed words"); f.input.focused = true
+					f.input:Fire("OnEnterPressed")
+					w.CW.Render()
+				end
+				eq(w.CW.SelectLogical("church"), true)
+				eq(R.Own("church"), true, "a room of the page's own")
+				Try("severe")
+				eq(f.input:GetText(), "", "the struck line leaves the box"); eq(f.reply, nil, "its reply too")
+				eq(f.input.focused, false, "the keyboard goes")
+				eq(room.RowWith(f, room.NOT_SENT), nil, "no note in the room")
+				Try("paused")
+				eq(f.input:GetText(), "typed words", "a paused line stays"); assert(f.reply, "with its reply")
+				assert(room.RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_PAUSED)), "the room says why")
+				-- A fight room: its line goes through ArenaChat.Send alone.
+				local sent = 0
+				local spec = { id = "Fstrike-1", key = "arena:Fstrike-1", kind = "fight", audience = "duel", access = "participants",
+					title = "Fixture fight", phase = "live", active = true, recoverable = true, supportsComments = true }
+				ns.ArenaChat = { Open = function() return true end, Lines = function() return {} end, Rooms = function() return { spec } end,
+					Close = function() return true end, Send = function() sent = sent + 1 return result[1], result[2] end }
+				local pane = assert(w.CW.OpenDynamicRoom(spec))
+				eq(pane, f)
+				R.Send = function() error("a fight room's line went to ChatRooms") end
+				Try("severe")
+				eq(sent, 1, "ArenaChat's send")
+				eq(f.input:GetText(), ""); eq(f.reply, nil); eq(f.input.focused, false)
+				eq(room.RowWith(f, room.NOT_SENT), nil)
+				Try("paused")
+				eq(sent, 2); eq(f.input:GetText(), "typed words")
+			end)
+			R.Send = send
+			rawset(ns, "WatchChat", saved)
+			rawset(ns, "ArenaChat", savedArena)
+			if not ok then error(err, 0) end
+		end)
+	end)
+end)
