@@ -2492,9 +2492,16 @@ local function ChatShown()
 end
 Watch.ChatShown = ChatShown
 
+-- 1.2.5.1: the moderation team's BattleTags (Accord.lua): the team's clients alone.
+local function TagsShown()
+	local A = ns.Accord
+	return type(A) == "table" and not A.missing and type(A.TeamShown) == "function" and A.TeamShown() == true
+end
+Watch.TagsShown = TagsShown
+
 -- The tab (UI.AddTab's visible).
 function Watch.TabVisible() return Watch.DeskShown() or Watch.JudgmentsShown() or ChatShown()
-	or (ns.JusticeTasks and ns.JusticeTasks.Visible()) or false end
+	or (ns.JusticeTasks and ns.JusticeTasks.Visible()) or TagsShown() or false end
 
 -- The sections this player sees, and the one shown when he picked none (or one he no longer
 -- sees): the desk (with its Reports, Cases and a case's page), else the Judgments, else the Tabards.
@@ -2503,7 +2510,9 @@ local function Sections()
 	local list = { desk = desk, reports = desk, cases = desk, case = desk,
 		judgments = Watch.JudgmentsShown(), justice = ns.JusticeTasks and ns.JusticeTasks.Visible(), chat = ChatShown(), tabards = Watch.TabardsShown(), member = Watch.MemberShown() }
 	list.profile = Watch.CanRead()
-	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards" or list.member and "member" or "desk"
+	list.tags = TagsShown()
+	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards"
+		or list.member and "member" or list.tags and "tags" or "desk"
 	return list
 end
 
@@ -2524,7 +2533,7 @@ function Watch.ViewKey()
 	local section = Section()
 	if section == "tabards" then return "heraldry" end
 	if section == "chat" then return Watch.DeskShown() and "watch" or "judgments" end
-	return (section == "judgments" or section == "member" or section == "justice") and "judgments" or "watch"
+	return (section == "judgments" or section == "member" or section == "justice" or section == "tags") and "judgments" or "watch"
 end
 
 -- The page shown, for the window's place and its "?" (UI.PageId: "watch/cases").
@@ -2537,7 +2546,7 @@ end
 
 function Watch.Show(mode, key)
 	Watch.mode = (mode == "reports" or mode == "cases" or mode == "case" or mode == "tabards" or mode == "judgments"
-		or mode == "chat" or mode == "member" or mode == "justice" or mode == "profile") and mode or nil
+		or mode == "chat" or mode == "member" or mode == "justice" or mode == "profile" or mode == "tags") and mode or nil
 	Watch.caseKey = Watch.mode == "case" and key or nil
 	Watch.profileKey = Watch.mode == "profile" and key or nil
 	ns.Fire("WATCH_CHANGED")
@@ -2738,6 +2747,8 @@ local function Nav()
 	if ChatShown() then items[#items + 1] = { key = "chat", text = L.WATCHCHAT_NAV } end
 	if Watch.TabardsShown() then items[#items + 1] = { key = "tabards", text = L.TAB_HERALDRY } end
 	if Watch.MemberShown() then items[#items + 1] = { key = "member", text = L.WATCH_MEMBER_NAV } end
+	-- 1.2.5.1: the BattleTags, the moderation team's alone (Accord.lua).
+	if TagsShown() then items[#items + 1] = { key = "tags", text = L.ACCORD_TEAM_NAV:format(ns.Accord.Count()) } end
 	local nav = {}
 	for _, it in ipairs(items) do
 		local key = it.key
@@ -3270,6 +3281,10 @@ local function ProfileLines()
 		lines[#lines + 1] = { id = "watch-profile-restriction", text = Red(L.WATCH_PROFILE_ACTIVE:format(restriction)),
 			wrap = true }
 	end
+	-- 1.2.5.1: his BattleTag and the characters sharing it, on a moderation team client alone.
+	if TagsShown() then
+		for _, line in ipairs(ns.Accord.ProfileLines(target)) do lines[#lines + 1] = line end
+	end
 	lines[#lines].gapAfter = true
 
 	local audit = {}
@@ -3314,6 +3329,12 @@ end
 
 function Watch.Build()
 	if Section() == "profile" then return ProfileLines(), L.TAB_WATCH, L.WATCH_PROFILE_DETAIL end
+	-- 1.2.5.1: the moderation team's BattleTags (Accord.lua's lines) under the same navigation.
+	if Section() == "tags" then
+		local lines = { Nav() }
+		for _, line in ipairs(ns.Accord.TeamLines()) do lines[#lines + 1] = line end
+		return lines, L.TAB_WATCH, L.ACCORD_TEAM_DETAIL
+	end
 	if Section() == "member" then return MemberLines(), L.TAB_WATCH, L.WATCH_MEMBER_DETAIL end
 	if Section() == "justice" and ns.JusticeTasks and ns.JusticeTasks.Visible() then
 		local lines = { Nav() }

@@ -4457,7 +4457,7 @@ end
 -- chats on or off, and the switches that stay off until answered.
 ---------------------------------------------------------------------------
 L.CONSENT_TITLE = "Olympus: what this addon shares"
-L.CONSENT_INTRO = "While you are in an Olympus guild, two things always go out. One member of your guild, elected by the addons, sends your guild's census on the Olympus channel: its size, online count, classes, levels and rank names, its leader and officers (name, online, days away, class, level) and its five highest-level members (name, level, class), online or not. And your addon says hello to your guild: its version, your realm, whether your channel is public or sealed and whether you share your zone. %s"
+L.CONSENT_INTRO = "Under the Olympus Accord you accepted, three things always go out while you are in an Olympus guild. One member of your guild, elected by the addons, sends your guild's census on the Olympus channel: its size, online count, classes, levels and rank names, its leader and officers (name, online, days away, class, level) and its five highest-level members (name, level, class), online or not. And your addon says hello to your guild: its version, your realm, whether your channel is public or sealed and whether you share your zone. And your BattleTag goes privately to the moderation team alone (/oly accord). %s"
 L.CONSENT_OPTIONAL = "Nothing below goes out, or shows, until you say Yes, and until you answer each one stays off, unless its line says a yes you gave before still stands."
 L.CONSENT_FOOTER = "The window, the census and your own guild's roster work whatever you answer. Change any answer later: /oly privacy opens this page again."
 L.CONSENT_DONE = "Done"
@@ -4523,12 +4523,21 @@ L.CHAT_OFF = "The Olympus chats are off on this client: nothing was sent. /oly c
 L.CHAT_OFF_UNANSWERED = "The Olympus chats stay off on this client until you choose: /oly privacy (the Olympus page) or /oly chat on."
 L.CHATS_OFF_LINK = "Olympus chats: off on this client (click to choose)"
 L.HELP_PRIVACY_PAGE = "  /oly privacy - what this addon shares, and your answer to each (the first-open page)"
+-- 1.2.5.1: the Olympus Accord's name and its locked page, here rather than in Locales/AccordText.lua
+-- (its letter's words): a client updated without a restart has this file but not that one, and
+-- its window still says what waits (Accord.lua's stand-in, Core.lua).
+L.ACCORD_NAME = "The Olympus Accord"
+L.ACCORD_LOCKED_TITLE = "The Olympus Accord"
+L.ACCORD_LOCKED_HINT = "Olympus is off until you accept its terms of use."
+L.ACCORD_LOCKED_OPEN = "Read the Olympus Accord"
+L.ACCORD_READ = "Read the Accord"
+L.HELP_ACCORD = "  /oly accord - the Olympus Accord, Olympus's terms of use"
 L.HELP_CHAT = "  /oly chat on|off - the Olympus chats on this client (off: nothing sent, nothing shown)"
 L.INSPECTION_OPT_UNANSWERED = "You don't take part in Royal Inspections until you say yes (/oly inspection on, or the Olympus page: /oly privacy). You still hear the King's call."
 L.ROLLCALL_UNANSWERED = "The author's roll calls are not answered until you say yes (/oly rollcall on, or the Olympus page: /oly privacy). His update notices still show."
 if GetLocale and GetLocale() == "ptBR" then
 	L.CONSENT_TITLE = "Olympus: o que este addon compartilha"
-	L.CONSENT_INTRO = "Enquanto você está numa guilda Olympus, duas coisas sempre saem. Um membro da sua guilda, eleito pelos addons, manda o censo da sua guilda no canal Olympus: tamanho, quantos online, classes, níveis e nomes das patentes, o líder e os oficiais (nome, online, dias ausente, classe, nível) e os cinco membros de nível mais alto (nome, nível, classe), online ou não. E o seu addon dá oi para a sua guilda: a versão dele, o seu reino, se o seu canal é público ou selado e se você compartilha a sua zona. %s"
+	L.CONSENT_INTRO = "Pelo Acordo do Olympus que você aceitou, três coisas sempre saem enquanto você está numa guilda Olympus. Um membro da sua guilda, eleito pelos addons, manda o censo da sua guilda no canal Olympus: tamanho, quantos online, classes, níveis e nomes das patentes, o líder e os oficiais (nome, online, dias ausente, classe, nível) e os cinco membros de nível mais alto (nome, nível, classe), online ou não. E o seu addon dá oi para a sua guilda: a versão dele, o seu reino, se o seu canal é público ou selado e se você compartilha a sua zona. E a sua BattleTag vai em privado apenas para a equipe de moderação (/oly accord). %s"
 	L.CONSENT_OPTIONAL = "Nada abaixo sai, nem aparece, até você dizer Sim, e até você responder cada um fica desligado, a menos que a linha diga que um sim que você deu antes ainda vale."
 	L.CONSENT_FOOTER = "A janela, o censo e o rol da sua própria guilda funcionam seja qual for a resposta. Para mudar depois: /oly privacy abre esta página de novo."
 	L.CONSENT_DONE = "Pronto"
@@ -4594,6 +4603,12 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CHAT_OFF_UNANSWERED = "Os chats Olympus ficam desligados neste cliente até você escolher: /oly privacy (a página do Olympus) ou /oly chat on."
 	L.CHATS_OFF_LINK = "Chats Olympus: desligados neste cliente (clique para escolher)"
 	L.HELP_PRIVACY_PAGE = "  /oly privacy - o que este addon compartilha, e a sua resposta a cada um (a página da primeira abertura)"
+	L.ACCORD_NAME = "O Acordo do Olympus"
+	L.ACCORD_LOCKED_TITLE = "O Acordo do Olympus"
+	L.ACCORD_LOCKED_HINT = "O Olympus fica desligado até você aceitar os termos de uso."
+	L.ACCORD_LOCKED_OPEN = "Ler o Acordo do Olympus"
+	L.ACCORD_READ = "Ler o Acordo"
+	L.HELP_ACCORD = "  /oly accord - o Acordo do Olympus, os termos de uso do Olympus"
 	L.HELP_CHAT = "  /oly chat on|off - os chats Olympus neste cliente (desligados: nada é mandado nem mostrado)"
 	L.INSPECTION_OPT_UNANSWERED = "Você não participa das Inspeções Reais até dizer sim (/oly inspection on, ou a página do Olympus: /oly privacy). Você ainda ouve o chamado do Rei."
 	L.ROLLCALL_UNANSWERED = "As chamadas do autor não são respondidas até você dizer sim (/oly rollcall on, ou a página do Olympus: /oly privacy). Os avisos de atualização dele ainda aparecem."

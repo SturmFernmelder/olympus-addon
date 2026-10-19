@@ -1471,6 +1471,9 @@ ns.On("LOTTERY_RESULT", function() Mark("RANKINGS_CHANGED") end)
 -- A guild joined or left, a rank (Roster.lua: DATA_CHANGED), the signed lists (the role); the census
 -- that names the leader online.
 ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED", "LEADER_CHANGED") end)
+-- (1.2.5.1) The Olympus Accord accepted or asked again (Accord.lua): every read's answer changed
+-- (Member, "guild").
+ns.On("ACCORD_CHANGED", function() Mark(unpack(API.DATA_EVENTS)) end)
 -- The leader's crown, the layers announced, a local layer sighting (HOP_CHANGED) and a sanction on
 -- locations (WATCHCHAT_CHANGED): what his lines and the Realm tab's layers show.
 for _, event in ipairs({ "KING_LOCATION_CHANGED", "LAYERS_CHANGED", "HOP_CHANGED", "WATCHCHAT_CHANGED" }) do

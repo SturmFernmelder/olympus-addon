@@ -2015,7 +2015,8 @@ function Workshop.TakeTitles(blob, sender, guild)
 	local was = Steward()
 	local stewards = ns.ReadStewards(list)
 	-- The approved guilds (1.1, Core.lua: ns.ReadApprovedGuilds): the list may make our guild Olympus.
-	local wasMember = ns.IsMember()
+	-- (1.2.5.1: an Olympus guild, the Olympus Accord accepted or not: ns.InOlympusGuild.)
+	local wasMember = ns.InOlympusGuild()
 	-- 1.2: the signed arbiters and auditors of the Blood Arena (Core.lua: ns.ReadArbiters), an entry
 	-- of their own, as the Steward's.
 	ns.rdb.councilTitles = { at = at, public = public == "1", realm = realm ~= "" and realm or nil, depts = depts, blob = blob, stewards = stewards,
@@ -2024,7 +2025,7 @@ function Workshop.TakeTitles(blob, sender, guild)
 	-- HA1 sets are separate and enter through Authority.lua; either path makes a later absent,
 	-- expired or bad generation fail closed instead of falling back to census ranks.
 	if ns.Authority and ns.Authority.AcceptTitles then ns.Authority.AcceptTitles(ns.rdb.councilTitles) end
-	if ns.IsMember() ~= wasMember then Workshop.MembershipChanged(wasMember) end
+	if ns.InOlympusGuild() ~= wasMember then Workshop.MembershipChanged(wasMember) end
 	local named = 0
 	for _, names in pairs(stewards) do named = named + #names end
 	ns.Log("High Council: a signed titles list of %d names in %d parts, %d Steward(s) (%s)", n, #depts, named, tostring(at))
@@ -2060,12 +2061,14 @@ ns.Comm.Handle("HT", function(...) Workshop.HandleTitles(...) end)
 ---------------------------------------------------------------------------
 
 -- The list made our guild an Olympus guild, or no longer: the addon starts (the channel, the
--- census, the roster) or stops, as when one joins or leaves a guild.
+-- census, the roster) or stops, as when one joins or leaves a guild. (1.2.5.1) It starts once the
+-- player accepted the Olympus Accord: one who has not yet is shown it now (Accord.lua).
 function Workshop.MembershipChanged(wasMember)
 	local guild = (GetGuildInfo and GetGuildInfo("player")) or "?"
-	if ns.IsMember() then
+	if ns.InOlympusGuild() then
 		ns.Print(L.APPROVED_YOU:format(guild))
 		ns.PlayAlert("soft", "update") -- (the author's word: his signed list)
+		if ns.Accord and ns.Accord.Ask then ns.SafeCall("accord", ns.Accord.Ask, "approved") end
 	elseif wasMember then
 		ns.Print(L.APPROVED_NO_LONGER:format(guild))
 	end

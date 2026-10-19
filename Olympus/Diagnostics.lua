@@ -391,6 +391,8 @@ function ns.StatusText()
 	-- (1.1) The addon's language: the game's, when Olympus has lines for it (Locales.lua).
 	add("language: %s", ns.LocaleReport and ns.LocaleReport() or "?")
 	add("player %s  |  %s  |  guild %s  |  olympus member: %s", tostring(ns.me), tostring(ns.faction), tostring(guild), tostring(ns.IsMember()))
+	-- (1.2.5.1: the Olympus Accord, Accord.lua: its version and state, never the BattleTag.)
+	add("accord: %s", tostring(ns.Accord and ns.Accord.StatusLine and ns.Accord.StatusLine() or "?"))
 	local realm, census = RealmLines()
 	add("%s", realm)
 	add("%s", census)

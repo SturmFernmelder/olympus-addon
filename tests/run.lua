@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "Bridge" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -172,7 +172,11 @@ ns.db = { guilds = {}, log = {}, errors = {}, blocked = {}, demo = false, showMa
 	treasurerShares = true, -- (0.9.3: the Treasurer said yes; the question has its own test)
 	-- (1.1, Fern's #11: these are off until the player answers. Here they said yes, as 1.0's
 	-- defaults were, for the tests written before; the first-open page has its own tests.)
-	addonChat = true, chatRooms = true, royalInspection = true, rollCall = true, layerHelp = true }
+	addonChat = true, chatRooms = true, royalInspection = true, rollCall = true, layerHelp = true,
+	-- (1.2.5.1: an account that accepted the Olympus Accord, as every account using Olympus does from
+	-- now on: without it no member's code runs, ns.IsMember. No fp, the tag's hash, and no BNGetInfo
+	-- here, so Accord.Check never asks again; the Accord's own tests, tests/accord.lua, start without it.)
+	accord = { v = 1, yes = true, at = 0 } }
 ns.me = "Tester-Realm"
 ns.realm = "Realm"
 -- (0.9.2: the King and the Treasurer are theirs on their realm group; here that is "Realm".)
@@ -2366,8 +2370,9 @@ local function WithUI(fn)
 	PTR_IssueReporter, UISpecialFrames, tinsert = nil, nil, nil
 	ns.rdb.guilds = {}
 	-- (1.1: the first-open page a window opened here showed is gone with the toolkit, and the
-	-- questions it asked this "session" with it.)
+	-- questions it asked this "session" with it. 1.2.5.1: the Olympus Accord's letter too.)
 	ns.Consent.Reset()
+	ns.Accord.Reset()
 	if not ok then error(err, 0) end
 	eq(captured, nil, "error caught")
 end
@@ -62379,8 +62384,23 @@ end)()
 		assert(at["Wanted.lua"] < at["ArenaMath.lua"], "Wanted is a core board, not part of the Arena-only load tail")
 		local comm = assert(ReadFile(ADDON_DIR .. "Comm.lua"))
 		assert(comm:find("Versions V7 V8 V9 | Workshop VR", 1, true))
+		-- The Olympus Accord (Accord.lua): its words with the other locales, the file after the
+		-- window's (its page) and The Watch's (its section), before the privacy page that follows it;
+		-- its two message types in Comm.lua's list.
+		local locales = { first = math.huge, last = 0 }
+		for line, i in pairs(at) do if line:find("^Locales\\") then locales.first, locales.last = math.min(locales.first, i), math.max(locales.last, i) end end
+		assert(at["Locales\\AccordText.lua"] and at["Locales\\AccordText.lua"] <= locales.last and at["Locales\\AccordText.lua"] < at["Core.lua"], "with the locales")
+		assert(at["UI.lua"] < at["Accord.lua"] and at["Watch.lua"] < at["Accord.lua"] and at["Accord.lua"] < at["Consent.lua"], "Accord.lua's place")
+		assert(comm:find("Accord BT BQ", 1, true), "BT and BQ in Comm.lua's list")
+		-- Olympus's own right-click lines (1.2.5.1): for a player known to be in Olympus alone.
+		for file, line in pairs({ ["Watch.lua"] = 'ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30, { olympus = true })',
+			["ArenaHome.lua"] = 'P.Add("arena", ArenaHome.MenuLines, 60, { olympus = true })',
+			["ChurchView.lua"] = 'ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40, { olympus = true })',
+			["Versions.lua"] = 'ns.PlayerMenu.Add("versions", function(target, menu) Versions.MenuLines(target, menu) end, 10)\n' }) do
+			assert(assert(ReadFile(ADDON_DIR .. file)):find(line, 1, true), file .. ": " .. line)
+		end
 		-- A client updated without a restart: the new files' stand-ins.
-		for _, key in ipairs({ "PlayerMenu", "Versions", "Answers", "Watch" }) do
+		for _, key in ipairs({ "PlayerMenu", "Versions", "Answers", "Watch", "Accord" }) do
 			local core = assert(ReadFile(ADDON_DIR .. "Core.lua"))
 			assert(core:find('StandIn("' .. key .. '"', 1, true), key)
 		end
@@ -62430,7 +62450,7 @@ end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
-		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
+		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
 		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
@@ -62440,6 +62460,8 @@ for _, name in ipairs(focused) do
 		or name == "guild-charter" and { WithGamepadUI = WithGamepadUI, WithUI = WithUI, FreshComm = FreshComm }
 		or name == "officer-muster" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
+		-- (1.2.5.1: the Olympus Accord's, its letter and the window's page.)
+		or name == "accord" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, FreshComm = FreshComm, LoadUI = LoadUI }
 		or name == "campaign" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
@@ -63145,6 +63167,34 @@ end)()
 			eq(#w.after, 1, "only the letter's own wait"); eq(w.after[1].sec, Lt.LOGIN_WAIT)
 			w.run()
 			assert(Lt.Frame() and Lt.Frame():IsShown())
+		end)
+	end)
+
+	-- (1.2.5.1) The Olympus Accord (Accord.lua): before it is accepted nothing of Olympus shows, the
+	-- letter included; once accepted (ACCORD_CHANGED, true) the letter comes HANDOFF after, as after
+	-- the privacy page's close (the page asks first when it has a line to ask: PageFirst).
+	test("1.2.5.1 version letters: never before the Olympus Accord is accepted; HANDOFF after it is", function()
+		WithLetters(function(w)
+			local Lt = w.Letters
+			local accord = ns.db.accord
+			local ok, err = pcall(function()
+				ns.Consent.Show():Hide() -- (nothing the privacy page still has to ask)
+				ns.db.accord = nil
+				w.login()
+				w.run() -- (its own wait)
+				w.tick()
+				eq(Lt.Frame(), nil, "not before the Accord")
+				for _, f in ipairs(w.on.ACCORD_CHANGED or {}) do f(false) end
+				eq(#w.after, 0, "asked again: nothing")
+				ns.db.accord = { v = ns.ACCORD_VERSION, yes = true, at = 0 }
+				for _, f in ipairs(w.on.ACCORD_CHANGED or {}) do f(true) end
+				local a = w.after[1]
+				assert(a, "the letter is asked once the Accord is accepted"); eq(a.sec, Lt.HANDOFF)
+				w.run()
+				assert(Lt.Frame() and Lt.Frame():IsShown(), "the letter")
+			end)
+			ns.db.accord = accord
+			if not ok then error(err, 0) end
 		end)
 	end)
 

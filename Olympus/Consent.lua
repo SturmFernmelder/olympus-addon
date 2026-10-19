@@ -13,9 +13,10 @@ local L = ns.L
 -- author's roll call, the Olympus chats and an officer's patrol findings (officers only). Each
 -- stays off until its Yes: nil, never answered, is off (Layers.Sharing, Hop.Helps,
 -- Treasury.Consent, King's OnInspect, Workshop.Answers, Channels.ChatOn, Inspect.Sharing).
--- The page also says what always goes out while the player is in an Olympus
--- guild (the census the elected member sends, names included, and the hello), so it never
--- promises that nothing does. The window works whatever the answers: the census, the Realm and
+-- The page also says what always goes out once the Olympus Accord (Accord.lua, 1.2.5.1) was
+-- accepted, while the player is in an Olympus guild (the census the elected member sends, names
+-- included, the hello, and the BattleTag to the moderation team alone), so it never promises that
+-- nothing does; until the Accord is accepted this page never shows (Consent.Ask, ns.IsMember). The window works whatever the answers: the census, the Realm and
 -- the player's own guild roster need none of them, location included.
 -- `/oly privacy` opens it again to change any answer; each answer also has its own command.
 -- Olympus's own frame, never the game's popup: with Blizzard's gamepad UI the game's popups break

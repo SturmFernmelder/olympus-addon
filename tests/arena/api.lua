@@ -2122,3 +2122,37 @@ test("1.2.4 the API: docs/API.md's title example shows the player's title on his
 	eq(Load()[1], title, "already granted: at load")
 	W3.NoErrors(w)
 end)
+
+-- 1.2.5.1: the Olympus Accord (Accord.lua). Until this account accepted it the player is no member
+-- (ns.IsMember): a granted addon reads what it reads outside an Olympus guild ("guild", member =
+-- false), and the contract stays (CONSENT_VERSION 9). Accepting it (Accord.lua's ACCORD_CHANGED,
+-- fired here as the Accord fires it) tells every data event's listeners once the burst settles.
+test("accord: the API before the Olympus Accord is accepted reads as outside an Olympus guild; once it is, WANTED, RANKINGS and PROFILE listeners are told", function()
+	local w, cast, viewer, API = Setup()
+	eq(API.CONSENT_VERSION, 9, "the contract unchanged")
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	Install(viewer, "MapPins", "Map Pins")
+	local api = w:As(viewer, O.Register, "MapPins")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	assert(Do(w, viewer, api, "GetWanted"), "a member reads")
+	local accord = viewer.db.accord
+	viewer.db.accord = nil
+	local p = Do(w, viewer, api, "GetProfile")
+	eq(Keys(p), "member"); eq(p.member, false)
+	local none, why = Do(w, viewer, api, "GetWanted")
+	eq(none, nil); eq(why, "guild")
+	eq(select(2, Do(w, viewer, api, "GetRankings")), "guild")
+	local told = {}
+	for _, event in ipairs({ "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED" }) do
+		eq(Do(w, viewer, api, "On", event, function(e) told[#told + 1] = e end), true)
+	end
+	w:Run(API.DISPATCH_DELAY)
+	told = {}
+	viewer.db.accord = accord
+	w:As(viewer, viewer.ns.Fire, "ACCORD_CHANGED", true)
+	w:Run(API.DISPATCH_DELAY)
+	table.sort(told)
+	eq(table.concat(told, ","), "PROFILE_CHANGED,RANKINGS_CHANGED,WANTED_CHANGED", "each told once")
+	eq(Do(w, viewer, api, "GetProfile").member, true)
+	W3.NoErrors(w)
+end)

@@ -475,6 +475,67 @@ test("watch: an integration opens one authorized member review without receiving
 	end)
 end)
 
+-- 1.2.5.1: the BattleTags each player's addon sent the moderation team (Accord.lua), in The Watch: on
+-- a team client alone (WatchChat.InRoom), its own section and a line on the person page.
+test("watch: the BattleTags (1.2.5.1) are the moderation team's alone: an Olympus moderator with no desk gets the tab for them; an officer outside the team never sees them, on any page", function()
+	WithWatch(function(w, W, c)
+		local L = ns.L
+		local team = {}
+		c.WatchChat = { InRoom = function(name) return team[c.Fold(c.FullName(name))] == true end,
+			Sanction = function() return nil end, RecordLines = function() return {} end, PageShown = function() return false end }
+		assert(loadfile(ROOT .. "Olympus/Accord.lua"))("Olympus", c)
+		local function Row(name, guild, via)
+			return { name = name, tag = "Target#1111", guild = guild, via = via, first = w.epoch, last = w.epoch, av = 1, aat = w.epoch }
+		end
+		c.rdb.battletags = { v = 1, rows = { [c.Fold("Target Person-Realm")] = Row("Target Person-Realm", "Olympus II", "roster"),
+			[c.Fold("Target Alt-Realm")] = Row("Target Alt-Realm", "Olympus III", "self") } }
+		local function Page()
+			local out = {}
+			for _, l in ipairs(W.Build()) do
+				out[#out + 1] = tostring(l.text or "") .. " " .. tostring(l.right or "")
+				for _, item in ipairs(l.nav or {}) do out[#out + 1] = tostring(item.text) end
+			end
+			return table.concat(out, "\n")
+		end
+		w.setRank("Target Person-Realm", 3); w.online(c.me, "Target Person-Realm")
+		-- An officer outside the team: his desk, and no BattleTag on any page.
+		eq(W.TabVisible(), true)
+		assert(not Page():find(L.ACCORD_TEAM_TITLE, 1, true), "no BattleTags page in his navigation")
+		W.Show("tags"); eq(W.PageId(), "desk", "no such page for him")
+		assert(W.OpenMember("Target Person-Realm"))
+		assert(not Page():find("Target#1111", 1, true) and not Page():find(L.ACCORD_TEAM_PROFILE_NONE, 1, true), "nothing on the person page")
+		-- On the team: the line on the person page, the others sharing the tag; the page itself.
+		team[c.Fold(c.me)] = true
+		assert(W.OpenMember("Target Person-Realm"))
+		local page = Page()
+		assert(page:find(L.ACCORD_TEAM_PROFILE:format("Target#1111"), 1, true), page)
+		assert(page:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Target Alt"), 1, true), page)
+		assert(page:find(L.ACCORD_TEAM_NAV:format(2), 1, true), "in his navigation")
+		W.Show("tags")
+		eq(W.PageId(), "tags"); eq(W.ViewKey(), "judgments", "no desk buttons")
+		local _, title, detail = W.Build()
+		eq(title, L.TAB_WATCH); eq(detail, L.ACCORD_TEAM_DETAIL)
+		page = Page()
+		assert(page:find(L.ACCORD_TEAM_SHARED:format(2), 1, true) and page:find("Target#1111", 1, true), page)
+		-- On the King's screen (his stream): masked.
+		w.masked = true
+		c.KingsScreen = function() return true end
+		page = Page()
+		assert(not page:find("1111", 1, true), "never a tag on the King's screen")
+		c.KingsScreen, w.masked = nil, nil
+		-- An Olympus moderator with no desk (not an officer): the tab, opened on the BattleTags.
+		w.setRank(c.me, 3)
+		W.Show(nil)
+		eq(W.CanRead(), false); eq(W.TabVisible(), true, "the BattleTags give him the tab")
+		eq(W.PageId(), "member", "his own page first, as everyone's")
+		assert(Page():find(L.ACCORD_TEAM_NAV:format(2), 1, true), "the BattleTags in its navigation")
+		W.Show("tags"); eq(W.PageId(), "tags")
+		-- Off the team: none of it.
+		team = {}
+		eq(W.TabVisible(), false); eq(W.PageId() ~= "tags", true)
+	end)
+end)
+
 test("watch: member review accepts an explicit cross-realm name and reports empty local context honestly", function()
 	WithWatch(function(_, W)
 		local ok = W.OpenMember("Remote Person-OtherRealm")

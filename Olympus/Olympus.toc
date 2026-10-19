@@ -47,6 +47,7 @@ Locales\RankingRulesText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
 Locales\PlayerSightingsText.lua
+Locales\AccordText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -112,6 +113,7 @@ Watch.lua
 Judgment.lua
 JusticeTasks.lua
 KingArrow.lua
+Accord.lua
 Consent.lua
 WeeklyBrief.lua
 Carry.lua

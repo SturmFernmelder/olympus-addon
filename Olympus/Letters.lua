@@ -440,6 +440,12 @@ ns.On("CONSENT_CLOSED", function()
 	if not waited or not ticker or Letters.IsRead(ns.VERSION) then return end
 	ns.After(Letters.HANDOFF, "version letter", function() Letters.Ask("privacy") end)
 end)
+-- (1.2.5.1) The Olympus Accord accepted (Accord.lua): the letter a moment after, unless the privacy
+-- page asks first (PageFirst; its closing brings the letter, above).
+ns.On("ACCORD_CHANGED", function(on)
+	if on ~= true or not waited or not ticker or Letters.IsRead(ns.VERSION) then return end
+	ns.After(Letters.HANDOFF, "version letter", function() Letters.Ask("accord") end)
+end)
 
 -- `/oly letters` (the list), `/oly letters <version>` (that letter; one without a letter: the list).
 function Letters.Slash(rest)
