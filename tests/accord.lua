@@ -687,7 +687,9 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 					assert(not text:find("|c", 1, true), "no colour codes in a bullet: bold is the font string's")
 				end
 			end
-			assert(total <= 380, "the letter is " .. total .. " words")
+			-- (Changed on purpose: 380 until moderator protection's bullet, 4.7, joined the letter at the
+			-- owner's ask; its 12 words, its full terms on the privacy page's line.)
+			assert(total <= 389, "the letter is " .. total .. " words")
 			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
 			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a
 			-- deep red ink and doubled strokes (the dot too); the other bullets in the plain ink.

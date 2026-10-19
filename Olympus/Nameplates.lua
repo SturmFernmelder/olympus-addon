@@ -362,14 +362,25 @@ end
 
 -- Once, with mouse and keyboard: the hook on the game's name updates (it runs for every compact
 -- unit frame, raid frames too: those leave after IsForbidden).
+-- Others' work after the same update (Cover.lua's cover names), on this one hook: the game keeps
+-- every hook for the session, so a second one on the same function would be one more to carry.
+local nameListeners = {}
 local function Install() -- gp:nameplates
 	if hooked or ns.GamepadUI() then return end
 	hooked = true
 	if type(hooksecurefunc) == "function" and type(CompactUnitFrame_UpdateName) == "function" then
 		hooksecurefunc("CompactUnitFrame_UpdateName", function(frame)
 			ns.SafeCall("nameplates name", Nameplates.NameUpdated, frame)
+			for i = 1, #nameListeners do ns.SafeCall("nameplates name listener", nameListeners[i], frame) end
 		end)
 	end
+end
+-- fn(frame) after each of the game's name updates, from now on (the hook installed if it is not
+-- yet, whether the marks are on or not). Each listener checks its own gate first.
+function Nameplates.OnNameUpdate(fn)
+	for i = 1, #nameListeners do if nameListeners[i] == fn then return Install() end end
+	nameListeners[#nameListeners + 1] = fn
+	Install()
 end
 
 -- A plate's unit frame's rig, made the first time it is seen (where a texture may be made now).
@@ -659,6 +670,8 @@ ns.On("DATA_CHANGED", function() Nameplates.CensusChanged() end)
 ns.On("HONORS_CHANGED", function() Nameplates.RefreshAll(true) end)
 -- The King shows or hides the council's names (the eye in the Realm, ns.SetCouncilNamesShown).
 ns.On("COUNCIL_MASK_CHANGED", function() Nameplates.CensusChanged() end)
+-- A moderator's cover name (Cover.lua): their mark goes as their border does.
+ns.On("COVER_CHANGED", function() Nameplates.CensusChanged() end)
 -- Registered where the client has them.
 pcall(ns.RegisterEvent, "NAME_PLATE_UNIT_ADDED", function(unit) Nameplates.Added(unit) end)
 pcall(ns.RegisterEvent, "NAME_PLATE_UNIT_REMOVED", function(unit) Nameplates.Removed(unit) end)

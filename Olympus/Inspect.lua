@@ -1018,6 +1018,7 @@ end
 -- is when the client hides its text (a secret value) or with the gamepad UI, where Olympus writes
 -- nothing into the game's frames; the lines below are added as the Treasurer's is.
 function Inspect.CouncilTooltip(tooltip, name, guild) -- gp:tooltip-unit
+	if Inspect.CoverOf(name) then return false end
 	if not (ns.IsMember() == true and ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(name)) then return false end
 	local M = ns.Moderation
 	if name ~= ns.me and type(M) == "table" and type(M.Hides) == "function" and M.Hides(name, guild) ~= nil then return false end
@@ -1034,6 +1035,31 @@ function Inspect.CouncilTooltip(tooltip, name, guild) -- gp:tooltip-unit
 	return true
 end
 
+-- A moderator's cover name on this client (Cover.lua), or nil.
+function Inspect.CoverOf(name)
+	local C = ns.Cover
+	return type(C) == "table" and type(C.AliasOf) == "function" and C.AliasOf(name) or nil
+end
+
+-- Their tooltip's first line says the cover name: the real name in it replaced (a title the game
+-- puts around it stays), or the whole line when the real name isn't in it. Left as it is when the
+-- client hides its text (a secret value).
+function Inspect.CoverTooltip(tooltip, name) -- gp:tooltip-unit
+	local alias = Inspect.CoverOf(name)
+	if not alias or ns.GamepadUI() or type(tooltip.GetName) ~= "function" then return false end
+	local left = _G[(tooltip:GetName() or "") .. "TextLeft1"] -- gp:tooltip-unit
+	local text = left and type(left.GetText) == "function" and left:GetText()
+	if type(text) ~= "string" or SecretTooltipValue(text) or text == "" then return false end
+	local real = ns.ShortName(name)
+	local at, stop = text:find(real, 1, true)
+	if not at then
+		local first = real:match("^(%S+) ")
+		if first then at, stop = text:find(first, 1, true) end
+	end
+	left:SetText(at and (text:sub(1, at - 1) .. alias .. text:sub(stop + 1)) or alias)
+	return true
+end
+
 -- 1.1.5, the gamepad gate (GamepadRegistry.lua's "tooltip-unit"): nothing with the gamepad UI on, from
 -- the first line (the game's soft target shows the tooltip again and again there, and Olympus writes
 -- nothing in the game's frames there): no line, no patrol. Not registered at a login with it.
@@ -1046,11 +1072,12 @@ function Inspect.TooltipUnit(tooltip) -- gp:tooltip-unit
 	if SecretTooltipValue(isPlayer) or not isPlayer then return false end
 	local name = TooltipUnitName(unit)
 	if not name then return false end
+	Inspect.CoverTooltip(tooltip, name)
 	local line = Inspect.TooltipLine(name)
 	if line then tooltip:AddLine(line) end
 	-- The Treasurer of Olympus: his name and the game's own word on his guild.
 	local guild = GetGuildInfo and GetGuildInfo(unit)
-	if not SecretTooltipValue(guild) and ns.IsTreasurer(name, guild) then tooltip:AddLine(ns.COIN .. L.TREASURER_TITLE, 1, 0.82, 0) end
+	if not SecretTooltipValue(guild) and not Inspect.CoverOf(name) and ns.IsTreasurer(name, guild) then tooltip:AddLine(ns.COIN .. L.TREASURER_TITLE, 1, 0.82, 0) end
 	Inspect.CouncilTooltip(tooltip, name, not SecretTooltipValue(guild) and guild or nil)
 	if patrol then Enqueue(unit) end
 	return true

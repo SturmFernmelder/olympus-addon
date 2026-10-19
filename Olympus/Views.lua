@@ -51,7 +51,7 @@ Views.Green, Views.Grey, Views.Red, Views.Gold = Green, Grey, Red, Gold
 local Plain = ns.Codec.Plain
 
 local function ClassColored(name, classFile)
-	name = Plain(name)
+	name = Plain(ns.CoverSwap(name))
 	local c = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
 	return c and ("|c%s%s|r"):format(c.colorStr, name) or name
 end

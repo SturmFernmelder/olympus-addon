@@ -2882,7 +2882,10 @@ function UI.BasePersonDetails(p)
 	-- (0.9.9), for whoever may see the council in the census (ns.CouncilVisible); not on the
 	-- King's screen while the councillors' names are hidden there (ns.CouncilMasked).
 	local full = ns.FullName(p.name, p.realm)
-	local councillor = ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(full)
+	-- A moderator's cover name (Cover.lua): their name above, and no council or Treasurer row.
+	local covered = ns.IsCovered(full)
+	if covered then name = ns.Codec.Plain(ns.CoverSwap(full)) end
+	local councillor = not covered and ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(full)
 	local className = (file and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[file]) or ""
 	local rows, rowMeta = {}, {}
 	local function Add(text, key, source, at, state)
@@ -2918,7 +2921,7 @@ function UI.BasePersonDetails(p)
 			if okEdit and type(open) == "function" and not edit then edit = open end
 		end
 	end
-	if ns.IsTreasurer(p.name, p.guild) then Add("|cffffd200" .. ns.COIN .. L.TREASURER_TITLE .. "|r", "treasurer", "derived", at, "derived") end
+	if not covered and ns.IsTreasurer(p.name, p.guild) then Add("|cffffd200" .. ns.COIN .. L.TREASURER_TITLE .. "|r", "treasurer", "derived", at, "derived") end
 	if councillor then
 		-- "High Councillor - <title> (<department>)", as the signed titles list gives them.
 		local t = ns.CouncilTitle(full) or {}

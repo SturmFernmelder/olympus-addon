@@ -600,9 +600,11 @@ end
 local function NameText(e)
 	local who = ns.FullName(e.sender)
 	local guild = e.guild
-	local council = ns.IsHighCouncillor(who) and not ns.CouncilMasked()
-	local name = ns.Codec.Plain(ns.DisplayName(e.sender) or "?")
-	local lead = ns.Channels.RoleBadge and ns.Channels.RoleBadge(who) or ""
+	-- A moderator's cover name (Cover.lua): that name, and none of the colours or tags below.
+	local covered = ns.IsCovered(who)
+	local council = not covered and ns.IsHighCouncillor(who) and not ns.CouncilMasked()
+	local name = ns.Codec.Plain(ns.CoverSwap(ns.DisplayName(e.sender)) or "?")
+	local lead = not covered and ns.Channels.RoleBadge and ns.Channels.RoleBadge(who) or ""
 	if council then
 		name = "|c" .. ns.HIGH_COUNCIL_COLOR .. name .. "|r"
 	else
@@ -613,7 +615,7 @@ local function NameText(e)
 	-- The King's Stewards and Hands, by the rule the channels read them with (his guild's lines).
 	local tag = ""
 	local K = ns.King
-	if ns.IsKingGuild(guild) and type(K) == "table" then
+	if not covered and ns.IsKingGuild(guild) and type(K) == "table" then
 		if type(K.IsStewardName) == "function" and K.IsStewardName(who) then
 			tag = " " .. Gold(L.CHATWIN_TAG_STEWARD)
 		elseif type(K.IsHandName) == "function" and K.IsHandName(who) then
@@ -623,7 +625,7 @@ local function NameText(e)
 	-- 1.2.4, the author ("mandar mensagem como desenvolvedor"): his title after his name, on all his
 	-- lines of the page (Borders.IsDevName, his name on his realm group). A tag, no mark before it.
 	local B = ns.Borders
-	if type(B) == "table" and type(B.IsDevName) == "function" and B.IsDevName(who) == true then
+	if not covered and type(B) == "table" and type(B.IsDevName) == "function" and B.IsDevName(who) == true then
 		tag = tag .. " |cffc8c8d2" .. ChatWindow.Localized("CHATWIN_TAG_DEV", "The Royal Dev") .. "|r"
 	end
 	local guildLabel = ns.Channels.ShowGuildNames() and (" " .. Grey("<" .. ns.Codec.Plain(guild or "?") .. ">")) or ""
@@ -4419,7 +4421,7 @@ end)
 -- another chat window, by /oly mute, /oly chatwindow, a line typed with /ol or the settings' own
 -- clicks. The review of the page's removal: the settings stayed as they were drawn, and a stale
 -- "shows in your chat" unmuted a channel /oly mute had muted.)
-for _, event in ipairs({ "PIN_CHANGED", "FILTER_CHANGED", "NETOFF_CHANGED", "COUNCIL_MASK_CHANGED", "CONSENT_CHANGED",
+for _, event in ipairs({ "PIN_CHANGED", "FILTER_CHANGED", "NETOFF_CHANGED", "COUNCIL_MASK_CHANGED", "CONSENT_CHANGED", "COVER_CHANGED",
 	"CHAT_SETTINGS_CHANGED", "WATCHCHAT_CHANGED" }) do -- (1.1.6: a timeout, a lift, a deletion: WatchChat.lua)
 	ns.On(event, function() ChatWindow.Changed() end) -- (1.2.3: each a new era, ChatWindow.era)
 end

@@ -1,0 +1,36 @@
+local ADDON, ns = ...
+local L = ns.L
+-- Embrace Anonymity, a moderator's cover name (Cover.lua, /oly cover).
+L.COVER_TITLE = "Embrace Anonymity"
+L.COVER_CONSENT_LABEL = "Moderator protection: cover names"
+L.COVER_CONSENT_TEXT = "To keep certain moderation teams safe, Olympus has features that stop you from seeing the names of those moderators, and of other people, while you use the addon. With your Yes, this client shows a moderator's cover name in place of the real one wherever Olympus can: the target frame, nameplates, the player's tooltip and Olympus's own pages, without their Olympus marks. Saying Yes, you accept that you are part of this safety arrangement and that certain moderators may use it, in good faith. If someone acts in bad faith under a cover name, report it and it will be dealt with quickly. Only this addon does this, only for you: the game's guild list, /who and the chat keep the real names, and turning Olympus off shows them again. The name the game draws above a character in the world can't be changed by an addon: with friendly nameplates on, the nameplate (with the cover name) takes its place."
+L.COVER_ONLY = "Only the King, the High Council and the addon's author can embrace anonymity."
+L.COVER_PROMPT = "Embrace Anonymity\n\nPick the name the others see in place of yours (a first name and a surname, letters only). Those who accepted moderator protection see it on your target frame, nameplate, tooltip and Olympus's pages. You also leave the Olympus network: no census, position, layer or sighting of yours goes out. Your moderation work still goes out."
+L.COVER_PROMPT_ON = "Embrace Anonymity\n\nYou appear as %s. Change the name, or turn it off."
+L.COVER_ON_BTN = "Embrace"
+L.COVER_OFF_BTN = "Turn off"
+L.COVER_ON = "Anonymity embraced: those who accepted moderator protection see you as %s. You are off the Olympus network's census, positions, layers and sightings. /oly cover off to come back."
+L.COVER_OFF = "Anonymity off: your own name shows again and you are back on the Olympus network."
+L.COVER_STATUS_ON = "You appear as %s (since %s)."
+L.COVER_STATUS_OFF = "Anonymity is off."
+L.COVER_BAD = "That name can't be used: a first name and a surname, letters only, 2 to 12 letters each."
+L.COVER_TAKEN = "That name can't be used: it is a real player's or another moderator's."
+L.HELP_CMD_COVER = "  /oly cover [First Surname | off] - (King, High Council, author) embrace anonymity under a cover name, or turn it off"
+
+if GetLocale and GetLocale() == "ptBR" then
+	L.COVER_TITLE = "Abraçar o anonimato"
+	L.COVER_CONSENT_LABEL = "Proteção de moderadores: nomes de cobertura"
+	L.COVER_CONSENT_TEXT = "Por segurança, para proteger certas equipes de moderadores, o Olympus tem recursos que impedem ver o nome desses moderadores, e de outras pessoas, para quem usa o addon. Com o seu Sim, este cliente mostra o nome de cobertura de um moderador no lugar do nome real onde o Olympus consegue: o quadro do alvo, as nameplates, o tooltip do jogador e as páginas do Olympus, sem as marcas do Olympus dele. Ao aceitar, você reconhece que faz parte dessa estrutura de segurança e que ela pode ser usada por certos moderadores, em boa-fé. Se alguém agir de má-fé sob um nome de cobertura, denuncie, e o caso será tratado rapidamente. Só este addon faz isso, só para você: a lista da guilda do jogo, o /who e o chat continuam mostrando o nome real, e desligar o Olympus mostra o nome de novo. O nome que o jogo desenha em cima do personagem no mundo nenhum addon troca: com as nameplates de aliados ligadas, a nameplate (com o nome de cobertura) fica no lugar dele."
+	L.COVER_ONLY = "Só o King, o High Council e o autor do addon podem abraçar o anonimato."
+	L.COVER_PROMPT = "Abraçar o anonimato\n\nEscolha o nome que os outros veem no lugar do seu (um nome e um sobrenome, só letras). Quem aceitou a proteção de moderadores vê esse nome no seu quadro de alvo, nameplate, tooltip e nas páginas do Olympus. Você também sai da rede do Olympus: nada de censo, posição, camada ou avistamento seu sai. O seu trabalho de moderação continua saindo."
+	L.COVER_PROMPT_ON = "Abraçar o anonimato\n\nVocê aparece como %s. Troque o nome ou desligue."
+	L.COVER_ON_BTN = "Abraçar"
+	L.COVER_OFF_BTN = "Desligar"
+	L.COVER_ON = "Anonimato ligado: quem aceitou a proteção de moderadores vê você como %s. Você saiu do censo, das posições, camadas e avistamentos da rede do Olympus. /oly cover off para voltar."
+	L.COVER_OFF = "Anonimato desligado: o seu nome aparece de novo e você voltou para a rede do Olympus."
+	L.COVER_STATUS_ON = "Você aparece como %s (desde %s)."
+	L.COVER_STATUS_OFF = "O anonimato está desligado."
+	L.COVER_BAD = "Esse nome não serve: um nome e um sobrenome, só letras, de 2 a 12 letras cada."
+	L.COVER_TAKEN = "Esse nome não serve: é de um jogador real ou de outro moderador."
+	L.HELP_CMD_COVER = "  /oly cover [Nome Sobrenome | off] - (King, High Council, autor) abraça o anonimato sob um nome de cobertura, ou desliga"
+end

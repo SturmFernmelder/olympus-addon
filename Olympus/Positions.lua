@@ -71,6 +71,7 @@ local function Dot(size)
 end
 
 local function Color(frame, name, class)
+	name = ns.CoverSwap(name)
 	local file = class and ns.CLASS_FILES[class]
 	local c = file and RAID_CLASS_COLORS and RAID_CLASS_COLORS[file]
 	if c then frame.dot:SetVertexColor(c.r, c.g, c.b) else frame.dot:SetVertexColor(0.25, 1, 0.25) end
