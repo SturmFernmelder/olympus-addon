@@ -1,6 +1,6 @@
 -- The chat warnings (ChatStrikes.lua, the author on 2026-10-19: three warnings in 24 hours for a
--- word of Olympus's list in what a player typed): how a typed line is read against the list, and
--- what it costs. Synthetic words only (as tests/watch-chat.lua's
+-- word of Olympus's list in what a player typed): how a typed line is read against the list, the
+-- shipped list and its script, and what it costs. Synthetic words only (as tests/watch-chat.lua's
 -- "plainword"): no real word of the list is ever written in this repository. The ladder, the report
 -- to the team and every chat it covers: tests/watch-chat.lua. Every test name starts with
 -- "watch: chat moderation: strikes:", so
@@ -148,6 +148,67 @@ test("watch: chat moderation: strikes: the line kept and reported is the report 
 		eq(e.where, "R:R:councilx", "a room's code: letters, digits, : _ - only")
 		eq(S.Refuse("|cffff0000a|r " .. WORDS[1] .. " ~ ^ |Hitem:1|h[x]|h", "A"), "severe")
 		eq(S.Store().mine[2].text, "a " .. WORDS[1] .. " [x]", "no colour, link code, ~ or ^ (the report's fields)")
+	end)
+end)
+
+test("watch: chat moderation: strikes: source and fixture: the list ships as 16-hex digests of lengths, the script's digests are ChatStrikes.Digest's, and no word of strike-clean.txt is on the list", function()
+	KeepDialogs(function()
+		local S = Client()
+		for k, v in pairs(S.LIST) do
+			assert(type(k) == "string" and k:match("^%x+$") and #k == 16 and k == k:lower(), "a digest: " .. tostring(k))
+			assert(type(v) == "number" and v >= 1 and v == math.floor(v), "a length: " .. tostring(v))
+		end
+		eq(S.Digest("plainword"), (ns.Sign.SHA256("olympus-strike-1:plainword"):sub(1, 8):gsub(".", function(ch) return ("%02x"):format(ch:byte()) end)))
+		-- The clean words: none on the shipped list, whatever spelling.
+		local n = 0
+		for line in io.lines(ROOT .. "tests/fixtures/strike-clean.txt") do
+			line = line:gsub("#.*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+			if line ~= "" then
+				n = n + 1
+				eq(S.Hits(line), nil, "a clean word hits the shipped list: " .. line)
+				local form = S.Canon(line)
+				assert(form, "one word of letters: " .. line)
+				eq(S.LIST[S.Digest(form)], nil, "on the list: " .. line)
+			end
+		end
+		assert(n >= 150, "the clean words: " .. n)
+		-- The script, run as the author runs it: on a plain list outside the repository, its table is
+		-- the digests and lengths ChatStrikes makes; a list inside it, or one with a clean word, refused.
+		local path = os.tmpname()
+		local f = assert(io.open(path, "wb"))
+		f:write("# synthetic\nPlainword\nPL\195\130INWORD\nlowword\npollllword\n\n")
+		f:close()
+		local function Run(p)
+			local h = assert(io.popen('cd "' .. ROOT .. '" && luajit scripts/strike-digest.lua "' .. p .. '" 2>&1; echo "exit=$?"'))
+			local out = h:read("*a")
+			h:close()
+			return out, tonumber(out:match("exit=(%d+)"))
+		end
+		local out, code = Run(path)
+		eq(code, 0, out)
+		local got = {}
+		for d, len in out:gmatch('%["(%x+)"%] = (%d+),') do got[d] = tonumber(len) end
+		local want, count = {}, 0
+		for _, w in ipairs({ "plainword", "lowword", "pollword" }) do
+			local form = S.Canon(w)
+			want[S.Digest(form)] = #form
+		end
+		for d, len in pairs(want) do eq(got[d], len, "the script's digest of a word") count = count + 1 end
+		local listed = 0
+		for _ in pairs(got) do listed = listed + 1 end
+		eq(listed, count, "each word once (an accent or a long run is the same word)")
+		assert(out:find("^S%.LIST = {\n"), out)
+		os.remove(path)
+		local inside, insideCode = Run(ROOT .. "tests/fixtures/strike-clean.txt")
+		eq(insideCode, 1); assert(inside:find("outside this repository", 1, true), inside)
+		path = os.tmpname()
+		f = assert(io.open(path, "wb")); f:write("plainword\nClassic\n"); f:close()
+		local refused, refusedCode = Run(path)
+		os.remove(path)
+		eq(refusedCode, 1); assert(refused:find("line 2", 1, true) and refused:find("strike-clean.txt", 1, true), refused)
+		assert(not refused:find("Classic", 1, true), "the refusal names the line, not the word")
+		-- The canonical form: two words, or a 1 left, are not one listed word.
+		eq(S.Canon("two words"), nil); eq(S.Canon("pla1nword"), nil); eq(S.Canon("PL\195\130INW0RD"), "plainword")
 	end)
 end)
 
