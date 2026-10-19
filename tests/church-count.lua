@@ -2113,3 +2113,176 @@ test("1.2.3 Church: a keeper's first upkeep of its ledger comes PRUNE_AFTER afte
 	K.Count.GONE_MAX = saved
 	if not ok then error(err, 0) end
 end)
+
+-- The global ledger's relays (the keepers, the King, the signed High Council): what a relay's pages
+-- show, whom a catch-up asks, and where a keeper's verified word goes.
+
+-- A /reload, or a login the next day: the same character's saved data (its SavedVariables), nothing
+-- of the session (its memory, whom it asked), the files loaded again (INIT). (As tests/church.lua's.)
+local function Reload(w, cl)
+	cl.online = false
+	local again = w:Client(cl.name, { guild = cl.guild or false, rank = cl.rank, rdb = cl.ns.rdb })
+	w:As(again, again.ns.Fire, "INIT")
+	return again
+end
+-- Whether a client's page shows another client's numbers (RankingView's third value).
+local function Remote(w, cl, list, window)
+	return w:As(cl, function() return select(3, cl.Count.RankingView(list, window)) end)
+end
+local function JoinsOn(w, cl, by, list, window)
+	for _, r in ipairs((w:As(cl, cl.Count.RankingView, list or "m", window or "m"))) do
+		if r.key == Key(by) then return r.joins end
+	end
+end
+
+test("global Church ledger: a council relay whose copy is behind shows a keeper's numbers, not its own smaller copy; its own copy only with nothing kept and no keeper online", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	w:Presence()
+	-- Aldric credits three of Mira's recruits; nothing reaches the council's copy (no push, no catch-up).
+	for i = 1, 3 do Give(w, c.a1, "Behind Rec" .. Letters(i), "Mira Wells", 2) end
+	eq(JoinsOn(w, c.a1, "Mira Wells"), 3, "the keeper's own page")
+	eq(Rec(w, council, "Behind Recb", "Mira Wells"), nil, "the council's copy is behind")
+	-- Its page asks a keeper, as every audience page does (a 1.2.5.1 keeper answers that ask; it drops
+	-- the council's catch-up), and shows that keeper's numbers.
+	eq(Remote(w, council, "m", "m"), true, "not its own copy while a keeper is online")
+	local ok, why = w:As(council, council.Count.Ask, "m", "m", nil, true)
+	eq(ok, true, "asked a keeper (" .. tostring(why) .. ")")
+	local q = w:Sent(council, "NR", "WHISPER", "q")
+	eq(Key(q[#q].target), Key(A1), "the desk")
+	w:Run(30)
+	eq(JoinsOn(w, council, "Mira Wells"), 3, "the keeper's numbers")
+	-- Only a keeper answers a page, and only a keeper's rows are taken.
+	eq(select(2, w:As(council, council.Count.Answer, "Nils Ford-Realm", "m", "m")), "not keeper")
+	eq(select(2, w:As(c.m2, c.m2.Count.TakeAnswerLine, World.COUNCILLOR, "NR~1~e~m~m~-~0~0")), "keeper")
+	-- Every keeper offline: the page keeps that answer, not the smaller copy.
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(Rec(w, council, "Behind Recb", "Mira Wells"), nil, "still behind")
+	eq(JoinsOn(w, council, "Mira Wells"), 3, "kept while no keeper is online")
+	-- A page it never had an answer for, with no keeper online: its own copy, shown as its own.
+	eq(Remote(w, council, "m", "a"), false, "nothing kept, no keeper online")
+end)
+
+test("global Church ledger: an audience page asks in the desk's order, the Apostles before the author: not the author's client while an Apostle is online", function()
+	local Z = "Zed Last-Realm"
+	local w = World.New({ apostles = { A1, A2, Z }, head = false })
+	local c = { a1 = w:Client(A1), a2 = w:Client(A2, { guild = World.GUILD2 }), z = w:Client(Z), author = w:Client(World.AUTHOR),
+		m1 = w:Client("Mira Wells"), wes = w:Client("Wes Brook") }
+	w:Act(c.a1, c.a1.Church.NameMissionary, "Mira Wells")
+	w:Run(8 * 3600)
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.z.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(w:As(c.m1, c.m1.Count.Ask, "m", "m", nil, true), true)
+	local q = w:Sent(c.m1, "NR", "WHISPER", "q")
+	eq(#q, 1)
+	eq(Key(q[1].target), Key(Z), "the Apostle, the desk, not the author whose name sorts first")
+end)
+
+test("global Church ledger: after a reload a keeper first asks the keeper it never completed a catch-up from: not the first by name again, and one a reload cut short before one it completed later", function()
+	local w, c = Cast()
+	Give(w, c.a1, "Rot Recb", "Mira Wells", 2)
+	Give(w, c.a2, "Rot Recc", "Mira Wells", 2)
+	c.author.online = true
+	w:Presence()
+	local function Asks(cl)
+		w:ClearSent()
+		eq(w:As(cl, cl.Count.CatchUp, true), true)
+		local q = w:Sent(cl, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		return Key(q[1].target)
+	end
+	eq(Asks(c.author), Key(A1))
+	w:Run(60)
+	assert(Rec(w, c.author, "Rot Recb", "Mira Wells"), "caught up from the first keeper asked")
+	local author = Reload(w, c.author)
+	w:Presence()
+	eq(Asks(author), Key(A2), "the keeper never caught up from")
+	w:Run(60)
+	assert(Rec(w, author, "Rot Recc", "Mira Wells"), "and its records")
+	-- Aldric's next catch-up takes two rounds, and a reload comes after the first: the next session
+	-- asks him first again, from where it stopped, not Bera, caught up from since.
+	Give(w, c.a1, "Rot Recd", "Mira Wells", 2)
+	w:Run(10)
+	Give(w, c.a1, "Rot Rece", "Mira Wells", 2)
+	c.a1.Count.CATCHUP_LINES = 1
+	eq(Asks(author), Key(A1), "the one caught up from longest ago")
+	w:Run(1)
+	assert(Rec(w, author, "Rot Recd", "Mira Wells"), "the first round")
+	eq(Rec(w, author, "Rot Rece", "Mira Wells"), nil, "not the second yet")
+	local again = Reload(w, author)
+	w:Presence()
+	eq(Asks(again), Key(A1), "the catch-up cut short")
+end)
+
+test("global Church ledger: a keeper spends no catch-up on a council relay that never answered while a keeper is online; one it caught up from before stays in the turn", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	c.author.online = true
+	w:Presence()
+	-- A 1.2.5.1 councillor's client answers no catch-up: it is no keeper (that release's Count.TakeLine
+	-- drops every ledger line on a client that is not one, "keeper").
+	council.Count.TakeLine = function() return false, "keeper" end
+	local function Asks()
+		w:ClearSent()
+		eq(w:As(c.author, c.author.Count.CatchUp, true), true)
+		local q = w:Sent(c.author, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		w:Run(60)
+		return Key(q[1].target)
+	end
+	eq(Asks(), Key(A1))
+	eq(Asks(), Key(A2))
+	eq(Asks(), Key(A1), "a keeper again, not the silent council relay")
+
+	-- A council relay a catch-up completed from (the only relay online then) is asked in its turn.
+	local w2, c2 = Cast()
+	local council2 = w2:Client(World.COUNCILLOR)
+	c2.a1.online, c2.a2.online = false, false
+	c2.author.online = true
+	w2:Run(c2.a1.Church.KEEPER_EVERY * 3)
+	w2:Presence({ council2, c2.author })
+	eq(w2:As(c2.author, c2.author.Count.CatchUp, true), true)
+	w2:Run(60)
+	c2.a1.online, c2.a2.online = true, true
+	w2:Presence()
+	local function Asks2()
+		w2:ClearSent()
+		eq(w2:As(c2.author, c2.author.Count.CatchUp, true), true)
+		local q = w2:Sent(c2.author, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		w2:Run(60)
+		return Key(q[1].target)
+	end
+	eq(Asks2(), Key(A1)); eq(Asks2(), Key(A2))
+	eq(Asks2(), Key(World.COUNCILLOR), "the one caught up from longest ago")
+end)
+
+test("global Church ledger: a keeper's verified word goes to the keepers online, a relay online costing them nothing; to the other relays only while the queue has room", function()
+	local w, c = Cast()
+	w:Client(World.COUNCILLOR)
+	w:Presence()
+	local B = ns.Codec.Base36
+	local hour = math.floor(w.clock / 3600)
+	local own = ("NV~1~w~Mira Wells-Realm~Push Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 2), B(hour - 1))
+	Join(w, World.GUILD, "Push Guy")
+	w:As(c.a2, c.a2.Count.TakeEvidence, "Mira Wells-Realm", own)
+	w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Wells-Realm", own)
+	eq(StateOf(w, c.a2, "Push Guy", "Mira Wells"), "pending")
+	-- Room for one line to each keeper online (Bera), not for one to each relay (Bera and the council).
+	w.room = c.a1.Count.SEND_ROOM + 2
+	w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", own)
+	w:Flush()
+	eq(StateOf(w, c.a2, "Push Guy", "Mira Wells"), "credited", "Bera has Wes's word from Aldric")
+	-- With no room past SEND_ROOM, the keepers still have it; the council's copy waits for its catch-up.
+	w.room = c.a1.Count.SEND_ROOM
+	w:ClearSent()
+	local line = w:As(c.a1, c.a1.Count.RecordLine, Key("Push Guy") .. ":" .. Key("Mira Wells"), Rec(w, c.a1, "Push Guy", "Mira Wells"))
+	w:As(c.a1, c.a1.Count.ToRelays, line)
+	local to = {}
+	for _, e in ipairs(w:Sent(c.a1, "NL", "WHISPER", "r")) do to[Key(e.target)] = true end
+	eq(to[Key(A2)], true, "the keeper")
+	eq(to[Key(World.COUNCILLOR)], nil, "not the council, with no room")
+end)
