@@ -241,24 +241,7 @@ off` stops the requests, `/oly layerhelp on` also forgets the answer to the King
 window, `/oly layerauto on` invites them without the window. Helpers must be in the same zone
 as the layer they are on, and the King himself is never asked.
 
-Layers are known from the members who share their zone and layer (see Privacy, below):
-the more share, the better hopping works. Asking works either way, and says on the channel
-the zone you are in and the layer you want. If the King's own layer announcement has not
-arrived yet, clicking his hop line sends one discovery question on the Olympus channel while his crown is visible.
-Clients that can see his exact nameplate keep that fact private until the question; eligible
-helpers answer the asker alone, and two independent answers must agree before the ordinary
-layer-hop ask begins. A lone or conflicting answer moves nobody. Turning location sharing,
-layer help or the crown off cancels a queued answer and privately withdraws one already sent
-while that discovery question remains active.
-
-The King's layer is known only while his crown
-shows on the map (**Show me on the map** on his Throne, off by default): his addon sends it
-the moment he shows the crown and repeats it every minute while it shows. With his crown
-hidden (or while he is in a dungeon, where it hides) the line says so instead of "try again in
-a minute". A layer is a copy of a zone inside one realm: when the census places him on another
-realm than yours, the line says that, even if his layer reaches your channel. The `king:` line
-of `/oly status` (and of `/oly bug`) says what your addon knows of him: online and how sure,
-his realm, his layer and his crown, and how long ago each was heard.
+*Continued in the README: [Layer hop: join the King's layer without begging in chat](https://github.com/dnl-gentile/olympus-addon#layer-hop-join-the-kings-layer-without-begging-in-chat).*
 
 ### Person details
 Click any Lord, Captain, racer or inspected player. Their profile opens in the Olympus window, at
@@ -752,21 +735,41 @@ account, `/oly discord forget` drops this character's request and proof.
 Another addon can read, with your permission, what Olympus already shows you: the Wanted list
 and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
-title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
+title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
+show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
+and his zone's layers with their "~N with Olympus" counts while you are there). An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
-(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Olympus sends nothing for it and gives it no way to send anything for
-you, nor your location, the census, other players' private data or Olympus's keys; each addon
-gets its own copy, a limited number of calls at a time. What that addon then does with what it
-read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
-restarts (not on a `/reload`).
+(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
+send nothing. A compatible addon can also let an authorized player start a short exact-name
+last-seen search, maintain a bounded set of exact-name searches while a visible tool session the
+player started remains on, or start a five-minute hostile-area search for one selected zone or
+micro-map, which may be widened to labelled not-hostile players outside Olympus guilds (or with
+none), never the observer's group. Its visible Start declares selected/configured names and any included list source. A
+handle has one area at a time: current map or an owned exact-result map until its row expires, then cancel
+and wait 60 seconds to rotate. Its UI shows map/position and Stop/Off; it never opens the map or
+resumes after No or `/reload` automatically. Olympus sends each exact **Name-Realm** sought, or the
+selected map ID, to the network.
+Members who separately enabled **Guild tools: player sightings** may answer privately from a
+current target, nameplate or mouseover observation or one their client kept only in memory after
+the game directly showed that player. While that permission and location sharing stay on, each
+client keeps at most 64 observations for up to 15 minutes, never saves them, and clears them on
+permission, location-sharing or network opt-out. Each observer can contribute at most six hostile
+observations to one area search and the requester keeps at most 48 distinct players. An exact-name
+answer gives that observer's name and guild; a public area row omits both. If WoW returns a native
+point for the visible unit, or the same identity as a party or raid unit, the result carries that
+target point. Otherwise it carries the observer's nearby encounter point, rounded to 0.1% of the
+map. The kind, observation time, expiry and layer are labelled, so this is last-seen information,
+not continuous tracking. Requests and answers expire, and turning either permission off cancels or
+withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
+world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
+can also host one bounded profile presentation. A current signed issuer opens it; an admitted
+member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
+and **No** closes that addon's state. Olympus
+never gives another addon the census, other players' private data or Olympus's keys; each addon gets
+its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
+you trust. After the update it loads once the game restarts (not on a `/reload`).
 
-The same registered handle can ask to contribute a client-owned page to the Olympus window when
-this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
-addons' data handles still work if that slot is occupied. Olympus keeps the window shell and puts
-the page in a fixed slot before Workshop; the addon builds and updates the content inside it. That
-page works while the data answer is pending or refused, and hosting it grants no Olympus data. Its
-behavior remains the responsibility of the addon that supplied it.
-For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
+*Continued in the README: [Other addons: the Olympus API (1.2.4)](https://github.com/dnl-gentile/olympus-addon#other-addons-the-olympus-api-124).*
 
 ## Install
 

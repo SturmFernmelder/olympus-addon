@@ -1626,13 +1626,39 @@ account, `/oly discord forget` drops this character's request and proof.
 Another addon can read, with your permission, what Olympus already shows you: the Wanted list
 and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
-title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
+title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
+show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
+and his zone's layers with their "~N with Olympus" counts while you are there). An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
-(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Olympus sends nothing for it and gives it no way to send anything for
-you, nor your location, the census, other players' private data or Olympus's keys; each addon
-gets its own copy, a limited number of calls at a time. What that addon then does with what it
-read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
-restarts (not on a `/reload`).
+(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
+send nothing. A compatible addon can also let an authorized player start a short exact-name
+last-seen search, maintain a bounded set of exact-name searches while a visible tool session the
+player started remains on, or start a five-minute hostile-area search for one selected zone or
+micro-map, which may be widened to labelled not-hostile players outside Olympus guilds (or with
+none), never the observer's group. Its visible Start declares selected/configured names and any included list source. A
+handle has one area at a time: current map or an owned exact-result map until its row expires, then cancel
+and wait 60 seconds to rotate. Its UI shows map/position and Stop/Off; it never opens the map or
+resumes after No or `/reload` automatically. Olympus sends each exact **Name-Realm** sought, or the
+selected map ID, to the network.
+Members who separately enabled **Guild tools: player sightings** may answer privately from a
+current target, nameplate or mouseover observation or one their client kept only in memory after
+the game directly showed that player. While that permission and location sharing stay on, each
+client keeps at most 64 observations for up to 15 minutes, never saves them, and clears them on
+permission, location-sharing or network opt-out. Each observer can contribute at most six hostile
+observations to one area search and the requester keeps at most 48 distinct players. An exact-name
+answer gives that observer's name and guild; a public area row omits both. If WoW returns a native
+point for the visible unit, or the same identity as a party or raid unit, the result carries that
+target point. Otherwise it carries the observer's nearby encounter point, rounded to 0.1% of the
+map. The kind, observation time, expiry and layer are labelled, so this is last-seen information,
+not continuous tracking. Requests and answers expire, and turning either permission off cancels or
+withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
+world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
+can also host one bounded profile presentation. A current signed issuer opens it; an admitted
+member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
+and **No** closes that addon's state. Olympus
+never gives another addon the census, other players' private data or Olympus's keys; each addon gets
+its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
+you trust. After the update it loads once the game restarts (not on a `/reload`).
 
 The same registered handle can ask to contribute a client-owned page to the Olympus window when
 this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
@@ -1793,6 +1819,7 @@ message (the game adds it). What goes where:
 | The crafting fees owed (1.2): each fee's seller and buyer, price, fee, gold paid, deadline, item, quantity and the seller's guild, who reported it and whether the Treasurer confirmed it | the King's character alone (whispers from the Treasurer's character) | at his ask, when he opens the Guild fees page or asks again: once each 5 minutes at most, 40 fees an answer |
 | A reminder of a crafting fee owed (1.2): the amount and the deadline | that seller alone (a whisper from the Treasurer's or the King's character) | when they press Remind him, once a day per seller at most |
 | Other players' lines in the Olympus chats as your addon accepted them (channel, sender and text; [Captains] and [Lords] only if your rank reads them), and the High Council list | other addons in your own game, through `OlympusBridge` (made for OfficerSpy, the moderators' companion addon, but any addon you install can read it) | always, while such an addon is loaded (no chat line while the Olympus chats are off on your client): Olympus sends nothing through it and never learns what that addon does with what it read |
+| A requested player sighting (PS, 1.2.5): an exact query carries one Name-Realm; a hostile-area query carries one selected zone or micro-map ID and lasts five minutes. Both use a short opaque request id. Exact answers carry the consenting observer's name and guild; public area rows omit both. Every answer carries target, observation time, expiry, layer, point kind and map position. The point is the target's native visible-unit or matching party/raid-unit position when WoW returns one; otherwise it is the observer's encounter position, rounded to 0.1% of the map | the query: everyone on the Olympus channel, only from a currently signed authorized requester; each answer: that requester alone (a whisper). One observer contributes at most six rows to an area search and the requester keeps at most 48 distinct players. On an explicit action Olympus can show sanitized rows as host-owned world-map pins, cleared on cancel, expiry, permission revocation or reload | only after the requester's addon permission is enabled by its own **Yes** or the page's deliberate **Authorize all** action; an observer answers only after the separate **Guild tools: player sightings** permission is enabled the same way and while sharing location. The exact-name session's visible Start declares selected/configured names and any included list source. One handle has one live area, on its current map or an owned exact-result map until its row expires, and rotates only after cancel plus 60 seconds. Its visible UI shows the map and rotation position, never opens the world map automatically, and stops on Off, No or reload without automatic resume. The game must have shown the exact or hostile target, mouseover or nameplate either now or within the last 15 minutes while both choices stayed on. Each client keeps at most 64 such observations only in memory and clears them on permission, location-sharing or network opt-out. A live answer rechecks the visible identity and coordinate before send; a cached answer rechecks its age and fields plus current eligibility. Requests and results expire; cancellation, either No and net-off cancel queued data and withdraw or discard live results |
 | Olympus Link (1.0.0): a request (your guild, faction, a random number, your code's id and a tag made from your code's signature and your name) | the confirmers asked (a whisper each): a High Councillor, or verified players drawn for your code | only after you press **Accept** on `/oly discord <code>` |
 | Olympus Link: the finished proof (your character name, realm, guild, faction, the tag, and the confirmers' names, how each knew your guild, their signatures and their keys' certificates) | the Olympus bot, through the page you scan it with, or a watcher (a High Councillor, by whisper) who hands it to the bot | when it is ready, until it is delivered (5 days after your code expired at most) |
 | Olympus Link, if you confirm (a key and its certificate from the bot's keeper, High Councillors' too): your proof for another player's request (its time, your key's id, how you know their guild, your signature), and in their finished proof your character's name and your key's certificate | that player alone (a whisper), then the Olympus bot in their finished proof | by itself, without asking you each time, once the bot is ready: only for players of an Olympus guild of your faction, never your own account's characters, one a minute and five a day per character, thirty a minute in all, until `/oly discord key off` |
@@ -1810,8 +1837,8 @@ position on the map).
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll
 calls, the Olympus chats, an officer's patrol findings to his guild's officers, your crafter
-listing (and with it your addon's answers to who can make it), another addon's reading through the Olympus API (1.2.4: each
-addon its own Yes; Olympus sends nothing for it, and what it does with what it read is its own) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
+listing (and with it your addon's answers to who can make it), another addon's use of the Olympus API (1.2.4: each
+addon its own Yes or the page's deliberate **Authorize all**; ordinary reads send nothing; an authorized exact-name search sends the Name-Realm, while a five-minute hostile-area search sends one selected map ID; a visible Start declares selected/configured names and included list sources; one live area uses the current or an owned exact-result map until its row expires, cancels before a 60-second rotation, stays visibly stoppable and never auto-resumes or opens the map; both receive only opted-in observers' private, expiring last-seen reports labelled as a native target point or observer encounter point; an area row omits observer identity and guild, with at most six rows from one observer and 48 distinct players at the requester; the same permission may let a current signed issuer open the bounded host-owned profile-presentation session and an admitted member enable its single fixed style on themself; it never accepts a target, asset path or arbitrary message; what the addon does with its bounded copies is its own; it may also read the King's presence as his lines and the Realm tab show it, and widen an area search to labelled not-hostile players outside Olympus guilds and the observer's group), **Guild tools: player sightings** (a separate permission enabled by its own Yes or **Authorize all**; while it and location sharing stay on, up to 64 direct observations may remain only in memory for up to 15 minutes; the same permission also permits bounded hostile-area answers on a selected map and, for a wider search, labelled not-hostile players outside Olympus guilds and your group) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
 bot's keeper made them) wait for your yes. The rest of the table goes out while you are in an
 Olympus guild, with no question first: your guild's census (from the member it elects, with the
 names above), the hello, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks
@@ -1825,7 +1852,21 @@ its own says in plain words what always goes out (the census, with the names it 
 hello) and asks **Yes** or **No** for
 each of the rest: your zone and layer, layer help, your book of the treasury (keepers only), the
 Royal Inspection, the author's roll call, the Olympus chats and your patrols' findings to your
-guild's officers (officers only). Each one stays off until its Yes.
+guild's officers (officers only). Each one stays off until its Yes or the page's deliberate
+**Authorize all** action.
+The separate **Guild tools: player sightings** line also stays off until its own Yes or
+**Authorize all**. It can answer a short authorized request for an exact player the
+game directly shows or showed recently, or an explicitly started five-minute hostile-area session
+for one selected map, while your location sharing and that permission stay on. The requester must
+declare selected/configured names and included list sources in its visible Start control; one live
+area uses the current or an owned exact-result map until its row expires, rotates only after cancel and 60 seconds, shows
+its map/position without opening the world map, and stops on Off, No or reload. It keeps at most 64 such
+observations only in memory for up to 15 minutes and clears them on either No, location-sharing off
+or network opt-out. In an area session one observer sends at most six hostile-player rows and the
+requester keeps at most 48 distinct players; the public area copy omits the observer's identity and guild. Its line
+explains the selected map broadcast, native target point when WoW supplies one, observer
+encounter-point fallback, every field and recipient, and that results are last-seen rather than
+continuous tracking.
 No on the chats means this client neither sends nor shows [Olympus], [Captains] or [Lords]. The
 window, the census and your own guild's roster work whatever you answer, location included.
 `/oly privacy` opens the page again, and each answer has its own command too (`/oly location`,

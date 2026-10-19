@@ -46,6 +46,12 @@ M.CUTS = {
 	{ title = "Loot notes (1.1)", keep = 1 },
 	-- (1.2.4: the role rooms' list and its rules are the README's; its opening stays.)
 	{ title = "Role rooms (1.2.4)", keep = 1 },
+	-- (1.2.5: the hostile-area API disclosure pushed the store page past its editor budget; keep
+	-- layer hop's complete player flow here and leave its discovery/security detail in the README.)
+	{ title = "Layer hop: join the King's layer without begging in chat", keep = 4 },
+	-- (1.2.5: the API's leader presence and wider area scope pushed it past the budget again: the
+	-- API's opening paragraph stays; its page-surface paragraph and the authors' link are the README's.)
+	{ title = "Other addons: the Olympus API (1.2.4)", keep = 1 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it. (1.2.4: the

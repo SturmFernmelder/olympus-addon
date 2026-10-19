@@ -108,7 +108,7 @@ Moderation.EXILE_MAX_KEPT = 50    -- timed words kept, one per guild
 -- census report: Comm.Broadcast.) The guild's own hello and key over GUILD go on, but (1.1.6) not
 -- a guild master's Vox question to his guild nor its results (Y3, as the Throne's T1~V and T1~E
 -- in HIDDEN_CALLS).
-Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR = true, LN = true, LX = true, LY = true, Y1 = true, Y2 = true, G1 = true,
+Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR = true, LN = true, LX = true, LY = true, PS = true, Y1 = true, Y2 = true, G1 = true,
 	Y3 = true,
 	W1 = true, WA = true, WL = true,
 	-- A removed client neither asks for nor relays signed write authority. Existing clients still
@@ -123,7 +123,10 @@ Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR
 	-- Never a player's own obligations (AW, ZX, ZR, ZT, ZF, KD): a net-off player's result, debt
 	-- marks and receipts still go out, and receivers ignore a net-off witness's AW (Moderation.Hides).
 	EC = true, BS = true, ZD = true, AS = true, AP = true, IL = true, KI = true, KO = true, KN = true, KS = true,
-	AM = true }
+	AM = true,
+	-- A temporary, self-owned profile presentation is never announced while this character or
+	-- guild is held back. Receivers independently apply the same moderation boundary.
+	FX = true }
 
 Moderation.random = math.random -- tests
 
@@ -1626,12 +1629,35 @@ local function HiddenCall(msg)
 	if msg:find("^T1~D~%d+~[^~]*~0~") then return false end
 	return msg:sub(1, 3) == "T1~" and type(K) == "table" and type(K.HIDDEN_CALLS) == "table" and K.HIDDEN_CALLS[msg:sub(4, 4)] == true
 end
+
+-- A player-sighting cleanup packet carries no coordinate. It may leave after this client turns its
+-- network participation off so accepted remote state is cancelled or withdrawn immediately. Keep
+-- this exception as strict as PlayerSightings's wire parser: C/X/W carry one canonical Name-Realm;
+-- D carries the positive integer map of the accepted area request. Queries and answers never pass.
+local function PlayerSightingCleanup(msg)
+	local mode, id, value = msg:match("^PS~([CDXW])~1~(%d+)~([^~]+)$")
+	if not mode then return false end
+	id = tonumber(id)
+	if not id or id ~= math.floor(id) or id < 1 or id > 99999 then return false end
+	if mode == "D" then
+		local mapID = tonumber(value)
+		return mapID ~= nil and mapID == math.floor(mapID) and mapID >= 1 and mapID <= 9999999
+	end
+	if #value > 96 or value:find("[|%c]") or value:match("^%s") or value:match("%s$") then return false end
+	local name, realm = value:match("^([^%-]+)%-([^%-]+)$")
+	return name ~= nil and realm ~= nil and not name:find("  ", 1, true)
+		and name:match("^[%a\128-\255][%a\128-\255 ]*$") ~= nil
+		and realm:match("^[%w\128-\255]+$") ~= nil
+end
 function Moderation.Blocks(msg)
 	if type(msg) ~= "string" or msg:sub(3, 3) ~= "~" then return false end
 	-- A private LY withdrawal carries no location: it only invalidates this sender's answer to
 	-- one still-active discovery request. Let it leave after a local opt-out/net-off, as the
 	-- week lets a setter withdraw their own entry, so already delivered evidence fails closed.
 	if msg:match("^LY~X~1~%d+~%d+$") then return false end
+	-- Player-sighting C/D/X/W cleanup packets likewise carry no position: after permission or network
+	-- access is removed they may only cancel an accepted request or withdraw a prior answer.
+	if PlayerSightingCleanup(msg) then return false end
 	if not Moderation.BLOCKED[msg:sub(1, 2)] and not HiddenCall(msg) then return false end
 	if not Moderation.SelfOff() then return false end
 	stats.blocked = stats.blocked + 1

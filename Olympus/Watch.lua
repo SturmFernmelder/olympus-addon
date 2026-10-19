@@ -2502,6 +2502,7 @@ local function Sections()
 	local desk = Watch.DeskShown()
 	local list = { desk = desk, reports = desk, cases = desk, case = desk,
 		judgments = Watch.JudgmentsShown(), justice = ns.JusticeTasks and ns.JusticeTasks.Visible(), chat = ChatShown(), tabards = Watch.TabardsShown(), member = Watch.MemberShown() }
+	list.profile = Watch.CanRead()
 	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards" or list.member and "member" or "desk"
 	return list
 end
@@ -2530,14 +2531,28 @@ end
 function Watch.PageId()
 	local section = Section()
 	if section == "case" then return "case:" .. tostring(Watch.caseKey or "") end
+	if section == "profile" then return "profile:" .. tostring(Watch.profileKey or "") end
 	return section
 end
 
 function Watch.Show(mode, key)
 	Watch.mode = (mode == "reports" or mode == "cases" or mode == "case" or mode == "tabards" or mode == "judgments"
-		or mode == "chat" or mode == "member" or mode == "justice") and mode or nil
+		or mode == "chat" or mode == "member" or mode == "justice" or mode == "profile") and mode or nil
 	Watch.caseKey = Watch.mode == "case" and key or nil
+	Watch.profileKey = Watch.mode == "profile" and key or nil
 	ns.Fire("WATCH_CHANGED")
+end
+
+-- Opens the host-owned, access-controlled record for one named character.  The
+-- caller receives only a success/failure result; every record, audit row and
+-- retained chat line remains inside The Watch and is filtered there exactly as
+-- it is on the normal Watch pages.
+function Watch.OpenMember(name)
+	if not Watch.CanRead() then return false, "access" end
+	local target = Character(name, true)
+	if not target then return false, "name" end
+	Watch.Show("profile", target)
+	return true
 end
 
 local function LinesGot(r)
@@ -3220,7 +3235,84 @@ local function MemberLines()
 	return lines
 end
 
+-- One named member's host-owned context. Integrations can open this page, but they never
+-- receive its records or retained words: the same Watch authorization and display filters
+-- used by the native pages remain the only path to the data.
+local function ProfileLines()
+	local target = Character(Watch.profileKey, true)
+	local shown = target and (ns.DisplayName(target) or target) or "?"
+	local lines = { Nav(), { header = true, text = L.WATCH_PROFILE_TITLE:format(shown) } }
+	if not target or not Watch.CanRead() then
+		lines[#lines + 1] = { id = "watch-profile-no-access", text = Grey(L.WATCH_NO_ACCESS), wrap = true }
+		return lines
+	end
+
+	local record = Watch.Record(target)
+	if record then
+		lines[#lines + 1] = { id = "watch-profile-status",
+			text = L.WATCH_PROFILE_STATUS:format(StatusLabel(record), tonumber(record.warnings) or 0,
+				tonumber(record.interventions) or 0), wrap = true }
+		if (tonumber(record.lastAt) or 0) > 0 then
+			lines[#lines + 1] = { text = L.WATCH_LAST_ACTION:format(ShownBy(record.lastBy), ns.Ago(record.lastAt)) }
+			local reason = (ns.CouncilMasked and ns.CouncilMasked() and not ns.IsKingCharacter(record.lastBy))
+				and L.NETOFF_REASON_HIDDEN or Watch.FilterText(record.lastReason)
+			lines[#lines + 1] = { text = L.WATCH_REASON:format(reason ~= "" and reason or "-"), wrap = true }
+		end
+	else
+		lines[#lines + 1] = { id = "watch-profile-no-record", text = Grey(L.WATCH_PROFILE_NO_RECORD), wrap = true }
+	end
+
+	local WC = ns.WatchChat
+	local sanction = WC and not WC.missing and WC.Sanction and WC.Sanction(target)
+	if sanction then
+		local restriction = WC.BarredText and WC.BarredText(sanction) or L.WATCH_MEMBER_RESTRICTED
+		lines[#lines + 1] = { id = "watch-profile-restriction", text = Red(L.WATCH_PROFILE_ACTIVE:format(restriction)),
+			wrap = true }
+	end
+	lines[#lines].gapAfter = true
+
+	local audit = {}
+	for _, entry in ipairs(Watch.Audit()) do
+		if Same(entry.name, target) then audit[#audit + 1] = entry end
+		if #audit >= 10 then break end
+	end
+	lines[#lines + 1] = { id = "watch-profile-audit", header = true, text = L.WATCH_PROFILE_AUDIT,
+		right = Grey(tostring(#audit)) }
+	if #audit == 0 then
+		lines[#lines + 1] = { text = Grey(L.WATCH_PROFILE_AUDIT_EMPTY), wrap = true }
+	else
+		for _, entry in ipairs(audit) do
+			local label = entry.op == "W" and L.WATCH_ACTION_WARN or entry.op == "V" and L.WATCH_ACTION_WATCH
+				or entry.op == "B" and L.WATCH_ACTION_BAN or CHAT_OPS[entry.op] and L["WATCHCHAT_OP_" .. entry.op]
+				or L.WATCH_ACTION_CLEAR
+			lines[#lines + 1] = { indent = 1, text = label:format(shown), right = Grey(ns.Ago(entry.at)),
+				tooltip = function(tt)
+					tt:AddLine(label:format(shown), 1, 0.82, 0)
+					if entry.via then tt:AddLine(L.WATCH_RECOVERED_VIA:format(ShownBy(entry.via)), 0.7, 0.7, 0.7)
+					else tt:AddLine(L.WATCH_BY:format(ShownBy(entry.by)), 0.7, 0.7, 0.7) end
+					if entry.reason ~= "" then tt:AddLine(L.WATCH_REASON:format(ShownReason(entry)), 1, 1, 1, true) end
+				end }
+		end
+	end
+	lines[#lines].gapAfter = true
+
+	local evidence = Watch.Evidence(target)
+	lines[#lines + 1] = { id = "watch-profile-messages", header = true, text = L.WATCH_PROFILE_MESSAGES,
+		right = Grey(tostring(#evidence)) }
+	if #evidence == 0 then
+		lines[#lines + 1] = { text = Grey(L.WATCH_PROFILE_MESSAGES_EMPTY), wrap = true }
+	else
+		for i = #evidence, math.max(1, #evidence - 9), -1 do
+			local entry = evidence[i]
+			lines[#lines + 1] = { indent = 1, text = Watch.FilterText(ns.Cut(entry.text, 140)), wrap = true,
+				right = Grey(ns.Ago(entry.at)) }
+		end
+	end
+	return lines
+end
+
 function Watch.Build()
+	if Section() == "profile" then return ProfileLines(), L.TAB_WATCH, L.WATCH_PROFILE_DETAIL end
 	if Section() == "member" then return MemberLines(), L.TAB_WATCH, L.WATCH_MEMBER_DETAIL end
 	if Section() == "justice" and ns.JusticeTasks and ns.JusticeTasks.Visible() then
 		local lines = { Nav() }
@@ -3465,7 +3557,7 @@ function Watch.ResetForTests()
 	wipe(councilHeard); wipe(councilAnswered)
 	councilAsk.lease, councilAsk.at, councilAsk.got = nil, -math.huge, 0
 	lastFlush = -math.huge
-	Watch.mode, Watch.caseKey = nil, nil
+	Watch.mode, Watch.caseKey, Watch.profileKey = nil, nil, nil
 	if cardFrame then cardFrame:Hide() end
 	cardFrame = nil
 	wipe(syncAsked); wipe(syncIncoming); wipe(syncOutgoing); wipe(syncRates); wipe(mwRates)

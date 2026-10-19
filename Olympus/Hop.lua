@@ -116,6 +116,8 @@ local function OnKingLayer(strict)
 	return (mine and type(S) == "table" and type(S.LocalKingLayer) == "function"
 		and S.LocalKingLayer(mine.mapID, mine.zoneUID)) and true or false
 end
+-- The same answer for the API's leader presence (API.lua), which reports the line "on the King's layer".
+function Hop.OnKingLayer(strict) return OnKingLayer(strict) end
 
 -- The short names of the others in our group.
 local function GroupNames()

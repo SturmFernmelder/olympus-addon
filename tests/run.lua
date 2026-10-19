@@ -7914,6 +7914,7 @@ test("layer hop: the King's layer line tops the Census and the Realm only while 
 		eq(#lines, 2); assert(lines[2].text:find(ns.L.HOP_KING_GO:format(H.ZoneName(1453)), 1, true), lines[2].text)
 		lines[1].onClick()
 		eq(#w.sent, 0, "not in his zone: nothing asked")
+		eq(H.OnKingLayer(true), false, "the API's answer (API.lua's leader presence) is the line's: not on his layer")
 		w.map = 1453
 		eq(#H.KingLines(), 1, "in his zone: the button alone")
 		assert(H.KingLine().text:find("Ask invite for Asmon Layer", 1, true), H.KingLine().text)
@@ -7926,6 +7927,7 @@ test("layer hop: the King's layer line tops the Census and the Realm only while 
 		w.see(9)
 		line = H.KingLine()
 		assert(line.text:find(ns.L.HOP_KING_HERE:format("Asmon"), 1, true) and not line.onClick, line.text)
+		eq(H.OnKingLayer(true), true, "the API's answer is the line's: on his layer")
 		-- Offline: no line at all.
 		ns.rdb.guilds["Olympus"].leaderOnline = false
 		eq(H.KingLine(), nil, "not online: no line")
@@ -62349,9 +62351,9 @@ test("hop sighting mixed versions: a client without LY ignores the new word", fu
 end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "watch-council-view" }
-		or { "hop", "hop-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
+		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)

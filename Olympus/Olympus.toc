@@ -46,6 +46,7 @@ Locales\GuildFinanceText.lua
 Locales\RankingRulesText.lua
 Locales\PerfText.lua
 Locales\APIText.lua
+Locales\PlayerSightingsText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -126,12 +127,14 @@ TabardsV2.lua
 Letters.lua
 GuildFrame.lua
 Borders.lua
+ProfileEffects.lua
 Nameplates.lua
 ChatWindow.lua
 WatchChat.lua
 OfficerMuster.lua
 Bridge.lua
 Wanted.lua
+PlayerSightings.lua
 API.lua
 ArenaMath.lua
 Compliance.lua

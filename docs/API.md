@@ -4,16 +4,22 @@ Olympus 1.2.4 lets other addons read, with the player's permission, what Olympus
 that player on its own pages. An addon can also contribute one page to the Olympus window without
 copying its shell. This page is the whole contract of version 1 (`OlympusAPI.VERSION`).
 
-- **Read-only data.** No data function sends a chat line, a decree, a whisper or any addon message
-  for the player, and none changes anything in Olympus.
+- **Read-only data.** The ordinary data functions send no chat line, decree, whisper or addon
+  message and change nothing in Olympus. The optional, separately identified network capabilities
+  are the exceptions: an authorized operator may explicitly start or stop a short, request-bound
+  exact-name search, explicitly start a visible session that rotates a bounded set of names the
+  player chose/configured or a list source the control declares, run one five-minute hostile-area
+  search at a time under the map/cadence rules below, or open the bounded host-owned
+  profile-presentation session described below.
 - **Only what the player already sees, at no more detail.** The Wanted list and its bounties, the
-  public rankings, the player's own frame and title, and his own Olympus guild, rank and role.
-- **One permission per addon's data.** Your addon calls `OlympusAPI.Register`, the player answers
-  **Yes** or **No** for it on Olympus's privacy page, and no data comes back before a Yes.
+  public rankings, the player's own frame and title, his own Olympus guild, rank and role, and the
+  leader's presence as the leader lines, the leader's map crown and the Realm tab's layer list show it.
+- **One permission per addon.** Your addon calls `OlympusAPI.Register`, the player answers **Yes**
+  or **No** for it on Olympus's privacy page, and no data comes back, search starts or presentation
+  is enabled before a Yes. The line describes the reads and optional bounded network actions.
 - **One shared client-owned page.** A registered handle may claim the one client-owned slot in
   Olympus's tab rail. Olympus owns the window shell; your addon owns that page's frames and
-  callbacks. Hosting the page grants no data access and works while the data answer is pending or
-  refused.
+  callbacks. Hosting the page grants no data access. It works while the answer is pending or refused.
 - **Copies.** Every table you get is built for that call. Changing it changes only your copy.
 - **Pushed, not polled.** Callbacks tell you when something changed.
 
@@ -50,6 +56,35 @@ if api:Status() == "granted" then
 end
 ```
 
+An authorized guild-tools UI can feature-detect a short, consented last-seen search. It must render
+the returned `kind` honestly: a native map or converted world target point for `exact-unit` or
+`exact-group`, and the
+observer's encounter point for `nearby`. None of them is continuous tracking:
+
+```lua
+if OlympusAPI.Has("network.sightings") then
+	api:On("SIGHTING_CHANGED", function(_, search)
+		-- Refresh your own search UI. search.sightings are session-only copies.
+	end)
+
+	-- Call from the player's explicit Start action, or from a visible bounded session
+	-- the player explicitly started. Its control must declare every configured list source.
+	local search, reason = api:StartPlayerSearch("Example-Realm")
+
+	-- That visible session may run one five-minute area search at a time on the current
+	-- map, then rotate no faster than once a minute to an owned exact-result map
+	-- until that result expires, even if its exact-name request was rotated out.
+	local area, areaReason = api:StartAreaSearch(84)
+
+	-- Where this build supports it, a later area search (after cancelling this one and
+	-- waiting out the rotation interval) may also include not-hostile players outside
+	-- Olympus guilds. Label each returned row by its hostile field.
+	if OlympusAPI.Has("network.sightings.area-scope") then
+		-- api:StartAreaSearch(84, "outsiders")
+	end
+end
+```
+
 If your addon has a page of its own, register it through the same handle. This is independent of
 the player's data answer:
 
@@ -77,8 +112,10 @@ starts, not on a `/reload`. Always check for it.
 
 `OlympusAPI.Register("MyAddon")` adds a line for your addon to Olympus's privacy page (the page
 `/oly privacy` opens). The line shows your TOC's `## Title` (colour and texture codes removed) and
-says, in Olympus's own words, what a Yes lets your addon read. The page opens by itself once for a
-new line, outside combat and instances, while the player is in an Olympus guild; the player can
+says, in Olympus's own words, what a Yes lets your addon read and, where the signed role permits,
+which exact-name request, visible name-rotation session, five-minute hostile-area search or bounded
+host-owned profile presentation it may start. The page opens by itself once for a new line, outside combat and instances,
+while the player is in an Olympus guild; the player can
 answer there at any time, and change the answer whenever he likes.
 
 - `"pending"`: never answered. Your calls return nothing.
@@ -87,10 +124,33 @@ answer there at any time, and change the answer whenever he likes.
 
 The page's **Authorize all** button deliberately answers every visible pending line, including an
 addon's; **Keep current choices** closes without granting it. Each addon also has its own Yes and
-No. The answer is kept for the player's account and stays
-across sessions. When a later API version gives more than version 1 does, every addon's line is
-asked again. This answer gates only the data methods and their data events. A registered UI surface
-works while the answer is pending or refused and receives no data from Olympus by doing so.
+No. The answer is kept for the player's account and stays across sessions. When a later permission
+contract gives more, every addon's line is asked again. This answer gates the data methods, their
+events and starting an exact-name search, bounded rotation, hostile-area search or profile
+presentation. Cancelling a search, stopping a profile session and disabling that handle's own
+presentation do not require a grant because they can only remove state. Changing the answer to No
+first cancels and forgets every search owned by that handle, closes its profile session and disables
+its effect. A later Yes does not resume a stopped exact-name or area session: the player must use
+the visible Start action again. A registered UI surface works while the answer is pending or
+refused and receives no data from Olympus by doing so.
+
+Participating observers have a separate Olympus-owned, explicit setting named **Guild tools:
+player sightings**. It defaults off until the player chooses its own Yes or the privacy page's
+deliberate **Authorize all** action. A requester cannot turn it on for anyone. While both this
+permission and location sharing stay on, the client can keep at most
+64 exact Name-Realm observations, captured only when the game directly presents that player through
+a target, nameplate or mouseover, in memory for up to 15 minutes. A current or later authorized
+request can receive that recent last-seen record. It is never written to saved variables and is
+cleared when this permission, location sharing or network participation is turned off. Turning either
+permission off also cancels queued reports and withdraws live results. An observer's answer still
+goes only to the verified requester through Olympus. An explicitly started hostile-area search
+broadcasts its selected map ID for five minutes. Each participating client may return at
+most six recent or new hostile-player observations actually exposed by target, nameplate or
+mouseover on that map, and the requester keeps at most 48 rows. The area copy always omits the
+observer's name and guild. A wider area search (scope `"outsiders"`) may also receive players the
+observer's game shows as not hostile whose guild, as that client reads it, is not an Olympus guild,
+or who have no guild; never the observer, the observer's group or an Olympus guild's player. Each
+such row is labelled `hostile = false` and counts toward the same limits.
 
 ## Reference
 
@@ -114,6 +174,11 @@ separate from the 16 addons that may register data handles.
 | `"rankings"` | `handle:GetRankings()` |
 | `"rankings.slayers"`, `"rankings.donors"`, `"rankings.church"`, `"rankings.games"` | that kind of ranking (a build without the games has no `"rankings.games"`) |
 | `"profile"` | `handle:GetProfile()` |
+| `"leader"` | `handle:GetLeaderPresence()` and `LEADER_CHANGED` |
+| `"network.sightings"` | request-bound exact-name and hostile-area searches through `StartPlayerSearch`, `StartAreaSearch`, their cancel/get methods, and explicit host-owned area map pins |
+| `"network.sightings.area-scope"` | `handle:StartAreaSearch(mapID, scope)` accepts `"outsiders"` as well as `"hostile"` |
+| `"network.profile-effects"` | one bounded host-owned profile-presentation session through `StartProfileSession`, `StopProfileSession`, `SetProfileEffect` and `GetProfileSession` |
+| `"ui.guild-tools"` | `handle:OpenGuildTools([section[, target]])`, which opens an authorized section of Olympus's own Watch workspace without returning its records |
 | `"callbacks"`, and each event's name | `handle:On(...)` |
 | `"ui.surface"` | one page through `handle:RegisterSurface(...)` and its lifecycle methods |
 
@@ -140,6 +205,248 @@ read-only tables. Every method works with `handle:Method(...)` and `handle.Metho
 ### `handle:Name()`
 
 The name you registered.
+
+### `handle:StartPlayerSearch(name)`
+
+Starts one short request-bound sighting search and returns its initial session, or `nil` and a
+reason. This is available only when `OlympusAPI.Has("network.sightings")`, after that addon's
+permission is granted by its own Yes or **Authorize all**,
+to a locally verified signed role allowed to operate guild tools. `name` must be one exact
+`Name-Realm`; Olympus does not run `/who`, inspect, target, invite, move, attack or otherwise act on
+that player. Call it only from an explicit Start action or while a visible, user-started session is
+rotating names the player selected or configured, or names from a list source that the same visible
+control declared before the click. Do not append a silent list source. A session must be off by
+default, remain visibly stoppable, stop on `/reload`, and cancel its current request when stopped.
+It must not start more than three searches per minute; cancel before rotating so it does not fill
+the three-active-search bound.
+
+The request is broadcast to the Olympus network. It contains the target name and an opaque request
+id; expiry is enforced locally by each client and is not sent as a wire field. A member can answer
+only if they independently opted into **Guild tools: player sightings** and share their own
+location. The answer comes from either a current direct target/nameplate/mouseover observation or a
+matching recent observation captured that way and kept only in the bounded memory cache described
+above. The private answer goes only to the verified issuer of that request. A live answer rechecks
+the same visible unit token, canonical name, GUID and coordinate when it leaves. A cached answer
+rechecks the immutable record's age and fields plus the observer's current consent, location-sharing
+and network eligibility; it never pretends the vanished unit was revalidated live.
+
+```lua
+{
+	id = "opaque request id",
+	target = "Example-Realm",
+	status = "searching", -- later complete; callbacks may also report cancelled or ended
+	createdAt = 1792000000,
+	expiresAt = 1792000600,
+	sightings = {
+		{
+			target = "Example-Realm",
+			observer = "Scout-Realm",
+			observerGuild = "Olympus Example",
+			seenAt = 1792000123,
+			receivedAt = 1792000125, -- when this requester accepted the private answer
+			expiresAt = 1792001023, -- result lifetime; do not alert or share at/after this time
+			mapID = 84,
+			x = 520, y = 375, -- 0..1000, rounded to 0.1% of the map
+			layer = 123,
+			kind = "exact-group", -- or "exact-unit" / "nearby"
+			accuracyYards = 0, -- optional; 0 marks a native unit point, not an estimated radius
+		},
+	},
+	observers = 1,
+	confirmed = false, -- true after two independently verified observers report it
+}
+```
+
+The exact optional fields may grow compatibly. `exact-unit` means WoW returned a map point directly,
+or a world position that the bundled supported map library could place on the observer's current
+map, for the visible target/mouseover/nameplate token. `exact-group` means the visible identity
+matched a real party/raid token by canonical name and GUID (and `UnitIsUnit` where available), and
+WoW returned that group token's map point or convertible world position. Conversion rejects another
+instance and out-of-map coordinates. Both carry `accuracyYards = 0`; this describes a native point rather
+than an estimated radius, not a guarantee that the player has stayed there. `nearby` is the
+observer's encounter point and deliberately omits `accuracyYards`, because the game exposes no
+honest yard radius for that fallback. Sessions and results are bounded, memory-only and expire;
+the observation cache is also memory-only, holds at most 64 names for at most 15 minutes and is
+cleared on consent, location-sharing or network opt-out. Consumers must not turn last-seen results
+into a permanent movement history. `receivedAt` and `expiresAt` are sanitized local timestamps from
+the requester's result. Consumers must stop alerts and sharing at or after `expiresAt`; an absent or
+invalid expiry must fail closed rather than make a result permanent.
+
+The consumer may maintain a bounded set of exact-name searches only while its visible,
+user-started tool session remains on. It must cancel a request before rotating it out, deduplicate
+repeated results, stop alerts when a result expires and stop every request when the session ends,
+the UI reloads or permission is revoked. An API Yes alone does not start a search or session.
+
+### `handle:CancelPlayerSearch(id)`
+
+Stops a request that this same handle started. It broadcasts the cancellation, cancels queued
+answers and withdraws its live results. Returns `true`, or `false` and `"unknown"`, `"unavailable"`
+or a transport/state reason. The call itself needs no read grant, but after a No has already
+cancelled and forgotten the request, a later call for that id returns `"unknown"`.
+
+### `handle:GetPlayerSearch(id)` and `handle:GetPlayerSearches()`
+
+Return a fresh copy of one request owned by this handle, or every live request it owns, after the
+same permission and guild checks as the other reads. A handle cannot read or cancel a request
+started by another addon. `GetPlayerSearch` returns `nil, "unknown"` for an id it does not own.
+
+### `handle:StartAreaSearch(mapID[, scope])`
+
+Starts one bounded area last-seen session and returns its initial snapshot, or `nil` and a
+reason. `handle:StartAreaSearch(mapID)` is the original hostile-area search, the same as scope
+`"hostile"`: players the observer's game reports as attackable or enemy. Scope `"outsiders"`, when
+`OlympusAPI.Has("network.sightings.area-scope")`, also covers players the observer's game reports
+as not hostile when the guild that client reads for them (`GetGuildInfo` for the observed player) is not
+an Olympus guild, or they have none. It never covers the observer, a member of the observer's party
+or raid, or a player in an Olympus guild. Any other scope returns `nil, "scope"`. `mapID` must be the explicit positive UI map ID of a zone or micro-map; it is not a player
+name, an anchor name or an instruction to guess the current map. The host accepts only the
+player's current map at the time of the call, or a map from an unexpired `exact-unit` or
+`exact-group` result obtained by an exact-name search that this same handle owned. Cancelling or
+rotating that exact-name request retains only this target/kind/map proof until the result's own
+`expiresAt`; it does not extend the result or expose it as a live search. A `nearby` encounter point,
+an expired result or another handle's result cannot authorize a map. Permission loss and `/reload` discard every retained proof.
+
+Call this only while a visible session the player explicitly started remains on. One handle may
+have only one live area search, and successful area starts must be at least 60 seconds apart. Cancel
+the current area before rotating. The visible UI must show the selected map (ID or an honest map
+label) and its position in the rotation, keep Stop/Off accessible, and never open the world map automatically.
+Only a separate explicit `ShowAreaSearchOnMap` action may do that. Turning the
+visible session off, losing permission or `/reload` ends it; neither a later permission grant nor a
+saved preference may resume it without a new Start action. Passive configured names and declared
+list sources may be remembered, but running state may not. The selected map ID is broadcast to the
+Olympus network, and each area request ends after five minutes or on cancellation/network opt-out.
+
+An observer participates only after the separate **Guild tools: player sightings** permission is
+granted by its own Yes or **Authorize all**, and while sharing location. Its client can answer only
+for a hostile player that WoW actually exposed as a
+current target, mouseover or nameplate, or for a recent observation captured through one of those
+tokens while both permissions remained on. This does not enumerate a zone and does not locate a
+player that no participating client saw. Each observer contributes at most six distinct rows;
+pending plus sent rows count together. The requester aggregates at most 48 target rows. The same
+15-minute, 64-name, memory-only observation cache and exact/native-versus-nearby semantics described
+for exact-name searches apply.
+
+The wider scope travels as a second, separate channel message after the area query. An observer on a
+build before it ignores that message and keeps answering only hostile rows; a query without it stays
+hostile on every build. A not-hostile row is accepted only for an `"outsiders"` request. Each
+observer's six-row cap and the requester's 48-row cap are shared by both kinds of row.
+
+The returned area shape deliberately omits observer identity and guild:
+
+```lua
+{
+	id = "opaque request id",
+	mode = "area",
+	scope = "hostile", -- or "outsiders", as requested
+	mapID = 84,
+	status = "searching",
+	createdAt = 1792000000,
+	expiresAt = 1792000300,
+	sightings = {
+		{
+			target = "Example-Realm",
+			seenAt = 1792000123,
+			receivedAt = 1792000125, -- optional
+			expiresAt = 1792001023,
+			mapID = 84,
+			x = 520, y = 375,
+			layer = 123,
+			kind = "nearby", -- or "exact-unit" / "exact-group"
+			-- accuracyYards = 0 only for a native exact point
+			hostile = true, -- false only in an "outsiders" search: label it as not hostile
+		},
+	},
+}
+```
+
+`nearby` remains the observing member's encounter position, not the target's exact position and
+not a claimed radius. The row does not contain `observer`, `observerGuild`, a GUID or another
+internal field. Consumers must present this as recent last-seen evidence and remove expired rows.
+
+### `handle:CancelAreaSearch(id)`
+
+Stops an area session that this same handle started, broadcasts its map-bound cancellation, forgets
+its rows and removes any host-owned pins for that handle. Returns `true`, or `false` and
+`"unknown"`, `"unavailable"` or a transport/state reason. Like exact cancellation, it needs no
+read grant because it can only reduce disclosure.
+
+### `handle:GetAreaSearch(id)` and `handle:GetAreaSearches()`
+
+Return a fresh sanitized copy of one owned area session, or every live area session this handle
+owns, after the same permission and guild checks as the other reads. Each copy reports the
+request's `scope`. They never return another
+addon's session. `GetAreaSearch` returns `nil, "unknown"` for a foreign, stale or wrong-mode id.
+
+### `handle:ShowAreaSearchOnMap(id)`
+
+On an explicit player action, shows the non-expired sanitized rows of this handle's live area
+session as host-owned world-map pins and focuses that selected map. It uses Olympus's bundled map
+compatibility path and native game artwork; it creates no minimap pin and exposes no observer
+metadata. Once shown, the pins refresh when that session changes even when the addon did not
+subscribe to `SIGHTING_CHANGED`. They are removed on cancellation, expiry/completion, permission
+revocation or UI reload. If the bundled compatibility check reports that world-map icon injection
+is unavailable, including on a client or gamepad UI that disables that path, the call returns
+`false, "unsupported"`; the sanitized area rows remain readable so the consumer can use a list or
+another non-map fallback instead of claiming pins were shown. Otherwise it returns `true`, or
+`false` and `"unknown"`, `"empty"`, `"ended"`, `"unavailable"` or `"failed"`.
+
+### `handle:ClearAreaSearchMap([id])`
+
+Removes this handle's host-owned area pins. With `id`, it clears only when that exact owned map view
+is active; without `id`, it idempotently clears this handle's current view. It cannot clear another
+addon's pins. Returns `true`, or `false, "unknown"` for a supplied id that is not the active view.
+
+### Profile-presentation session
+
+These methods exist only when `OlympusAPI.Has("network.profile-effects")` is true. Olympus owns the
+art, layout, transport, lifetime and target-frame rendering. The public contract accepts only a
+host-defined style identifier and the exact pre-approved caption for that style. It accepts no
+texture or atlas path, colour, coordinate, arbitrary message or target player. A presentation is
+self-only: each admitted member can announce it only for their own character while a current
+signed issuer's session remains live.
+
+`handle:StartProfileSession(style)` asks the host to open the short shared session and returns
+`true`, or `false` and a reason. Opening is restricted to a current signed issuer. The host renews
+the session every 10 seconds while eligible; a missed lease expires after about 32 seconds.
+Only one API owner can hold the local outgoing session at a time.
+
+`handle:StopProfileSession()` closes the session owned by this handle. It remains available after
+permission is refused because it can only remove that handle's state. It returns `true`, or `false`
+and a reason such as `"owner"` when another handle owns the active session.
+
+`handle:SetProfileEffect(style, enabled[, caption])` enables or disables this handle's self-only
+presentation. Enabling requires a live compatible session and the style's exact pre-approved
+caption; disabling ignores `caption` and remains available after permission is refused. It returns
+`true`, or `false` and a reason. It never assigns an effect to another player.
+
+`handle:GetProfileSession()` returns a fresh sanitized copy of the current session:
+
+```lua
+{ style = "shadow", expiresIn = 31.5 }
+```
+
+It never returns the issuer, grant identifier, caption, transport epoch or another internal field.
+With no live session it returns `nil, "none"`; the normal permission, guild and rate checks still
+apply. `expiresIn` is approximate and counts down, so do not poll it. Subscribe to
+`PROFILE_EFFECT_SESSION_CHANGED`; its payload is the same sanitized table when a session opens and
+`nil` when it closes or expires. Permission revocation closes and disables this handle's state
+before Olympus saves the No. All session and presentation state is memory-only and ends on UI
+reload or logout.
+
+### `handle:OpenGuildTools([section[, target]])`
+
+Opens Olympus's own Watch workspace. `section` is optional (`"desk"` by default) and may be
+`"desk"`, `"reports"`, `"cases"`, `"chat"`, `"justice"` or `"profile"`. `"profile"` requires
+an explicit character name in `target`; a full `Name-Realm` avoids ambiguity. Olympus calls
+`Watch.OpenMember(target)` so the Watch module still resolves the name and applies its own access
+control. The caller receives only success or failure: records, retained public messages and action
+history remain inside the host-owned Watch page.
+
+Olympus confirms the resulting page before selecting its own Watch tab. If name resolution, access,
+page selection or tab navigation fails, it restores the Watch page that was open before the call.
+The route works independently of the addon's data-sharing answer because it grants no data and no
+write primitive. Returns `true`, or `false` and `"section"`, `"target"`, `"name"`, `"guild"`,
+`"access"`, `"unavailable"`, `"failed"`, or a host-navigation reason.
 
 ### `handle:RegisterSurface(spec)`
 
@@ -272,6 +579,39 @@ words, or `nil`.
 Outside an Olympus guild it is `{ member = false }`, and `GetWanted` and `GetRankings` return
 `nil, "guild"`.
 
+### `handle:GetLeaderPresence()`
+
+The federation leader's presence (the King on Olympus's pages), built field by field from what this
+player's own Olympus pages show: the leader lines on the Census and Realm tabs, the leader's crown on
+the map, and the Realm tab's layer list. Available when `OlympusAPI.Has("leader")`; it needs the same
+permission, Olympus guild and rate checks as `GetWanted`.
+
+```lua
+{
+	name = "Leader", -- the name those lines give
+	online = true,
+	otherRealm = false,
+	realm = nil, -- the realm, only when otherRealm is true (the line names it)
+	mapID = 1453, mapName = "Stormwind City", -- the zone the lines name, else the crown's
+	position = { mapID = 1453, x = 420, y = 510, seenAt = 1792000123 }, -- the crown, 0..1000
+	onYourLayer = false, -- the line that says the player is on the leader's layer
+	layer = "Leader's layer", -- the name the Realm tab gives the leader's layer
+	layers = { -- only while the player is in that zone, as the Realm tab lists it
+		{ name = "Leader's layer", olympus = 12, yours = false, leader = true },
+		{ name = "Captain's layer", olympus = 4, yours = true, leader = false },
+	},
+}
+```
+
+Every field is `nil` rather than guessed. With nobody online it is `{ online = false }`; for the
+leader himself, `{ name, online = true, isYou = true }`. `position` exists only while the leader
+shares the crown and it has not expired (about 45 seconds after the last update). `layers` and
+`layer` exist only while the player is in the leader's zone on the same realm; `olympus` is the
+Realm tab's "~N with Olympus", a sample of Olympus clients that share their layer, not a population
+(the game exposes none). While Olympus hides locations from this player, only `name` and `online`
+remain. It never returns another member's name except as a layer name the Realm tab already shows,
+nor a population, the census or a movement history.
+
 ### `handle:On(event, fn)` and `handle:Off(event[, fn])`
 
 `On` adds a callback and returns `true` (`false` for an unknown event, a non-function, or past 4
@@ -283,6 +623,9 @@ without `fn`.
 | `WANTED_CHANGED` | `fn(event, rows)`: what `GetWanted()` returns | the Wanted list changed |
 | `RANKINGS_CHANGED` | `fn(event, rankings)`: what `GetRankings()` returns | a public ranking changed |
 | `PROFILE_CHANGED` | `fn(event, profile)`: what `GetProfile()` returns | the frame, title, guild, rank or role changed, or the player joined or left an Olympus guild |
+| `LEADER_CHANGED` | `fn(event, presence)`: what `GetLeaderPresence()` returns | the leader came online or left, the crown moved, appeared or expired, a layer count or name changed, or the player changed zone or layer |
+| `SIGHTING_CHANGED` | `fn(event, search)`: the current full owned exact-name or area search for non-terminal changes; cancellation or disappearance may be the terminal marker `{ id = id, status = "cancelled" or "ended" }` | after a start method has returned, its queued send completes, a result arrives or is withdrawn, or the search is cancelled or disappears |
+| `PROFILE_EFFECT_SESSION_CHANGED` | `fn(event, session)`: the sanitized `{ style, expiresIn }` returned by `GetProfileSession()`, or `nil` | a bounded host-owned session opens, closes or expires; heartbeat renewals do not produce callbacks |
 | `PERMISSION_CHANGED` | `fn(event, status)`: `"granted"` or `"refused"` | the player answered your line |
 
 - The data events come only while the player's answer is Yes (`WANTED_CHANGED` and
@@ -292,6 +635,13 @@ without `fn`.
   `PERMISSION_CHANGED` with `"granted"`), as the examples below do.
 - A burst of changes is told once, about 2 seconds after it, never in combat (it waits for the
   combat to end).
+- `SIGHTING_CHANGED` is scoped to opaque ids that this same handle started. Another registered
+  addon never receives or reads them. Each start method itself returns the initial snapshot;
+  initialize from that return rather than depending on the later queued-send transition to produce
+  a callback. Treat a terminal marker as an instruction to discard every previously copied result
+  for that id.
+- `PROFILE_EFFECT_SESSION_CHANGED` never includes the issuer, grant id, caption or transport
+  state. Read its argument directly; a `nil` argument means there is no live session.
 - Each callback gets its own copy, and its call never counts against the rate limit.
 - A callback that raises an error is caught: Olympus logs it with your addon's name, and Olympus and
   the other callbacks go on. A callback that fails 3 times is removed.
@@ -306,12 +656,36 @@ Every data method returns `nil` and a reason when it gives nothing:
 | `"guild"` | the player is in no Olympus guild |
 | `"busy"` | more than 20 data calls from your addon in 10 seconds: wait, or use the callbacks |
 | `"kind"` | `GetRankings` was given an unknown kind |
+| `"unavailable"` | this build does not provide the requested optional capability |
+| `"member"`, `"authority"` | the player is not a current member or their signed Olympus role cannot start that guild-tools request |
+| `"netoff"`, `"instance"` | network access is disabled for this player, or the player is currently in an instance |
+| `"transport"`, `"channel"` | the guarded addon transport or the Olympus channel is not ready |
+| `"target"` | the exact `Name-Realm` is malformed or names the requester |
+| `"scope"` | an area search was given a scope other than `"hostile"` or `"outsiders"`, or `"outsiders"` on a build without `"network.sightings.area-scope"` |
+| `"map"` | an area search was given a secret, unknown, non-zone/non-micro map, or a map that is neither current nor backed by this handle's fresh exact result |
+| `"active"`, `"cooldown"` | this handle already has a live area, or its previous successful area start was less than 60 seconds ago |
+| `"capacity"`, `"queue"` | the bounded sighting-session or send queue cannot accept the request |
+| `"unknown"` | that search id was not started by this handle |
+| `"unsupported"`, `"empty"`, `"ended"`, `"failed"` | an explicit area map view is unsupported, has no current rows, has ended, or its guarded draw failed |
+| `"none"` | no bounded profile-presentation session is live |
+| `"style"`, `"state"`, `"caption"` | an unknown host style, non-boolean enable state, or caption that is not the exact pre-approved text |
+| `"held"`, `"session"`, `"owner"` | the local moderation hold is active, no compatible profile session is live, or another API handle owns the local state |
 
 ## What it never gives
 
-The census of the guilds, other players' private data, a location (the Wanted page's victims and
-sightings stay on the page), the GUID of an Olympus member, the times of anyone's activity, the
-staff's views, or any secret: no key, no sealed channel name, no signature, no private list.
+The census of the guilds, other players' private data, the Wanted page's victims or stored
+sightings, a movement history, the GUID of an Olympus member merely because they are a member, the
+staff's views, or any secret: no key, no sealed channel name, no signature, no private list. The
+optional request-bound capability returns only a current or at-most-15-minute recent native
+last-seen result: a native observed or matching group-unit point where WoW exposes one, otherwise
+the consenting observer's encounter point, to the verified requester, then expires it. A hostile-
+area session is one selected map for five minutes, at most six rows per observer and 48 at the
+requester; its public rows omit the observer and guild. Its wider scope adds only not-hostile
+players outside Olympus guilds and the observer's group, each labelled. The leader presence gives
+only what the leader lines, the crown and the Realm tab's layers show, never a population. Area rotation is one live map per handle,
+at least 60 seconds between successful starts, and only the current map or an owned native exact
+result map until that result expires. Rotating its exact-name request does not extend or discard
+that result; permission loss and `/reload` do discard it.
 Each row is built field by field from the page's own data, so what Olympus adds to its own tables
 later never reaches your addon unless this contract adds it.
 
@@ -322,10 +696,16 @@ addon could read Olympus's saved variables directly. The API is the supported an
 in: it asks the player, gives your addon a stable contract, and keeps Olympus from handing out
 anything on its own. Please use it, and only for what the player said Yes to.
 
-Olympus's line on the privacy page tells the player that Olympus sends nothing for your addon and
-that what your addon does with what it read is up to your addon, so that he says Yes only to addons
-he trusts. Keep that trust: what he says Yes to is your addon reading, not it sending what it read
-to other players.
+Olympus's line on the privacy page tells the player exactly what may be read and that an authorized
+operator's exact search sends a target name, or an area search sends one selected map ID, and can
+receive private, expiring observer reports. It also explains the bounded memory-only
+recent-observation cache and that a consumer may maintain a bounded rotation only while its visible,
+user-started tool session remains on. A visible Start must declare selected/configured names and any
+included list source; the session must show its selected area and rotation position and provide
+Stop/Off. Everything else remains read-only. Keep that trust: never start a search or session
+without the player's action, silently add a list source, auto-resume after permission or reload,
+broaden its audience, keep it running after the visible session ends, or present a nearby encounter point as exact.
+Never persist a movement history.
 
 ## Examples
 

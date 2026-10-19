@@ -419,6 +419,64 @@ test("watch: tab is Treasury > The Watch > Throne and reuses Court and Moderatio
 	assert(ui:find('{ "COURT_BTN", function() ns.Court.Toggle()', 1, true), "Hold Court remains a Throne button")
 end)
 
+test("watch: an integration opens one authorized member review without receiving its private data", function()
+	WithWatch(function(w, W, c)
+		local target, other = "Target Person-Realm", "Other Person-Realm"
+		w.setRank(target, 3); w.setRank(other, 3); w.online(c.me, target, other)
+		assert(W.Mark(target, "review the target"))
+		assert(W.Warn(target, "target warning"))
+		assert(W.Mark(other, "must stay out of target page"))
+		w.chat.A = {
+			{ sender = target, t = w.epoch - 30, text = "target public words" },
+			{ sender = other, t = w.epoch - 20, text = "other public words" },
+		}
+		c.WatchChat = {
+			Sanction = function(name)
+				if c.Fold(c.FullName(name)) ~= c.Fold(target) then return nil end
+				return { kind = "timeout", entry = { reason = "current restriction" }, ends = w.epoch + 60 }
+			end,
+			BarredText = function() return "restricted for testing" end,
+		}
+
+		local ok, why = W.OpenMember(target)
+		eq(ok, true); eq(why, nil); eq(W.PageId(), "profile:" .. target)
+		local lines, title, detail = W.Build()
+		eq(title, ns.L.TAB_WATCH); eq(detail, ns.L.WATCH_PROFILE_DETAIL)
+		local page = {}
+		local ids = {}
+		for _, line in ipairs(lines) do
+			page[#page + 1] = tostring(line.text or "")
+			if line.id then ids[line.id] = line end
+		end
+		page = table.concat(page, "\n")
+		assert(ids["watch-profile-status"], "the target's summary")
+		assert(ids["watch-profile-restriction"], "the target's active restriction")
+		assert(ids["watch-profile-audit"], "the target's action history")
+		assert(ids["watch-profile-messages"], "the target's retained public messages")
+		assert(page:find("target public words", 1, true), page)
+		assert(not page:find("other public words", 1, true), "another player's words leaked into the page")
+		assert(not page:find("must stay out of target page", 1, true), "another player's action leaked into the page")
+
+		-- Opening the page returns only a boolean; callers cannot ask it for records while access is gone.
+		w.setRank(c.me, 3)
+		ok, why = W.OpenMember(target)
+		eq(ok, false); eq(why, "access")
+		eq(W.Record(target), nil); eq(#W.Audit(), 0)
+		W.ResetForTests(); eq(W.profileKey, nil, "test/session reset forgets the selected private target")
+	end)
+end)
+
+test("watch: member review accepts an explicit cross-realm name and reports empty local context honestly", function()
+	WithWatch(function(_, W)
+		local ok = W.OpenMember("Remote Person-OtherRealm")
+		eq(ok, true); eq(W.PageId(), "profile:Remote Person-OtherRealm")
+		local lines = W.Build()
+		local noRecord
+		for _, line in ipairs(lines) do if line.id == "watch-profile-no-record" then noRecord = line end end
+		assert(noRecord, "no local record is not presented as a clean record")
+	end)
+end)
+
 test("watch: only live local GM/Captains or a live signed roster moderator have access", function()
 	WithWatch(function(w, W, c)
 		w.setRank(c.me, 3)

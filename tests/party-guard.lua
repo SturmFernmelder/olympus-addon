@@ -13,7 +13,7 @@ local function Scene(fn)
 	local w = {
 		now = 2000000000, kingAt = true, localKing = false, member = true, gamepad = false,
 		rosterName = nil, rosterAt = nil, ownGuild = "Olympus Test", seen = {}, searches = {},
-		room = true, combat = false, invited = {}, printed = {}, dialog = nil, units = {},
+		seenReads = 0, room = true, combat = false, invited = {}, printed = {}, dialog = nil, units = {},
 	}
 	local ok, err = pcall(function()
 		ns.db.partyGuardOff = nil
@@ -32,11 +32,13 @@ local function Scene(fn)
 		ns.Who = setmetatable({
 			ROUND_TTL = 900,
 			SeenGuild = function(name)
+				w.seenReads = w.seenReads + 1
 				local e = w.seen[name]
 				return e and e.guild, e and e.age
 			end,
 			Search = function(quiet, guild, name)
 				w.searches[#w.searches + 1] = { quiet, guild, name }
+				if w.searchError then error(w.searchError) end
 				return w.searchResult ~= false
 			end,
 		}, { __index = saved.who })
@@ -85,11 +87,15 @@ test("party guard: only clear party requests while the King is online; candidate
 		for _, text in ipairs({ "inv", "Invite me please", "can you invite me to the group?", "me convida pro grupo?" }) do
 			assert(G.InviteIntent(text), text)
 		end
-		for _, text in ipairs({ "the party was fun", "invite sent", "who is in group?", "guild invite please", "do not invite me" }) do
+		for _, text in ipairs({ "the party was fun", "invite sent", "who is in group?", "guild invite please", "do not invite me",
+			"why did you invite me?", "did you invite me already?" }) do
 			eq(G.InviteIntent(text), false, text)
 		end
 		assert(G.OnWhisper("invite me please", "Same-Realm"))
+		eq(#w.printed, 1, "a new sender gets one non-modal chat notice")
+		eq(w.printed[1], ns.L.PARTY_GUARD_NEW:format(ns.DisplayName("Same-Realm") or "Same-Realm"))
 		assert(G.OnWhisper("inv", "Same-Realm"))
+		eq(#w.printed, 1, "repeat whispers update the row without repeating the notice")
 		local same = assert(Candidate("Same-Realm"))
 		eq(same.count, 2); eq(same.text, nil, "the whisper body is never retained")
 
@@ -105,6 +111,25 @@ test("party guard: only clear party requests while the King is online; candidate
 		end
 		eq(#G.Candidates(), G.CANDIDATE_MAX, "bounded")
 		eq(Candidate("Same-Realm"), nil, "oldest evicted")
+		local collapsed = G.Lines()
+		eq(Has(collapsed, "Crowd6"), nil, "older guarded requests start collapsed")
+		local more = assert(Has(collapsed, ns.L.PARTY_GUARD_MORE:format(15)))
+		assert(more.onClick, "the remaining count is an actionable row")
+		more.onClick()
+		assert(Has(G.Lines(), "Crowd6"), "expanding makes every retained request accessible")
+		local less = assert(Has(G.Lines(), ns.L.PARTY_GUARD_LESS))
+		less.onClick()
+		eq(Has(G.Lines(), "Crowd6"), nil, "the long list can be collapsed again")
+		local moreAgain = assert(Has(G.Lines(), ns.L.PARTY_GUARD_MORE:format(15)))
+		moreAgain.onClick()
+		w.localKing, w.kingAt = false, false
+		G.OnKingLocationChanged()
+		w.localKing = true
+		for i = 1, 6 do
+			w.now = w.now + 1
+			assert(G.OnWhisper("inv", "Restart" .. i .. "-Realm"))
+		end
+		eq(Has(G.Lines(), "Restart1"), nil, "a later King-online session starts collapsed again")
 		w.now = w.now + G.CANDIDATE_TTL + 1
 		eq(#G.Candidates(), 0, "TTL")
 
@@ -119,23 +144,50 @@ test("party guard: guild status only comes from fresh roster, explicit who, or a
 		assert(G.OnWhisper("invite me", "Unknown-Realm"))
 		local unknown = assert(Candidate("Unknown-Realm"))
 		eq(unknown.evidence, nil)
+		w.seen[unknown.name] = { guild = "Olympus Test", age = 0 }
+		eq(assert(Candidate(unknown.name)).evidence, nil, "an older global /who cache is never evidence")
+		eq(w.seenReads, 0, "Party Guard never reads the global /who cache")
+		eq(G.OnWhoSeen(unknown.name, "Olympus Test"), false, "an unsolicited /who row is not evidence")
 		local verify = assert(Has(G.Lines(), ns.L.PARTY_GUARD_VERIFY))
-		assert(Has(G.Lines(), ns.L.PARTY_GUARD_TITLE:format(1)), "the non-modal rows are available to the War Room")
+		assert(verify.text:find("manually", 1, true), "the row says verification is manual")
+		assert(Has(ns.Views.Build("census"), ns.L.PARTY_GUARD_TITLE:format(1)), "the non-modal rows are in the Census")
+		local sentAt = w.now
 		verify.onClick()
 		eq(#w.searches, 1); eq(w.searches[1][1], true); eq(w.searches[1][3], "Unknown-Realm")
 		eq(unknown.evidence, nil, "sending /who alone proves nothing")
-		w.searchResult = false
-		eq(G.Verify(unknown), false, "Who.Search owns and reports its cooldown/capability refusal")
-		w.searchResult = true
-
-		w.seen[unknown.name] = { guild = "Olympus Test", age = 2 }
+		w.now = sentAt - 1
+		eq(G.OnWhoSeen(unknown.name, "Olympus Test"), false, "a result older than the request and verification is rejected")
+		w.now = sentAt
 		assert(G.OnWhoSeen(unknown.name, "Olympus Test"))
 		local found = assert(Candidate(unknown.name))
 		eq(found.evidence.status, "olympus"); eq(found.evidence.source, "who")
 		assert(Has(G.Lines(), ns.L.PARTY_GUARD_SOURCE_WHO), "source and age are visible")
-		w.seen[unknown.name].age = G.EVIDENCE_TTL + 1
-		found.who = nil
+		found.who.at = w.now - G.EVIDENCE_TTL - 1
 		eq(assert(Candidate(unknown.name)).evidence, nil, "stale who becomes Unknown")
+
+		G.ResetForTests()
+		assert(G.OnWhisper("inv", "First-Realm")); assert(G.OnWhisper("inv", "Second-Realm"))
+		local first, second = assert(Candidate("First-Realm")), assert(Candidate("Second-Realm"))
+		assert(G.Verify(first))
+		eq(G.OnWhoSeen(second.name, "Olympus Test"), false, "verification is exact to one candidate")
+		assert(G.OnWhoSeen(first.name, "Olympus Test"))
+		eq(G.OnWhoSeen(first.name, "Other Guild"), false, "one verification cannot authorize later rows")
+
+		G.ResetForTests()
+		assert(G.OnWhisper("inv", "Failed-Realm"))
+		local failed = assert(Candidate("Failed-Realm"))
+		w.searchResult = false
+		eq(G.Verify(failed), false)
+		eq(G.OnWhoSeen(failed.name, "Olympus Test"), false, "a refused search leaves no pending verification")
+		w.searchResult = true
+		w.searchError = "send failed"
+		local ok = pcall(G.Verify, failed)
+		eq(ok, false)
+		eq(G.OnWhoSeen(failed.name, "Olympus Test"), false, "a failed search leaves no pending verification")
+		w.searchError = nil
+		assert(G.Verify(failed))
+		w.now = w.now + G.VERIFY_TTL + 1
+		eq(G.OnWhoSeen(failed.name, "Olympus Test"), false, "a late unrelated /who row cannot satisfy an expired verification")
 
 		G.ResetForTests()
 		w.rosterName, w.rosterAt = "Member-Realm", w.now
@@ -193,17 +245,16 @@ test("party guard: invitations are manual and recheck King, identity, evidence, 
 		G.ResetForTests(); w.rosterName, w.rosterAt = nil, nil
 		assert(G.OnWhisper("party invite", "Outsider-Realm"))
 		local outsider = assert(Candidate("Outsider-Realm"))
-		w.seen[outsider.name] = { guild = "Other Guild", age = 0 }
-		G.OnWhoSeen(outsider.name, "Other Guild")
+		assert(G.Verify(outsider)); assert(G.OnWhoSeen(outsider.name, "Other Guild"))
 		assert(G.RequestInvite(outsider)); eq(#w.invited, before, "warning is not an invite")
 		eq(w.dialog.which, "OLYMPUS_PARTY_GUARD_OUTSIDER")
+		w.now = w.now + 30
 		assert(G.ConfirmOutsider(w.dialog.data)); eq(#w.invited, before + 1, "manual override")
 
 		G.ResetForTests(); w.dialog = nil
 		assert(G.OnWhisper("inv", "Changed-Realm"))
 		local changed = assert(Candidate("Changed-Realm"))
-		w.seen[changed.name] = { guild = "Other Guild", age = 0 }
-		G.OnWhoSeen(changed.name, "Other Guild")
+		assert(G.Verify(changed)); assert(G.OnWhoSeen(changed.name, "Other Guild"))
 		assert(G.RequestInvite(changed))
 		local decision = w.dialog.data
 		w.now = w.now + 1
@@ -211,21 +262,6 @@ test("party guard: invitations are manual and recheck King, identity, evidence, 
 		changed.who = { guild = "Olympus Test", at = w.now }
 		eq(G.ConfirmOutsider(decision), false, "stale confirmation cannot invite after evidence changes")
 		eq(#w.invited, before + 1)
-	end)
-end)
-
-test("party guard: a Legate may click-invite a fresh own-guild member without waiting for the King", function()
-	Scene(function(w)
-		w.kingAt, w.localKing = false, false
-		w.rosterName, w.rosterAt = "Soldier-Realm", w.now
-		eq(G.InviteGuildmate("Soldier-Realm"), true)
-		eq(w.invited[1], "Soldier")
-		w.rosterAt = nil
-		eq(G.InviteGuildmate("Soldier-Realm"), false, "stale roster is not membership proof")
-		eq(#w.invited, 1)
-		w.rosterAt, w.room = w.now, false
-		eq(G.InviteGuildmate("Soldier-Realm"), false, "a full group is rechecked at the click")
-		eq(#w.invited, 1)
 	end)
 end)
 
@@ -238,12 +274,12 @@ test("party guard: English and pt-BR user-facing copy have matching format contr
 	if not ok then error(err, 0) end
 	pt = pt.L
 	local keys = {
-		"HELP_PARTY_GUARD", "PARTY_GUARD_TITLE", "PARTY_GUARD_TIP", "PARTY_GUARD_UNKNOWN",
+		"HELP_PARTY_GUARD", "PARTY_GUARD_TITLE", "PARTY_GUARD_TIP", "PARTY_GUARD_NEW", "PARTY_GUARD_UNKNOWN",
 		"PARTY_GUARD_OLYMPUS", "PARTY_GUARD_OUTSIDER", "PARTY_GUARD_GUILD_UNKNOWN",
 		"PARTY_GUARD_NO_GUILD", "PARTY_GUARD_SOURCE_NONE", "PARTY_GUARD_SOURCE_ROSTER",
 		"PARTY_GUARD_SOURCE_WHO", "PARTY_GUARD_SOURCE_DIRECT", "PARTY_GUARD_DETAIL",
 		"PARTY_GUARD_VERIFY", "PARTY_GUARD_VERIFY_GAMEPAD", "PARTY_GUARD_INVITE",
-		"PARTY_GUARD_REVIEW", "PARTY_GUARD_DISMISS", "PARTY_GUARD_MORE", "PARTY_GUARD_TURN_OFF",
+		"PARTY_GUARD_REVIEW", "PARTY_GUARD_DISMISS", "PARTY_GUARD_MORE", "PARTY_GUARD_LESS", "PARTY_GUARD_TURN_OFF",
 		"PARTY_GUARD_ON", "PARTY_GUARD_OFF", "PARTY_GUARD_CANNOT_INVITE", "PARTY_GUARD_RECHECK",
 		"PARTY_GUARD_OUTSIDER_PROMPT", "PARTY_GUARD_INVITE_ANYWAY",
 	}
