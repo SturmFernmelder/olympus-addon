@@ -2003,14 +2003,20 @@ function ArenaHome.MenuLines(target, menu)
 	local name = target.name
 	local n = 0
 	local off = target.locked == true or ns.Arena.Blocked()
-	menu.Button(L.ARENA_MENU_CHALLENGE, function() ArenaHome.Challenge(name) end, L.ARENA_MENU_CHALLENGE, off and L.ARENA_MENU_LOCKED or (ArenaHome.ArbitersOn() and L.ARENA_MENU_CHALLENGE_TIP or L.ARENA_MENU_CHALLENGE_TIP_POINTS), not off)
-	n = n + 1
-	menu.Button(L.ARENA_MENU_BONE, function() ArenaHome.Open("bone.invite", name) end, L.ARENA_MENU_BONE, off and L.ARENA_MENU_LOCKED or L.ARENA_MENU_BONE_TIP, not off)
-	n = n + 1
-	local table_ = ArenaHome.WatchableTable(name)
-	if table_ then
-		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+	-- (1.2.5.1) The Arena's own lines only on a player known to be in Olympus: PlayerMenu.lua's shared
+	-- hook sets target.olympus (PlayerMenu.KnownOlympus). "Watch duel" shows on any duel in sight,
+	-- Olympus's or not (the duel view says when it is not an Olympus duel).
+	local olympus = target.olympus ~= false
+	if olympus then
+		menu.Button(L.ARENA_MENU_CHALLENGE, function() ArenaHome.Challenge(name) end, L.ARENA_MENU_CHALLENGE, off and L.ARENA_MENU_LOCKED or (ArenaHome.ArbitersOn() and L.ARENA_MENU_CHALLENGE_TIP or L.ARENA_MENU_CHALLENGE_TIP_POINTS), not off)
 		n = n + 1
+		menu.Button(L.ARENA_MENU_BONE, function() ArenaHome.Open("bone.invite", name) end, L.ARENA_MENU_BONE, off and L.ARENA_MENU_LOCKED or L.ARENA_MENU_BONE_TIP, not off)
+		n = n + 1
+		local table_ = ArenaHome.WatchableTable(name)
+		if table_ then
+			menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+			n = n + 1
+		end
 	end
 	-- (1.2.6) His duel, when he fights one in sight (ArenaSpectate.Watchable): the pair taken now.
 	local S = ns.ArenaSpectate
@@ -2019,7 +2025,7 @@ function ArenaHome.MenuLines(target, menu)
 		menu.Button(L.ARENA_MENU_WATCH_DUEL, function() S.Open(duel) end, L.ARENA_MENU_WATCH_DUEL, L.ARENA_MENU_WATCH_DUEL_TIP, true)
 		n = n + 1
 	end
-	if not target.profileAdded then
+	if olympus and not target.profileAdded then
 		menu.Button(L.ARENA_MENU_PROFILE, function() ns.PlayerMenu.OpenProfile(name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
 		n = n + 1
 	end
@@ -2110,7 +2116,7 @@ function ArenaHome.HookMenus()
 	local P = ns.PlayerMenu
 	if type(P) == "table" and type(P.Add) == "function" then
 		-- (1.2.5.1: an Olympus line, for a player this client knows to be in Olympus alone.)
-		hooked = P.Add("arena", ArenaHome.MenuLines, 60, { olympus = true }) and "shared" or false
+		hooked = P.Add("arena", ArenaHome.MenuLines, 60) and "shared" or false
 		return hooked
 	end
 	-- (A client without PlayerMenu.lua's list: Blizzard's menus with mouse and keyboard alone.)
