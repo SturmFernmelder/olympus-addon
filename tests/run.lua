@@ -61182,6 +61182,40 @@ end)()
 		end)
 	end)
 
+	-- (1.2.5.1's review) Once the author's signed leadership boundary is enforced, a chat line claims
+	-- no guild (Channels.VerifiedLevel skips Data.ClaimGuild), so an ordinary member of another
+	-- Olympus guild was unknown and his Report to Olympus line was gone. His line itself, heard on
+	-- the Olympus channel, makes him known (Channels.SpokeFor), fed here through the real Receive.
+	test("player menus (1.2.5.1): with the signed boundary enforced, a name heard on the Olympus channel this session gets Olympus's own lines (Report to Olympus), though his line claimed no guild", function()
+		WithVersions("Tester-Realm", function(w)
+			local saved = { enforced = ns.Authority.Enforced, role = ns.Authority.Role, chat = ns.rdb.chat }
+			local ok, err = pcall(function()
+				local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
+					GamepadUI = function() return false end }, { __index = ns })
+				assert(loadfile(ADDON_DIR .. "PlayerMenu.lua"))("Olympus", pns)
+				local P = pns.PlayerMenu
+				assert(P.Add("report", function(target, menu) menu.Button("Report line", function() end) end, 30, { olympus = true }))
+				ns.UI.OpenPlayerProfile = function() end
+				ns.Authority.Enforced = function() return true end
+				ns.Authority.Role = function() return nil end
+				local function Texts(ctx) local r = MenuRoot(); P.Build("FRIEND", r, ctx); return r.Texts() end
+				local who = "Rude Voice-Elsewhere"
+				eq(P.KnownOlympus(who), false, "unknown before his line")
+				assert(not Texts({ name = who }):find("Report line", 1, true))
+				AsRank(3, function()
+					local shown, why = Chan.Receive("CHANNEL", who, Msg("A", "Olympus III", 901, "rude words"), 5000)
+					assert(shown or why == "muted", tostring(why))
+				end)
+				eq(ns.Data.ClaimedGuild(who), nil, "his line claimed no guild (the boundary)")
+				eq(P.KnownOlympus(who), true, "heard on the Olympus channel")
+				assert(Texts({ name = who }):find("Report line", 1, true), "Report to Olympus for him")
+				eq(ns.Channels.SpokeFor(who), "Olympus III")
+			end)
+			ns.Authority.Enforced, ns.Authority.Role, ns.rdb.chat = saved.enforced, saved.role, saved.chat
+			if not ok then error(err, 0) end
+		end)
+	end)
+
 	test("1.1.2 versions: a guildmate's hello names it (by the short name too); up to date, out of date, newer, unreadable; the author's released version is the newest known", function()
 		local cns, Deliver = FreshComm()
 		Deliver("GUILD", "Ann", "H1~" .. ns.VERSION .. "~Realm~p")

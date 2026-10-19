@@ -503,12 +503,14 @@ test("watch: the BattleTags (1.2.5.1) are the moderation team's alone: an Olympu
 		assert(not Page():find(L.ACCORD_TEAM_TITLE, 1, true), "no BattleTags page in his navigation")
 		W.Show("tags"); eq(W.PageId(), "desk", "no such page for him")
 		assert(W.OpenMember("Target Person-Realm"))
-		assert(not Page():find("Target#1111", 1, true) and not Page():find(L.ACCORD_TEAM_PROFILE_NONE, 1, true), "nothing on the person page")
+		assert(not Page():find("Target#", 1, true) and not Page():find(L.ACCORD_TEAM_PROFILE_NONE, 1, true), "nothing on the person page")
 		-- On the team: the line on the person page, the others sharing the tag; the page itself.
 		team[c.Fold(c.me)] = true
 		assert(W.OpenMember("Target Person-Realm"))
 		local page = Page()
-		assert(page:find(L.ACCORD_TEAM_PROFILE:format("Target#1111"), 1, true), page)
+		-- (Changed on purpose, 1.2.5.1's review: the digits stay hidden until the page's Show.)
+		assert(page:find(L.ACCORD_TEAM_PROFILE:format("Target#****"), 1, true), page)
+		assert(not page:find("1111", 1, true), "no digits until Show")
 		assert(page:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Target Alt"), 1, true), page)
 		assert(page:find(L.ACCORD_TEAM_NAV:format(2), 1, true), "in his navigation")
 		W.Show("tags")
@@ -516,7 +518,10 @@ test("watch: the BattleTags (1.2.5.1) are the moderation team's alone: an Olympu
 		local _, title, detail = W.Build()
 		eq(title, L.TAB_WATCH); eq(detail, L.ACCORD_TEAM_DETAIL)
 		page = Page()
-		assert(page:find(L.ACCORD_TEAM_SHARED:format(2), 1, true) and page:find("Target#1111", 1, true), page)
+		assert(page:find(L.ACCORD_TEAM_SHARED:format(2), 1, true) and page:find("Target#****", 1, true), page)
+		assert(c.Accord.RevealTeam(), "the page's Show")
+		assert(Page():find("Target#1111", 1, true), "the digits a moment")
+		c.Accord.RevealTeam()
 		-- On the King's screen (his stream): masked.
 		w.masked = true
 		c.KingsScreen = function() return true end

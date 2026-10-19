@@ -12,27 +12,37 @@ local L = ns.L
 -- guild an Olympus guild, when this account's BattleTag changed and on /oly privacy (each of these
 -- a deliberate ask: Not now at login is for the login's tries alone). Not now saves nothing: the
 -- next login asks again. Accepted: ns.db.accord, for the game account (its alts are not asked
--- again): the version, when, and 16 bits of the BattleTag's hash (fp), enough to see it changed,
--- never the tag itself. A higher ns.ACCORD_VERSION asks again.
+-- again): the version, when, and 8 bits of the BattleTag's hash (fp), enough to see it changed
+-- (one change in 256 goes unseen until the next version), never the tag itself: with 16 a known
+-- name's digits came back from the file almost alone. A higher ns.ACCORD_VERSION asks again.
 --
 -- The BattleTag. Only the player's own, read from his own game (BNGetInfo, as Blizzard's own
 -- FriendsFrame reads it once Battle.net is connected, on every supported client); I accept is
 -- enabled only while it can be read. An account that accepted is never locked out by a Battle.net
 -- outage: the gate (ns.AccordAccepted) reads saved data alone, and Check acts only on a tag it read.
 -- It shows masked on the letter (its digits; Show reveals them for REVEAL seconds), and on the
--- King's screen its name too, with no Show (he streams).
+-- King's screen (Stream: his character, any character of his game account once it was seen
+-- there, his preview) no part of it, with no Show (he streams).
 --
 -- Who gets it: the moderation team alone (WatchChat.InRoom: the author, the King, the High
 -- Council and the Olympus moderators they named). A team member's client asks on the Olympus
 -- channel (BQ, ASK_FIRST after login, then every ASK_EVERY); each player's client that accepted
 -- answers that one asker by a logged whisper (BT), after a random delay, at most once every
--- TELL_EVERY from each character to each asker. Nothing goes to a team member who did not just
--- show he is online (no "No player named..." lines), nothing ever goes on the channel or GUILD, and
--- no other player's client keeps or shows one. The team's clients keep them (ns.rdb.battletags,
--- KEEP after the last one) and The Watch shows them, grouped by tag (the characters one player
--- plays), masked on the King's screen even after his eye button. A tag is what that player's own
--- addon read and sent: a modified addon can send someone else's, so nothing is ever done with one
--- automatically (a later option, with that in mind).
+-- TELL_EVERY from each character to each asker, and only to an asker of the team level of its own
+-- or higher (WatchChat.ActorLevel): an ordinary player's goes to any team member, a moderator's to
+-- the moderators and above, a councillor's to the council, the King and the author, the King's to
+-- the author alone. Nothing goes to a team member who did not just show he is online; the
+-- server's "No player named..." for one who left meanwhile drops what waits for him and, with
+-- mouse and keyboard (the gamepad gate's system-filters), stays out of the chat for QUIET seconds
+-- after our whisper. Nothing ever goes on the channel or GUILD, and no other player's client keeps
+-- or shows one. The team's clients keep them (ns.rdb.battletags, KEEP after the last one) while
+-- they are on the team (Guard: wiped at once on its own sanction or a lost seat, else TEAM_GRACE
+-- off the team), and The Watch shows them, grouped by tag (the characters one player plays), the
+-- digits hidden until the page's Show (REVEAL seconds), and on the King's screen no part of a tag,
+-- his eye button included. `/oly accord forget <name>` drops that player's tag on a team client (a
+-- removal asked for). A tag is what that player's own addon read and sent: a modified addon can
+-- send someone else's, so nothing is ever done with one automatically (a later option, with that
+-- in mind).
 --
 --   BQ~1                                          a team member's ask (the channel, not logged)
 --   BT~1~<version>~<accepted at>~<guild>~<tag>    a player's answer (a logged whisper to the asker)
@@ -54,23 +64,32 @@ Accord.TAKE_WINDOW = 4200   -- a team client keeps answers this long after its o
 Accord.TAKE_GAP = 600       -- the same character and tag kept again at most this often
 Accord.KEEP = 180 * 86400   -- a kept tag, after it was last received
 Accord.ROWS_MAX = 3000
+Accord.QUIET = 10           -- the server's "No player named" for an asker we just whispered: out of chat this long
+Accord.RETELL_WINDOW = 600  -- I accept tells the askers heard this recently (an older one may have left)
+Accord.TEAM_GRACE = 2 * 86400 -- a client off the team this long drops its BattleTags (a namer's list may lapse a while)
+Accord.GUARD_FIRST, Accord.GUARD_EVERY = 300, 600
 Accord.ASKERS_MAX = 40
 Accord.TOLD_MAX = 400
 Accord.SHOWN_MAX = 150
 Accord.WIDTH = 560
 Accord.HEIGHT = 680
 Accord.SCREEN_MARGIN = 48
--- The letter's topics: { n, bullets }, keys ACCORD_T<n>_HEAD and ACCORD_T<n>_<i> (AccordText.lua).
-Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 4 }, { 4, 3 }, { 5, 4 }, { 6, 2 }, { 7, 1 }, { 8, 1 }, { 9, 1 } }
+-- The letter's topics: { n, bullets }, keys ACCORD_T<n>_HEAD and ACCORD_T<n>_<i> (AccordText.lua),
+-- each bullet one short sentence. BOLD: the bullets in heavier ink (a font string has no inline
+-- bold: the whole line, its shadow one pixel to the right in the ink's own colour).
+Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 6 }, { 4, 6 }, { 5, 5 }, { 6, 3 }, { 7, 1 }, { 8, 2 }, { 9, 2 } }
+Accord.BOLD = { ["2_1"] = true, ["5_2"] = true, ["5_3"] = true }
 -- A BattleTag as Battle.net writes one: a name, "#", digits. Never "~", "|" or a control byte.
 Accord.TAG_SHAPE = "^[^#~|%c]+#%d+$"
 Accord.random = math.random -- (swappable in tests)
 
 local frame
-local session = { declined = false, newSaid = false, lastAsk = nil, gen = 0, revealUntil = 0, lastRead = -math.huge }
+local session = { declined = false, newSaid = false, revealUntil = 0, teamRevealUntil = 0, lastRead = -math.huge }
 local askers = {}  -- [Fold(name)] = { name, at }: team members whose ask was heard this session
-local pending = {} -- [Fold(name)] = true: an answer waiting for its delay
-local stats = { asks = 0, heard = 0, told = 0, kept = 0, refused = 0, askNotTeam = 0 }
+local pending = {} -- [Fold(name)] = { name }: an answer waiting for its delay (NotFound takes it away)
+local quiet = {}   -- [lower(name as the server writes it)] = until (GetTime): our whisper's not-found line
+local watchingNotFound, filtering = false, false
+local stats = { asks = 0, heard = 0, told = 0, kept = 0, refused = 0, askNotTeam = 0, lower = 0, gone = 0, wiped = 0 }
 
 local function Mono() return type(GetTime) == "function" and GetTime() or 0 end
 local function Grey(s) return "|cff9d9d9d" .. tostring(s) .. "|r" end
@@ -96,10 +115,15 @@ function Accord.ReadTag()
 	return tag
 end
 
--- 16 bits of the tag's hash: a changed tag shows, a known name's digits can't be told from it.
+-- 8 bits of the tag's hash: a changed tag shows (but one in 256), and a known name leaves dozens
+-- to hundreds of digit strings that fit it, not one (the salt is in the public source).
 function Accord.Fp(tag)
 	local h = ns.Sign.SHA256("OlympusAccord\0" .. ns.Fold(tag))
-	return ("%02x%02x"):format(h:byte(1), h:byte(2))
+	return ("%02x"):format(h:byte(1))
+end
+-- A saved fp as Fp writes it (a 1.2.5.1 test build kept two bytes: the first is the same one).
+local function SavedFp(a)
+	return type(a) == "table" and type(a.fp) == "string" and a.fp:sub(1, 2) or nil
 end
 
 local function Saved()
@@ -134,12 +158,45 @@ end
 -- The team's page and lines show: a team member's client, never in the author's role preview.
 function Accord.TeamShown() return Accord.TeamMember() and not Previewing() end
 
--- A tag as this screen shows it: on the King's (his stream) its name cut short and no digits,
--- whatever his eye button says (ns.CouncilNamesShown is not asked).
-function Accord.ShownTag(tag)
+-- Whether our tag may go to `name`: a team member whose level is ours or higher (WatchChat's
+-- ActorLevel: 0 an ordinary player, 3 a moderator, 4 a councillor, 6 the King, 7 the author), so a
+-- team member's own tag never goes down to those he outranks (one councillor's list names up to ten).
+local function MayTell(name)
+	if not TeamName(name) then return false end
+	local w = WC()
+	if type(w.ActorLevel) ~= "function" then return true end
+	return (tonumber(w.ActorLevel(name)) or 0) >= (tonumber(w.ActorLevel(ns.me)) or 0)
+end
+Accord.MayTell = MayTell
+
+-- The King's stream: his character, the author's preview of his screen, and any character of his
+-- game account once his own was seen on it (ns.db.kingAccount: an alt's letter shows nothing either).
+local function Stream()
+	if type(ns.db) == "table" and ns.db.kingAccount == true then return true end
+	return (ns.IsKingCharacter and ns.IsKingCharacter(ns.me) == true) or ns.KingsScreen() == true
+end
+Accord.Stream = Stream
+
+-- A tag as this screen shows it: its name and "#****" until the page's Show (REVEAL seconds); on
+-- the King's screen no part of it ("BattleTag <n>" for the n-th group), whatever his eye button
+-- says (ns.CouncilNamesShown is not asked).
+function Accord.ShownTag(tag, n)
 	tag = tostring(tag or "")
-	if ns.KingsScreen() then return ns.MaskName(tag:match("^(.-)#") or tag) .. "#****" end
-	return tag
+	if Stream() then return n and L.ACCORD_TEAM_HIDDEN:format(n) or L.ACCORD_TAG_HIDDEN_STREAM end
+	if session.teamRevealUntil > Mono() then return tag end
+	return (tag:match("^(.-)#") or tag) .. "#****"
+end
+function Accord.TeamRevealed() return not Stream() and session.teamRevealUntil > Mono() end
+-- The page's Show / Hide: the digits for REVEAL seconds, never on the King's screen; the page
+-- follows (ACCORD_TEAM_CHANGED, UI.lua), and again when they hide by themselves.
+function Accord.RevealTeam()
+	if Stream() or not Accord.TeamShown() then return false end
+	session.teamRevealUntil = Accord.TeamRevealed() and 0 or Mono() + Accord.REVEAL
+	ns.Fire("ACCORD_TEAM_CHANGED")
+	if session.teamRevealUntil > 0 then
+		ns.After(Accord.REVEAL + 0.2, "olympus accord hide", function() ns.Fire("ACCORD_TEAM_CHANGED") end)
+	end
+	return true
 end
 local function ShownName(name)
 	local shown = ns.DisplayName(name) or tostring(name)
@@ -164,6 +221,19 @@ local function Changed(on)
 		if C.RequestKey then ns.SafeCall("accord key", C.RequestKey) end
 		if C.Hello then ns.SafeCall("accord hello", C.Hello, true) end
 	end
+	-- The login's own asks that waited for a member and found none (the letter shows LOGIN_WAIT
+	-- after login, after most of them): the guild's newer realm key (Keys, K5), the War page's
+	-- recovery, an officer's loot book and patrol findings, the team's BattleTag ask. Each keeps its
+	-- own once-a-session or spacing rule.
+	if on then
+		local function Live(t) return type(t) == "table" and not t.missing and t or nil end
+		local K, Wr, Lo, I = Live(ns.Keys), Live(ns.War), Live(ns.Loot), Live(ns.Inspect)
+		if K and K.Ask then ns.SafeCall("accord key epoch", K.Ask) end
+		if Wr and Wr.Ask then ns.SafeCall("accord war", Wr.Ask) end
+		if Lo and Lo.Ask and Lo.IsOfficer and Lo.IsOfficer() then ns.SafeCall("accord loot", Lo.Ask) end
+		if I and I.AskShared then ns.SafeCall("accord patrol", I.AskShared) end
+		ns.SafeCall("accord team", Accord.AskTeam)
+	end
 	ns.Fire("DATA_CHANGED")
 end
 
@@ -180,16 +250,17 @@ function Accord.Accept()
 	end
 	local old, v, fp = Saved(), ns.ACCORD_VERSION, Accord.Fp(tag)
 	-- (Another tag: the team is told again, whenever it last was.)
-	local told = old and type(old.told) == "table" and old.fp == fp and old.told or {}
+	local told = old and type(old.told) == "table" and SavedFp(old) == fp and old.told or {}
 	ns.db.accord = { v = v, yes = true, at = ns.Now(), fp = fp, told = told }
 	ns.Log("olympus accord accepted (v%d)", v)
 	Changed(true)
 	ns.Print(L.ACCORD_ACCEPTED:format(v))
 	if frame then frame:Hide() end
-	-- Team members heard asking lately (an account asked again: a new version, another tag).
+	-- Team members heard asking lately (an account asked again: a new version, another tag), within
+	-- RETELL_WINDOW: one heard longer ago may have left, and asks again within ASK_EVERY anyway.
 	local now = Mono()
 	for _, e in pairs(askers) do
-		if now - e.at <= 2 * Accord.ASK_EVERY then Tell(e.name, true) end
+		if now - e.at <= Accord.RETELL_WINDOW then Tell(e.name, true) end
 	end
 	ns.After(Accord.HANDOFF, "olympus accord", function()
 		local C = ns.Consent
@@ -224,7 +295,8 @@ end
 function Accord.Check()
 	local a = Saved()
 	local tag = Accord.ReadTag()
-	if a and ns.AccordAccepted() and tag and type(a.fp) == "string" and a.fp ~= Accord.Fp(tag) then
+	if type(ns.db) == "table" and ns.IsKingCharacter and ns.IsKingCharacter(ns.me) == true then ns.db.kingAccount = true end
+	if a and ns.AccordAccepted() and tag and SavedFp(a) and SavedFp(a) ~= Accord.Fp(tag) then
 		a.yes, a.why = false, "tag"
 		ns.Log("olympus accord: this account's BattleTag changed, asked again")
 		Changed(false)
@@ -275,28 +347,102 @@ local function Wire(tag)
 	return #msg <= 255 and msg or nil
 end
 
--- Our tag to one team member, now: only while we are a member, he is still in the team and our
--- tag reads the same at the game's send (the permit), logged (the server keeps it).
+-- The server's "No player named <name> is currently playing" (ERR_CHAT_PLAYER_NOT_FOUND_S, its
+-- pattern as Treasury reads it): who it names, lower case, or nil (a secret value: never read).
+local function NotFoundName(text)
+	if type(text) ~= "string" or Secret(text) then return nil end
+	local T = ns.Treasury
+	local pattern = type(T) == "table" and type(T.NotFoundPattern) == "function" and T.NotFoundPattern()
+	local who = type(pattern) == "string" and text:match(pattern)
+	return type(who) == "string" and who:lower() or nil
+end
+local function NamedAs(name, who)
+	return (ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who
+end
+
+-- That line for a team member we told or were about to tell: he left, so the answer still
+-- waiting for its delay is dropped, and I accept no longer tells him (his next ask, when he is
+-- back, is answered as any). True when it named one.
+function Accord.NotFound(text)
+	local who = NotFoundName(text)
+	if not who then return false end
+	local hit = false
+	for key, p in pairs(pending) do
+		if NamedAs(p.name, who) then pending[key] = nil; hit = true end
+	end
+	for key, e in pairs(askers) do
+		if NamedAs(e.name, who) then askers[key] = nil; hit = true end
+	end
+	if hit then stats.gone = stats.gone + 1 end
+	return hit
+end
+-- (Registered the first time an answer waits, as the Arena's and the sightings' whispers do.)
+local function WatchNotFound()
+	if watchingNotFound then return end
+	watchingNotFound = true
+	pcall(ns.RegisterEvent, "CHAT_MSG_SYSTEM", function(text) ns.SafeCall("olympus accord not found", Accord.NotFound, text) end)
+end
+
+-- The same line, kept out of the chat frames QUIET seconds after our whisper to him went (the
+-- player typed nothing: a line naming a moderator out of nowhere says nothing to him). With the
+-- gamepad UI (the gate's system-filters) none is registered, and one registered before does
+-- nothing from its first line: the line shows, as the game's own would.
+function Accord.QuietLine(_, _, text)
+	if not ns.Gate.Allowed("system-filters") then return false end
+	if next(quiet) == nil then return false end
+	local who = NotFoundName(text)
+	local untilAt = who and quiet[who]
+	return untilAt ~= nil and Mono() <= untilAt
+end
+function Accord.Quiet(name)
+	local now = Mono()
+	for who, untilAt in pairs(quiet) do if untilAt < now then quiet[who] = nil end end
+	for _, shown in ipairs({ ns.TellName(name), ns.DisplayName(name) }) do
+		if type(shown) == "string" and shown ~= "" then quiet[shown:lower()] = now + Accord.QUIET end
+	end
+	if filtering or not ns.Gate.Allowed("system-filters") then return end
+	-- (The global, as FarkleTable's filter: every supported client has it, and Forever's
+	-- ChatFrameUtil has no AddMessageEventFilter; that one only where the global is gone.)
+	local add = rawget(_G, "ChatFrame_AddMessageEventFilter") -- gp:system-filters
+	if type(add) ~= "function" then
+		local U = rawget(_G, "ChatFrameUtil") -- gp:system-filters
+		add = type(U) == "table" and rawget(U, "AddMessageEventFilter") or nil -- gp:system-filters
+	end
+	if type(add) ~= "function" then return end
+	filtering = true
+	pcall(add, "CHAT_MSG_SYSTEM", Accord.QuietLine) -- gp:system-filters
+end
+
+-- Our tag to one team member, now: only while we are a member, he is still in the team (at our
+-- level or higher, MayTell) and our tag reads the same at the game's send (the permit), logged
+-- (the server keeps it).
 function Accord.SendTag(name)
 	local tag = Accord.ReadTag()
-	if not tag or not ns.IsMember() or not TeamName(name) then return false end
+	if not tag or not ns.IsMember() or not MayTell(name) then return false end
 	local C = ns.Comm
 	if not (C and C.Whisper) or (C.QueueRoom and C.QueueRoom() < 1) then return false end
 	local msg = Wire(tag)
 	if not msg then return false end
 	local guardKey = "accord-tag:" .. ns.Fold(name)
-	return C.Whisper(name, msg, guardKey, false, true, function(sent) if sent then RecordTold(name) end end,
+	Accord.Quiet(name)
+	return C.Whisper(name, msg, guardKey, false, true, function(sent)
+		if sent then
+			RecordTold(name)
+			Accord.Quiet(name) -- (from when it really left the queue)
+		end
+	end,
 		{ owner = Accord, key = guardKey, permit = function(owner, key, dist, to, payload)
 			if owner ~= Accord or key ~= guardKey or dist ~= "WHISPER" or payload ~= msg or ns.Fold(ns.FullName(ns.Normal(to))) ~= ns.Fold(name) then
 				return false, "guard"
 			end
-			if not ns.IsMember() or not TeamName(name) or Accord.ReadTag() ~= tag then return false, "revoked" end
+			if not ns.IsMember() or not MayTell(name) or Accord.ReadTag() ~= tag then return false, "revoked" end
 			return true
 		end }) ~= false
 end
 
 -- After a random delay, unless this character told him within TELL_EVERY (force: whenever), one
--- already waits, or no tag can be read.
+-- already waits, or no tag can be read. The server saying meanwhile that he is not online drops
+-- it (NotFound).
 Tell = function(name, force)
 	if type(name) ~= "string" or name == "" or not ns.IsMember() then return false end
 	local key = ns.Fold(name)
@@ -304,10 +450,11 @@ Tell = function(name, force)
 	local t = Told()
 	if not force and t and ns.Now() - (tonumber(t[ToldKey(name)]) or -math.huge) < Accord.TELL_EVERY then return false end
 	if not Accord.ReadTag() then return false end
-	pending[key] = true
-	local gen = session.gen
+	local entry = { name = name }
+	pending[key] = entry
+	WatchNotFound()
 	ns.After(Accord.random(Accord.DELAY_MIN, Accord.DELAY_MAX), "olympus accord tell", function()
-		if gen ~= session.gen then return end
+		if pending[key] ~= entry then return end
 		pending[key] = nil
 		Accord.SendTag(name)
 	end)
@@ -336,6 +483,10 @@ function Accord.HandleAsk(dist, sender, text)
 		stats.askNotTeam = stats.askNotTeam + 1
 		return false, "team"
 	end
+	if not MayTell(sender) then
+		stats.lower = stats.lower + 1
+		return false, "level"
+	end
 	stats.heard = stats.heard + 1
 	Remember(sender)
 	Tell(sender, false)
@@ -345,15 +496,6 @@ end
 ---------------------------------------------------------------------------
 -- The team's side: asking, and keeping what comes back
 ---------------------------------------------------------------------------
-
-function Accord.AskTeam()
-	if not Accord.TeamMember() then return false end
-	local C = ns.Comm
-	if not (C and C.ChannelName and C.ChannelName()) then return false end
-	session.lastAsk = Mono()
-	stats.asks = stats.asks + 1
-	return C.Send("CHANNEL", "BQ~1", "accord ask") ~= false
-end
 
 local function Store(make)
 	local r = ns.rdb
@@ -365,6 +507,28 @@ local function Store(make)
 		r.battletags = s
 	end
 	return s
+end
+
+-- A team member's client keeps when it was last on the team, as whom, and whether that one named
+-- moderators (the author, the King, a councillor): Guard's facts.
+local function OnTeam(s)
+	s.teamAt, s.teamChar = ns.Now(), ns.Fold(ns.me or "")
+	local w = WC()
+	s.namer = w ~= nil and type(w.NamerLevel) == "function" and (tonumber(w.NamerLevel(ns.me)) or 0) > 0 or nil
+end
+
+-- The ask, on the channel. Its time is saved (s.asked, the server's clock), so the answers to it
+-- are still taken after a /reload (they come up to DELAY_MAX later).
+function Accord.AskTeam()
+	if not Accord.TeamMember() then return false end
+	local C = ns.Comm
+	if not (C and C.ChannelName and C.ChannelName()) then return false end
+	local s = Store(true)
+	if not s then return false end
+	OnTeam(s)
+	s.asked = ns.Now()
+	stats.asks = stats.asks + 1
+	return C.Send("CHANNEL", "BQ~1", "accord ask") ~= false
 end
 
 -- Drops what is past KEEP, then the oldest over ROWS_MAX.
@@ -406,7 +570,9 @@ function Accord.HandleTag(dist, sender, text)
 	local C = ns.Comm
 	if C_ChatInfo and C_ChatInfo.SendAddonMessageLogged and C and C.DeliveredLogged and not C.DeliveredLogged() then return No("unlogged") end
 	if not Accord.TeamMember() then return No("team") end
-	if not session.lastAsk or Mono() - session.lastAsk > Accord.TAKE_WINDOW then return No("unasked") end
+	local asked = Store(false)
+	asked = asked and tonumber(asked.asked)
+	if not asked or ns.Now() - asked > Accord.TAKE_WINDOW or asked > ns.Now() + 60 then return No("unasked") end
 	if type(text) ~= "string" or #text > 255 then return No("shape") end
 	local av, aat, guild, tag = text:match("^BT~1~(%d+)~(%d+)~([^~]*)~([^~]+)$")
 	if not av or #tag > Accord.TAG_MAX or not tag:match(Accord.TAG_SHAPE) then return No("shape") end
@@ -415,6 +581,7 @@ function Accord.HandleTag(dist, sender, text)
 	if type(sender) ~= "string" or sender == "" then return No("shape") end
 	local s = Store(true)
 	if not s then return No("store") end
+	OnTeam(s)
 	local key, now = ns.Fold(sender), ns.Now()
 	local row = s.rows[key]
 	local same = type(row) == "table" and type(row.tag) == "string" and ns.Fold(row.tag) == ns.Fold(tag)
@@ -428,6 +595,53 @@ function Accord.HandleTag(dist, sender, text)
 	ns.Log("olympus accord: a BattleTag from %s kept (%s)", sender, via) -- (never the tag)
 	ns.Fire("ACCORD_TEAM_CHANGED")
 	return true
+end
+
+-- Off the moderation team, this client's BattleTags go (the whole store): at once when the
+-- character that was on it now has its powers barred by a sanction (WatchChat.Barred) or, one that
+-- named moderators, lost that seat (a signed list without him); else once no character of this
+-- account was on the team for TEAM_GRACE (a namer's list lapses after LIST_FRESH unheard, and an
+-- alt is played a while). At login (GUARD_FIRST later) and every GUARD_EVERY. True when wiped.
+function Accord.Guard()
+	local s = Store(false)
+	if not s then return false end
+	if Accord.TeamMember() then
+		OnTeam(s)
+		return false
+	end
+	local now, w = ns.Now(), WC()
+	if tonumber(s.teamAt) == nil then s.teamAt = now end
+	local same = type(s.teamChar) == "string" and s.teamChar == ns.Fold(ns.me or "")
+	local barred = same and w ~= nil and type(w.Barred) == "function" and w.Barred("powers") ~= nil
+	local unseated = same and s.namer == true and w ~= nil and type(w.NamerLevel) == "function" and (tonumber(w.NamerLevel(ns.me)) or 0) == 0
+	local why = barred and "sanction" or unseated and "seat" or now - s.teamAt > Accord.TEAM_GRACE and "lapsed" or nil
+	if not why then return false end
+	ns.rdb.battletags = nil
+	stats.wiped = stats.wiped + 1
+	ns.Log("olympus accord: off the moderation team (%s), its BattleTags dropped", why)
+	ns.Fire("ACCORD_TEAM_CHANGED")
+	return true
+end
+
+-- `/oly accord forget <name>` on a team client: that player's BattleTag (every character sharing
+-- it, and where it was the one before) dropped here, as its player asked. True and how many.
+function Accord.Forget(name)
+	if not Accord.TeamShown() then return false, "team" end
+	local s = Store(false)
+	local row = s and type(name) == "string" and name:match("%S") and s.rows[ns.Fold(ns.FullName(ns.Normal(name)))]
+	if type(row) ~= "table" or type(row.tag) ~= "string" then return false, "none" end
+	local tag, n = ns.Fold(row.tag), 0
+	for k, r in pairs(s.rows) do
+		if type(r) == "table" and type(r.tag) == "string" and ns.Fold(r.tag) == tag then
+			s.rows[k] = nil
+			n = n + 1
+		elseif type(r) == "table" and type(r.prev) == "string" and ns.Fold(r.prev) == tag then
+			r.prev = nil
+		end
+	end
+	ns.Log("olympus accord: a BattleTag dropped on request (%d characters)", n) -- (never the tag)
+	ns.Fire("ACCORD_TEAM_CHANGED")
+	return true, n
 end
 
 function Accord.Count()
@@ -474,18 +688,23 @@ function Accord.TeamLines()
 	local groups = Accord.Groups()
 	local lines = {
 		{ id = "accord-team", header = true, text = L.ACCORD_TEAM_TITLE, right = Grey(Accord.Count()) },
-		{ text = Grey(L.ACCORD_TEAM_SCOPE), wrap = true, gapAfter = true },
+		{ text = Grey(L.ACCORD_TEAM_SCOPE), wrap = true, gapAfter = #groups == 0 or Stream() },
 	}
 	if #groups == 0 then
 		lines[#lines + 1] = { text = Grey(L.ACCORD_TEAM_EMPTY), wrap = true }
 		return lines
+	end
+	-- The digits, for REVEAL seconds (never on the King's screen).
+	if not Stream() then
+		lines[#lines + 1] = { id = "accord-team-reveal", text = "|cffffd200" .. (Accord.TeamRevealed() and L.ACCORD_TEAM_HIDE or L.ACCORD_TEAM_SHOW) .. "|r",
+			onClick = function() Accord.RevealTeam() end, gapAfter = true }
 	end
 	local masked = ns.CouncilMasked()
 	local W = ns.Watch
 	for i, g in ipairs(groups) do
 		if i > Accord.SHOWN_MAX then break end
 		local n = #g.rows
-		lines[#lines + 1] = { text = Accord.ShownTag(g.tag), right = Grey(n == 1 and L.ACCORD_TEAM_ONE or L.ACCORD_TEAM_SHARED:format(n)) }
+		lines[#lines + 1] = { text = Accord.ShownTag(g.tag, i), right = Grey(n == 1 and L.ACCORD_TEAM_ONE or L.ACCORD_TEAM_SHARED:format(n)) }
 		for _, r in ipairs(g.rows) do
 			local name = r.name
 			local open = type(W) == "table" and not W.missing and type(W.CanRead) == "function" and W.CanRead() == true
@@ -515,7 +734,9 @@ function Accord.ProfileLines(target)
 	if type(row) ~= "table" or type(row.tag) ~= "string" then
 		return { { id = "watch-profile-battletag", text = Grey(L.ACCORD_TEAM_PROFILE_NONE) } }
 	end
-	local out = { { id = "watch-profile-battletag", text = L.ACCORD_TEAM_PROFILE:format(Accord.ShownTag(row.tag)) } }
+	-- (A click shows the digits a moment, as the BattleTags page's Show; never on the King's screen.)
+	local out = { { id = "watch-profile-battletag", text = L.ACCORD_TEAM_PROFILE:format(Accord.ShownTag(row.tag)),
+		onClick = not Stream() and function() Accord.RevealTeam() end or nil } }
 	local others = {}
 	for _, r in pairs(s.rows) do
 		if r ~= row and type(r) == "table" and type(r.tag) == "string" and ns.Fold(r.tag) == ns.Fold(row.tag) then others[#others + 1] = ShownName(r.name) end
@@ -535,6 +756,7 @@ local INK = { 0.18, 0.10, 0.02 }
 local TITLE_INK = { 0.24, 0.12, 0.03 }
 local SUB_INK = { 0.35, 0.25, 0.12 }
 local HEAD_INK = { 0.40, 0.12, 0.04 }
+local BOLD_INK = { 0.36, 0.06, 0.02 }
 local WARN = "|cff8c1a0a"
 
 local function Font(title)
@@ -548,6 +770,13 @@ local function Px(fs, px, exact)
 	if ok and type(path) == "string" and type(size) == "number" and (size < px or (exact and size ~= px)) then fs:SetFont(path, px, flags) end
 end
 local function Ink(fs, c) if fs.SetTextColor then fs:SetTextColor(c[1], c[2], c[3]) end end
+-- Bold on parchment: a deep red ink, and its shadow one pixel to the right in the same ink (the
+-- strokes doubled; the game's fonts have no bold face an addon can pick).
+local function Bold(fs)
+	Ink(fs, BOLD_INK)
+	if fs.SetShadowColor then fs:SetShadowColor(BOLD_INK[1], BOLD_INK[2], BOLD_INK[3], 1) end
+	if fs.SetShadowOffset then fs:SetShadowOffset(1, 0) end
+end
 local function Text(parent, title, px, exact, color)
 	local fs = parent:CreateFontString(nil, "ARTWORK", Font(title))
 	Px(fs, px, exact)
@@ -574,13 +803,16 @@ local function Button(parent, label, w, h, fn)
 end
 
 local PAGE_W, TEXT_X = 484, 16
+-- The bottom: the footer's lowest line FOOTER_Y up; the band BAND_GAP above the footer's top (at
+-- least BAND_Y), BAND_H tall at least and taller for a note of two lines; the words above it.
+local FOOTER_Y, FOOTER_W, BAND_Y, BAND_GAP, BAND_H, NOTE_W = 62, Accord.WIDTH - 80, 86, 10, 44, Accord.WIDTH - 56 - 46 - 110
 
 -- The body's words, in the topics' order (built once): the opening, then each topic's heading
 -- and its bullets (a dot, its text beside it).
 local function Body(f)
 	local child = f.bodyChild
 	f.parts = {}
-	local function Add(kind, fs, x, gap, width) f.parts[#f.parts + 1] = { kind = kind, fs = fs, x = x, gap = gap, width = width } end
+	local function Add(kind, fs, x, gap, width, bold) f.parts[#f.parts + 1] = { kind = kind, fs = fs, x = x, gap = gap, width = width, bold = bold } end
 	local opening = Text(child, false, 13)
 	opening:SetText(L.ACCORD_OPENING)
 	Add("block", opening, 0, 0, PAGE_W)
@@ -594,7 +826,9 @@ local function Body(f)
 			Add("dot", dot, 4, 4, 10)
 			local line = Text(child, false, 13)
 			line:SetText(L["ACCORD_T" .. t[1] .. "_" .. i])
-			Add("bullet", line, TEXT_X, 0, PAGE_W - TEXT_X)
+			local bold = Accord.BOLD[t[1] .. "_" .. i] == true
+			if bold then Bold(line); Bold(dot) end
+			Add("bullet", line, TEXT_X, 0, PAGE_W - TEXT_X, bold or nil)
 		end
 	end
 end
@@ -612,14 +846,12 @@ local function LayoutBody(f)
 	f.bodyChild:SetSize(PAGE_W, math.max(1, y + 4))
 end
 
-local function Stream() return (ns.IsKingCharacter and ns.IsKingCharacter(ns.me) == true) or ns.KingsScreen() == true end
-
--- The tag as the letter shows it: its digits hidden unless revealed; on the King's screen its name
--- cut short too, never revealed.
+-- The tag as the letter shows it: its digits hidden unless revealed; on the King's screen no part
+-- of it (a short name cut to four letters is still the whole name), never revealed.
 function Accord.LetterTag(tag, revealed)
 	if type(tag) ~= "string" then return nil end
 	local name = tag:match("^(.-)#%d+$") or tag
-	if Stream() then return ns.MaskName(name) .. "#****" end
+	if Stream() then return "****#****" end
 	if revealed then return tag end
 	return name .. "#****"
 end
@@ -692,9 +924,10 @@ local function Make()
 	f.tagLabel:SetText(L.ACCORD_TAG_LABEL)
 	f.tag = Text(f, true, 15, true, TITLE_INK)
 	f.tag:SetPoint("LEFT", f.tagLabel, "RIGHT", 6, 0)
+	-- (Under the label, its own lines: the band grows with it, Accord.Refresh.)
 	f.tagNote = Text(f, false, 12, true)
-	f.tagNote:SetPoint("BOTTOMLEFT", f.band, "BOTTOMLEFT", 46, 5)
-	f.tagNote:SetWidth(Accord.WIDTH - 56 - 46 - 110)
+	f.tagNote:SetPoint("TOPLEFT", f.tagLabel, "BOTTOMLEFT", 0, -3)
+	f.tagNote:SetWidth(NOTE_W)
 	f.reveal = Button(f, L.ACCORD_TAG_SHOW, 70, 20, function()
 		session.revealUntil = session.revealUntil > Mono() and 0 or Mono() + Accord.REVEAL
 		Accord.Refresh(false)
@@ -705,8 +938,8 @@ local function Make()
 	-- The version and its date, a line, then the two answers (the conservative one on the left).
 	f.footer = Text(f, false, 12, true, SUB_INK)
 	f.footer:SetJustifyH("CENTER")
-	f.footer:SetPoint("BOTTOM", 0, 62)
-	f.footer:SetWidth(Accord.WIDTH - 80)
+	f.footer:SetPoint("BOTTOM", 0, FOOTER_Y)
+	f.footer:SetWidth(FOOTER_W)
 	local low = f:CreateTexture(nil, "BORDER")
 	low:SetColorTexture(0.25, 0.13, 0.04, 0.45)
 	low:SetPoint("BOTTOMLEFT", 40, 54)
@@ -771,10 +1004,29 @@ function Accord.Refresh(read)
 	f.acceptEnabled = not accepted and tag ~= nil
 	if not accepted and not tag then footer = footer .. "  ·  " .. WARN .. L.ACCORD_ACCEPT_WAIT_TIP .. "|r" end
 	f.footer:SetText(footer)
+	Accord.LayoutBottom(f)
 	f.accept:SetEnabled(f.acceptEnabled)
 	f.accept:SetShown(not accepted)
 	f.notNow:SetShown(not accepted)
 	f.close:SetShown(accepted)
+end
+
+-- The band and the words' bottom edge for what they hold now: a two-line note or footer never
+-- runs over the label, the band or the last words.
+function Accord.LayoutBottom(f)
+	local footerTop = FOOTER_Y + Height(f.footer, FOOTER_W)
+	local bandY = math.max(BAND_Y, math.ceil(footerTop + BAND_GAP))
+	local bandH = math.max(BAND_H, math.ceil(5 + Height(f.tagLabel, 120) + 3 + Height(f.tagNote, NOTE_W) + 5))
+	f.band:ClearAllPoints()
+	f.band:SetPoint("BOTTOMLEFT", 28, bandY)
+	f.band:SetPoint("BOTTOMRIGHT", -28, bandY)
+	f.band:SetHeight(bandH)
+	f.seal:ClearAllPoints()
+	f.seal:SetPoint("BOTTOMLEFT", 34, bandY + math.floor((bandH - 32) / 2))
+	f.body:ClearAllPoints()
+	f.body:SetPoint("TOPLEFT", 28, -104)
+	f.body:SetPoint("BOTTOMRIGHT", -40, bandY + bandH + 4)
+	f.bandY, f.bandH = bandY, bandH
 end
 
 -- The letter, accepted or not (/oly accord, and Ask).
@@ -789,7 +1041,18 @@ function Accord.Show(reason)
 	if type(AH) == "table" and not AH.missing and type(AH.FadeIn) == "function" then ns.SafeCall("olympus accord fade", AH.FadeIn, frame) end
 	return frame
 end
-function Accord.Slash() return Accord.Show("slash") end
+-- /oly accord: the letter; /oly accord forget <name> (a team client): that player's BattleTag
+-- dropped here, as he asked.
+function Accord.Slash(rest)
+	local name = type(rest) == "string" and rest:match("^%s*forget%s+(.-)%s*$")
+	if name then
+		local ok, n = Accord.Forget(name)
+		if ok then ns.Print(L.ACCORD_FORGOT:format(n))
+		else ns.Print(n == "team" and L.ACCORD_FORGET_TEAM or L.ACCORD_FORGET_NONE:format(name)) end
+		return ok
+	end
+	return Accord.Show("slash")
+end
 function Accord.Frame() return frame end
 function Accord.Hide() if frame then frame:Hide() end end
 
@@ -812,16 +1075,16 @@ function Accord.StatusLine()
 	else state = ("v%d not accepted%s"):format(ns.ACCORD_VERSION, session.declined and " (not now)" or "") end
 	local _, why = Accord.ReadTag()
 	local team = Accord.TeamMember() and (" | team: %d characters, %d BattleTags"):format(Accord.Count(), #Accord.Groups()) or ""
-	return ("%s | battletag %s%s | asks %d, heard %d, told %d, kept %d, refused %d, not team %d"):format(state, why or "readable", team,
-		stats.asks, stats.heard, stats.told, stats.kept, stats.refused, stats.askNotTeam)
+	return ("%s | battletag %s%s | asks %d, heard %d, told %d, kept %d, refused %d, not team %d, below %d, gone %d, wiped %d"):format(state,
+		why or "readable", team, stats.asks, stats.heard, stats.told, stats.kept, stats.refused, stats.askNotTeam, stats.lower, stats.gone, stats.wiped)
 end
 function Accord.Stats() return stats end
 
 -- Tests start from a clean session (ns.db.accord, the account's, is theirs to set).
 function Accord.Reset()
-	session.declined, session.newSaid, session.lastAsk, session.revealUntil, session.lastRead = false, false, nil, 0, -math.huge
-	session.gen = session.gen + 1
-	wipe(askers); wipe(pending)
+	session.declined, session.newSaid, session.revealUntil, session.teamRevealUntil, session.lastRead = false, false, 0, 0, -math.huge
+	wipe(askers); wipe(pending); wipe(quiet)
+	watchingNotFound = false -- (each test's own events; the game never resets it)
 	for k in pairs(stats) do stats[k] = 0 end
 	if frame and rawget(_G, "OlympusAccordFrame") ~= frame then frame = nil elseif frame then frame:Hide() end
 end
@@ -838,7 +1101,13 @@ function Accord.OnLogin()
 	for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "BN_CONNECTED", "BN_DISCONNECTED", "BN_INFO_CHANGED" }) do
 		pcall(ns.RegisterEvent, event, function() Accord.Check() end)
 	end
+	-- (A 1.2.5.1 test build's two-byte fp: its first byte kept, the other one dropped from the file.)
+	local a = Saved()
+	if a and type(a.fp) == "string" and #a.fp > 2 then a.fp = SavedFp(a) end
+	if type(ns.db) == "table" and ns.IsKingCharacter and ns.IsKingCharacter(ns.me) == true then ns.db.kingAccount = true end
 	Accord.Prune()
+	ns.After(Accord.GUARD_FIRST, "olympus accord guard", Accord.Guard)
+	ns.Every(Accord.GUARD_EVERY, "olympus accord guard", Accord.Guard)
 	ns.After(Accord.LOGIN_WAIT, "olympus accord", function() Accord.Ask("login") end)
 	ns.Every(Accord.RETRY, "olympus accord", function() Accord.Ask("login") end)
 	ns.After(Accord.ASK_FIRST, "olympus accord team", Accord.AskTeam)

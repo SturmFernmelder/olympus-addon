@@ -7,6 +7,7 @@ local ns, test, eq, H = ...
 local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]accord%.lua$")) or "./"
 local L = ns.L
 local TAG = "Tester#1234"
+local RealFire = ns.Fire -- (Scene records ns.Fire; a test that needs the real listeners calls this)
 local COUNCILLOR = "Iron Warden-Realm"
 local MEMBER = "Member7-Realm" -- (one of the harness's guild roster)
 
@@ -22,7 +23,7 @@ local COMM = { "Whisper", "Send", "CheckMembership", "JoinSoon", "RequestKey", "
 local function Scene(fn, opts)
 	opts = opts or {}
 	local A = ns.Accord
-	local saved = { g = {}, f = {}, c = {}, accord = ns.db.accord, wc = rawget(ns, "WatchChat"), viewAs = rawget(ns, "ViewAs"),
+	local saved = { g = {}, f = {}, c = {}, accord = ns.db.accord, kingAccount = ns.db.kingAccount, wc = rawget(ns, "WatchChat"), viewAs = rawget(ns, "ViewAs"),
 		council = ns.rdb.council, tags = ns.rdb.battletags, chatMod = ns.rdb.chatMod, claimed = ns.Data.ClaimedGuild,
 		consentAsk = ns.Consent.Ask }
 	for _, k in ipairs(GLOBALS) do saved.g[k] = rawget(_G, k) end
@@ -67,6 +68,7 @@ local function Scene(fn, opts)
 		assert(loadfile(ROOT .. "Olympus/WatchChat.lua"))("Olympus", wns)
 		ns.WatchChat = wns.WatchChat
 		A.Reset()
+		ns.db.kingAccount = nil
 		ns.db.accord = opts.accepted and { v = ns.ACCORD_VERSION, yes = true, at = w.now - 100, fp = A.Fp(TAG), told = {} } or nil
 		-- Time on, and every timer due runs (in order).
 		function w.Run(sec)
@@ -95,7 +97,7 @@ local function Scene(fn, opts)
 	for _, k in ipairs(GLOBALS) do rawset(_G, k, saved.g[k]) end
 	for _, k in ipairs(FIELDS) do rawset(ns, k, saved.f[k]) end
 	for _, k in ipairs(COMM) do ns.Comm[k] = saved.c[k] end
-	ns.db.accord, ns.WatchChat, ns.ViewAs = saved.accord, saved.wc, saved.viewAs
+	ns.db.accord, ns.db.kingAccount, ns.WatchChat, ns.ViewAs = saved.accord, saved.kingAccount, saved.wc, saved.viewAs
 	ns.rdb.council, ns.rdb.battletags, ns.rdb.chatMod, ns.Data.ClaimedGuild = saved.council, saved.tags, saved.chatMod, saved.claimed
 	ns.Consent.Ask = saved.consentAsk
 	A.Reset()
@@ -194,7 +196,9 @@ test("accord: before it is accepted the privacy page never asks; I accept keeps 
 			eq(A.Accept(), true)
 			local a = ns.db.accord
 			eq(a.v, ns.ACCORD_VERSION); eq(a.yes, true); eq(a.at, w.now); eq(a.fp, A.Fp(TAG))
-			assert(type(a.fp) == "string" and #a.fp == 4, "two bytes of the hash")
+			-- (Changed on purpose, 1.2.5.1's review: one byte of the hash, not two. With two, a known
+			-- name's digits came back from the saved file almost alone; see the fingerprint's test.)
+			assert(type(a.fp) == "string" and #a.fp == 2, "one byte of the hash")
 			for k, v in pairs(a) do assert(not tostring(v):find("1234", 1, true), "the tag is never saved: " .. k) end
 			eq(ns.IsMember(), true, "a member now")
 			eq(#w.Fired("ACCORD_CHANGED"), 1); eq(w.Fired("ACCORD_CHANGED")[1][2], true)
@@ -510,9 +514,9 @@ test("accord: a team client asks on the channel and keeps an answer only when lo
 		eq(A.HandleTag("WHISPER", MEMBER, BT()), true)
 		w.claims["Quiet Mender-Realm"] = "Olympus III"
 		eq(A.HandleTag("WHISPER", "Quiet Mender-Realm", BT(nil, "Olympus III", "Mender#4321")), true)
-		eq(A.HandleTag("WHISPER", "Brisk Fern-Realm", BT(nil, "Olympus III", "Fern#7777")), true)
+		eq(A.HandleTag("WHISPER", "Brisk Lantern-Realm", BT(nil, "Olympus III", "Lantern#7777")), true)
 		local rows = ns.rdb.battletags.rows
-		eq(rows[ns.Fold(MEMBER)].via, "roster"); eq(rows[ns.Fold("Quiet Mender-Realm")].via, "claim"); eq(rows[ns.Fold("Brisk Fern-Realm")].via, "self")
+		eq(rows[ns.Fold(MEMBER)].via, "roster"); eq(rows[ns.Fold("Quiet Mender-Realm")].via, "claim"); eq(rows[ns.Fold("Brisk Lantern-Realm")].via, "self")
 		eq(rows[ns.Fold(MEMBER)].tag, TAG); eq(rows[ns.Fold(MEMBER)].guild, "Olympus II")
 		eq(#w.Fired("ACCORD_TEAM_CHANGED"), 3)
 		-- The same again soon: refused; another tag: kept, the old one as before.
@@ -545,31 +549,56 @@ test("accord: an ordinary member's client never keeps, sends on or shows a Battl
 	end, { accepted = true })
 end)
 
-test("accord: the team's page groups one player's characters; the King's screen never shows a BattleTag, his eye button included, and masks the names; never in a role preview", function()
+-- (Changed on purpose, 1.2.5.1's review: a BattleTag's digits were shown in full on every team
+-- screen but the King's; they now stay hidden there too until the page's Show, for REVEAL seconds.
+-- On the King's screen no part of a tag shows: a name of four letters or fewer showed whole.)
+test("accord: the team's page groups one player's characters, the digits hidden until its Show (a moment); the King's screen never shows any part of a BattleTag, his eye button included, and masks the names; never in a role preview", function()
 	Scene(function(w, A)
 		C_ChatInfo = { SendAddonMessageLogged = function() end }
 		A.AskTeam()
 		A.HandleTag("WHISPER", MEMBER, BT())
 		A.HandleTag("WHISPER", "Second Alt-Realm", BT())
-		A.HandleTag("WHISPER", "Brisk Fern-Realm", BT(nil, nil, "Fern#7777"))
+		A.HandleTag("WHISPER", "Brisk Lantern-Realm", BT(nil, nil, "Bob#7777"))
 		eq(A.Count(), 3); eq(#A.Groups(), 2)
 		eq(A.Groups()[1].tag, TAG, "the most characters first"); eq(#A.Groups()[1].rows, 2)
-		local text = Shown(A.TeamLines())
-		assert(text:find(TAG, 1, true)); assert(text:find(L.ACCORD_TEAM_SHARED:format(2), 1, true)); assert(text:find(L.ACCORD_TEAM_ONE, 1, true))
+		local function Page() return Shown(A.TeamLines()) .. "\n" .. Shown(A.ProfileLines(MEMBER)) end
+		local text = Page()
+		assert(not text:find("1234", 1, true) and not text:find("7777", 1, true), "no digits until Show: " .. text)
+		assert(text:find("Tester#****", 1, true) and text:find("Bob#****", 1, true), text)
+		assert(text:find(L.ACCORD_TEAM_SHARED:format(2), 1, true)); assert(text:find(L.ACCORD_TEAM_ONE, 1, true))
 		assert(text:find(L.ACCORD_TEAM_SCOPE, 1, true), "never act on one alone")
-		local profile = Shown(A.ProfileLines(MEMBER))
-		assert(profile:find(L.ACCORD_TEAM_PROFILE:format(TAG), 1, true))
-		assert(profile:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Second Alt"), 1, true), profile)
+		assert(text:find(L.ACCORD_TEAM_PROFILE:format("Tester#****"), 1, true))
+		assert(text:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Second Alt"), 1, true), text)
 		assert(Shown(A.ProfileLines("Nobody Here-Realm")):find(L.ACCORD_TEAM_PROFILE_NONE, 1, true))
-		-- The King's screen: no digits, the tag's name and the characters cut short; his eye changes nothing for tags.
+		-- The page's Show: the digits for REVEAL seconds, the page redrawn now and when they hide again.
+		local show
+		for _, l in ipairs(A.TeamLines()) do if l.id == "accord-team-reveal" then show = l end end
+		assert(show and show.text:find(L.ACCORD_TEAM_SHOW, 1, true) and show.onClick, "the page's Show")
+		local fired = #w.Fired("ACCORD_TEAM_CHANGED")
+		show.onClick()
+		eq(#w.Fired("ACCORD_TEAM_CHANGED"), fired + 1, "the page redrawn")
+		text = Page()
+		assert(text:find(TAG, 1, true) and text:find("Bob#7777", 1, true), text)
+		assert(text:find(L.ACCORD_TEAM_PROFILE:format(TAG), 1, true))
+		assert(text:find(L.ACCORD_TEAM_HIDE, 1, true), "and its Hide")
+		w.Run(A.REVEAL + 1)
+		eq(#w.Fired("ACCORD_TEAM_CHANGED"), fired + 2, "redrawn when they hide by themselves")
+		assert(not Page():find("1234", 1, true), "hidden again")
+		eq(A.RevealTeam(), true); eq(A.RevealTeam(), true)
+		assert(not Page():find("1234", 1, true), "Hide")
+		-- The King's screen: no part of any tag, no Show; his eye changes nothing for tags.
 		w.kingScreen = true
 		for _, shown in ipairs({ false, true }) do
 			ns.SetCouncilNamesShown(shown)
-			local all = Shown(A.TeamLines()) .. "\n" .. Shown(A.ProfileLines(MEMBER))
+			local all = Page()
 			assert(not all:find("1234", 1, true) and not all:find("7777", 1, true), "a tag on the King's screen")
-			assert(all:find("Test****#****", 1, true), all)
+			assert(not all:find("Tester#", 1, true) and not all:find("Bob", 1, true), "no part of a tag, a short one included: " .. all)
+			assert(all:find(L.ACCORD_TEAM_HIDDEN:format(1), 1, true) and all:find(L.ACCORD_TEAM_HIDDEN:format(2), 1, true), all)
+			assert(all:find(L.ACCORD_TEAM_PROFILE:format(L.ACCORD_TAG_HIDDEN_STREAM), 1, true), all)
+			assert(not all:find(L.ACCORD_TEAM_SHOW, 1, true), "no Show on his screen")
 			eq(all:find("Second Alt", 1, true) ~= nil, shown, "names masked until his eye")
 		end
+		eq(A.RevealTeam(), false, "his screen never reveals")
 		ns.SetCouncilNamesShown(false)
 		w.kingScreen = false
 		-- The author's role preview: hidden.
@@ -603,7 +632,11 @@ test("accord: never a BattleTag in the log, the errors, the bug report or /oly s
 	end, { team = true }) end)
 end)
 
-test("accord: the letter: Olympus's own bronze window over parchment, the Accord's name in the quest title font, every topic and bullet, the version and its date; the tag masked (Show reveals it a moment), and on the King's screen masked with no Show", function()
+-- (Changed on purpose, 1.2.5.1's review: the owner asked for a letter "não muito grande, em tópicos
+-- bonitinho, fácil de ler", "com negrito, quando necessário". Its 20 long bullets became short
+-- one-sentence ones (fewer words in all, each bounded below), the key ones in bold; and on the
+-- King's screen no part of the tag shows: a short name cut to four letters was the whole name.)
+test("accord: the letter: Olympus's own bronze window over parchment, the Accord's name in the quest title font, every topic and its short bullets, the key ones bold, the version and its date; the tag masked (Show reveals it a moment), and on the King's screen no part of it, with no Show", function()
 	H.WithUI(function()
 		Scene(function(w, A)
 			local f = A.Show("slash")
@@ -621,8 +654,36 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 				assert(body:find(L["ACCORD_T" .. t[1] .. "_HEAD"], 1, true), t[1])
 				for i = 1, t[2] do n = n + 1; assert(body:find(L["ACCORD_T" .. t[1] .. "_" .. i], 1, true), t[1] .. "." .. i) end
 			end
-			eq(n, 20)
+			local want = 0
+			for _, t in ipairs(A.TOPICS) do want = want + t[2] end
+			eq(n, want)
 			eq(#f.parts, 1 + #A.TOPICS + 2 * n, "a dot beside each bullet")
+			-- Short: one sentence a bullet, the whole letter well under the first draft's 571 words.
+			local total = select(2, L.ACCORD_OPENING:gsub("%S+", ""))
+			for _, t in ipairs(A.TOPICS) do
+				for i = 1, t[2] do
+					local text = L["ACCORD_T" .. t[1] .. "_" .. i]
+					local count = select(2, text:gsub("%S+", ""))
+					total = total + count
+					assert(count <= 22, ("bullet %d.%d is %d words"):format(t[1], i, count))
+					assert(not text:find("|c", 1, true), "no colour codes in a bullet: bold is the font string's")
+				end
+			end
+			assert(total <= 360, "the letter is " .. total .. " words")
+			-- Bold where it matters: the BattleTag's two promises and Blizzard's rules first, a deep red
+			-- ink and doubled strokes (the dot too); the other bullets in the plain ink.
+			local bold = {}
+			for _, p in ipairs(f.parts) do
+				if p.kind == "bullet" and p.bold then bold[#bold + 1] = p.fs:GetText() end
+				if p.kind == "bullet" and not p.bold then eq(p.fs.textColor[1], 0.18, "plain ink") end
+			end
+			eq(#bold, 3)
+			for _, key in ipairs({ "ACCORD_T2_1", "ACCORD_T5_2", "ACCORD_T5_3" }) do
+				local found = false
+				for _, text in ipairs(bold) do if text == L[key] then found = true end end
+				assert(found, key .. " in bold")
+			end
+			for _, p in ipairs(f.parts) do if p.bold then eq(p.fs.textColor[1], 0.36, "bold ink") end end
 			assert(f.bodyChild:GetHeight() > 300, "laid out")
 			eq(f.footer:GetText(), L.ACCORD_FOOTER:format(1, L.ACCORD_DATE))
 			-- The tag: its digits hidden; Show for REVEAL seconds; Hide.
@@ -635,13 +696,14 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 			f.reveal:Click(); f.reveal:Click()
 			eq(f.tag:GetText(), "Tester#****", "Hide")
 			f:Hide()
-			-- The King's own character, before he accepted (his King's screen not yet his): masked, no Show.
+			-- The King's own character, before he accepted (his King's screen not yet his): no part of
+			-- the tag, no Show.
 			w.king = true
 			f = A.Show("login")
-			eq(f.tag:GetText(), "Test****#****"); eq(f.reveal:IsShown(), false)
+			eq(f.tag:GetText(), "****#****"); eq(f.reveal:IsShown(), false)
 			eq(f.tagNote:GetText(), L.ACCORD_TAG_HIDDEN_STREAM)
 			f.reveal:Click()
-			eq(f.tag:GetText(), "Test****#****")
+			eq(f.tag:GetText(), "****#****")
 			-- Accepted, from /oly accord: the date, and Close alone.
 			eq(A.Accept(), true)
 			w.king = false
@@ -761,4 +823,257 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 	SlashCmdList.OLYMPUS("help")
 	print = savedPrint
 	assert(table.concat(lines, "\n"):find(ns.L.HELP_ACCORD, 1, true), "in /oly help")
+end)
+
+-- 1.2.5.1's review: the fixes after the Accord's first build, each against the real Accord.lua.
+
+test("accord: a team member who left before the answer went: the server's not-found line drops what waits for him and I accept no longer tells him; the line our own whisper causes stays out of the chat a moment (mouse and keyboard)", function()
+	Scene(function(w, A)
+		local savedErr = rawget(_G, "ERR_CHAT_PLAYER_NOT_FOUND_S")
+		ERR_CHAT_PLAYER_NOT_FOUND_S = "No player named '%s' is currently playing."
+		local ok, err = pcall(function()
+			A.random = function(lo, hi) return hi end
+			eq(A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1"), true)
+			assert(w.events.CHAT_MSG_SYSTEM, "the server's lines read once an answer waits")
+			local line = ERR_CHAT_PLAYER_NOT_FOUND_S:format(ns.TellName(COUNCILLOR))
+			eq(A.NotFound(ERR_CHAT_PLAYER_NOT_FOUND_S:format("Somebody Else")), false, "another name")
+			eq(A.NotFound("Some other system line"), false)
+			-- He logged off before his answer's delay ran out: the server says so (another addon's
+			-- whisper, or ours to him a moment ago), and nothing goes to him.
+			w.events.CHAT_MSG_SYSTEM[1](line)
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 0, "nothing to a name the server says is not online")
+			-- I accept (asked again): he is not told either.
+			ns.db.accord.v = 0
+			eq(A.Accept(), true)
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 0, "not on accepting either")
+			-- Back, he asks again: answered; the not-found line our whisper may cause stays out of the
+			-- chat QUIET seconds (he may leave between the delay and the send), anyone else's shows.
+			A.random = function(lo) return lo end
+			eq(A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1"), true)
+			w.Run(A.DELAY_MIN)
+			eq(#w.whispers, 1)
+			eq(A.QuietLine(nil, "CHAT_MSG_SYSTEM", line), true, "kept out of the chat")
+			eq(A.QuietLine(nil, "CHAT_MSG_SYSTEM", ERR_CHAT_PLAYER_NOT_FOUND_S:format("Somebody Else")), false, "anyone else's shows")
+			eq(A.QuietLine(nil, "CHAT_MSG_SYSTEM", "Some other system line"), false)
+			w.mono = w.mono + A.QUIET + 1
+			eq(A.QuietLine(nil, "CHAT_MSG_SYSTEM", line), false, "and later, as ever")
+			assert(A.StatusLine():find("gone 1", 1, true), A.StatusLine())
+		end)
+		ERR_CHAT_PLAYER_NOT_FOUND_S = savedErr
+		if not ok then error(err, 0) end
+	end, { accepted = true })
+end)
+
+test("accord: a team client's ask is kept by the server's clock: after a /reload the answers to it are still taken, until TAKE_WINDOW", function()
+	Scene(function(w, A)
+		C_ChatInfo = { SendAddonMessageLogged = function() end }
+		eq(A.AskTeam(), true)
+		w.Run(60)
+		A.Reset() -- (a /reload: this session's state gone, the saved data kept)
+		eq(A.HandleTag("WHISPER", MEMBER, BT()), true, "an answer to the ask before the reload")
+		w.Run(A.TAKE_WINDOW)
+		eq(select(2, A.HandleTag("WHISPER", "Late Comer-Realm", BT(nil, nil, "Late#1"))), "unasked")
+	end, { accepted = true, team = true })
+end)
+
+test("accord: a team member's own BattleTag never goes down the team: the King's client answers no councillor (the author, yes), a councillor's answers the council, an ordinary player's any team member; the game's send checks it again", function()
+	local W = ns.Workshop
+	local savedAuthor = W.IsAuthorName
+	local ok, err = pcall(function()
+		W.IsAuthorName = function(name) return ns.FullName(name) == "Author Person-Realm" end
+		Scene(function(w, A)
+			A.random = function(lo) return lo end
+			w.king = true
+			eq(select(2, A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1")), "level", "the King's own tag: not to a councillor")
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 0)
+			eq(A.HandleAsk("CHANNEL", "Author Person-Realm", "BQ~1"), true, "to the author")
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 1); eq(w.whispers[1].to, "Author Person-Realm")
+			-- An answer that waited from before he was the King (a test of the permit): no send.
+			w.king = false
+			eq(A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1"), true)
+			w.king = true
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 1, "checked again at the send")
+			w.king = false
+			assert(A.StatusLine():find("below 1", 1, true), A.StatusLine())
+		end, { accepted = true })
+		Scene(function(w, A)
+			A.random = function(lo) return lo end
+			eq(A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1"), true, "a councillor's own: to a councillor")
+			w.Run(A.DELAY_MAX)
+			eq(#w.whispers, 1)
+		end, { accepted = true, team = true })
+	end)
+	W.IsAuthorName = savedAuthor
+	if not ok then error(err, 0) end
+end)
+
+test("accord: a client off the moderation team drops its BattleTags: at once on its own sanction or a lost seat, else after TEAM_GRACE off the team (an alt played a while, a namer's list lapsed)", function()
+	Scene(function(w, A)
+		C_ChatInfo = { SendAddonMessageLogged = function() end }
+		local function Kept()
+			A.AskTeam()
+			eq(A.HandleTag("WHISPER", MEMBER, BT()), true)
+			return ns.rdb.battletags ~= nil and A.Count() == 1
+		end
+		A.OnLogin()
+		local tick = false
+		for _, t in ipairs(w.tickers) do if t.where == "olympus accord guard" and t.f == A.Guard then tick = true end end
+		eq(tick, true, "checked every GUARD_EVERY")
+		assert(Kept())
+		eq(A.Guard(), false, "on the team: kept")
+		-- An alt of the account, off the team: kept within TEAM_GRACE, dropped after it.
+		ns.me = "Tester Alt-Realm"
+		eq(A.TeamMember(), false)
+		eq(A.Guard(), false)
+		w.now = w.now + A.TEAM_GRACE - 60
+		eq(A.Guard(), false, "within the grace")
+		w.now = w.now + 120
+		eq(A.Guard(), true); eq(ns.rdb.battletags, nil, "dropped after it")
+		ns.me = "Tester-Realm"
+		-- The seat lost (the signed council list no longer names him): at once.
+		assert(Kept())
+		ns.rdb.council.names.tester = nil
+		eq(A.TeamMember(), false)
+		eq(A.Guard(), true); eq(ns.rdb.battletags, nil, "a lost seat: at once")
+		ns.rdb.council.names.tester = "Tester"
+		-- His own sanction barring his powers (a timeout, a hold, net-off): at once.
+		assert(Kept())
+		local WCt = ns.WatchChat
+		local barred = WCt.Barred
+		WCt.Barred = function(what, name) if name == nil then return { kind = "timeout" } end return barred(what, name) end
+		eq(A.Guard(), true); eq(ns.rdb.battletags, nil, "a sanction: at once")
+		WCt.Barred = barred
+		eq(#w.Fired("ACCORD_TEAM_CHANGED") > 0, true)
+		assert(A.StatusLine():find("wiped 3", 1, true), A.StatusLine())
+	end, { accepted = true, team = true })
+end)
+
+test("accord: accepted after the login's own asks ran (the letter shows 30 seconds in): the guild's newer realm key is asked for then (K5 over GUILD), as at login", function()
+	H.WithUI(function() Scene(function(w, A)
+		A.OnLogin()
+		w.Run(A.LOGIN_WAIT + 5)
+		assert(A.Frame() and A.Frame():IsShown(), "the letter")
+		eq(#w.sends, 0, "nothing while it waits")
+		A.Frame().accept:Click()
+		eq(ns.IsMember(), true)
+		local k5 = false
+		for _, m in ipairs(w.sends) do if m.dist == "GUILD" and m.msg:match("^K5~") then k5 = true end end
+		eq(k5, true, "the key epoch ask")
+	end) end)
+end)
+
+test("accord: on any character of the King's game account, once his own was seen there, the letter shows no part of the BattleTag and no Show; another account's alt as before", function()
+	H.WithUI(function() Scene(function(w, A)
+		w.king = true
+		A.Check() -- (a loading screen on his own character)
+		eq(ns.db.kingAccount, true)
+		w.king = false
+		ns.me = "Kings Alt-Realm"
+		eq(A.Stream(), true)
+		local f = A.Show("login")
+		eq(f.tag:GetText(), "****#****"); eq(f.reveal:IsShown(), false)
+		eq(f.tagNote:GetText(), L.ACCORD_TAG_HIDDEN_STREAM)
+		f:Hide()
+		ns.db.kingAccount = nil
+		f = A.Show("login")
+		eq(f.tag:GetText(), "Tester#****"); eq(f.reveal:IsShown(), true)
+		f:Hide()
+	end) end)
+end)
+
+test("accord: in an Olympus guild before the Accord, a members-only refusal says it waits for the Accord (/oly accord), never that he is no member; elsewhere as ever", function()
+	Scene(function(w, A)
+		eq(ns.InOlympusGuild(), true); eq(ns.IsMember(), false)
+		local ok, why = ns.Channels.Send("A", "hello")
+		eq(ok, false); eq(why, "member")
+		assert(w.Said(L.ACCORD_DECLINED), "the Accord named")
+		assert(not w.Said(L.MEMBERS_ONLY))
+		eq(ns.MembersOnlyText(), L.ACCORD_DECLINED)
+		GetGuildInfo = function() return "Some Other Guild" end
+		eq(ns.MembersOnlyText(), L.MEMBERS_ONLY, "outside Olympus")
+	end)
+end)
+
+test("accord: /oly accord forget <name> on a team client drops that player's BattleTag, every character sharing it; elsewhere nothing is kept to drop", function()
+	Scene(function(w, A)
+		C_ChatInfo = { SendAddonMessageLogged = function() end }
+		A.AskTeam()
+		A.HandleTag("WHISPER", MEMBER, BT())
+		A.HandleTag("WHISPER", "Second Alt-Realm", BT())
+		A.HandleTag("WHISPER", "Brisk Lantern-Realm", BT(nil, nil, "Lantern#7777"))
+		eq(A.Count(), 3)
+		SlashCmdList.OLYMPUS("accord forget " .. MEMBER)
+		eq(A.Count(), 1, "both characters of that tag")
+		assert(ns.rdb.battletags.rows[ns.Fold("Brisk Lantern-Realm")], "the other player's kept")
+		assert(w.Said(L.ACCORD_FORGOT:format(2)))
+		eq(A.Slash("forget Nobody Here"), false)
+		assert(w.Said(L.ACCORD_FORGET_NONE:format("Nobody Here")))
+		ns.rdb.council.names.tester = nil
+		eq(A.Slash("forget Brisk Lantern-Realm"), false)
+		assert(w.Said(L.ACCORD_FORGET_TEAM))
+		ns.rdb.council.names.tester = "Tester"
+	end, { accepted = true, team = true })
+end)
+
+test("accord: the BattleTag's band grows with a two-line note under its label, and the words end above it (Battle.net down)", function()
+	H.WithUI(function() Scene(function(w, A)
+		w.bn.up = false
+		local f = A.Show("login")
+		local p = f.tagNote.points[1]
+		eq(p[1], "TOPLEFT"); eq(p[2], f.tagLabel); eq(p[3], "BOTTOMLEFT", "the note under the label, never over it")
+		-- (The harness measures no font: about 6 pixels a letter and 15 a line, Accord's own fallback.)
+		local noteH = 15 * math.ceil(#f.tagNote:GetText() / math.floor(f.tagNote:GetWidth() / 6))
+		assert(noteH >= 30, "a note of two lines here")
+		assert(f.bandH >= 5 + 15 + 3 + noteH + 5, ("the band holds both: %d"):format(f.bandH))
+		eq(f.band:Anchor("BOTTOMLEFT")[5], f.bandY)
+		eq(f.body:Anchor("BOTTOMRIGHT")[5], f.bandY + f.bandH + 4, "the words end above the band")
+		assert(f.bandY >= 62 + 15 + 10, "the band above the footer")
+		w.bn.up = true
+		A.Refresh(true)
+		eq(f.bandH, 44, "one line: the band as drawn")
+		f:Hide()
+	end) end)
+end)
+
+test("accord: a BattleTag kept, dropped or shown redraws The Watch while it shows", function()
+	H.WithUI(function() Scene(function(w, A)
+		local uns, listeners = setmetatable({}, { __index = ns }), {}
+		uns.On = function(name, f) listeners[name] = listeners[name] or {}; table.insert(listeners[name], f) end
+		assert(loadfile(ROOT .. "Olympus/UI.lua"))("Olympus", uns)
+		ns.UI = uns.UI
+		local UI = uns.UI
+		UI.Toggle()
+		local main = OlympusFrame
+		local calls = 0
+		UI.RefreshSoon = function() calls = calls + 1 end
+		assert(listeners.ACCORD_TEAM_CHANGED, "UI.lua listens")
+		local tab = main.tab
+		main.tab = "watch"
+		for _, f in ipairs(listeners.ACCORD_TEAM_CHANGED) do f() end
+		eq(calls, 1, "The Watch redrawn")
+		main.tab = "census"
+		for _, f in ipairs(listeners.ACCORD_TEAM_CHANGED) do f() end
+		eq(calls, 1, "another tab: nothing")
+		main.tab = tab
+		main:Hide()
+	end, { accepted = true }) end)
+end)
+
+test("accord: the saved fingerprint keeps one byte: for a known name dozens of four-digit numbers fit it; a test build's two bytes are cut to one at login, not asked again", function()
+	Scene(function(w, A)
+		local fp, fits = A.Fp(TAG), 0
+		for n = 1000, 9999 do if A.Fp("Tester#" .. n) == fp then fits = fits + 1 end end
+		assert(fits >= 10, "only " .. fits .. " four-digit numbers fit: the digits come back from the file")
+		local h = ns.Sign.SHA256("OlympusAccord\0" .. ns.Fold(TAG))
+		ns.db.accord.fp = ("%02x%02x"):format(h:byte(1), h:byte(2))
+		A.OnLogin()
+		eq(ns.db.accord.fp, fp, "its first byte kept")
+		A.Check()
+		eq(ns.IsMember(), true, "not asked again")
+	end, { accepted = true })
 end)

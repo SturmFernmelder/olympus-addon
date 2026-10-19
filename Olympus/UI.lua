@@ -3082,6 +3082,9 @@ end)
 -- The court's public line tops the Census and Realm; its restricted queue lives in The Watch.
 ns.On("COURT_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm" or main.tab == "watch") then UI.RefreshSoon() end end)
 ns.On("WATCH_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
+-- 1.2.5.1: a BattleTag kept, dropped or its digits shown or hidden again (Accord.lua): The Watch's
+-- BattleTags page, its count and the person page follow.
+ns.On("ACCORD_TEAM_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
 -- A page of the Realm tab changed (1.1: the loot notes), or the standalone Crafters board changed.
 ns.On("REALM_PAGE_CHANGED", function(key)
 	if not main then return end

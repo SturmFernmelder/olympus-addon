@@ -612,7 +612,7 @@ function Sightings.Request(king, label)
 	if changed then ClearLocal("lease") end
 	if not at or (king.character and not Same(at.from, king.character)) then return Drop("lease") end
 	if king.mapID and king.mapID ~= at.mapID then return Drop("lease") end
-	if not ns.IsMember or ns.IsMember() ~= true then return ns.Print(ns.L.MEMBERS_ONLY) end
+	if not ns.IsMember or ns.IsMember() ~= true then return ns.Print(ns.MembersOnlyText and ns.MembersOnlyText() or ns.L.MEMBERS_ONLY) end
 	local off = SelfOff()
 	if off then return ns.Print(ns.Moderation.YouText(off)) end
 	if (IsInInstance and IsInInstance()) then return ns.Print(ns.L.HOP_INSTANCE) end

@@ -1607,6 +1607,12 @@ end
 function ns.IsMember()
 	return ns.AccordAccepted() and ns.InOlympusGuild()
 end
+-- What a "members only" refusal says: in an Olympus guild before the Olympus Accord, that it waits
+-- for the Accord (and where it is), never that he is no member; elsewhere the usual line.
+function ns.MembersOnlyText()
+	if ns.InOlympusGuild() and not ns.AccordAccepted() then return ns.L.ACCORD_DECLINED end
+	return ns.L.MEMBERS_ONLY
+end
 
 ---------------------------------------------------------------------------
 -- Log (ring buffer in SavedVariables, readable from WTF/.../SavedVariables/Olympus.lua)
@@ -2374,7 +2380,7 @@ local function Slash(input)
 			local P = ns.PlayerProfile
 			local ok, why
 			if P and not P.missing and P.OpenName then ok, why = P.OpenName(rest ~= "" and rest or ns.me) end
-			if not ok then ns.Print(why == "member" and L.MEMBERS_ONLY or L.PLAYER_PROFILE_USAGE) end
+			if not ok then ns.Print(why == "member" and ns.MembersOnlyText() or L.PLAYER_PROFILE_USAGE) end
 		elseif cmd == "letters" or cmd == "letter" or cmd == "cartas" then
 			-- 1.1.5: the version letters (Letters.lua): every one, or one version's.
 			ns.Letters.Slash(rest)

@@ -130,7 +130,8 @@ end
 -- 1.2.5.1 (the owner, right-clicking a portrait: Olympus's lines "even for those who are not in
 -- Olympus"): whether this client knows `name` to be in an Olympus guild, from what it already holds
 -- (opening a menu sends nothing): the unit's guild as the game gives it, our roster, the guild our
--- last /who showed, the guild his own Olympus messages spoke for, the signed manifest. Unknown is no.
+-- last /who showed, his line on the Olympus channels this session, the guild his own Olympus
+-- messages spoke for, the signed manifest. Unknown is no.
 function PlayerMenu.KnownOlympus(name, unit)
 	if type(unit) == "string" and unit ~= "" and type(GetGuildInfo) == "function" then
 		local ok, guild = pcall(GetGuildInfo, unit)
@@ -144,6 +145,11 @@ function PlayerMenu.KnownOlympus(name, unit)
 		local guild, ago = W.SeenGuild(name)
 		if type(guild) == "string" and type(ago) == "number" and ago < 1800 then return guild ~= "" and ns.IsFederation(guild) == true end
 	end
+	-- His line heard on the Olympus channels this session, for an Olympus guild (Channels.SpokeFor):
+	-- once the signed leadership boundary is enforced, his line claims nothing (Channels.VerifiedLevel).
+	local C = ns.Channels
+	local spoke = type(C) == "table" and type(C.SpokeFor) == "function" and C.SpokeFor(name) or nil
+	if type(spoke) == "string" and ns.IsFederation(spoke) == true then return true end
 	local D = ns.Data
 	local claimed = type(D) == "table" and type(D.ClaimedGuild) == "function" and D.ClaimedGuild(name) or nil
 	if type(claimed) == "string" then return ns.IsFederation(claimed) == true end

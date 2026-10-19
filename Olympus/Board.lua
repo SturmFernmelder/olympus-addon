@@ -392,7 +392,7 @@ Board.Send = Send
 -- Whether we can put anything on the Board now: a member, on the channel, not in lockdown, not off.
 function Board.Ready()
 	if not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return false, "member"
 	end
 	if not ns.Comm.ChannelReady() then
