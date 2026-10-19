@@ -5081,6 +5081,86 @@ test("Realm races keep the race exposed by modern /who without putting it on the
 	end)
 end)
 
+-- CR-05 (races shown as Unknown): another guild's Lord is known from its census report,
+-- which carries no race. /who showed his race while he was online; the next round, with him
+-- logged off, used to put him back under Unknown. The client's WhoInfo gives raceStr only
+-- (no race file token), so these rows give no sixth field.
+test("CR-05: a race /who showed stays in the Realm's Races after its round is over, this session only, never saved; Unknown says why", function()
+	WithWho(function(server)
+		local saved = { members = ns.Roster.members, ui = ns.UI, arena = ns.ArenaProfile, creature = C_CreatureInfo }
+		local ok, err = pcall(function()
+			ns.Roster.members, ns.ArenaProfile, C_CreatureInfo = {}, nil, nil
+			ns.UI = { Refresh = function() end, StatusLine = function() return "status" end, ShowPerson = function() end,
+				FilterChanged = function() end }
+			ns.rdb.guilds["OLYMPUS VII"] = { total = 30, online = 4, zones = {}, t = ns.Now(), realm = "Realm",
+				leader = "Lordelf", leaderClass = "MA", leaderLevel = 60, officers = {}, top = {} }
+			local function Groups()
+				ns.Views.ClearFilters()
+				ns.Views.SetRealmMode("races", true)
+				local out = {}
+				for _, line in ipairs(ns.Views.Build("realm")) do
+					if type(line.id) == "string" and line.id:find("^realm:races:") then out[line.id:sub(13)] = line end
+				end
+				return out
+			end
+			local function Holds(t, value, seen)
+				seen = seen or {}
+				if type(t) ~= "table" or seen[t] then return false end
+				seen[t] = true
+				for k, v in pairs(t) do
+					if k == value or v == value or (type(v) == "table" and Holds(v, value, seen)) then return true end
+				end
+				return false
+			end
+			local SAVED = { OlympusDB, ns.db, ns.rdb }
+			eq(Holds(SAVED, "Night Elf"), false, "nothing saved holds the race before the test")
+
+			local before = Groups()
+			assert(before.unknown and not before["race:night elf"], "the report alone gives no race")
+
+			eq(ns.Who.Search(), true)
+			server.Answer({ { "Lordelf", "OLYMPUS VII", 60, "MAGE", "Night Elf" } })
+			server.Run(ns.Who.SETTLE)
+			local seen = Groups()
+			assert(seen["race:night elf"] and not seen.unknown, "seen online: his race")
+
+			-- He logs off. The round's searches for the misspelled names find nobody, then the next
+			-- round's broad search lists only someone else.
+			for _ = 1, #ns.Who.VARIANTS do
+				eq(server.Click(), true)
+				server.Answer({})
+				server.Run(ns.Who.SETTLE)
+			end
+			eq(server.Click(), true)
+			eq(server.sent[#server.sent], ns.Who.QUERY, "the next round's broad search")
+			server.Answer({ { "Otherdwarf", "OLYMPUS VII", 50, "WARRIOR", "Dwarf" } })
+			server.Run(ns.Who.SETTLE)
+			eq(ns.Who.sweep.byName.Lordelf, nil, "the new round no longer lists him")
+			local after = Groups()
+			assert(after["race:night elf"], "the race /who showed earlier this session stays")
+			assert(after["race:dwarf"], "the new round's player has his own")
+			eq(after.unknown, nil, "nobody back under Unknown")
+			eq(after["race:night elf"].text:find("(1)", 1, true) ~= nil, true, "him, once")
+			eq(select(1, ns.Who.RaceOf("Lordelf-Realm")), "Night Elf")
+			eq(Holds(SAVED, "Night Elf"), false, "kept in memory only: nothing saved holds it")
+
+			-- /oly reset forgets the rounds and these races with them.
+			ns.Who.Reset()
+			eq(ns.Who.RaceOf("Lordelf"), nil)
+			local unknown = Groups().unknown
+			assert(unknown, "after a reset he is Unknown again until /who sees him")
+			-- The Unknown group says why.
+			local tip = {}
+			unknown.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+			eq(tip[#tip], ns.L.REALM_RACE_UNKNOWN_TIP, "the Unknown group says where a race comes from")
+		end)
+		ns.Roster.members, ns.UI, ns.ArenaProfile, C_CreatureInfo = saved.members, saved.ui, saved.arena, saved.creature
+		ns.Views.ClearFilters()
+		ns.Views.SetRealmMode("guilds", true)
+		if not ok then error(err, 0) end
+	end)
+end)
+
 test("who on the old UI: no answer, the Social window gets the event back on the timeout", function()
 	WithWho(function(server)
 		FriendsFrame = ListenerFrame("FriendsFrame", true)

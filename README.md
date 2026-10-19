@@ -210,7 +210,10 @@ channels; the same charter and Join controls work for each side.
   one. Your guild comes from your live roster. Other guilds are partial (their reports and
   players seen with `/who`). Race comes from your live roster or `/who` result when the client
   directly exposes it, or from a consented Arena profile; these local observations do not add a
-  race field to census reports. Profession skill/current cap comes from the crafter's consented
+  race field to census reports. A race a `/who` answer showed stays known for the rest of the
+  session, after its round is over or the player logs off (in memory only: never saved or sent,
+  gone at a reload and with `/oly reset`). The Races view's **Unknown** group says on hover where a
+  race comes from. Profession skill/current cap comes from the crafter's consented
   listing with its age. Unknown data stays
   **Unknown**: Olympus does not infer a role from class or pretend another player's professions
   came from inspect. Each view keeps its own search and collapsed groups for the session.

@@ -2641,6 +2641,13 @@ local function RealmPeople(s)
 	end
 
 	for _, p in ipairs(out) do
+		-- (CR-05) The race a /who answer showed earlier this session, for someone no list of the
+		-- current round has (logged off since, or only in his guild's report): the game's word,
+		-- before an Arena profile's self-report.
+		if not p.race and ns.Who and ns.Who.RaceOf then
+			local race, raceName = ns.Who.RaceOf(p.full)
+			if race ~= nil then p.race, p.raceName = race, raceName end
+		end
 		local profile = ns.ArenaProfile and ns.ArenaProfile.Of and ns.ArenaProfile.Of(p.full)
 		-- A private Arena profile may have been learned from a fight this client witnessed. It is
 		-- not consent to surface those facts in the Realm; only its public flag (or our own profile)
@@ -2796,6 +2803,11 @@ local function RealmGroupedLines(s, mode, q)
 				realmGroupOpen[mode][g.key] = not realmGroupOpen[mode][g.key] or nil
 				ns.UI.Refresh()
 			end,
+			-- (CR-05) Races' Unknown says where a race comes from: the census carries none.
+			tooltip = mode == "races" and g.key == "unknown" and function(tt)
+				tt:AddLine(g.label, 1, 0.82, 0)
+				tt:AddLine(L.REALM_RACE_UNKNOWN_TIP, 1, 1, 1, true)
+			end or nil,
 		}
 		if open then for _, entry in ipairs(g.people) do lines[#lines + 1] = RealmPersonLine(entry.person, entry.profession) end end
 	end
