@@ -991,8 +991,10 @@ end
 -- An Apostle's own look (1.2.1, the owner's call, for an Apostle who asked for it)
 ---------------------------------------------------------------------------
 -- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
--- on his own screen alone, while everyone else sees his normal frame. Offered in the frame picker
--- (ProfileEdit) to anyone the signed Apostles list names (Church.SignedApostles: the author's
+-- on his own screen alone, while everyone else sees the Apostles' cross he holds in the Church's
+-- ranking (1.2.5, the owner's rule: his pick follows it, HonorsNet.OwnLookFrame), or with none
+-- held his normal frame. Offered in the frame picker (ProfileEdit) to anyone the signed Apostles
+-- list names (Church.SignedApostles: the author's
 -- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the
 -- plain underlay tinted black (UNDERLAY.black). Kept in this account's save, by character
 -- (ns.db.ownLooks), and never sent: the profile's word (AP) carries his pick as ever, so every

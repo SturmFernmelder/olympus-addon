@@ -1339,6 +1339,21 @@ function H.Known()
 	}
 end
 
+-- (1.2.5, the owner's rule of 10-19) The red cross is its wearer's own look, on his own screen alone
+-- (Borders.OwnLook): every other client shows him with the Apostles' cross he holds in the Church's
+-- ranking (apostle-1/2/3, the best one held, gold, silver or bronze). So while he wears it, the pick
+-- his profile's word carries is that cross; with none held, his pick as it is. Nil: no change.
+function H.OwnLookFrame(held)
+	local B = ns.Borders
+	if type(B) ~= "table" or B.missing or type(B.OwnLook) ~= "function" or B.OwnLook() == nil then return nil end
+	local best
+	for _, h in ipairs(type(held) == "table" and held or {}) do
+		if type(h) == "table" and h.family == "apostle" and type(h.frame) == "string" and type(h.place) == "number"
+			and ns.Honors.FrameShipped(h) and (not best or h.place < best.place) then best = h end
+	end
+	return best and best.frame or nil
+end
+
 local refreshing = false
 local letters = {} -- the queue shown now: { key, t }
 -- Our honours looked at again: what is new switches on (unless locked) and gets its letter.
@@ -1367,6 +1382,10 @@ function H.Refresh()
 		local pick, earned, lost = ns.Honors.Update(before, held, known, function(h)
 			return told[H.LetterMark(h.key, h.period)] == true
 		end, { now = H.Inputs().now })
+		-- (1.2.5) The red cross worn here: the cross he holds is what everyone else sees, whatever
+		-- else switched on (H.OwnLookFrame).
+		local cross = H.OwnLookFrame(held)
+		if cross then pick.frame = cross end
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
 		if not same or (first and next(pick.seen or {}) ~= nil) then P.SavePick(pick) end
