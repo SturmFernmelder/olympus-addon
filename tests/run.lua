@@ -29918,11 +29918,12 @@ test("1.2.6 the Companion's chat record: each Olympus channel line shown, ours a
 		-- once a session (the record's review: other addons can take every slot first, and nothing
 		-- said why the Companion's record stayed empty).
 		for _ = 3, 4 do eq(B.RegisterChatRecorder(function() end), true) end
-		local logged = #ns.db.log
 		eq(B.RegisterChatRecorder(function() end), false, "four recorders at most")
+		local logged, refusal = #ns.db.log, ns.db.log[#ns.db.log]
+		assert(refusal:find("bridge: a chat recorder refused, all 4 slots taken", 1, true), refusal)
 		eq(B.RegisterChatRecorder(function() end), false)
-		eq(#ns.db.log, logged + 1, "one log line for the refusals")
-		assert(ns.db.log[#ns.db.log]:find("bridge: a chat recorder refused, all 4 slots taken", 1, true), ns.db.log[#ns.db.log])
+		eq(#ns.db.log, logged, "one log line for the refusals, including when the bounded log is full")
+		eq(ns.db.log[#ns.db.log], refusal, "the second refusal adds no duplicate")
 		-- The README's privacy table names it: who receives it, which lines, when it is saved.
 		local f = assert(io.open(ROOT .. "README.md", "rb"))
 		local readme = f:read("*a")
@@ -63917,6 +63918,7 @@ end
 			["Privacy"] = "The table is", -- "What goes where:"
 			["Security and trust"] = "The list is", -- "... said plainly further down (...):"
 			["What colluding characters can reach"] = "The list is", -- "can still reach the following"
+			["Alt links (1.1): one player, counted once"] = "The list is", -- "the census counts people:"
 		}
 		for _, cut in ipairs(gen.CUTS) do
 			local function Section(text)

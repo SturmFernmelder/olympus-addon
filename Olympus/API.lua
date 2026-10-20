@@ -1047,7 +1047,9 @@ end
 local function AreaPin(row) -- gp:worldmap-icons
 	if not ns.Gate.Allowed("worldmap-icons") then return nil end
 	if UIParent == nil then return nil end
-	local frame = CreateFrame("Frame", nil, UIParent)
+	-- An unskinned map marker, not a standalone window. Keep the optional
+	-- template explicit so the window-style guard can verify that invariant.
+	local frame = CreateFrame("Frame", nil, UIParent, nil)
 	frame:SetSize(18, 18)
 	local icon = frame:CreateTexture(nil, "OVERLAY")
 	icon:SetAllPoints()
@@ -1425,8 +1427,13 @@ local function PinTooltip(self) -- gp:minimap
 end
 
 local function PinDot(size) -- gp:minimap
-	if UIParent == nil or type(CreateFrame) ~= "function" then return nil end
-	local f = CreateFrame("Frame", nil, UIParent)
+	-- Loaded in WoW after the frame API exists; UIParent is the compatibility
+	-- guard, as it is for the world-map marker above. Avoid passing CreateFrame
+	-- around as a value, which would make the window-style audit unverifiable.
+	if UIParent == nil then return nil end
+	-- An unskinned map marker, not a standalone window. Keep the optional
+	-- template explicit so the window-style guard can verify that invariant.
+	local f = CreateFrame("Frame", nil, UIParent, nil)
 	f.olympus = true
 	f:SetSize(size, size)
 	f.edge = f:CreateTexture(nil, "BACKGROUND")

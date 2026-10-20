@@ -3370,11 +3370,15 @@ function UI.ShowCopy(title, text, action, opts)
 		if not copyFrame then return nil end
 	end
 	local button = copyFrame.action
+	-- A small copy window has no Select all button.  Read only the field CopyFrame
+	-- installed: frame mixins (and the offline frame toolkit) may expose a method
+	-- with the same name through the frame's metatable.
+	local selectAll = rawget(copyFrame, "selectAll")
 	button.fn = action and action.fn or nil
 	button:SetShown(action ~= nil)
 	-- With the button on the left, the hint moves right.
 	copyFrame.hint:ClearAllPoints()
-	if action or copyFrame.selectAll then
+	if action or selectAll then
 		copyFrame.hint:SetPoint("BOTTOMRIGHT", -12, 10)
 		copyFrame.hint:SetJustifyH("RIGHT")
 	else
@@ -3388,9 +3392,9 @@ function UI.ShowCopy(title, text, action, opts)
 		button:SetWidth(math.max(120, math.ceil(textW) + 24))
 		button:Enable()
 	end
-	if copyFrame.selectAll then
-		copyFrame.selectAll:ClearAllPoints()
-		if action then copyFrame.selectAll:SetPoint("LEFT", button, "RIGHT", 6, 0) else copyFrame.selectAll:SetPoint("BOTTOMLEFT", 10, 6) end
+	if selectAll then
+		selectAll:ClearAllPoints()
+		if action then selectAll:SetPoint("LEFT", button, "RIGHT", 6, 0) else selectAll:SetPoint("BOTTOMLEFT", 10, 6) end
 	end
 	-- (1.1.5) A second button after the first (and Select all), made the first time one is asked for.
 	local second = type(opts.second) == "table" and type(opts.second.fn) == "function" and opts.second or nil
@@ -3410,7 +3414,7 @@ function UI.ShowCopy(title, text, action, opts)
 			local textW = fs and (fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()) or 120
 			b:SetWidth(math.max(110, math.ceil(textW) + 24))
 			b:ClearAllPoints()
-			local after = copyFrame.selectAll or (action and button) or nil
+			local after = selectAll or (action and button) or nil
 			if after then b:SetPoint("LEFT", after, "RIGHT", 6, 0) else b:SetPoint("BOTTOMLEFT", 10, 6) end
 			-- The hint takes the room right of the buttons, wrapped there if it must (a longer
 			-- language's), never under them.

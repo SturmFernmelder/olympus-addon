@@ -207,7 +207,7 @@ end
 local function With(o, fn)
 	o = o or {}
 	local m = Modules(o)
-	local saved = { rdb = ns.rdb, now = ns.Now, realm = ns.realm, group = ns.group, faction = ns.faction, accord = ns.db.accord,
+	local saved = { rdb = ns.rdb, now = ns.Now, realm = ns.realm, group = ns.group, faction = ns.faction, me = ns.me, accord = ns.db.accord,
 		guildInfo = GetGuildInfo, level = rawget(_G, "UnitLevel"), class = rawget(_G, "UnitClass"), race = rawget(_G, "UnitRace"),
 		guid = rawget(_G, "UnitGUID"), modules = {} }
 	for key in pairs(m) do saved.modules[key] = rawget(ns, key) end
@@ -216,13 +216,13 @@ local function With(o, fn)
 	for key, value in pairs(o.modules or {}) do rawset(ns, key, value or nil) end
 	ns.rdb = { guilds = Census(o.guilds or 8, NOW, o.staleLordOnline), seen = {}, treasuryFlags = {} }
 	ns.Now = function() return NOW end
-	ns.realm, ns.group, ns.faction = "Realm", "Realm", "Alliance"
+	ns.realm, ns.group, ns.faction, ns.me = "Realm", "Realm", "Alliance", ME
 	UnitLevel = function() return 60 end
 	UnitClass = function() return "Mage", "MAGE" end
 	UnitRace = function() return "Gnome", "Gnome" end
 	UnitGUID = function() return "Player-4619-0000ABCD" end
 	local ok, err = pcall(fn, m)
-	ns.rdb, ns.Now, ns.realm, ns.group, ns.faction, ns.db.accord = saved.rdb, saved.now, saved.realm, saved.group, saved.faction, saved.accord
+	ns.rdb, ns.Now, ns.realm, ns.group, ns.faction, ns.me, ns.db.accord = saved.rdb, saved.now, saved.realm, saved.group, saved.faction, saved.me, saved.accord
 	GetGuildInfo, UnitLevel, UnitClass, UnitRace, UnitGUID = saved.guildInfo, saved.level, saved.class, saved.race, saved.guid
 	for key, value in pairs(saved.modules) do rawset(ns, key, value) end
 	if not ok then error(err, 0) end
