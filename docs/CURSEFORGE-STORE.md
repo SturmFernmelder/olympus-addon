@@ -29,12 +29,13 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
+- **1.3.0**: Shared durable records and rankings; Church catch-up; Wanted and Slayers pagination,
+  rebalanced history and recent map sightings; the current Legate structure; safer Watch records;
+  Companion exports after the Accord; and integrated Arena, Bones and chat fixes.
 - **1.2.5.1**: Hotfix: officers can return a guild separated by a mismatched private realm key to the
   public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
 - **1.2.5**: Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,
   safer shared rankings and relay queues, and predictable Most Wanted list expansion.
-- **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
-  from members' own kills and deaths, bounties by office and level; the missionaries' crook
 
 Every version's notes are in the [GitHub releases](https://github.com/dnl-gentile/olympus-addon/releases). This page is the short one for CurseForge: the [README](https://github.com/dnl-gentile/olympus-addon#olympus) has every section in full.
 
