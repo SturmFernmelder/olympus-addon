@@ -27,6 +27,10 @@ local ADDON, ns = ...
 -- hostile rows; a request with no S stays "hostile". Only a not-hostile B row carries the final
 -- "~o", and only an S-extended request accepts one.
 --
+-- The requester's own client is an observer of its own area request too: a player its own game
+-- shows it (at the start, and while the request lives) enters that request as an "own" row, with
+-- no message sent and no sharing consent needed, since nothing leaves the client.
+--
 -- Q/C senders and R/X recipients are server-stamped by the addon channel. Q is accepted only
 -- from Olympus's existing signed authority (Moderation.IsIssuer), or from the addon's pinned
 -- author identity so the developer can exercise the same live path; a local guild roster never
@@ -478,6 +482,8 @@ local function AreaResultCopy(result)
 		seenAt = result.seenAt, receivedAt = result.receivedAt, expiresAt = result.expiresAt,
 		kind = result.kind or "nearby", hostile = result.hostile ~= false }
 	if result.accuracyYards ~= nil then out.accuracyYards = result.accuracyYards end
+	-- This client's own observation: says nothing about any other member.
+	if result.own == true then out.own = true end
 	return out
 end
 
@@ -697,6 +703,9 @@ local function StartRequest(mode, value, scope)
 	end })
 	if not accepted and requests[request.id] == request then RemoveRequest(request, "queue", false) end
 	if accepted then Changed(request.id, "started") end
+	if accepted and mode == "area" and requests[request.id] == request and Sightings.SeedOwnArea then
+		Sightings.SeedOwnArea(request)
+	end
 	return accepted and true or false, accepted and request.id or "queue"
 end
 
@@ -753,7 +762,13 @@ function Sightings.AreaSession(id)
 	for _, result in pairs(request.results) do
 		local key = result.target:lower()
 		local previous = chosen[key]
-		if not previous or PreferResponse(previous, result.seenAt, result.kind) then chosen[key] = result end
+		-- A full tie (same time and precision) goes to this client's own row: a network row's time
+		-- is already rounded down by its serialized age, and pairs' order must not decide.
+		local tie = previous and previous.seenAt == result.seenAt
+			and (RESPONSE_QUALITY[previous.kind] or 0) == (RESPONSE_QUALITY[result.kind] or 0)
+		if not previous or PreferResponse(previous, result.seenAt, result.kind) or (tie and result.own == true) then
+			chosen[key] = result
+		end
 	end
 	out.results, out.sightings = {}, {}
 	for _, result in pairs(chosen) do out.results[#out.results + 1] = AreaResultCopy(result) end
@@ -940,9 +955,52 @@ local function HostileUnit(unit)
 	return type(UnitIsEnemy) == "function" and Ask(UnitIsEnemy, "player", unit) == true
 end
 
-function Sightings.ObserveUnit(unit, remember)
+-- This client's own live area requests. What the requester's own game shows it belongs in its own
+-- session at once, with no other member and no network round trip: nothing about it leaves this
+-- client, so it needs neither the sharing consent nor location sharing (the request itself already
+-- needed the signed authority, CanRequest).
+local function OwnAreaRequests()
+	local list = {}
+	for _, request in pairs(requests) do
+		if request.mode == "area" and (request.phase == "sending" or request.phase == "waiting") then
+			list[#list + 1] = request
+		end
+	end
+	return list
+end
+
+-- One row per target for this client's own observation, under a key no reporter can have (a
+-- reporter key starts with its canonical name). It obeys the same map, scope and target cap as a
+-- network row; the newest of the two wins in AreaSession, as between two reporters.
+local function AddOwnAreaRow(request, target, mapID, x, y, layer, kind, accuracyYards, hostile, outsider, seenAt)
+	if request.mapID ~= mapID or not AreaTakes(request, hostile, outsider) then return false end
+	local key = "\0own\0" .. target:lower()
+	if not request.results[key] then
+		local targets, count, known = {}, 0, false
+		for _, result in pairs(request.results) do
+			local resultTarget = type(result.target) == "string" and result.target:lower() or ""
+			if resultTarget == target:lower() then known = true end
+			if resultTarget ~= "" and not targets[resultTarget] then targets[resultTarget], count = true, count + 1 end
+		end
+		if not known and count >= Sightings.AREA_MAX_RESULTS then return false end
+	elseif (request.results[key].seenAt or 0) > seenAt then
+		return false
+	end
+	request.results[key] = { requestId = request.id, target = target, reporter = ns.me, own = true,
+		mapID = mapID, x = x, y = y, layer = layer or 0, seenAt = seenAt, receivedAt = seenAt,
+		expiresAt = seenAt + Sightings.RESULT_TTL, kind = kind or "nearby", accuracyYards = accuracyYards,
+		hostile = hostile == true }
+	Changed(request.id, "result")
+	return true
+end
+
+-- ownOnly: only this client's own area requests take the observation (the scan when one starts);
+-- no remote is answered and nothing is remembered.
+local function Observe(unit, remember, ownOnly)
 	local eligible, why = ObserverEligible()
-	if not eligible then return false, why end
+	local own = OwnAreaRequests()
+	if ownOnly then eligible, why = false, "own" end
+	if not eligible and #own == 0 then return false, why end
 	if not AllowedUnit(unit) then return false, "unit" end
 	local exists, player = Ask(UnitExists, unit), Ask(UnitIsPlayer, unit)
 	local guid = Ask(UnitGUID, unit)
@@ -973,6 +1031,15 @@ function Sightings.ObserveUnit(unit, remember)
 	local now, matched, queuedAny = Now(), false, false
 	local hostile = HostileUnit(unit)
 	local outsider = not hostile and Outsider(unit, guid)
+	local ownAdded = false
+	for _, request in ipairs(own) do
+		if AddOwnAreaRow(request, name, mapID, x, y, layer, kind, accuracyYards, hostile, outsider, now) then ownAdded = true end
+	end
+	local point = { target = name, mapID = mapID, x = x, y = y, layer = layer, kind = kind, accuracyYards = accuracyYards }
+	if not eligible then
+		if ownAdded then return true, point end
+		return false, #own > 0 and "unrequested" or why
+	end
 	if remember ~= false then Remember(name, mapID, x, y, layer, kind, accuracyYards, hostile, outsider, now) end
 	local list = {}
 	for _, remote in pairs(remotes) do list[#list + 1] = remote end
@@ -985,10 +1052,32 @@ function Sightings.ObserveUnit(unit, remember)
 			if ok then queuedAny = true end
 		end
 	end
-	if not matched then return false, "unrequested" end
-	return queuedAny, queuedAny and { target = name, mapID = mapID, x = x, y = y, layer = layer,
-		kind = kind, accuracyYards = accuracyYards } or "replay"
+	if not matched then
+		if ownAdded then return true, point end
+		return false, "unrequested"
+	end
+	return queuedAny, queuedAny and point or "replay"
 end
+
+function Sightings.ObserveUnit(unit, remember) return Observe(unit, remember, false) end
+
+-- A new own area request starts with what this client already knows of that map: its bounded
+-- recent memory (kept only while it shares) and every player its game shows it right now.
+local function SeedOwnArea(request)
+	local now = Now()
+	PruneRecent(now)
+	for _, record in pairs(recent) do
+		AddOwnAreaRow(request, record.target, record.mapID, record.x, record.y, record.layer, record.kind,
+			record.accuracyYards, record.hostile, record.outsider, record.at)
+	end
+	Observe("target", false, true)
+	Observe("mouseover", false, true)
+	for i = 1, 40 do
+		local token = "nameplate" .. i
+		if Ask(UnitExists, token) == true then Observe(token, false, true) end
+	end
+end
+Sightings.SeedOwnArea = SeedOwnArea
 
 local function ReceiveQuery(sender, text)
 	local version, id, target = text:match("^PS~Q~(%d+)~(%d+)~([^~]+)$")

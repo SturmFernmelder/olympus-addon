@@ -373,6 +373,13 @@ The returned area shape deliberately omits observer identity and guild:
 }
 ```
 
+The requester's own client is an observer of its own area search too. A player that the
+requester's own game exposes as a target, mouseover or nameplate (at the start and while the search
+lives) enters the search as a row with `own = true`, under the same map, scope and 48-target rules.
+Nothing about it is sent, and it needs neither the sharing permission nor location sharing. One row
+is kept per target: the newest of an own row and a network row wins, and a network row never says
+which member sent it.
+
 `nearby` remains the observing member's encounter position, not the target's exact position and
 not a claimed radius. The row does not contain `observer`, `observerGuild`, a GUID or another
 internal field. Consumers must present this as recent last-seen evidence and remove expired rows.
@@ -409,6 +416,33 @@ another non-map fallback instead of claiming pins were shown. Otherwise it retur
 Removes this handle's host-owned area pins. With `id`, it clears only when that exact owned map view
 is active; without `id`, it idempotently clears this handle's current view. It cannot clear another
 addon's pins. Returns `true`, or `false, "unknown"` for a supplied id that is not the active view.
+
+### `handle:SetSightingPins(pins)` and `handle:ClearSightingPins()`
+
+Keep recent rows in sight while a visible session the player explicitly started remains on.
+`pins` is a list of at most 96 rows, each a copy of a row this handle read from its own searches:
+
+```lua
+{
+	target = "Example-Realm",
+	category = "hostile", -- or "marked" / "outsider": the dot's fixed colour (red, orange, blue)
+	mapID = 84, x = 520, y = 375,
+	seenAt = 1792000123, expiresAt = 1792001023,
+	kind = "nearby", accuracyYards = 30, -- as the row gave them
+	own = true, -- optional: the row's own flag
+	marks = { "Watch" }, -- optional: at most three short labels of the consumer's lists
+	label = "Horde", -- optional: the consumer's own short name for the category (32 bytes)
+}
+```
+
+Olympus draws host-owned dots on the world map (mouse and keyboard only; the gamepad UI's map gets
+none) and on the minimap, and writes the tooltip itself from those fields: the name, the category (or its `label`),
+the marks or "Not marked", how long ago (Olympus's clock against `seenAt`) and the precision (an exact
+point, nearby within about N yards, or the observer's encounter point), and "Seen by you" for an own
+row. An older dot fades. A row past its `expiresAt`, or with an unknown category or invalid point,
+is not drawn. It never opens the map. Each call replaces this handle's whole set and returns `true`
+and the number drawn, or `false` and `"invalid"`, `"unavailable"` or a permission reason.
+`ClearSightingPins` removes the set; permission loss and `/reload` remove it too.
 
 ### Profile-presentation session
 

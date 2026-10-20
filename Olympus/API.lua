@@ -106,6 +106,7 @@ API.RESERVED_METHODS = {
 	GetLeaderPresence = "nil", StartPlayerSearch = "nil", GetPlayerSearch = "nil", GetPlayerSearches = "nil",
 	StartAreaSearch = "nil", GetAreaSearch = "nil", GetAreaSearches = "nil",
 	CancelPlayerSearch = "false", CancelAreaSearch = "false", ShowAreaSearchOnMap = "false", ClearAreaSearchMap = "false",
+	SetSightingPins = "false", ClearSightingPins = "false",
 	-- The quiet presence and the profile presentation: authorized addons only, as the leader's presence.
 	SetQuietPresence = "false", GetQuietPresence = "nil",
 	StartProfileSession = "false", StopProfileSession = "false", SetProfileEffect = "false", GetProfileSession = "nil",
@@ -573,6 +574,8 @@ function API.AreaSearch(id)
 					mapID = mapID, x = x, y = y, layer = Num(row.layer, true) or 0, kind = kind, hostile = hostile }
 				if receivedAt and receivedAt >= at then sighting.receivedAt = receivedAt end
 				if accuracy ~= nil then sighting.accuracyYards = accuracy end
+				-- This client's own observation (no other member's identity in it).
+				if row.own == true then sighting.own = true end
 				out.sightings[#out.sightings + 1], targets[key] = sighting, true
 			end
 		end
@@ -597,6 +600,7 @@ local function SearchFingerprint(state)
 end
 
 local ClearAreaMap, DrawAreaMap
+local HideSightingPins -- (the sighting pins, defined beside the methods)
 
 -- A consumer may rotate an exact-name request before it rotates its hostile-area coverage. Keep
 -- only the already-sanitized exact target/map binding until that result's own expiry; cancellation
@@ -935,6 +939,7 @@ local function SetAnswer(c, on)
 		c.areaProofs = {}
 		c.areaStartedAt = nil
 		ClearAreaMap(c)
+		HideSightingPins(c)
 	end
 	all[c.key] = { on = on and true or false, v = API.CONSENT_VERSION, at = ns.Now and ns.Now() or 0 }
 	c.told = {}
@@ -1358,6 +1363,160 @@ function METHODS.ClearAreaSearchMap(c, id)
 	if id ~= nil and type(id) ~= "string" then return false, "unknown" end
 	return ClearAreaMap(c, id)
 end
+-- Sighting pins: the rows a visible, player-started monitoring session chose to keep in sight, as
+-- host-owned dots on the world map (mouse and keyboard only: ns.WorldMapIcons) and on the minimap,
+-- each coloured by a fixed category. Olympus writes the tooltip from the pin's own checked fields:
+-- the name, its category (or the consumer's own short name for it), the consumer's short marks (a list's name, at most three), how long ago
+-- it was seen (Olympus's own clock, the rows' seenAt) and how precise the point is. It never opens
+-- the map. Each call replaces this handle's whole set; permission loss, ClearSightingPins and a
+-- /reload remove it, and a pin past its own expiresAt is never drawn.
+API.PIN_MAX = 96
+API.PIN_CATEGORIES = {
+	hostile = { 0.92, 0.18, 0.14 },   -- red
+	marked = { 1, 0.62, 0.05 },       -- orange
+	outsider = { 0.3, 0.62, 1 },      -- blue
+}
+local PIN_LABEL = { hostile = "API_PIN_HOSTILE", marked = "API_PIN_MARKED", outsider = "API_PIN_OUTSIDER" }
+
+local function PinRow(raw, now)
+	if type(raw) ~= "table" or Secret(raw.category) or not API.PIN_CATEGORIES[raw.category] then return nil end
+	local target = Plain(raw.target, 72)
+	local mapID, x, y = Num(raw.mapID, true), Num(raw.x), Num(raw.y)
+	local seenAt, expiresAt = Num(raw.seenAt), Num(raw.expiresAt)
+	if not target or not mapID or mapID <= 0 or not x or x < 0 or x > 1000 or not y or y < 0 or y > 1000
+		or not seenAt or not expiresAt or expiresAt <= now or seenAt > now + 60 then return nil end
+	local kind = raw.kind
+	if kind ~= "exact-unit" and kind ~= "exact-group" then kind = "nearby" end
+	local yards = kind == "nearby" and Num(raw.accuracyYards) or nil
+	if yards and (yards < 1 or yards > 100000) then yards = nil end
+	local marks = {}
+	for _, mark in ipairs(type(raw.marks) == "table" and raw.marks or {}) do
+		if #marks >= 3 then break end
+		local text = Plain(mark, 24)
+		if text then marks[#marks + 1] = text end
+	end
+	return { target = target, category = raw.category, label = Plain(raw.label, 32), mapID = mapID, x = x, y = y,
+		seenAt = seenAt, expiresAt = expiresAt, kind = kind, accuracyYards = yards, own = raw.own == true, marks = marks }
+end
+
+local function PinTooltip(self) -- gp:minimap
+	local row = self.pinRow
+	if type(row) ~= "table" or type(GameTooltip) ~= "table" or type(GameTooltip.SetOwner) ~= "function" then return end
+	local c = API.PIN_CATEGORIES[row.category] or { 1, 1, 1 }
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:AddLine(row.target, c[1], c[2], c[3])
+	GameTooltip:AddLine(row.label or L[PIN_LABEL[row.category]] or row.category, 0.85, 0.85, 0.85)
+	if #row.marks > 0 then
+		GameTooltip:AddLine((L.API_PIN_MARKS or "Marked: %s"):format(table.concat(row.marks, ", ")), 1, 0.82, 0)
+	else
+		GameTooltip:AddLine(L.API_PIN_UNMARKED or "Not marked", 0.6, 0.6, 0.6)
+	end
+	GameTooltip:AddLine((L.API_PIN_SEEN or "Seen %s"):format(ns.Ago(row.seenAt)), 0.85, 0.85, 0.85)
+	local precision
+	if row.kind ~= "nearby" then precision = L.API_AREA_EXACT or "Exact last-seen point"
+	elseif row.accuracyYards then precision = (L.API_PIN_YARDS or "Nearby, within about %d yards"):format(math.floor(row.accuracyYards + 0.5))
+	else precision = L.API_PIN_NEARBY or "Nearby: where the observer stood" end
+	GameTooltip:AddLine(precision, 0.75, 0.75, 0.75, true)
+	if row.own then GameTooltip:AddLine(L.API_PIN_OWN or "Seen by you", 0.5, 0.9, 0.5) end
+	GameTooltip:Show()
+end
+
+local function PinDot(size) -- gp:minimap
+	if UIParent == nil or type(CreateFrame) ~= "function" then return nil end
+	local f = CreateFrame("Frame", nil, UIParent)
+	f.olympus = true
+	f:SetSize(size, size)
+	f.edge = f:CreateTexture(nil, "BACKGROUND")
+	f.edge:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+	f.edge:SetVertexColor(0, 0, 0, 0.9)
+	f.edge:SetAllPoints()
+	f.dot = f:CreateTexture(nil, "ARTWORK")
+	f.dot:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+	f.dot:SetPoint("TOPLEFT", 1.5, -1.5)
+	f.dot:SetPoint("BOTTOMRIGHT", -1.5, 1.5)
+	if f.EnableMouse then f:EnableMouse(true) end
+	f:SetScript("OnEnter", PinTooltip)
+	f:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end) -- gp:minimap
+	f:Hide()
+	return f
+end
+
+-- An older sighting fades: full under two minutes, then three quarters, then half from five.
+local function PinAlpha(row, now)
+	local age = now - row.seenAt
+	if age < 120 then return 1 end
+	if age < 300 then return 0.75 end
+	return 0.5
+end
+
+HideSightingPins = function(c) -- gp:worldmap-icons!undo
+	local P = ns.Pins and ns.Pins()
+	if P and c.pinOwner then
+		if ns.Gate.Allowed("worldmap-icons") and type(P.RemoveAllWorldMapIcons) == "function" then
+			pcall(P.RemoveAllWorldMapIcons, P, c.pinOwner)
+		end
+		if type(P.RemoveAllMinimapIcons) == "function" then pcall(P.RemoveAllMinimapIcons, P, c.pinOwner) end -- gp:minimap
+	end
+	for _, pair in ipairs(c.pinFrames or {}) do
+		pair.world.pinRow, pair.mini.pinRow = nil, nil
+		pcall(pair.world.Hide, pair.world)
+		pcall(pair.mini.Hide, pair.mini)
+	end
+	c.pinCount = 0
+end
+
+-- The world map's dots only with mouse and keyboard (ns.WorldMapIcons), the minimap's always, as
+-- Positions.lua draws guildmates.
+local function DrawSightingPins(c, list)
+	local P = ns.Pins and ns.Pins()
+	if not P or type(P.AddMinimapIconMap) ~= "function" then return false, "unavailable" end
+	local world = type(ns.WorldMapIcons) == "function" and ns.WorldMapIcons(P, c.pinOwner) == true -- gp:worldmap-icons
+	HideSightingPins(c)
+	local now = ns.Now and ns.Now() or 0
+	local used = 0
+	for _, raw in ipairs(list) do
+		if used >= API.PIN_MAX then break end
+		local row = PinRow(raw, now)
+		if row then
+			used = used + 1
+			local pair = c.pinFrames[used]
+			if not pair then
+				local w, m = PinDot(12), PinDot(10)
+				if not w or not m then HideSightingPins(c) return false, "unavailable" end
+				pair = { world = w, mini = m }
+				c.pinFrames[used] = pair
+			end
+			local color, alpha = API.PIN_CATEGORIES[row.category], PinAlpha(row, now)
+			for _, frame in ipairs({ pair.world, pair.mini }) do
+				frame.pinRow = row
+				frame.dot:SetVertexColor(color[1], color[2], color[3])
+				if frame.SetAlpha then frame:SetAlpha(alpha) end
+			end
+			if world and ns.Gate.Allowed("worldmap-icons") then
+				-- gp:worldmap-icons
+				local ok = pcall(P.AddWorldMapIconMap, P, c.pinOwner, pair.world, row.mapID, row.x / 1000, row.y / 1000,
+					HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
+				if ok then pcall(pair.world.Show, pair.world) end
+			end
+			local ok = pcall(P.AddMinimapIconMap, P, c.pinOwner, pair.mini, row.mapID, row.x / 1000, row.y / 1000, false, false) -- gp:minimap
+			if ok then pcall(pair.mini.Show, pair.mini) end
+		end
+	end
+	c.pinCount = used
+	return true, used
+end
+
+function METHODS.SetSightingPins(c, list)
+	if Secret(list) or type(list) ~= "table" then return false, "invalid" end
+	local ok, why = SightingRead(c, function() return true end)
+	if not ok then return false, why or "unknown" end
+	return DrawSightingPins(c, list)
+end
+function METHODS.ClearSightingPins(c)
+	HideSightingPins(c)
+	return true
+end
+
 local GUILD_TOOL_SECTIONS = { desk = true, reports = true, cases = true, chat = true, justice = true, profile = true }
 
 local function ShowGuildToolsSection(section, target)
@@ -1443,7 +1602,7 @@ local function ReadOnly(_, k) error("OlympusAPI: read-only (" .. tostring(k) .. 
 local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
 		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot), searches = {}, sightingTold = {}, sightingEnded = {},
-		areaMapOwner = {}, areaMapFrames = {}, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot),
+		areaMapOwner = {}, areaMapFrames = {}, pinOwner = {}, pinFrames = {}, pinCount = 0, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot),
 		quietOwner = "api-quiet:" .. tostring(slot), authKey = API.AuthorizedKey(key) }
 	local methods = {}
 	for k, fn in pairs(METHODS) do
