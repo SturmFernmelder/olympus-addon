@@ -889,8 +889,9 @@ end
 -- Every line kept goes through here, whether it is then shown, muted or held back by the flood
 -- guard: into the history the Chat tab shows (CHAT_CHANGED) and, from someone else, already
 -- checked and sanitized, to a companion reading along (CHAT_LINE, for
--- OlympusBridge.RegisterChatObserver). The mute and the flood guard only decide what this chat
--- frame shows.
+-- OlympusBridge.RegisterChatObserver); and every one, ours too, to the Companion's chat record
+-- (ns.RecordChat, OlympusBridge.RegisterChatRecorder). The mute and the flood guard only decide
+-- what this chat frame shows.
 -- 1.2.5.1: the senders this session heard on the Olympus channels and the guild their line
 -- spoke for (PlayerMenu.KnownOlympus: an Olympus player, whatever the signed boundary lets
 -- Data.ClaimGuild record). Bounded: past SPOKE_MAX it starts again.
@@ -913,6 +914,8 @@ local function Keep(tier, sender, guild, class, text, mine, id)
 	AddHistory(tier, { sender = sender, guild = guild, class = class, text = text, mine = mine or nil, id = tonumber(id) })
 	ns.Fire("CHAT_CHANGED", tier)
 	if not mine then ns.Fire("CHAT_LINE", tier, sender, text) end
+	-- Every line kept, ours too (our echo, a part that left): the Companion's chat record (Bridge.lua).
+	if ns.RecordChat then ns.RecordChat(tier, sender, text, mine == true) end
 end
 
 local function Accept(tier, sender, guild, class, text, mine, id)

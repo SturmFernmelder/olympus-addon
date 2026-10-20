@@ -388,6 +388,15 @@ local function Keep(r, e)
 	r.usedAt = ns.Now()
 	if Persist then Persist() end
 end
+-- The Companion's chat record (Bridge.lua's ns.RecordChat): each line kept and shown, once. Our own
+-- line once it left: at once on the duel's lanes, a Bones table's once one of its sends got through
+-- (a line that reached nobody leaves the view, Completed, and is never recorded).
+local recorded = setmetatable({}, { __mode = "k" })
+local function Record(room, e)
+	if recorded[e] or not ns.RecordChat then return end
+	recorded[e] = true
+	ns.RecordChat(room, e.sender, e.text, e.mine == true)
+end
 local function AlsoInChat(room, e)
 	local ui = ns.db and ns.db.arenaUI
 	local chat = type(ui) == "table" and type(ui.chat) == "table" and ui.chat
@@ -480,6 +489,7 @@ function ArenaChat.Send(room, text)
 			end
 		end
 		e.sendPending = waiting and true or nil
+		if delivered then Record(room, e) end
 		-- A successful native API call is not an acknowledgement from another client. Retain
 		-- partially delivered lines; only a wholly failed admission warns and leaves the view.
 		if not waiting and not delivered and not e.sendFailed then
@@ -523,7 +533,7 @@ function ArenaChat.Send(room, text)
 	r.mine[nextLine .. "#" .. text] = now
 	e = { chat = room, t = ns.Now(), sender = ns.me, guild = guild, class = class ~= "" and class or nil, text = text, id = nextLine, mine = true }
 	Keep(r, e)
-	if ev.kind == "farkle" then Completed(true) end
+	if ev.kind == "farkle" then Completed(true) else Record(room, e) end
 	AlsoInChat(room, e)
 	ns.Fire("ARENA_CHAT", room)
 	return true
@@ -574,7 +584,9 @@ local function OnChat(dist, sender, mode, body)
 	if not admitted then
 		-- (A line the player's block terms hide is kept, marked, as the Chat tab keeps it.)
 		if reason == "filtered" then
-			Keep(r, { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id, hidden = true })
+			local e = { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id, hidden = true }
+			Keep(r, e)
+			Record(room, e)
 			ns.Fire("ARENA_CHAT", room)
 		end
 		return Drop(reason)
@@ -596,6 +608,7 @@ local function OnChat(dist, sender, mode, body)
 	r.times[#r.times + 1] = now
 	local e = { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id }
 	Keep(r, e)
+	Record(room, e)
 	stats.shown = stats.shown + 1
 	AlsoInChat(room, e)
 	ns.Fire("ARENA_CHAT", room)

@@ -717,3 +717,29 @@ test("Squads (1.2.3): a census notice (DATA_CHANGED) tells SQUADS_CHANGED and CH
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in noting each call here): a
+-- squad room's line kept and shown, the sender's own once its whisper left, as his own; never a
+-- line that never left, one Olympus's checks refused, or one from outside the room.
+test("Squads: the Companion's chat record: each squad line kept, the sender's own once it left, never one refused or unsent", function()
+	World(function(w, s)
+		local rec = {}
+		w.c.RecordChat = function(tier, sender, text, isSelf) rec[#rec + 1] = { tier = tier, sender = sender, text = text, isSelf = isSelf } end
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		local room = s.Get("Leader").room
+		w.c.me = "Leader-Realm"
+		eq(s.ChatSend(room, "form up"), true)
+		eq(#rec, 0, "not while its whisper waits")
+		w.jobs[#w.jobs].done(false)
+		eq(#rec, 0, "never one that did not leave")
+		eq(s.ChatSend(room, "form up now"), true); w.jobs[#w.jobs].done(true)
+		eq(#rec, 1); eq(rec[1].tier, room); eq(rec[1].sender, "Leader-Realm"); eq(rec[1].text, "form up now"); eq(rec[1].isSelf, true)
+		w.c.me = "Soldier1-Realm"
+		local function Line(seq, words) return "SC~1~" .. room:sub(7) .. "~" .. seq .. "~" .. words end
+		w.filtered = true; eq(s.ReceiveChat("WHISPER", "Leader", Line(1, "refused by the checks")), false); w.filtered = false
+		eq(s.ReceiveChat("WHISPER", "Outsider", Line(1, "not of the squad")), false)
+		eq(#rec, 1, "nothing refused")
+		eq(s.ReceiveChat("WHISPER", "Leader", Line(2, "on me")), true)
+		eq(#rec, 2); eq(rec[2].sender, "Leader-Realm"); eq(rec[2].text, "on me"); eq(rec[2].isSelf, false)
+	end)
+end)

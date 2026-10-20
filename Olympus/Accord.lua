@@ -90,7 +90,7 @@ Accord.SCREEN_MARGIN = 48
 -- The letter's topics: { n, bullets }, keys ACCORD_T<n>_HEAD and ACCORD_T<n>_<i> (AccordText.lua),
 -- each bullet one short sentence. BOLD: the bullets in heavier ink (a font string has no inline
 -- bold: the whole line, its shadow one pixel to the right in the ink's own colour).
-Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 6 }, { 4, 7 }, { 5, 6 }, { 6, 3 }, { 7, 1 }, { 8, 2 }, { 9, 2 } }
+Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 6 }, { 4, 7 }, { 5, 6 }, { 6, 4 }, { 7, 1 }, { 8, 2 }, { 9, 2 } }
 Accord.BOLD = { ["2_1"] = true, ["5_2"] = true, ["5_3"] = true, ["5_4"] = true }
 -- A BattleTag as Battle.net writes one: a name, "#", digits. Never "~", "|" or a control byte.
 Accord.TAG_SHAPE = "^[^#~|%c]+#%d+$"

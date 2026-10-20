@@ -451,3 +451,46 @@ test("watch: chat moderation: strikes: a fight room's line with a listed word is
 	eq(w:As(a, a.ns.ArenaChat.MaySend, rooms.players), true, "open again after the pause")
 	eq(w:As(a, a.ns.ArenaChat.Send, rooms.players, "clean words"), true)
 end)
+
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in on each client noting each
+-- call): a Bones table's line on each client that shows it, the sender's own once one of its sends
+-- got through (as his own); never his line that reached nobody, nor a deleted line's late copy.
+test("Bones chat core: the Companion's chat record: each table line shown, the sender's own once sent, never an unsent line or a deleted line's replay", function()
+	local w, a, b, s, _, rooms = Live()
+	b.rank = 0; Roster(w, b); Watch(w, b, rooms)
+	local rec = {}
+	for _, c in ipairs({ a, b, s }) do
+		rawset(c.ns, "RecordChat", function(tier, sender, text, isSelf)
+			rec[#rec + 1] = { by = c.name, tier = tier, sender = sender, text = text, isSelf = isSelf }
+		end)
+	end
+	local function By(c) local out = {} for _, e in ipairs(rec) do if e.by == c.name then out[#out + 1] = e end end return out end
+	eq(w:As(a, a.ns.ArenaChat.Send, rooms.players, "good luck"), true)
+	eq(#rec, 0, "not while its send waits in the queue")
+	Drain(w, a)
+	eq(#By(a), 1); eq(By(a)[1].tier, rooms.players); eq(By(a)[1].sender, a.name); eq(By(a)[1].text, "good luck"); eq(By(a)[1].isSelf, true)
+	eq(#By(b), 1); eq(By(b)[1].sender, a.name); eq(By(b)[1].text, "good luck"); eq(By(b)[1].isSelf, false)
+	eq(#By(s), 0, "a spectator never shows the players' room")
+	-- The spectator's Everyone line: on every client that shows it.
+	eq(w:As(s, s.ns.ArenaChat.Send, rooms.everyone, "go go go"), true); Drain(w, s)
+	for _, c in ipairs({ a, b, s }) do
+		local last = By(c)[#By(c)]
+		eq(last.tier, rooms.everyone, c.name); eq(last.text, "go go go"); eq(last.isSelf, c == s, c.name)
+	end
+	-- b deletes a's line; its late copy, past the dedupe window, is dropped and never recorded again.
+	local e = w:As(b, b.ns.ArenaChat.Lines, rooms.players)[1]
+	local id, text = e.id, e.text
+	eq((w:As(b, b.ns.WatchChat.Delete, rooms.players, e, "actual guild moderation")), true)
+	w.clock = w.clock + 121
+	local count = #rec
+	w:As(a, a.globals.C_ChatInfo.SendAddonMessageLogged, a.ns.PREFIX, "EC~L1~" .. rooms.players .. "~" .. id .. "~MA~" .. a.guild .. "~" .. text, "WHISPER", b.short)
+	eq(#rec, count, "a deleted line's late copy is never recorded")
+	-- a's line none of whose sends got through: shown at Enter, then out of the view, never recorded.
+	w.clock = w.clock + 30
+	eq(w:As(a, a.ns.ArenaChat.Send, rooms.players, "never delivered"), true)
+	a.globals.C_ChatInfo.SendAddonMessageLogged = function() return 2 end
+	Drain(w, a)
+	local lines = a.ns.ArenaChat.Room(rooms.players).lines
+	eq(lines[#lines].text, "never delivered"); eq(lines[#lines].sendFailed, true, "it reached nobody")
+	eq(#rec, count, "an unsent line is never recorded")
+end)

@@ -659,3 +659,62 @@ test("chat rooms (CH-04): a reply crosses a role room's whispers with its quote 
 		assert(quote.text:sub(-3) == "..." and asked:find(quote.text:sub(1, -4), 1, true) == 1, quote.text)
 	end)
 end)
+
+-- The Companion's chat record (the author, 2026-10-20: the Companion records the chat lines the
+-- player sees, staff only, several witnesses agreeing). This file's rooms hand each line they keep
+-- and show to ns.RecordChat (Bridge.lua's, here a stand-in noting each call): another member's
+-- line, a line the player's block terms hide (still in its tab), and the player's own, as his own,
+-- but only once one of its whispers left; never one that reached nobody, nor a line refused.
+test("chat rooms: the Companion's chat record: each room line kept and shown, the player's own once it left, never one refused or unsent", function()
+	WithRooms(function(w, R, c)
+		local rec = {}
+		c.RecordChat = function(tier, sender, text, isSelf) rec[#rec + 1] = { tier = tier, sender = sender, text = text, isSelf = isSelf } end
+		local audience = ChurchLike(w, R, c, 3)
+		-- Another member's line, and one the player's block terms grey out: both recorded.
+		eq(R.Receive("WHISPER", "Brother a-Realm", RoomMessage("church", 1, "evening, all"), 1001), true)
+		w.filtered = true
+		eq(R.Receive("WHISPER", "Brother b-Realm", RoomMessage("church", 2, "a hidden word"), 1002), true)
+		w.filtered = false
+		eq(#rec, 2)
+		eq(rec[1].tier, "church"); eq(rec[1].sender, "Brother a-Realm"); eq(rec[1].text, "evening, all"); eq(rec[1].isSelf, false)
+		eq(rec[2].text, "a hidden word"); eq(R.History("church")[2].hidden, true, "greyed in its tab, still recorded")
+		-- Refused by Olympus's checks (Channels.Admit: net-off, a timeout, a deleted line's copy): nothing.
+		local admit = c.Channels.Admit
+		for _, why in ipairs({ "netoff", "timeout", "deleted", "rate" }) do
+			c.Channels.Admit = function() return false, why end
+			eq(R.Receive("WHISPER", "Brother c-Realm", RoomMessage("church", 3, "refused " .. why), 1003), false, why)
+		end
+		c.Channels.Admit = admit
+		eq(R.Receive("WHISPER", "Stranger-Realm", RoomMessage("church", 4, "not of the room"), 1004), false)
+		eq(#rec, 2, "no refused line, no outsider's")
+		-- The player's own line: shown at Enter while it sends, recorded once a whisper left, once.
+		assert(R.Send("church", "my own words"))
+		eq(#rec, 2, "not while every whisper still waits")
+		w.finish(w.jobs[1], true)
+		eq(#rec, 2, "settled only once all finished")
+		w.finish(w.jobs[2], false, "dropped"); w.finish(w.jobs[3], true)
+		eq(#rec, 3)
+		eq(rec[3].tier, "church"); eq(rec[3].sender, c.me); eq(rec[3].text, "my own words"); eq(rec[3].isSelf, true)
+		-- A line none of whose whispers left: shown at Enter, then gone, and never recorded.
+		w.clearJobs(); w.advance(2)
+		assert(R.Send("church", "nobody hears this"))
+		for _, job in ipairs(w.jobs) do audience[job.target:lower()] = nil end
+		for _, job in ipairs(w.jobs) do w.finish(job, true) end
+		eq(#R.History("church"), 3, "it left the history"); eq(#rec, 3, "and was never recorded")
+		-- Guild, the game's own guild chat as the server's event gives it: another's line, then ours
+		-- coming back (our own, isSelf); a line sent but not yet echoed by the server is nothing yet.
+		w.advance(2)
+		assert(R.Send("guild", "to the guild"))
+		eq(#rec, 3, "the native echo is the line")
+		assert(w.nativeEvents.CHAT_MSG_GUILD("hi guild", "Guildmate-Realm"))
+		assert(w.nativeEvents.CHAT_MSG_GUILD("to the guild", "Member-Realm"))
+		eq(#rec, 5)
+		eq(rec[4].tier, "guild"); eq(rec[4].sender, "Guildmate-Realm"); eq(rec[4].isSelf, false)
+		eq(rec[5].tier, "guild"); eq(rec[5].text, "to the guild"); eq(rec[5].isSelf, true)
+		-- The rooms off on this client: nothing kept, nothing recorded.
+		c.db.chatRooms = false
+		eq(w.nativeEvents.CHAT_MSG_GUILD("rooms off", "Guildmate-Realm"), false)
+		eq(R.Receive("WHISPER", "Brother a-Realm", RoomMessage("church", 9, "rooms off"), 1009), false)
+		eq(#rec, 5)
+	end)
+end)

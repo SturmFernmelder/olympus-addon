@@ -457,6 +457,39 @@ test("1.2 P1.8: a fixed Bones search keeps its non-level filters, ignores a stal
 	MW.NoErrors(w)
 end)
 
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in on each client noting each
+-- call): a fight room's line other than a Bones table's (a match room, its whisper to the other
+-- fighter) is recorded on the sender's client at once, as his own, and on the other's as it shows.
+test("1.2.6 the Companion's chat record: a match room's line, the sender's own at once as his own, the other fighter's as it shows", function()
+	local w, a, b = Pair()
+	for _, c in ipairs({ a, b }) do
+		CH.WithRooms(w, c)
+		rawset(c.ns, "ChatWindow", { OpenDynamicRoom = function(spec) return { room = spec.id } end })
+	end
+	assert(a.Match.Start({ game = "b", kind = "c", level = 10, reach = "z" }))
+	w:Run(6)
+	local mid = MW.Last(w, a, "R"):match("^R~(M[0-9a-z]+)~")
+	MW.Answer(w, b, "yes")
+	w:Run(0)
+	local rec = {}
+	for _, c in ipairs({ a, b }) do
+		c.Arena.SetRules(true)
+		c.ns.ArenaRoles.Live = function() return true end
+		rawset(c.ns, "RecordChat", function(tier, sender, text, isSelf)
+			rec[#rec + 1] = { by = c.name, tier = tier, sender = sender, text = text, isSelf = isSelf }
+		end)
+		w:As(c, function() assert(c.ns.ArenaChat.Open(mid), "the accepted match is an ArenaChat event") end)
+	end
+	w:As(a, function() assert(a.ns.ArenaChat.Send(mid, "same tavern?")) end)
+	eq(#rec, 1, "the sender's own line at once: its whisper left with the call")
+	eq(rec[1].by, a.name); eq(rec[1].tier, mid); eq(rec[1].sender, a.name); eq(rec[1].text, "same tavern?"); eq(rec[1].isSelf, true)
+	w:Run(0)
+	eq(#w:As(b, b.ns.ArenaChat.Lines, mid), 1, "the other fighter's client shows it")
+	eq(#rec, 2, "each line once on each client")
+	eq(rec[2].by, b.name); eq(rec[2].tier, mid); eq(rec[2].sender, a.name); eq(rec[2].text, "same tavern?"); eq(rec[2].isSelf, false)
+	MW.NoErrors(w)
+end)
+
 test("1.2 P1.8: Arena and Bones open separate compact fixed-game Find entries; only Arena uses the remembered level filter", function()
 	local w = World.New()
 	local a = MW.Client(w, "Lida Fenn", { pos = SEEKER })

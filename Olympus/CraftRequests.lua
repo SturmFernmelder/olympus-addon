@@ -3706,6 +3706,7 @@ local function KeepChat(r, e)
 	while #r.chat > Requests.CHAT_MAX do table.remove(r.chat, 1) end
 	ns.Fire("CHAT_ROOM_CHANGED", RoomId(r.id))
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", RoomId(r.id), e.sender, e.text) end
+	if ns.RecordChat then ns.RecordChat(RoomId(r.id), e.sender, e.text, e.mine == true) end -- (the Companion's chat record, Bridge.lua)
 end
 
 function Requests.ChatSend(room, text)

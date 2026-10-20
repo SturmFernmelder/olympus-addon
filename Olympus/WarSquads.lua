@@ -403,6 +403,7 @@ local function Keep(room, e)
 	while #chat.lines > Squads.CHAT_MAX do table.remove(chat.lines, 1) end
 	ns.Fire("CHAT_ROOM_CHANGED", room)
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", room, e.sender, e.text) end
+	if ns.RecordChat then ns.RecordChat(room, e.sender, e.text, e.mine == true) end -- (the Companion's chat record, Bridge.lua)
 end
 function Squads.ChatHistory(room)
 	local out = {}

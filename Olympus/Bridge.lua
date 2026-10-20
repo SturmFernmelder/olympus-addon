@@ -2,8 +2,9 @@ local ADDON, ns = ...
 
 -- A read-only door for a companion addon the mods run (OfficerSpy). It answers "is this a High
 -- Councillor?" from the signed list, hands out a copy of that list, and passes along each chat
--- line this client has already accepted. Nothing here sends, writes or changes anything in
--- Olympus: a companion only reads, and Olympus never learns what it does with what it read.
+-- line this client has already accepted (and, for the Olympus Companion's chat record, each line
+-- it shows: RegisterChatRecorder). Nothing here sends, writes or changes anything in Olympus: a
+-- companion only reads, and Olympus never learns what it does with what it read.
 
 OlympusBridge = OlympusBridge or {}
 OlympusBridge.API_VERSION = 1
@@ -11,6 +12,7 @@ OlympusBridge.CENSUS_CHECKPOINT_API_VERSION = 1
 
 local COUNCIL_MAX = 64  -- a copy never grows past this (the signed list itself stops at 30)
 local OBSERVERS_MAX = 8 -- one companion listens, realistically
+local RECORDERS_MAX = 4 -- the Companion's chat record (RegisterChatRecorder): one, realistically
 local CHECKPOINT_SCHEMA = "olympus-census-checkpoint"
 local CHECKPOINT_VERSION = 1
 local CHECKPOINT_MAX_GUILDS = 256
@@ -20,7 +22,8 @@ local CHECKPOINT_MAX_TIME = 9999999999
 -- The private desktop bridge gets census aggregates through this separate contract. It never
 -- receives OlympusDB (or a reference into it), chat, settings, keys, moderation records, member
 -- names, officers, reporters or the High Council. Every call builds fresh plain tables so a
--- consumer can change its copy without changing Olympus.
+-- consumer can change its copy without changing Olympus. (The chat lines this client shows reach
+-- a Companion only through RegisterChatRecorder, below, never through this contract.)
 local function Whole(value, maximum)
 	local n = tonumber(value)
 	if not n or n ~= n then return 0 end
@@ -356,3 +359,47 @@ ns.On("CHAT_LINE", function(tier, sender, text)
 	if type(tier) ~= "string" or type(sender) ~= "string" or type(text) ~= "string" then return end
 	for i = 1, #observers do pcall(observers[i], tier, sender, text) end
 end)
+
+-- The Olympus Companion's chat record (the author, 2026-10-20: the Companion may record the chat
+-- lines the player already sees and send them to the server, seen by the staff alone, so that
+-- several players' Companions agreeing confirm what was said, and to moderate). fn(tier, sender,
+-- text, isSelf) for every Olympus chat line this client shows, the player's own included (isSelf):
+--   tier   the chat, as a moderator's deletion names it (WatchChat.lua): "A", "C" or "L" for
+--          [Olympus], [Captains] and [Lords]; a room's id for the rooms this character is in
+--          ("guild", a role room's, a squad's, a crafting deal's); a fight or Bones room's id.
+--   text   as Olympus keeps it, after its checks and Codec.SanitizeChat: a muted channel's lines,
+--          the flood guard's and those the player's block terms grey out too (each still shows
+--          in its tab). Never a line a chat warning refused (it never left), nor one Olympus kept
+--          off for moderation (net-off, a timeout, a deleted line's late copy).
+--   isSelf true for the player's own line, once it left (a line none of whose sends left goes from
+--          the view and is never recorded); false for everyone else's.
+-- Nothing until the Olympus Accord is accepted at its current version. The Accord's letter
+-- (ACCORD_T6_3), the privacy page (CONSENT_INTRO) and README's Privacy table say so: this
+-- function's existence is what the private Companion bridge looks for, so it ships with them.
+-- RECORDERS_MAX at most; a recorder that errors is skipped and stops nothing (nor does anything
+-- here: ns.RecordChat throws nothing back). RegisterChatObserver above stays as it was.
+local recorders = {}
+function OlympusBridge.RegisterChatRecorder(fn)
+	if type(fn) ~= "function" or #recorders >= RECORDERS_MAX then return false end
+	recorders[#recorders + 1] = fn
+	return true
+end
+
+-- Every chat surface calls this where it keeps a line it shows (Channels.lua, ChatRooms.lua,
+-- WarSquads.lua, CraftRequests.lua, ArenaChat.lua). Plain strings only; nothing ever thrown back.
+function ns.RecordChat(tier, sender, text, isSelf)
+	if #recorders == 0 or type(tier) ~= "string" or type(sender) ~= "string" or type(text) ~= "string" then return end
+	-- (Only once the Olympus Accord that says so is accepted, as the bridge's "self" section: the
+	-- game's own guild chat reaches the Guild room without Olympus's channel. An error there: no.)
+	if type(ns.AccordAccepted) ~= "function" then return end
+	local okGate, accepted = pcall(ns.AccordAccepted)
+	if not okGate or accepted ~= true then return end
+	local C = ns.Codec
+	if C and C.SanitizeChat then
+		local ok, clean = pcall(C.SanitizeChat, text)
+		text = ok and type(clean) == "string" and clean or ""
+	end
+	if text == "" or tier == "" or sender == "" then return end
+	local own = isSelf == true
+	for i = 1, #recorders do pcall(recorders[i], tier, sender, text, own) end
+end

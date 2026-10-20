@@ -813,6 +813,9 @@ local function Keep(id, e)
 	-- its sender and must not make a background room look unread while the queued send
 	-- completes.
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", id, e.sender, e.text) end
+	-- The Companion's chat record (Bridge.lua): every line kept, ours too; our echo still sending
+	-- once one of its whispers left (Send's Settle), never one that reached nobody.
+	if not e.pending and ns.RecordChat then ns.RecordChat(id, e.sender, e.text, e.mine == true) end
 end
 
 -- The server's guild event includes guildmates without Olympus. Do not publish it to M2 or
@@ -1224,6 +1227,7 @@ local function Send(id, text)
 		if successes > 0 then
 			echo.pending = nil
 			ns.Fire("CHAT_ROOM_CHANGED", id)
+			if ns.RecordChat then ns.RecordChat(id, echo.sender, echo.text, true) end -- (it left: Keep's record)
 		else
 			Unkeep(id, echo)
 		end

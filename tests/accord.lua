@@ -747,8 +747,12 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 			-- (Changed on purpose: 380 until moderator protection's bullet, 4.7, joined the letter at the
 			-- owner's ask; its 12 words, its full terms on the privacy page's line. The sanction that
 			-- follows the BattleTag, 5.5, took the place of "It helps spot one player's characters", its
-			-- wording trimmed by one word so the merged letter still fits 389.)
-			assert(total <= 389, "the letter is " .. total .. " words")
+			-- wording trimmed by one word so the merged letter still fits 389. Then, 2026-10-20, the
+			-- disclosure of the chat record the owner approved, 6.3: with the Companion, the Olympus
+			-- chat lines the player sees go to staff, kept to confirm what was said and moderate. Its 21
+			-- words grow the bound to 410, as the moderator protection's bullet grew it; nothing else in
+			-- the letter changed.)
+			assert(total <= 410, "the letter is " .. total .. " words")
 			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
 			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a
 			-- deep red ink and doubled strokes (the dot too); the other bullets in the plain ink.
@@ -922,6 +926,18 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 	-- team alone in game, as with the Companion (the letter's T5_3) the online census gets it too.
 	assert(en.CONSENT_INTRO:find("And in game, your BattleTag goes privately to the moderation team alone", 1, true), "the privacy page: in game")
 	assert(pt.CONSENT_INTRO:find("E no jogo a sua BattleTag vai em privado apenas para a equipe de moderação", 1, true), "pt-BR privacy page: no jogo")
+	-- (2026-10-20) The Companion's chat record (Bridge.lua's OlympusBridge.RegisterChatRecorder, the
+	-- switch the private Companion bridge looks for): the letter's 6.3 and the privacy page say who
+	-- gets the Olympus chat lines the player sees, his own too, and why, in both languages.
+	for _, must in ipairs({ "Olympus Companion app", "Olympus chat lines you see", "go to staff", "confirm what was said", "moderate" }) do
+		assert(en.ACCORD_T6_3:find(must, 1, true), "ACCORD_T6_3: " .. must)
+	end
+	for _, must in ipairs({ "Olympus Companion", "linhas dos chats do Olympus que você vê", "para a staff", "confirmar o que foi dito", "moderar" }) do
+		assert(pt.ACCORD_T6_3:find(must, 1, true), "pt-BR ACCORD_T6_3: " .. must)
+	end
+	assert(en.CONSENT_INTRO:find("If you use the Olympus Companion app, it sends every Olympus chat line you see, your own included, to Olympus's staff, who keep them to confirm what was said and to moderate.", 1, true), "the privacy page: the chat record")
+	assert(pt.CONSENT_INTRO:find("Se você usa o app Olympus Companion, ele manda cada linha dos chats do Olympus que você vê, as suas também, para a staff do Olympus, que as guarda para confirmar o que foi dito e para moderar.", 1, true), "pt-BR privacy page: the chat record")
+	eq(select(2, en.CONSENT_INTRO:gsub("%%s", "")), 1, "the privacy page's intro keeps its one %s")
 	-- Each topic's bullets are the letter's (Accord.TOPICS), in both languages: none past its count.
 	for _, t in ipairs(ns.Accord.TOPICS) do
 		for _, lang in ipairs({ en, pt }) do

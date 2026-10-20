@@ -2227,3 +2227,32 @@ test("1.2 craft requests (mediated): a debt ruled with none of the buyer's gold 
 	assert(K.Rec(w, a, r.id), "a debt still due is never pruned with its deal")
 	NoErrors(w)
 end)
+
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in on each client noting each
+-- call): a deal's private chat line, on the sender's client once its whisper left (his own) and on
+-- the other party's when it arrives; never the context lines, nor a stranger's or an unlogged copy.
+test("1.2 craft requests: the Companion's chat record: each deal chat line on both parties' clients, the sender's own as his own", function()
+	local w = World.New()
+	local a, b, c = Cast(w)
+	local r = DirectDeal(w, a, b)
+	local rec = {}
+	for _, cl in ipairs({ a, b, c }) do
+		rawset(cl.ns, "RecordChat", function(tier, sender, text, isSelf)
+			rec[#rec + 1] = { by = cl.name, tier = tier, sender = sender, text = text, isSelf = isSelf }
+		end)
+	end
+	local room = "craft:" .. r.id
+	eq(a.Craft.ChatSend(room, "how long will it take?"), true)
+	eq(#rec, 0, "not before its whisper left")
+	w:Run(0)
+	eq(#rec, 2, table.concat(a.errors or {}, "\n"))
+	local mine, theirs = rec[1].by == a.name and rec[1] or rec[2], rec[1].by == b.name and rec[1] or rec[2]
+	eq(mine.by, a.name); eq(mine.tier, room); eq(mine.sender, a.name); eq(mine.text, "how long will it take?"); eq(mine.isSelf, true)
+	eq(theirs.by, b.name); eq(theirs.tier, room); eq(theirs.sender, a.name); eq(theirs.isSelf, false)
+	-- A stranger's line and an unlogged copy are dropped before they are kept: nothing recorded.
+	c.Comm.Whisper(a.name, ("CJ~1~%s~1~hello"):format(r.id), nil, false, true)
+	b.Comm.Whisper(a.name, ("CJ~1~%s~70~unlogged words"):format(r.id), nil, false, false)
+	w:Run(0)
+	eq(#rec, 2, "no stranger's line, no unlogged copy")
+	NoErrors(w)
+end)

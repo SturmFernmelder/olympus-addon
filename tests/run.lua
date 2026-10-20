@@ -29827,6 +29827,117 @@ test("1.0.0 OfficerSpy's bridge: a line the flood guard holds back still reaches
 	if not ok then error(err, 0) end
 end)
 
+-- 1.2.6: the Olympus Companion's chat record (the author, 2026-10-20: the Companion may record the
+-- chat lines the player already sees and send them to the server, seen by the staff alone, several
+-- players' Companions agreeing on a line). OlympusBridge.RegisterChatRecorder(fn): fn(tier, sender,
+-- text, isSelf) for each Olympus channel line kept and shown (in the chat frame or its tab), ours
+-- too once it left; never one Olympus's checks refused (a moderator's net-off, timeout or deletion,
+-- a repeat, an ignored player), nor one a chat warning refused; nothing before the Olympus Accord;
+-- a broken recorder stops nothing; four at most. (The rooms' and the fight rooms' own tests are in
+-- tests/chat-rooms.lua, tests/squads.lua, tests/arena/craft-requests.lua and bones-chat.lua.)
+test("1.2.6 the Companion's chat record: each Olympus channel line shown, ours as our own once it left, never a refused or moderated one, nothing before the Accord, a broken recorder stops nothing, four at most", function()
+	local B, M, WC, C = OlympusBridge, ns.Moderation, ns.WatchChat, ns.Comm
+	local saved = { hides = M.Hides, silenced = WC.Silenced, tomb = WC.Tombstoned, severe = WC.RefuseSevere,
+		filter = ns.Filter.Hides, accord = ns.db.accord, friends = C_FriendList }
+	local rec, broken, live = {}, 0, true
+	ns.db.chatMute, ns.rdb.chat = nil, nil
+	local ok, err = pcall(function()
+		eq(type(B.RegisterChatRecorder), "function", "the function the private Companion bridge looks for")
+		eq(B.RegisterChatRecorder("not a function"), false); eq(B.RegisterChatRecorder(nil), false)
+		eq(B.RegisterChatRecorder(function() if live then broken = broken + 1; error("a broken recorder") end end), true)
+		eq(B.RegisterChatRecorder(function(tier, sender, text, isSelf)
+			if live then rec[#rec + 1] = { tier = tier, sender = sender, text = text, isSelf = isSelf } end
+		end), true)
+		local raw = "meet at |cffff0000the bank|r |Hplayer:Someone|h[Someone]|h " .. ITEM
+		local T = 8000000
+		AsRank(3, function()
+			CHAT_LINES = {}
+			eq((Chan.Receive("CHANNEL", "Member41", Msg("A", MY_GUILD, 8401, raw), T)), true, "a broken recorder stops nothing")
+			eq(#CHAT_LINES, 1, "the line shows"); eq(broken, 1); eq(#rec, 1)
+			local kept = Chan.History("A")
+			eq(rec[1].tier, "A"); eq(rec[1].sender, "Member41-Realm"); eq(rec[1].isSelf, false)
+			eq(rec[1].text, kept[#kept].text, "the text the chat keeps and shows")
+			eq(rec[1].text, Codec.SanitizeChat(raw))
+			-- Refused by Olympus's checks: nothing recorded.
+			eq((Chan.Receive("CHANNEL", "Member41", Msg("A", MY_GUILD, 8401, raw), T + 1)), false, "a repeat")
+			eq((Chan.Receive("CHANNEL", "Member42", Msg("L", MY_GUILD, 8402, "lords only"), T + 2)), false, "above our rank")
+			C_FriendList = { IsIgnored = function(name) return tostring(name):find("Member43", 1, true) ~= nil end }
+			eq((Chan.Receive("CHANNEL", "Member43", Msg("A", MY_GUILD, 8403, "ignored"), T + 3)), false, "ignored")
+			C_FriendList = saved.friends
+			M.Hides = function(who) if tostring(who):find("Member44", 1, true) then return { kind = "c" } end end
+			eq(select(2, Chan.Receive("CHANNEL", "Member44", Msg("A", MY_GUILD, 8404, "taken off"), T + 4)), "netoff")
+			M.Hides = saved.hides
+			WC.Silenced = function(who) if tostring(who):find("Member45", 1, true) then return true end end
+			eq(select(2, Chan.Receive("CHANNEL", "Member45", Msg("A", MY_GUILD, 8405, "timed out"), T + 5)), "timeout")
+			WC.Silenced = saved.silenced
+			WC.Tombstoned = function(_, who) return tostring(who):find("Member46", 1, true) ~= nil end
+			eq(select(2, Chan.Receive("CHANNEL", "Member46", Msg("A", MY_GUILD, 8406, "a deleted line's late copy"), T + 6)), "deleted")
+			WC.Tombstoned = saved.tomb
+			eq(#rec, 1, "no refused line, no moderated one")
+			-- Kept and in its tab though off the chat frame: the player's block terms, a muted channel.
+			ns.Filter.Hides = function(text) return text:find("badword", 1, true) ~= nil end
+			eq(select(2, Chan.Receive("CHANNEL", "Member47", Msg("A", MY_GUILD, 8407, "a badword here"), T + 7)), "filtered")
+			ns.Filter.Hides = saved.filter
+			Chan.ToggleMute("olympus")
+			eq(select(2, Chan.Receive("CHANNEL", "Member48", Msg("A", MY_GUILD, 8408, "while muted"), T + 8)), "muted")
+			Chan.ToggleMute("olympus")
+			eq(#rec, 3); eq(rec[2].text, "a badword here"); eq(rec[3].text, "while muted"); eq(rec[3].isSelf, false)
+			-- Our own line, as our own, once it left. (Between this file's other sends, 2e12 and 3e12:
+			-- two sends need Channels' gap between them.)
+			WithLane(function() eq((Chan.Send("A", "my own line", 2.5e12)), true) end)
+			eq(#rec, 4); eq(rec[4].tier, "A"); eq(rec[4].sender, ns.me); eq(rec[4].text, "my own line"); eq(rec[4].isSelf, true)
+			-- One that never left, and one a chat warning refused before anything left: nothing.
+			WithLane(function()
+				C.SendChat = function(_, done) done(false, "failed"); return true end
+				eq((Chan.Send("A", "never left", 2.5e12 + 100)), true, "taken at Enter")
+			end)
+			WC.RefuseSevere = function(text) if text:find("listed", 1, true) then return "severe" end end
+			WithLane(function() eq(select(2, Chan.Send("A", "a listed word", 2.5e12 + 200)), "severe") end)
+			WC.RefuseSevere = saved.severe
+			eq(#rec, 4, "no line that never left, none a chat warning refused")
+		end)
+		-- The record itself (ns.RecordChat, every surface's door): sanitized as Olympus shows it, the
+		-- game's own guild chat too; nothing before the Olympus Accord is accepted, nor a malformed call.
+		ns.RecordChat("guild", "Guildmate-Realm", "|cffff0000red|r words", false)
+		eq(#rec, 5); eq(rec[5].tier, "guild"); eq(rec[5].text, Codec.SanitizeChat("|cffff0000red|r words")); eq(rec[5].isSelf, false)
+		ns.RecordChat("guild", ns.me, "ours", 1)
+		eq(rec[6].isSelf, false, "isSelf is true alone, never a truthy stand-in")
+		ns.db.accord = nil
+		ns.RecordChat("A", "Member49-Realm", "before the Accord", false)
+		ns.db.accord = saved.accord
+		ns.RecordChat("A", nil, "no sender", false); ns.RecordChat("A", "Member49-Realm", 42, false); ns.RecordChat("", "Member49-Realm", "no chat", false)
+		ns.RecordChat("A", "Member49-Realm", "\1 \2  ", false) -- (control bytes and spaces: nothing once sanitized)
+		eq(#rec, 6, "nothing before the Accord, nothing malformed or empty")
+		-- The Accord's gate itself erring stops nothing either: the line simply is not recorded.
+		local savedGate = ns.AccordAccepted
+		ns.AccordAccepted = function() error("a broken gate") end
+		ns.RecordChat("A", "Member49-Realm", "while the gate errs", false)
+		ns.AccordAccepted = savedGate
+		eq(#rec, 6, "nothing recorded while the Accord's gate errs")
+		-- Four recorders at most (one, realistically: the Companion's).
+		for _ = 3, 4 do eq(B.RegisterChatRecorder(function() end), true) end
+		eq(B.RegisterChatRecorder(function() end), false, "four recorders at most")
+		-- The README's privacy table names it: who receives it, which lines, when it is saved.
+		local f = assert(io.open(ROOT .. "README.md", "rb"))
+		local readme = f:read("*a")
+		f:close()
+		local row
+		for line in readme:gmatch("[^\n]+") do
+			if line:sub(1, 2) == "| " and line:find("RegisterChatRecorder", 1, true) then row = line end
+		end
+		assert(row, "README: the chat record's privacy row")
+		for _, must in ipairs({ "Olympus's staff", "your own Olympus Companion", "only the staff see them", "confirm what was said",
+			"to moderate", "your own once it left", "never a line a chat warning refused", "Olympus Accord", "saved at logout or `/reload`" }) do
+			assert(row:find(must, 1, true), "README's chat record row: " .. must)
+		end
+	end)
+	live = false
+	M.Hides, WC.Silenced, WC.Tombstoned, WC.RefuseSevere = saved.hides, saved.silenced, saved.tomb, saved.severe
+	ns.Filter.Hides, ns.db.accord, C_FriendList = saved.filter, saved.accord, saved.friends
+	ns.db.chatMute, ns.rdb.chat = nil, nil
+	if not ok then error(err, 0) end
+end)
+
 -- 1.0.0, at the merge onto 1.0: the King's stream (0.9.9) hides the councillors' names on his
 -- screen, with no mark in the chats and /oly council cutting each name short; the bridge follows.
 test("1.0.0 OfficerSpy's bridge: on the King's screen, while the councillors' names are hidden, it names nobody", function()
