@@ -1372,6 +1372,7 @@ end
 -- /reload and Olympus hiding locations from this player remove it. A pin past its own expiresAt is
 -- not drawn, and a drawn one goes by itself once past it (TickSightingPins).
 API.PIN_MAX = 96
+API.PIN_LIFETIME_MAX = 15 * 60 -- no dot may outlive the sighting result it represents
 API.PIN_CATEGORIES = {
 	hostile = { 0.92, 0.18, 0.14 },   -- red
 	marked = { 1, 0.62, 0.05 },       -- orange
@@ -1384,8 +1385,9 @@ local function PinRow(raw, now)
 	local target = Plain(raw.target, 72)
 	local mapID, x, y = Num(raw.mapID, true), Num(raw.x), Num(raw.y)
 	local seenAt, expiresAt = Num(raw.seenAt), Num(raw.expiresAt)
-	if not target or not mapID or mapID <= 0 or not x or x < 0 or x > 1000 or not y or y < 0 or y > 1000
-		or not seenAt or not expiresAt or expiresAt <= now or seenAt > now + 60 then return nil end
+	if not target or not mapID or mapID <= 0 or mapID > 9999999 or not x or x < 0 or x > 1000 or not y or y < 0 or y > 1000
+		or not seenAt or not expiresAt or expiresAt <= now or expiresAt <= seenAt
+		or expiresAt > seenAt + API.PIN_LIFETIME_MAX or seenAt > now + 60 then return nil end
 	local kind = raw.kind
 	if kind ~= "exact-unit" and kind ~= "exact-group" then kind = "nearby" end
 	local yards = kind == "nearby" and Num(raw.accuracyYards) or nil
@@ -1552,8 +1554,10 @@ local function DrawSightingPins(c, list)
 	if type(P.RemoveMinimapIcon) ~= "function" or type(P.RemoveWorldMapIcon) ~= "function" then HideSightingPins(c) end
 	local now = ns.Now and ns.Now() or 0
 	local used = 0
-	for _, raw in ipairs(list) do
-		if used >= API.PIN_MAX then break end
+	-- The public contract is the first PIN_MAX rows, not PIN_MAX valid rows after walking an
+	-- arbitrarily large hostile table supplied by another addon.
+	for i = 1, math.min(#list, API.PIN_MAX) do
+		local raw = list[i]
 		local row = PinRow(raw, now)
 		if row then
 			local pair = c.pinFrames[used + 1]

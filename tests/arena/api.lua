@@ -1155,7 +1155,7 @@ test("1.2.5.1 the API sighting pins: coloured world-map and minimap dots, Olympu
 		{ target = "Enemy One-Emberfall", category = "hostile", mapID = 1453, x = 410, y = 520, seenAt = now - 30,
 			expiresAt = now + 600, kind = "nearby", accuracyYards = 30, own = true },
 		{ target = "Marked Rogue-Emberfall", category = "marked", mapID = 1453, x = 500, y = 500, seenAt = now - 400,
-			expiresAt = now + 600, kind = "exact-unit", marks = { "Watch", "Wanted", "|cffff0000Red|r", "Fourth" } },
+			expiresAt = now + 500, kind = "exact-unit", marks = { "Watch", "Wanted", "|cffff0000Red|r", "Fourth" } },
 		{ target = "Passing Stranger-Emberfall", category = "outsider", mapID = 1429, x = 300, y = 300, seenAt = now - 150,
 			expiresAt = now + 600, kind = "nearby", label = "|cff00ff00Minorities|r" },
 		{ target = "Expired-Emberfall", category = "hostile", mapID = 1453, x = 1, y = 1, seenAt = now - 900, expiresAt = now - 1 },
@@ -1197,6 +1197,18 @@ test("1.2.5.1 the API sighting pins: coloured world-map and minimap dots, Olympu
 	eq(#pins.world, 0); eq(#pins.mini, 2)
 	state.worldOn = true
 	eq(select(2, Do(w, viewer, a, "SetSightingPins", "nope")), "invalid")
+	-- Security boundary: only the documented first 96 inputs are inspected, and a consumer cannot
+	-- turn a short last-seen result into a permanent marker with invented lifetime metadata.
+	local bounded = {}
+	for i = 1, viewer.ns.API.PIN_MAX do bounded[i] = { category = "invalid" } end
+	bounded[viewer.ns.API.PIN_MAX + 1] = list[1]
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", bounded)), 0, "nothing after the 96-row input cap is inspected")
+	local forever = {}
+	for k, v in pairs(list[1]) do forever[k] = v end
+	forever.expiresAt = forever.seenAt + viewer.ns.API.PIN_LIFETIME_MAX + 1
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { forever })), 0, "a pin cannot outlive a sighting result")
+	forever.expiresAt = forever.seenAt
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { forever })), 0, "expiry must follow the sighting")
 	-- A permission's No removes them.
 	w:As(viewer, C.Choose, "api:mappins", false)
 	eq(#pins.world, 0); eq(#pins.mini, 0)
