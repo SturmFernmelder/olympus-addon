@@ -2267,14 +2267,18 @@ function Wanted.SightingMapID(sighting)
 	return mapID
 end
 
+-- A live sighting's server time translated to this client's clock, for ns.Ago.
+local function AgoAt(at, live)
+	return live and (ns.Now() - math.max(0, math.floor(Clock()) - at)) or at
+end
+
 -- Exact date plus age: an old sighting remains useful and is never silently hidden as "stale".
 -- A live sighting's server time is translated to this client's clock only for ns.Ago.
 function Wanted.SightingWhen(at, live)
 	at = math.floor(tonumber(at) or 0)
 	local dateFn = date or (os and os.date)
 	local stamp = type(dateFn) == "function" and dateFn("%Y-%m-%d %H:%M", at) or tostring(at)
-	local agoAt = live and (ns.Now() - math.max(0, math.floor(Clock()) - at)) or at
-	return L.WANTED_SEEN_WHEN:format(stamp, ns.Ago(agoAt))
+	return L.WANTED_SEEN_WHEN:format(stamp, ns.Ago(AgoAt(at, live)))
 end
 
 -- A separate, genuine in-game observation for this session. It is never inferred from an old
@@ -2414,13 +2418,28 @@ function Wanted.OnlineTip(tt, t, seen)
 	return true
 end
 
--- The entry's "Last seen online" line (the list's, under his row, and his page's), nil without one.
+-- His page's "Last seen online" line, nil without one. (The list says it short on his row:
+-- Wanted.OnlineShort.)
 function Wanted.OnlineLine(t, indent)
 	local seen = Wanted.LastOnline(t)
 	if not seen then return nil end
 	return { id = "wanted-online:" .. tostring(t.key), indent = indent or 1,
 		text = "|cff9d9d9d" .. L.WANTED_LAST_ONLINE:format(Wanted.SightingWhen(seen.at, seen.live)) .. "|r",
 		tooltip = function(tt) return Wanted.OnlineTip(tt, t, seen) end }
+end
+
+-- (Daniel: "ficou ruim last seen online em linha nova... tinha que ser algo clicavel na mesma
+-- linha com pré info curta abrindo pagina do wanted".) The list row's own short "seen 2h ago"
+-- ("seen 3d ago" past a day), nil without a time. It sits after the row's counts, so a click on it
+-- is a click on his row, which opens his page (Wanted.OpenTarget); the row's tooltip (TargetTip)
+-- keeps the date, the age and the source.
+function Wanted.OnlineShort(t)
+	local seen = Wanted.LastOnline(t)
+	if not seen then return nil end
+	local agoAt = AgoAt(seen.at, seen.live)
+	local age = math.max(0, ns.Now() - agoAt)
+	if age >= 86400 then return L.WANTED_ROW_SEEN_DAYS:format(math.floor(age / 86400)) end
+	return L.WANTED_ROW_SEEN:format(ns.Ago(agoAt))
 end
 
 -- (1.2.4: the open cycle's deaths and how many counted, when one did not: the same member again
@@ -2617,11 +2636,12 @@ local function ListLines()
 	if #targets == 0 then lines[#lines + 1] = { text = Grey(L.WANTED_EMPTY) } end
 	for i = 1, Wanted.VisibleRows("wanted", #targets) do
 		local t = targets[i]
+		-- (His last seen online on his own row, short and dim after the counts, no line of its own:
+		-- Wanted.OnlineShort. rightWide: a long name gives way before it does.)
+		local seen = Wanted.OnlineShort(t)
 		lines[#lines + 1] = { id = "wanted:" .. t.key, key = t.key, text = Display(t),
-			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills), onClick = function() return Wanted.OpenTarget(t) end,
-			tooltip = TargetTip(t) }
-		local online = Wanted.OnlineLine(t, 1)
-		if online then lines[#lines + 1] = online end
+			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills) .. (seen and Grey("  ·  " .. seen) or ""),
+			rightWide = seen ~= nil or nil, onClick = function() return Wanted.OpenTarget(t) end, tooltip = TargetTip(t) }
 		local location = Wanted.LocationLine(t, 1)
 		if location then lines[#lines + 1] = location end
 	end

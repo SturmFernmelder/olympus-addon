@@ -199,8 +199,17 @@ test("Wanted last seen online (RH-09): this client's own sighting stays on the l
 			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
 			return nil
 		end
-		local online = "wanted-online:g:" .. guid
-		eq(Find(online), nil, "nothing dates him yet")
+		-- (Daniel, 2026-10-20, changed on purpose: "ficou ruim last seen online em linha nova". The
+		-- list says it short on his own row, dim after its counts, never on a line of its own; the
+		-- row's tooltip keeps the date and the source, and his page keeps its own line.)
+		local online, rowId, sep = "wanted-online:g:" .. guid, "wanted:g:" .. guid, "|cff9d9d9d  ·  "
+		local function Short()
+			local right = assert(Find(rowId), "his row").right
+			local at = right:find(sep, 1, true)
+			return at and right:sub(at + #sep, -3) or nil -- (his short item, its "|r" aside)
+		end
+		eq(Short(), nil, "nothing dates him yet")
+		eq(Find(online), nil)
 		c.db.wantedSightings = false
 		eq(select(2, c.Wanted.ObserveUnit("target")), "off")
 		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "sightings off: no time is recorded")
@@ -213,20 +222,26 @@ test("Wanted last seen online (RH-09): this client's own sighting stays on the l
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		assert(c.Wanted.Prune())
 		eq(c.Wanted.LiveSighting(assert(c.Wanted.Target(nil, guid))), nil, "no session pin is left")
-		local line = assert(Find(online), "the list has his Last seen online line")
+		eq(Short(), c.L.WANTED_ROW_SEEN:format(c.L.AGO_MIN:format(math.floor((c.Wanted.SIGHT_TTL + 60) / 60))),
+			"the list row still says when, short")
+		eq(Find(online), nil, "never on a line of its own on the list")
 		local when = date("%Y-%m-%d %H:%M", 1800000000)
+		local rowTip = TipText(assert(Find(rowId)))
+		assert(rowTip:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), rowTip)
+		assert(rowTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "the row's tooltip names its source: this client's own sighting")
+		assert(Find(rowId).onClick(), "a click on the row opens his page")
+		local line = assert(Find(online), "his page has his Last seen online line")
 		assert(line.text:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), line.text)
 		assert(TipText(line):find(c.L.WANTED_ONLINE_OWN, 1, true), "its source: this client's own sighting")
-		local rowTip = TipText(assert(Find("wanted:g:" .. guid)))
-		assert(rowTip:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), rowTip)
-		assert(rowTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "the row's tooltip says it too")
+		assert(c.Wanted.Back())
 		-- The time alone on the entry, never where he or the observer stood.
 		local stored = c.rdb.wanted.targets["g:" .. guid]
 		for _, field in ipairs({ "mapID", "x", "y", "layer", "observer", "zone" }) do eq(stored[field], nil, field) end
 
 		c.Wanted.SetSightings(false, true)
 		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "the No forgets the time")
-		eq(Find(online), nil, "and nothing else dates him")
+		eq(Short(), nil, "and nothing else dates him")
+		eq(Find(online), nil)
 	end)
 end)
 

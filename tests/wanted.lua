@@ -1,5 +1,5 @@
 -- Horde Most Wanted: the real ledger and adapters against a small supported-client boundary.
-local ns, test, eq = ...
+local ns, test, eq, extra = ...
 local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]wanted%.lua$")) or "./"
 
 -- (1.2.3: Add, Send evidence, Review and Withdraw are gone; Sightings to is new. The old names stay
@@ -306,6 +306,18 @@ end
 
 local function Tooltip()
 	return { lines = {}, AddLine = function(self, text) self.lines[#self.lines + 1] = tostring(text) end }
+end
+
+-- A Most Wanted row's counts: its right text up to his short last seen online, dim after them.
+-- (Daniel, 2026-10-20, changed on purpose: "tinha que ser algo clicavel na mesma linha com pré
+-- info curta". The assertions that compared the whole right text with the counts compare the
+-- counts still, exactly; what follows them is tested on its own.)
+local SEEN_SEP = "|cff9d9d9d  ·  "
+local function RowCounts(line)
+	local right = line and line.right
+	if type(right) ~= "string" then return right end
+	local at = right:find(SEEN_SEP, 1, true)
+	return at and right:sub(1, at - 1) or right
 end
 
 test("wanted: top-level page, stock Orc icon, authority gate, normalized identity and internal target profile", function()
@@ -2262,21 +2274,34 @@ test("wanted last seen online (RH-09): a member's shared row dates it, this clie
 			return table.concat({ "WK", 1, scope, "Olympus II", digest, w.epoch, W.MonthNow(), kind, "1.0f000091",
 				"1.cc000091", "Prowler-Realm" }, "~")
 		end
-		-- His "Last seen online" line on the list: its text and its tooltip's.
-		local function Online()
-			for _, line in ipairs(W.Build()) do
-				if line.id == "wanted-online:g:" .. horde then
-					local tt = Tooltip()
-					line.tooltip(tt)
-					return line.text, table.concat(tt.lines, "\n")
-				end
-			end
-			return nil
+		-- (Daniel, 2026-10-20, changed on purpose: "ficou ruim last seen online em linha nova". The
+		-- list says it short on his own row, after its counts, with no line of its own; the row's
+		-- tooltip keeps the date and the source, and his page keeps its "Last seen online" line.
+		-- Each of the three is checked where it now is.)
+		local function TipOf(line)
+			local tt = Tooltip()
+			line.tooltip(tt)
+			return table.concat(tt.lines, "\n")
 		end
 		local function Says(at, source)
-			local text, tip = Online()
-			assert(text and text:find(c.L.WANTED_LAST_ONLINE:format(date("%Y-%m-%d %H:%M", at)), 1, true), tostring(text))
+			local full = c.L.WANTED_LAST_ONLINE:format(date("%Y-%m-%d %H:%M", at))
+			local row
+			for _, line in ipairs(W.Build()) do
+				assert(line.id ~= "wanted-online:g:" .. horde, "no line of its own on the list")
+				if line.id == "wanted:g:" .. horde then row = line end
+			end
+			assert(row, "his row on the list")
+			local short = SEEN_SEP .. c.L.WANTED_ROW_SEEN:format(c.Ago(at)) .. "|r"
+			eq(row.right:sub(-#short), short, "his row ends with when he was seen, short")
+			local tip = TipOf(row)
+			assert(tip:find(full, 1, true), tip)
 			assert(tip:find(source, 1, true), tip)
+			assert(W.OpenTarget(nil, horde))
+			local page
+			for _, line in ipairs(W.Build()) do if line.id == "wanted-online:g:" .. horde then page = line end end
+			assert(page and page.text:find(full, 1, true), "his page's line: " .. tostring(page and page.text))
+			assert(TipOf(page):find(source, 1, true), "and its source")
+			assert(W.Back())
 		end
 		-- A member's own death to him, heard on the channel: the shared record dates him.
 		local killed = w.epoch
@@ -2314,6 +2339,105 @@ test("wanted last seen online (RH-09): a member's shared row dates it, this clie
 		t = W.Target(nil, horde)
 		eq(t.lastOnline, died); eq(t.lastOnlineKind, "death"); eq(t.seenOnline, seen)
 		Says(died, c.L.WANTED_ONLINE_DEATH)
+	end)
+end)
+
+-- Daniel, 2026-10-20: "no wanted... ficou ruim last seen online em linha nova... tinha que ser algo
+-- clicavel na mesma linha com pré info curta abrindo pagina do wanted", then "do char wanted no caso".
+test("wanted last seen online on his row (2026-10-20): short and dim after the counts, no line of its own, the whole time and its source in the row's tooltip, a click on it opens his page; English and pt-BR fit the window's rows", function()
+	local drawn = {} -- [language] = his row, drawn below in the window's list widths
+	WithWanted(function(w, W, c)
+		local horde = "Player-1-0F000095"
+		local at = w.epoch
+		assert(w.commHandlers.WK("CHANNEL", w.participant("Herald-Realm", "Player-1-CC000095"), table.concat({ "WK", 1, ScopeOf(c),
+			"Olympus II", "00000000000009b1", at, W.MonthNow(), "S", "1.0f000095", "1.cc000095", "Prowler-Realm" }, "~")))
+		local t = assert(W.Target(nil, horde))
+		local counts = c.L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills)
+		local prefix = c.L.WANTED_LAST_ONLINE:gsub("%%s", "")
+		local function TipOf(line)
+			local tt = Tooltip()
+			line.tooltip(tt)
+			return table.concat(tt.lines, "\n")
+		end
+		local function List()
+			local row
+			for _, line in ipairs(W.Build()) do
+				if line.id == "wanted:g:" .. horde then row = line end
+				assert(line.id ~= "wanted-online:g:" .. horde, "no Last seen online line on the list")
+				assert(not tostring(line.text or ""):find(prefix, 1, true), "no line of the list says it: " .. tostring(line.text))
+			end
+			return assert(row, "his row")
+		end
+
+		-- Two hours later: his one row, its counts, then "seen 2h ago", dim (the harness's ns.Ago
+		-- gives the seconds).
+		w.advance(2 * 3600)
+		local row = List()
+		eq(row.text, c.DisplayName("Prowler-Realm"), "his name, as ever")
+		eq(row.right, counts .. "|cff9d9d9d  ·  " .. c.L.WANTED_ROW_SEEN:format(c.Ago(at)) .. "|r")
+		eq(row.rightWide, true, "a long name gives way before it")
+		local tip = TipOf(row)
+		local full = c.L.WANTED_LAST_ONLINE:format(c.L.WANTED_SEEN_WHEN:format(date("%Y-%m-%d %H:%M", at), c.Ago(at)))
+		assert(tip:find(full, 1, true), "the date and how long ago: " .. tip)
+		assert(tip:find(c.L.WANTED_ONLINE_KILL, 1, true), "and the source: " .. tip)
+		-- Past a day, in days.
+		w.advance(3 * 86400)
+		row = List()
+		eq(row.right, counts .. "|cff9d9d9d  ·  " .. c.L.WANTED_ROW_SEEN_DAYS:format(3) .. "|r")
+
+		-- A click on it (on his row: one button) opens his own Most Wanted page, which keeps its line.
+		eq(W.PageId(), "list")
+		assert(row.onClick())
+		eq(W.PageId(), "target:g:" .. horde, "his page")
+		local page, online = W.Build(), nil
+		eq(page[2].header, true); eq(page[2].text, row.text, "headed with his name")
+		for _, line in ipairs(page) do if line.id == "wanted-online:g:" .. horde then online = line end end
+		full = c.L.WANTED_LAST_ONLINE:format(c.L.WANTED_SEEN_WHEN:format(date("%Y-%m-%d %H:%M", at), c.Ago(at)))
+		assert(online and online.text:find(full, 1, true), "his page's Last seen online line: " .. tostring(online and online.text))
+		assert(TipOf(online):find(c.L.WANTED_ONLINE_KILL, 1, true))
+		assert(W.Back())
+
+		-- What the window draws 23 hours after he was seen (its longest "seen ...h ago"), in both
+		-- languages: ns.Ago's hours (in the language's words) in place of the harness's seconds.
+		w.epoch = at + 23 * 3600
+		local pt, savedLocale = {}, GetLocale
+		GetLocale = function() return "ptBR" end
+		local ok, err = pcall(function()
+			assert(loadfile(ROOT .. "Olympus/Locales.lua"))("Olympus", pt)
+			assert(loadfile(ROOT .. "Olympus/Locales/RankingRulesText.lua"))("Olympus", pt)
+		end)
+		GetLocale = savedLocale
+		if not ok then error(err, 0) end
+		eq(pt.L.WANTED_ROW_SEEN:format(pt.L.AGO_HOUR:format(2)), "visto há 2h")
+		eq(pt.L.WANTED_ROW_SEEN_DAYS:format(3), "visto há 3d")
+		for _, lang in ipairs({ { "en", ns.L }, { "pt", pt.L } }) do
+			c.L = lang[2]
+			c.Ago = function(when) return lang[2].AGO_HOUR:format(math.floor((w.epoch - when) / 3600)) end
+			assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+			W = c.Wanted
+			assert(W.Load())
+			drawn[lang[1]] = List()
+			assert(drawn[lang[1]].right:find(lang[2].WANTED_ROW_SEEN:format(lang[2].AGO_HOUR:format(23)), 1, true), drawn[lang[1]].right)
+		end
+		c.L = ns.L
+	end)
+	-- The list's width in the Olympus window as it opens (UI.lua's ListWidth: 338 wide, old look 296,
+	-- HD 305), measured as the offline fonts do (6 px a byte, wider than the game's): the whole right
+	-- text stays, never cut.
+	extra.WithUI(function()
+		for _, look in ipairs({ { "old", 296 }, { "hd", 305 } }) do
+			for lang, row in pairs(drawn) do
+				local content = CreateFrame("Frame", nil, UIParent)
+				content:SetWidth(look[2])
+				content.style = look[1]
+				ns.Views.Render(content, { row })
+				local r = content.rows[1]
+				eq(r.right:GetText(), row.right)
+				eq(r.right:Anchor("LEFT"), nil, look[1] .. " " .. lang .. ": the right text kept whole, "
+					.. r.right:GetUnboundedStringWidth() .. " px")
+				eq(r.left:GetText(), row.text, "his name on the same row")
+			end
+		end
 	end)
 end)
 
@@ -3738,7 +3862,7 @@ test("wanted 1.2.4 bounty world: a 240 bounty dominates the level-60 base on eve
 		-- The tab's row says it in points.
 		local row
 		for _, line in ipairs(world:As(watcher, watcher.W.Build)) do if line.id == "wanted:g:" .. horde then row = line end end
-		eq(row and row.right, ns.L.WANTED_ROW_COUNTS:format(240, 3))
+		eq(RowCounts(row), ns.L.WANTED_ROW_COUNTS:format(240, 3))
 		local claim = Kill(slayer, horde, "Ganker-Realm", -1) -- 15 levels above him: "??"
 		eq(claim.hl, 55); eq(claim.hf, true); eq(claim.level, 60, "the King's row's exact 60"); eq(claim.points, 246)
 		for _, cl in ipairs(everyone) do
@@ -3976,7 +4100,7 @@ test("wanted 1.2.4 (the author's report: 3 kills of the same member, 18 points):
 		eq(t.current, 18, "a plain level-18 member, three times in 8 minutes: 18")
 		eq(t.lifetimeKills, 1, "one kill, as the points count it (before: 3)")
 		local row = assert(WantedRow(W, camper), "on Most Wanted")
-		eq(row.right, ns.L.WANTED_ROW_COUNTS:format(18, 1))
+		eq(RowCounts(row), ns.L.WANTED_ROW_COUNTS:format(18, 1))
 		local tip = TipText(row)
 		assert(tip:find(ns.L.WANTED_LIFETIME:format(1), 1, true), tip)
 		assert(tip:find(ns.L.WANTED_REPEATS:format(3, 1, 10), 1, true), tip)
@@ -4010,11 +4134,11 @@ test("wanted 1.2.4 (the author's report: 3 kills of the same member, 18 points):
 		W = c.Wanted; assert(W.Load())
 		t = W.Target(nil, camper)
 		eq(t.current, 18); eq(t.lifetimeKills, 1)
-		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(18, 1))
+		eq(RowCounts(WantedRow(W, camper)), ns.L.WANTED_ROW_COUNTS:format(18, 1))
 		-- Ten minutes after the one that counted: a second kill, and its points.
 		w.advance(W.Bounty.SCORE.REPEAT_GAP - 480)
 		w.die(w.forever("Camper-Realm", camper))
-		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(36, 2))
+		eq(RowCounts(WantedRow(W, camper)), ns.L.WANTED_ROW_COUNTS:format(36, 2))
 		-- Another member's deaths to him, heard: his own gap, the same rule.
 		local mate = w.participant("Mate-Realm", "Player-1-CC00E101")
 		for i, digest in ipairs({ "00000000000e1001", "00000000000e1002" }) do
@@ -4025,7 +4149,7 @@ test("wanted 1.2.4 (the author's report: 3 kills of the same member, 18 points):
 		t = W.Target(nil, camper)
 		eq(t.current, 66, "his first death adds 30, the one two minutes later nothing")
 		eq(t.lifetimeKills, 3, "and one kill")
-		eq(WantedRow(W, camper).right, ns.L.WANTED_ROW_COUNTS:format(66, 3))
+		eq(RowCounts(WantedRow(W, camper)), ns.L.WANTED_ROW_COUNTS:format(66, 3))
 		-- A bounty at its cap still counts the kill (the death counted; only the points stop).
 		W.Bounty.SCORE.BOUNTY_MAX = 66
 		w.advance(W.Bounty.SCORE.REPEAT_GAP)
@@ -4069,7 +4193,7 @@ test("wanted 1.2.4 (the author's report: many on Most Wanted with 0 points and 0
 		-- He kills a member (this client's player): wanted at once, for his bounty and his kill.
 		w.advance(W.DEATH_WINDOW + 1)
 		w.die(w.forever("Prey-Realm", prey))
-		eq(WantedRow(W, prey).right, ns.L.WANTED_ROW_COUNTS:format(40, 1))
+		eq(RowCounts(WantedRow(W, prey)), ns.L.WANTED_ROW_COUNTS:format(40, 1))
 		status = W.StatusText()
 		assert(status:find(ns.L.WANTED_STATUS_STORE:format("RealmGroup", "Alliance", 1, 1, 0, 3, 2, ns.L.WANTED_STATUS_YES), 1, true), status)
 		-- Killed for his bounty: a new cycle at 0 points, and still wanted for the member he killed.
@@ -4079,7 +4203,7 @@ test("wanted 1.2.4 (the author's report: many on Most Wanted with 0 points and 0
 		w.units.target = nil
 		assert(ok, tostring(e)); eq(e.points, 40, "his bounty alone: this member was paid his level within the hour")
 		eq(W.Target(nil, prey).current, 0)
-		eq(WantedRow(W, prey).right, ns.L.WANTED_ROW_COUNTS:format(0, 1), "0 points and 1 kill: listed")
+		eq(RowCounts(WantedRow(W, prey)), ns.L.WANTED_ROW_COUNTS:format(0, 1), "0 points and 1 kill: listed")
 		-- After a reload: the same list.
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
 		W = c.Wanted; assert(W.Load())
@@ -4099,7 +4223,7 @@ test("wanted 1.2.4: an entry with nothing counted is not on Most Wanted: one lis
 		local sender = w.participant("Voided-Realm", "Player-1-CC00E301")
 		assert(w.commHandlers.WK("CHANNEL", sender, BountyRow(c, W, { digest = "00000000000e3001", at = w.epoch,
 			horde = "1.0d00e302", own = "1.cc00e301", worth = "M~20~0", name = "Voided Horde-Realm" })))
-		eq(WantedRow(W, "Player-1-0D00E302").right, ns.L.WANTED_ROW_COUNTS:format(20, 1))
+		eq(RowCounts(WantedRow(W, "Player-1-0D00E302")), ns.L.WANTED_ROW_COUNTS:format(20, 1))
 		local king = w.authority("Kingly-Realm", "king")
 		assert(w.commHandlers.WV("CHANNEL", king, ("WV~V~1~%s~%s~00000000000e3001~%d"):format(ScopeOf(c), sender, w.epoch)))
 		eq(W.Target(nil, "Player-1-0D00E302").current, 0, "voided")
