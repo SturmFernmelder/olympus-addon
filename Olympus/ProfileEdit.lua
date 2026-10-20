@@ -144,7 +144,7 @@ end
 ---------------------------------------------------------------------------
 
 function PE.PickFrame(key)
-	-- 1.2.1: an own look (Borders.OWN_LOOKS) is this screen's alone, never sent. (1.2.5, the owner's
+	-- 1.2.1: an own look (Borders.OWN_LOOKS) is this screen's alone, never sent. (1.2.6, the owner's
 	-- rule of 10-19: the pick everyone else sees becomes the Apostles' cross he holds in the Church's
 	-- ranking, HonorsNet.OwnLookFrame; with none held it stays as it is.) Any other frame ends it.
 	local borders = B()

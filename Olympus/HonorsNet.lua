@@ -1339,7 +1339,7 @@ function H.Known()
 	}
 end
 
--- (1.2.5, the owner's rule of 10-19) The red cross is its wearer's own look, on his own screen alone
+-- (1.2.6, the owner's rule of 10-19) The red cross is its wearer's own look, on his own screen alone
 -- (Borders.OwnLook): every other client shows him with the Apostles' cross he holds in the Church's
 -- ranking (apostle-1/2/3, the best one held, gold, silver or bronze). So while he wears it, the pick
 -- his profile's word carries is that cross; with none held, his pick as it is. Nil: no change.
@@ -1382,7 +1382,7 @@ function H.Refresh()
 		local pick, earned, lost = ns.Honors.Update(before, held, known, function(h)
 			return told[H.LetterMark(h.key, h.period)] == true
 		end, { now = H.Inputs().now })
-		-- (1.2.5) The red cross worn here: the cross he holds is what everyone else sees, whatever
+		-- (1.2.6) The red cross worn here: the cross he holds is what everyone else sees, whatever
 		-- else switched on (H.OwnLookFrame).
 		local cross = H.OwnLookFrame(held)
 		if cross then pick.frame = cross end

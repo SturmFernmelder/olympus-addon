@@ -992,7 +992,7 @@ end
 ---------------------------------------------------------------------------
 -- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
 -- on his own screen alone, while everyone else sees the Apostles' cross he holds in the Church's
--- ranking (1.2.5, the owner's rule: his pick follows it, HonorsNet.OwnLookFrame), or with none
+-- ranking (1.2.6, the owner's rule: his pick follows it, HonorsNet.OwnLookFrame), or with none
 -- held his normal frame. Offered in the frame picker (ProfileEdit) to anyone the signed Apostles
 -- list names (Church.SignedApostles: the author's
 -- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the

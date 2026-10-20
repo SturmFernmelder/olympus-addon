@@ -43,7 +43,7 @@ test("Church dropdown: titleless menu clears the window border and selects the a
 		eq(c.View.window, "w", "actual Church time-window callback")
 		ns.Views.DrawFilters(row, Filters(w, c), 300)
 		when:Click()
-		-- (1.2.5) A redraw that changes none of its choices (a search typed elsewhere) keeps it open,
+		-- (1.2.6) A redraw that changes none of its choices (a search typed elsewhere) keeps it open,
 		-- its rows the redrawn page's: closing it was the dropdown vanishing under the mouse (the
 		-- author's report of 10-06; tests/arena/church-dropdown.lua's next test).
 		ns.Views.SetFilter("church", "apostle")
@@ -78,7 +78,7 @@ test("Church dropdown: understated triggers retain Who, When and their active va
 	end)
 end)
 
--- 1.2.5: the author's report of 10-06 ("ta dificil de navegar nos dropdowns eles ficam sumindo"): the
+-- 1.2.6: the author's report of 10-06 ("ta dificil de navegar nos dropdowns eles ficam sumindo"): the
 -- Church page redraws on its own (a census word, a ranking answer: UI.RefreshSoon), and every redraw
 -- closed the Who or When dropdown open under the mouse. The page drawn as the window draws it
 -- (ChurchView.Build, Views.SplitPageNav, Views.Render), then drawn again.

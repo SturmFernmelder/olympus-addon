@@ -561,7 +561,7 @@ function Views.DrawFilters(holder, filters, width)
 			end)
 			holder.filters[i] = b
 		end
-		-- A reused row can belong to another page; its previous choices are no longer valid. (1.2.5: a
+		-- A reused row can belong to another page; its previous choices are no longer valid. (1.2.6: a
 		-- redraw that changed none of them, a census word or a Church answer arriving, keeps the open
 		-- menu, its rows this drawing's choices: it closed under the player's mouse, the author's
 		-- report of 10-06, "eles ficam sumindo".)

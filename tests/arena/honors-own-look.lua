@@ -1,7 +1,7 @@
 -- 1.2.1: an Apostle's own look (Borders.OwnLook, the frame picker in ProfileEdit.lua): the red
 -- cross on his own portrait, on his own screen alone, offered to anyone the signed Apostles list
 -- names (Church.SignedApostles over the signed titles list we hold), never sent; everyone else sees
--- his normal frame (1.2.5: the Apostles' cross he holds in the Church's ranking, below, when he holds
+-- his normal frame (1.2.6: the Apostles' cross he holds in the Church's ranking, below, when he holds
 -- one). On the test world. Every name is invented.
 local H = ...
 local test, eq = H.test, H.eq
@@ -194,7 +194,7 @@ test("1.2.1 an Apostle's own look: never offered to anyone the signed Apostles l
 	W3.NoErrors(w)
 end)
 
--- 1.2.5 (the owner's rule of 10-19, agreed with the Apostle who wears it): the red cross stays on
+-- 1.2.6 (the owner's rule of 10-19, agreed with the Apostle who wears it): the red cross stays on
 -- his own screen alone, and every other client shows him with the Apostles' cross he holds in the
 -- Church's ranking. The real Church.lua and ChurchCount.lua over client c's namespace (as
 -- tests/arena/honors-places.lua), holding a signed titles list naming `apostles`.
@@ -233,7 +233,7 @@ local function Top(w, to, apostles, missionaries)
 	w:Run(3)
 end
 
-test("1.2.5 the red cross: on his own screen alone; every other client shows the Apostles' cross he holds in the Church's ranking, his pick following it while he wears it (a new honour switching on included); another frame worn ends it", function()
+test("1.2.6 the red cross: on his own screen alone; every other client shows the Apostles' cross he holds in the Church's ranking, his pick following it while he wears it (a new honour switching on included); another frame worn ends it", function()
 	local w, cast = W3.New()
 	local apostle, viewer, first = cast.A, cast.spectator, cast.B
 	local all = { apostle, viewer, first }
