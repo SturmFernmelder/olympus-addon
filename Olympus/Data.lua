@@ -954,7 +954,16 @@ function Data.SendGlobalCensus()
 	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local payload = Data.GlobalCensusPayload()
 	if not payload or payload:sub(-1) == "~" then return false end
-	local ok = ns.Comm.SendChunked(payload, false, "CHANNEL", nil, { owner = Data, key = "census-global" })
+	-- A keyed job carries its permit, which the transport asks before each piece goes out
+	-- (Comm.lua's NormalizeOptions refuses a key without one, and the snapshot then never left):
+	-- the channel's lane alone, and only while this client still holds the relay's trust.
+	local key = "census-global"
+	local ok = ns.Comm.SendChunked(payload, false, "CHANNEL", nil, { owner = Data, key = key,
+		permit = function(_, guardKey, dist, target)
+			if guardKey ~= key or dist ~= "CHANNEL" or target ~= nil then return false, "lane" end
+			if not GlobalTrusted(ns.me) then return false, "trust" end
+			return true
+		end })
 	if ok then globalLastSent = ns.Now() end
 	return ok
 end

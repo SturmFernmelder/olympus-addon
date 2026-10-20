@@ -117,6 +117,60 @@ test("global census: an ordinary late client may ask a trusted holder for the pu
 		"malformed senders are still refused")
 end)
 
+-- 10-20 (the lead's audit): the snapshot went to the transport as a keyed job with no permit, which
+-- Comm's NormalizeOptions refuses ("guard"), so no trusted holder's snapshot ever left; the tests
+-- above stubbed SendChunked and never saw it. Here the real transport (FreshComm, Comm.lua) takes it.
+test("global census: a trusted holder's snapshot really reaches the transport's queue and the channel, piece by piece, and stops when his trust goes", function()
+	local FreshComm = assert(extra and extra.FreshComm, "tests/run.lua hands FreshComm to this file")
+	local saved = { info = C_ChatInfo, channel = GetChannelName, time = GetTime }
+	local ok, err = pcall(function()
+		local holder = CensusWorld()
+		local relay, trusted = "Council-Realm", true
+		holder.ns.me = relay
+		holder.ns.Church = { IsLedgerRelay = function(name) return trusted and name == relay end }
+		holder.ns.Alts = nil
+		-- Enough guilds for a snapshot of several pieces.
+		for i = 1, 30 do
+			holder.ns.rdb.guilds[("Olympus Dawn %02d"):format(i)] = { total = 900 + i, online = 70, avgLevel = 46.2, t = holder.clock, st = holder.clock }
+		end
+		local cns = FreshComm()
+		local C = cns.Comm
+		local sent = {}
+		C_ChatInfo.SendAddonMessage = function(_, msg, dist) sent[#sent + 1] = { dist = dist, msg = msg } return true end
+		GetChannelName = function() return 5 end
+		C.JoinChannel()
+		holder.ns.Comm = C
+		local payload = assert(holder.D.GlobalCensusPayload())
+		local pieces = ns.Codec.Chunk(payload, "1")
+		assert(#pieces > 1, "a snapshot of several pieces")
+		eq(C.QueueSize(), 0)
+		eq(holder.D.SendGlobalCensus(), true, "the transport takes the snapshot")
+		eq(C.QueueSize(), #pieces, "every piece waits in the send queue")
+		local clock = 1000
+		GetTime = function() return clock end
+		for _ = 1, #pieces * 2 do clock = clock + 2; C.Pump() end
+		eq(C.QueueSize(), 0, "all of it went")
+		eq(#sent, #pieces, "one channel message per piece")
+		for i, m in ipairs(sent) do
+			eq(m.dist, "CHANNEL", "on the Olympus channel")
+			eq(m.msg, pieces[i], "piece " .. i .. " as Codec.Chunk cut it")
+		end
+		-- His trust gone mid-way: the permit, asked before each piece, sends no more of it.
+		sent = {}
+		eq(holder.D.SendGlobalCensus(), true)
+		C.Pump()
+		eq(#sent, 1, "the first piece went")
+		trusted = false
+		for _ = 1, #pieces * 2 do clock = clock + 2; C.Pump() end
+		eq(#sent, 1, "no piece after his trust went")
+		eq(C.QueueSize(), 0, "the rest dropped, not left waiting")
+		eq(holder.D.SendGlobalCensus(), false, "an untrusted client sends no snapshot")
+		eq(C.QueueSize(), 0)
+	end)
+	C_ChatInfo, GetChannelName, GetTime = saved.info, saved.channel, saved.time
+	if not ok then error(err, 0) end
+end)
+
 -- Two values alike, tables compared value by value whatever their identity; the first difference.
 local function Alike(a, b, path)
 	if type(a) ~= "table" or type(b) ~= "table" then
