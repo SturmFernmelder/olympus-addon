@@ -46,7 +46,7 @@ end
 local function World(fn, o)
 	o = o or {}
 	local w = { now = 1800000000, clock = 1800000007, member = true, accord = true, roles = {}, ranks = {},
-		guild = "Olympus Ember", kingGuild = "Olympus Ember", handlers = {}, kingHandlers = {}, printed = {}, team = false }
+		guild = "Olympus Ember", kingGuild = "Olympus Ember", lordGuild = "Olympus Ember", handlers = {}, kingHandlers = {}, printed = {}, team = false }
 	local c = setmetatable({ me = "Tester-Realm", realm = "Realm", group = "Realm", faction = "Alliance",
 		db = { accord = { v = 1, yes = true, at = 0 } }, rdb = { guilds = {} }, L = setmetatable({}, { __index = ns.L }),
 		DecreePages = {}, RealmPages = {} }, { __index = ns })
@@ -57,6 +57,7 @@ local function World(fn, o)
 	c.IsMember = function() return w.member end
 	c.IsFederation = function(g) return type(g) == "string" and g:find("Olympus", 1, true) ~= nil end
 	c.IsKingGuild = function(g) return g ~= nil and g == w.kingGuild end
+	c.KingGuildName = function() return w.kingGuild end
 	c.IsKingCharacter = function(n) return Role(n) == "king" end
 	c.IsHighCouncillor = function(n) return Role(n) == "council" end
 	c.IsCrown = function() return false end
@@ -67,7 +68,12 @@ local function World(fn, o)
 	c.Print = function(t) w.printed[#w.printed + 1] = tostring(t) end
 	c.Data = { ServerTime = function() return w.clock end, Summary = function() return { guilds = {} } end,
 		ClaimGuild = function() return true end,
-		AuthorizedRank = function(name) return Role(name) == "lord" and 0 or nil, "roster" end }
+		-- A "lord" masters w.lordGuild alone: rank 0 there, the roster's word in this character's own
+		-- guild and the census's in another (Data.AuthorizedRank before the signed enforcement).
+		AuthorizedRank = function(name, guild)
+			if Role(name) ~= "lord" or guild ~= w.lordGuild then return nil end
+			return 0, guild == w.guild and "roster" or "census"
+		end }
 	c.Roster = { RankOf = function(n) return w.ranks[c.FullName(n)] end, MyRank = function() return w.ranks[c.me] or 3 end,
 		IsOfficer = function() return false end }
 	c.King = { HAND_MAY = {}, STEWARD_MAY = {}, Register = function(kind, f) w.kingHandlers[kind] = f end,
@@ -220,10 +226,13 @@ test("companion bridge affairs (931): crafting carries the board's open cards an
 		local d = assert(Data("crafting"))
 		eq(#d.board, 3); eq(#d.own, 3, "his two requests taken and the one he is making; the completed one left out")
 		local b = d.board[2]
-		eq(b.id, "c2"); eq(b.item, "Lionheart Helm 2"); eq(b.quantity, 2); eq(b.requester, "Asker2"); eq(b.guild, "Olympus Ember")
+		eq(b.id, "c2"); eq(b.item, "Lionheart Helm 2"); eq(b.quantity, 2); eq(b.guild, "Olympus Ember")
+		-- (The review of 931: the board's line and its opened card name no requester; its search alone
+		-- matches him. The board's rows carry none.)
+		eq(b.requester, nil, "the board names no requester"); assert(not Carries(d.board, "Asker"), "no requester on the board")
 		eq(b.status, "open"); eq(b.canMake, true, "the page's 'you can make it'"); eq(d.board[1].canMake, false)
 		eq(b.at, 1799999002 + 7, "the server's time")
-		OnlyFields(d.board, Set({ "id", "item", "quantity", "requester", "guild", "status", "at", "canMake" }), "board")
+		OnlyFields(d.board, Set({ "id", "item", "quantity", "guild", "status", "at", "canMake" }), "board")
 		OnlyFields(d.own, Set({ "id", "item", "quantity", "status", "guild", "at", "role", "crafter", "requester" }), "own")
 		eq(d.own[1].role, "requester"); eq(d.own[1].crafter, "Maker1"); eq(d.own[1].requester, nil); eq(d.own[1].status, "terms")
 		eq(d.own[3].role, "crafter"); eq(d.own[3].requester, "Buyer1"); eq(d.own[3].crafter, nil)
@@ -256,7 +265,8 @@ test("companion bridge affairs (931): crafting from the real request store: an o
 				terms = { unit = 777777, total = 777777, source = "SECRET" }, chat = { { text = "SECRET CHAT" } }, audit = {}, seenActions = {}, seenChat = {} },
 		} }
 		local d = assert(Data("crafting"), "the real registry's crafting section")
-		eq(#d.board, 1); eq(d.board[1].id, "cardx"); eq(d.board[1].item, "Thorium Bar"); eq(d.board[1].requester, "Asker")
+		eq(#d.board, 1); eq(d.board[1].id, "cardx"); eq(d.board[1].item, "Thorium Bar"); eq(d.board[1].quantity, 4)
+		eq(d.board[1].requester, nil, "as the board shows it: no requester"); assert(not Carries(d.board, "Asker"))
 		eq(#d.own, 1); eq(d.own[1].id, "mine"); eq(d.own[1].status, "accepted"); eq(d.own[1].crafter, "Maker")
 		assert(not Carries(d, "SECRET") and not Carries(d, "777777"), "no terms, details or chat")
 		eq(#R.All(), 2, "the store itself unchanged by the export")
@@ -373,6 +383,31 @@ test("companion bridge affairs (931): decrees lists the Decrees tab's decrees as
 	end, { load = REAL })
 end)
 
+test("companion bridge affairs (931): on the King's screen while the councillors' names are hidden, a councillor's decree has no role and is no notice, never the Crown's", function()
+	World(function(w, c)
+		w.roles["Royal-Realm"], w.roles["Sage-Realm"] = "king", "council"
+		local D1 = w.handlers.D1
+		D1("CHANNEL", "Royal-Realm", ns.Codec.EncodeDecree("ROYAL", 1453, 0.5, 0.25, "Olympus Ember", 0, "Crown speaks"))
+		w.now, w.clock = w.now + 61, w.clock + 61
+		D1("CHANNEL", "Sage-Realm", ns.Codec.EncodeDecree("ROYAL", 1429, 0.1, 0.2, "Olympus Ember", 0, "Council speaks"))
+		local shown = assert(Data("decrees"))
+		eq(#shown, 2); eq(shown[1].role, "council", "the names shown: the council's mark")
+		eq(Data("notices").items[1].kind, "council")
+		w.masked = true
+		local d = assert(Data("decrees"))
+		eq(#d, 2, "the Decrees tab still lists it")
+		eq(d[1].id, shown[1].id); eq(d[1].text, "Council speaks"); eq(d[1].by, "Sage", "the sender the page's tooltip names")
+		eq(d[1].role, nil, "no council mark while the names are hidden, and not the Crown's")
+		eq(d[2].role, "crown", "the King's own decree")
+		local items = assert(Data("notices")).items
+		eq(#items, 1, "the councillor's decree is no notice while hidden")
+		eq(items[1].kind, "king"); eq(items[1].role, "crown"); eq(items[1].text, "Crown speaks")
+		for _, item in ipairs(items) do assert(item.id ~= shown[1].id and item.kind ~= "council", item.id) end
+		w.masked = false
+		eq(#Data("notices").items, 2, "the eye open: the council's decree again")
+	end, { load = REAL })
+end)
+
 test("companion bridge affairs (931): notices in the agreed shape: an officer muster, its withdrawal under the same id, the Crown's and the High Council's decrees, a guild master's muster for his guild", function()
 	World(function(w, c)
 		w.roles["Royal-Realm"], w.roles["Sage-Realm"], w.roles["Lord-Realm"] = "king", "council", "lord"
@@ -430,6 +465,65 @@ test("companion bridge affairs (931): notices carry this character's own letters
 	end)
 end)
 
+-- Each notice by its id.
+local function ById(items)
+	local out = {}
+	for _, item in ipairs(items or {}) do out[item.id] = item end
+	return out
+end
+
+test("companion bridge affairs (931): an ended muster keeps its audience and role: a guild master's stays his guild's, the Crown's the army's; another guild's or faction's is no notice", function()
+	World(function(w, c)
+		-- Lord-Realm masters Olympus Ember, which is not the King's guild: his calls reach his guild alone.
+		w.kingGuild = "Olympus"
+		w.roles["Royal-Realm"], w.roles["Lord-Realm"] = "king", "lord"
+		local OM = w.handlers.OM
+		local seq = w.clock
+		assert(OM("GUILD", "Lord-Realm", ("OM~1~P~A~Realm~%d~%d~Olympus Ember~1429~Guild raid"):format(seq, seq)))
+		assert(OM("CHANNEL", "Royal-Realm", ("OM~1~P~A~Realm~%d~%d~Olympus~1429~Defend Goldshire"):format(seq + 1, seq)))
+		local guildId, crownId = ("muster:%d:%s"):format(seq, ns.Fold("Lord-Realm")), ("muster:%d:%s"):format(seq + 1, ns.Fold("Royal-Realm"))
+		local active = ById(assert(Data("notices")).items)
+		eq(active[guildId].audience, "guild"); eq(active[guildId].guild, "Olympus Ember"); eq(active[guildId].role, "guildMaster")
+		eq(active[crownId].audience, "army"); eq(active[crownId].role, "crown")
+		w.now, w.clock = w.now + 30, w.clock + 30
+		assert(OM("GUILD", "Lord-Realm", ("OM~1~E~A~Realm~%d~%d"):format(seq, seq)))
+		assert(OM("CHANNEL", "Royal-Realm", ("OM~1~E~A~Realm~%d~%d"):format(seq + 1, seq)))
+		eq(#c.OfficerMuster.List(), 0, "both ended: only the acts log holds them")
+		local ended = ById(Data("notices").items)
+		local g, k = assert(ended[guildId], "the guild's withdrawn muster"), assert(ended[crownId], "the Crown's withdrawn muster")
+		eq(g.withdrawn, true); eq(g.title, "Guild raid")
+		eq(g.audience, "guild", "his guild's alone, withdrawn as while it stood"); eq(g.guild, "Olympus Ember"); eq(g.role, "guildMaster")
+		eq(k.withdrawn, true); eq(k.audience, "army"); eq(k.guild, nil); eq(k.role, "crown")
+		for _, item in pairs(ended) do assert(item.audience, "every notice has its audience: " .. item.id) end
+		-- The acts log is this account's on the realm group: another character of it, in another
+		-- guild, holds the same rows. The guild's call is none of his; the Crown's still reaches him.
+		w.guild = "Olympus II"
+		ended = ById(Data("notices").items)
+		eq(ended[guildId], nil, "another guild's muster is no notice here")
+		eq(ended[crownId].audience, "army")
+		-- A role lost since: no notice to place.
+		w.guild, w.roles["Lord-Realm"] = "Olympus Ember", nil
+		eq(ById(Data("notices").items)[guildId], nil, "its poster no longer that guild's master")
+		-- Nor the other faction's call, on a character of the same account of the other faction.
+		w.roles["Lord-Realm"], c.faction = "lord", "Horde"
+		eq(#Data("notices").items, 0, "the Alliance's calls are no Horde character's")
+	end, { load = REAL })
+	-- The King's guild's master calls the whole army: the same role and audience once withdrawn.
+	World(function(w, c)
+		w.roles["Lord-Realm"], w.ranks["Lord-Realm"] = "lord", 0
+		local OM = w.handlers.OM
+		local seq = w.clock
+		assert(OM("CHANNEL", "Lord-Realm", ("OM~1~P~A~Realm~%d~%d~Olympus Ember~1429~Hold the bridge"):format(seq, seq)))
+		local id = ("muster:%d:%s"):format(seq, ns.Fold("Lord-Realm"))
+		local before = ById(Data("notices").items)[id]
+		eq(before.role, "crown"); eq(before.audience, "army")
+		w.now, w.clock = w.now + 30, w.clock + 30
+		assert(OM("CHANNEL", "Lord-Realm", ("OM~1~E~A~Realm~%d~%d"):format(seq, seq)))
+		local after = ById(Data("notices").items)[id]
+		eq(after.withdrawn, true); eq(after.role, before.role, "the same role as while active"); eq(after.audience, "army"); eq(after.guild, nil)
+	end, { load = REAL })
+end)
+
 ---------------------------------------------------------------------------
 -- agenda, with the real Week.lua
 ---------------------------------------------------------------------------
@@ -477,7 +571,8 @@ end)
 local function WatchStub(w)
 	local function Case(i, open)
 		return { key = "k" .. i, target = "Reported" .. i .. "-Realm", open = open, reporters = 2, cats = { A = 2 }, firstAt = 100 + i, lastAt = 200 + i,
-			reports = { { reporter = "Reporter Secret", note = "NOTE SECRET", lines = { "LINE SECRET" } } }, finding = { verdict = "up" },
+			reports = { { reporter = "Reporter Secret", note = "NOTE SECRET", lines = { "LINE SECRET" } } },
+			finding = i % 2 == 0 and { verdict = "up" } or nil, -- (the even ones upheld)
 			record = { lastReason = "REASON SECRET" } }
 	end
 	local open, handled, records = {}, {}, {}
@@ -521,6 +616,42 @@ test("companion bridge affairs (931): watch exists only on a moderation team cli
 		assert(not Carries(d, "SECRET") and not Carries(d, "Secret"), "no reporter, note, line, reason or moderator")
 		w.tabards = false
 		eq(Data("watch").counts.inspected, nil, "the Tabards' numbers only where the Tabards show")
+	end)
+end)
+
+test("companion bridge affairs (931): watch on the King's stream carries the cases as the page shows them there: the accused cut short until upheld, no report counts or dates", function()
+	World(function(w, c)
+		-- The real Watch.lua (its Accused and Upheld, on this world's stream switch, c.CouncilMasked),
+		-- loaded into a namespace of its own over the world's; the stub's cases and records for its data.
+		local wns = setmetatable({ On = function() end, UI = {}, Moderation = {}, Comm = { Handle = function() end },
+			PlayerMenu = { Add = function() return true end } }, { __index = c })
+		local dialogs = {}
+		for name, d in pairs(StaticPopupDialogs) do dialogs[name] = d end
+		local loaded, why = pcall(function() assert(loadfile(ROOT .. "Olympus/Watch.lua"))("Olympus", wns) end)
+		for name in pairs(StaticPopupDialogs) do StaticPopupDialogs[name] = dialogs[name] end
+		assert(loaded, why)
+		c.Watch = WatchStub(w)
+		c.Watch.Accused, c.Watch.Upheld = wns.Watch.Accused, wns.Watch.Upheld
+		w.desk, w.canRead = true, true
+		local d = assert(Data("watch"))
+		eq(d.cases[1].name, "Reported1"); eq(d.cases[1].reports, 2); eq(d.cases[1].firstAt, 101); eq(d.counts.reportsOpen, 240)
+		w.masked = true
+		eq(wns.Watch.OnStream(), true, "the page's own stream switch")
+		d = assert(Data("watch"))
+		eq(#d.cases, 100)
+		for i, case in ipairs(d.cases) do
+			eq(case.name, i % 2 == 0 and ("Reported" .. i) or ns.MaskName("Reported" .. i), "case " .. i .. ": whole only once upheld")
+			eq(case.reports, nil); eq(case.firstAt, nil); eq(case.lastAt, nil)
+			eq(case.categories, "abuse or slurs (2)", "the allegation the row shows")
+		end
+		eq(d.counts.reportsOpen, nil, "no count of reports on the stream")
+		eq(d.counts.casesOpen, 120, "the sections' own counts, as their headers show them"); eq(d.counts.casesHandled, 30)
+		eq(d.records[1].name, "Rec1", "the guild's records as their list shows them")
+		local whole = Set(Strings(d))
+		for i = 1, 99, 2 do assert(not whole["Reported" .. i] and not whole["Reported" .. i .. "-Realm"], "an unproven accused name whole: " .. i) end
+		-- A Watch without the accessors: every accused name cut short.
+		c.Watch.Accused, c.Watch.Upheld = nil, nil
+		eq(Data("watch").cases[2].name, ns.MaskName("Reported2"))
 	end)
 end)
 

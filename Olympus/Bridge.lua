@@ -205,13 +205,15 @@ function OlympusBridge.GetCensusCheckpoint()
 end
 
 -- Sections: one versioned, read-only door per kind of data for the Companion (Daniel: more
--- "ports" than the census). A module's exporter returns only what every member already sees on
--- Olympus's own pages; this registry copies it into fresh plain tables, within fixed limits, and
--- the private sidecar (OlympusCompanionBridge) saves only the sections it knows at logout. The one
--- exception is "self" (BridgeSections.lua): the player's own character and BattleTag, once his
--- Olympus Accord is accepted. Never another player's BattleTag, chat text or chat-strike line, a
--- council/High Council-only view, treasury items or anything private to an audience the player is
--- not in: an exporter that would need one does not belong here.
+-- "ports" than the census). A module's exporter returns only what this character's own client
+-- already shows on Olympus's own pages, to the audience that page has: a staff-only section (The
+-- Watch's, BridgeAffairs.lua) exists only on the clients whose page shows it, and personal rows
+-- carry this character's own (his crafting deals, his letters from the King, and "self",
+-- BridgeSections.lua: his character and BattleTag once his Olympus Accord is accepted). This
+-- registry copies it into fresh plain tables, within fixed limits, and the private sidecar
+-- (OlympusCompanionBridge) saves only the sections it knows at logout. Never another player's
+-- BattleTag or private data, chat text or a chat-strike line, treasury items, or anything private
+-- to an audience the player is not in: an exporter that would need one does not belong here.
 OlympusBridge.SECTIONS_API_VERSION = 1
 OlympusBridge.SECTION_LIMITS = { sections = 32, depth = 5, values = 1500, string = 120 }
 -- (931) A section that needs more than the defaults (a whole roster, a room's chat lines, a decree's

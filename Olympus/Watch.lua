@@ -2347,6 +2347,7 @@ local function Accused(name, upheld)
 end
 Watch.Accused = Accused
 local function Upheld(c) return type(c) == "table" and type(c.finding) == "table" and c.finding.verdict == "up" end
+Watch.Upheld = Upheld -- (931, read-only: the Companion's watch section names the accused as the page does)
 
 local function ShownReason(e)
 	local authenticated = e.via or e.by

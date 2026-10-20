@@ -11,8 +11,10 @@ local ADDON, ns = ...
 -- terms or its request chat, a treasury item, a reporter's name or note, an evidence line, a
 -- moderator's reason, a GUID or a BattleTag. Lists are cut from their end (the oldest, the lowest).
 -- A module that errors leaves its own section nil (Bridge.GetSection's pcall); the others go on.
--- Two small read-only accessors serve chatRooms: ChatWindow.Unread (the tab's unread counts) and
--- ChatRooms.KnownRecipientCount (a room's member count as the page last counted it).
+-- Small read-only accessors: for chatRooms, ChatWindow.Unread (the tab's unread counts) and
+-- ChatRooms.KnownRecipientCount (a room's member count as the page last counted it); for notices,
+-- OfficerMuster.Authorized (who may call whom, for an ended call's reach); for watch, Watch.Upheld
+-- (a case a finding upheld, whose accused the stream names whole).
 if type(OlympusBridge) ~= "table" or type(OlympusBridge.RegisterSection) ~= "function" then return end
 
 local B = OlympusBridge
@@ -117,13 +119,17 @@ end
 -- The role a poster speaks with, in the self section's words (BridgeSections.lua's roles): crown
 -- (the King, his Steward, his Hands; and for the whole army, the King's guild's own officers),
 -- council (the signed High Council), author, and for one guild alone its master (guildMaster) or
--- another of its officers (officer).
+-- another of its officers (officer). On the King's screen while the councillors' names are hidden
+-- (Masked) a councillor has none (nil): "council" would mark him, and the Crown's is not his.
 local function RoleOf(name, scope)
 	if type(name) ~= "string" or name == "" then return nil end
 	local full = ns.FullName(name)
 	local K, W = Live("King"), Live("Workshop")
 	if Yes(ns.IsKingCharacter, full) or (K and (Yes(K.IsStewardName, full) or Yes(K.IsHandName, full))) then return "crown" end
-	if not Masked() and Yes(ns.IsHighCouncillor, full) then return "council" end
+	if Yes(ns.IsHighCouncillor, full) then
+		if Masked() then return nil end
+		return "council"
+	end
 	if W and Yes(W.IsAuthorName, full) then return "author" end
 	if scope == "guild" then
 		local R = Live("Roster")
@@ -146,7 +152,10 @@ end
 ---------------------------------------------------------------------------
 -- crafting: the Crafters tab's request board (open cards, as every member sees them) and this
 -- character's own open deals (the board's Mine and Accepted pages). Never the terms, the price,
--- the settlement or the request's chat: the item, its quantity, its state and the other party.
+-- the settlement or the request's chat. A card as its board line and opened card show it: the
+-- item, its quantity, its guild, the "you can make it" mark, its state and age; no requester (the
+-- board names none: its search alone matches him). His own deal: the same, and the other party,
+-- whom the deal's chat names.
 ---------------------------------------------------------------------------
 
 local TERMINAL = { completed = true, cancelled = true, expired = true }
@@ -161,7 +170,7 @@ Register("crafting", { values = 2000 }, function()
 		if item then
 			local id, guild, at = Text(r.id, 24), Text(r.guild, 72), At(r.updated or r.created, off)
 			if r.state == "open" and #board < CRAFT_BOARD then
-				board[#board + 1] = { id = id, item = item, quantity = Whole(r.quantity), requester = Name(r.requester), guild = guild,
+				board[#board + 1] = { id = id, item = item, quantity = Whole(r.quantity), guild = guild,
 					status = "open", at = at, canMake = Yes(R.CanFulfill, r) }
 			end
 			local asked, making = Same(r.requester, ns.me), Same(r.crafter, ns.me)
@@ -231,9 +240,10 @@ end)
 
 ---------------------------------------------------------------------------
 -- decrees: the Decrees tab's list (Decree.Active, newest first): a decree's kind, whom it reaches
--- (the whole army, or one guild alone), who sent it and with what role, its zone, its words (as the
--- page shows them: hidden by the player's block terms until he shows them) and when it ends. Never
--- a local preview (Decree.Preview: nothing was sent).
+-- (the whole army, or one guild alone), who sent it and with what role (none for a councillor's
+-- while his name is hidden: RoleOf), its zone, its words (as the page shows them: hidden by the
+-- player's block terms until he shows them) and when it ends. Never a local preview
+-- (Decree.Preview: nothing was sent).
 ---------------------------------------------------------------------------
 
 local function PreviewDecree(d)
@@ -330,10 +340,11 @@ end)
 -- zone?, guild?, at, withdrawn, audience } } }, newest first, 30 at most, only what this client holds:
 --   muster  the officer musters (OfficerMuster.List: the Crown's for the whole army, this guild's
 --           master's for it alone), and those that ended within a day (this client's acts log,
---           Chronicle: withdrawn, expired or replaced) as withdrawn
+--           Chronicle: withdrawn, expired or replaced) as withdrawn, with the same reach and role
 --   king    the decrees of the Crown for the whole army (Decree.Active), and this character's own
 --           letters from the King (HonorsNet.Letters; audience "self": his alone, never to fan out)
---   council the High Council's decrees for the whole army
+--   council the High Council's decrees for the whole army (none on the King's screen while the
+--           councillors' names are hidden: RoleOf gives such a decree no role to show)
 -- An id is the same on every client that heard it ("muster:<sequence>:<poster key>", a decree's own
 -- fields); a letter's is this character's own.
 ---------------------------------------------------------------------------
@@ -344,32 +355,57 @@ local function MusterTitle(title)
 	return title
 end
 
+-- A muster's role: the channel's calls are the Crown's alone (OfficerMuster's Authorized: the King,
+-- his Steward, his Hands, the King's guild's master), whoever else the poster is; a guild's, its
+-- master's. The same on every client, whatever the King's screen hides.
+local function MusterRole(audience) return audience == "guild" and "guildMaster" or "crown" end
+
+-- An ended muster's reach. The acts log keeps no guild and no distribution, and it is this
+-- account's on the realm group (ns.rdb), whichever character heard the call: the reach is the one
+-- the poster has now under the rule his call was heard by (OfficerMuster.Authorized), the channel's
+-- first as Muster.CanPost chooses it: the whole army for the Crown; this character's guild alone,
+-- named, for its master as this roster has him. Anything else (a call another character of this
+-- account heard in another guild, a role lost since, the other faction's call) is no notice.
+local function EndedReach(M, by, faction)
+	if type(M.Authorized) ~= "function" or faction ~= (ns.faction == "Horde" and "H" or ns.faction == "Alliance" and "A" or nil) then return nil end
+	local mine = type(GetGuildInfo) == "function" and GetGuildInfo("player") or nil
+	local king = type(ns.KingGuildName) == "function" and ns.KingGuildName() or nil
+	if Yes(M.Authorized, by, mine, "CHANNEL") or (king ~= mine and Yes(M.Authorized, by, king, "CHANNEL")) then return "army" end
+	if Yes(M.Authorized, by, mine, "GUILD") then return "guild", mine end
+	return nil
+end
+
 local function Musters(items, off)
 	local M = Live("OfficerMuster")
 	if not M or type(M.List) ~= "function" then return false end
 	for _, row in ipairs(M.List() or {}) do
 		if type(row) == "table" and type(row.by) == "string" and tonumber(row.seq) then
-			local guildOnly = row.dist == "GUILD"
+			local audience = row.dist == "GUILD" and "guild" or "army"
 			local who = Name(row.by) or "?"
-			local by = guildOnly and L.OFFICER_MUSTER_BY_GUILD and L.OFFICER_MUSTER_BY_GUILD:format(who, tostring(row.guild or "?"))
+			local by = audience == "guild" and L.OFFICER_MUSTER_BY_GUILD and L.OFFICER_MUSTER_BY_GUILD:format(who, tostring(row.guild or "?"))
 				or (L.OFFICER_MUSTER_BY and L.OFFICER_MUSTER_BY:format(who)) or who
 			items[#items + 1] = { id = ("muster:%d:%s"):format(Whole(row.seq), ns.Fold(row.by)), kind = "muster",
-				role = guildOnly and "guildMaster" or RoleOf(row.by, "army"), title = Text(MusterTitle(row.title), NOTICE_TITLE),
-				text = Text(by, NOTICE_TEXT), zone = Zone(row.zone), guild = guildOnly and Text(row.guild, 72) or nil,
-				at = Whole(row.at), withdrawn = false, audience = guildOnly and "guild" or "army" }
+				role = MusterRole(audience), title = Text(MusterTitle(row.title), NOTICE_TITLE),
+				text = Text(by, NOTICE_TEXT), zone = Zone(row.zone), guild = audience == "guild" and Text(row.guild, 72) or nil,
+				at = Whole(row.at), withdrawn = false, audience = audience }
 		end
 	end
 	-- Those that ended: the acts log keeps each once (its id: muster:<faction>:<poster key>:<sequence>).
 	local C = Live("Chronicle")
 	local now = ns.Now() + off
 	for _, e in ipairs(C and type(C.Entries) == "function" and C.Entries() or {}) do
-		local key, seq
-		if type(e) == "table" and e.kind == "muster" and type(e.id) == "string" then key, seq = e.id:match("^muster:[AH]:(.+):(%d+)$") end
+		local faction, key, seq
+		if type(e) == "table" and e.kind == "muster" and type(e.id) == "string" and type(e.by) == "string" then
+			faction, key, seq = e.id:match("^muster:([AH]):(.+):(%d+)$")
+		end
 		local st = key and (tonumber(e.st) or At(e.t, off))
 		if st and now - st <= NOTICE_ENDED_FOR then
-			items[#items + 1] = { id = ("muster:%d:%s"):format(Whole(seq), key), kind = "muster", role = RoleOf(e.by, "guild"),
-				title = Text(MusterTitle(e.words or L.OFFICER_MUSTER_TITLE), NOTICE_TITLE), text = Text(e.what, NOTICE_TEXT),
-				at = Whole(st), withdrawn = true }
+			local audience, guild = EndedReach(M, e.by, faction)
+			if audience then
+				items[#items + 1] = { id = ("muster:%d:%s"):format(Whole(seq), key), kind = "muster", role = MusterRole(audience),
+					title = Text(MusterTitle(e.words or L.OFFICER_MUSTER_TITLE), NOTICE_TITLE), text = Text(e.what, NOTICE_TEXT),
+					guild = audience == "guild" and Text(guild, 72) or nil, at = Whole(st), withdrawn = true, audience = audience }
+			end
 		end
 	end
 	return true
@@ -379,8 +415,8 @@ local function DecreeNotices(items, off)
 	local list, D = Decrees()
 	if not list then return false end
 	for _, d in ipairs(list) do
-		if type(d) == "table" and type(d.kind) == "string" and d.scope ~= "guild" and not PreviewDecree(d) then
-			local role = DecreeRole(d, "army")
+		local role = type(d) == "table" and type(d.kind) == "string" and d.scope ~= "guild" and not PreviewDecree(d) and DecreeRole(d, "army")
+		if role then
 			local veiled = d.hidden == true and not d.revealed
 			items[#items + 1] = { id = DecreeId(d), kind = role == "council" and "council" or "king", role = role,
 				title = Text(type(D.Label) == "function" and D.Label(d) or d.kind, NOTICE_TITLE),
@@ -436,17 +472,29 @@ end)
 -- reported name, open or handled, how many reported it and for what, when), the guild's records
 -- (status, warnings, timeout), the Tabards' inspected players and the untabarded list. Never a
 -- reporter's name or note, an evidence line, a moderator's reason or name, a chat line or a
--- chat-strike line, a BattleTag or a GUID.
+-- chat-strike line, a BattleTag or a GUID. On the King's stream (Masked, as Watch.OnStream) the
+-- cases as the page shows them there (Watch.lua's CaseRow): the accused's name cut short until a
+-- finding upheld the case (Watch.Accused, Watch.Upheld), and neither how many reported him nor
+-- when (alts could inflate it), so no open reports' count either.
 ---------------------------------------------------------------------------
 
-local function CaseRows(W, out, open, handled, council)
+-- The accused's name as the case's row shows it: on the stream cut short until a finding upheld
+-- the case (a module without Watch.Accused or Watch.Upheld: cut short always).
+local function AccusedName(W, c, stream)
+	if not stream then return Name(c.target) end
+	local upheld = type(W.Upheld) == "function" and W.Upheld(c) == true
+	local shown = type(W.Accused) == "function" and Text(W.Accused(c.target, upheld), 64)
+	return shown or Text(ns.MaskName(Name(c.target) or "?"), 64)
+end
+
+local function CaseRows(W, out, open, handled, council, stream)
 	for _, list in ipairs({ open or {}, handled or {} }) do
 		for _, c in ipairs(list) do
 			if #out >= WATCH_ROWS then return end
 			if type(c) == "table" and type(c.target) == "string" then
-				out[#out + 1] = { name = Name(c.target), open = c.open == true, reports = Whole(c.reporters),
+				out[#out + 1] = { name = AccusedName(W, c, stream), open = c.open == true, reports = not stream and Whole(c.reporters) or nil,
 					categories = type(W.CatsText) == "function" and type(c.cats) == "table" and Text(W.CatsText(c.cats), 120) or nil,
-					firstAt = Whole(c.firstAt), lastAt = Whole(c.lastAt), council = council or nil }
+					firstAt = not stream and Whole(c.firstAt) or nil, lastAt = not stream and Whole(c.lastAt) or nil, council = council or nil }
 			end
 		end
 	end
@@ -467,16 +515,18 @@ Register("watch", { values = 4000 }, function()
 	local WC = Live("WatchChat")
 	local team = WC ~= nil and Yes(WC.InRoom, ns.me)
 	if not team and not Yes(W.DeskShown) then return nil end
-	local counts = { reportsOpen = 0, casesOpen = 0, casesHandled = 0 }
+	local stream = Masked()
+	local counts = { reportsOpen = not stream and 0 or nil, casesOpen = 0, casesHandled = 0 }
 	local out = { counts = counts, cases = {}, records = {}, inspected = {}, untabarded = {} }
 	local function CountCases(open, handled)
 		counts.casesOpen, counts.casesHandled = counts.casesOpen + #(open or {}), counts.casesHandled + #(handled or {})
+		if stream then return end
 		for _, c in ipairs(open or {}) do counts.reportsOpen = counts.reportsOpen + Whole(type(c) == "table" and c.reporters) end
 	end
 	if Yes(W.CanRead) then
 		local open, handled = W.Cases()
 		CountCases(open, handled)
-		CaseRows(W, out.cases, open, handled)
+		CaseRows(W, out.cases, open, handled, nil, stream)
 		local banned, watched, warned = 0, 0, 0
 		for _, e in ipairs(W.Records() or {}) do
 			if type(e) == "table" and type(e.name) == "string" then
@@ -495,7 +545,7 @@ Register("watch", { values = 4000 }, function()
 	if Yes(W.CouncilDeskShown) and type(W.CouncilCases) == "function" then
 		local open, handled = W.CouncilCases()
 		CountCases(open, handled)
-		CaseRows(W, out.cases, open, handled, true)
+		CaseRows(W, out.cases, open, handled, true, stream)
 	end
 	local I = Live("Inspect")
 	if I and type(I.Summary) == "function" and (type(W.TabardsShown) ~= "function" or Yes(W.TabardsShown)) then
