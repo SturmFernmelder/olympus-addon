@@ -51,6 +51,11 @@ and the confirmed alt links. Nothing is sent.
    header's count stays `Data.Summary()`'s. The last good sizes are `ns.rdb.censusClean.sizes`,
    pruned at login past `Data.KEEP`.
 
+**Validated people** (the Olympus Accord's BattleTags): only a moderation team client holds any
+(`Accord.lua`'s team store), so only its export carries `validated`: how many distinct BattleTags and
+characters it holds, never a tag or a name. Every other client sends none and its Companion shows
+"not counted yet".
+
 **Not counted yet:** people with the addon (beyond those online now) and Battle.net accounts.
 Counting them needs a census wire change on every reporter (a per-account flag in the hello, report
 fields for guildmates seen with the addon). Not in this release: the export leaves them out and the
@@ -73,6 +78,7 @@ stats = {
   days = { "t~characters~people~online", ... },      -- the page's 30 days, days without a sample out
   hours = { "t~characters~people~online", ... },     -- the page's 24 hours, hours without one out
   guilds = { "members~online~users~avg10~status~name", ... },  -- 256 at most, biggest first
+  validated? = { battleTags, characters },   -- a moderation team client only: numbers, never tags or names
 }
 ```
 

@@ -171,3 +171,28 @@ test("census stats section: the page's figures and series, the sanitized census 
 		eq(#data.days, 0); eq(#data.hours, 0); eq(data.avgLevel, nil)
 	end)
 end)
+
+test("census stats section: validated people only from a moderation team client, as numbers, never a tag or a name", function()
+	local saved = ns.Accord
+	local team = true
+	ns.Accord = {
+		TeamShown = function() return team end,
+		Groups = function() return { { tag = "Secret#1234", rows = { { name = "A-Realm" }, { name = "B-Realm" } } }, { tag = "Other#99", rows = { { name = "C-Realm" } } } } end,
+		Count = function() return 3 end,
+	}
+	local ok, err = pcall(With, { guilds = Army() }, function()
+		local data = assert(OlympusBridge.GetSection("stats")).data
+		eq(data.validated.battleTags, 2); eq(data.validated.characters, 3)
+		local function Holds(t, depth)
+			for k, v in pairs(t) do
+				if type(v) == "string" and (v:find("#", 1, true) or v:find("-Realm", 1, true)) then return k end
+				if type(v) == "table" and depth < 5 then local found = Holds(v, depth + 1) if found then return found end end
+			end
+		end
+		eq(Holds(data.validated, 0), nil, "no tag or name")
+		team = false
+		eq(assert(OlympusBridge.GetSection("stats")).data.validated, nil, "any other client: none")
+	end)
+	ns.Accord = saved
+	if not ok then error(err, 0) end
+end)
