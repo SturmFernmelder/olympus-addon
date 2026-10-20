@@ -99,6 +99,38 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.JUSTICE_TASKS_CONFIRM_HINT = "Confirmar a conclusão para %s após sua própria revisão? A tentativa e a ausência observada não comprovam quem agiu ou a causa. O registro será identificado como confirmado por revisão humana."
 end
 
+L.LETTER_1_3_0_TITLE = "A shared Olympus"
+L.LETTER_1_3_0 = [==[Version 1.3.0.
+
+- {news} Public rankings and records now keep their verified source and can be repeated by eligible ledger holders, so late and returning clients can recover the same durable state after the original witness goes offline.
+- {church} Church service records preserve confirmed recruitment history across sessions. Unknown time is paused rather than turned into a false zero, and a new correspondent begins a new personal term.
+- {wanted} Most Wanted and Slayers open with five rows each, expand independently, preserve proven history under the rebalanced score, and show the latest dated sighting without pretending that an old sighting is live.
+- {guild} Legates organize groups of up to forty, with up to twenty-five per guild. Their role presentation, badges and notices follow the High Council's current structure.
+- {craft} Crafting, Treasury, Arena and games expose only their permitted public summaries. Their durable ledgers reject malformed or unverifiable claims instead of allowing a sender to invent a score.
+- {watch} Reports, sanctions and Justice records keep their audience. Staff may see the responsible staff member; the affected player sees only the responsible Olympus office, protecting individual moderators from targeting.
+- {team} Chat replies, match rooms, privacy choices and Companion exports use the same bounded records the addon itself accepts. Nothing is exported before the Olympus Accord is accepted.
+- {dice} Bones and Arena received the integrated interface and record fixes in this release. Practice remains separate from public player rankings.
+- {crown} Location pins use recent, permission-gated sightings, disappear when they expire or permission is withdrawn, and never collect or draw exact positions inside instances.
+
+This is a large release and therefore starts the 1.3 line. Offline tests cover the rules and data boundaries; multiplayer relay, client-specific UI and map placement still depend on live in-game observation.]==]
+
+if GetLocale() == "ptBR" then
+	L.LETTER_1_3_0_TITLE = "Um Olympus compartilhado"
+	L.LETTER_1_3_0 = [==[Versão 1.3.0.
+
+- {news} Rankings e registros públicos agora preservam sua fonte verificada e podem ser retransmitidos por guardiões elegíveis do livro, permitindo que clientes atrasados ou que voltaram recuperem o mesmo estado perene depois que a testemunha original fica offline.
+- {church} Os registros de serviço da Igreja preservam o histórico confirmado de recrutamento entre sessões. Tempo desconhecido fica pausado, em vez de virar um zero falso, e um novo correspondente começa sua própria gestão.
+- {wanted} Most Wanted e Slayers abrem com cinco linhas cada, expandem separadamente, preservam o histórico comprovado com a pontuação rebalanceada e mostram a última localização datada sem fingir que uma observação antiga está ao vivo.
+- {guild} Legates organizam grupos de até quarenta pessoas, com até vinte e cinco por guilda. A apresentação do cargo, os badges e os avisos seguem a estrutura atual decidida pelo High Council.
+- {craft} Crafting, Treasury, Arena e jogos expõem somente seus resumos públicos permitidos. Seus livros perenes rejeitam alegações malformadas ou não verificáveis, em vez de permitir que um remetente invente uma pontuação.
+- {watch} Reports, sanções e registros de Justiça preservam seu público. A equipe pode ver o responsável da própria equipe; a pessoa afetada vê apenas o departamento responsável do Olympus, protegendo moderadores individuais de perseguição.
+- {team} Respostas do chat, salas de partida, escolhas de privacidade e exportações do Companion usam os mesmos registros limitados que o próprio addon aceita. Nada é exportado antes da aceitação do Olympus Accord.
+- {dice} Bones e Arena receberam nesta versão as correções integradas de interface e registro. Treino continua separado dos rankings públicos entre jogadores.
+- {crown} Pins de localização usam observações recentes e autorizadas, somem quando expiram ou a permissão é retirada e nunca coletam nem desenham posições exatas dentro de instâncias.
+
+Esta é uma versão grande e por isso inicia a linha 1.3. Testes offline cobrem as regras e os limites de dados; relay multiplayer, interface específica do cliente e posicionamento no mapa ainda dependem de observação ao vivo no jogo.]==]
+end
+
 L.LETTER_1_2_5_1_TITLE = "Reconnect a separated guild"
 L.LETTER_1_2_5_1 = [==[Version 1.2.5.1.
 

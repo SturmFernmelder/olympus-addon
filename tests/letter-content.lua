@@ -59,8 +59,24 @@ test("1.2.5 letter content: both languages describe only the shipped reply, offi
 			assert(not previous or at > previous, locale .. ": release points stay ordered")
 			previous = at
 		end
-		eq(cns.Letters.Versions()[1], "1.2.5.1", locale .. ": hotfix first")
-		eq(cns.Letters.Versions()[2], "1.2.5", locale .. ": release retained after hotfix")
+		eq(cns.Letters.Versions()[1], "1.3.0", locale .. ": current release first")
+		eq(cns.Letters.Versions()[2], "1.2.5.1", locale .. ": hotfix retained")
+		eq(cns.Letters.Versions()[3], "1.2.5", locale .. ": previous release retained")
+	end
+end)
+
+test("1.3.0 letter content: both languages explain the durable relay, rankings, moderation and live-test boundary", function()
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = Language(locale)
+		local title, body = cns.Letters.Text("1.3.0")
+		assert(type(title) == "string" and title ~= "", locale .. ": title")
+		assert(type(body) == "string" and #body > 1800 and body:find("1.3.0", 1, true), locale .. ": detailed letter")
+		local raw = cns.L.LETTER_1_3_0
+		for _, phrase in ipairs(locale == "ptBR" and {
+			"estado perene", "Most Wanted e Slayers", "High Council", "equipe pode ver", "Testes offline"
+		} or {
+			"durable state", "Most Wanted and Slayers", "High Council", "Staff may see", "Offline tests"
+		}) do assert(raw:find(phrase, 1, true), locale .. ": " .. phrase) end
 	end
 end)
 
