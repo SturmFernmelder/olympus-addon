@@ -19,8 +19,9 @@ local L = ns.L
 -- It never sends: every Olympus send (Comm, Arena.Send, SayTo) is held while a step runs or a page
 -- draws, and only its type is counted. It never changes a setting: the window's tab and page, the
 -- modules' pages and the saved keys the pages write are put back as they were. It never clicks a
--- row or a button but a page's own navigation, its links and its Back; it stops in combat or at a
--- loading screen, putting everything back first.
+-- row or a button but a page's own navigation, its links and its Back, one redraw a frame. It stops
+-- in combat or at a loading screen drawing nothing (what it opened hidden at once, the window's page
+-- put back once out of combat), and never loads the Arena's own addon.
 
 local SelfTest = {}
 ns.SelfTest = SelfTest
@@ -41,7 +42,11 @@ SelfTest.LIGHT_LUMA = 0.5
 SelfTest.LINKS_PER_PAGE = 16
 SelfTest.SIBLINGS_PER_TAB = 12
 SelfTest.FINGERPRINT_MAX = 4096  -- a saved key larger than this (serialized) is not compared
-SelfTest.BYTES_MAX = 32000       -- the probes' text kept at most (past it, details are dropped)
+SelfTest.BYTES_MAX = 40000       -- the probes' text kept at most (past it, details are dropped)
+-- The room kept for the closing steps (the restore, the Back list, the fence, the privacy check,
+-- the cost...): however many pages come before, those probes and their details are in the report.
+SelfTest.CLOSING_PROBES = 24
+SelfTest.CLOSING_BYTES = 7200
 SelfTest.TEXT_MAX = 6000         -- the copy window's text
 SelfTest.OVERFLOW_PX = 4
 SelfTest.REGIONS_MAX = 2000
@@ -249,26 +254,56 @@ local function Note(list, value)
 	if #list < SelfTest.LIST_MAX then list[#list + 1] = value end
 end
 
--- One result: id, area, what was checked, ok | warn | fail | skip, and a short detail.
+-- One result: id, area, what was checked, ok | warn | fail | skip, and a short detail. The probes
+-- of the closing steps (step.closing) have a room of their own, CLOSING_PROBES and CLOSING_BYTES:
+-- however many pages come before, the others never use it.
 local function Add(id, area, what, result, detail)
 	local r = run
 	if not r then return nil end
 	r.counts[result] = (r.counts[result] or 0) + 1
-	if #r.probes >= SelfTest.MAX_PROBES then
+	local closing = r.current ~= nil and r.current.closing == true
+	if #r.probes >= SelfTest.MAX_PROBES - (closing and 0 or SelfTest.CLOSING_PROBES) then
 		r.dropped = r.dropped + 1
 		return nil
 	end
 	local p = { id = Clip(id, SelfTest.ID_MAX), area = Clip(area or "selftest", 12), what = Clip(what or "", 60), result = result }
 	local d = Clip(detail or "", SelfTest.DETAIL_MAX)
-	if r.bytes + #d > SelfTest.BYTES_MAX then
+	local fixed = #p.id + #p.what + 24
+	local room = closing and (SelfTest.CLOSING_BYTES - r.closingBytes) or (SelfTest.BYTES_MAX - SelfTest.CLOSING_BYTES - r.bytes)
+	if fixed + #d > room then
 		r.trimmed = r.trimmed + 1
 		d = ""
 	end
 	p.detail = d
-	r.bytes = r.bytes + #p.id + #p.what + #d + 24
+	if closing then r.closingBytes = r.closingBytes + fixed + #d else r.bytes = r.bytes + fixed + #d end
 	r.probes[#r.probes + 1] = p
 	if r.current then r.current.made[#r.current.made + 1] = p end
 	return p
+end
+
+-- The pages' room is used up: a page's step opens nothing more (counted as dropped).
+local function Full()
+	return run ~= nil and #run.probes >= SelfTest.MAX_PROBES - SelfTest.CLOSING_PROBES
+end
+
+local RANK = { skip = 0, ok = 1, warn = 2, fail = 3 }
+-- A page's probe told what a later step found (its Back, clicked in a frame of its own): the worse
+-- result of the two, the note after its detail (when it kept one, and room is left).
+local function Amend(p, result, note)
+	local r = run
+	if not (r and p) then return end
+	if (RANK[result] or 0) > (RANK[p.result] or 0) then
+		r.counts[p.result] = math.max(0, (r.counts[p.result] or 0) - 1)
+		r.counts[result] = (r.counts[result] or 0) + 1
+		p.result = result
+	end
+	if note and p.detail ~= "" then
+		local d = Clip(p.detail .. "; " .. note, SelfTest.DETAIL_MAX)
+		if r.bytes + #d - #p.detail <= SelfTest.BYTES_MAX - SelfTest.CLOSING_BYTES then
+			r.bytes = r.bytes + #d - #p.detail
+			p.detail = d
+		end
+	end
 end
 
 local function Step(id, area, what, fn, opts)
@@ -305,8 +340,26 @@ local function Kind(spec, v)
 	return v:match("^(%u+%d?)~") or (spec[2] == "SendChat" and "chat" or "?")
 end
 
+-- owner[key] (a window's redraw) inside the fence f whenever it runs, until the fence comes down;
+-- counted: the Olympus window's, whose count tells a step whether what it clicked drew the window.
+local function WrapRedraw(f, owner, key, counted)
+	local redraw = type(owner) == "table" and rawget(owner, key) or nil
+	if not f or f.off or type(redraw) ~= "function" then return false end
+	for _, w in ipairs(f.wrapped) do if w.owner == owner and w.key == key then return true end end
+	local wrapper = function(...)
+		if counted then f.redraws = f.redraws + 1 end
+		f.depth = f.depth + 1
+		local ok, err = pcall(redraw, ...)
+		f.depth = f.depth - 1
+		if not ok then error(err, 0) end
+	end
+	owner[key] = wrapper
+	f.wrapped[#f.wrapped + 1] = { owner = owner, key = key, orig = redraw, wrapper = wrapper }
+	return true
+end
+
 local function FenceOn(r)
-	local f = { depth = 0, blocked = {}, wrapped = {}, left = {} }
+	local f = { depth = 0, blocked = {}, wrapped = {}, left = {}, redraws = 0, loads = 0 }
 	for _, spec in ipairs(FENCED) do
 		local owner = spec[1] == false and ns or Mod(spec[1])
 		local key = spec[2]
@@ -329,29 +382,30 @@ local function FenceOn(r)
 			f.wrapped[#f.wrapped + 1] = { owner = owner, key = key, orig = orig, wrapper = wrapper }
 		end
 	end
+	-- The Arena's own addon is never loaded by the run: a load lasts the session (its saved data
+	-- moves, its timers start). Inside the fence, Arena.LoadUI refuses while it is not loaded yet.
+	local A = Mod("Arena")
+	local load = A and rawget(A, "LoadUI")
+	if type(load) == "function" and type(A.UILoaded) == "function" then
+		local wrapper = function(...)
+			if f.depth > 0 and A.UILoaded() ~= true then
+				f.loads = f.loads + 1
+				return false, "selftest"
+			end
+			return load(...)
+		end
+		A.LoadUI = wrapper
+		f.wrapped[#f.wrapped + 1] = { owner = A, key = "LoadUI", orig = load, wrapper = wrapper }
+	end
 	r.fence = f
 	-- Every redraw of the window while the run lasts is inside the fence too: a page drawn again by
 	-- itself (its timer, an event) may ask the network as it draws.
-	SelfTest.FenceRedraws(Mod("UI"), "Refresh")
+	WrapRedraw(f, Mod("UI"), "Refresh", true)
 	return f
 end
 
--- owner[key] (a window's redraw) inside the fence whenever it runs, until the run ends.
-function SelfTest.FenceRedraws(owner, key)
-	local f = run and run.fence
-	local redraw = type(owner) == "table" and rawget(owner, key) or nil
-	if not f or f.off or type(redraw) ~= "function" then return false end
-	for _, w in ipairs(f.wrapped) do if w.owner == owner and w.key == key then return true end end
-	local wrapper = function(...)
-		f.depth = f.depth + 1
-		local ok, err = pcall(redraw, ...)
-		f.depth = f.depth - 1
-		if not ok then error(err, 0) end
-	end
-	owner[key] = wrapper
-	f.wrapped[#f.wrapped + 1] = { owner = owner, key = key, orig = redraw, wrapper = wrapper }
-	return true
-end
+-- owner[key] (a window's redraw) inside the run's fence whenever it runs, until the run ends.
+function SelfTest.FenceRedraws(owner, key) return WrapRedraw(run and run.fence, owner, key, false) end
 
 local function FenceOff(r)
 	local f = r and r.fence
@@ -399,12 +453,13 @@ local function RunStep(step)
 	local ok, res = pcall(step.fn, step)
 	local ms = SelfTest.Clock() - t0
 	r.fence.depth = r.fence.depth - 1
-	r.current = nil
 	r.ms, r.steps = r.ms + ms, r.steps + 1
 	if ms > r.worst.ms then r.worst.ms, r.worst.id = ms, step.id end
 	r.raised = r.raised + math.max(0, AllErrors() - step.errBase)
 	r.errorsSeen = r.errorsSeen + #step.errors
+	-- (Still the current step: a closing step's own error uses the closing steps' room.)
 	if not ok then Add(step.id, step.area, step.what, "fail", "selftest: " .. ErrText(res)) end
+	r.current = nil
 	for _, p in ipairs(step.made) do if p.ms == nil then p.ms = Round(ms, 1) end end
 	if SelfTest.trace then pcall(SelfTest.trace, r.ticks, step.id, step.heavy == true) end
 	if ok and res == "again" and run == r then table.insert(r.queue, r.pos, step) end
@@ -551,12 +606,8 @@ local function WantedTo(s)
 	elseif s.wantedTarget then Try(Wa.OpenTarget, s.wantedTarget) end
 end
 
--- Everything back as Snapshot found it; returns the saved keys it had to put back.
-function SelfTest.Restore(s)
-	local restored = {}
-	if type(s) ~= "table" then return restored end
-	local UI = Mod("UI")
-	-- The windows the run opened.
+-- The windows the run opened, hidden (route: the Arena window's place put back first).
+local function HideWindows(s, UI, route)
 	local A = Mod("Accord")
 	if not s.frames.accord and Shown(FrameOf(A, "Frame")) then Try(A.Hide) end
 	local C = Mod("Consent")
@@ -569,9 +620,43 @@ function SelfTest.Restore(s)
 	if S and run and run.spectated and type(S.Close) == "function" then Try(S.Close) end
 	local ui = ArenaUI()
 	if ui then
-		if s.arena and s.arena.route then Try(ui.RestoreRoute, s.arena.route) end
+		if route and s.arena and s.arena.route then Try(ui.RestoreRoute, s.arena.route) end
 		if not (s.arena and s.arena.shown) and Try(ui.IsShown) and ui.IsShown() then Try(ui.Hide) end
 	end
+end
+
+-- The saved keys back as they were; returns those it had to put back.
+local function RestoreKeys(s)
+	local restored = {}
+	for _, k in ipairs(SelfTest.SAVED_KEYS) do
+		local now = Fingerprint(type(ns.db) == "table" and ns.db[k] or nil, 1e6)
+		if now ~= s.prints[k] then
+			RestoreInto(k, s.db[k])
+			restored[#restored + 1] = k
+		end
+	end
+	return restored
+end
+
+-- A stop in combat or at a loading screen: nothing drawn. The windows the run opened are hidden
+-- (a Hide alone) and the Olympus window too when it was closed; the saved keys put back. Its tab
+-- and page wait for SelfTest.PutBack, out of combat.
+function SelfTest.HideOpened(s)
+	if type(s) ~= "table" then return {} end
+	local UI = Mod("UI")
+	HideWindows(s, UI, false)
+	if not s.shown and UI and type(UI.IsShown) == "function" and UI.IsShown() and type(UI.Toggle) == "function" then Try(UI.Toggle) end
+	return RestoreKeys(s)
+end
+
+-- Everything back as Snapshot found it; returns the saved keys it had to put back. opts.closed:
+-- the window closed now, and closed before: opened on its tab and page again (when either
+-- changed) and closed.
+function SelfTest.Restore(s, opts)
+	if type(s) ~= "table" then return {} end
+	local UI = Mod("UI")
+	-- The windows the run opened.
+	HideWindows(s, UI, true)
 	-- The modules' pages.
 	local CV = Mod("ChurchView")
 	if CV and s.church then CV.page, CV.list, CV.window, CV.arg = s.church.page, s.church.list, s.church.window, s.church.arg end
@@ -590,7 +675,9 @@ function SelfTest.Restore(s)
 	local V = ns.Views
 	if type(V) == "table" and s.realmMode and type(V.SetRealmMode) == "function" then Try(V.SetRealmMode, s.realmMode, true) end
 	if type(V) == "table" and type(V.CloseChat) == "function" then Try(V.CloseChat) end
-	if UI and type(UI.SelectTab) == "function" and (s.shown or (type(UI.IsShown) == "function" and UI.IsShown())) then
+	local open = UI and type(UI.IsShown) == "function" and UI.IsShown() == true
+	local closedMoved = opts and opts.closed and not s.shown and not open and PageKey() ~= s.page
+	if UI and type(UI.SelectTab) == "function" and (s.shown or open or closedMoved) then
 		Try(UI.SelectTab, s.tab or "census")
 		if s.tab == "realm" and type(V) == "table" then
 			local M = Mod("Members")
@@ -607,14 +694,21 @@ function SelfTest.Restore(s)
 	local CS = Mod("CensusStats")
 	if CS and s.censusStats == false and type(CS.Shown) == "function" and CS.Shown() == true then Try(CS.Close) end
 	-- The saved keys.
-	for _, k in ipairs(SelfTest.SAVED_KEYS) do
-		local now = Fingerprint(type(ns.db) == "table" and ns.db[k] or nil, 1e6)
-		if now ~= s.prints[k] then
-			RestoreInto(k, s.db[k])
-			restored[#restored + 1] = k
-		end
-	end
-	return restored
+	return RestoreKeys(s)
+end
+
+-- What is not as Snapshot `s` found it: "ok" or "warn", and the detail.
+function SelfTest.Compare(s)
+	local notes = {}
+	local after = SelfTest.Snapshot()
+	if after.shown ~= s.shown then notes[#notes + 1] = "window " .. (after.shown and "open" or "closed") end
+	if s.shown and after.page ~= s.page then notes[#notes + 1] = ("page %s, was %s"):format(SafeId(after.page), SafeId(s.page)) end
+	if s.church and after.church and (after.church.page ~= s.church.page or after.church.list ~= s.church.list or after.church.window ~= s.church.window) then notes[#notes + 1] = "the Church's page" end
+	if s.watch and after.watch and (after.watch.mode ~= s.watch.mode or after.watch.caseKey ~= s.watch.caseKey) then notes[#notes + 1] = "The Watch's page" end
+	if after.realmMode ~= s.realmMode then notes[#notes + 1] = "the Realm's mode" end
+	if after.docked ~= s.docked then notes[#notes + 1] = "docked " .. tostring(after.docked) end
+	if #notes > 0 then return "warn", "not as before: " .. table.concat(notes, ", ") end
+	return "ok", "as before: " .. (s.shown and SafeId(s.page) or "closed")
 end
 
 -- What must be the same after the run as before: never changed by it.
@@ -672,12 +766,34 @@ local function ButtonText(b)
 	return ok and text or nil
 end
 
+-- A stand-in tooltip that draws nothing; texts: where its lines' texts go (when given).
+local function FakeTip(texts)
+	return setmetatable({}, { __index = function(_, k)
+		if k == "NumLines" or k == "GetWidth" or k == "GetHeight" then return function() return 0 end end
+		if k == "IsShown" or k == "IsOwned" or k == "IsForbidden" then return function() return false end end
+		if k == "GetName" then return function() return "OlympusSelfTestTooltip" end end
+		if texts and (k == "AddLine" or k == "SetText") then return function(_, text) texts[#texts + 1] = text end end
+		if texts and k == "AddDoubleLine" then return function(_, a, b) texts[#texts + 1] = a; texts[#texts + 1] = b end end
+		return function() end
+	end })
+end
+
+-- A header that goes back when clicked, its tooltip saying so (the Church's person page: its name
+-- leads back to the ranking, CHURCH_BACK): a known Back.
+local function BackHeader(line)
+	if not (line.header and type(line.onClick) == "function" and type(line.tooltip) == "function") then return false end
+	local texts = {}
+	pcall(line.tooltip, FakeTip(texts))
+	for _, t in ipairs(texts) do if IsBack(t) then return true end end
+	return false
+end
+
 -- How to go back from the page in `view` (its lines, its strips, its buttons), or nil.
 function SelfTest.FindBack(view)
 	if type(view) ~= "table" then return nil end
 	for _, line in ipairs(view.lines or {}) do
 		if type(line) == "table" then
-			if IsBack(line.text) and type(line.onClick) == "function" then return line.onClick end
+			if (IsBack(line.text) or BackHeader(line)) and type(line.onClick) == "function" then return line.onClick end
 			for _, item in ipairs(type(line.nav) == "table" and line.nav or {}) do
 				if type(item) == "table" and IsBack(item.text) and type(item.onClick) == "function" then return item.onClick end
 			end
@@ -699,12 +815,13 @@ function SelfTest.FindBack(view)
 	return nil
 end
 
--- The page in `view` has a Back: a line, a strip's item or a button that says one.
+-- The page in `view` has a Back: a line, a strip's item or a button that says one, or a header
+-- whose tooltip does.
 function SelfTest.HasBack(view)
 	if type(view) ~= "table" then return false end
 	for _, line in ipairs(view.lines or {}) do
 		if type(line) == "table" then
-			if IsBack(line.text) then return true end
+			if IsBack(line.text) or BackHeader(line) then return true end
 			for _, item in ipairs(type(line.nav) == "table" and line.nav or {}) do if type(item) == "table" and IsBack(item.text) then return true end end
 		end
 	end
@@ -1380,8 +1497,12 @@ MOD[#MOD + 1] = { id = "mod.census", what = "the census's totals", heavy = true,
 		Age(s.newest), okR and tostring(rebuilding or false) or "?", change))
 end }
 
+-- The fields of a section that carry the player's own BattleTag on purpose: "self", the Companion's
+-- own (its battleTag, once the Accord is accepted). The search for the tag skips them alone.
+SelfTest.OWN_TAG_FIELDS = { self = { battleTag = true } }
+
 -- Each section its own frame (the census's can be large), then the whole: within the limits, and
--- no BattleTag in any of them. Nothing is saved.
+-- no BattleTag in any of them but where a section carries the player's own. Nothing is saved.
 MOD[#MOD + 1] = { id = "mod.bridge", what = "the Companion file's sections, each within its limits", fn = function(step)
 	local B = type(OlympusBridge) == "table" and OlympusBridge or nil
 	if not (B and type(B.Sections) == "function" and type(B.GetSection) == "function") then return P(step, "skip", "no OlympusBridge") end
@@ -1397,7 +1518,14 @@ MOD[#MOD + 1] = { id = "mod.bridge", what = "the Companion file's sections, each
 			local ms = SelfTest.Clock() - t0
 			if not (ok and type(sec) == "table") then acc.out[#acc.out + 1] = name .. " none" return end
 			local m = Measure(sec.data)
-			for _, text in ipairs(m.strings) do if #acc.texts < 6000 then acc.texts[#acc.texts + 1] = text end end
+			local own = SelfTest.OWN_TAG_FIELDS[name]
+			local scan = m
+			if own and type(sec.data) == "table" then
+				local rest = {}
+				for k, v in pairs(sec.data) do if not own[k] then rest[k] = v end end
+				scan = Measure(rest)
+			end
+			for _, text in ipairs(scan.strings) do if #acc.texts < 6000 then acc.texts[#acc.texts + 1] = text end end
 			local within = m.values <= (limits.values or 1500) + 1 and m.depth <= (limits.depth or 5) + 1
 			if not within then acc.over = true end
 			acc.out[#acc.out + 1] = ("%s %dv d%d %dms%s"):format(name, m.values, m.depth, math.floor(ms + 0.5), within and "" or " OVER")
@@ -1587,6 +1715,18 @@ local function Redraw()
 	if UI and type(UI.Refresh) == "function" then pcall(UI.Refresh) end
 end
 
+-- The Olympus window's redraws so far in this run (the fence counts them).
+local function Redraws() local f = run and run.fence return f and f.redraws or 0 end
+
+-- fn() protected; when it did not refuse (false) and drew nothing (a module that draws on a later
+-- frame, by an event), the window drawn once: never a second redraw after one that happened.
+local function Drawn(fn, ...)
+	local mark = Redraws()
+	local ok, a, b = pcall(fn, ...)
+	if ok and a ~= false and Redraws() == mark then Redraw() end
+	return ok, a, b
+end
+
 -- The window on a tab: true, or false and why not.
 local function SelectTab(key)
 	local UI = Mod("UI")
@@ -1595,13 +1735,49 @@ local function SelectTab(key)
 	if ok == false then return false, "no " .. key .. " tab here (" .. tostring(why) .. ")" end
 	return true
 end
-local function RealmFirst()
-	local V = ns.Views
-	if type(V) == "table" and type(V.CloseChat) == "function" then V.CloseChat() end
-	return SelectTab("realm")
-end
 -- (The page shown is the tab's: a tab hidden for this character shows the Census instead.)
-local function OnTab(key) return function() return PageKey():sub(1, #key + 1) == key .. "/" end end
+local function IsOnTab(key) return PageKey():sub(1, #key + 1) == key .. "/" end
+local function OnTab(key) return function() return IsOnTab(key) end end
+
+-- One frame's way toward a page, one redraw at most. way: { open = fn (true, or false and why not),
+-- tab = the tab it is on (selected first, in a frame of its own, when another shows), pre = { ready,
+-- go } (another first step: the player's own profile before one of its sections) }. "shown",
+-- "again" (one step taken: the next one the next frame), or "skip" / "fail" and why.
+local function Toward(way)
+	if way.tab and not IsOnTab(way.tab) then
+		local ok, why = SelectTab(way.tab)
+		if not ok then return "skip", why end
+		if not IsOnTab(way.tab) then return "skip", "not shown for this character (" .. SafeId(PageKey()) .. ")" end
+		return "again"
+	end
+	if way.pre and not way.pre.ready() then
+		local ok, done, why = Drawn(way.pre.go)
+		if not ok then return "fail", "opening it errored: " .. ErrText(done) end
+		if done == false or not way.pre.ready() then return "skip", tostring(why or "not here for this character") end
+		return "again"
+	end
+	local ok, shown, why = Drawn(way.open)
+	if not ok then return "fail", "opening it errored: " .. ErrText(shown) end
+	if shown == false then return "skip", tostring(why or "not here for this character") end
+	return "shown"
+end
+
+-- One frame's way back to a page { key, way } (the page a link was on, a page for its Back):
+-- "here" when it shows; "again" after one try (its way in; after two, another tab first: a page
+-- left without a Back stays its tab's page until another tab opens); false past them.
+local function Reopen(step, page)
+	if PageKey() == page.key then return "here" end
+	if not page.way then return false end
+	step.tries = (step.tries or 0) + 1
+	if step.tries > 5 then return false end
+	if step.tries == 3 then
+		pcall(SelectTab, page.key:sub(1, 7) == "census/" and "decrees" or "census")
+		return "again"
+	end
+	local st = Toward(page.way)
+	if st == "skip" or st == "fail" then return false end
+	return "again"
+end
 
 local function Sends(step)
 	local out = {}
@@ -1640,46 +1816,43 @@ function Sweep.Examine(step, key, needsBack)
 	return res
 end
 
--- Its Back clicked: the page must change, and to the page the link was on (origin, when known).
-function Sweep.TryBack(step, key, res, origin)
-	local click = SelfTest.FindBack(res.view)
-	if not click then return end
-	local ok = pcall(click)
-	Redraw()
-	local now = PageKey()
-	if not ok or now == key then
-		res.brokenBack = true
-		Note(run.brokenBack, SafeId(key))
-	elseif origin and now ~= origin then
-		res.wrongBack = SafeId(now)
-		Note(run.wrongBack, SafeId(key) .. " -> " .. SafeId(now))
-	end
-end
-
+-- The page's probe (its Back is told later, by its own step: Sweep.Back); returns it.
 function Sweep.Report(step, key, res)
 	local notes = {}
 	if res.errors > 0 then notes[#notes + 1] = ("%d error%s: %s"):format(res.errors, res.errors > 1 and "s" or "", tostring(res.first or "(raised)")) end
 	if res.noBack then notes[#notes + 1] = "no Back" end
-	if res.brokenBack then notes[#notes + 1] = "its Back stays" end
-	if res.wrongBack then notes[#notes + 1] = "its Back leads to " .. res.wrongBack end
 	if res.ink.light > 0 then notes[#notes + 1] = ("light ink x%d"):format(res.ink.light) end
 	if res.over.over > 0 then notes[#notes + 1] = ("past the edge x%d"):format(res.over.over) end
 	local sends = Sends(step)
 	if sends ~= "" then notes[#notes + 1] = "would send: " .. sends end
-	local result = (res.errors > 0 or res.brokenBack) and "fail"
-		or ((res.noBack or res.wrongBack or res.ink.light > 0 or res.over.over > 0) and "warn" or "ok")
-	P(step, result, SafeId(key) .. (#notes > 0 and (": " .. table.concat(notes, "; ")) or (" (" .. res.over.checked .. " texts" .. (res.ink.checked > 0 and (", " .. res.ink.checked .. " on parchment") or "") .. ")")))
+	local result = res.errors > 0 and "fail" or ((res.noBack or res.ink.light > 0 or res.over.over > 0) and "warn" or "ok")
+	return P(step, result, SafeId(key) .. (#notes > 0 and (": " .. table.concat(notes, "; ")) or (" (" .. res.over.checked .. " texts" .. (res.ink.checked > 0 and (", " .. res.ink.checked .. " on parchment") or "") .. ")")))
+end
+
+-- A page's Back clicked, in a frame of its own: the page must change, and to `origin` when known
+-- (the page the link was on); its probe is told. page: { key, way } (way: the page shown again
+-- first, when its links left another one). quiet: only back (a page seen before), nothing told.
+function Sweep.Back(stepId, page, origin, probe, quiet)
+	return Step(stepId, "ui", "its Back", function(step)
+		local at = Reopen(step, page)
+		if at == "again" then return "again" end
+		if at ~= "here" then return end
+		local click = SelfTest.FindBack(View())
+		if not click then return end
+		local ok = Drawn(click)
+		if quiet then return end
+		local now = PageKey()
+		if not ok or now == page.key then
+			Note(run.brokenBack, SafeId(page.key))
+			Amend(probe, "fail", "its Back stays")
+		elseif origin and now ~= origin then
+			Note(run.wrongBack, SafeId(page.key) .. " -> " .. SafeId(now))
+			Amend(probe, "warn", "its Back leads to " .. SafeId(now))
+		end
+	end, { heavy = true })
 end
 
 -- Each tooltip called with a stand-in tooltip that draws nothing.
-local function FakeTip()
-	return setmetatable({}, { __index = function(_, k)
-		if k == "NumLines" or k == "GetWidth" or k == "GetHeight" then return function() return 0 end end
-		if k == "IsShown" or k == "IsOwned" or k == "IsForbidden" then return function() return false end end
-		if k == "GetName" then return function() return "OlympusSelfTestTooltip" end end
-		return function() end
-	end })
-end
 function Sweep.Tooltips(key, tips)
 	return Step("ui.tooltips." .. SafeId(key), "ui", "the page's tooltips", function(step)
 		local t = run.tooltips
@@ -1717,77 +1890,82 @@ function Sweep.Links(view)
 	return out
 end
 
--- The page a link was on, shown again: as it is, by its own way in, or by that way in after
--- another tab (a page left without a Back stays its tab's page until another tab is opened).
-local function Reopen(origin)
-	if PageKey() == origin.key then return true end
-	pcall(origin.open)
-	Redraw()
-	if PageKey() == origin.key then return true end
-	local UI = Mod("UI")
-	local other = origin.key:sub(1, 7) == "census/" and "decrees" or "census"
-	if UI and pcall(UI.SelectTab, other) then
-		pcall(origin.open)
-		Redraw()
-	end
-	return PageKey() == origin.key
-end
-
+-- A link of the page `origin` ({ key, way }): the page it was on shown again first when another
+-- shows (its frames), the click in a frame of its own, the page it opens examined; its Back next.
 local function Link(stepId, origin, line)
 	return Step(stepId, "ui", "a page a link opens", function(step)
-		if not Reopen(origin) then return P(step, "skip", "could not open " .. SafeId(origin.key) .. " again") end
-		local ok, err = pcall(line.onClick)
+		if Full() then run.dropped = run.dropped + 1 return end
+		local at = Reopen(step, origin)
+		if at == "again" then return "again" end
+		if at ~= "here" then return P(step, "skip", "could not open " .. SafeId(origin.key) .. " again") end
+		local ok, err = Drawn(line.onClick)
 		if not ok then return P(step, "fail", SafeId(origin.key) .. ": its link errored: " .. ErrText(err)) end
-		Redraw()
 		local key = PageKey()
 		if key == origin.key then return P(step, "warn", SafeId(origin.key) .. ": a link opened no other page") end
 		if run.seen[key] then
-			local back = SelfTest.FindBack(View())
-			if back then pcall(back) Redraw() end
+			-- (A page seen before: only back to the page the link was on, for its next link.)
+			Insert({ Sweep.Back(stepId .. ".back", { key = key }, nil, nil, true) })
 			return
 		end
 		local res = Sweep.Examine(step, key, true)
-		Sweep.TryBack(step, key, res, origin.key)
-		Sweep.Report(step, key, res)
-		Insert({ Sweep.Tooltips(key, res.tips) })
+		local probe = Sweep.Report(step, key, res)
+		local more = { Sweep.Tooltips(key, res.tips) }
+		if not res.noBack then more[#more + 1] = Sweep.Back(stepId .. ".back", { key = key }, origin.key, probe) end
+		Insert(more)
 	end, { heavy = true })
 end
 
 -- After the strip's other pages, the one it had selected first, selected again (a page kept in
 -- its module alone, as the crafters' board's: the snapshot does not know it).
 local function Reselect(tab, text)
-	return Step("ui.nav." .. tab .. ".again", "ui", "the tab's first page again", function()
-		if type(text) ~= "string" or not SelectTab(tab) then return end
-		for _, line in ipairs((View() or {}).nav or {}) do
-			for _, item in ipairs(type(line) == "table" and type(line.nav) == "table" and line.nav or {}) do
-				if type(item) == "table" and item.text == text and type(item.onClick) == "function" then
-					pcall(item.onClick)
-					Redraw()
-					return
+	return Step("ui.nav." .. tab .. ".again", "ui", "the tab's first page again", function(step)
+		if type(text) ~= "string" then return end
+		step.tries = (step.tries or 0) + 1
+		local st = Toward({ tab = tab, open = function()
+			for _, line in ipairs((View() or {}).nav or {}) do
+				for _, item in ipairs(type(line) == "table" and type(line.nav) == "table" and line.nav or {}) do
+					if type(item) == "table" and item.text == text and type(item.onClick) == "function" then
+						item.onClick()
+						return true
+					end
 				end
 			end
-		end
+			return false
+		end })
+		if st == "again" and step.tries < 3 then return "again" end
 	end, { heavy = true })
 end
 
--- A page opened by open() (true, or false and why not here); opts: needsBack, rendered (open drew
--- the window itself), expect() (false: the page is not this player's), expand: "tab" (its strip's
--- other pages, its links) or "page" (its links).
-function Sweep.Visit(stepId, open, opts)
+-- A page reached by way (see Toward), one redraw a frame; opts: needsBack, expect() (false: the
+-- page is not this player's), key (the page's id, when known: not opened again once seen), dedupe
+-- (not examined again once seen), linkOnly (a Realm page with a link of its own: shown by itself
+-- with nothing, its link opens another page), expand: "tab" (its links, its strip's other pages)
+-- or "page" (its links). Its links first, then its strip's pages, its own Back last.
+function Sweep.Visit(stepId, way, opts)
 	opts = opts or {}
 	return Step(stepId, "ui", opts.what or "a page", function(step)
-		local ok, shown, why = pcall(open)
-		if not ok then return P(step, "fail", "opening it errored: " .. ErrText(shown)) end
-		if shown == false then return P(step, "skip", tostring(why or "not here for this character")) end
-		if not opts.rendered then Redraw() end
+		if opts.key and run.seen[opts.key] then return end
+		if Full() then run.dropped = run.dropped + 1 return end
+		step.tries = (step.tries or 0) + 1
+		local st, why = Toward(way)
+		if st == "again" then
+			if step.tries < 4 then return "again" end
+			st, why = "skip", "not shown (" .. SafeId(PageKey()) .. ")"
+		end
+		if st ~= "shown" then return P(step, st, why) end
 		if opts.expect and not opts.expect() then return P(step, "skip", "not shown for this character (" .. SafeId(PageKey()) .. ")") end
 		local key = PageKey()
 		if opts.dedupe and run.seen[key] then return end
+		if opts.linkOnly and #((View() or {}).lines or {}) == 0 then
+			run.seen[key] = true
+			return P(step, "skip", SafeId(key) .. ": nothing of its own (its link opens another page)")
+		end
 		local res = Sweep.Examine(step, key, opts.needsBack)
+		local probe = Sweep.Report(step, key, res)
 		local more = { Sweep.Tooltips(key, res.tips) }
 		if opts.expand then
-			-- Its links first, while the tab still shows this page; then the strip's other pages.
-			local origin = { key = key, open = open }
+			-- Its links while the tab still shows this page (each comes back by its own Back).
+			local origin = { key = key, way = way }
 			for i, line in ipairs(Sweep.Links(res.view)) do
 				if i > SelfTest.LINKS_PER_PAGE then break end
 				more[#more + 1] = Link(("ui.link.%s.%d"):format(SafeId(key), i), origin, line)
@@ -1797,11 +1975,9 @@ function Sweep.Visit(stepId, open, opts)
 				for i, item in ipairs(Sweep.Siblings(res.view)) do
 					if i > SelfTest.SIBLINGS_PER_TAB then break end
 					siblings = i
-					more[#more + 1] = Sweep.Visit(("ui.nav.%s.%d"):format(tab, i), function()
-						if not SelectTab(tab) then return false, "its tab" end
-						item.onClick()
-						return true
-					end, { what = "another page of the tab", dedupe = true, expand = "page" })
+					local click = item.onClick
+					more[#more + 1] = Sweep.Visit(("ui.nav.%s.%d"):format(tab, i), { tab = tab, open = function() click() return true end },
+						{ what = "another page of the tab", dedupe = true, expand = "page" })
 				end
 				for _, line in ipairs(res.view.nav or {}) do
 					for _, item in ipairs(type(line) == "table" and type(line.nav) == "table" and line.nav or {}) do
@@ -1811,8 +1987,7 @@ function Sweep.Visit(stepId, open, opts)
 				if siblings > 0 then more[#more + 1] = Reselect(tab, selected) end
 			end
 		end
-		if opts.needsBack then Sweep.TryBack(step, key, res) end
-		Sweep.Report(step, key, res)
+		if opts.needsBack and not res.noBack then more[#more + 1] = Sweep.Back(stepId .. ".back", { key = key, way = way }, nil, probe) end
 		Insert(more)
 	end, { heavy = true })
 end
@@ -1830,78 +2005,63 @@ local function FirstRosterMate()
 end
 
 -- The pages reached otherwise than by a tab's strip or a link: opened by their own module's
--- function. A file that adds such a page adds its line here, or to ns.SelfTestOpeners before
--- this file loads (the same { id, back, open, rendered, tab } shape).
+-- function. A file that adds such a page adds its line here, or to ns.SelfTestOpeners before this
+-- file loads, in the same shape: { id, back (it needs a Back), tab (the tab it is on: selected
+-- first, in a frame of its own, so open need not), pre (another first step: { ready, go }), key
+-- (the page's id, when known: not opened again once a link reached it), open (true, or false and
+-- why not here: the window is drawn after it when it drew nothing) }.
 SelfTest.OPENERS = {
-	{ id = "church-detail", back = true, rendered = true, open = function()
+	{ id = "church-detail", back = true, tab = "church", open = function()
 		local CV, Cnt = Mod("ChurchView"), Mod("ChurchCount")
 		if not (CV and Cnt) then return false, "no Church here" end
 		local rows = Cnt.RankingView("a", "m")
 		local row = type(rows) == "table" and rows[1]
 		if not (row and row.name) then return false, "no one on the ranking yet" end
-		local ok, why = SelectTab("church")
-		if not ok then return false, why end
 		CV.Show("detail", ns.FullName(row.name))
-		Redraw()
 		return CV.page == "detail", "this character may not see a person's numbers"
 	end },
-	{ id = "church-apostle", back = true, rendered = true, open = function()
+	{ id = "church-apostle", back = true, tab = "church", open = function()
 		local CV, Church = Mod("ChurchView"), Mod("Church")
 		if not (CV and Church) then return false, "no Church here" end
 		local S = Church.State()
 		local k = type(S) == "table" and type(S.order) == "table" and S.order[1]
 		local a = k and S.apostle and S.apostle[k]
 		if not (a and a.n) then return false, "no Apostle in the book" end
-		local ok, why = SelectTab("church")
-		if not ok then return false, why end
 		CV.Show("detail", ns.FullName(a.n))
-		Redraw()
 		return CV.page == "detail", "this character may not see a person's numbers"
 	end },
-	{ id = "watch-case", back = true, rendered = true, open = function()
+	{ id = "watch-case", back = true, tab = "watch", open = function()
 		local W = Mod("Watch")
 		if not W then return false, "no Watch here" end
 		local cases = type(W.Cases) == "function" and W.Cases() or {}
 		if not cases[1] then return false, "no case open" end
-		local ok, why = SelectTab("watch")
-		if not ok then return false, why end
 		W.Show("case", cases[1].key)
-		Redraw()
 		return PageKey():find("^watch/case:") ~= nil, "the desk is not this character's"
 	end },
-	{ id = "watch-member", back = true, rendered = true, open = function()
+	{ id = "watch-member", back = true, tab = "watch", open = function()
 		local W = Mod("Watch")
 		if not (W and type(W.OpenMember) == "function") then return false, "no Watch here" end
-		local ok, why = SelectTab("watch")
-		if not ok then return false, why end
 		local opened, w = W.OpenMember(ns.me)
 		if not opened then return false, "not this character's (" .. tostring(w) .. ")" end
-		Redraw()
 		return true
 	end },
-	{ id = "wanted-target", back = true, open = function()
+	{ id = "wanted-target", back = true, tab = "wanted", open = function()
 		local Wa = Mod("Wanted")
 		if not Wa then return false, "no Wanted here" end
 		local t = (Wa.Targets() or {})[1]
 		if not t then return false, "nobody on the ledger" end
-		local ok, why = SelectTab("wanted")
-		if not ok then return false, why end
 		return Wa.OpenTarget(t) == true, "the entry did not open"
-	end, rendered = true },
-	{ id = "wanted-review", back = true, open = function()
+	end },
+	{ id = "wanted-review", back = true, tab = "wanted", open = function()
 		local Wa = Mod("Wanted")
 		if not Wa then return false, "no Wanted here" end
-		local ok, why = SelectTab("wanted")
-		if not ok then return false, why end
 		return Wa.OpenReview() == true, "not this character's"
-	end, rendered = true },
-	{ id = "wanted-rules", back = true, open = function()
+	end },
+	{ id = "wanted-rules", back = true, tab = "wanted", open = function()
 		local Wa = Mod("Wanted")
 		if not Wa then return false, "no Wanted here" end
-		local ok, why = SelectTab("wanted")
-		if not ok then return false, why end
 		return Wa.OpenRules() == true, "no rules page"
-	end, rendered = true },
+	end },
 	{ id = "other-profile", back = true, open = function()
 		local PP = Mod("PlayerProfile")
 		if not (PP and type(PP.OpenName) == "function") then return false, "no profiles here" end
@@ -1909,35 +2069,41 @@ SelfTest.OPENERS = {
 		if not name then return false, "no guildmate online" end
 		local ok = PP.OpenName(name)
 		return ok == true, "it did not open"
-	end, rendered = true },
-	{ id = "census-stats", back = true, rendered = true, open = function()
+	end },
+	{ id = "census-stats", back = true, open = function()
 		local UI = Mod("UI")
 		if not (UI and type(UI.OpenCensusStats) == "function") then return false, "not in this build" end
 		UI.OpenCensusStats()
-		Redraw()
 		return true
 	end },
-	{ id = "board", back = true, open = function()
+	{ id = "board", back = true, tab = "realm", key = "realm/board", open = function()
 		local V = ns.Views
 		if not (type(V) == "table" and type(V.ShowBoard) == "function") then return false, "no Board" end
-		local ok, why = RealmFirst()
-		if not ok then return false, why end
 		V.ShowBoard(true)
 		return V.BoardShown() == true, "the Board did not open"
-	end, rendered = true },
-	{ id = "king-hands", back = true, rendered = true, open = function()
+	end },
+	{ id = "king-hands", back = true, tab = "throne", open = function()
 		local K = Mod("King")
 		if not K then return false, "no Throne here" end
-		local ok, why = SelectTab("throne")
-		if not ok then return false, why end
-		if PageKey():find("^throne/") == nil or (type(K.ThroneShown) == "function" and not K.ThroneShown()) then
-			return false, "the Throne is not this character's"
-		end
+		if type(K.ThroneShown) == "function" and not K.ThroneShown() then return false, "the Throne is not this character's" end
 		K.Show("hands")
-		Redraw()
 		return true
 	end },
 }
+
+-- The player's own profile shown, before one of its sections.
+local function OwnProfile()
+	local UI, PP = Mod("UI"), Mod("PlayerProfile")
+	return {
+		ready = function() return UI ~= nil and type(UI.OwnProfileShown) == "function" and UI.OwnProfileShown() == true end,
+		go = function()
+			if not (UI and type(UI.OpenPlayerProfile) == "function") then return false, "no profile here" end
+			local me = PP and type(PP.Find) == "function" and PP.Find(ns.me) or nil
+			if UI.OpenPlayerProfile(type(me) == "table" and me or { name = ns.me }) ~= true then return false, "it did not open" end
+			return true
+		end,
+	}
+end
 
 -- The openers whose list comes from their module: the Members filters, the profile's sections,
 -- the Treasury's modes.
@@ -1946,21 +2112,16 @@ local function MoreOpeners()
 	local M = Mod("Members")
 	for _, f in ipairs(M and type(M.FILTERS) == "table" and M.FILTERS or {}) do
 		local filter = f
-		out[#out + 1] = { id = "members-" .. tostring(f), back = true, rendered = true, open = function()
-			local ok, why = RealmFirst()
-			if not ok then return false, why end
+		out[#out + 1] = { id = "members-" .. tostring(f), back = true, tab = "realm", open = function()
 			M.Show(filter)
 			return M.Shown() == true, "the members page did not open"
 		end }
 	end
-	local PE, PP = Mod("ProfileEdit"), Mod("PlayerProfile")
+	local PE = Mod("ProfileEdit")
 	for _, s in ipairs(PE and type(PE.SECTIONS) == "table" and PE.SECTIONS or {}) do
 		local section = s
-		out[#out + 1] = { id = "my-profile-" .. section, back = false, open = function()
-			local UI = Mod("UI")
-			if not (UI and type(UI.OpenPlayerProfile) == "function" and type(PE.SetSection) == "function") then return false, "no profile here" end
-			local me = PP and type(PP.Find) == "function" and PP.Find(ns.me) or nil
-			if UI.OpenPlayerProfile(type(me) == "table" and me or { name = ns.me }) ~= true then return false, "it did not open" end
+		out[#out + 1] = { id = "my-profile-" .. section, back = false, pre = OwnProfile(), open = function()
+			if type(PE.SetSection) ~= "function" then return false, "no profile here" end
 			return PE.SetSection(section) == true, "not this character's"
 		end }
 	end
@@ -1968,11 +2129,8 @@ local function MoreOpeners()
 	if T and type(T.Show) == "function" then
 		for _, m in ipairs({ "summary", "book", "keepers", "wallet", "dues", "guild-finance", "own-guild" }) do
 			local mode = m
-			out[#out + 1] = { id = "treasury-" .. mode, back = false, tab = "treasury", rendered = true, open = function()
-				local ok, why = SelectTab("treasury")
-				if not ok then return false, why end
+			out[#out + 1] = { id = "treasury-" .. mode, back = false, tab = "treasury", open = function()
 				T.Show(mode)
-				Redraw()
 				return T.mode == mode, "not this character's"
 			end }
 		end
@@ -1994,25 +2152,25 @@ function Sweep.Plan(step)
 		if type(key) == "string" and tab.apiSurface then
 			-- Another addon's page in the window (the Olympus API): its code is its own and may send
 			-- what no fence here holds back, so it is listed, never opened.
-			steps[#steps + 1] = Step("ui.tab." .. key, "ui", "another addon's tab", function(step)
-				P(step, "skip", "another addon's page: not opened (its sends are its own)")
+			steps[#steps + 1] = Step("ui.tab." .. key, "ui", "another addon's tab", function(s)
+				P(s, "skip", "another addon's page: not opened (its sends are its own)")
 			end)
 		elseif type(key) == "string" then
-			steps[#steps + 1] = Sweep.Visit("ui.tab." .. key, function() return SelectTab(key) end,
-				{ what = "the tab", tab = key, rendered = true, expect = OnTab(key), expand = "tab" })
+			steps[#steps + 1] = Sweep.Visit("ui.tab." .. key, { open = function() return SelectTab(key) end },
+				{ what = "the tab", tab = key, expect = OnTab(key), expand = "tab" })
 		end
 	end
 	for _, p in ipairs(type(ns.RealmPages) == "table" and ns.RealmPages or {}) do
 		local pageKey = type(p) == "table" and p.key
 		if type(pageKey) == "string" then
-			steps[#steps + 1] = Sweep.Visit("ui.page.realm/" .. pageKey, function()
-				local ok, why = RealmFirst()
-				if not ok then return false, why end
+			-- (A page a link of the Realm's tree reached already is not opened again.)
+			steps[#steps + 1] = Sweep.Visit("ui.page.realm/" .. pageKey, { tab = "realm", open = function()
 				local V = ns.Views
 				if type(V.SetRealmMode) == "function" then V.SetRealmMode("guilds", true) end
 				V.ShowPage(pageKey)
 				return V.PageShown() == pageKey, "it did not open"
-			end, { what = "a page of the Realm", needsBack = true, rendered = true, expand = "page" })
+			end }, { what = "a page of the Realm", needsBack = true, expand = "page", key = "realm/" .. pageKey,
+				linkOnly = type(p.Link) == "function" })
 		end
 	end
 	local openers = {}
@@ -2022,8 +2180,10 @@ function Sweep.Plan(step)
 		end
 	end
 	for _, o in ipairs(openers) do
-		steps[#steps + 1] = Sweep.Visit("ui.open." .. o.id, o.open, { what = "a page its module opens", needsBack = o.back, rendered = o.rendered,
-			expect = type(o.tab) == "string" and OnTab(o.tab) or nil, expand = "page" })
+		local tab = type(o.tab) == "string" and o.tab or nil
+		steps[#steps + 1] = Sweep.Visit("ui.open." .. o.id, { tab = tab, pre = type(o.pre) == "table" and o.pre or nil, open = o.open },
+			{ what = "a page its module opens", needsBack = o.back, expect = tab and OnTab(tab) or nil, expand = "page",
+				key = type(o.key) == "string" and o.key or nil })
 	end
 	Insert(steps)
 	P(step, "ok", ("%d tabs, %d Realm pages, %d openers"):format(#(UI.TABS or {}), #(ns.RealmPages or {}), #openers))
@@ -2135,9 +2295,18 @@ local function ArenaPage(id, show)
 	end, { heavy = true })
 end
 
+-- The Arena's own addon loaded this session already: the run never loads it (a load lasts until
+-- the /reload, with its saved data moved and its timers started).
+local function ArenaLoaded()
+	local A = Mod("Arena")
+	return A ~= nil and type(A.UILoaded) == "function" and A.UILoaded() == true
+end
+local ARENA_NOT_LOADED = "the Arena window is not loaded this session: open the Arena once, then run again"
+
 WINDOWS[#WINDOWS + 1] = { id = "ui.arena", what = "the Arena window", fn = function(step)
 	local AH, A = Mod("ArenaHome"), Mod("Arena")
 	if not (AH and A and type(AH.Open) == "function") then return P(step, "skip", "no Arena here") end
+	if not ArenaLoaded() then return P(step, "skip", ARENA_NOT_LOADED) end
 	if type(ns.db.arenaRules) ~= "table" then return P(step, "skip", "its first open would show the arena's rules first") end
 	local ui = type(ns.db.arenaUI) == "table" and ns.db.arenaUI or {}
 	if not (type(ui.seen) == "table" and ui.seen["explained:arena"] == true) then return P(step, "skip", "its first open would show the arena's explanation first") end
@@ -2175,6 +2344,7 @@ end }
 WINDOWS[#WINDOWS + 1] = { id = "ui.duel", what = "the duel view (yourself and your focus)", fn = function(step)
 	local S = Mod("ArenaSpectate")
 	if not (S and type(S.PairFromUnits) == "function" and type(S.Open) == "function") then return P(step, "skip", "no duel view here") end
+	if not ArenaLoaded() then return P(step, "skip", ARENA_NOT_LOADED) end
 	local okE, exists = Try(UnitExists, "focus")
 	local okP, player = Try(UnitIsPlayer, "focus")
 	if not (okE and okP) or Secret(exists) or Secret(player) or not exists or not player then
@@ -2235,19 +2405,12 @@ end }
 ---------------------------------------------------------------------------
 
 local CLOSING = {}
-CLOSING[#CLOSING + 1] = { id = "ui.restore", what = "the window and the pages as they were", heavy = true, fn = function(step)
+-- (later: what a stop in combat or at a loading screen leaves for SelfTest.PutBack, or skips.)
+CLOSING[#CLOSING + 1] = { id = "ui.restore", what = "the window and the pages as they were", heavy = true, later = true, fn = function(step)
 	local s = run.snap
 	if not s then return P(step, "skip", "nothing to put back (stopped before it began)") end
 	run.restored = SelfTest.Restore(s)
-	local notes = {}
-	local after = SelfTest.Snapshot()
-	if after.shown ~= s.shown then notes[#notes + 1] = "window " .. (after.shown and "open" or "closed") end
-	if s.shown and after.page ~= s.page then notes[#notes + 1] = ("page %s, was %s"):format(SafeId(after.page), SafeId(s.page)) end
-	if s.church and after.church and (after.church.page ~= s.church.page or after.church.list ~= s.church.list or after.church.window ~= s.church.window) then notes[#notes + 1] = "the Church's page" end
-	if s.watch and after.watch and (after.watch.mode ~= s.watch.mode or after.watch.caseKey ~= s.watch.caseKey) then notes[#notes + 1] = "The Watch's page" end
-	if after.realmMode ~= s.realmMode then notes[#notes + 1] = "the Realm's mode" end
-	if after.docked ~= s.docked then notes[#notes + 1] = "docked " .. tostring(after.docked) end
-	P(step, #notes > 0 and "warn" or "ok", #notes > 0 and ("not as before: " .. table.concat(notes, ", ")) or ("as before: " .. (s.shown and SafeId(s.page) or "closed")))
+	P(step, SelfTest.Compare(s))
 end }
 
 CLOSING[#CLOSING + 1] = { id = "ui.back", what = "a Back on every page a link opens", fn = function(step)
@@ -2273,7 +2436,7 @@ CLOSING[#CLOSING + 1] = { id = "ui.glyphs", what = "letters the game's fonts lac
 end }
 CLOSING[#CLOSING + 1] = { id = "api.cast", what = "UnitCastingInfo / UnitChannelInfo on yourself", fn = function(step)
 	local c = run.cast
-	if not c then return P(step, "skip", "no cast during the run (start your hearthstone while it runs)") end
+	if not c then return P(step, "skip", "no cast during the run (start your hearthstone while it runs, then step to cancel it before it ends)") end
 	P(step, (c.sixth == "boolean false" or c.sixth == "boolean true") and "ok" or "warn", ("%s: %d returns, 6th %s, %d secret, end time %s"):format(c.kind, c.n,
 		c.sixth, c.secrets, c.endSecret and "secret" or "plain"))
 end }
@@ -2292,7 +2455,7 @@ CLOSING[#CLOSING + 1] = { id = "api.secretfs", what = "SetFormattedText with a s
 	run.secret = nil
 	P(step, ok and "ok" or "fail", ok and "accepted" or "refused")
 end }
-CLOSING[#CLOSING + 1] = { id = "selftest.keys", what = "the small saved keys after the run", fn = function(step)
+CLOSING[#CLOSING + 1] = { id = "selftest.keys", what = "the small saved keys after the run", later = true, fn = function(step)
 	return SelfTest.KeysStep(step, "after")
 end }
 CLOSING[#CLOSING + 1] = { id = "selftest.invariants", what = "quiet presence, record mode, the Accord, warnings, net-off, cover: unchanged", fn = function(step)
@@ -2302,14 +2465,14 @@ CLOSING[#CLOSING + 1] = { id = "selftest.invariants", what = "quiet presence, re
 	P(step, #changed > 0 and "fail" or "ok", #changed > 0 and ("changed: " .. table.concat(changed, ", ")) or "all as before")
 end }
 CLOSING[#CLOSING + 1] = { id = "selftest.settings", what = "the settings: put back, or changed by something else", fn = function(step)
-	local before, after, others = run.prints.before or {}, run.prints.after or {}, {}
-	for k, v in pairs(after) do
+	local before, after, others = run.prints.before or {}, run.prints.after, {}
+	for k, v in pairs(after or {}) do
 		local was = before[k]
 		if was ~= nil and was ~= false and v ~= false and was ~= v then others[#others + 1] = k end
 	end
 	table.sort(others)
 	P(step, "ok", ("put back: %s; other small keys changed meanwhile: %s"):format(#(run.restored or {}) > 0 and table.concat(run.restored, ", ") or "none",
-		#others > 0 and table.concat(others, ", ") or "none"))
+		not after and "not compared (stopped early)" or (#others > 0 and table.concat(others, ", ") or "none")))
 end }
 CLOSING[#CLOSING + 1] = { id = "mod.comm", what = "the channel and the queue", fn = function(step)
 	local C = Mod("Comm")
@@ -2338,8 +2501,11 @@ CLOSING[#CLOSING + 1] = { id = "selftest.fence", what = "sends held back during 
 	local list = {}
 	for k, n in pairs(run.fence.blocked) do list[#list + 1] = k .. " x" .. n end
 	table.sort(list)
+	if run.fence.loads > 0 then list[#list + 1] = "arena load x" .. run.fence.loads end
+	-- (Held is what the fence is for: the pages' own asks, the Board's, Loot's, War's, the Church's
+	-- numbers, are held on every run. A send replaced meanwhile by another file is the one to look at.)
 	local left = run.fence.left
-	P(step, #left > 0 and "warn" or (#list > 0 and "warn" or "ok"), (#list > 0 and ("held: " .. table.concat(list, ", ")) or "nothing held")
+	P(step, #left > 0 and "warn" or "ok", (#list > 0 and ("held: " .. table.concat(list, ", ")) or "nothing held")
 		.. (#left > 0 and ("; replaced meanwhile by another file: " .. table.concat(left, ", ")) or ""))
 end }
 CLOSING[#CLOSING + 1] = { id = "selftest.cost", what = "what the run cost", fn = function(step)
@@ -2422,8 +2588,10 @@ local function Finish(step)
 	}
 	ns.db.selftest = report
 	ns.Print(L.SELFTEST_DONE:format(report.summary.ok, report.summary.warn, report.summary.fail, report.summary.skip))
+	-- (Stopped by combat, a loading screen or the gamepad UI: no window over the fight; /oly
+	-- selftest status opens it.)
 	local UI = Mod("UI")
-	if UI and type(UI.ShowCopy) == "function" then UI.ShowCopy(L.SELFTEST_TITLE, SelfTest.ReportText(report), nil, { key = "selftest", big = true, auto = true }) end
+	if not r.noWindow and UI and type(UI.ShowCopy) == "function" then UI.ShowCopy(L.SELFTEST_TITLE, SelfTest.ReportText(report), nil, { key = "selftest", big = true, auto = true }) end
 	r.done = true
 end
 
@@ -2485,7 +2653,17 @@ function SelfTest.EventFrame()
 	end
 	return eventFrame
 end
+-- A stop in combat or at a loading screen: the window's own tab and page, put back once out of
+-- combat (SelfTest.PutBack). { snap, left (the page the run left), shown, report }.
+local pending
+
+local function InCombat() return type(InCombatLockdown) == "function" and InCombatLockdown() == true end
+
 function SelfTest.OnEvent(event)
+	if event == "PLAYER_REGEN_ENABLED" then
+		if not run then SelfTest.PutBack() end
+		return
+	end
 	if not run then return end
 	if event == "PLAYER_REGEN_DISABLED" then
 		SelfTest.Abort("combat")
@@ -2495,13 +2673,13 @@ function SelfTest.OnEvent(event)
 		ns.Print(L.SELFTEST_ABORT_ZONE)
 	end
 end
-local function EventsOn()
+local function Listen(events)
 	local f = SelfTest.EventFrame()
 	if not f then return end
 	f:SetScript("OnEvent", function(_, event) ns.SafeCall("selftest event", SelfTest.OnEvent, event) end)
-	f:RegisterEvent("PLAYER_REGEN_DISABLED")
-	f:RegisterEvent("PLAYER_ENTERING_WORLD")
+	for _, e in ipairs(events) do f:RegisterEvent(e) end
 end
+local function EventsOn() Listen({ "PLAYER_REGEN_DISABLED", "PLAYER_ENTERING_WORLD" }) end
 local function EventsOff()
 	if eventFrame and eventFrame.UnregisterAllEvents then eventFrame:UnregisterAllEvents() end
 end
@@ -2515,22 +2693,92 @@ function SelfTest.Teardown()
 	EventsOff()
 end
 
--- Stopped before the end (combat, a loading screen, /oly selftest stop, too long): everything is
--- put back now, the report keeps what was checked.
+-- The window's tab and page after a stop in combat or at a loading screen, out of combat: only
+-- when nobody used it meanwhile (on the page the run left, open or closed as it left it). Its
+-- redraws inside a fence of their own, as the run's were; the report's ui.restore says how it went.
+function SelfTest.PutBack()
+	local p = pending
+	if not p or run or InCombat() then return false end
+	pending = nil
+	EventsOff()
+	local UI = Mod("UI")
+	local shown = UI ~= nil and type(UI.IsShown) == "function" and UI.IsShown() == true
+	local result, detail
+	if shown == p.shown and (not shown or PageKey() == p.left) then
+		local hold = {}
+		FenceOn(hold)
+		hold.fence.depth = 1
+		local ok, err = pcall(SelfTest.Restore, p.snap, { closed = true })
+		hold.fence.depth = 0
+		FenceOff(hold)
+		if ok then result, detail = SelfTest.Compare(p.snap) else result, detail = "fail", "putting it back errored: " .. ErrText(err) end
+		local report = ns.db.selftest
+		if report == p.report and type(report.summary) == "table" then
+			for k, n in pairs(hold.fence.blocked) do
+				report.summary.sends = report.summary.sends or {}
+				report.summary.sends[Clip(k, 16)] = (report.summary.sends[Clip(k, 16)] or 0) + n
+			end
+		end
+	else
+		result, detail = "warn", "not put back: the window was used meanwhile"
+	end
+	local report = ns.db.selftest
+	if report == p.report and type(report) == "table" and type(report.summary) == "table" then
+		for _, probe in ipairs(report.probes or {}) do
+			if probe.id == "ui.restore" then
+				local s = report.summary
+				s[probe.result] = math.max(0, (tonumber(s[probe.result]) or 0) - 1)
+				s[result] = (tonumber(s[result]) or 0) + 1
+				probe.result, probe.detail = result, Clip(detail, SelfTest.DETAIL_MAX)
+			end
+		end
+	end
+	return true
+end
+
+-- Waits for the end of the fight (or, after a loading screen, a moment) to put the window back.
+local function PutBackLater(r)
+	local UI = Mod("UI")
+	pending = { snap = r.snap, left = PageKey(), shown = UI ~= nil and type(UI.IsShown) == "function" and UI.IsShown() == true, report = ns.db.selftest }
+	Listen({ "PLAYER_REGEN_ENABLED" })
+	if r.aborted ~= "combat" then
+		local p = pending
+		SelfTest.After(1, function() if pending == p and not InCombat() then SelfTest.PutBack() end end)
+	end
+end
+
+-- Stopped before the end. /oly selftest stop, too long: everything put back now, the report kept
+-- and shown. Combat or a loading screen: nothing drawn now (the run's windows hidden, a Hide alone),
+-- the report kept without its window, the Olympus window put back after (PutBackLater). The
+-- gamepad UI: put back now, the report without its window.
 function SelfTest.Abort(reason)
 	local r = run
 	if not r or r.aborted then return false end
 	r.aborted = reason
-	local keep = {}
-	for i = r.pos, #r.queue do if r.queue[i].closing then keep[#keep + 1] = r.queue[i] end end
-	r.queue, r.pos = keep, 1
 	r.token = -1 -- (the frame already asked for finds the run gone)
+	r.noWindow = reason == "combat" or reason == "zone" or reason == "gamepad"
+	local restoreLeft = false
+	for i = r.pos, #r.queue do if r.queue[i].id == "ui.restore" then restoreLeft = true end end
+	local quiet = (reason == "combat" or reason == "zone") and r.snap ~= nil and restoreLeft
+	local keep = {}
+	for i = r.pos, #r.queue do
+		local step = r.queue[i]
+		if step.closing and not (quiet and step.later) then keep[#keep + 1] = step end
+	end
+	if quiet then
+		r.restored = SelfTest.HideOpened(r.snap)
+		table.insert(keep, 1, Step("ui.restore", "ui", "the window and the pages as they were", function(step)
+			P(step, "skip", reason == "combat" and "put back after the fight" or "put back after the loading screen")
+		end, { closing = true }))
+	end
+	r.queue, r.pos = keep, 1
 	while run == r and r.pos <= #r.queue and not r.done do
 		local step = r.queue[r.pos]
 		r.pos = r.pos + 1
 		RunStep(step)
 	end
 	if run == r then SelfTest.Teardown() end
+	if quiet then PutBackLater(r) end
 	if reason == "time" then ns.Print(L.SELFTEST_ABORT_TIME) end
 	return true
 end
@@ -2549,9 +2797,10 @@ local function Plan()
 	for _, p in ipairs(BUILD) do q[#q + 1] = Step(p.id, "build", p.what, p.fn) end
 	for _, p in ipairs(API) do q[#q + 1] = Step(p.id, "api", p.what, p.fn) end
 	for _, p in ipairs(MOD) do q[#q + 1] = Step(p.id, "mod", p.what, p.fn, { heavy = p.heavy }) end
-	q[#q + 1] = Step("ui.plan", "ui", "the pages to open", Sweep.Plan)
+	-- (The other windows before the pages: however many pages the window has, they are in the report.)
 	for _, p in ipairs(WINDOWS) do q[#q + 1] = Step(p.id, "ui", p.what, p.fn, { heavy = true }) end
-	for _, p in ipairs(CLOSING) do q[#q + 1] = Step(p.id, p.id:match("^(%a+)") or "selftest", p.what, p.fn, { heavy = p.heavy, closing = true }) end
+	q[#q + 1] = Step("ui.plan", "ui", "the pages to open", Sweep.Plan)
+	for _, p in ipairs(CLOSING) do q[#q + 1] = Step(p.id, p.id:match("^(%a+)") or "selftest", p.what, p.fn, { heavy = p.heavy, closing = true, later = p.later }) end
 	q[#q + 1] = Step("selftest.finish", "selftest", "the report", Finish, { closing = true })
 	return q
 end
@@ -2590,8 +2839,10 @@ function SelfTest.Start()
 		ns.Print(L.SELFTEST_PRIVACY_WAITS)
 		return false, "privacy"
 	end
+	-- (A window left by a run stopped in combat, never put back since: put back first.)
+	if pending then SelfTest.PutBack() end
 	tokens = tokens + 1
-	run = { token = tokens, started = SelfTest.Now(), queue = {}, pos = 1, probes = {}, counts = {}, dropped = 0, trimmed = 0, bytes = 0,
+	run = { token = tokens, started = SelfTest.Now(), queue = {}, pos = 1, probes = {}, counts = {}, dropped = 0, trimmed = 0, bytes = 0, closingBytes = 0,
 		ms = 0, steps = 0, ticks = 0, worst = { ms = 0 }, raised = 0, errorsSeen = 0, pages = 0, seen = {}, noBack = {}, brokenBack = {}, wrongBack = {},
 		lightInk = {}, overflow = {}, prints = {}, leaks = {}, tooltips = { calls = 0, errors = 0, pages = {} } }
 	FenceOn(run)

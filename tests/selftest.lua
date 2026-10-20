@@ -50,6 +50,14 @@ local function Scene(fn, opts)
 			return n
 		end
 		function w.Said(text) for _, p in ipairs(w.printed) do if p == text then return true end end return false end
+		-- One frame at a time until done() (at most max frames): whether it came.
+		function w.PumpUntil(done, max)
+			for _ = 1, max or 2000 do
+				if done() then return true end
+				if w.Pump(1) == 0 then break end
+			end
+			return done() == true
+		end
 		fn(w)
 	end)
 	if S.Running() then pcall(S.Abort, "stop") end
@@ -186,6 +194,9 @@ test("selftest: nothing is sent while it runs: the sends a page makes are held a
 				eq(p.result, "ok", "a page that asks is no failure: " .. p.detail)
 				for _, k in ipairs(COMM) do eq(ns.Comm[k], spies[k], "Comm." .. k .. " is its own again") end
 				eq(ProbeOf(report, "selftest.fence").detail:find("SELFTEST x1", 1, true) ~= nil, true, "the fence's probe names it")
+				-- (Before: "warn" whenever anything was held, so on every run: the Board's, Loot's and
+				-- the Church's asks are always held. Held is the fence doing its work.)
+				eq(ProbeOf(report, "selftest.fence").result, "ok", ProbeOf(report, "selftest.fence").detail)
 			end)
 			for _, k in ipairs(COMM) do ns.Comm[k] = savedComm[k] end
 			C_ChatInfo, ns.SayTo, SendChatMessage, C_Timer = savedChat, savedSay, savedSCM, savedTimer
@@ -234,6 +245,15 @@ test("selftest: the detectors: a page without a Back, light text on parchment (i
 	eq(S.HasBack({ lines = {}, buttons = { { IsShown = function() return false end, GetText = function() return L.PLAYER_PROFILE_BACK end } } }), false,
 		"a hidden one is none")
 	eq(S.IsBack(L.CHURCH_BACK), true, "the short *_BACK lines count"); eq(S.IsBack("Points"), false)
+	-- A header that goes back, its tooltip saying so: a Back; without the click, or the tooltip, none.
+	local function Tip(text) return function(tt) tt:AddLine(text, 1, 0.82, 0) end end
+	local go = function() end
+	eq(S.HasBack({ lines = { { header = true, text = "A Person", onClick = go, tooltip = Tip(L.CHURCH_BACK) } } }), true, "the header's Back")
+	eq(S.FindBack({ lines = { { header = true, text = "A Person", onClick = go, tooltip = Tip(L.CHURCH_BACK) } } }), go, "and its click")
+	eq(S.HasBack({ lines = { { header = true, text = "A Person", onClick = go } } }), false, "a header's click alone")
+	eq(S.HasBack({ lines = { { header = true, text = "A Person", tooltip = Tip(L.CHURCH_BACK) } } }), false, "a tooltip alone")
+	eq(S.HasBack({ lines = { { header = true, text = "A Person", onClick = go, tooltip = Tip("Points this week") } } }), false, "another tooltip")
+	eq(S.HasBack({ lines = { { text = "A row", onClick = go, tooltip = Tip(L.CHURCH_BACK) } } }), false, "a row, not a header")
 	-- Ink: the parchment, white text on it; dark ink; dark ink with white words in it.
 	local white = S.Ink({ frame = FakeFrame({ FakeString("Some words here", { 1, 1, 1 }) }, nil, true) })
 	eq(white.checked, 1); eq(white.light, 1, "white on parchment")
@@ -257,14 +277,20 @@ test("selftest: the detectors: a page without a Back, light text on parchment (i
 	eq(S.SafeId("player-profile:Another One-Realm"), "player-profile:other")
 end)
 
-test("selftest: the Back detector on the Church's own pages: a person's detail page has none (the missing Back reported), its rules page has one", function()
+-- (Before: the detail page counted as one without a Back, reported on every run. Its header is the
+-- way back, CHURCH_BACK its tooltip: the "known back widget" the self-test's brief counts.)
+test("selftest: the Back detector on the Church's own pages: a person's detail page goes back by its header (CHURCH_BACK its tooltip), its rules page by its Back line", function()
 	local World = assert(loadfile(ROOT .. "tests/church-world.lua"))(ns, ROOT)
 	local w = World.New({ apostles = { "Aldric Vane-Realm" } })
 	local author = w:Client(World.AUTHOR, { view = true })
 	author.View.page, author.View.arg = "detail", "Aldric Vane-Realm"
 	local lines = w:As(author, author.View.Build)
 	eq(author.View.page, "detail", "the author sees a person's numbers")
-	eq(S.HasBack({ lines = lines }), false, "no Back on the detail page: only its header goes back, with CHURCH_BACK as its tooltip")
+	eq(S.HasBack({ lines = lines }), true, "its header goes back, and its tooltip says so")
+	local back = S.FindBack({ lines = lines })
+	assert(back, "the header's click")
+	w:As(author, back)
+	eq(author.View.page, "ranking", "back to the ranking")
 	author.View.page, author.View.arg = "ranking", nil
 	local rules
 	for _, line in ipairs(w:As(author, author.View.Build)) do if type(line.id) == "string" and line.id:find("^ranking%-rules:") then rules = line end end
@@ -283,7 +309,23 @@ test("selftest: a page a Realm link opens without a Back is in the report's page
 			table.insert(ns.RealmPages, 2, { key = "selftestelsewhere", beforeBoard = true, Link = function()
 				return { text = "Selftest other page", onClick = function() ns.Views.ShowPage("selftestelsewhere") end }
 			end, Lines = function() return { { text = "< Back", onClick = function() ns.Views.ShowBoard(true) end }, { text = "Its Back goes astray" } } end })
+			-- (A page of a link only: its link opens another page, by itself it shows nothing. Before:
+			-- reported without a Back on every run, as "My profile" is.)
+			table.insert(ns.RealmPages, 3, { key = "selftestlinkonly", beforeBoard = true, Link = function()
+				return { text = "Selftest elsewhere", onClick = function() ns.Views.ShowBoard(true) end }
+			end, Lines = function() return {} end })
 			local report = Run(w)
+			for _, id in ipairs(report.summary.noBack) do
+				assert(id ~= "realm/selftestlinkonly" and id ~= "realm/myprofile", "a link-only page is not one without a Back: " .. id)
+			end
+			local linkOnly = ProbeOf(report, "ui.page.realm/selftestlinkonly")
+			eq(linkOnly and linkOnly.result, "skip", "the page by itself: " .. tostring(linkOnly and linkOnly.detail))
+			-- (Before: reached by its link, then opened again from ns.RealmPages and reported twice.)
+			eq(ProbeOf(report, "ui.page.realm/selftestnoback"), nil, "reached by its link: not opened again")
+			eq(ProbeOf(report, "ui.open.board"), nil, "the Board, reached by the tree's link: not opened again by its opener")
+			local times = 0
+			for _, id in ipairs(report.summary.noBack) do if id == "realm/selftestnoback" then times = times + 1 end end
+			eq(times, 1, "listed once")
 			local found = false
 			for _, id in ipairs(report.summary.noBack) do if id == "realm/selftestnoback" then found = true end end
 			assert(found, "listed: " .. table.concat(report.summary.noBack, ", "))
@@ -301,6 +343,148 @@ test("selftest: a page a Realm link opens without a Back is in the report's page
 			assert(link, "reached by its link from the Realm's tree")
 			eq(link.result, "warn"); assert(link.detail:find("no Back", 1, true), link.detail)
 			assert(S.ReportText(report):find("realm/selftestnoback", 1, true), "in the copy window's text")
+		end)
+	end)
+end)
+
+-- (Before: the Companion's "self" section, which carries the player's own BattleTag on purpose
+-- once the Accord is accepted, failed mod.bridge and build.privacy on every run.)
+test("selftest: the Companion's own section carries the player's BattleTag on purpose: not a leak there; the tag in another of its fields or another section is", function()
+	local function Bridge(sections)
+		local names = {}
+		for name in pairs(sections) do names[#names + 1] = { name = name, version = 1 } end
+		table.sort(names, function(a, b) return a.name < b.name end)
+		return { SECTION_LIMITS = { values = 1500, depth = 5 }, Sections = function() return names end,
+			GetSection = function(name) return sections[name] and { name = name, version = 1, data = sections[name] } or nil end }
+	end
+	for _, case in ipairs({
+		{ "its own field", { census = { characters = 3 }, self = { character = ns.me, battleTag = TAG, accord = 1, roles = { "author" } } }, false },
+		{ "another field of its section", { self = { character = ns.me, battleTag = TAG, note = "for " .. TAG } }, true },
+		{ "another section", { census = { tags = { TAG } }, self = { character = ns.me, battleTag = TAG } }, true },
+	}) do
+		Scene(function(w)
+			InWindow(function()
+				BNConnected = function() return true end
+				BNGetInfo = function() return 1, TAG, nil, "", false, false, false end
+				local savedB = rawget(_G, "OlympusBridge")
+				OlympusBridge = Bridge(case[2])
+				local ok, err = pcall(function()
+					local report = Run(w)
+					local bridge, privacy = ProbeOf(report, "mod.bridge"), ProbeOf(report, "build.privacy")
+					assert(bridge and privacy, "both probes")
+					eq(bridge.result, case[3] and "fail" or "ok", case[1] .. ": " .. bridge.detail)
+					eq(privacy.result, case[3] and "fail" or "ok", case[1] .. ": " .. privacy.detail)
+					eq((Serialized(report) .. S.ReportText(report)):find("57319", 1, true), nil, case[1] .. ": the tag never in the report")
+				end)
+				OlympusBridge = savedB
+				if not ok then error(err, 0) end
+			end)
+		end)
+	end
+end)
+
+-- (Before: the Arena window's check opened it, and so loaded the Arena's own addon for the rest of
+-- the session, from a timer: its saved data moved and its timers started.)
+test("selftest: the Arena's own addon is never loaded by a run: its window's checks wait for an Arena opened this session, and a page that would load it is refused", function()
+	Scene(function(w)
+		InWindow(function()
+			-- (The harness has none of the Arena's files: ns.Arena is Core.lua's stand-in. Here it
+			-- is the Arena's core for the test, its LoadUI loading the Arena's addon as ArenaNet.lua's
+			-- does, with C_AddOns.LoadAddOn, and ArenaHome's and ArenaSpectate's Open going through it,
+			-- as theirs do.)
+			local A = ns.Arena
+			local loads, savedAO = 0, C_AddOns
+			local saved = { rules = ns.db.arenaRules, ui = ns.db.arenaUI, units = { UnitExists, UnitIsPlayer },
+				home = rawget(ns, "ArenaHome"), spectate = rawget(ns, "ArenaSpectate"), missing = rawget(A, "missing"),
+				loaded = rawget(A, "UILoaded"), load = rawget(A, "LoadUI") }
+			local ok, err = pcall(function()
+				C_AddOns = setmetatable({ LoadAddOn = function() loads = loads + 1 return true end }, { __index = savedAO })
+				rawset(A, "missing", nil)
+				rawset(A, "UILoaded", function() return false end)
+				rawset(A, "LoadUI", function() C_AddOns.LoadAddOn("Olympus_Arena") return false, "early" end)
+				local ownLoad = A.LoadUI
+				rawset(ns, "ArenaHome", { Open = function() return A.LoadUI() == true end })
+				rawset(ns, "ArenaSpectate", { PairFromUnits = function() return { a = "player", b = "focus" } end, Active = function() return false end,
+					Open = function() return ns.ArenaHome.Open("duel.watch") end, Close = function() end })
+				-- (Every other reason to skip out of the way: the rules read, the explanation seen, a focus.)
+				ns.db.arenaRules, ns.db.arenaUI = {}, { seen = { ["explained:arena"] = true } }
+				UnitExists = function(u) if u == "focus" then return true end return saved.units[1](u) end
+				UnitIsPlayer = function(u) if u == "focus" then return true end return saved.units[2](u) end
+				table.insert(ns.RealmPages, { key = "selftestarena", Lines = function()
+					ns.ArenaHome.Open("events")
+					return { { text = "< Back", onClick = function() ns.Views.ShowPage(nil) end }, { text = "A page that opens the Arena" } }
+				end })
+				local report = Run(w)
+				eq(loads, 0, "LoadAddOn never called")
+				for _, id in ipairs({ "ui.arena", "ui.duel" }) do
+					local p = ProbeOf(report, id)
+					assert(p, id)
+					eq(p.result, "skip", id .. ": " .. p.detail)
+					assert(p.detail:find("open the Arena once", 1, true), id .. ": " .. p.detail)
+				end
+				local fence = ProbeOf(report, "selftest.fence")
+				assert(fence.detail:find("arena load x", 1, true), fence.detail)
+				eq(A.LoadUI, ownLoad, "Arena.LoadUI its own again")
+				-- Out of the run, the player's own open loads it.
+				ns.ArenaHome.Open("events")
+				eq(loads, 1, "the player's own open")
+			end)
+			C_AddOns, ns.db.arenaRules, ns.db.arenaUI = savedAO, saved.rules, saved.ui
+			UnitExists, UnitIsPlayer = saved.units[1], saved.units[2]
+			rawset(ns, "ArenaHome", saved.home)
+			rawset(ns, "ArenaSpectate", saved.spectate)
+			rawset(A, "missing", saved.missing)
+			rawset(A, "UILoaded", saved.loaded)
+			rawset(A, "LoadUI", saved.load)
+			if not ok then error(err, 0) end
+		end)
+	end)
+end)
+
+-- (Before: a step opened a page, clicked its link and its Back in one frame, drawing the window four
+-- or five times, an extra redraw after calls that draw it already.)
+test("selftest: one redraw of the window a frame: a page's tab, the page, its link and its Back each in a frame of their own, nothing drawn again after a click that drew", function()
+	Scene(function(w)
+		InWindow(function(UI)
+			local refreshes, most, own = 0, {}, UI.Refresh
+			-- (Open before the run: opening a closed window draws it twice, its OnShow's redraw and
+			-- its tab's, as the player's own click on the button does.)
+			UI.SelectTab("census")
+			-- Pages whose clicks draw once: one a link of the Realm's tree opens, one opened by itself.
+			local function Page(key, link)
+				return { key = key, beforeBoard = link or nil, Link = link and function()
+					return { text = "Selftest " .. key, onClick = function() ns.Views.ShowPage(key) end }
+				end or nil, Lines = function()
+					return { { text = "< Back", onClick = function() ns.Views.ShowPage(nil) end }, { text = "A page: " .. key } }
+				end }
+			end
+			table.insert(ns.RealmPages, 1, Page("selftestlinked", true))
+			table.insert(ns.RealmPages, Page("selftestdirect", false))
+			local ok, err = pcall(function()
+				UI.Refresh = function(...) refreshes = refreshes + 1 return own(...) end
+				S.trace = function(_, id)
+					most[id] = math.max(most[id] or 0, refreshes)
+					refreshes = 0
+				end
+				local report = Run(w)
+				local link
+				for _, p in ipairs(report.probes) do
+					if p.id:find("^ui%.link%.realm/guilds%.%d+$") and p.detail:find("^realm/selftestlinked") then link = p.id end
+				end
+				assert(link, "the tree's link to the page")
+				eq(most[link], 1, "the link's click: one redraw")
+				eq(most[link .. ".back"], 1, "its Back, in a step of its own: one redraw")
+				eq(most["ui.page.realm/selftestdirect"], 1, "a page opened by itself: one redraw a frame")
+				eq(most["ui.page.realm/selftestdirect.back"], 1, "and its Back")
+				eq(ProbeOf(report, "ui.page.realm/selftestlinked"), nil, "reached by its link: not opened again")
+				-- Every other step: one redraw, or the module's own two (War.Show draws its page and
+				-- its tab, as the player's click does); never the self-test's extra.
+				for id, n in pairs(most) do
+					if not id:find("^ui%.restore") then assert(n <= 2, id .. ": " .. n .. " redraws") end
+				end
+			end)
+			UI.Refresh = own
+			if not ok then error(err, 0) end
 		end)
 	end)
 end)
@@ -324,8 +508,20 @@ test("selftest: the report is bounded and plain: at most MAX_PROBES probes, shor
 			end
 			local report = Run(w)
 			assert(#report.probes <= S.MAX_PROBES, "probes: " .. #report.probes)
-			eq(#report.probes, S.MAX_PROBES, "the cap reached")
-			assert(report.summary.dropped > 0, "and counted past it")
+			assert(report.summary.dropped > 0, "the pages past the cap counted")
+			-- (Before: the pages took the whole room and the closing probes were dropped, the test
+			-- letting build.privacy be absent. The closing steps keep a room of their own, the other
+			-- windows come before the pages.)
+			for _, id in ipairs({ "ui.restore", "ui.back", "selftest.invariants", "selftest.settings", "selftest.fence", "selftest.cost",
+				"build.privacy", "mod.comm", "ui.accord", "ui.copy" }) do
+				local p = ProbeOf(report, id)
+				assert(p, id .. " in the report, past 400 pages")
+				assert(p.detail ~= "", id .. " with its detail")
+			end
+			eq(ProbeOf(report, "selftest.invariants").result, "ok", ProbeOf(report, "selftest.invariants").detail)
+			local pages = 0
+			for _, p in ipairs(report.probes) do if p.id:find("^ui%.page%.realm/selftestmany") then pages = pages + 1 end end
+			assert(pages > 100 and pages < 400, "pages until the room is used: " .. pages)
 			local function Plain(v, depth)
 				assert(depth <= 4, "too deep")
 				local t = type(v)
@@ -348,8 +544,8 @@ test("selftest: the report is bounded and plain: at most MAX_PROBES probes, shor
 			eq(roster.result, "ok", roster.detail)
 			assert(roster.detail:find("17 GUID ok", 1, true), roster.detail)
 			w.cleanup()
-			local privacy = ProbeOf(report, "build.privacy") or {}
-			eq(privacy.result ~= "fail", true, "the privacy probe: " .. tostring(privacy.detail))
+			local privacy = ProbeOf(report, "build.privacy")
+			eq(privacy.result, "ok", "the privacy probe: " .. tostring(privacy.detail))
 			local bn = ProbeOf(report, "api.bn")
 			assert(bn and bn.detail:find("Name#digits", 1, true), "the tag's shape, without the tag")
 		end)
@@ -422,24 +618,123 @@ test("selftest: a window's own redraws while it runs (an event, a timer: outside
 	end)
 end)
 
-test("selftest: combat in the middle stops it: everything put back at once, the report says combat, the fence and the error tap gone", function()
+-- A run stopped in combat or by a loading screen: what it does at that moment counted (the
+-- window's redraws, the copy window), then the moment out of combat.
+local function Stopped(w, UI, event)
+	local refreshes, copies = 0, 0
+	local ownRefresh, ownCopy = UI.Refresh, UI.ShowCopy
+	UI.Refresh = function(...) refreshes = refreshes + 1 return ownRefresh(...) end
+	UI.ShowCopy = function(...) copies = copies + 1 return ownCopy(...) end
+	local ok, err = pcall(S.OnEvent, event)
+	UI.Refresh, UI.ShowCopy = ownRefresh, ownCopy
+	if not ok then error(err, 0) end
+	return refreshes, copies
+end
+
+-- (Before: the stop put everything back in the same frame, redrawing the window, fingerprinting
+-- the saved keys and opening the report's copy window over the fight.)
+test("selftest: combat in the middle stops it at once and draws nothing: its windows hidden, the report kept without its window, the fence and the error tap gone; the window's page back after the fight", function()
 	Scene(function(w)
 		InWindow(function(UI)
 			local send, capture = ns.Comm.Send, ns.CaptureError
 			UI.SelectTab("census")
 			assert(S.Start())
-			w.Pump(40)
+			assert(w.PumpUntil(function() return UI.PageId() == "realm/guilds" end), "the run on the Realm's page")
 			eq(S.Running(), true, "still running")
 			assert(ns.Comm.Send ~= send, "the fence is up while it runs")
-			S.OnEvent("PLAYER_REGEN_DISABLED")
+			local refreshes, copies = Stopped(w, UI, "PLAYER_REGEN_DISABLED")
 			eq(S.Running(), false, "stopped at once")
+			eq(refreshes, 0, "no redraw as the fight starts")
+			eq(copies, 0, "no copy window over the fight")
 			eq(w.printed[#w.printed], L.SELFTEST_ABORT_COMBAT)
 			eq(ns.db.selftest.summary.aborted, "combat")
 			eq(ns.Comm.Send, send, "Comm.Send is its own again"); eq(ns.CaptureError, capture, "and ns.CaptureError")
-			eq(UI.PageId(), "census/", "the window as it was"); eq(UI.IsShown(), true)
-			assert(ProbeOf(ns.db.selftest, "ui.restore"), "its closing ran")
+			eq(UI.IsShown(), true, "open, as it was")
+			local restore = ProbeOf(ns.db.selftest, "ui.restore")
+			eq(restore.result, "skip"); eq(restore.detail, "put back after the fight")
+			for _, id in ipairs({ "ui.back", "selftest.invariants", "selftest.fence", "selftest.cost", "build.privacy" }) do assert(ProbeOf(ns.db.selftest, id), id) end
 			w.Pump()
 			eq(S.Running(), false, "the frame asked for before finds nothing to do")
+			-- Out of combat: the page it had, the report told; nothing sent putting it back.
+			local spied, own = {}, ns.Comm.Send
+			ns.Comm.Send = function() spied[#spied + 1] = "Comm.Send" return false end
+			local ok, err = pcall(S.OnEvent, "PLAYER_REGEN_ENABLED")
+			ns.Comm.Send = own
+			assert(ok, err)
+			eq(UI.PageId(), "census/", "the window as it was"); eq(UI.IsShown(), true)
+			eq(table.concat(spied, ","), "", "nothing sent")
+			restore = ProbeOf(ns.db.selftest, "ui.restore")
+			eq(restore.result, "ok", restore.detail)
+			S.OnEvent("PLAYER_REGEN_ENABLED")
+			eq(UI.PageId(), "census/", "once")
+		end)
+	end)
+	-- The window closed before: hidden at once (a Hide), its tab put back after, still closed.
+	Scene(function(w)
+		InWindow(function(UI)
+			UI.SelectTab("decrees")
+			UI.Toggle()
+			eq(UI.IsShown(), false)
+			assert(S.Start())
+			assert(w.PumpUntil(function() return UI.IsShown() and UI.PageId() == "realm/guilds" end), "the run opened it")
+			local refreshes, copies = Stopped(w, UI, "PLAYER_REGEN_DISABLED")
+			eq(refreshes, 0); eq(copies, 0)
+			eq(UI.IsShown(), false, "closed at once")
+			S.OnEvent("PLAYER_REGEN_ENABLED")
+			eq(UI.IsShown(), false, "still closed")
+			eq(UI.PageId(), "decrees/", "its tab put back")
+			eq(ProbeOf(ns.db.selftest, "ui.restore").result, "ok", ProbeOf(ns.db.selftest, "ui.restore").detail)
+		end)
+	end)
+	-- The player used the window meanwhile: it stays as the player left it.
+	Scene(function(w)
+		InWindow(function(UI)
+			UI.SelectTab("census")
+			assert(S.Start())
+			assert(w.PumpUntil(function() return UI.PageId() == "realm/guilds" end))
+			Stopped(w, UI, "PLAYER_REGEN_DISABLED")
+			UI.SelectTab("decrees")
+			S.OnEvent("PLAYER_REGEN_ENABLED")
+			eq(UI.PageId(), "decrees/", "the player's page")
+			local restore = ProbeOf(ns.db.selftest, "ui.restore")
+			eq(restore.result, "warn"); assert(restore.detail:find("used meanwhile", 1, true), restore.detail)
+		end)
+	end)
+	-- Combat seen at a frame of the run (its event missed): the same.
+	Scene(function(w)
+		InWindow(function(UI)
+			UI.SelectTab("census")
+			assert(S.Start())
+			assert(w.PumpUntil(function() return UI.PageId() == "realm/guilds" end))
+			w.combat = true
+			local refreshes = 0
+			local own = UI.Refresh
+			UI.Refresh = function(...) refreshes = refreshes + 1 return own(...) end
+			w.Pump(1)
+			UI.Refresh = own
+			eq(S.Running(), false); eq(refreshes, 0)
+			eq(ns.db.selftest.summary.aborted, "combat")
+			w.combat = false
+			S.OnEvent("PLAYER_REGEN_ENABLED")
+			eq(UI.PageId(), "census/")
+		end)
+	end)
+end)
+
+test("selftest: a loading screen stops it the same way, no copy window after it; the window's page back a moment later", function()
+	Scene(function(w)
+		InWindow(function(UI)
+			UI.SelectTab("census")
+			assert(S.Start())
+			assert(w.PumpUntil(function() return UI.PageId() == "realm/guilds" end))
+			local refreshes, copies = Stopped(w, UI, "PLAYER_ENTERING_WORLD")
+			eq(S.Running(), false); eq(refreshes, 0); eq(copies, 0)
+			eq(w.printed[#w.printed], L.SELFTEST_ABORT_ZONE)
+			eq(ns.db.selftest.summary.aborted, "zone")
+			eq(ProbeOf(ns.db.selftest, "ui.restore").detail, "put back after the loading screen")
+			w.Pump()
+			eq(UI.PageId(), "census/", "put back a moment later")
+			eq(ProbeOf(ns.db.selftest, "ui.restore").result, "ok")
 		end)
 	end)
 end)
@@ -510,6 +805,10 @@ test("selftest: its lines in English and Portuguese, with the same codes; the TO
 		end
 	end
 	assert(n >= 20, "its lines: " .. n)
+	-- (Before: "start your hearthstone": one that ends teleports through a loading screen, which stops
+	-- the run. Started and cancelled, it is still the cast the check reads.)
+	assert(L.SELFTEST_STARTED:find("cancel", 1, true), L.SELFTEST_STARTED)
+	assert(rawget(pt.L, "SELFTEST_STARTED"):find("cancelar", 1, true), "its Portuguese")
 	local toc = assert(io.open(ROOT .. "Olympus/Olympus.toc")):read("*a")
 	local lines = {}
 	for line in toc:gmatch("[^\r\n]+") do lines[#lines + 1] = line end

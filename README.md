@@ -3054,7 +3054,10 @@ the test world of `tests/arena/lib/world.lua`.
 Test builds, the author only: `/oly selftest` probes the client's APIs, opens every page and module
 read-only, and writes `OlympusDB.selftest` with a copyable summary; `/oly selftest status` reopens
 it (`Olympus/SelfTest.lua`, its offline tests in `tests/selftest.lua`). It sends nothing and puts the
-window back as it was; a `/reload` after it writes the file.
+window back as it was; a `/reload` after it writes the file. Combat or a loading screen stops it
+without drawing: its own windows close at once and the Olympus window goes back to its page after
+the fight. It never loads the Arena's addon, so the Arena window's checks need the Arena opened once
+that session.
 
 Remote rehearsal enrollment requires `/oly arena rehearsals on`; the default refuses it without
 creating a rehearsal store. `off` leaves a current rehearsal locally (a director closes their
