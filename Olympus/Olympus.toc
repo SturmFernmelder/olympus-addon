@@ -142,6 +142,7 @@ Wanted.lua
 PlayerSightings.lua
 API.lua
 BridgeSections.lua
+BridgePeople.lua
 Record.lua
 ArenaMath.lua
 Compliance.lua

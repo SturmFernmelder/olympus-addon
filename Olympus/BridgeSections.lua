@@ -24,11 +24,223 @@ local function Whole(v)
 	return math.floor(v)
 end
 
+-- The helpers the Companion's other section files share (BridgePeople.lua, loaded after this one):
+-- ns.BridgeKit, Olympus's own table, never a global.
+-- Open(): a member who accepted the Olympus Accord (ns.AccordAccepted, ns.IsMember); the rankings,
+--   the Wanted list and every section of BridgePeople.lua give nothing before it ("self" asks the
+--   Accord itself).
+-- Try(module, fn, ...): Call, but nil for a stand-in of a file this build has not loaded yet (Core's
+--   StandIn, `missing`).
+-- Text(v, max): a plain one-line text for a row: no colour or link codes, control characters or
+--   "~" (the rows' separator), cut at max bytes (48 by default), never half a letter; "" for none.
+-- Row(...): one row as "a~b~...", numbers whole (a "%.1f" string stays as given), within the
+--   registry's string limit (SECTION_LIMITS.string): the last field is cut when it is longer.
+--   Rows are strings where a list would pass the registry's value budget (SECTION_LIMITS.values)
+--   as tables: each such list sits beside its `fields`, the names of the row's fields in order.
+-- Same(a, b): one character, whatever realm form or letter case each name has.
+local Kit = { Call = Call, Whole = Whole }
+ns.BridgeKit = Kit
+function Kit.Open()
+	return type(ns.AccordAccepted) == "function" and ns.AccordAccepted() == true
+		and type(ns.IsMember) == "function" and ns.IsMember() == true
+end
+function Kit.Try(module, fn, ...)
+	local m = ns[module]
+	if type(m) ~= "table" or m.missing then return nil end
+	return Call(module, fn, ...)
+end
+function Kit.Text(v, max)
+	if type(v) ~= "string" then return "" end
+	local s = v:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|A.-|a", ""):gsub("|H.-|h(.-)|h", "%1")
+		:gsub("[|~%c]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+	return ns.Cut(s, max or 48)
+end
+function Kit.Row(...)
+	local parts = {}
+	for i = 1, select("#", ...) do
+		local v = select(i, ...)
+		if type(v) == "number" then parts[i] = tostring(Whole(v))
+		elseif type(v) == "boolean" then parts[i] = v and "1" or "0"
+		else parts[i] = Kit.Text(v, 120) end
+	end
+	return ns.Cut(table.concat(parts, "~"), OlympusBridge.SECTION_LIMITS.string)
+end
+function Kit.Same(a, b)
+	return type(a) == "string" and type(b) == "string" and a ~= "" and ns.Fold(ns.FullName(a)) == ns.Fold(ns.FullName(b))
+end
+local Open, Try, Text, Row, Same = Kit.Open, Kit.Try, Kit.Text, Kit.Row, Kit.Same
+
+---------------------------------------------------------------------------
+-- The ranking boards (the Companion's Rankings tab): each board as the page that lists it, its
+-- rows as "~" strings in `fields` order, cut from the end, and this character's own place where
+-- the board has him. Only boards every member's page shows: the games' while the King made them
+-- public (ArenaHome.RankingsPublic, as the Games tab and the API), the treasury's donors while the
+-- King shows the Treasury's ranking (Treasury.PublicShows("ranking")), the Church's public rows
+-- while its switch is open (ChurchCount.PublicView). Never a staff view.
+---------------------------------------------------------------------------
+
+local BOARD_ROWS = 50
+
+-- A name as the Arena's pages show it (ArenaHome.Name: masked on the King's screen while his
+-- councillors' names are, Arena.Mask), else as the other pages do.
+local function ArenaName(name)
+	local shown = Try("ArenaHome", "Name", name)
+	if type(shown) == "string" then return shown end
+	return type(name) == "string" and ns.DisplayName(name) or ""
+end
+
+local function Board(board, period, fields, list)
+	return { board = board, period = period, fields = fields, rows = {}, list = list }
+end
+
+-- The arena's overall ranking (the Games tab's, every page of the Arena window's): all time.
+local function ArenaBoard()
+	if Try("ArenaHome", "RankingsPublic", "arena") ~= true then return nil end
+	local rows = Try("ArenaLedger", "Ranking", "all", "A", { mode = "L" })
+	if type(rows) ~= "table" then return nil end
+	local b, me = Board("arena", "all", "place~rating~wins~losses~name"), Try("ArenaProfile", "MyGk")
+	for i, r in ipairs(rows) do
+		if type(r) == "table" then
+			local place = Whole(r.rank) > 0 and Whole(r.rank) or i
+			if #b.rows < BOARD_ROWS then b.rows[#b.rows + 1] = Row(place, r.rating, r.wins, r.losses, ArenaName(r.name or r.gk)) end
+			if me and r.gk == me then b.own = { place = place, value = Whole(r.rating) } end
+		end
+	end
+	return b
+end
+
+-- Bones' best players this month (FarkleTable.Best), the ten the Games tab lists.
+local function BonesBoard()
+	if Try("ArenaHome", "RankingsPublic", "bones") ~= true then return nil end
+	local rows = Try("FarkleTable", "Best", "L")
+	if type(rows) ~= "table" then return nil end
+	local b = Board("bones", "month", "place~won~games~name")
+	for i, r in ipairs(rows) do
+		if type(r) == "table" then
+			local place = Whole(r.place) > 0 and Whole(r.place) or i
+			if #b.rows < 10 then b.rows[#b.rows + 1] = Row(place, r.won, r.games, ArenaName(r.name)) end
+			if Same(r.name, ns.me) then b.own = { place = place, value = Whole(r.won) } end
+		end
+	end
+	return b
+end
+
+-- The Church's public rankings (its Public page): the Apostles' and the missionaries', the last
+-- 30 days' points (tenths) and all time's.
+local function Tenths(v) return math.floor((tonumber(v) or 0) * 10 + 0.5) end
+local function ChurchBoards(out)
+	local v = Try("ChurchCount", "PublicView")
+	if type(v) ~= "table" then return end
+	local most = tonumber(ns.ChurchCount.PUBLIC_ROWS) or 10
+	for _, it in ipairs({ { "a", "apostles" }, { "m", "missionaries" } }) do
+		local b = Board("church", "month", "place~points10~allTime10~name", it[2])
+		local rows = type(v[it[1]]) == "table" and v[it[1]] or {}
+		for place = 1, most do
+			local r = rows[place]
+			if type(r) == "table" then
+				b.rows[#b.rows + 1] = Row(place, Tenths(r.s30), Tenths(r.sall), ns.DisplayName(ns.FullName(r.name)))
+				if Same(r.name, ns.me) then b.own = { place = place, value = Tenths(r.s30) } end
+			end
+		end
+		out[#out + 1] = b
+	end
+end
+
+-- The month's crafting ranking (the Realm's crafting page, CraftRanking.Current).
+local function CraftingBoard()
+	local rows = Try("CraftRanking", "Current")
+	if type(rows) ~= "table" then return nil end
+	local b = Board("crafting", "month", "place~points~deliveries~customers~name")
+	for i, r in ipairs(rows) do
+		if type(r) == "table" then
+			local place = Whole(r.place) > 0 and Whole(r.place) or i
+			if #b.rows < BOARD_ROWS then b.rows[#b.rows + 1] = Row(place, r.points, r.deliveries, r.customers, ns.DisplayName(r.name)) end
+			if Same(r.name, ns.me) then b.own = { place = place, value = Whole(r.points) } end
+		end
+	end
+	return b
+end
+
+-- The Treasury's ranking of donors (its tab's, as it may go out: Treasury.Report(true, true), the
+-- copy the army reads), copper given, while the King shows the ranking.
+local function TreasuryBoard()
+	if Try("Treasury", "PublicShows", "ranking") ~= true then return nil end
+	local r = Try("Treasury", "Report", true, true)
+	if type(r) ~= "table" or type(r.rank) ~= "table" then return nil end
+	local person = Try("Alts", "Person", ns.me) or ns.ShortName(ns.me)
+	local b = Board("treasury", "all", "place~copper~name")
+	for i, g in ipairs(r.rank) do
+		if type(g) == "table" then
+			if #b.rows < BOARD_ROWS then b.rows[#b.rows + 1] = Row(i, g.money, g.name) end
+			if type(g.name) == "string" and type(person) == "string" and ns.Fold(g.name) == ns.Fold(person) then
+				b.own = { place = i, value = Whole(g.money) }
+			end
+		end
+	end
+	return b
+end
+
+-- The donors' honours (the API's, its own gate: while the King shows the Treasury's ranking): the
+-- all-time three, and the month's where this build wears their frame. Names alone.
+local function DonorBoards(out, donors)
+	if type(donors) ~= "table" then return end
+	for _, period in ipairs({ "all", "month" }) do
+		local names = donors[period]
+		if type(names) == "table" then
+			local b = Board("donors", period, "place~name")
+			for i, name in ipairs(names) do
+				if type(name) == "string" then
+					b.rows[#b.rows + 1] = Row(i, name)
+					if Same(name, ns.me) then b.own = { place = i } end
+				end
+			end
+			out[#out + 1] = b
+		end
+	end
+end
+
+-- The Wanted tab's Slayers boards (Wanted.Rankings): this month's and all time's.
+local function WantedBoards(out)
+	local rank = Try("Wanted", "Rankings")
+	if type(rank) ~= "table" then return end
+	local guid = type(UnitGUID) == "function" and UnitGUID("player") or nil
+	for _, period in ipairs({ "month", "all" }) do
+		local b = Board("wanted", period, "place~points~claims~name")
+		for i, r in ipairs(type(rank[period]) == "table" and rank[period] or {}) do
+			if type(r) == "table" then
+				local place = Whole(r.place) > 0 and Whole(r.place) or i
+				if #b.rows < BOARD_ROWS then b.rows[#b.rows + 1] = Row(place, r.points, r.claims, ns.DisplayName(r.name)) end
+				if (type(guid) == "string" and r.guid == guid) or Same(r.name, ns.me) then b.own = { place = place, value = Whole(r.points) } end
+			end
+		end
+		out[#out + 1] = b
+	end
+end
+
+-- Every board, each from its own module: one that fails or has nothing is left out alone.
+local function Boards(donors)
+	local out = {}
+	for _, make in ipairs({ ArenaBoard, BonesBoard }) do
+		local ok, b = pcall(make)
+		if ok and b then out[#out + 1] = b end
+	end
+	pcall(ChurchBoards, out)
+	for _, make in ipairs({ CraftingBoard, TreasuryBoard }) do
+		local ok, b = pcall(make)
+		if ok and b then out[#out + 1] = b end
+	end
+	pcall(DonorBoards, out, donors)
+	pcall(WantedBoards, out)
+	return out
+end
+
 -- Public rankings: the API's (Slayers boards, donors' top three only while the King shows the
 -- Treasury's ranking, the Church's public top three, the games the King made public), the month's
 -- crafting ranking as the Realm's crafting page lists it, and the Treasury's spending only while
--- the King shows the balance (numbers alone).
+-- the King shows the balance (numbers alone). 1.2.6 (the Companion's Rankings tab): `boards`, every
+-- board above with its rows and this character's own place (Boards); nothing before the Accord.
 OlympusBridge.RegisterSection("rankings", 1, function()
+	if not Open() then return nil end
 	local out = {}
 	local API = ns.API
 	if type(API) == "table" and type(API.Rankings) == "function" then
@@ -50,6 +262,7 @@ OlympusBridge.RegisterSection("rankings", 1, function()
 		local spent, entries = Call("Treasury", "PublicSpending")
 		if spent then out.treasury = { spentCopper = Whole(spent), entries = Whole(entries) } end
 	end
+	out.boards = Boards(out.donors)
 	return out
 end)
 
@@ -77,14 +290,19 @@ OlympusBridge.RegisterSection("guilds", 1, function()
 	return { people = Whole(s.total), characters = Whole(s.characters or s.total), alts = Whole(s.alts), guilds = rows }
 end)
 
--- The Wanted tab's list (the API's rows: place, name, bounty, kills, cycle).
+-- The Wanted tab's list (the API's rows: place, name, bounty, kills, cycle), its first 100. The
+-- GUID stays: each target's own page shows it (L.WANTED_GUID), and it is who he is on the list.
+-- Nothing before the Accord (1.2.6).
+local WANTED_ROWS = 100
 OlympusBridge.RegisterSection("wanted", 1, function()
+	if not Open() then return nil end
 	local API = ns.API
 	if type(API) ~= "table" or type(API.Wanted) ~= "function" then return nil end
 	local ok, rows = pcall(API.Wanted)
 	if not ok or type(rows) ~= "table" then return nil end
 	local targets = {}
 	for i, r in ipairs(rows) do
+		if #targets >= WANTED_ROWS then break end
 		if type(r) == "table" and type(r.name) == "string" then
 			targets[#targets + 1] = { place = Whole(r.place) > 0 and Whole(r.place) or i, name = r.name, guid = r.guid,
 				bounty = Whole(r.bounty), kills = Whole(r.kills), cycle = Whole(r.cycle) }
