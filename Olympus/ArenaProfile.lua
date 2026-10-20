@@ -177,7 +177,7 @@ function P.SetPick(frame, title)
 	local before = P.Pick()
 	local pick, why = ns.Honors.Choose(before, held, frame or "rank", title)
 	if not pick then return false, why end
-	-- (1.2.5) Another frame picked (a letter's "Wear it", an honour's mark as the chat icon) while
+	-- (1.2.6) Another frame picked (a letter's "Wear it", an honour's mark as the chat icon) while
 	-- the red cross is worn ends it, as ProfileEdit's frame picker does: everyone else would see
 	-- the cross he holds instead (HonorsNet.OwnLookFrame). That cross, or a title alone, keeps it.
 	local B = ns.Borders
