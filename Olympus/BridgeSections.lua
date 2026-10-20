@@ -26,9 +26,9 @@ end
 
 -- The helpers the Companion's other section files share (BridgePeople.lua, loaded after this one):
 -- ns.BridgeKit, Olympus's own table, never a global.
--- Open(): a member who accepted the Olympus Accord (ns.AccordAccepted, ns.IsMember); the rankings,
---   the Wanted list and every section of BridgePeople.lua give nothing before it ("self" asks the
---   Accord itself).
+-- Open(): a member who accepted the Olympus Accord (ns.AccordAccepted, ns.IsMember); the census's
+--   guilds and statistics, the rankings, the Wanted list and every section of BridgePeople.lua give
+--   nothing before it ("self" asks the Accord itself).
 -- Try(module, fn, ...): Call, but nil for a stand-in of a file this build has not loaded yet (Core's
 --   StandIn, `missing`).
 -- Text(v, max): a plain one-line text for a row: no colour or link codes, control characters or
@@ -267,8 +267,10 @@ OlympusBridge.RegisterSection("rankings", 1, function()
 end)
 
 -- The census's guilds as the Census tab lists them: members (characters), online while fresh,
--- average level, plus the people/characters/linked-alts totals.
+-- average level, plus the people/characters/linked-alts totals. Nothing before the Accord, nor for
+-- a non-member: the window shows him the Accord's or the Join page alone, no census (UI.Locked).
 OlympusBridge.RegisterSection("guilds", 1, function()
+	if not Open() then return nil end
 	local D = ns.Data
 	if type(D) ~= "table" or type(D.Summary) ~= "function" then return nil end
 	local ok, s = pcall(D.Summary)
@@ -372,7 +374,9 @@ local function Series(fn, now)
 	return out
 end
 
+-- (Nothing before the Accord, nor for a non-member, as the census page itself: UI.Locked.)
 OlympusBridge.RegisterSection("stats", 1, function()
+	if not Open() then return nil end
 	local D, C = ns.Data, ns.CensusClean
 	if type(D) ~= "table" or type(D.Summary) ~= "function" or type(C) ~= "table" or type(C.Compute) ~= "function" then return nil end
 	local now = ns.Now()

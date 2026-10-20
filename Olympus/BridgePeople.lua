@@ -41,7 +41,18 @@ end
 -- them: members, online while fresh, average level, Captains, inactive members, the Lord and
 -- whether he is online now (Views.PresenceNow, as the row), and the King's name (the Realm's line).
 -- The census's faction and realm group once, for every guild.
+-- The Lord's presence as the row says it: online (lordOnline 1, lordDays 0), offline for lordDays
+-- whole days (lordOnline 0), or not known now (lordOnline and lordDays empty): an old report had
+-- him online and nobody sees him now, the row's "online <age> ago", lordSeenAt that report's time.
 ---------------------------------------------------------------------------
+
+-- The Lord's three fields from Views.PresenceNow's online, days and at: nil, nil and the old
+-- report's time while he is not known now.
+local function LordPresence(on, days, at)
+	if on == true then return true, 0, nil end
+	if on == nil and type(at) == "number" then return nil, nil, Whole(at) end
+	return false, Whole(days), nil
+end
 
 OlympusBridge.RegisterSection("realm", 1, function()
 	if not Open() then return nil end
@@ -50,22 +61,23 @@ OlympusBridge.RegisterSection("realm", 1, function()
 	if type(s) ~= "table" or type(s.guilds) ~= "table" then return nil end
 	local V = ns.Views
 	local out = { at = Now(), faction = Text(ns.faction, 16), realmGroup = Text(ns.group or ns.realm, 96),
-		fields = "members~online~avgLevel~captains~inactive7~inactive30~lordOnline~lordDays~fresh~name~lord", guilds = {} }
+		fields = "members~online~avgLevel~captains~inactive7~inactive30~lordOnline~lordDays~lordSeenAt~fresh~name~lord", guilds = {} }
 	for _, e in ipairs(s.guilds) do
 		if #out.guilds >= REALM_GUILDS then break end
 		local g = type(e) == "table" and e.g
 		if type(g) == "table" and type(e.name) == "string" then
 			if not out.king and type(g.leader) == "string" and ns.IsKingGuild(e.name) then out.king = Text(g.leader) end
-			local on, days = g.leaderOnline, g.leaderDays
+			local on, days, at = g.leaderOnline, g.leaderDays, nil
 			if type(V) == "table" and type(V.PresenceNow) == "function" then
-				local okP, pOn, pDays = pcall(V.PresenceNow, e, g.leader, g.leaderOnline, g.leaderDays)
-				if okP then on, days = pOn, pDays end
+				local okP, pOn, pDays, _, pAt = pcall(V.PresenceNow, e, g.leader, g.leaderOnline, g.leaderDays)
+				if okP then on, days, at = pOn, pDays, pAt end
 			end
+			local lordOnline, lordDays, lordSeenAt = LordPresence(on, days, at)
 			local tenths = Safe(D.AvgTenths, g)
 			local fresh = e.fresh == true
 			out.guilds[#out.guilds + 1] = Row(Whole(g.total), fresh and Whole(g.online) or 0, tenths and ("%.1f"):format(tenths / 10) or "",
-				type(g.officers) == "table" and #g.officers or 0, Whole(g.inactive7), Whole(g.inactive30), on == true,
-				on == true and 0 or Whole(days), fresh, e.name, g.leader)
+				type(g.officers) == "table" and #g.officers or 0, Whole(g.inactive7), Whole(g.inactive30), lordOnline, lordDays, lordSeenAt,
+				fresh, e.name, g.leader)
 		end
 	end
 	return out
@@ -229,11 +241,13 @@ local function GameEvents()
 			out[#out + 1] = e
 		end
 	end
-	-- The recent public duels, ended, with their winner.
+	-- The recent public duels, ended, with their winner; titleFight: a public title fight (the
+	-- ledger's flag, ArenaLedger.History's `title`, a boolean there). `title` is always an event's
+	-- text, never that flag.
 	for _, r in ipairs(Try("ArenaLedger", "History", { limit = 30, mode = "L" }) or {}) do
 		if type(r) == "table" and type(r.fid) == "string" and r.public ~= false then
 			Add({ kind = "duel", id = Text(r.fid, 32), at = Whole(r.t), a = ArenaName(r.A), b = ArenaName(r.B), winner = ArenaName(r.winner),
-				state = "over", title = r.title == true or nil })
+				state = "over", titleFight = r.title == true or nil })
 		end
 	end
 	-- The events the tab and the window list: live, upcoming and ended.

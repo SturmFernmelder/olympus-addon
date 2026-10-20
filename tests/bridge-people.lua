@@ -13,7 +13,9 @@ local NOW = 1800000000
 local ME = ns.me -- "Tester-Realm"
 local MY_GK = "4619-0000ABCD"
 local NEW = { "realm", "roster", "church", "games", "profile" }
-local GATED = { "realm", "roster", "church", "games", "profile", "rankings", "wanted" }
+-- (The census's guilds and statistics too: no page shows them before the Accord or to an outsider,
+-- UI.Locked; the review of 2026-10-20 found them given to both.)
+local GATED = { "realm", "roster", "church", "games", "profile", "rankings", "wanted", "guilds", "stats" }
 
 local function Fields(row) local out = {} for f in (row .. "~"):gmatch("(.-)~") do out[#out + 1] = f end return out end
 local function Count(fields) local n = 0 for _ in fields:gmatch("[^~]+") do n = n + 1 end return n end
@@ -61,10 +63,11 @@ local function Modules(o)
 					rating = 2000 - i, wins = 40 - (i % 40), losses = i % 9 }
 			end)
 		end,
+		-- (ArenaLedger.History's rows: `title` is the ledger's flag, a boolean, true for a title fight.)
 		History = function()
 			return Rows(40, function(i)
 				return { fid = ("F%04d"):format(i), t = NOW - i * 600, A = Name("Red", i) .. "-Realm", B = Name("Blue", i) .. "-Realm",
-					winner = Name("Red", i) .. "-Realm", public = true, method = "KO" }
+					winner = Name("Red", i) .. "-Realm", public = true, method = "KO", title = i == 2 }
 			end)
 		end,
 	}
@@ -183,8 +186,9 @@ local function Modules(o)
 	return m
 end
 
--- The census: n guilds (the King's <Olympus> first), each from its own roster's report.
-local function Census(n, now)
+-- The census: n guilds (the King's <Olympus> first), each from its own roster's report; every
+-- 50th an old report (3 hours), its Lord online in it when staleLordOnline.
+local function Census(n, now, staleLordOnline)
 	local guilds = {}
 	guilds.Olympus = { guild = "Olympus", total = 1000, online = 400, t = now - 5, mine = true, avgLevel = 52.34, leader = "Kingly",
 		leaderOnline = true, officers = Rows(30, function(i) return { name = Name("Captain", i), online = i % 2 == 0, days = 1 } end),
@@ -192,7 +196,7 @@ local function Census(n, now)
 	for i = 2, n do
 		local name = ("Olympus Vanguard %s"):format(Name("", i))
 		guilds[name] = { guild = name, total = 1000 - i, online = 200, t = i % 50 == 0 and now - 3 * 3600 or now - 5, mine = true,
-			avgLevel = 40 + (i % 20), leader = Name("Lord", i), leaderOnline = i % 3 == 0, leaderDays = 2.5,
+			avgLevel = 40 + (i % 20), leader = Name("Lord", i), leaderOnline = i % 3 == 0 or (staleLordOnline == true and i % 50 == 0), leaderDays = 2.5,
 			officers = Rows(30, function(k) return { name = Name("Cap", i * 31 + k), online = false, days = 3 } end),
 			inactive7 = i % 7, inactive30 = i % 30, battleTag = "Secret#1234" }
 	end
@@ -210,7 +214,7 @@ local function With(o, fn)
 	if o.modules then for key in pairs(o.modules) do saved.modules[key] = rawget(ns, key) end end
 	for key, value in pairs(m) do rawset(ns, key, value) end
 	for key, value in pairs(o.modules or {}) do rawset(ns, key, value or nil) end
-	ns.rdb = { guilds = Census(o.guilds or 8, NOW), seen = {}, treasuryFlags = {} }
+	ns.rdb = { guilds = Census(o.guilds or 8, NOW, o.staleLordOnline), seen = {}, treasuryFlags = {} }
 	ns.Now = function() return NOW end
 	ns.realm, ns.group, ns.faction = "Realm", "Realm", "Alliance"
 	UnitLevel = function() return 60 end
@@ -257,18 +261,19 @@ end)
 test("bridge people: realm lists the Realm's guilds as rows of their fields in the census's order, at most 256, online only while fresh, the King's name, nothing private", function()
 	With({ guilds = 300 }, function()
 		local d = Data("realm")
-		eq(d.fields, "members~online~avgLevel~captains~inactive7~inactive30~lordOnline~lordDays~fresh~name~lord")
+		eq(d.fields, "members~online~avgLevel~captains~inactive7~inactive30~lordOnline~lordDays~lordSeenAt~fresh~name~lord")
 		eq(d.faction, "Alliance"); eq(d.realmGroup, "Realm"); eq(d.king, "Kingly"); eq(d.at, NOW)
 		eq(#d.guilds, 256, "cut to 256, the census checkpoint's own cap")
 		local first = Fields(d.guilds[1])
-		eq(#first, Count(d.fields))
+		eq(#first, Count(d.fields), "an empty lordSeenAt is a field all the same")
 		eq(first[1], "1000"); eq(first[2], "400"); eq(first[3], "52.3"); eq(first[4], "30"); eq(first[5], "40"); eq(first[6], "12")
-		eq(first[7], "1"); eq(first[8], "0"); eq(first[9], "1"); eq(first[10], "Olympus"); eq(first[11], "Kingly")
+		eq(first[7], "1"); eq(first[8], "0"); eq(first[9], "", "no old report's time for a Lord online now")
+		eq(first[10], "1"); eq(first[11], "Olympus"); eq(first[12], "Kingly")
 		-- The census's own order (Data.Summary's, the Realm's by default), cut from its end.
 		local s = ns.Data.Summary()
 		eq(#s.guilds, 300)
 		for i, row in ipairs(d.guilds) do
-			eq(Fields(row)[10], s.guilds[i].name, "row " .. i .. " in the census's order")
+			eq(Fields(row)[11], s.guilds[i].name, "row " .. i .. " in the census's order")
 			assert(#row <= B.SECTION_LIMITS.string, row)
 		end
 		Never(d, "Secret#1234", "a BattleTag")
@@ -278,10 +283,35 @@ test("bridge people: realm lists the Realm's guilds as rows of their fields in t
 		local stale = 0
 		for _, row in ipairs(Data("realm").guilds) do
 			local f = Fields(row)
-			if f[9] == "0" then stale = stale + 1; eq(f[2], "0", "an old report counts nobody online") end
-			if f[7] == "0" then eq(f[8], "2", "a Lord offline: his days away, whole") end
+			if f[10] == "0" then stale = stale + 1; eq(f[2], "0", "an old report counts nobody online") end
+			if f[7] == "0" then eq(f[8], "2", "a Lord offline: his days away, whole"); eq(f[9], "") end
 		end
 		eq(stale, 1, "an old report is listed, grey")
+	end)
+end)
+
+test("bridge people: realm: a Lord an old report had online, nobody seeing him now, is not known to be online or offline: empty lordOnline and lordDays, and that report's time, as the row's \"online <age> ago\"", function()
+	-- (The review of 2026-10-20: the row said "online 3h ago", the section "offline today".)
+	With({ guilds = 60, staleLordOnline = true }, function()
+		local s, rows = ns.Data.Summary(), {}
+		for _, row in ipairs(Data("realm").guilds) do local f = Fields(row) rows[f[11]] = f end
+		local old
+		for _, e in ipairs(s.guilds) do if e.fresh == false then old = e end end
+		assert(old, "the old report")
+		local on, days, dim, at = ns.Views.PresenceNow(old, old.g.leader, old.g.leaderOnline, old.g.leaderDays)
+		eq(on, nil, "the page: not known now"); eq(days, nil); eq(dim, true); eq(at, NOW - 3 * 3600, "the page: online <age> ago")
+		local f = assert(rows[old.name], "its row")
+		eq(f[7], "", "lordOnline: unknown"); eq(f[8], "", "lordDays: unknown"); eq(f[9], tostring(NOW - 3 * 3600), "lordSeenAt: the report's time")
+		eq(f[10], "0", "an old report")
+		-- The others as before: online now, or offline for whole days, and no lordSeenAt.
+		local online, offline = 0, 0
+		for name, r in pairs(rows) do
+			if name ~= old.name then
+				eq(r[9], "", name)
+				if r[7] == "1" then online = online + 1; eq(r[8], "0") else eq(r[7], "0", name); offline = offline + 1 end
+			end
+		end
+		assert(online > 0 and offline > 0, "both kinds listed")
 	end)
 end)
 
@@ -421,15 +451,24 @@ test("bridge people: games: the public events and results the pages list, newest
 			kinds[e.kind] = (kinds[e.kind] or 0) + 1
 			ids[e.id] = true
 			for k in pairs(e) do
-				assert(({ kind = true, id = true, at = true, a = true, b = true, winner = true, state = true, title = true, count = true, official = true })[k], k)
+				assert(({ kind = true, id = true, at = true, a = true, b = true, winner = true, state = true, title = true, titleFight = true,
+					count = true, official = true })[k], k)
 			end
-			if e.title then assert(not e.title:find("|", 1, true), e.title) end
+			-- (The review of 2026-10-20: a title fight's `title` was the ledger's boolean beside the
+			-- events' text in the same field.)
+			if e.title ~= nil then eq(type(e.title), "string", e.id .. ": title is an event's text"); assert(not e.title:find("|", 1, true), e.title) end
+			if e.titleFight ~= nil then eq(e.titleFight, true, e.id) end
 		end
 		eq(kinds.night + kinds.tourney + kinds.duel + kinds.bones, 50)
 		assert(ids.K0001, "a live public table"); eq(ids.K0002, nil, "a rehearsal's table")
-		local duel
-		for _, e in ipairs(d.events) do if e.id == "F0001" then duel = e end end
+		local duel, titled
+		for _, e in ipairs(d.events) do
+			if e.id == "F0001" then duel = e end
+			if e.id == "F0002" then titled = e end
+		end
 		eq(duel.kind, "duel"); eq(duel.state, "over"); eq(duel.winner, Name("Red", 1)); eq(duel.a, Name("Red", 1)); eq(duel.b, Name("Blue", 1))
+		eq(duel.titleFight, nil, "not a title fight")
+		eq(titled.kind, "duel"); eq(titled.titleFight, true, "a public title fight, flagged"); eq(titled.title, nil, "no text in place of the flag")
 		local own = d.own
 		eq(own.duelsWon, 33); eq(own.duelsLost, 7); eq(own.rating, 1993); eq(own.duelsPlace, 7)
 		eq(own.bonesWon, 2, "the live realm's games alone"); eq(own.bonesLost, 1); eq(own.bonesPlace, 4)
@@ -466,7 +505,8 @@ test("bridge people: a module's error leaves its own section nil and every other
 	local function Boom() error("boom") end
 	local roster = ns.Roster
 	local cases = {
-		realm = { modules = { Data = setmetatable({ Summary = Boom }, { __index = ns.Data }) } },
+		-- (The census's guilds and statistics read the same Data.Summary: they go with it, nothing else.)
+		realm = { modules = { Data = setmetatable({ Summary = Boom }, { __index = ns.Data }) }, alike = { guilds = true, stats = true } },
 		roster = { modules = { Roster = setmetatable({}, { __index = function(_, k)
 			if k == "members" then error("boom") end
 			return roster[k]
@@ -481,8 +521,9 @@ test("bridge people: a module's error leaves its own section nil and every other
 			if o.gamesBoom then m.ArenaHome.TabVisible = Boom end
 			if o.profileBoom then m.API.Profile = Boom end
 			eq(B.GetSection(name), nil, name .. ": its module failed")
+			for other in pairs(o.alike or {}) do eq(B.GetSection(other), nil, other .. ": the same module failed") end
 			for _, other in ipairs(GATED) do
-				if other ~= name then
+				if other ~= name and not (o.alike and o.alike[other]) then
 					assert(B.GetSection(other), name .. " failed: " .. other .. " still whole")
 				end
 			end
