@@ -1819,13 +1819,40 @@ function H.PreviewLetter(key)
 	frame:Show()
 	return true
 end
+-- The page of the previews lies on the Olympus window's parchment (its Realm page, parchment =
+-- true): its words in the game's quest fonts, the dark ink of the Throne's and "Your week"'s pages
+-- (line.font), never the list's white. (2026-10-19, the author: "as letras brancas em cima do
+-- parchment, não dá para ler direito".) A row never wraps: the note in rows short enough for it.
+local PAGE_INK, PAGE_TITLE = "QuestFont", "QuestTitleFont"
+H.PAGE_WRAP = 44
+local function PageLine(text, font, extra)
+	local line = { text = text, font = font or PAGE_INK }
+	for k, v in pairs(extra or {}) do line[k] = v end
+	return line
+end
+local function PageParagraph(lines, text, extra)
+	local row = ""
+	for word in tostring(text or ""):gmatch("%S+") do
+		if row ~= "" and #row + 1 + #word > H.PAGE_WRAP then
+			lines[#lines + 1] = PageLine(row)
+			row = word
+		else
+			row = row == "" and word or (row .. " " .. word)
+		end
+	end
+	if row ~= "" then lines[#lines + 1] = PageLine(row, nil, extra) end
+end
 function H.PreviewLines()
 	local keys = H.PreviewKeys()
 	if #keys == 0 then return {} end
-	local lines = { { header = true, text = L.HONOR_LETTER_PREVIEW_HEAD }, { text = L.HONOR_LETTER_PREVIEW_NOTE, gapAfter = true } }
+	-- Its first row, Back: the Realm again, as the Realm's other pages (2026-10-19, the author: the
+	-- page had none, he went to Classes and back to leave it).
+	local lines = { PageLine(L.HONOR_LETTER_PREVIEW_BACK, PAGE_INK, { gapAfter = true, onClick = function() ns.Views.ShowPage(nil) end }),
+		PageLine(L.HONOR_LETTER_PREVIEW_HEAD, PAGE_TITLE, { header = true }) }
+	PageParagraph(lines, L.HONOR_LETTER_PREVIEW_NOTE, { gapAfter = true })
 	for _, key in ipairs(keys) do
 		local k = key
-		lines[#lines + 1] = { text = "> " .. (H.TitleText(k) or k), onClick = function() H.PreviewLetter(k) end }
+		lines[#lines + 1] = PageLine("> " .. (H.TitleText(k) or k), nil, { onClick = function() H.PreviewLetter(k) end })
 	end
 	return lines
 end

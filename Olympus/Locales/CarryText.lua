@@ -25,6 +25,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CARRY_HISTORY_INVALID = "Assinatura original inválida. Esta declaração continua não verificada e não altera status."
 end
 L.CARRY_TITLE = "Carried history"
+L.CARRY_BACK = "< Back to the Realm" -- (its page's first row: the Realm again)
 L.CARRY_NOTE = "Older quote copies remain unverified. Signed originals have separate origin checks; neither route imports loot decisions, payment status, pardons, ranks or keys. Private loot never passes through the member."
 L.CARRY_PREPARE = "Before moving, use /oly carry prepare <destination guild master-Realm>. Join that sister guild manually, then offer this snapshot here."
 L.CARRY_CONFIRM = "Prepare %d quoted records from <%s> for %s of <%s>? No history is sent yet. After your manual move, only that guild's verified master can receive it, and must accept."
@@ -44,6 +45,7 @@ L.CARRY_QUOTE = "Quote"
 L.CARRY_UNKNOWN = "unknown"
 if GetLocale and GetLocale() == "ptBR" then
 	L.CARRY_TITLE = "Histórico transportado"
+	L.CARRY_BACK = "< Voltar ao Reino"
 	L.CARRY_NOTE = "Cópias antigas de citações continuam não verificadas. Originais assinados têm verificação de origem separada; nenhuma via importa decisões de loot, pagamentos, perdões, cargos ou chaves. Loot privado nunca passa pelo membro."
 	L.CARRY_PREPARE = "Antes de mudar, use /oly carry prepare <mestre da guilda de destino-Reino>. Entre nessa guilda irmã manualmente e depois ofereça o snapshot aqui."
 	L.CARRY_CONFIRM = "Preparar %d registros citados de <%s> para %s de <%s>? Nenhum histórico será enviado agora. Após sua mudança manual, somente o mestre verificado dessa guilda pode recebê-lo, e deve aceitar."
@@ -65,6 +67,7 @@ end
 local translated = {
 	deDE = {
 		CARRY_TITLE = "Übertragene Geschichte",
+		CARRY_BACK = "< Zurück zum Reich",
 		CARRY_NOTE = "Ältere Zitatkopien bleiben ungeprüft. Signierte Originale haben eigene Herkunftsprüfungen; kein Weg übernimmt Beuteentscheidungen, Zahlungen, Begnadigungen, Ränge oder Schlüssel. Private Beutenotizen gehen nie durch das Mitglied.",
 		CARRY_PREPARE = "Vor dem Wechsel: /oly carry prepare <Zielgildenmeister-Realm>. Tritt der Schwestergilde manuell bei und biete die Kopie hier an.",
 		CARRY_CONFIRM = "%d zitierte Einträge aus <%s> für %s von <%s> vorbereiten? Noch wird nichts gesendet. Nach deinem manuellen Wechsel muss der geprüfte Gildenmeister zustimmen.",
@@ -84,6 +87,7 @@ local translated = {
 	},
 	esES = {
 		CARRY_TITLE = "Historial trasladado",
+		CARRY_BACK = "< Volver al Reino",
 		CARRY_NOTE = "Las citas antiguas siguen sin verificar. Los originales firmados tienen controles de origen separados; ninguna vía importa decisiones de botín, pagos, indultos, rangos ni claves. Las notas privadas de botín nunca pasan por el miembro.",
 		CARRY_PREPARE = "Antes de cambiar: /oly carry prepare <maestro de la hermandad destino-Reino>. Únete manualmente a esa hermandad hermana y ofrece la copia aquí.",
 		CARRY_CONFIRM = "¿Preparar %d registros citados de <%s> para %s de <%s>? Aún no se envía nada. Tras tu cambio manual, el maestro verificado debe aceptar.",
@@ -103,6 +107,7 @@ local translated = {
 	},
 	frFR = {
 		CARRY_TITLE = "Historique transféré",
+		CARRY_BACK = "< Retour au Royaume",
 		CARRY_NOTE = "Les anciennes citations restent non vérifiées. Les originaux signés ont des contrôles de provenance séparés ; aucune voie n'importe les décisions de butin, paiements, pardons, grades ou clés. Le butin privé ne passe jamais par le membre.",
 		CARRY_PREPARE = "Avant de changer : /oly carry prepare <maître de guilde cible-Royaume>. Rejoins manuellement cette guilde soeur, puis propose la copie ici.",
 		CARRY_CONFIRM = "Préparer %d entrées citées de <%s> pour %s de <%s> ? Rien n'est encore envoyé. Après ton changement manuel, le maître vérifié doit accepter.",

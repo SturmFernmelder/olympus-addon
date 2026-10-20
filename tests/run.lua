@@ -63338,7 +63338,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -63353,6 +63353,7 @@ for _, name in ipairs(focused) do
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
+		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI } -- (the Realm's pages: their ink and their Back)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
@@ -64148,6 +64149,10 @@ end)()
 				eq(r:IsShown(), true); eq(r.version, v)
 				assert(r.text:GetText():find(L.LETTERS_ROW:format(v, (Lt.Text(v))), 1, true), r.text:GetText())
 				eq(r.text:GetText():find(L.LETTERS_CURRENT, 1, true) ~= nil, v == ns.VERSION, v .. ": this version marked")
+				-- (2026-10-19, the author: light words on the parchment are hard to read. The mark was
+				-- the list's grey, 9d9d9d; now a dark faded ink.)
+				eq(r.text:GetText():find("|cff9d9d9d", 1, true), nil, v .. ": no light grey on the parchment")
+				if v == ns.VERSION then assert(r.text:GetText():find("|c" .. Lt.MARK_INK .. "(" .. L.LETTERS_CURRENT, 1, true), r.text:GetText()) end
 			end
 			-- A click: that version's letter, read; All letters: the list again.
 			local oldRow

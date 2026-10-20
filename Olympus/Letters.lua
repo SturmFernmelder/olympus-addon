@@ -50,6 +50,8 @@ Letters.LOGIN_WAIT = 8
 Letters.RETRY = 10
 Letters.HANDOFF = 2
 Letters.WIDTH, Letters.HEIGHT = 440, 470
+-- The history's mark of this version on the parchment (0.35, 0.25, 0.12: the Accord's faded ink).
+Letters.MARK_INK = "ff59401f"
 
 local frame, ticker, waited
 
@@ -385,7 +387,9 @@ function Letters.ShowHistory()
 		r:SetPoint("TOPLEFT", f.page, "TOPLEFT", 0, y)
 		r:SetWidth(width)
 		local title = Letters.Text(v)
-		local now = v == ns.VERSION and ("  |cff9d9d9d(" .. L.LETTERS_CURRENT .. ")|r") or ""
+		-- (This version's mark in a faded brown ink, still dark on the parchment: the list's grey,
+		-- 9d9d9d, was barely there on it.)
+		local now = v == ns.VERSION and ("  |c" .. Letters.MARK_INK .. "(" .. L.LETTERS_CURRENT .. ")|r") or ""
 		r.text:SetText(L.LETTERS_ROW:format(v, title) .. now)
 		r:Show()
 		y = y - 24
