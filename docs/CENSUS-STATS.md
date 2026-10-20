@@ -54,12 +54,12 @@ and the confirmed alt links. Nothing is sent.
 **Validated people** (the Olympus Accord's BattleTags): only a moderation team client holds any
 (`Accord.lua`'s team store), so only its export carries `validated`: how many distinct BattleTags and
 characters it holds, never a tag or a name. Every other client sends none and its Companion shows
-"not counted yet".
+no line for it (Daniel, 2026-10-20: the public sees only what is counted).
 
 **Not counted yet:** people with the addon (beyond those online now) and Battle.net accounts.
 Counting them needs a census wire change on every reporter (a per-account flag in the hello, report
 fields for guildmates seen with the addon). Not in this release: the export leaves them out and the
-Companion shows "not counted yet". To be designed with Daniel after 2026-10-21.
+Companion shows no line for them. To be designed with Daniel after 2026-10-21.
 
 ## Export (`stats` section, version 1, `Olympus/BridgeSections.lua`)
 
