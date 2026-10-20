@@ -111,12 +111,36 @@ read a stable file, and keep the preceding valid checkpoint if parsing fails.
 ## Sections
 
 Besides the census checkpoint, Olympus offers versioned read-only sections through
-`OlympusBridge.RegisterSection(name, version, exporter)` / `GetSection(name)` (`Olympus/Bridge.lua`,
-exporters in `Olympus/BridgeSections.lua`). Olympus copies each into fresh plain tables within
-`OlympusBridge.SECTION_LIMITS`. At logout this sidecar saves only the sections it knows, at the
-version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `stats`, `wanted` and
-`self`. `stats` is the census statistics page's figures (`docs/CENSUS-STATS.md`).
-A failing or unknown section is skipped and never blocks the census.
+`OlympusBridge.RegisterSection(name, version, exporter, limits)` / `GetSection(name)`
+(`Olympus/Bridge.lua`, exporters in `Olympus/BridgeSections.lua` and `Olympus/BridgeAffairs.lua`).
+Olympus copies each into fresh plain tables within `OlympusBridge.SECTION_LIMITS` (or the larger
+limits a section asked for, never past `OlympusBridge.SECTION_MAX`). At logout this sidecar saves
+only the sections it knows, at version 1, under `OlympusCompanionDB.sections`: `guilds`,
+`rankings`, `stats`, `wanted`, `self`, `realm`, `roster`, `church`, `games`, `profile`, `crafting`,
+`crafters`, `treasury`, `decrees`, `agenda`, `notices`, `watch` and `chatRooms` (a name Olympus
+does not register is simply absent). `stats` is the census statistics page's figures
+(`docs/CENSUS-STATS.md`). A failing or unknown section is skipped and never blocks the census.
+
+The affairs' sections (`Olympus/BridgeAffairs.lua`), each nil before the Olympus Accord is accepted
+and for a character who is no member:
+
+- `crafting`: the request board's open cards (100) and this character's own open deals (30): item,
+  quantity, state, guild, the other party; never the terms, the price or the request's chat;
+- `crafters`: the crafters' directory (300, the best skill first): name, guild, professions with
+  their skill, cap and recipe count;
+- `treasury`: the public numbers alone, only while the King shows the balance (`shown = false`
+  otherwise): balance, in, out, this week's donations and donors; never an item or a name;
+- `decrees`: the Decrees tab's decrees (30): kind, whole army or one guild, role and name of the
+  sender, zone, words as the page shows them, times;
+- `agenda`: the week (30, soonest first): the King's Agenda and dated entries, this guild's
+  calendar events, the Arena's fights;
+- `notices`: `{ items }` (30, newest first): musters (and those ended within a day, as withdrawn),
+  the Crown's and the High Council's decrees for the whole army, and this character's own letters
+  from the King (`audience = "self"`: his alone);
+- `watch`: only on a moderation team client or for the desk's own staff: counts, the cases, the
+  guild's records, the inspected players and the untabarded list (100 each); never a reporter, a
+  note, an evidence line, a moderator's reason or a chat line;
+- `chatRooms`: the rooms this character is in, with member and unread counts; no chat text.
 
 What a section may carry: only what every member already sees on Olympus's own pages, plus the
 `self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, guild = "Guild Name", at = <server

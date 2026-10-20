@@ -220,7 +220,8 @@ OlympusBridge.SECTION_MAX = { values = 200000, string = 512 }
 
 local sections, sectionNames = {}, {}
 
--- Registers `name` (lowercase letters, digits, "_"); a name is taken once, by its first exporter.
+-- Registers `name` (a lowercase letter, then letters, digits or "_": "chatRooms", as the Companion
+-- names that section); a name is taken once, by its first exporter.
 -- `limits` (optional): { values = n, string = n } for this section, each at most SECTION_MAX's.
 local function Limit(v, default, max)
 	if v == nil then return default end
@@ -228,7 +229,7 @@ local function Limit(v, default, max)
 	return v
 end
 function OlympusBridge.RegisterSection(name, version, exporter, limits)
-	if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or #name > 32 then return false, "name" end
+	if type(name) ~= "string" or not name:match("^[a-z][%w_]*$") or #name > 32 then return false, "name" end
 	if type(version) ~= "number" or version < 1 or version ~= math.floor(version) then return false, "version" end
 	if type(exporter) ~= "function" then return false, "exporter" end
 	if limits ~= nil and type(limits) ~= "table" then return false, "limits" end

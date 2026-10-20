@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections", "BridgeAffairs" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -30248,6 +30248,10 @@ test("1.2.6 companion sections: the sidecar saves only the sections it knows, at
 		assert(loadfile(ROOT .. "OlympusCompanionBridge/Checkpoint.lua"))("OlympusCompanionBridge", {})
 		local OnEvent = assert(EVENT_SCRIPTS[before + 1], "the private bridge event frame")
 		local asked = {}
+		-- (931: every tab's section, companion/BRIDGE-SECTIONS.md: the sidecar knows them all now.)
+		local TABS = {}
+		for _, name in ipairs({ "realm", "roster", "church", "games", "profile", "crafting", "crafters", "treasury", "decrees", "agenda",
+			"notices", "watch", "chatRooms" }) do TABS[name] = true end
 		OlympusBridge = {
 			CENSUS_CHECKPOINT_API_VERSION = 1,
 			GetCensusCheckpoint = function() return nil end,
@@ -30259,6 +30263,7 @@ test("1.2.6 companion sections: the sidecar saves only the sections it knows, at
 				if name == "wanted" then error("boom") end
 				if name == "self" then return { name = name, version = 1, data = { character = "Me-Realm" } } end
 				if name == "stats" then return { name = name, version = 1, data = { people = 7 } } end -- (the census statistics)
+				if TABS[name] then return { name = name, version = 1, data = { tab = name } } end
 				return { name = name, version = 1, data = { leaked = true } }
 			end,
 		}
@@ -30271,9 +30276,11 @@ test("1.2.6 companion sections: the sidecar saves only the sections it knows, at
 		eq(db.sections.wanted, nil, "a failing section is skipped, the others still go")
 		eq(db.sections.self.data.character, "Me-Realm")
 		eq(db.sections.stats.data.people, 7, "the census statistics' figures")
-		eq(asked.chat, nil, "it only asks for the sections it knows")
-		for name in pairs(db.sections) do
-			assert(({ guilds = true, self = true, stats = true })[name], "unexpected section " .. name)
+		eq(asked.chat, nil, "it only asks for the sections it knows"); eq(asked.census, nil, "the census goes as the checkpoint alone")
+		for name in pairs(TABS) do eq(db.sections[name] and db.sections[name].data.tab, name, "the tab's section " .. name) end
+		for name, s in pairs(db.sections) do
+			assert(({ guilds = true, self = true, stats = true })[name] or TABS[name], "unexpected section " .. name)
+			eq(s.data.leaked, nil, name)
 		end
 
 		OlympusBridge.GetSection = nil
@@ -55543,6 +55550,8 @@ do
 		WithMapIcons = WithMapIcons, RecordingPins = RecordingPins, WithGamepadUI = WithGamepadUI, Widget = Widget, T0 = T0 })
 	-- (1.2.3: the garbage the Chat tab's and the window's redraws make, the author's measure on his game.)
 	assert(loadfile(ROOT .. "tests/chat-memory.lua"))(ns, test, eq, { ADDON_DIR = ADDON_DIR, WithWindow = WithWindow, Widget = Widget, T0 = T0 })
+	-- (931: the Companion's chatRooms section reads the Chat tab's unread counts, tests/bridge-affairs.lua.)
+	Harness.WithChatWindow = WithWindow
 
 	local function Line(t, sender, text, extra)
 		local e = { t = t, sender = sender, guild = "Olympus II", text = text }
@@ -63522,7 +63531,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats", "bridge-affairs" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -63539,6 +63548,7 @@ for _, name in ipairs(focused) do
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
 		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI } -- (the Realm's pages: their ink and their Back)
 		or name == "census-stats" and { WithUI = WithUI, LoadUI = LoadUI } -- (CR-02 / KH-08)
+		or name == "bridge-affairs" and { WithWindow = Harness.WithChatWindow, ROOT = ROOT } -- (931: the Companion's tabs of affairs)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }
