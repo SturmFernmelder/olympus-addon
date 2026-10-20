@@ -55788,6 +55788,27 @@ do
 			ns.me = dev
 			B.ChatForget()
 			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", dev), SILVER .. ns.AUTHOR, "on his own screen, on his own line")
+			-- CH-10 (the author, 10-19: "Você quer ver seu dragão, sim"): his own lines on his own screen
+			-- in every form Forever's chat events may hand his name (ns.Normal: "First-Surname", with or
+			-- without a realm, or no realm at all), logged in on either realm of his group, guild chat too.
+			local first, surname = ns.AUTHOR:match("^(%S+) (%S+)$")
+			local savedRealm, savedSplit = ns.realm, ns.splitNames
+			local okOwn, errOwn = pcall(function()
+				ns.splitNames = true
+				local realms = ns.GroupRealms(ns.GroupOf(ns.AUTHOR_REALM))
+				assert(#realms >= 2, "his realm group")
+				for _, realm in ipairs(realms) do
+					ns.realm, ns.me = realm, ns.AUTHOR .. "-" .. realm
+					for _, form in ipairs({ ns.AUTHOR, first .. "-" .. surname, first .. "-" .. surname .. "-" .. realm, ns.me }) do
+						for _, event in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_PARTY", "CHAT_MSG_CHANNEL", "CHAT_MSG_GUILD" }) do
+							B.ChatForget()
+							eq(cb(event, first, "hi", form), SILVER .. first, "his own line on " .. realm .. ", sent as " .. form .. ", " .. event)
+						end
+					end
+				end
+			end)
+			ns.realm, ns.splitNames = savedRealm, savedSplit
+			if not okOwn then ns.me = savedMe; error(errOwn, 0) end
 			ns.me = savedMe
 			B.ChatForget()
 			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", ns.AUTHOR .. "-Elsewhere"), nil, "his name on another realm group")
