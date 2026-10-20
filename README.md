@@ -3245,9 +3245,10 @@ Gundlach and contributors (speedata, 3-clause BSD) for Olympus Link's QR code
   donations), Zeal (what the King hides stays off the channel), and FedGuy / Fed Olympus
   (nameplate-assisted layer hopping).
 - **Art:** Max (the bronze elite borders, drawn over the game's own; the winged one remains the guild masters').
-- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
-  to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
-  player who told us WoW had handed him the channel.
+- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI; PartyRockAce's report
+  of the world map blocked in controller mode, fixed in 1.0), Ignitheus (whispers to Forever
+  names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the player who
+  told us WoW had handed him the channel.
 - Everyone who reported a bug, tested in game or asked for a feature.
 
 ## License

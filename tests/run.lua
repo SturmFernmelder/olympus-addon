@@ -29597,6 +29597,20 @@ do
 			Has(security, "](https://github.com/dnl-gentile/olympus-addon#" .. id .. ").*\n", "the store page: the README's section")
 		end
 	end)
+
+	-- The author asked on 2026-09-27 that the Credits line of the controller player whose 0.9.8
+	-- report showed the block came when the world map opened name that report (fixed in 1.0,
+	-- 1705a331); since 0.9.6 the line had said only "the gamepad UI". (No player is named here: the
+	-- line is checked by what it credits.)
+	test("docs: Credits on the README, the CurseForge page and the store page name the controller player's report of the world map blocked in controller mode, fixed in 1.0", function()
+		for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md", "docs/CURSEFORGE-STORE.md" }) do
+			local credits = Flat(assert(Section(Doc(path), "Credits"), path .. ": a Credits section"))
+			local field = credits:match("%*%*Reports from the field:%*%*(.-)%.%s+%- ")
+			assert(field, path .. ": a Reports from the field line")
+			Has(field, " (the gamepad UI; ", path .. ": the gamepad UI still credited")
+			Has(field, "'s report of the world map blocked in controller mode, fixed in 1.0), ", path .. ": the report credited")
+		end
+	end)
 end
 ---------------------------------------------------------------------------
 -- OfficerSpy's bridge (Bridge.lua): what a companion addon the mods run may read, and that it
