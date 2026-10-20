@@ -1141,17 +1141,13 @@ local function SeenName(name)
 	end
 	return shown
 end
--- Does `name` hold the search `q`, as its row shows it?
-local function NameHolds(q, name)
-	return type(name) == "string" and name ~= "" and SearchName(name):find(q, 1, true) ~= nil
-end
-
 -- 1.2.1: the Census's search reads letters that look alike as one: l, I and 1, and 0 and O (a
 -- guild's name may mix them, "OLYMPUS XIlI", and the player types what he sees). A folded text
--- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o.
+-- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o. CR-08 (the author's ask):
+-- the Realm's search too, the same guilds of the same census, their Lords, Captains and members.
 local function Lookalike(s) return (s:gsub("[l1]", "i"):gsub("0", "o")) end
--- Does `name` hold the Census's search `lq` (Lookalike of the query), as its row shows it? Kept
--- like SearchName.
+-- Does `name` hold the Census's or the Realm's search `lq` (Lookalike of the query), as its row
+-- shows it? Kept like SearchName.
 local function LookHolds(lq, name)
 	if type(name) ~= "string" or name == "" then return false end
 	local k = lookNames[name]
@@ -2069,19 +2065,19 @@ local function SweptByGuild()
 	return out
 end
 
--- The guilds where the Realm's search `q` finds a player seen online (Views.MembersOf's sources:
--- our roster for our own guild `own`, /who's round for the others), before any member list is
--- made: [guild] = true.
-local function SeenHits(q, own)
+-- The guilds where the Realm's search `lq` (Lookalike) finds a player seen online (Views.MembersOf's
+-- sources: our roster for our own guild `own`, /who's round for the others), before any member list
+-- is made: [guild] = true.
+local function SeenHits(lq, own)
 	local hit = {}
 	local sweep = ns.Who and ns.Who.sweep
 	for _, p in ipairs(sweep and sweep.list or {}) do
 		local guild = p.guild
-		if guild and guild ~= own and not hit[guild] and p.name and NameHolds(q, SeenName(p.name)) then hit[guild] = true end
+		if guild and guild ~= own and not hit[guild] and p.name and LookHolds(lq, SeenName(p.name)) then hit[guild] = true end
 	end
 	if own then
 		for _, m in ipairs(ns.Roster.online or {}) do
-			if NameHolds(q, m.name) then
+			if LookHolds(lq, m.name) then
 				hit[own] = true
 				break
 			end
@@ -2092,19 +2088,20 @@ end
 
 -- What of a guild the Realm's search finds, its name aside: its Lord, its Captains and the
 -- members seen online (our roster, /who), each by name as its row shows it. `ctx`: the search
--- (q, own, hits: SeenHits, swept: SweptByGuild once needed). The member list (Views.MembersOf
--- makes a table for each player and sorts them) is made only for a guild where someone is found
--- and only when `rows` (the guild will show): otherwise `n` counts a member found as one.
+-- (lq: Lookalike of it, own, hits: SeenHits, swept: SweptByGuild once needed). The member list
+-- (Views.MembersOf makes a table for each player and sorts them) is made only for a guild where
+-- someone is found and only when `rows` (the guild will show): otherwise `n` counts a member found
+-- as one.
 local function GuildMatches(e, ctx, rows)
-	local g, q = e.g, ctx.q
-	local found = { lord = NameHolds(q, g.leader), officers = {}, members = {}, all = {} }
+	local g, lq = e.g, ctx.lq
+	local found = { lord = LookHolds(lq, g.leader), officers = {}, members = {}, all = {} }
 	for _, o in ipairs(g.officers or {}) do
-		if NameHolds(q, o.name) then found.officers[#found.officers + 1] = o end
+		if LookHolds(lq, o.name) then found.officers[#found.officers + 1] = o end
 	end
 	local seen = ctx.hits[e.name]
 	if not seen and e.name ~= ctx.own then
 		for _, p in ipairs(ns.Who and ns.Who.GuildSeen and ns.Who.GuildSeen(e.name) or {}) do
-			if p.guild == e.name and p.name and NameHolds(q, SeenName(p.name)) then
+			if p.guild == e.name and p.name and LookHolds(lq, SeenName(p.name)) then
 				seen = true
 				break
 			end
@@ -2114,7 +2111,7 @@ local function GuildMatches(e, ctx, rows)
 		ctx.swept = ctx.swept or SweptByGuild()
 		local members, fromWho = Views.MembersOf(e.name, g, ctx.swept)
 		for _, m in ipairs(members) do
-			if NameHolds(q, m.name) then found.members[#found.members + 1] = m end
+			if LookHolds(lq, m.name) then found.members[#found.members + 1] = m end
 		end
 		found.all, found.fromWho = members, fromWho
 	end
@@ -2157,8 +2154,9 @@ end
 
 -- `q`, the search (Views.Query): the High Council's names (for whoever may see it), then each
 -- guild whose name holds it, whole, and each whose Lord, Captains or members seen do, opened on
--- those alone; "No match" for none. The chats' link stays (the Chat tab it opens has a search of
--- its own). Nothing
+-- those alone, the guilds and their people with look-alike letters as one, as in the Census
+-- (Lookalike, CR-08); "No match" for none. The chats' link stays (the Chat tab it opens has a
+-- search of its own). Nothing
 -- else: the King's lines, the level race, recruiting and the layers show once it is emptied.
 local function RealmLines(s, q)
 	if boardShown and ns.Board and not ns.Board.missing and ns.Board.Lines then return ns.Board.Lines(q) end
@@ -2389,14 +2387,14 @@ local function RealmLines(s, q)
 	-- guilds past them counted in `more`, shown on a click.)
 	local ctx, rows, more
 	if q then
-		local own = GetGuildInfo("player")
-		ctx, rows, more = { q = q, own = own, hits = SeenHits(q, own) }, 0, 0
+		local own, lq = GetGuildInfo("player"), Lookalike(q)
+		ctx, rows, more = { lq = lq, own = own, hits = SeenHits(lq, own) }, 0, 0
 	end
 	-- (1.2.4's review: in the Realm's own order, chosen on its line above its guilds; by default
 	-- Data.Summary's own, the shared order, as before. A search's guilds in it too.)
 	if not q and #s.guilds > 1 then lines[#lines + 1] = RealmOrderLine() end
 	for _, e in ipairs(Views.RealmOrdered(s.guilds)) do
-		if not q or NameHolds(q, e.name) then
+		if not q or LookHolds(ctx.lq, e.name) then
 			-- (Found by its name: the guild as ever, opened or not.)
 			if q then found = found + 1 end
 			Guild(e, expanded[e.name])

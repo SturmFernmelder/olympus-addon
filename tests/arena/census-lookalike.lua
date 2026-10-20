@@ -2,7 +2,9 @@
 -- that look alike ("OLYMPUS XIlI", a small L among capital i's; a one or a zero for I or O), and
 -- the player types what he sees. The Census's search reads l, I and 1 as one letter and 0 and O
 -- as another, in what is typed and in the guilds, Lords, players and zones it reads; any other
--- letter as ever. On the harness's namespace, its census swapped for a few invented guilds.
+-- letter as ever. CR-08 (the author's ask): the Realm's search (RealmLines) reads the same
+-- guilds, Lords, Captains and members seen the same way. On the harness's namespace, its census
+-- swapped for a few invented guilds.
 local H = ...
 local test, eq = H.test, H.eq
 local ns = H.ns
@@ -88,5 +90,58 @@ test("1.2.1 Census search: what is typed stays as typed, and the recruiting word
 		local found = false
 		for _, l in ipairs(lines) do if l.header and l.text == ns.L.RECRUITING then found = true end end
 		check(found, "the recruiting list for %s", word)
+	end)
+end)
+
+-- CR-08, the Realm's search (Olympus/Views.lua's RealmLines) over the same census: the guilds'
+-- rows, by their id, in order.
+local function RealmGuilds(lines)
+	local out = {}
+	for _, l in ipairs(lines) do
+		local name = type(l.id) == "string" and l.id:match("^guild:(.+)$")
+		if name then out[#out + 1] = name end
+	end
+	return table.concat(out, ",")
+end
+local function FindRealm(V, text)
+	V.SetFilter("realm", text)
+	return V.Build("realm")
+end
+local function Says(lines, text)
+	for _, l in ipairs(lines) do if Plain(l.text) == text then return true end end
+	return false
+end
+
+test("CR-08 Realm search: l, I and 1 read alike, 0 and O too, as in the Census: XIII finds OLYMPUS XIlI, its Lord, Captains and members seen", function()
+	WithCensus(function(V)
+		local who, savedSweep = ns.Who, ns.Who and ns.Who.sweep
+		-- A member of Olympus Amber Hollow the /who round saw online.
+		who.sweep = { list = { { name = "Ilvara", guild = "Olympus Amber Hollow", level = 18, class = "MAGE" } } }
+		local ok, err = pcall(function()
+			-- A guild by its name, typed as it looks, any case.
+			eq(RealmGuilds(FindRealm(V, "XIII")), "OLYMPUS XIlI")
+			eq(RealmGuilds(FindRealm(V, "xiii")), "OLYMPUS XIlI")
+			eq(RealmGuilds(FindRealm(V, "X1lI")), "OLYMPUS XIlI", "a one and a small L typed")
+			eq(RealmGuilds(FindRealm(V, "olympus xili")), "OLYMPUS XIlI", "as written")
+			eq(RealmGuilds(FindRealm(V, "house")), "Olympus H0use", "a zero for an O")
+			eq(RealmGuilds(FindRealm(V, "h0use")), "Olympus H0use")
+			-- Its Lord, a Captain and a member seen online, opened under their guild.
+			local lines = FindRealm(V, "marrek dunhoit")
+			eq(RealmGuilds(lines), "OLYMPUS XIlI", "a Lord, an l typed as I"); eq(People(lines), "Marrek Dunholt")
+			lines = FindRealm(V, "ysoide")
+			eq(RealmGuilds(lines), "Olympus II"); eq(People(lines), "Ysolde Imrie", "a Captain")
+			lines = FindRealm(V, "llvara")
+			eq(RealmGuilds(lines), "Olympus Amber Hollow", "a member seen, his capital i typed as a small L")
+			eq(People(lines), "Ilvara", "his row under it")
+			-- Every other letter as ever.
+			eq(RealmGuilds(FindRealm(V, "amber")), "Olympus Amber Hollow")
+			eq(RealmGuilds(FindRealm(V, "hoiiow")), "Olympus Amber Hollow", "Hollow's two Ls read as I")
+			lines = FindRealm(V, "XIIII")
+			eq(RealmGuilds(lines), "", "one letter too many finds nothing")
+			check(Says(lines, ns.L.SEARCH_NO_MATCH), "and says so")
+			eq(V.Filter("realm"), "XIIII", "the box keeps what was typed")
+		end)
+		who.sweep = savedSweep
+		if not ok then error(err, 0) end
 	end)
 end)
