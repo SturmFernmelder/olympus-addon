@@ -182,8 +182,9 @@ channels; the same charter and Join controls work for each side.
   seen online (the player shows under the guild's row), or a zone ("Stormwind": its soldiers
   and its guilds, most first). Type **recruiting** (or `free 50`) for every guild with room,
   most free slots first and the King's gates on top. Letters that look alike count as one
-  (1.2.1): l, I and 1, and 0 and O, so `XIII` finds OLYMPUS XIlI. The Realm tab's search reads
-  its guilds, Lords, Captains and members seen the same way.
+  (1.2.2): l, I and 1, and 0 and O, so `XIII` finds OLYMPUS XIlI. The Realm tab's search reads
+  its guilds, Lords, Captains and members seen, and its classes, races and professions, the
+  same way.
 - **Tonight on this client** (1.1): under the list, the most soldiers your addon saw online at
   once tonight and when, and (in its tooltip, and next to a zone you search) how each zone
   filled or emptied since. Counted by your own addon once a minute from the reports it

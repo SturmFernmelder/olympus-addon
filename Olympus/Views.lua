@@ -1144,7 +1144,8 @@ end
 -- 1.2.1: the Census's search reads letters that look alike as one: l, I and 1, and 0 and O (a
 -- guild's name may mix them, "OLYMPUS XIlI", and the player types what he sees). A folded text
 -- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o. CR-08 (the author's ask):
--- the Realm's search too, the same guilds of the same census, their Lords, Captains and members.
+-- the Realm's search too, the same guilds of the same census, their Lords, Captains and members,
+-- and the people of its classes, races and professions.
 local function Lookalike(s) return (s:gsub("[l1]", "i"):gsub("0", "o")) end
 -- Does `name` hold the Census's or the Realm's search `lq` (Lookalike of the query), as its row
 -- shows it? Kept like SearchName.
@@ -2681,8 +2682,12 @@ local function RealmRaceName(id, knownName)
 	return L.REALM_RACE_N:format(id)
 end
 
-local function RealmPersonMatches(q, p, group)
-	return ns.Holds(q, p.name, p.full, p.guild, p.rank, p.role, group)
+-- Does the search `lq` (Lookalike of it; nil, none) find the person `p` of the group `group`? Each
+-- text as its row shows it, look-alike letters as one, as the guilds' search (CR-08).
+local function RealmPersonMatches(lq, p, group)
+	if not lq then return true end
+	return LookHolds(lq, p.name) or LookHolds(lq, p.full) or LookHolds(lq, p.guild) or LookHolds(lq, p.rank)
+		or LookHolds(lq, p.role) or LookHolds(lq, group)
 end
 
 local function RealmPersonSort(a, b)
@@ -2773,12 +2778,12 @@ local function RealmGroupedLines(s, mode, q)
 		end
 	end
 
-	local ordered = {}
+	local ordered, lq = {}, q and Lookalike(q)
 	for _, g in pairs(groups) do
 		local matches = {}
 		for _, entry in ipairs(g.people) do
 			local p = entry.person
-			if RealmPersonMatches(q, p, g.label) or (entry.profession and ns.Holds(q, entry.profession.name)) then matches[#matches + 1] = entry end
+			if RealmPersonMatches(lq, p, g.label) or (entry.profession and LookHolds(lq, entry.profession.name)) then matches[#matches + 1] = entry end
 		end
 		if #matches > 0 then g.people = matches; ordered[#ordered + 1] = g end
 	end

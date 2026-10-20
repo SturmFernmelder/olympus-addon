@@ -145,3 +145,55 @@ test("CR-08 Realm search: l, I and 1 read alike, 0 and O too, as in the Census: 
 		if not ok then error(err, 0) end
 	end)
 end)
+
+-- CR-08, the Realm's other views (Olympus/Views.lua's RealmGroupedLines: classes, races and
+-- professions), each with a search of its own over the same people: its groups' rows by their key,
+-- in order.
+local function Groups(lines)
+	local out = {}
+	for _, l in ipairs(lines) do
+		local key = type(l.id) == "string" and l.id:match("^realm:%a+:(.+)$")
+		if key then out[#out + 1] = key end
+	end
+	return table.concat(out, ",")
+end
+local function FindIn(V, mode, text)
+	V.SetRealmMode(mode, true)
+	V.SetFilter("realm:" .. mode, text)
+	return V.Build("realm")
+end
+
+test("CR-08 Realm's classes, races and professions: their search reads l, I and 1 alike, 0 and O too, as the guilds': XIII finds OLYMPUS XIlI's people, a name and a profession typed as they look", function()
+	WithCensus(function(V)
+		local who, crafters = ns.Who, ns.Crafters
+		local saved = { sweep = who.sweep, board = crafters.Board }
+		-- A member of Olympus Amber Hollow the /who round saw online, a tailor on the crafters' board.
+		who.sweep = { list = { { name = "Ilvara", guild = "Olympus Amber Hollow", level = 18, class = "MAGE" } } }
+		crafters.Board = function()
+			return { { name = "Ilvara", guild = "Olympus Amber Hollow", t = os.time(),
+				profs = { { key = "197", name = "Tailoring", rank = 120, max = 150 } } } }
+		end
+		local ok, err = pcall(function()
+			-- A guild's people by its name, typed as it looks.
+			eq(People(FindIn(V, "classes", "olympus xiii")), "Marrek Dunholt-Realm", "XIlI's Lord, by his guild")
+			eq(People(FindIn(V, "races", "XIII")), "Marrek Dunholt-Realm", "the races' search too")
+			-- A name, his capital i typed as a small L or a one, under his group.
+			local lines = FindIn(V, "classes", "llvara")
+			eq(Groups(lines), "MA"); eq(People(lines), "Ilvara-Realm")
+			eq(People(FindIn(V, "classes", "1lvara")), "Ilvara-Realm", "a one typed")
+			eq(People(FindIn(V, "classes", "ysoide")), "Ysolde Imrie-Realm", "a Captain, his l typed as I")
+			-- A profession's name, and its crafter's guild.
+			lines = FindIn(V, "professions", "taiioring")
+			eq(Groups(lines), "197", "Tailoring"); eq(People(lines), "Ilvara-Realm")
+			eq(People(FindIn(V, "professions", "amber hoiiow")), "Ilvara-Realm", "his guild, Hollow's Ls typed as I")
+			-- Every other letter as ever.
+			lines = FindIn(V, "classes", "XIIII")
+			eq(People(lines), "", "one letter too many finds nothing")
+			check(Says(lines, ns.L.SEARCH_NO_MATCH), "and says so")
+			eq(V.Filter("realm:classes"), "XIIII", "the box keeps what was typed")
+		end)
+		who.sweep, crafters.Board = saved.sweep, saved.board
+		V.SetRealmMode("guilds", true)
+		if not ok then error(err, 0) end
+	end)
+end)
