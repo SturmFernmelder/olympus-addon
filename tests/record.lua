@@ -559,7 +559,9 @@ test("record mode: the source sends nothing; the TOC declares its own SavedVaria
 	assert(at["Record.lua"] and at["Record.lua"] > at["Data.lua"] and at["Record.lua"] > at["Sign.lua"] and at["Record.lua"] > at["UI.lua"])
 	local core = assert(ReadFile(ROOT .. "Olympus/Core.lua"))
 	assert(core:find('StandIn("Record", { "Slash" })', 1, true))
-	assert(core:find('"Nominees", "Record" }) do', 1, true), "named among the files a restart loads")
+	-- (In the restart list, wherever the other files merged into the release put it: named, not placed.)
+	local restart = core:match('for _, key in ipairs%((%b{})%) do%s+if ns%[key%]%.missing')
+	assert(restart and restart:find('"Record"', 1, true), "named among the files a restart loads")
 	assert(core:find('elseif cmd == "record" then', 1, true))
 	eq(rawget(ns, "Record") and ns.Record.missing, true, "the harness, like a client updated without a restart, has the stand-in")
 	-- The census page's line: first, a click opens the status.
