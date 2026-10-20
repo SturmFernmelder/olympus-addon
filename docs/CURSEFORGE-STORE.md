@@ -446,10 +446,6 @@ King's name he:
   members' too, and they never wait behind the flood guard, like the King's. For the other
   guilds his [Lords] lines are the Crown's, as the Hands' are.
 
-Never the King's own: his crown on the map and his layer, holding court, Royal Writs, Royal
-Pardons, the untabarded list, and the King's own book of the treasury or his yes to share it
-(the Steward keeps no book unless named a keeper).
-
 *Continued in the README: [The King's Steward (1.0.0)](https://github.com/dnl-gentile/olympus-addon#the-kings-steward-100).*
 
 ### The Treasury (its keepers, the King, and the army when the King says so)

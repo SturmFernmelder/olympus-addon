@@ -63516,7 +63516,8 @@ for _, name in ipairs(focused) do
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
-		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI, "census-stats" } -- (the Realm's pages: their ink and their Back)
+		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI } -- (the Realm's pages: their ink and their Back)
+		or name == "census-stats" and { WithUI = WithUI, LoadUI = LoadUI } -- (CR-02 / KH-08)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }

@@ -31,7 +31,7 @@ M.CUTS = {
 	{ title = "The Chat tab (1.1.1)", keep = 1 }, -- (1.1.6: the page grew past the budget with 1.2's sections)
 	{ title = "Net-off (1.1): the moderators hide a character or take a guild off the network", keep = 1 },
 	{ title = "The Throne (the King and his Hands)", keep = 1 },
-	{ title = "The King's Steward (1.0.0)", keep = 3 }, -- his opening, what he does, and what he never does
+	{ title = "The King's Steward (1.0.0)", keep = 2 }, -- his opening and what he does (what he never does: the README)
 	{ title = "The Treasury (its keepers, the King, and the army when the King says so)", keep = 1 },
 	{ title = "Privacy", keep = 1 },
 	{ title = "Security and trust", keep = 2 },
@@ -52,6 +52,8 @@ M.CUTS = {
 	-- (1.2.5: the API's leader presence and wider area scope pushed it past the budget again: the
 	-- API's opening paragraph stays; its page-surface paragraph and the authors' link are the README's.)
 	{ title = "Other addons: the Olympus API (1.2.4)", keep = 1 },
+	-- (1.2.5.1 release integration: the merged lanes passed the budget by a few dozen bytes: the
+	-- Steward's "what he never does" paragraph is the README's.)
 	-- (1.2.5.1: the chat warnings, the Companion bridge and the Olympus Accord's line together passed
 	-- the budget: a High Councillor's tooltip paragraph is the README's.)
 	{ title = "Person details", keep = 1 },
