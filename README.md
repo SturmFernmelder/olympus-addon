@@ -2454,6 +2454,17 @@ message (the game adds it). What goes where:
 | A reviewer's word that he takes sightings (WS) | everyone on the Olympus channel | from a reviewer who said Yes to sightings: 45 seconds after login and every 5 minutes, and off at once on his No |
 | Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named) at your team level or higher, by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
 | A moderation team member's ask for BattleTags (BQ, 1.2.5.1): nothing but his name | everyone on the Olympus channel | from a team member's addon, 90 seconds after login and every 30 minutes |
+| Record mode, about you (the Guinness attempt's witnesses, members of an Olympus guild only, only after your own `/oly record on`; off by default, kept for that character until `/oly record off`): your character, GUID, guild and rank, faction, realm and census realm group, the addon's version and test build number, the game's version and language, a SHA-256 hash of your BattleTag if the game gives it (never the tag itself; anyone who guesses your tag can test it against the hash), and when each session began | nobody: record mode sends no message of any kind. It is written only to your own `WTF\Account\<ACCOUNT>\SavedVariables\Olympus.lua` (`OlympusRecordDB`), and it reaches the author and the attempt's checkers only if you send them that file yourself | each login or `/reload` while it is on; the game writes the file at `/reload`, logout or quit |
+| Record mode, about your guild and the census: your guild's roster at each quarter hour of the server's clock and at each `/oly record mark` (each member's name and realm, GUID, class and level once, then who is on the roster, who is online and whose level changed), and the first census report each other guild sends in each quarter hour (its time, the guild, its size, online count and addon users, and its sender's name), every line chained to the one before by SHA-256. Your guildmates are not asked, and neither is your guild's leader (whether to require the leader's agreement is the author's call: docs/RECORD-FORMAT.md, section 1). It reads what the game gives any member's addon, GUIDs included, which the guild window does not show, and keeps it as a series every quarter hour | nobody: the same file, which leaves your PC only if you send it | while record mode is on (the roster never in combat); at most 7,000 census lines a UTC day |
+
+**Record mode (the Guinness attempt).** `/oly record on` turns it on for one character of an
+Olympus guild, and a line on the census page says so while it is. It reads only your own guild's
+roster, as the game gives it to any member's addon (never in combat), and the census reports your
+addon already takes; it sends nothing. `/oly record status` opens a window you can copy from:
+what is written, the chain's head, and the file to send (after a `/reload` or a logout, since the
+game writes it only then). It never shows your BattleTag, so it can be posted or streamed. The exact format and hash rule, for whoever checks the witnesses' files, are in
+[docs/RECORD-FORMAT.md](docs/RECORD-FORMAT.md); `luajit scripts/record-check.lua FILE...` checks
+the chains and compares the witnesses' checkpoints.
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
 position on the map).
@@ -3010,6 +3021,7 @@ Other limits:
 | `/oly log [n \| word \| copy \| clear]` | the acts this client saw (decrees, gates, pardons, visibility switches), each with the sender's name; kept on this computer, never sent (1.1) |
 | `/oly status` | diagnostics in chat (1.0.0: whom your addon knows as the King's Steward, and the lists of Hands it holds, whose each is; 1.1.2: the author's in a copy window) |
 | `/oly perf` · `/oly perf on\|off\|reset` | the profiler (1.2.1): on, it measures which of Olympus's calls take the game's time (each listener on a line of its own, the frames with 30 ms or more of Olympus's work, the 40 slowest calls) and stays on through /reload until off; reset clears it; alone, its report in a copy window. Off, nothing of it runs. A listener is named by its place, #n: `luajit scripts/perf-listeners.lua` gives each its file and line |
+| `/oly record on\|off\|status\|mark` | record mode for the Guinness attempt's witnesses: your guild's roster at each quarter hour of the server's clock and at each mark (one a minute), written only to your own saved file, never in combat, nothing sent; kept on for that character until off; alone or `status`, what it wrote and the file to send, in a copy window ([its format](docs/RECORD-FORMAT.md)) |
 
 ## Reporting a bug
 

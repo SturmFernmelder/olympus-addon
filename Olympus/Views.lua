@@ -1605,6 +1605,10 @@ local function CensusLines(s, q)
 		lines[#lines].gapAfter = true
 		lines[#lines + 1] = behind
 	end
+	-- Record mode on (Record.lua, the Guinness attempt's witnesses): its line first; a click opens its
+	-- status. Put in last, so the lines above count as before ("No reports yet").
+	local record = ns.Record and ns.Record.Line and ns.Record.Line()
+	if record then table.insert(lines, 1, record) end
 	return lines
 end
 
