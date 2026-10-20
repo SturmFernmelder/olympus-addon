@@ -494,8 +494,12 @@ ns.Gate.Hooks("worldmap-icons", {
 	leftover = function() return worldMapTouched end,
 })
 
--- Round logo button with the exact geometry of minimap buttons (LibDBIcon layout at 31px,
--- scaled to the requested size): gold tracking ring, dark disc, round logo.
+-- Round logo button with the geometry of minimap buttons (LibDBIcon's sizes at 31px, scaled to
+-- the requested size): gold tracking ring, dark disc, round logo.
+-- The disc and the logo on the ring's centre, (16, -16) with the ring 53 across from the top left
+-- (UP-12, the author's "um pouquinho descentralizado"): LibDBIcon's places for them, (7, -5) and
+-- (7, -6), are its classic ones, and 0.9.0's logo on that disc, (8, -6), sat about 1 unit right
+-- of the ring's centre and 1 above it on Forever (measured in the author's screenshots of 10-04).
 function ns.MakeRoundButton(name, parent, size)
 	local k = size / 31
 	local b = CreateFrame("Button", name, parent)
@@ -503,13 +507,13 @@ function ns.MakeRoundButton(name, parent, size)
 	local bg = b:CreateTexture(nil, "BACKGROUND")
 	bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
 	bg:SetSize(20 * k, 20 * k)
-	bg:SetPoint("TOPLEFT", 7 * k, -5 * k)
+	bg:SetPoint("TOPLEFT", 6 * k, -6 * k)
 	-- The logo, a disc (the mask): centred on the dark disc behind it (LibDBIcon's square
 	-- icons sit 1.5 px off it, which the ring hides; a disc there shows a crescent).
 	local icon = b:CreateTexture(nil, "ARTWORK")
 	icon:SetTexture(ns.LOGO)
 	icon:SetSize(18 * k, 18 * k)
-	icon:SetPoint("TOPLEFT", 8 * k, -6 * k)
+	icon:SetPoint("TOPLEFT", 7 * k, -7 * k)
 	if icon.SetMask then pcall(icon.SetMask, icon, "Interface\\CharacterFrame\\TempPortraitAlphaMask") end
 	local ring = b:CreateTexture(nil, "OVERLAY")
 	ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")

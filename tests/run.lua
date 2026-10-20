@@ -10550,7 +10550,46 @@ test("the soldier count explains the census on hover; the minimap logo sits on i
 		local b = ns.MakeRoundButton("OlympusTestRound", UIParent, 31)
 		eq(b.icon.w, 18)
 		local a = b.icon:Anchor("TOPLEFT")
-		eq(a[4] .. " " .. a[5], "8 -6", "the logo's centre on the disc's (17, -15)")
+		-- (UP-12: the disc and the logo both moved onto the gold ring's centre, test below; the logo
+		-- still on the disc's centre, now (16, -16), where 0.9.0 had both on (17, -15).)
+		eq(a[4] .. " " .. a[5], "7 -7", "the logo's centre on the disc's (16, -16)")
+	end)
+end)
+
+-- UP-12 (the author, 09-24 and again 09-26, after 0.7.12 and 0.9.0 had each moved it: the minimap
+-- icon "um pouquinho descentralizado"). Measured on Forever 1.60.1 in four of the author's
+-- screenshots of 10-04 (two at 1281 x 720, two at 1366 x 768, the layout of 0.9.0 to 1.2.5.1): a
+-- circle fitted to the gold ring's brightest gold, and the logo matched to them at its own scale,
+-- put the logo 1.0 to 1.1 units right of the ring's centre and 0.8 to 0.95 above it. The ring's
+-- centre is so about (15.9, -15.9) from the 31-unit button's top left, with the ring 53 across from
+-- that corner: 0.3 of the ring's size each way. Blizzard's own Forever layouts with that ring agree
+-- within a unit (ItemDisplay.xml's SpecRing, GroupLootFrame.xml's, the world map's filter button).
+-- The logo and the dark disc behind it go on that centre, within a quarter unit, on every round
+-- button: the minimap's (31), the world map's (30) and the guild windows' (26 and 22).
+test("UP-12 round buttons: the logo and its dark disc sit on the gold ring's centre at every size", function()
+	WithUI(function()
+		local RING_CENTRE = 15.9 / 53 -- (of the ring's size, from its top left, across and down: measured, above)
+		local function Centre(t)
+			local p = t:Anchor("TOPLEFT")
+			return p[4] + t.w / 2, p[5] - t.h / 2
+		end
+		for _, size in ipairs({ 31, 30, 26, 22 }) do
+			local b = ns.MakeRoundButton(nil, UIParent, size)
+			local of = {}
+			for _, t in ipairs(b.textures or {}) do of[t.texture] = t end
+			local ring, disc = of["Interface\\Minimap\\MiniMap-TrackingBorder"], of["Interface\\Minimap\\UI-Minimap-Background"]
+			assert(ring and disc and of[ns.LOGO] == b.icon, size .. ": the ring, the dark disc and the logo")
+			local p = ring:Anchor("TOPLEFT")
+			local rx, ry = p[4] + ring.w * RING_CENTRE, p[5] - ring.h * RING_CENTRE
+			local near = 0.25 * size / 31
+			for label, t in pairs({ logo = b.icon, disc = disc }) do
+				local cx, cy = Centre(t)
+				assert(math.abs(cx - rx) <= near and math.abs(cy - ry) <= near,
+					("%d: the %s's centre %.2f, %.2f; the ring's %.2f, %.2f"):format(size, label, cx, cy, rx, ry))
+			end
+			assert(math.abs(b.icon.w - 18 * size / 31) < 1e-9, size .. ": the logo's size kept")
+			assert(math.abs(disc.w - 20 * size / 31) < 1e-9, size .. ": the disc's size kept")
+		end
 	end)
 end)
 
