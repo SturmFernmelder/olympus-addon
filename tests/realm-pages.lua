@@ -12,6 +12,8 @@ local INK = { QuestFont = true, QuestTitleFont = true }
 -- words and saved data; the harness's census, roster and the rest under it. Nothing it loads
 -- registers with the harness (its events, comm handlers and dialogs are its own or put back).
 -- The author's Workshop is open (the King's letters' previews are his alone: HonorsNet.PreviewKeys).
+-- (ProfileEdit's "myprofile" entry is a link alone, no page: it opens the person page, whose Back
+-- is UI.BackFromPlayerProfile; tests/arena/profile-edit.lua has it.)
 local function Client()
 	local w = { clock = 1800000000, sent = 0, timers = {} }
 	local c = setmetatable({ RealmPages = {}, L = setmetatable({}, { __index = ns.L }) }, { __index = ns })
@@ -114,5 +116,68 @@ test("King's letters page on the Realm's parchment: every row of the honour lett
 		eq(ui.PageId(), "realm/guilds"); eq(frame.parchment:IsShown(), false)
 		link = assert(RowWith(frame, "> " .. L.HONOR_LETTER_PREVIEW_HEAD))
 		eq(INK[link.left.font], nil, "the Realm's list is unchanged")
+	end)
+end)
+
+-- 2026-10-19, the author on the same page: "E essa página está sem botão de voltar. Eu clico
+-- nela, eu tenho que clicar em classes, depois de novo para poder voltar." While a page shows, the
+-- Realm's Guilds button is the one selected and does nothing: a page without a Back of its own has
+-- no way out but another view and Guilds again. Every page the Realm's modules register is opened
+-- as the player opens it (its own row in the Realm; the level race's rules link for the rules page;
+-- the Board's link for the weekly summary) and its first drawn row must be its Back, which leads
+-- where it was opened from: the Realm's guilds (the weekly summary: the Board). Fails before on
+-- the King's letters (honorletters) and Carried history (carry) pages, which had none.
+test("Realm pages: every page of the Realm tab has a Back as its first row and it returns to the Realm overview, the King's letters' and Carried history's too", function()
+	WithRealm(function(ui, frame, w, c)
+		local brief = ns.WeeklyBrief -- (the harness's Board links the brief of the namespace it was loaded in)
+		local ok, err = pcall(function()
+			ns.WeeklyBrief = c.WeeklyBrief
+			local L = c.L
+			local FROM = { weeklybrief = "board" }
+			-- The row a page is opened from, in what the window shows now.
+			local function Opener(page)
+				if page.key == "ranking-rules" then
+					for _, r in ipairs(Rows(frame)) do if r.line.id == "ranking-rules:realm-level" then return r end end
+					return nil
+				end
+				if page.key == "weeklybrief" then return RowWith(frame, Plain(c.WeeklyBrief.Link().text)) end
+				local link = page.Link and page.Link()
+				return link and RowWith(frame, Plain(link.text))
+			end
+			local seen = {}
+			for _, page in ipairs(c.RealmPages) do
+				local key, from = page.key, "realm/" .. (FROM[page.key] or "guilds")
+				seen[key] = true
+				c.Views.ShowBoard(FROM[key] == "board")
+				c.Views.ShowPage(nil)
+				eq(ui.PageId(), from, key .. ": where it is opened from")
+				local opener = assert(Opener(page), key .. ": its link on " .. from)
+				opener:Click()
+				eq(ui.PageId(), "realm/" .. key, key .. ": opened")
+				local back = Rows(frame)[1]
+				assert(back and back.line.onClick, key .. ": a first row to click")
+				assert(Plain(back.line.text):match("^< "), key .. ": its first row is Back, not " .. tostring(back.line.text))
+				if page.parchment then assert(INK[back.left.font], key .. ": its Back in the parchment's ink") end
+				back:Click()
+				eq(ui.PageId(), from, key .. ": Back leads where it was opened from")
+				eq(frame.parchment ~= nil and frame.parchment:IsShown(), false, key .. ": the parchment goes with its page")
+			end
+			-- The pages of the modules loaded (a page added to them later is checked the same way).
+			for _, key in ipairs({ "ranking-rules", "loot", "war", "guildcharter", "weeklybrief", "personalbrief", "carry", "honorletters" }) do
+				assert(seen[key], key .. " registered and checked")
+			end
+			-- The two that had none, word for word, in English and pt-BR.
+			eq(L.HONOR_LETTER_PREVIEW_BACK, "< Back to the Realm"); eq(L.CARRY_BACK, "< Back to the Realm")
+			for _, pair in ipairs({ { "Locales/ArenaFightsText", "HONOR_LETTER_PREVIEW_BACK" }, { "Locales/CarryText", "CARRY_BACK" } }) do
+				local pt, saved = {}, GetLocale
+				GetLocale = function() return "ptBR" end
+				local loaded, why = pcall(function() assert(loadfile(ROOT .. "Olympus/" .. pair[1] .. ".lua"))("Olympus", { L = pt }) end)
+				GetLocale = saved
+				assert(loaded, why)
+				eq(pt[pair[2]], "< Voltar ao Reino", pair[2] .. " in pt-BR")
+			end
+		end)
+		ns.WeeklyBrief = brief
+		if not ok then error(err, 0) end
 	end)
 end)

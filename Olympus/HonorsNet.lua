@@ -1845,7 +1845,10 @@ end
 function H.PreviewLines()
 	local keys = H.PreviewKeys()
 	if #keys == 0 then return {} end
-	local lines = { PageLine(L.HONOR_LETTER_PREVIEW_HEAD, PAGE_TITLE, { header = true }) }
+	-- Its first row, Back: the Realm again, as the Realm's other pages (2026-10-19, the author: the
+	-- page had none, he went to Classes and back to leave it).
+	local lines = { PageLine(L.HONOR_LETTER_PREVIEW_BACK, PAGE_INK, { gapAfter = true, onClick = function() ns.Views.ShowPage(nil) end }),
+		PageLine(L.HONOR_LETTER_PREVIEW_HEAD, PAGE_TITLE, { header = true }) }
 	PageParagraph(lines, L.HONOR_LETTER_PREVIEW_NOTE, { gapAfter = true })
 	for _, key in ipairs(keys) do
 		local k = key

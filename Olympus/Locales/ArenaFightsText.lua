@@ -51,6 +51,7 @@ L.HONOR_LETTER_LATER = "Later"
 L.HONOR_LETTER_PREVIEW_HEAD = "Preview: the King's letters"
 L.HONOR_LETTER_PREVIEW_ONLY = "Preview only"
 L.HONOR_LETTER_PREVIEW_NOTE = "Choose a letter to inspect its existing parchment, frame and text. These are fictional examples: no honour is awarded, worn, saved or sent, and real waiting letters are not consumed."
+L.HONOR_LETTER_PREVIEW_BACK = "< Back to the Realm" -- (its page's first row: the Realm again)
 L.HONOR_LETTER = {
 	arena = "Okay, listen.\n\nYou walked into the arena and beat everybody. Not most people. Everybody. So you're %s now, and the gryphon is yours.\n\nHeads up: every tryhard in Olympus wants it off you now. Don't let them.",
 	class = "Hey,\n\nI checked. Of everyone playing your class in Olympus, nobody fights like you. That's huge. You're %s now.\n\nThe rest of them are gonna study every move you make. Let them. They still won't keep up.",
@@ -273,6 +274,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.HONOR_LETTER_PREVIEW_HEAD = "Prévia: cartas do Rei"
 	L.HONOR_LETTER_PREVIEW_ONLY = "Só prévia"
 	L.HONOR_LETTER_PREVIEW_NOTE = "Escolha uma carta para conferir seu pergaminho, moldura e texto existentes. São exemplos fictícios: nenhuma honraria é concedida, usada, salva ou enviada, e cartas reais pendentes não são consumidas."
+	L.HONOR_LETTER_PREVIEW_BACK = "< Voltar ao Reino"
 	L.HONOR_LETTER = {
 		arena = "Olha só.\n\nVocê entrou na arena e ganhou de todo mundo. Não da maioria. De todo mundo. Agora você é %s, e o grifo é seu.\n\nSó avisando: todo tryhard do Olympus vai querer tirar ele de você. Não deixa.",
 		class = "E aí,\n\nEu conferi. De todo mundo da sua classe no Olympus, ninguém luta como você. Isso é enorme. Agora você é %s.\n\nO resto vai estudar cada movimento seu. Deixa. Mesmo assim não vão te acompanhar.",
