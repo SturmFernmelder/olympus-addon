@@ -1368,8 +1368,9 @@ end
 -- each coloured by a fixed category. Olympus writes the tooltip from the pin's own checked fields:
 -- the name, its category (or the consumer's own short name for it), the consumer's short marks (a list's name, at most three), how long ago
 -- it was seen (Olympus's own clock, the rows' seenAt) and how precise the point is. It never opens
--- the map. Each call replaces this handle's whole set; permission loss, ClearSightingPins and a
--- /reload remove it, and a pin past its own expiresAt is never drawn.
+-- the map. Each call replaces this handle's whole set; permission loss, ClearSightingPins, a
+-- /reload and Olympus hiding locations from this player remove it. A pin past its own expiresAt is
+-- not drawn, and a drawn one goes by itself once past it (TickSightingPins).
 API.PIN_MAX = 96
 API.PIN_CATEGORIES = {
 	hostile = { 0.92, 0.18, 0.14 },   -- red
@@ -1449,6 +1450,42 @@ local function PinAlpha(row, now)
 	return 0.5
 end
 
+-- While Olympus hides locations from this player (WatchChat.Barred "locations", as the guildmates'
+-- dots, the King's crown and the Wanted pins), none of these dots either. A check that fails hides.
+local function LocationsBarred()
+	if not Has("WatchChat", "Barred") then return false end
+	local ok, barred = pcall(ns.WatchChat.Barred, "locations")
+	if not ok then return true end
+	return barred ~= nil and barred ~= false
+end
+
+-- Whether this handle may keep its dots up: its Yes, a member, locations not hidden from him.
+local function PinsAllowed(c)
+	return Granted(c) and Member() and not LocationsBarred()
+end
+
+-- A slot's two frames, off every map and with no row. Their anchors go too: a frame the library no
+-- longer places never shows where it last stood (the library shows a minimap dot itself, only in
+-- the player's own zone, and hides it when it takes it off).
+local function ResetPinPair(pair)
+	pair.row, pair.onWorld, pair.onMini, pair.placed = nil, nil, nil, nil
+	for _, frame in ipairs({ pair.world, pair.mini }) do
+		frame.pinRow = nil
+		pcall(frame.Hide, frame)
+		if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
+	end
+end
+
+-- One slot's dots taken off the maps (the world map's only while the gate allows: at a switch to
+-- the gamepad UI ns.WorldMapIcons or the gate's park took them off already).
+local function UnplacePin(P, c, pair) -- gp:worldmap-icons!undo
+	if P and pair.onWorld and ns.Gate.Allowed("worldmap-icons") and type(P.RemoveWorldMapIcon) == "function" then
+		pcall(P.RemoveWorldMapIcon, P, c.pinOwner, pair.world)
+	end
+	if P and pair.onMini and type(P.RemoveMinimapIcon) == "function" then pcall(P.RemoveMinimapIcon, P, c.pinOwner, pair.mini) end -- gp:minimap
+	ResetPinPair(pair)
+end
+
 HideSightingPins = function(c) -- gp:worldmap-icons!undo
 	local P = ns.Pins and ns.Pins()
 	if P and c.pinOwner then
@@ -1457,52 +1494,107 @@ HideSightingPins = function(c) -- gp:worldmap-icons!undo
 		end
 		if type(P.RemoveAllMinimapIcons) == "function" then pcall(P.RemoveAllMinimapIcons, P, c.pinOwner) end -- gp:minimap
 	end
-	for _, pair in ipairs(c.pinFrames or {}) do
-		pair.world.pinRow, pair.mini.pinRow = nil, nil
-		pcall(pair.world.Hide, pair.world)
-		pcall(pair.mini.Hide, pair.mini)
-	end
+	for _, pair in ipairs(c.pinFrames or {}) do ResetPinPair(pair) end
 	c.pinCount = 0
 end
 
+-- Every PIN_TICK seconds while a handle has dots: a dot past its row's expiresAt goes, the others fade
+-- with age (their alpha alone: nothing is placed again), and all go once the handle's Yes, the
+-- membership or the player's locations do. One pending timer per handle at most (ns.After, as the
+-- leader's expiry: no ticker), and none once its dots are gone.
+API.PIN_TICK = 15
+local TickSightingPins
+local function SchedulePinTick(c)
+	if c.pinTickPending or not ns.After then return end
+	c.pinTickPending = true
+	ns.After(API.PIN_TICK, "api sighting pins", function()
+		c.pinTickPending = nil
+		if (c.pinCount or 0) > 0 then TickSightingPins(c) end
+	end)
+end
+TickSightingPins = function(c)
+	if not PinsAllowed(c) then HideSightingPins(c) return end
+	local P = ns.Pins and ns.Pins()
+	-- With the gamepad UI the gate's park took the world map's dots off: placed again on a later Set
+	-- once it allows them.
+	local worldOff = not ns.Gate.Allowed("worldmap-icons")
+	local now = ns.Now and ns.Now() or 0
+	local count = 0
+	for _, pair in ipairs(c.pinFrames) do
+		if worldOff then pair.onWorld = nil end
+		local row = pair.row
+		if row then
+			if row.expiresAt <= now then
+				UnplacePin(P, c, pair)
+			else
+				count = count + 1
+				local alpha = PinAlpha(row, now)
+				for _, frame in ipairs({ pair.world, pair.mini }) do
+					if frame.SetAlpha then frame:SetAlpha(alpha) end
+				end
+			end
+		end
+	end
+	c.pinCount = count
+	if count == 0 then HideSightingPins(c) else SchedulePinTick(c) end
+end
+
 -- The world map's dots only with mouse and keyboard (ns.WorldMapIcons), the minimap's always, as
--- Positions.lua draws guildmates.
+-- Positions.lua draws guildmates. The pin library shows, places and hides every dot itself (Wanted's
+-- pins too): Olympus never shows one. A slot whose row stands where it stood keeps its dots (no
+-- blink, nothing rebuilt), only its tooltip row, colour and alpha change; a row the library cannot
+-- place (a map it does not know) is not drawn and not counted.
 local function DrawSightingPins(c, list)
 	local P = ns.Pins and ns.Pins()
 	if not P or type(P.AddMinimapIconMap) ~= "function" then return false, "unavailable" end
 	local world = type(ns.WorldMapIcons) == "function" and ns.WorldMapIcons(P, c.pinOwner) == true -- gp:worldmap-icons
-	HideSightingPins(c)
+	-- A library without the single-icon removals: every dot off and placed again, as before.
+	if type(P.RemoveMinimapIcon) ~= "function" or type(P.RemoveWorldMapIcon) ~= "function" then HideSightingPins(c) end
 	local now = ns.Now and ns.Now() or 0
 	local used = 0
 	for _, raw in ipairs(list) do
 		if used >= API.PIN_MAX then break end
 		local row = PinRow(raw, now)
 		if row then
-			used = used + 1
-			local pair = c.pinFrames[used]
+			local pair = c.pinFrames[used + 1]
 			if not pair then
 				local w, m = PinDot(12), PinDot(10)
 				if not w or not m then HideSightingPins(c) return false, "unavailable" end
 				pair = { world = w, mini = m }
-				c.pinFrames[used] = pair
+				c.pinFrames[used + 1] = pair
 			end
-			local color, alpha = API.PIN_CATEGORIES[row.category], PinAlpha(row, now)
-			for _, frame in ipairs({ pair.world, pair.mini }) do
-				frame.pinRow = row
-				frame.dot:SetVertexColor(color[1], color[2], color[3])
-				if frame.SetAlpha then frame:SetAlpha(alpha) end
+			-- (Without the world map, ns.WorldMapIcons took this handle's dots there off already.)
+			if not world then pair.onWorld = nil end
+			local spot = row.mapID .. ":" .. row.x .. ":" .. row.y
+			if pair.placed ~= spot then
+				UnplacePin(P, c, pair)
+				local ok, added = pcall(P.AddMinimapIconMap, P, c.pinOwner, pair.mini, row.mapID, row.x / 1000, row.y / 1000, false, false) -- gp:minimap
+				if ok and added == true then pair.onMini, pair.placed = true, spot end
 			end
-			if world and ns.Gate.Allowed("worldmap-icons") then
-				-- gp:worldmap-icons
-				local ok = pcall(P.AddWorldMapIconMap, P, c.pinOwner, pair.world, row.mapID, row.x / 1000, row.y / 1000,
-					HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
-				if ok then pcall(pair.world.Show, pair.world) end
-			end
-			local ok = pcall(P.AddMinimapIconMap, P, c.pinOwner, pair.mini, row.mapID, row.x / 1000, row.y / 1000, false, false) -- gp:minimap
-			if ok then pcall(pair.mini.Show, pair.mini) end
+			if pair.placed == spot then
+				used = used + 1
+				if world and not pair.onWorld and ns.Gate.Allowed("worldmap-icons") then
+					-- gp:worldmap-icons
+					local ok, added = pcall(P.AddWorldMapIconMap, P, c.pinOwner, pair.world, row.mapID, row.x / 1000, row.y / 1000,
+						HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
+					pair.onWorld = ok and added == true or nil
+				end
+				pair.row = row
+				local color, alpha = API.PIN_CATEGORIES[row.category], PinAlpha(row, now)
+				for _, frame in ipairs({ pair.world, pair.mini }) do
+					frame.pinRow = row
+					frame.dot:SetVertexColor(color[1], color[2], color[3])
+					if frame.SetAlpha then frame:SetAlpha(alpha) end
+				end
+			end -- (else the slot, reset by UnplacePin, waits for the next row)
 		end
 	end
+	for i = used + 1, #c.pinFrames do
+		local pair = c.pinFrames[i]
+		if pair.row or pair.placed or pair.onWorld then UnplacePin(P, c, pair) end
+	end
 	c.pinCount = used
+	if used == 0 then HideSightingPins(c) else SchedulePinTick(c) end
 	return true, used
 end
 
@@ -1510,6 +1602,7 @@ function METHODS.SetSightingPins(c, list)
 	if Secret(list) or type(list) ~= "table" then return false, "invalid" end
 	local ok, why = SightingRead(c, function() return true end)
 	if not ok then return false, why or "unknown" end
+	if LocationsBarred() then HideSightingPins(c) return false, "barred" end
 	return DrawSightingPins(c, list)
 end
 function METHODS.ClearSightingPins(c)
@@ -1738,6 +1831,16 @@ ns.On("ACCORD_CHANGED", function() Mark(unpack(API.DATA_EVENTS)) end)
 -- locations (WATCHCHAT_CHANGED): what his lines and the Realm tab's layers show.
 for _, event in ipairs({ "KING_LOCATION_CHANGED", "LAYERS_CHANGED", "HOP_CHANGED", "WATCHCHAT_CHANGED" }) do
 	ns.On(event, function() Mark("LEADER_CHANGED") end)
+end
+-- Locations hidden from this player (a sanction: WATCHCHAT_CHANGED; a net-off word: NETOFF_CHANGED),
+-- or the Accord asked again: every handle's sighting dots go at once, as the Wanted pins do, not on
+-- their next tick.
+for _, event in ipairs({ "WATCHCHAT_CHANGED", "NETOFF_CHANGED", "ACCORD_CHANGED" }) do
+	ns.On(event, function()
+		for _, c in ipairs(order) do
+			if (c.pinCount or 0) > 0 and not PinsAllowed(c) then HideSightingPins(c) end
+		end
+	end)
 end
 -- A request started by one handle changed or received a fresh, normalized observation. Only the
 -- handle that owns that opaque request id is told; the event never exposes another addon's search.

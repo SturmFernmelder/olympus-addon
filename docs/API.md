@@ -439,10 +439,14 @@ Olympus draws host-owned dots on the world map (mouse and keyboard only; the gam
 none) and on the minimap, and writes the tooltip itself from those fields: the name, the category (or its `label`),
 the marks or "Not marked", how long ago (Olympus's clock against `seenAt`) and the precision (an exact
 point, nearby within about N yards, or the observer's encounter point), and "Seen by you" for an own
-row. An older dot fades. A row past its `expiresAt`, or with an unknown category or invalid point,
-is not drawn. It never opens the map. Each call replaces this handle's whole set and returns `true`
-and the number drawn, or `false` and `"invalid"`, `"unavailable"` or a permission reason.
-`ClearSightingPins` removes the set; permission loss and `/reload` remove it too.
+row. A dot fades as it ages and goes by itself soon after its row's `expiresAt` (Olympus looks
+every 15 seconds, with no call needed). A row past its `expiresAt`, with an unknown category, an invalid
+point or a map the game cannot place, is neither drawn nor counted. It never opens the map. Each
+call replaces this handle's whole set (a row at the same point as before keeps its dot) and returns
+`true` and the number drawn, or `false` and `"invalid"`, `"unavailable"`, `"barred"` (while Olympus
+hides locations from this player) or a permission reason. `ClearSightingPins` removes the set;
+permission loss, the player no longer being a member, Olympus hiding locations from him and
+`/reload` remove it too.
 
 ### Profile-presentation session
 
