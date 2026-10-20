@@ -46,7 +46,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with the moderation team only.
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with Olympus's staff only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his

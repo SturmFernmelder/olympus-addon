@@ -35,7 +35,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with the moderation team only.
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with Olympus's staff only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his
@@ -1882,8 +1882,8 @@ masked (**Show** reveals them for ten seconds; on the King's screen, and on any 
 game account once his own was seen there, no part of it shows and there is no Show). **I accept** works only while Battle.net gives it; while Battle.net can't be
 reached the letter says so and tries again by itself, and an account that accepted is never locked
 out by an outage. Only 8 bits of its hash are kept on your client, to see whether it changed (one
-change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. Your
-BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
+change in 256 goes unseen), never the tag itself, and too few bits to give its digits back. In
+game, your BattleTag goes to the moderation team alone (the author, the King, the High Council and the Olympus
 moderators they named), by a logged whisper, only to a team member whose addon just asked on your
 channel and whose team level is yours or higher (a moderator's own goes to the moderators and
 above, a councillor's to the council, the King and the author, the King's to the author alone), at
@@ -1903,7 +1903,7 @@ listing (and with it your addon's answers to who can make it), another addon's u
 addon its own Yes or the page's deliberate **Authorize all**; ordinary reads send nothing; an authorized exact-name search sends the Name-Realm, while a five-minute hostile-area search sends one selected map ID; a visible Start declares selected/configured names and included list sources; one live area uses the current or an owned exact-result map until its row expires, cancels before a 60-second rotation, stays visibly stoppable and never auto-resumes or opens the map; both receive only opted-in observers' private, expiring last-seen reports labelled as a native target point or observer encounter point; an area row omits observer identity and guild, with at most six rows from one observer and 48 distinct players at the requester; for an addon the Olympus team authorized, the same permission may let a current signed issuer or the addon's author open the bounded host-owned profile-presentation session and an admitted member enable its single fixed style on themself; it never accepts a target, asset path or arbitrary message; what the addon does with its bounded copies is its own; it may also read the King's presence as his lines and the Realm tab show it, and widen an area search to labelled not-hostile players outside Olympus guilds and the observer's group), **Guild tools: player sightings** (a separate permission enabled by its own Yes or **Authorize all**; while it and location sharing stay on, up to 64 direct observations may remain only in memory for up to 15 minutes; the same permission also permits bounded hostile-area answers on a selected map and, for a wider search, labelled not-hostile players outside Olympus guilds and your group) and Olympus Link (your **Accept**, or a confirmer's typing in the key the
 bot's keeper made them) wait for your yes. The rest of the table goes out while you are in an
 Olympus guild, once you accepted the Olympus Accord, with no question first: your guild's census (from the member it elects, with the
-names above), the hello, your BattleTag to the moderation team alone, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks
+names above), the hello, your BattleTag to the moderation team alone in game, signed-leadership synchronization after the author activates it, and your addon's answer to a version check (1.1.2), an officer's loot notes and points to his guild and your addon's ask for what its book lacks
 (when the page opens), your addon's word of a direct crafting sale to the Treasurer's characters (1.2), and what other
 addons read through the bridge.
 

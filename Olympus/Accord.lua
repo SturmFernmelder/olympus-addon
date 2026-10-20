@@ -24,7 +24,7 @@ local L = ns.L
 -- King's screen (Stream: his character, any character of his game account once it was seen
 -- there, his preview) no part of it, with no Show (he streams).
 --
--- Who gets it: the moderation team alone (WatchChat.InRoom: the author, the King, the High
+-- Who gets it in game: the moderation team alone (WatchChat.InRoom: the author, the King, the High
 -- Council and the Olympus moderators they named). A team member's client asks on the Olympus
 -- channel (BQ, ASK_FIRST after login, then every ASK_EVERY); each player's client that accepted
 -- answers that one asker by a logged whisper (BT), after a random delay, at most once every
@@ -43,6 +43,12 @@ local L = ns.L
 -- removal asked for). A tag is what that player's own addon read and sent: a modified addon can
 -- send someone else's, so nothing is ever done with one automatically (a later option, with that
 -- in mind).
+--
+-- The Olympus Companion app (the letter's ACCORD_T5_3): once accepted, the bridge's "self" section
+-- (BridgeSections.lua) hands this character's name and own tag, read here (ReadTag), to the private
+-- sidecar a Companion user installed, which saves it in its own file at logout or /reload; the
+-- Companion takes it to Olympus's online census, where only its staff see BattleTags. Nothing is
+-- sent in game for it, and the tags a team client keeps of others never go there.
 --
 --   BQ~1                                          a team member's ask (the channel, not logged)
 --   BT~1~<version>~<accepted at>~<guild>~<tag>    a player's answer (a logged whisper to the asker)
@@ -77,8 +83,8 @@ Accord.SCREEN_MARGIN = 48
 -- The letter's topics: { n, bullets }, keys ACCORD_T<n>_HEAD and ACCORD_T<n>_<i> (AccordText.lua),
 -- each bullet one short sentence. BOLD: the bullets in heavier ink (a font string has no inline
 -- bold: the whole line, its shadow one pixel to the right in the ink's own colour).
-Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 6 }, { 4, 6 }, { 5, 5 }, { 6, 3 }, { 7, 1 }, { 8, 2 }, { 9, 2 } }
-Accord.BOLD = { ["2_1"] = true, ["5_2"] = true, ["5_3"] = true }
+Accord.TOPICS = { { 1, 2 }, { 2, 2 }, { 3, 6 }, { 4, 6 }, { 5, 6 }, { 6, 3 }, { 7, 1 }, { 8, 2 }, { 9, 2 } }
+Accord.BOLD = { ["2_1"] = true, ["5_2"] = true, ["5_3"] = true, ["5_4"] = true }
 -- A BattleTag as Battle.net writes one: a name, "#", digits. Never "~", "|" or a control byte.
 Accord.TAG_SHAPE = "^[^#~|%c]+#%d+$"
 Accord.random = math.random -- (swappable in tests)
