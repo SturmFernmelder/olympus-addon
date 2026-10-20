@@ -57,6 +57,9 @@ M.CUTS = {
 	-- (1.2.5.1: the chat warnings, the Companion bridge and the Olympus Accord's line together passed
 	-- the budget: a High Councillor's tooltip paragraph is the README's.)
 	{ title = "Person details", keep = 1 },
+	-- (1.2.6: the Olympus Companion named in the privacy section's first words passed the budget:
+	-- the alt links' rules are the README's; their opening stays.)
+	{ title = "Alt links (1.1): one player, counted once", keep = 1 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it. (1.2.4: the

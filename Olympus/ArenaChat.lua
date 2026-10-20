@@ -389,8 +389,9 @@ local function Keep(r, e)
 	if Persist then Persist() end
 end
 -- The Companion's chat record (Bridge.lua's ns.RecordChat): each line kept and shown, once. Our own
--- line once it left: at once on the duel's lanes, a Bones table's once one of its sends got through
--- (a line that reached nobody leaves the view, Completed, and is never recorded).
+-- line once one of its sends left: on the match and duel lanes when Arena.Send's done says one
+-- did, a Bones table's when its attempts settle (a line that reached nobody leaves the view,
+-- Completed, and is never recorded).
 local recorded = setmetatable({}, { __mode = "k" })
 local function Record(room, e)
 	if recorded[e] or not ns.RecordChat then return end
@@ -480,6 +481,14 @@ function ArenaChat.Send(room, text)
 	local body = ("%s~%d~%s~%s~%s"):format(room, nextLine, class, GuildWord(guild), text)
 	local sent
 	local e, attempts = nil, {}
+	-- (The match and duel lanes: Arena.Send's done, once a send of this line left, maybe within the
+	-- call itself, before e exists; the line is recorded then, or as soon as it is kept.)
+	local left = false
+	local function Left(ok)
+		if ok ~= true then return end
+		left = true
+		if e then Record(room, e) end
+	end
 	local function Completed(quiet)
 		if not e then return end -- immediate refusal before any own line was retained
 		local waiting, delivered = false, false
@@ -511,13 +520,13 @@ function ArenaChat.Send(room, text)
 	end
 	if ev.public == true then
 		if ev.kind == "farkle" then sent, why = QueueTable()
-		else sent, why = A.Send("EC", mode, body, { chat = true, logged = true }) end
+		else sent, why = A.Send("EC", mode, body, { chat = true, logged = true, done = Left }) end
 	else
 		for _, name in ipairs(Party(ev)) do
 			if not Same(name, ns.me) then
 				local one, w
 				if ev.kind == "farkle" then one, w = QueueTable(name)
-				else one, w = A.Send("EC", mode, body, { to = name, logged = true }) end
+				else one, w = A.Send("EC", mode, body, { to = name, logged = true, done = Left }) end
 				sent = sent or one
 				why = why or w
 			end
@@ -533,7 +542,7 @@ function ArenaChat.Send(room, text)
 	r.mine[nextLine .. "#" .. text] = now
 	e = { chat = room, t = ns.Now(), sender = ns.me, guild = guild, class = class ~= "" and class or nil, text = text, id = nextLine, mine = true }
 	Keep(r, e)
-	if ev.kind == "farkle" then Completed(true) else Record(room, e) end
+	if ev.kind == "farkle" then Completed(true) elseif left then Record(room, e) end
 	AlsoInChat(room, e)
 	ns.Fire("ARENA_CHAT", room)
 	return true

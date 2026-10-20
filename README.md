@@ -2414,13 +2414,14 @@ retires the old private key so a delayed message cannot split them again.
 4. Every client adds up all the summaries: that is the census.
 
 The addon itself talks only in game, through the game's own addon messages: it has no server of
-its own, and nothing it sends leaves the game. The one exception is
+its own, and nothing it sends leaves the game. One exception is
 [Olympus Link](#olympus-link-your-discord-role-100), and only when you choose to link a
 character: it uses a website (the Olympus Link page, on this repository's GitHub Pages) and the
 Olympus bot on Discord, and the proof that a character is yours goes to the bot through that
 page or a High Councillor's watcher. A confirmer (a key from the bot's keeper) signs other
 players' requests by itself once the bot is ready, and those signatures reach the bot in their
-proofs.
+proofs. The other is the Olympus Companion app, only if you install it (its rows in
+[Privacy](#privacy)).
 
 **Realms vs layers.** A realm (ClassicBetaPvP, ClassicBetaPvP2...) is a separate world
 with its own guilds; layers are copies of a zone *inside* one realm. Guilds on the same
@@ -2435,15 +2436,17 @@ window shows which realms you are counting.
 ## Privacy
 
 The addon itself talks only through the game's own addon messages: it has no server of its own,
-and what it sends stays in the game. The one exception is Olympus Link, and only when you choose
+and what it sends stays in the game. One exception is Olympus Link, and only when you choose
 to link a character, or to confirm other players' links: a link's proof goes to the Olympus bot
 on Discord, through the Olympus Link page on GitHub Pages (where you sign in with Discord) or a
 High Councillor's watcher. A confirmer, a High Councillor too, is someone who typed in a key the
 bot's keeper made them (no addon makes or announces a key by itself, and the author's council
 authority is off): once the bot is ready, their addon says so on the Olympus channel every 5
 minutes and signs other players' requests by itself, and their character's name and signature
-reach the bot in those players' proofs, until `/oly discord key off`. Your name is on every
-message (the game adds it). What goes where:
+reach the bot in those players' proofs, until `/oly discord key off`. The other is the Olympus
+Companion app, only if you install it: its own bridge addon takes your character's name and
+BattleTag and the Olympus and guild chat lines your client shows to Olympus's server, for its staff
+alone (the Companion's rows below). Your name is on every message (the game adds it). What goes where:
 
 | What | Who receives it | When |
 |---|---|---|
@@ -2512,7 +2515,7 @@ message (the game adds it). What goes where:
 | The fee desk's answer (1.2): the fee, what was paid, its deadline, and whether it is due, paid or waived | that party alone (a whisper from the Treasurer's character) | once for each word of a sale |
 | The crafting fees owed (1.2): each fee's seller and buyer, price, fee, gold paid, deadline, item, quantity and the seller's guild, who reported it and whether the Treasurer confirmed it | the King's character alone (whispers from the Treasurer's character) | at his ask, when he opens the Guild fees page or asks again: once each 5 minutes at most, 40 fees an answer |
 | A reminder of a crafting fee owed (1.2): the amount and the deadline | that seller alone (a whisper from the Treasurer's or the King's character) | when they press Remind him, once a day per seller at most |
-| Other players' lines in the Olympus chats as your addon accepted them (channel, sender and text; [Captains] and [Lords] only if your rank reads them), and the High Council list | other addons in your own game, through `OlympusBridge` (made for OfficerSpy, the moderators' companion addon, but any addon you install can read it) | always, while such an addon is loaded (no chat line while the Olympus chats are off on your client): Olympus sends nothing through it and never learns what that addon does with what it read |
+| Other players' lines in the Olympus chats as your addon accepted them (channel, sender and text; [Captains] and [Lords] only if your rank reads them), and the High Council list; and (1.2.6, `RegisterChatRecorder`) the lines of the Olympus chats and rooms as your client receives them, yours included and locally hidden lines too: [Olympus], [Captains], [Lords], the rooms you are in (Guild, guildmates without Olympus included, role rooms, squads, crafting deals' private chats) and the fight and Bones rooms | other addons in your own game, through `OlympusBridge` (made for OfficerSpy, the moderators' companion addon, and for the Olympus Companion's chat record, but any addon you install can read it, with no Companion) | always, while such an addon is loaded (no chat line while the Olympus chats are off on your client; the chat record's lines only once you accepted the Olympus Accord): Olympus sends nothing through it and never learns what that addon does with what it read |
 | Olympus Link (1.0.0): a request (your guild, faction, a random number, your code's id and a tag made from your code's signature and your name) | the confirmers asked (a whisper each): a High Councillor, or verified players drawn for your code | only after you press **Accept** on `/oly discord <code>` |
 | Olympus Link: the finished proof (your character name, realm, guild, faction, the tag, and the confirmers' names, how each knew your guild, their signatures and their keys' certificates) | the Olympus bot, through the page you scan it with, or a watcher (a High Councillor, by whisper) who hands it to the bot | when it is ready, until it is delivered (5 days after your code expired at most) |
 | Olympus Link, if you confirm (a key and its certificate from the bot's keeper, High Councillors' too): your proof for another player's request (its time, your key's id, how you know their guild, your signature), and in their finished proof your character's name and your key's certificate | that player alone (a whisper), then the Olympus bot in their finished proof | by itself, without asking you each time, once the bot is ready: only for players of an Olympus guild of your faction, never your own account's characters, one a minute and five a day per character, thirty a minute in all, until `/oly discord key off` |
@@ -2544,7 +2547,7 @@ message (the game adds it). What goes where:
 | Record mode, about you (the Guinness attempt's witnesses, members of an Olympus guild only, only after your own `/oly record on`; off by default, kept for that character until `/oly record off`): your character, GUID, guild and rank, faction, realm and census realm group, the addon's version and test build number, the game's version and language, a SHA-256 hash of your BattleTag if the game gives it (never the tag itself; anyone who guesses your tag can test it against the hash), and when each session began | nobody: record mode sends no message of any kind. It is written only to your own `WTF\Account\<ACCOUNT>\SavedVariables\Olympus.lua` (`OlympusRecordDB`), and it reaches the author and the attempt's checkers only if you send them that file yourself | each login or `/reload` while it is on; the game writes the file at `/reload`, logout or quit |
 | Record mode, about your guild and the census: your guild's roster at each quarter hour of the server's clock and at each `/oly record mark` (each member's name and realm, GUID, class and level once, then who is on the roster, who is online and whose level changed), and the first census report each other guild sends in each quarter hour (its time, the guild, its size, online count and addon users, and its sender's name), every line chained to the one before by SHA-256. Your guildmates are not asked, and neither is your guild's leader (whether to require the leader's agreement is the author's call: docs/RECORD-FORMAT.md, section 1). It reads what the game gives any member's addon, GUIDs included, which the guild window does not show, and keeps it as a series every quarter hour | nobody: the same file, which leaves your PC only if you send it | while record mode is on (the roster never in combat); at most 7,000 census lines a UTC day |
 | Your own character's name (Name-Realm) and BattleTag, the Olympus Accord's version, the server's time and the roles you hold (officer, guild master, council, King, author) (the Companion's `self` section, 1.2.6) | the private Olympus Companion Bridge addon, only if you installed it with the Olympus Companion app: it saves them in its own file on your computer (`OlympusCompanionDB`), and the Companion takes them to Olympus's online census, where only staff see BattleTags, never other players or the public. Any addon in your game can read them through `OlympusBridge` too, as it can read your BattleTag from the game itself | only once you accepted the Olympus Accord, saved at logout or `/reload`; your BattleTag as your own game gives it, never another player's BattleTag (not the ones a moderation team client keeps); never shown or printed on screen, the King's included |
-| The Olympus chat lines your client shows (the Companion's chat record, `OlympusBridge.RegisterChatRecorder`, 1.2.6): each line's chat ([Olympus], [Captains], [Lords], a room you are in, or a fight or Bones room; Guild is your guild's own chat as the game gives it, guildmates without Olympus included), its sender, its words as Olympus shows them, and whether it is your own | Olympus's staff, through your own Olympus Companion: the private Olympus Companion Bridge addon, only if you installed it with the Olympus Companion app, saves them in its own file on your computer, and the Companion sends them to Olympus's server, where only the staff see them and keep them, to confirm what was said (several players' Companions agreeing on a line) and to moderate; never other players or the public. Any addon in your game can read them through `OlympusBridge` too | every line your client shows, your own once it left, and those a muted channel, the Olympus channels' flood guard or your own block terms keep off your chat frame (each still in its tab); never a line a chat warning refused, nor one Olympus kept off for moderation (net-off, a timeout, a deleted line's late copy); only once you accepted the Olympus Accord, and only from the chats and rooms you have on; saved at logout or `/reload` |
+| The Olympus and guild chat lines your client receives (the Companion's chat record, `OlympusBridge.RegisterChatRecorder`, 1.2.6): each line's chat ([Olympus], [Captains], [Lords], a room you are in, or a fight or Bones room; Guild is your guild's own chat as the game gives it, guildmates without Olympus included), its sender, its sanitized words, and whether it is your own | Olympus's staff, through your own Olympus Companion: the private Olympus Companion Bridge addon, only if you installed it with the Olympus Companion app, saves them in its own file on your computer, and the Companion sends them to Olympus's server, where only the staff see them and keep them, to confirm what was said (several players' Companions agreeing on a line) and to moderate; never other players or the public. Any addon in your game can read them through `OlympusBridge` too | every accepted line your client receives, your own once one of its sends left (never one that reached nobody, a squad leader's alone included), including those a muted channel, the Olympus channels' flood guard or your own block terms hide locally; never a line a chat warning refused, nor one Olympus kept off for moderation (net-off, a timeout, a deleted line's late copy), nor a pinned line (its own row above); only once you accepted the Olympus Accord, and only from the chats and rooms you have on; saved at logout or `/reload` |
 
 **Record mode (the Guinness attempt).** `/oly record on` turns it on for one character of an
 Olympus guild, and a line on the census page says so while it is. It reads only your own guild's
@@ -2633,8 +2636,8 @@ and BattleTag also go, once you accepted, to Olympus's online census, for securi
 (knowing who is who): the bridge addon saves them in its own file at logout or `/reload`, and the
 Companion takes them there, where only staff see BattleTags, never other players or the public.
 Never another player's BattleTag: the ones a moderation team client keeps stay in the game.
-The Companion also keeps a record of the Olympus chats: every Olympus chat line your client shows
-(your own included) goes, through the same bridge addon and at the same moments, to Olympus's
+The Companion also keeps a record of the Olympus chats: every Olympus and guild chat line your
+client shows (your own included) goes, through the same bridge addon and at the same moments, to Olympus's
 staff, who keep them to confirm what was said, several players' Companions agreeing on a line,
 and to moderate. The Olympus Accord's letter and the privacy page say so.
 

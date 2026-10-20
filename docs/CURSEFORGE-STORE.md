@@ -397,24 +397,8 @@ the census, are not touched: one name stops the spam.
 ### Alt links (1.1): one player, counted once
 One player in three guilds used to swell the army by three and look like three donors. Link your
 alts and the census counts people:
-- On your main, `/oly alt add Name` names a character of this account; then log that character
-  and say yes there. The offer waits in this account's saved variables, so only this account's
-  characters can be linked, each confirming on itself: an officer can't attach anyone's alt,
-  and a character added later is linked only once it confirms too. An alt never starts a link
-  (its main does), and it gains nothing of its main's (a Hand's alt is no Hand).
-- The army's total then counts each player once, whatever guilds their characters are in (each
-  guild's own size stays its roster's; the header's tooltip says how many were counted once).
-  The treasury's ranking and its week's donors put a player's characters on one line, under the
-  main's name. Vox Populi takes one vote per player.
-- Each linked character's addon says so on the Olympus channel (its name, its guild and the
-  names it confirmed), and a link counts on a client only when both characters said it: a name
-  someone claims alone links nothing.
-- `/oly alt` shows your links; `/oly alt remove Name` takes one apart, from either character.
-- While any linked name is hidden by the moderators (net-off), the links freeze: your addon adds
-  and removes none, and every addon keeps the links it knew (it takes new names, drops none), so
-  nobody drops the punished character to walk back in on an alt.
-- The same faction and realm group only (one census). Up to 8 alts per player. On the Forever
-  beta, which forgets addon data at every login, the offer can't reach the alt yet.
+
+*The list is in the README, with the rest of this section: [Alt links (1.1): one player, counted once](https://github.com/dnl-gentile/olympus-addon#alt-links-11-one-player-counted-once).*
 
 ### The Throne (the King and his Hands)
 A tab with a crown that only the King sees: the guild master of the guild named exactly
@@ -824,11 +808,11 @@ retires the old private key so a delayed message cannot split them again.
 4. Every client adds up all the summaries: that is the census.
 
 The addon itself talks only in game, through the game's own addon messages: it has no server of
-its own, and nothing it sends leaves the game. The one exception is Olympus Link (above), and
+its own, and nothing it sends leaves the game. One exception is Olympus Link (above), and
 only when you choose to link a character: it uses a website (the Olympus Link page, on the
 project's GitHub Pages) and the Olympus bot on Discord. A confirmer (a key from the bot's keeper)
 signs other players' requests by itself once the bot is ready, and those signatures reach the bot
-in their proofs.
+in their proofs. The other is the Olympus Companion app, only if you install it (Privacy, below).
 
 **Realms vs layers.** A realm (ClassicBetaPvP, ClassicBetaPvP2...) is a separate world
 with its own guilds; layers are copies of a zone *inside* one realm. Guilds on the same
@@ -843,15 +827,17 @@ window shows which realms you are counting.
 ## Privacy
 
 The addon itself talks only through the game's own addon messages: it has no server of its own,
-and what it sends stays in the game. The one exception is Olympus Link, and only when you choose
+and what it sends stays in the game. One exception is Olympus Link, and only when you choose
 to link a character, or to confirm other players' links: a link's proof goes to the Olympus bot
 on Discord, through the Olympus Link page on GitHub Pages (where you sign in with Discord) or a
 High Councillor's watcher. A confirmer, a High Councillor too, is someone who typed in a key the
 bot's keeper made them (no addon makes or announces a key by itself, and the author's council
 authority is off): once the bot is ready, their addon says so on the Olympus channel every 5
 minutes and signs other players' requests by itself, and their character's name and signature
-reach the bot in those players' proofs, until `/oly discord key off`. Your name is on every
-message (the game adds it). What goes where:
+reach the bot in those players' proofs, until `/oly discord key off`. The other is the Olympus
+Companion app, only if you install it: its own bridge addon takes your character's name and
+BattleTag and the Olympus and guild chat lines your client shows to Olympus's server, for its staff
+alone (the Companion's rows below). Your name is on every message (the game adds it). What goes where:
 
 *The table is in the README, with the rest of this section: [Privacy](https://github.com/dnl-gentile/olympus-addon#privacy).*
 
