@@ -767,15 +767,21 @@ local function EnsureUI()
 	return ui
 end
 
+-- (The target's map and place, and who the target is, below: in a battleground, an arena or a
+-- dungeon the game may hide them from addons as secret values, and a secret stops the code with an
+-- error on any test, comparison or sum. Each answer is checked with Secret before anything uses
+-- it, and a hidden one is none: no place shown, no target. Effects.Refresh runs at every census
+-- report and every net-off word, so one unchecked answer there was an error each time.)
 local function Coordinates()
 	local C = C_Map
 	if type(C) ~= "table" or type(C.GetBestMapForUnit) ~= "function" or type(C.GetPlayerMapPosition) ~= "function" then return "" end
 	local okMap, mapID = pcall(C.GetBestMapForUnit, "target")
-	if not okMap or type(mapID) ~= "number" then return "" end
+	if not okMap or Secret(mapID) or type(mapID) ~= "number" then return "" end
 	local okPos, pos = pcall(C.GetPlayerMapPosition, mapID, "target")
 	if not okPos or type(pos) ~= "table" or type(pos.GetXY) ~= "function" then return "" end
 	local okXY, x, y = pcall(pos.GetXY, pos)
-	if not okXY or type(x) ~= "number" or type(y) ~= "number" or x <= 0 or y <= 0 or x > 1 or y > 1 then return "" end
+	if not okXY or Secret(x) or Secret(y) or type(x) ~= "number" or type(y) ~= "number" then return "" end
+	if x <= 0 or y <= 0 or x > 1 or y > 1 then return "" end
 	local name
 	if type(C.GetMapInfo) == "function" then
 		local okInfo, info = pcall(C.GetMapInfo, mapID)
@@ -786,11 +792,18 @@ local function Coordinates()
 end
 
 local function TargetName()
-	if type(UnitExists) == "function" and not UnitExists("target") then return nil end
-	if type(UnitIsPlayer) == "function" and not UnitIsPlayer("target") then return nil end
+	if type(UnitExists) == "function" then
+		local ok, exists = pcall(UnitExists, "target")
+		if not ok or Secret(exists) or not exists then return nil end
+	end
+	if type(UnitIsPlayer) == "function" then
+		local ok, player = pcall(UnitIsPlayer, "target")
+		if not ok or Secret(player) or not player then return nil end
+	end
 	if type(ns.UnitFullName) ~= "function" then return nil end
 	local ok, name = pcall(ns.UnitFullName, "target")
-	return ok and type(name) == "string" and name or nil
+	if not ok or Secret(name) or type(name) ~= "string" then return nil end
+	return name
 end
 
 local function Show(lease)
