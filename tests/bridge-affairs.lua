@@ -172,7 +172,10 @@ test("companion bridge affairs (931): every section of the tabs of affairs is re
 	local readme = assert(io.open(ROOT .. "OlympusCompanionBridge/README.md")):read("*a")
 	for _, name in ipairs(AFFAIRS) do assert(readme:find("`" .. name .. "`", 1, true), "README names " .. name) end
 	local toc = assert(io.open(ROOT .. "Olympus/Olympus.toc")):read("*a")
-	assert(toc:find("\nBridgeSections%.lua\r?\nBridgeAffairs%.lua\r?\n"), "the TOC loads it right after BridgeSections.lua")
+	-- (931: the Companion's section files, BridgeSections.lua's helpers first, then the people tabs'
+	-- file and this one, which needs neither of the other two's sections.)
+	assert(toc:find("\nBridgeSections%.lua\r?\nBridgePeople%.lua\r?\nBridgeAffairs%.lua\r?\n"),
+		"the TOC loads it with the Companion's section files, after BridgeSections.lua and BridgePeople.lua")
 end)
 
 test("companion bridge affairs (931): nothing at all before the Olympus Accord is accepted, nor for a character who is no member", function()
