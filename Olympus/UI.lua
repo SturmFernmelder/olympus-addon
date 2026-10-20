@@ -1899,6 +1899,8 @@ local function ShowTab(key, focus)
 		ns.SafeCall("leave tab " .. previous.key, previous.onLeave)
 	end
 	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
+	-- (The Decrees' pages too, the officer musters': another tab opens them on their list again.)
+	if key ~= "decrees" and ns.Views.CloseDecreePage then ns.Views.CloseDecreePage() end
 	main.tab = key
 	for k, v in pairs(main.views) do v:SetShown(not surface and k == key) end
 	for k, v in pairs(main.apiSurfaceViews or {}) do v:SetShown(surface ~= nil and k == key) end
@@ -2020,6 +2022,7 @@ local function PageOf(tab, locked)
 	elseif tab == "throne" then
 		-- (1.1.5: a guild master's Guild tab, in the Throne's place.)
 		sub = ns.King and ns.King.ThroneShown and not ns.King.ThroneShown() and "guild" or ns.King and ns.King.mode
+	elseif tab == "decrees" then sub = ns.Views.DecreePageShown and ns.Views.DecreePageShown() -- (the officer musters')
 	elseif tab == "treasury" then sub = ns.Treasury and ns.Treasury.mode
 	elseif tab == "wanted" then sub = ns.Wanted and ns.Wanted.PageId and ns.Wanted.PageId()
 	elseif tab == "watch" then sub = ns.Watch and ns.Watch.PageId and ns.Watch.PageId() end -- (1.1.6: desk, reports, cases, case)

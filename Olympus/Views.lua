@@ -2687,6 +2687,32 @@ end
 -- Decrees (layers + decrees)
 ---------------------------------------------------------------------------
 
+-- Pages of the Decrees tab (2026-10-19, Daniel: the officer musters belong in the Decrees, not in
+-- The Realm): a module lists one in ns.DecreePages, the shape of ns.RealmPages' ({ key, Link =
+-- function() return its link line, or nil end, Lines = function(q) return its lines end, tip =
+-- what its search finds, L.SEARCH_TIP_...}). Its link, under the royal decrees, opens it in place
+-- of the tab's list; its Back line (ShowDecreePage(nil)) or another tab opened (UI.lua's ShowTab)
+-- closes it. A page whose link he no longer gets (he left the guild) closes by itself.
+local decreePageShown -- the page shown instead of the Decrees' list, or nil
+local function DecreePage(key)
+	for _, p in ipairs(ns.DecreePages or {}) do
+		if p.key == key then return p end
+	end
+	return nil
+end
+local function DecreePageNow()
+	local page = decreePageShown and DecreePage(decreePageShown)
+	if page and page.Link and not page.Link() then page = nil end
+	if not page then decreePageShown = nil end
+	return page
+end
+function Views.DecreePageShown() return decreePageShown end
+function Views.ShowDecreePage(key)
+	decreePageShown = DecreePage(key) and key or nil
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+end
+function Views.CloseDecreePage() decreePageShown = nil end
+
 local function DecreeLines(q)
 	-- The shared army agenda owns this page's top: the King's current appointment and week,
 	-- consented guild-calendar rows, and read-only Arena providers all keep the one Week identity,
@@ -2725,6 +2751,22 @@ local function DecreeLines(q)
 			end }
 		elseif d.text ~= "" then
 			lines[#lines + 1] = { indent = 1, text = Grey('"' .. d.text .. '"') }
+		end
+	end
+	-- The tab's pages (ns.DecreePages: the officer musters), one link each under the decrees, with
+	-- one gap after the last; none while a search is typed.
+	local links = {}
+	for _, p in ipairs(not q and ns.DecreePages or {}) do
+		local link = p.Link and p.Link()
+		if link then links[#links + 1] = link end
+	end
+	if #links > 0 then
+		local prev = lines[#lines]
+		if prev then prev.gapAfter = true end
+		for i, link in ipairs(links) do
+			link.pageLink = true
+			link.gapAfter = i == #links
+			lines[#lines + 1] = link
 		end
 	end
 	-- 1.1 (#31): a Vox Populi question the player's block terms hid, while it is open.
@@ -3147,6 +3189,9 @@ local BUILD = {
 	decrees = function()
 		local title, text = DecreeDetail()
 		local q = Views.Query("decrees")
+		-- (A page of the tab, ns.DecreePages: its lines in place of the list, the one box searching it.)
+		local page = DecreePageNow()
+		if page then return Searched(page.Lines(q) or {}, "decrees", page.tip or "LOG"), title, text end
 		local lines = DecreeLines(q)
 		-- 1.1 (#12): this client's log of the acts it saw; the box searches it and the week alone.
 		if ns.Chronicle and not ns.Chronicle.missing then ns.Chronicle.AddLines(lines, q) end

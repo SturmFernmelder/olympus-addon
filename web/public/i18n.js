@@ -184,7 +184,7 @@ export const strings = {
 		forgetDoneCharacters: 'No longer linked',
 		forgetBack: 'Back to the start',
 
-		footer: 'Olympus Link is part of the Olympus addon, a fan project not affiliated with Blizzard Entertainment.',
+		footer: 'Olympus Link is part of the Olympus addon, not made or endorsed by Blizzard Entertainment.',
 		noScript: 'Olympus Link needs JavaScript.',
 	},
 
@@ -359,7 +359,7 @@ export const strings = {
 		forgetDoneCharacters: 'Não mais vinculados',
 		forgetBack: 'Voltar ao início',
 
-		footer: 'O Olympus Link faz parte do addon Olympus, um projeto de fãs sem ligação com a Blizzard Entertainment.',
+		footer: 'O Olympus Link faz parte do addon Olympus, que não é feito nem endossado pela Blizzard Entertainment.',
 		noScript: 'O Olympus Link precisa de JavaScript.',
 	},
 };

@@ -672,23 +672,29 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 			eq(n, want)
 			eq(#f.parts, 1 + #A.TOPICS + 2 * n, "a dot beside each bullet")
 			-- Short: one sentence a bullet, the whole letter well under the first draft's 571 words.
+			-- (Changed on purpose, 2026-10-19: the owner asked to drop "unofficial fan addon" and say
+			-- what Olympus is instead, so "What Olympus is" 1.1 names the guilds and what the addon
+			-- holds, 28 words in English. That one bullet is bounded at 30; every other stays at 22,
+			-- and the letter's bound grows by the same 20 words, 360 to 380.)
 			local total = select(2, L.ACCORD_OPENING:gsub("%S+", ""))
 			for _, t in ipairs(A.TOPICS) do
 				for i = 1, t[2] do
 					local text = L["ACCORD_T" .. t[1] .. "_" .. i]
 					local count = select(2, text:gsub("%S+", ""))
 					total = total + count
-					assert(count <= 22, ("bullet %d.%d is %d words"):format(t[1], i, count))
+					local cap = (t[1] == 1 and i == 1) and 30 or 22
+					assert(count <= cap, ("bullet %d.%d is %d words"):format(t[1], i, count))
 					assert(not text:find("|c", 1, true), "no colour codes in a bullet: bold is the font string's")
 				end
 			end
-			assert(total <= 360, "the letter is " .. total .. " words")
+			assert(total <= 380, "the letter is " .. total .. " words")
 			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
 			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a
 			-- deep red ink and doubled strokes (the dot too); the other bullets in the plain ink.
 			-- (Changed on purpose, 2026-10-19: the owner's "sair para o Companion só" became a bullet
 			-- of its own, T5_3, in bold with the in-game promise it qualifies; the 360-word bound
-			-- stays, the letter trimmed elsewhere to fit.)
+			-- stays, the letter trimmed elsewhere to fit. Then, the same day, the owner's "botar uma descrição mais
+			-- explicando o que é" made the first topic say what Olympus is, and the bound became 380.)
 			local bold = {}
 			for _, p in ipairs(f.parts) do
 				if p.kind == "bullet" and p.bold then bold[#bold + 1] = p.fs:GetText() end
@@ -826,6 +832,18 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 	eq(en.ACCORD_NAME, "The Olympus Accord"); eq(pt.ACCORD_NAME, "O Acordo do Olympus")
 	assert(en.ACCORD_SUBTITLE:find("Terms of use", 1, true) and en.ACCORD_OPENING:find("terms of use", 1, true), "it says what it is")
 	assert(pt.ACCORD_SUBTITLE:find("Termos de uso", 1, true))
+	-- What Olympus is (2026-10-19, the owner: not "unofficial", not a fan addon, say what it is):
+	-- the Olympus guilds' own free addon and what it holds; Blizzard's line stays its own bullet.
+	assert(en.ACCORD_T1_1:find("Olympus guilds", 1, true) and en.ACCORD_T1_1:find("census", 1, true), en.ACCORD_T1_1)
+	assert(pt.ACCORD_T1_1:find("guildas Olympus", 1, true) and pt.ACCORD_T1_1:find("censo", 1, true), pt.ACCORD_T1_1)
+	for _, s in ipairs({ en.ACCORD_T1_1, pt.ACCORD_T1_1 }) do
+		local low = s:lower()
+		for _, word in ipairs({ "unofficial", "fan addon", "fan-made", "não oficial", "fãs" }) do
+			assert(not low:find(word, 1, true), word .. " in: " .. s)
+		end
+	end
+	eq(en.ACCORD_T1_2, "Not made or endorsed by Blizzard Entertainment.")
+	eq(pt.ACCORD_T1_2, "Não é feito nem endossado pela Blizzard Entertainment.")
 	-- The rules it states are the code's: the ladder, the 30 days, English only, no stakes, 180 days.
 	assert(en.ACCORD_T4_2:find("1 hour, 24 hours and 7 days", 1, true) and en.ACCORD_T4_2:find("30 days", 1, true))
 	eq(ns.Accord.KEEP, 180 * 86400); assert(en.ACCORD_T5_2:find("180 days", 1, true))
