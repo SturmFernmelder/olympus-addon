@@ -3051,6 +3051,11 @@ version. Packaging refuses a commit missing either folder or giving the two TOCs
 versions. The arena's tests live in `tests/arena/` (one file per part, run by `tests/run.lua`), on
 the test world of `tests/arena/lib/world.lua`.
 
+Test builds, the author only: `/oly selftest` probes the client's APIs, opens every page and module
+read-only, and writes `OlympusDB.selftest` with a copyable summary; `/oly selftest status` reopens
+it (`Olympus/SelfTest.lua`, its offline tests in `tests/selftest.lua`). It sends nothing and puts the
+window back as it was; a `/reload` after it writes the file.
+
 Remote rehearsal enrollment requires `/oly arena rehearsals on`; the default refuses it without
 creating a rehearsal store. `off` leaves a current rehearsal locally (a director closes their
 own rehearsal). A director's explicit Start remains available. Copper rehearsals are refused

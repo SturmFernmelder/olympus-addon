@@ -48,6 +48,7 @@ Locales\PerfText.lua
 Locales\APIText.lua
 Locales\PlayerSightingsText.lua
 Locales\AccordText.lua
+Locales\SelfTestText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -178,3 +179,4 @@ ArenaChat.lua
 ArenaSpectate.lua
 ArenaTest.lua
 ArenaHome.lua
+SelfTest.lua

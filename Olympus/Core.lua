@@ -1884,6 +1884,8 @@ StandIn("Versions", { "Check", "AskUpdate", "Tell" })
 StandIn("Answers", { "Open" })
 -- 1.1.5: the guild masters' centurions and correspondents (Nominees.lua).
 StandIn("Nominees", { "Slash", "Prompt" })
+-- The self-test of test builds (SelfTest.lua, /oly selftest: the author alone).
+StandIn("SelfTest", { "Slash" })
 
 -- Blizzard's gamepad UI (WoW: Forever's controller mode) is on.
 function ns.GamepadUI()
@@ -2467,6 +2469,10 @@ local function Slash(input)
 		elseif cmd == "perf" then
 			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
 			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
+		elseif cmd == "selftest" then
+			-- Test builds, the author alone (SelfTest.lua): the client, every page and the modules,
+			-- checked by themselves; status and stop.
+			if ns.SelfTest.missing then ns.Print(L.RESTART_NEEDED) else ns.SelfTest.Slash(rest) end
 		elseif cmd == "status" then
 			-- (1.2: the memory figures in it are measured now, on the command alone: Diagnostics' arena lines.)
 			if UpdateAddOnMemoryUsage then pcall(UpdateAddOnMemoryUsage) end
