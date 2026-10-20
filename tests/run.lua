@@ -603,16 +603,18 @@ test("1.1.5 Census and Realm default guild order puts OLYMPUS first on a size ti
 		eq(table.concat(realmRows, ","), "OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Alpha Olympus,Beta Olympus,Olympus Old",
 			"the Realm uses the same default order")
 
-		-- A Members click the other way is the plain column: smallest first, no standard-bearer.
+		-- A Members click the other way is the plain column: smallest first.
 		-- (Changed on purpose, 1.2.4, the author's ask: a tie goes to the higher average level
-		-- first, whichever way the column runs, then the name; before, to the name alone.)
+		-- first, whichever way the column runs, then the name; before, to the name alone.
+		-- Changed on purpose again, CR-04, the author's ask: the exact <OLYMPUS> first on a tie of
+		-- any order, before the average level; before, an explicit column click had no standard-bearer.)
 		ns.Views.SortBy("members")
 		guildRows = {}
 		for _, line in ipairs(ns.Views.Build("census")) do
 			if line.cols then guildRows[#guildRows + 1] = line.cols[1] end
 		end
-		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,Knights of Olympus,Olympus III,Olympus II,OLYMPUS,Olympus Old",
-			"an ascending Members sort keeps its header's meaning, a tie by average level")
+		eq(table.concat(guildRows, ","), "Alpha Olympus,Beta Olympus,OLYMPUS,Knights of Olympus,Olympus III,Olympus II,Olympus Old",
+			"an ascending Members sort keeps its header's meaning, a tie the standard-bearer first, then by average level")
 	end)
 	ns.rdb.guilds, ns.rdb.seen, ns.Views.sort, ns.UI, ns.rdb.realmKey = savedGuilds, savedSeen, savedSort, savedUI, savedKey
 	if not ok then error(err, 0) end
@@ -5081,6 +5083,86 @@ test("Realm races keep the race exposed by modern /who without putting it on the
 		server.Answer({ { "Whodwarf", "OLYMPUS VII", 55, "WARRIOR", "Dwarf", "Dwarf" } })
 		eq(ns.Who.sweep.byName.Whodwarf.race, "Dwarf")
 		eq(ns.Who.sweep.byName.Whodwarf.raceName, "Dwarf")
+	end)
+end)
+
+-- CR-05 (races shown as Unknown): another guild's Lord is known from its census report,
+-- which carries no race. /who showed his race while he was online; the next round, with him
+-- logged off, used to put him back under Unknown. The client's WhoInfo gives raceStr only
+-- (no race file token), so these rows give no sixth field.
+test("CR-05: a race /who showed stays in the Realm's Races after its round is over, this session only, never saved; Unknown says why", function()
+	WithWho(function(server)
+		local saved = { members = ns.Roster.members, ui = ns.UI, arena = ns.ArenaProfile, creature = C_CreatureInfo }
+		local ok, err = pcall(function()
+			ns.Roster.members, ns.ArenaProfile, C_CreatureInfo = {}, nil, nil
+			ns.UI = { Refresh = function() end, StatusLine = function() return "status" end, ShowPerson = function() end,
+				FilterChanged = function() end }
+			ns.rdb.guilds["OLYMPUS VII"] = { total = 30, online = 4, zones = {}, t = ns.Now(), realm = "Realm",
+				leader = "Lordelf", leaderClass = "MA", leaderLevel = 60, officers = {}, top = {} }
+			local function Groups()
+				ns.Views.ClearFilters()
+				ns.Views.SetRealmMode("races", true)
+				local out = {}
+				for _, line in ipairs(ns.Views.Build("realm")) do
+					if type(line.id) == "string" and line.id:find("^realm:races:") then out[line.id:sub(13)] = line end
+				end
+				return out
+			end
+			local function Holds(t, value, seen)
+				seen = seen or {}
+				if type(t) ~= "table" or seen[t] then return false end
+				seen[t] = true
+				for k, v in pairs(t) do
+					if k == value or v == value or (type(v) == "table" and Holds(v, value, seen)) then return true end
+				end
+				return false
+			end
+			local SAVED = { OlympusDB, ns.db, ns.rdb }
+			eq(Holds(SAVED, "Night Elf"), false, "nothing saved holds the race before the test")
+
+			local before = Groups()
+			assert(before.unknown and not before["race:night elf"], "the report alone gives no race")
+
+			eq(ns.Who.Search(), true)
+			server.Answer({ { "Lordelf", "OLYMPUS VII", 60, "MAGE", "Night Elf" } })
+			server.Run(ns.Who.SETTLE)
+			local seen = Groups()
+			assert(seen["race:night elf"] and not seen.unknown, "seen online: his race")
+
+			-- He logs off. The round's searches for the misspelled names find nobody, then the next
+			-- round's broad search lists only someone else.
+			for _ = 1, #ns.Who.VARIANTS do
+				eq(server.Click(), true)
+				server.Answer({})
+				server.Run(ns.Who.SETTLE)
+			end
+			eq(server.Click(), true)
+			eq(server.sent[#server.sent], ns.Who.QUERY, "the next round's broad search")
+			server.Answer({ { "Otherdwarf", "OLYMPUS VII", 50, "WARRIOR", "Dwarf" } })
+			server.Run(ns.Who.SETTLE)
+			eq(ns.Who.sweep.byName.Lordelf, nil, "the new round no longer lists him")
+			local after = Groups()
+			assert(after["race:night elf"], "the race /who showed earlier this session stays")
+			assert(after["race:dwarf"], "the new round's player has his own")
+			eq(after.unknown, nil, "nobody back under Unknown")
+			eq(after["race:night elf"].text:find("(1)", 1, true) ~= nil, true, "him, once")
+			eq(select(1, ns.Who.RaceOf("Lordelf-Realm")), "Night Elf")
+			eq(Holds(SAVED, "Night Elf"), false, "kept in memory only: nothing saved holds it")
+
+			-- /oly reset forgets the rounds and these races with them.
+			ns.Who.Reset()
+			eq(ns.Who.RaceOf("Lordelf"), nil)
+			local unknown = Groups().unknown
+			assert(unknown, "after a reset he is Unknown again until /who sees him")
+			-- The Unknown group says why.
+			local tip = {}
+			unknown.tooltip({ AddLine = function(_, text) tip[#tip + 1] = text end })
+			eq(tip[#tip], ns.L.REALM_RACE_UNKNOWN_TIP, "the Unknown group says where a race comes from")
+		end)
+		ns.Roster.members, ns.UI, ns.ArenaProfile, C_CreatureInfo = saved.members, saved.ui, saved.arena, saved.creature
+		ns.Views.ClearFilters()
+		ns.Views.SetRealmMode("guilds", true)
+		if not ok then error(err, 0) end
 	end)
 end)
 
@@ -10513,7 +10595,46 @@ test("the soldier count explains the census on hover; the minimap logo sits on i
 		local b = ns.MakeRoundButton("OlympusTestRound", UIParent, 31)
 		eq(b.icon.w, 18)
 		local a = b.icon:Anchor("TOPLEFT")
-		eq(a[4] .. " " .. a[5], "8 -6", "the logo's centre on the disc's (17, -15)")
+		-- (UP-12: the disc and the logo both moved onto the gold ring's centre, test below; the logo
+		-- still on the disc's centre, now (16, -16), where 0.9.0 had both on (17, -15).)
+		eq(a[4] .. " " .. a[5], "7 -7", "the logo's centre on the disc's (16, -16)")
+	end)
+end)
+
+-- UP-12 (the author, 09-24 and again 09-26, after 0.7.12 and 0.9.0 had each moved it: the minimap
+-- icon "um pouquinho descentralizado"). Measured on Forever 1.60.1 in four of the author's
+-- screenshots of 10-04 (two at 1281 x 720, two at 1366 x 768, the layout of 0.9.0 to 1.2.5.1): a
+-- circle fitted to the gold ring's brightest gold, and the logo matched to them at its own scale,
+-- put the logo 1.0 to 1.1 units right of the ring's centre and 0.8 to 0.95 above it. The ring's
+-- centre is so about (15.9, -15.9) from the 31-unit button's top left, with the ring 53 across from
+-- that corner: 0.3 of the ring's size each way. Blizzard's own Forever layouts with that ring agree
+-- within a unit (ItemDisplay.xml's SpecRing, GroupLootFrame.xml's, the world map's filter button).
+-- The logo and the dark disc behind it go on that centre, within a quarter unit, on every round
+-- button: the minimap's (31), the world map's (30) and the guild windows' (26 and 22).
+test("UP-12 round buttons: the logo and its dark disc sit on the gold ring's centre at every size", function()
+	WithUI(function()
+		local RING_CENTRE = 15.9 / 53 -- (of the ring's size, from its top left, across and down: measured, above)
+		local function Centre(t)
+			local p = t:Anchor("TOPLEFT")
+			return p[4] + t.w / 2, p[5] - t.h / 2
+		end
+		for _, size in ipairs({ 31, 30, 26, 22 }) do
+			local b = ns.MakeRoundButton(nil, UIParent, size)
+			local of = {}
+			for _, t in ipairs(b.textures or {}) do of[t.texture] = t end
+			local ring, disc = of["Interface\\Minimap\\MiniMap-TrackingBorder"], of["Interface\\Minimap\\UI-Minimap-Background"]
+			assert(ring and disc and of[ns.LOGO] == b.icon, size .. ": the ring, the dark disc and the logo")
+			local p = ring:Anchor("TOPLEFT")
+			local rx, ry = p[4] + ring.w * RING_CENTRE, p[5] - ring.h * RING_CENTRE
+			local near = 0.25 * size / 31
+			for label, t in pairs({ logo = b.icon, disc = disc }) do
+				local cx, cy = Centre(t)
+				assert(math.abs(cx - rx) <= near and math.abs(cy - ry) <= near,
+					("%d: the %s's centre %.2f, %.2f; the ring's %.2f, %.2f"):format(size, label, cx, cy, rx, ry))
+			end
+			assert(math.abs(b.icon.w - 18 * size / 31) < 1e-9, size .. ": the logo's size kept")
+			assert(math.abs(disc.w - 20 * size / 31) < 1e-9, size .. ": the disc's size kept")
+		end
 	end)
 end)
 
@@ -29533,6 +29654,20 @@ do
 		local security = assert(Section(store, "Security and trust"), "the store page: a Security and trust section")
 		for _, id in ipairs({ "security-and-trust", "what-colluding-characters-can-reach" }) do
 			Has(security, "](https://github.com/dnl-gentile/olympus-addon#" .. id .. ").*\n", "the store page: the README's section")
+		end
+	end)
+
+	-- The author asked on 2026-09-27 that the Credits line of the controller player whose 0.9.8
+	-- report showed the block came when the world map opened name that report (fixed in 1.0,
+	-- 1705a331); since 0.9.6 the line had said only "the gamepad UI". (No player is named here: the
+	-- line is checked by what it credits.)
+	test("docs: Credits on the README, the CurseForge page and the store page name the controller player's report of the world map blocked in controller mode, fixed in 1.0", function()
+		for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md", "docs/CURSEFORGE-STORE.md" }) do
+			local credits = Flat(assert(Section(Doc(path), "Credits"), path .. ": a Credits section"))
+			local field = credits:match("%*%*Reports from the field:%*%*(.-)%.%s+%- ")
+			assert(field, path .. ": a Reports from the field line")
+			Has(field, " (the gamepad UI; ", path .. ": the gamepad UI still credited")
+			Has(field, "'s report of the world map blocked in controller mode, fixed in 1.0), ", path .. ": the report credited")
 		end
 	end)
 end
@@ -56499,6 +56634,27 @@ do
 			ns.me = dev
 			B.ChatForget()
 			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", dev), SILVER .. ns.AUTHOR, "on his own screen, on his own line")
+			-- CH-10 (the author, 10-19: "Você quer ver seu dragão, sim"): his own lines on his own screen
+			-- in every form Forever's chat events may hand his name (ns.Normal: "First-Surname", with or
+			-- without a realm, or no realm at all), logged in on either realm of his group, guild chat too.
+			local first, surname = ns.AUTHOR:match("^(%S+) (%S+)$")
+			local savedRealm, savedSplit = ns.realm, ns.splitNames
+			local okOwn, errOwn = pcall(function()
+				ns.splitNames = true
+				local realms = ns.GroupRealms(ns.GroupOf(ns.AUTHOR_REALM))
+				assert(#realms >= 2, "his realm group")
+				for _, realm in ipairs(realms) do
+					ns.realm, ns.me = realm, ns.AUTHOR .. "-" .. realm
+					for _, form in ipairs({ ns.AUTHOR, first .. "-" .. surname, first .. "-" .. surname .. "-" .. realm, ns.me }) do
+						for _, event in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_PARTY", "CHAT_MSG_CHANNEL", "CHAT_MSG_GUILD" }) do
+							B.ChatForget()
+							eq(cb(event, first, "hi", form), SILVER .. first, "his own line on " .. realm .. ", sent as " .. form .. ", " .. event)
+						end
+					end
+				end
+			end)
+			ns.realm, ns.splitNames = savedRealm, savedSplit
+			if not okOwn then ns.me = savedMe; error(errOwn, 0) end
 			ns.me = savedMe
 			B.ChatForget()
 			eq(cb("CHAT_MSG_SAY", ns.AUTHOR, "hi", ns.AUTHOR .. "-Elsewhere"), nil, "his name on another realm group")
@@ -63340,7 +63496,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
@@ -63355,7 +63511,7 @@ for _, name in ipairs(focused) do
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
 		or name == "census-avg-level" and { WithUI = WithUI, LoadUI = LoadUI } -- (1.2.4)
-		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI } -- (the Realm's pages: their ink and their Back)
+		or name == "realm-pages" and { WithUI = WithUI, LoadUI = LoadUI, "census-stats" } -- (the Realm's pages: their ink and their Back)
 		or (name == "census" or name == "authority") and { FreshComm = FreshComm }
 		or name == "quiet-presence" and { FreshComm = FreshComm, WithHop = WithHop, Fire = CoreFire } -- (1.2.5.1)
 		or name:match("^church") and { WithGamepadUI = WithGamepadUI, WithUI = WithUI }

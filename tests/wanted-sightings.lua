@@ -457,9 +457,12 @@ test("wanted sightings (1.2.0): off until the member's own Yes, a line of its ow
 		for _, part in ipairs({ "Horde player", "name and GUID", "your own map position (rounded) and layer", "the time, your name and your guild",
 			"15 minutes", "whispered to one reviewer", "the one you choose with Sightings to on the Most Wanted page", "the King, a High Councillor or the author",
 			"until you choose one, nobody gets it", "seen nearby", "Nothing goes while you keep your zone and layer private",
-			"the King's only while his crown shows on the map", "Never anyone off the list", "never on the Olympus channel", "never in an instance", "nothing saved",
+			-- (RH-09, changed on purpose: the time a wanted Horde player was last seen is now kept on
+			-- the member's own list, his "Last seen online"; the page says so, and that a No forgets it.)
+			"the King's only while his crown shows on the map", "Never anyone off the list", "never on the Olympus channel", "never in an instance",
+			"Nothing saved but the time your client last saw each one, on your own Most Wanted list (never where, never sent)",
 			"Authorize all while it is pending",
-			"No stops it at once", "take your pins off his map", "before you logged out stays there until its 15 minutes are up",
+			"No stops it at once, forgets those times", "take your pins off his map", "before you logged out stays there until its 15 minutes are up",
 			"/oly sightings on|off" }) do
 			assert(text:find(part, 1, true), "the page says: " .. part)
 		end
@@ -1330,12 +1333,22 @@ test("wanted sightings: an open Wanted profile refreshes only when a pin is adde
 		eq(o.uiRefreshes, 1, "adding a local pin redraws the open profile")
 		world:Pump()
 		eq(king.uiRefreshes, 1, "receiving a pin redraws the open profile")
-		local function HasObserved(cl)
+		-- (RH-09, changed on purpose: 1.2.4's session-only "Last observed online" line is now the
+		-- kept "Last seen online" line, wanted-online, whose tooltip names its source. A pin a member
+		-- sent shows as seen nearby; the king's own sighting is kept after its pin, as Daniel asked.)
+		local function Source(cl)
 			for _, line in ipairs(world:As(cl, cl.W.Build)) do
-				if line.id == "wanted-observed:g:" .. GROM then return true end
+				if line.id == "wanted-online:g:" .. GROM then
+					local tip = Tooltip()
+					world:As(cl, line.tooltip, tip)
+					local text = table.concat(tip.lines, "\n")
+					return text:find(L.WANTED_ONLINE_NEARBY, 1, true) and "nearby"
+						or text:find(L.WANTED_ONLINE_OWN, 1, true) and "own" or "other"
+				end
 			end
-			return false
+			return nil
 		end
+		local function HasObserved(cl) return Source(cl) == "nearby" end
 		assert(HasObserved(king), "the received observation appears without a manual page refresh")
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 1, "an unchanged pin refresh does not create a redraw loop")
@@ -1346,14 +1359,18 @@ test("wanted sightings: an open Wanted profile refreshes only when a pin is adde
 		eq(king.uiRefreshes, 2, "taking back the delivered pin redraws the reviewer's profile")
 		eq(HasObserved(king), false, "the withdrawn observation disappears immediately")
 
+		eq(Source(king), nil, "and nothing else dates him on the king's page")
+
 		assert(world:See(king, "target", Horde("Grom-Realm", GROM)))
 		eq(king.uiRefreshes, 3, "a new native observation redraws once")
+		eq(Source(king), "own")
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 3, "the normal pin beat is quiet while nothing changed")
 		world:Advance(king.W.SIGHT_TTL + 1)
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 4, "expiry redraws once")
-		eq(HasObserved(king), false, "the expired observation disappears immediately")
+		eq(#world:Pins(king), 0, "the expired pin disappears immediately")
+		eq(Source(king), "own", "his own sighting's time stays on the page after its pin (RH-09)")
 	end)
 end)
 

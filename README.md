@@ -127,10 +127,11 @@ channels; the same charter and Join controls work for each side.
   clicking, like the Guild window: a first click on Members, Online or Avg lvl puts the highest
   first, a second the lowest. By default, fresh reports and larger guilds come first; at the same
   size the exact `<OLYMPUS>` comes first, then the higher average level, then the name (1.1.5).
-  Any other column's tie goes to the higher average level, then the name; by Avg lvl, a guild
-  without one comes last either way and a tie goes to the larger guild (1.2.4). A title wider
-  than its column (the narrow window, a longer language's words) shows its short form (*Memb.*,
-  *Onl.*, *Avg*), or is cut with "..." inside its own header, never over the next one.
+  Any other column's tie, whichever way it runs, goes to the exact `<OLYMPUS>` first, then the
+  higher average level, then the name; by Avg lvl, a guild without one comes last either way and
+  a tie goes to `<OLYMPUS>`, then the larger guild (1.2.4). A title wider than its column (the
+  narrow window, a longer language's words) shows its short form (*Memb.*, *Onl.*, *Avg*), or is
+  cut with "..." inside its own header, never over the next one.
 - The Realm lists its guilds in the same default order, and its own **Order** line above them
   (1.2.4) sorts them by members (the default), online, average level, guild or Lord: a count the
   highest first, a name A to Z, ties as in the Census. A column clicked in the Census leaves the
@@ -141,9 +142,21 @@ channels; the same charter and Join controls work for each side.
   parentheses after each Lord's *online* or *offline*, Recruiting after each guild's free slots,
   and the copy for Discord in a column of its own. Wherever guilds are listed by a count (free
   slots, soldiers in a zone, a map pin, the Royal Inspection, the dues table after its members),
-  the same count goes to the higher average level first, then the name, and the average level
-  shows after the count (in the dues table, in each guild's hover).
-- **Total soldiers** and **online now** across the whole realm.
+  the same count goes to the exact `<OLYMPUS>` first, then the higher average level, then the
+  name, and the average level shows after the count (in the dues table, in each guild's hover).
+- **Total soldiers** and **online now** across the whole realm. Next to the soldiers (every
+  character on the guilds' rosters), smaller and darker, the **people**: each player once, the
+  characters their players linked as alts counted once (see Alt links, below).
+- **The census in numbers**: a click on the header's count (from any tab) opens a page of its own
+  in the Census tab: characters, people, linked alts, online now, the guilds counted (and how many
+  report right now), the army's average level (each guild's, weighted by its size), the five
+  largest guilds against the game's 1,000 cap and the levels online. Two small graphs show how the
+  counts moved: the characters over the last 30 days (each day's highest) and who was online over
+  the last 24 hours (each hour's most); hover a day or an hour for its numbers. Your own addon
+  writes the census down every 15 minutes while you play, about 3 minutes after login once the
+  census is rebuilt, and keeps 30 days of it in your saved variables (the last two days sample by
+  sample). Nothing is sent: another player's client keeps its own history, so the curves can
+  differ. **< The Census**, or any tab, goes back to the list.
 - **Where the army stands**: top zones ("Stormwind City 742") and totals per continent
   (Eastern Kingdoms, Kalimdor), counted by the guilds whose census comes from a member who
   shares their zone (see Privacy, below).
@@ -172,7 +185,9 @@ channels; the same charter and Join controls work for each side.
 - **Search the census** (1.1): a guild, a Lord, a Captain, a player of a guild's top five or one
   seen online (the player shows under the guild's row), or a zone ("Stormwind": its soldiers
   and its guilds, most first). Type **recruiting** (or `free 50`) for every guild with room,
-  most free slots first and the King's gates on top.
+  most free slots first and the King's gates on top. Letters that look alike count as one
+  (1.2.1): l, I and 1, and 0 and O, so `XIII` finds OLYMPUS XIlI. The Realm tab's search reads
+  its guilds, Lords, Captains and members seen the same way.
 - **Tonight on this client** (1.1): under the list, the most soldiers your addon saw online at
   once tonight and when, and (in its tooltip, and next to a zone you search) how each zone
   filled or emptied since. Counted by your own addon once a minute from the reports it
@@ -208,7 +223,10 @@ channels; the same charter and Join controls work for each side.
   one. Your guild comes from your live roster. Other guilds are partial (their reports and
   players seen with `/who`). Race comes from your live roster or `/who` result when the client
   directly exposes it, or from a consented Arena profile; these local observations do not add a
-  race field to census reports. Profession skill/current cap comes from the crafter's consented
+  race field to census reports. A race a `/who` answer showed stays known for the rest of the
+  session, after its round is over or the player logs off (in memory only: never saved or sent,
+  gone at a reload and with `/oly reset`). The Races view's **Unknown** group says on hover where a
+  race comes from. Profession skill/current cap comes from the crafter's consented
   listing with its age. Unknown data stays
   **Unknown**: Olympus does not infer a role from class or pretend another player's professions
   came from inspect. Each view keeps its own search and collapsed groups for the session.
@@ -679,9 +697,17 @@ bottom-to-top always gives the same tab order; changing role or debug view never
   none), and a click there shows them all (another hides them again). A link shows its tooltip
   when you hover it, and a Shift-click puts it in the tab's box.
 - Right-click any saved line and choose **Reply**. The box shows a compact reference to its writer
-  and words; the sent bubble draws that reference above your answer. Older addon versions still
-  see a readable text prefix. Replying changes no identity, delivery, permissions or moderation
-  authority, and the **x** beside the reference cancels it without sending.
+  and words, and the **x** beside it cancels it without sending. Your answer's bubble, on your
+  screen and everyone else's, shows the quoted line over the answer: smaller, on a darker inset,
+  with its writer's name (**You** for a line of yours). A client draws the quote only when it holds
+  the quoted line itself, by that writer and with those words; without it (you came online later,
+  or the line is no longer among those kept) the answer shows as it was written, with its
+  `[reply @Name-Realm: ...]` prefix, which is also what older addon versions show. So typing that
+  prefix by hand puts no quote in anyone's mouth. A quoted line a moderator deleted shows as
+  deleted in the quote too. The quote gives up words to keep your answer whole (a room keeps 150
+  bytes of a line, a fight room 180); an answer too long to go with any quote stays in the box,
+  and the chat says why. Replying changes no identity, delivery, permissions or moderation
+  authority.
 - **The box** runs across the bottom, where the other tabs have their buttons, with no Send
   button: Enter sends. It is Olympus's own, not the game's chat box: it takes the keyboard only
   when you click into it or press your open-chat key (Enter, unless you changed it) while the tab
@@ -1155,8 +1181,9 @@ alts and the census counts people:
   characters can be linked, each confirming on itself: an officer can't attach anyone's alt,
   and a character added later is linked only once it confirms too. An alt never starts a link
   (its main does), and it gains nothing of its main's (a Hand's alt is no Hand).
-- The army's total then counts each player once, whatever guilds their characters are in (each
-  guild's own size stays its roster's; the header's tooltip says how many were counted once).
+- The army's people count then counts each player once, whatever guilds their characters are in (each
+  guild's own size stays its roster's; the header shows the people next to the soldiers, and its
+  tooltip says how many were counted once).
   The treasury's ranking and its week's donors put a player's characters on one line, under the
   main's name, and a dues payment made from an alt counts for its main (1.1.5, see the dues
   below). Vox Populi takes one vote per player.
@@ -1993,6 +2020,13 @@ with its Slayers (a Take off no longer reaches it). Up to 512 entries taken off 
 and take no place. A Horde player is his GUID, never a name: his name is the one the game gives for
 that GUID wherever your client can look it up, a row that gives a GUID the game knows another
 character's name is refused, and an entry under someone's name never keeps that player off.
+
+**Last seen online.** Each entry on the list, its tooltip and its page say when he was last seen in
+the world: the newest of the shared rows (a member he killed, or his own death to one), your own
+client's sighting of him (only while your Most Wanted sightings are on: the time alone is kept on
+your list, never where, never sent, and your No forgets it) and, for a reviewer, a sighting a
+member sent him this session. It is never a presence lookup: a Horde player nobody saw or fought
+shows no time.
 
 The signed **Slayers top three** is the publisher's own board, by verified GUID (a slayer his
 client knows by name only is left out and named on his Frames page). A trusted peer can relay that
@@ -3370,9 +3404,10 @@ Gundlach and contributors (speedata, 3-clause BSD) for Olympus Link's QR code
   donations), Zeal (what the King hides stays off the channel), and FedGuy / Fed Olympus
   (nameplate-assisted layer hopping).
 - **Art:** Max (the bronze elite borders, drawn over the game's own; the winged one remains the guild masters').
-- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
-  to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
-  player who told us WoW had handed him the channel.
+- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI; PartyRockAce's report
+  of the world map blocked in controller mode, fixed in 1.0), Ignitheus (whispers to Forever
+  names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the player who
+  told us WoW had handed him the channel.
 - Everyone who reported a bug, tested in game or asked for a feature.
 
 ## License

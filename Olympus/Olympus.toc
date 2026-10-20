@@ -49,6 +49,7 @@ Locales\APIText.lua
 Locales\PlayerSightingsText.lua
 Locales\AccordText.lua
 Locales\RecordText.lua
+Locales\CensusStatsText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -107,6 +108,7 @@ PartyGuard.lua
 AnswerBank.lua
 Answers.lua
 Views.lua
+CensusStats.lua
 Members.lua
 Nominees.lua
 UI.lua

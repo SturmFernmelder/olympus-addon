@@ -93,7 +93,7 @@ local WHY = { moved = "CHATWIN_WHY_MOVED", late = "CHATWIN_WHY_LATE", failed = "
 	access = "CHATWIN_WHY_ACCESS", off = "CHATWIN_WHY_OFF", netoff = "CHATWIN_WHY_NETOFF", held = "CHATWIN_WHY_NETOFF",
 	timeout = "CHATWIN_WHY_TIMEOUT", severe = "CHATWIN_WHY_SEVERE", lockdown = "CHATWIN_WHY_LOCKDOWN", paused = "CHATWIN_WHY_PAUSED",
 	guild = "CHATWIN_WHY_GUILD", empty = "CHATWIN_WHY_EMPTY", size = "CHATWIN_WHY_SIZE", preview = "CHATWIN_WHY_PREVIEW",
-	gamepad = "CHATWIN_WHY_GAMEPAD" }
+	gamepad = "CHATWIN_WHY_GAMEPAD", replylong = "CHATWIN_WHY_REPLY_LONG" } -- (CH-04: ChatWindow.EncodeReply's nil)
 -- The pointer's arrow: the game's tutorial arrow (Blizzard_TutorialTemplates), else the chat
 -- frame's own scroll-down arrow (Blizzard_SharedXML's dropdown and store templates use it).
 local ARROW_ATLAS, ARROW_FILE = "NPE_ArrowDown", "Interface\\ChatFrame\\UI-ChatIcon-ScrollDown-Up"
@@ -202,29 +202,97 @@ function ChatWindow.Localized(key, fallback)
 end
 
 -- A reply stays readable on older clients: it is an ordinary text prefix, not a new transport
--- packet. Updated clients recognize that bounded prefix and draw it as a compact quote. It is
--- presentation only and grants no identity or moderation authority.
+-- packet: "[reply @Name-Realm: the quoted words] the answer". Updated clients draw it as a compact
+-- quote over the answer, and only when they hold the quoted line themselves (ChatWindow.QuoteOf):
+-- a prefix typed by hand puts no words in anyone's mouth. It is presentation only and grants no
+-- identity or moderation authority.
+-- CH-04: 1.2.5 put a "\n" between the quote and the answer. Codec.SanitizeChat drops every control
+-- byte before a line leaves (Channels.Send, ChatRooms) and again when it arrives, so no reply ever
+-- reached anyone as one. Every byte of this prefix is printable and outlives each chat's cleaning
+-- (Codec.SanitizeChat, ArenaChat.Clean, a crafting deal's and a squad's). The writer's full name
+-- travels, so each client shows it as its own realm does and finds the line it quotes.
+ChatWindow.REPLY_QUOTE = 60 -- bytes of the quoted words at most, then "..."
+ChatWindow.REPLY_MIN = 8    -- fewer left for them by a chat's budget: Enter refuses the reply
 function ChatWindow.ReplyPart(value, limit)
-	local s = ns.Codec.Plain(tostring(value or "")):gsub("[%c%[%]]", " "):gsub("%s+", " ")
-	s = Trim(s)
-	limit = tonumber(limit) or 72
+	-- (A link or a colour as its words alone: the quote is plain text, as its wire is.)
+	local s = tostring(value or ""):gsub("||", "\1"):gsub("|H.-|h(.-)|h", "%1"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+	s = Trim(ns.Codec.Plain(s):gsub("[%c%[%]]", " "):gsub("%s+", " "))
+	limit = tonumber(limit) or ChatWindow.REPLY_QUOTE
 	if #s > limit then
-		s = s:sub(1, limit):gsub("[\128-\191]+$", "") .. "..."
+		-- (Cut before a character, never inside one: 1.2.5 left its first byte behind.)
+		local cut = limit
+		while cut > 0 and (s:byte(cut + 1) or 0) >= 128 and s:byte(cut + 1) < 192 do cut = cut - 1 end
+		s = Trim(s:sub(1, cut)) .. "..."
 	end
 	return s
 end
 function ChatWindow.DecodeReply(text)
 	if type(text) ~= "string" then return nil, text end
-	local who, quote, body = text:match("^%[reply @([^%]]+)%] ([^\n]*)\n([%s%S]*)$")
-	if not who or who == "" or quote == "" then return nil, text end
-	return { who = ChatWindow.ReplyPart(who, 48), text = ChatWindow.ReplyPart(quote, 84) }, body
+	local who, quote, body = text:match("^%[reply @([^:%]]+): ([^%]]+)%] (.+)$")
+	if not who then return nil, text end
+	who, quote = ChatWindow.ReplyPart(who, 48), ChatWindow.ReplyPart(quote, ChatWindow.REPLY_QUOTE + 3)
+	if who == "" or quote == "" or not body:find("%S") then return nil, text end
+	return { who = who, text = quote }, body
 end
-function ChatWindow.EncodeReply(reply, text)
+-- `limit`: the bytes of a line the chat it goes to keeps (ChatWindow.ReplyLimit), the quote made
+-- shorter to leave the answer whole. Returns the line, or nil when the answer leaves fewer than
+-- REPLY_MIN bytes there for the quote (Enter keeps it in the box and says why).
+function ChatWindow.EncodeReply(reply, text, limit)
 	if type(reply) ~= "table" then return text end
-	local who = ChatWindow.ReplyPart(reply.who or reply.sender, 48)
-	local quote = ChatWindow.ReplyPart(reply.text, 84)
-	if who == "" or quote == "" then return text end
-	return ("[reply @%s] %s\n%s"):format(who, quote, text)
+	local name = reply.sender and ns.FullName(ns.Normal(reply.sender)) or reply.who
+	local who = ChatWindow.ReplyPart(name, 48):gsub(":", "")
+	if who == "" then return text end
+	local room = ChatWindow.REPLY_QUOTE
+	-- (15: "[reply @", ": ", "] " and the "..." of a quote cut short.)
+	if tonumber(limit) then room = math.min(room, limit - #text - #who - 15) end
+	if room < ChatWindow.REPLY_MIN then return nil end
+	local quote = ChatWindow.ReplyPart(reply.text, room)
+	if quote == "" then return text end
+	return ("[reply @%s: %s] %s"):format(who, quote, text)
+end
+-- CH-04: the bytes of a line the chat keeps: a fight room's (ArenaChat.TEXT_MAX), a room's
+-- (ChatRooms.TEXT_MAX: Guild, the role rooms, a crafting deal's and a squad's keep as many), the
+-- three channels' (Channels.Send splits a long line into CHAT_PARTS parts).
+function ChatWindow.ReplyLimit(room, logical)
+	if room then return tonumber(type(ns.ArenaChat) == "table" and ns.ArenaChat.TEXT_MAX) or 180 end
+	if logical then return tonumber(type(ns.ChatRooms) == "table" and ns.ChatRooms.TEXT_MAX) or 150 end
+	return ns.Codec.CHAT_PARTS * 200
+end
+-- CH-04: a writer's name as the quote and the line it quotes are matched (lower case, with realm).
+function ChatWindow.ReplyKey(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	return (ns.FullName(ns.Normal(name)) or name):lower()
+end
+-- CH-04: the line a reply quotes among `lines`, the chat as this client holds it: one by the writer
+-- it names whose words are the quote's (up to its "..." when it was cut). nil when there is none:
+-- the reply shows as written then, prefix and all. A match a moderator deleted comes back only when
+-- no other does (its words are not drawn again: Bubble). Kept on the reply's view while `lines` is
+-- the same list with the same ends.
+function ChatWindow.QuoteOf(v, e, lines, hides)
+	if not v.reply or type(lines) ~= "table" then return nil end
+	local n = #lines
+	if v.quoteFor == lines and v.quoteN == n and v.quoteFirst == lines[1] and v.quoteLast == lines[n] then
+		return v.quoteHit or nil
+	end
+	local want, quote = v.replyKey, v.reply.text
+	local cut = quote:sub(-3) == "..." and quote:sub(1, -4) or nil
+	local hit
+	for i = n, 1, -1 do
+		local o = lines[i]
+		if o ~= e and type(o) == "table" then
+			local ov = ChatWindow.ViewOf(o, hides)
+			if ov.senderKey ~= nil and ov.senderKey == want then
+				local plain = ov.plain
+				if not plain then plain = ChatWindow.ReplyPart(ov.body, math.huge); ov.plain = plain end
+				if plain == quote or (cut and cut ~= "" and plain:sub(1, #cut) == cut) then
+					hit = o
+					if not o.del then break end
+				end
+			end
+		end
+	end
+	v.quoteFor, v.quoteN, v.quoteFirst, v.quoteLast, v.quoteHit = lines, n, lines[1], lines[n], hit or false
+	return hit
 end
 local function Dynamic(t) return type(t) == "string" and dynamicRooms[t] or nil end
 -- (1.2.3: kept for the era, ChatWindow.logicalOf. ChatRooms.Info makes a new description at each
@@ -643,6 +711,9 @@ local function NewBubble(pane)
 	b.body:SetTextColor(0.95, 0.95, 0.95)
 	-- A referenced line: deliberately smaller and quieter than the new words, with the same gold
 	-- accent used by native Olympus detail strips. The wire prefix itself is never shown twice.
+	-- (CH-04: on a darker inset of the bubble's own colour, under the bar and the words.)
+	b.replyBg = b:CreateTexture(nil, "BORDER")
+	b.replyBg:SetColorTexture(0, 0, 0, 0.3); b.replyBg:Hide()
 	b.replyBar = b:CreateTexture(nil, "ARTWORK")
 	b.replyBar:SetWidth(2); b.replyBar:SetColorTexture(1, 0.82, 0, 0.9); b.replyBar:Hide()
 	b.replyWho = b:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -782,16 +853,24 @@ function ChatWindow.ViewOf(e, hides)
 		v.at, v.when, v.day = t, Grey(date("%H:%M", t)), date("%Y-%m-%d", t)
 		v.dayRow, v.full = Grey(v.day), ns.FullName(e.sender)
 		local reply, body = ChatWindow.DecodeReply(e.text)
-		v.replyWho = reply and ns.Codec.SanitizeChat(reply.who) or nil
+		-- (CH-04: its writer as this client names him, "You" for ours; the line it quotes is looked
+		-- for at each redraw, ChatWindow.QuoteOf, and v.raw is what shows without it.)
+		v.reply, v.replyKey = reply, reply and ChatWindow.ReplyKey(reply.who) or nil
+		v.replyWho = reply and (ns.Channels.IsMe(reply.who) and L.CHATWIN_YOU
+			or ns.Codec.SanitizeChat(ns.DisplayName(ns.Normal(reply.who)) or reply.who)) or nil
 		v.replyText = reply and ns.Codec.SanitizeChat(reply.text) or nil
 		v.body = ns.Codec.SanitizeChat(body)
+		v.raw = reply and ns.Codec.SanitizeChat(e.text) or nil
+		v.senderKey, v.plain, v.quoteFor = ChatWindow.ReplyKey(e.sender), nil, nil
 		v.era, v.found = nil, nil
 	end
 	if v.era ~= ChatWindow.era or v.hides ~= hides or v.del ~= e.del then
 		v.era, v.hides, v.del = ChatWindow.era, hides, e.del
 		v.own = Own(e)
 		v.veiled = not v.own and hides ~= nil and hides(e.text or "") or false
-		v.shown = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. (v.pending and (Grey(L.CHATWIN_SENDING) .. " ") or "") .. v.body
+		local marks = (v.veiled and (Grey(L.FILTER_HIDDEN_MARK) .. " ") or "") .. (v.pending and (Grey(L.CHATWIN_SENDING) .. " ") or "")
+		v.shown = marks .. v.body
+		v.shownRaw = v.raw and (marks .. v.raw) or nil
 		v.headed = false
 	end
 	return v
@@ -862,8 +941,13 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	-- Its words: the header's at a group's start, then the line's.
 	local who, when, whisper, full
 	if start then who, when, whisper, full = ChatWindow.HeaderOf(v, e, deleted) end
-	local text = deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN) or v.shown
-	local replyWho, replyText = not deleted and not hidden and v.replyWho or nil, not deleted and not hidden and v.replyText or nil
+	-- CH-04: a reply's quote over its answer while this client holds the line it quotes (its words
+	-- gone with it when a moderator deleted that line); else the reply's words as written.
+	local quoted = not deleted and not hidden and v.reply and ChatWindow.QuoteOf(v, e, ChatWindow.drawing, hides) or nil
+	local text = deleted and ns.WatchChat.DeletedBody() or hidden and Grey(L.CHATWIN_HIDDEN)
+		or (v.reply and not quoted and v.shownRaw) or v.shown
+	local replyWho, replyText = quoted and v.replyWho or nil, quoted and v.replyText or nil
+	if quoted and quoted.del == true and ns.WatchChat ~= nil and not ns.WatchChat.missing then replyText = ns.WatchChat.DeletedBody() end
 	local bodyFont, bodySize, bodyFlags = ChatWindow.FontOf(b.body)
 	local whoFont, whoSize, whoFlags = ChatWindow.FontOf(b.who)
 	-- (Written into the bubble's second look, b.lookNext, not a new table: no garbage each redraw.)
@@ -910,7 +994,9 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 	b.body:SetText(text)
 	b.replyWho:SetText(replyWho or "")
 	b.replyText:SetText(replyText or "")
-	local replyWidth = replyWho and math.max(math.ceil(TextWidth(b.replyWho)), math.ceil(TextWidth(b.replyText)) + 6) or 0
+	-- (CH-04: the quote in an inset of its own across the bubble, WhatsApp's way: its bar, its
+	-- writer, then its words; 12 = the bar and its gaps.)
+	local replyWidth = replyWho and math.max(math.ceil(TextWidth(b.replyWho)), math.ceil(TextWidth(b.replyText))) + 12 or 0
 	local inner = math.min(maxInner, math.max(math.ceil(TextWidth(b.body)), headerW, replyWidth, 1))
 	b.body:SetWidth(inner)
 	local bodyH = TextHeight(b.body, inner)
@@ -921,17 +1007,18 @@ local function Bubble(i, e, start, y, maxInner, hides, pane, room)
 		top = top + HEADER_H + 2
 	end
 	if replyWho then
-		local quoteWidth = math.max(1, inner - 8)
+		local quoteWidth = math.max(1, inner - 12)
 		b.replyWho:SetWidth(quoteWidth)
 		b.replyText:SetWidth(quoteWidth)
-		local replyH = 12 + TextHeight(b.replyText, quoteWidth)
-		b.replyBar:ClearAllPoints(); b.replyBar:SetPoint("TOPLEFT", b, "TOPLEFT", PAD, -top); b.replyBar:SetHeight(replyH)
-		b.replyWho:ClearAllPoints(); b.replyWho:SetPoint("TOPLEFT", b.replyBar, "TOPRIGHT", 6, 0)
+		local replyH = 3 + 12 + 1 + TextHeight(b.replyText, quoteWidth) + 3
+		b.replyBg:ClearAllPoints(); b.replyBg:SetPoint("TOPLEFT", b, "TOPLEFT", PAD, -top); b.replyBg:SetSize(inner, replyH)
+		b.replyBar:ClearAllPoints(); b.replyBar:SetPoint("TOPLEFT", b.replyBg, "TOPLEFT", 0, 0); b.replyBar:SetHeight(replyH)
+		b.replyWho:ClearAllPoints(); b.replyWho:SetPoint("TOPLEFT", b.replyBg, "TOPLEFT", 8, -3)
 		b.replyText:ClearAllPoints(); b.replyText:SetPoint("TOPLEFT", b.replyWho, "BOTTOMLEFT", 0, -1)
-		b.replyBar:Show(); b.replyWho:Show(); b.replyText:Show()
-		top = top + replyH + 5
+		b.replyBg:Show(); b.replyBar:Show(); b.replyWho:Show(); b.replyText:Show()
+		top = top + replyH + 4
 	else
-		b.replyBar:Hide(); b.replyWho:Hide(); b.replyText:Hide()
+		b.replyBg:Hide(); b.replyBar:Hide(); b.replyWho:Hide(); b.replyText:Hide()
 	end
 	-- (The moderator's button, while hovered: left of the time in a header, else the top corner.)
 	if b.mod then
@@ -1239,6 +1326,7 @@ local function DrawLines(all)
 	end
 	local maxInner = math.max(BUBBLE_MIN, math.floor(width * SHARE)) - 2 * PAD
 	ChatWindow.KeepBubbles(frame.bubbles, list)
+	ChatWindow.drawing = all -- (CH-04: where a reply's quoted line is looked for, the whole chat, not the search's)
 	local prev, prevDay -- (1.2.3: the line before's view, ChatWindow.ViewOf)
 	for _, e in ipairs(list) do
 		local v = ChatWindow.ViewOf(e, hides)
@@ -1256,6 +1344,7 @@ local function DrawLines(all)
 		y = y + Bubble(nb, e, start, y, maxInner, hides)
 		prev = v
 	end
+	ChatWindow.drawing = nil
 	-- The lines of ours that were not sent: a grey note each, a click puts one back in the box.
 	local t = tier
 	-- (1.2.4: one refused at Enter has its words still in the box: its reason alone, nothing to put back;
@@ -3008,9 +3097,14 @@ local function Submit()
 		-- channels retain their old keepMute behaviour.
 		local room = Dynamic(tier)
 		local logical = ChatWindow.Logical(tier)
-		local outgoing = ChatWindow.EncodeReply(frame.reply, text)
+		local outgoing = ChatWindow.EncodeReply(frame.reply, text, ChatWindow.ReplyLimit(room, logical))
 		local ok, why, left
-		if room then
+		if not outgoing then
+			-- (CH-04: the answer leaves its quote no room in this chat: kept in the box, and the
+			-- chat says why on one line, as a room's refusal does.)
+			ok, why = false, "replylong"
+			ChatWindow.Refused(tier, why)
+		elseif room then
 			local A = ns.ArenaChat
 			if type(A) == "table" and type(A.Send) == "function" then ok, why = A.Send(room.id, outgoing) else ok, why = false, "room" end
 		elseif logical then
@@ -3554,7 +3648,10 @@ function ChatWindow.CreateEmbedded(parent, opts)
 		if text == "" then self:SetText(""); keep = false
 		elseif text:sub(1, 1) == "/" then ns.Print(L.CHATWIN_NO_SLASH:format(opts.label and opts.label() or "Bones"))
 		elseif opts.maySend() then
-			local sent, why = opts.send(ChatWindow.EncodeReply(p.reply, text))
+			local outgoing = ChatWindow.EncodeReply(p.reply, text, opts.maxBytes)
+			local sent, why
+			if outgoing then sent, why = opts.send(outgoing)
+			else ns.Print(L.CHATWIN_NOT_SENT:format(ChatWindow.Localized("CHATWIN_WHY_REPLY_LONG", "it is too long to go as a reply here: shorten it, or cancel the reply"))) end
 			-- (A chat warning's refused line goes from the box too, as from the Chat tab's.)
 			if sent or why == "confirm" or why == "severe" then
 				self:SetText(""); ChatWindow.ClearReply(p); p:Render(true)
@@ -3597,8 +3694,10 @@ function ChatWindow.CreateEmbedded(parent, opts)
 		local y, prev = 6
 		local hides = Hides()
 		ChatWindow.Era() -- (1.2.3: the lines' looks of this era, ChatWindow.ViewOf; never older than ERA_MAX)
-		local all = Searched(opts.lines(), self.query, hides)
+		local lines = opts.lines()
+		local all = Searched(lines, self.query, hides)
 		ChatWindow.KeepBubbles(self.bubbles, all) -- (1.2.1: each line in its own bubble again)
+		ChatWindow.drawing = lines -- (CH-04: a reply's quoted line is looked for here, ChatWindow.QuoteOf)
 		for i, e in ipairs(all) do
 			local v = ChatWindow.ViewOf(e, hides)
 			local start = not prev or prev.full ~= v.full or prev.own ~= v.own or v.at - prev.at > GROUP_TIME
@@ -3606,6 +3705,7 @@ function ChatWindow.CreateEmbedded(parent, opts)
 			y = y + Bubble(i, e, start, y, math.max(40, math.min(width * SHARE, width - EDGE * 2) - PAD * 2), hides, self, opts.room())
 			prev = v
 		end
+		ChatWindow.drawing = nil
 		for i = #all + 1, #self.bubbles do self.bubbles[i]:Hide(); self.bubbles[i].entry = nil end
 		if self.modMenu and ChatWindow.ModEntry(self.modBubble) ~= self.modTarget then self.modMenu:Hide() end
 		self.content:SetHeight(math.max(1, y + 8))

@@ -33,6 +33,15 @@ local function Frame(name, frames)
 	return setmetatable(f, { __index = function() return function() end end })
 end
 
+-- What a line's tooltip says, its lines joined.
+local function TipText(line)
+	local tt = { lines = {} }
+	function tt:AddLine(text) self.lines[#self.lines + 1] = tostring(text) end
+	assert(line and line.tooltip, "a line with a tooltip")
+	line.tooltip(tt)
+	return table.concat(tt.lines, "\n")
+end
+
 local function WithMapWanted(fn)
 	local names = { "CreateFrame", "WorldMapFrame", "UIParent", "ShowUIPanel", "GameTooltip", "IsInInstance", "UnitGUID", "UnitIsPlayer",
 		"UnitFactionGroup", "UnitCanAttack", "UnitIsPVP", "GetGuildInfo", "C_Map", "issecretvalue", "hooksecurefunc" }
@@ -150,22 +159,74 @@ test("Wanted last seen: an old zone stays dated on the list and map, focuses wit
 
 		assert(target.onClick())
 		local profile = c.Wanted.Build()
-		local profileLocation
+		local profileLocation, online
 		for _, line in ipairs(profile) do
 			if line.id == "wanted-location:g:" .. guid then profileLocation = line end
-			assert(not tostring(line.text):find(c.L.WANTED_LAST_OBSERVED_LABEL, 1, true),
-				"stored combat evidence is not called an online observation")
+			if line.id == "wanted-online:g:" .. guid then online = line end
 		end
 		assert(profileLocation and profileLocation.onClick, "the profile keeps the same dated map action")
+		-- (RH-09, changed on purpose: Daniel's "visto online por último" counts the shared records too,
+		-- so the stored death now dates the profile's one "Last seen online" line, which replaced
+		-- 1.2.4's session-only "Last observed online". What this assertion kept is kept: its source
+		-- says the record, never a sighting by this client.)
+		assert(online and online.text:find(date("%Y-%m-%d %H:%M", 1799000000), 1, true), online and online.text)
+		local tip = TipText(online)
+		assert(tip:find(c.L.WANTED_ONLINE_KILL, 1, true), tip)
+		assert(not tip:find(c.L.WANTED_ONLINE_OWN, 1, true), "stored combat evidence is not called this client's own sighting")
 		c.db.wantedSightings = true
 		assert(c.Wanted.ObserveUnit("target"), "the game genuinely observes this unit")
 		profile = c.Wanted.Build()
-		local observed
+		online = nil
 		for _, line in ipairs(profile) do
-			if tostring(line.text):find(c.L.WANTED_LAST_OBSERVED_LABEL, 1, true) then observed = line end
+			if line.id == "wanted-online:g:" .. guid then online = line end
 		end
-		assert(observed and observed.text:find(date("%Y-%m-%d %H:%M", 1800000000), 1, true),
-			"native in-game observation gets its own dated line")
+		assert(online and online.text:find(date("%Y-%m-%d %H:%M", 1800000000), 1, true),
+			"the newer native in-game observation dates the line")
+		assert(TipText(online):find(c.L.WANTED_ONLINE_OWN, 1, true), "and its source says so")
+	end)
+end)
+
+test("Wanted last seen online (RH-09): this client's own sighting stays on the list row after its pin and a reload, the time alone; off records none and the No forgets it", function()
+	WithMapWanted(function(c, _, _, _, guid)
+		c.WatchChat = { Barred = function() return nil end }
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		c.Wanted.CanManage = function() return true end
+		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
+		-- (A kill counted long ago with no time kept: nothing dates him yet.)
+		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
+		c.Wanted.Rebuild()
+		local function Find(id)
+			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
+			return nil
+		end
+		local online = "wanted-online:g:" .. guid
+		eq(Find(online), nil, "nothing dates him yet")
+		c.db.wantedSightings = false
+		eq(select(2, c.Wanted.ObserveUnit("target")), "off")
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "sightings off: no time is recorded")
+		c.db.wantedSightings = true
+		assert(c.Wanted.ObserveUnit("target"))
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, 1800000000, "the time he was seen goes on his entry")
+
+		-- His pin's 15 minutes pass, then a reload: no pin is left, the list still says when.
+		c.TestAdvance(c.Wanted.SIGHT_TTL + 60)
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		assert(c.Wanted.Prune())
+		eq(c.Wanted.LiveSighting(assert(c.Wanted.Target(nil, guid))), nil, "no session pin is left")
+		local line = assert(Find(online), "the list has his Last seen online line")
+		local when = date("%Y-%m-%d %H:%M", 1800000000)
+		assert(line.text:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), line.text)
+		assert(TipText(line):find(c.L.WANTED_ONLINE_OWN, 1, true), "its source: this client's own sighting")
+		local rowTip = TipText(assert(Find("wanted:g:" .. guid)))
+		assert(rowTip:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), rowTip)
+		assert(rowTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "the row's tooltip says it too")
+		-- The time alone on the entry, never where he or the observer stood.
+		local stored = c.rdb.wanted.targets["g:" .. guid]
+		for _, field in ipairs({ "mapID", "x", "y", "layer", "observer", "zone" }) do eq(stored[field], nil, field) end
+
+		c.Wanted.SetSightings(false, true)
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "the No forgets the time")
+		eq(Find(online), nil, "and nothing else dates him")
 	end)
 end)
 

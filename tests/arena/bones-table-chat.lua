@@ -175,6 +175,39 @@ test("Bones table chat: two real players exchange private and Everyone lines, a 
 	Clean(w)
 end)
 
+-- CH-04 (the author, 2026-10-19: "Quando você responde uma mensagem, ela aparece menorzinha em
+-- cima"): a reply across the table, both players' actual clients and ArenaChat between them, the
+-- quote cut to leave the answer the room's 180 bytes (ArenaChat.TEXT_MAX). (Its size and place in
+-- the bubble: tests/chat-role-window.lua, the same Bubble on the main harness's widgets.)
+test("Bones table chat (CH-04): a reply crosses the table with its quote drawn and its answer whole, on both players' panels", function()
+	local w, a, b = Live()
+	local said = "Shall we double the stakes for the last round, or keep them as they are until someone busts?"
+	Send(w, a, said)
+	local theirs = Frame(b).conversation.bubbles[1]
+	eq(theirs.body:GetText(), said)
+	eq(w:As(b, b.ns.ChatWindow.BeginReply, theirs), true)
+	eq(Frame(b).conversation.replyComposer:IsShown(), true)
+	local answer = "Double them: I have rolled three sixes in a row and the innkeeper is watching, so no backing out now"
+	Send(w, b, answer)
+	eq(Frame(b).conversation.input:GetText(), "", table.concat(b.printed, "\n"))
+	eq(Frame(b).conversation.replyComposer:IsShown(), false)
+	local function Reply(c)
+		for _, bubble in ipairs(Frame(c).conversation.bubbles) do
+			if bubble:IsShown() and bubble.body:GetText() == answer then return bubble end
+		end
+		error(c.name .. ": no bubble with the whole answer")
+	end
+	local mine, his = Reply(b), Reply(a)
+	eq(his.replyWho:GetText(), w:As(a, function() return a.ns.L.CHATWIN_YOU end), "his own line quoted: You")
+	eq(mine.replyWho:GetText(), w:As(b, b.ns.DisplayName, a.name))
+	for _, bubble in ipairs({ mine, his }) do
+		eq(bubble.replyText:IsShown(), true); eq(bubble.replyBg:IsShown(), true)
+		local words = bubble.replyText:GetText()
+		assert(words:sub(-3) == "..." and said:find(words:sub(1, -4), 1, true) == 1, words)
+	end
+	Clean(w)
+end)
+
 test("Bones table chat: the shared bubble renderer keeps filter reveal and actual royal moderation on a registered Everyone surface", function()
 	local w, a, b, _, id, king = Live(nil, H.World.KING_GUILD)
 	w:As(b, b.ns.Filter.Add, "veiled")
