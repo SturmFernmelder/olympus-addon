@@ -431,7 +431,7 @@ end
 
 -- The sections this sidecar knows, at the version it knows (Bridge.lua's registry). Olympus has
 -- already copied each into plain tables within its limits; an unknown name or version is skipped.
-local KNOWN_SECTIONS = { guilds = 1, rankings = 1, self = 1, wanted = 1 }
+local KNOWN_SECTIONS = { guilds = 1, rankings = 1, self = 1, stats = 1, wanted = 1 }
 
 local function CopySections(bridge)
 	if type(bridge) ~= "table" or bridge.SECTIONS_API_VERSION ~= 1 or type(bridge.GetSection) ~= "function" then return nil end
