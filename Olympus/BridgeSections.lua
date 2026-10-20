@@ -101,6 +101,28 @@ end)
 -- tags a moderation team client keeps of other players (ns.rdb.battletags). A file of the
 -- player's own computer, not a screen: the King's account exports it too, and it is never printed
 -- or logged.
+-- The roles this character holds, as the Companion's tabs read them: officer (his guild rank may
+-- act as an officer, Roster.IsOfficer), guildMaster (rank 0), council (the signed High Council),
+-- crown (the pinned King), author (the addon's author). His own, never another player's; absent
+-- roles are left out, so a plain member has an empty list.
+local function Yes(fn, ...)
+	if type(fn) ~= "function" then return false end
+	local ok, v = pcall(fn, ...)
+	return ok and v == true
+end
+local function SelfRoles(me)
+	local out, R, W = {}, ns.Roster, ns.Workshop
+	if type(R) == "table" then
+		if Yes(R.IsOfficer) then out[#out + 1] = "officer" end
+		local ok, rank = pcall(type(R.MyRank) == "function" and R.MyRank or function() return nil end)
+		if ok and rank == 0 and type(IsInGuild) == "function" and IsInGuild() then out[#out + 1] = "guildMaster" end
+	end
+	if Yes(ns.IsHighCouncillor, me) then out[#out + 1] = "council" end
+	if Yes(ns.IsKingCharacter, me) then out[#out + 1] = "crown" end
+	if type(W) == "table" and Yes(W.IsAuthorName, me) then out[#out + 1] = "author" end
+	return out
+end
+
 OlympusBridge.RegisterSection("self", 1, function()
 	if type(ns.AccordAccepted) ~= "function" or ns.AccordAccepted() ~= true then return nil end
 	local A = ns.Accord
@@ -109,5 +131,6 @@ OlympusBridge.RegisterSection("self", 1, function()
 	local me = ns.me
 	if type(tag) ~= "string" or type(me) ~= "string" or not me:find("^[^%-]+%-.+$") then return nil end
 	local at = Call("Data", "ServerTime")
-	return { character = me, battleTag = tag, accord = ns.ACCORD_VERSION, at = Whole(at or (ns.Now and ns.Now())) }
+	return { character = me, battleTag = tag, accord = ns.ACCORD_VERSION, at = Whole(at or (ns.Now and ns.Now())),
+		roles = SelfRoles(me) }
 end)

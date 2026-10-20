@@ -119,8 +119,10 @@ A failing or unknown section is skipped and never blocks the census.
 
 What a section may carry: only what every member already sees on Olympus's own pages, plus the
 `self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, at = <server
-time> }`, the player's own character and BattleTag as his own game gives it (`Accord.ReadTag`),
-the Olympus Accord's version and the server's time of the export. It is nil until the Accord is
+time>, roles = { "officer", "guildMaster", "council", "crown", "author" } }`, the player's own
+character and BattleTag as his own game gives it (`Accord.ReadTag`), the Olympus Accord's version,
+the server's time of the export, and the roles this character holds (only those that apply; an
+empty list for a plain member), which the Companion uses to show only the tabs he may open. It is nil until the Accord is
 accepted at the current version (its letter tells the player), and while Battle.net can't give the
 tag; never another player's BattleTag (not the ones a moderation team client keeps), and never
 shown or printed on screen. The Companion shows BattleTags to staff only, never publicly. Never

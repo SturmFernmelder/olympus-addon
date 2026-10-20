@@ -1158,8 +1158,13 @@ test("accord: the Companion's self section: nothing before the Olympus Accord is
 			eq(d.accord, ns.ACCORD_VERSION); eq(d.accord, 1)
 			eq(d.at, 1800000777, "the server's clock, not this computer's")
 			for k, v in pairs(d) do
-				assert(({ character = true, battleTag = true, accord = true, at = true })[k], "field " .. tostring(k))
-				assert(type(v) ~= "table", "flat: " .. k)
+				assert(({ character = true, battleTag = true, accord = true, at = true, roles = true })[k], "field " .. tostring(k))
+				-- (roles, 10-19, the Windows Companion's tabs: a flat list of role names; every other field flat.)
+				if k == "roles" then
+					for _, r in ipairs(v) do assert(type(r) == "string" and #r <= 32, "a role name") end
+				else
+					assert(type(v) ~= "table", "flat: " .. k)
+				end
 				if type(v) == "string" then assert(#v <= B.SECTION_LIMITS.string and not v:find("[|%c]"), k) end
 			end
 			d.battleTag = "Changed#1"
@@ -1183,6 +1188,36 @@ test("accord: the Companion's self section: nothing before the Olympus Accord is
 		A.Check()
 		eq(ns.AccordAccepted(), false)
 		eq(B.GetSection("self"), nil, "the account asked again: nothing")
+	end) end)
+end)
+
+test("accord: the Companion's self section lists this character's own roles for the Companion's tabs: none for a plain member; officer, guildMaster, council, crown and author as he holds them", function()
+	H.WithUI(function() Scene(function(w, A)
+		local B = OlympusBridge
+		eq(A.Accept(), true)
+		local R, W = ns.Roster, ns.Workshop
+		local saved = { off = R.IsOfficer, rank = R.MyRank, hc = ns.IsHighCouncillor, king = ns.IsKingCharacter, author = W.IsAuthorName }
+		local ok, err = pcall(function()
+			R.IsOfficer = function() return false end
+			R.MyRank = function() return 7 end
+			ns.IsHighCouncillor = function() return false end
+			ns.IsKingCharacter = function() return false end
+			W.IsAuthorName = function() return false end
+			eq(#B.GetSection("self").data.roles, 0, "a plain member: no roles")
+			R.IsOfficer = function() return true end
+			R.MyRank = function() return 0 end
+			ns.IsHighCouncillor = function(n) return n == ns.me end
+			ns.IsKingCharacter = function(n) return n == ns.me end
+			W.IsAuthorName = function(n) return n == ns.me end
+			eq(table.concat(B.GetSection("self").data.roles, ","), "officer,guildMaster,council,crown,author", "every role he holds, in order")
+			-- Another player's role never counts: the checks ask about this character alone.
+			ns.IsHighCouncillor = function(n) return n == "Someone Else-Realm" end
+			eq(table.concat(B.GetSection("self").data.roles, ","), "officer,guildMaster,crown,author")
+			R.IsOfficer = function() error("roster not ready") end
+			eq(table.concat(B.GetSection("self").data.roles, ","), "guildMaster,crown,author", "an error in a check: that role left out")
+		end)
+		R.IsOfficer, R.MyRank, ns.IsHighCouncillor, ns.IsKingCharacter, W.IsAuthorName = saved.off, saved.rank, saved.hc, saved.king, saved.author
+		if not ok then error(err, 0) end
 	end) end)
 end)
 
