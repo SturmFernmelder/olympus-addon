@@ -3226,8 +3226,9 @@ end
 -- left to its asker's next ask (EARLY_ASK_AGAIN later, and some of its EARLY_ASKS gone): a late
 -- login waits EARLY_GAP at most, and the list still goes out once each EARLY_GAP at most.
 -- Anyone's ask holds ours (EARLY_ASK_HOLD) only when its answer reaches us too: it asks for no
--- newer list than ours, so any list newer than it has is newer than ours (Konig's review of 1.0.0: an ask as new as the holder's list, or dated ahead, is
--- never answered, and anyone repeating one kept every client without the list from asking).
+-- newer list than ours, so any list newer than it has is newer than ours (Konig's review of
+-- 1.0.0: an ask as new as the holder's list, or dated ahead, is never answered, and anyone
+-- repeating one kept every client without the list from asking).
 function Treasury.HandleEarlyAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" then return end
 	local at = tonumber(text:match("^TQ~(%d+)$"))
