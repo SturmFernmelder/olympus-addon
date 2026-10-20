@@ -365,4 +365,3 @@ ns.On("LOGIN", function()
 	ns.After(15, "craft ranking", function() Craft.Tick(true) end)
 	EnsureTicker()
 end)
-
