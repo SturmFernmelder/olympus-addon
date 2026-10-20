@@ -2479,9 +2479,9 @@ end
 
 local eventFrame
 function SelfTest.EventFrame()
-	if not eventFrame and type(CreateFrame) == "function" then
+	if not eventFrame then
 		eventFrame = CreateFrame("Frame")
-		if eventFrame and eventFrame.Hide then eventFrame:Hide() end
+		eventFrame:Hide()
 	end
 	return eventFrame
 end

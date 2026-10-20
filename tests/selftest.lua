@@ -492,7 +492,7 @@ test("selftest: paced: a frame runs one window's step alone, light steps until t
 	end)
 end)
 
-test("selftest: its lines in English and Portuguese, with the same codes; the TOC loads its words with the locales and its file last", function()
+test("selftest: its lines in English and Portuguese, with the same codes; the TOC loads its words with the locales and its file the core's last, before the Arena's own files", function()
 	local function Codes(s) local out = {} for c in tostring(s):gmatch("%%[%d%.%-]*%a") do out[#out + 1] = c end return table.concat(out, " ") end
 	local savedLocale = GetLocale
 	GetLocale = function() return "ptBR" end
@@ -513,7 +513,12 @@ test("selftest: its lines in English and Portuguese, with the same codes; the TO
 	local toc = assert(io.open(ROOT .. "Olympus/Olympus.toc")):read("*a")
 	local lines = {}
 	for line in toc:gmatch("[^\r\n]+") do lines[#lines + 1] = line end
-	eq(lines[#lines], "SelfTest.lua", "last: after every page it opens")
+	local at = {}
+	for i, line in ipairs(lines) do at[line] = i end
+	-- (Every module it reads is looked up when it runs: its place is the core's last, before the
+	-- Arena's load tail, whose files the arena's own rules cover.)
+	assert(at["SelfTest.lua"] and at["ArenaMath.lua"], "both listed")
+	eq(at["SelfTest.lua"], at["ArenaMath.lua"] - 1, "the core's last file, before the Arena's load tail")
 	assert(toc:find("Locales\\SelfTestText.lua\nCore.lua", 1, true), "with the locales, before Core.lua")
 	assert(assert(io.open(ROOT .. "Olympus/Core.lua")):read("*a"):find('StandIn("SelfTest", { "Slash" })', 1, true), "its stand-in")
 end)

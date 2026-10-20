@@ -141,6 +141,7 @@ Wanted.lua
 PlayerSightings.lua
 API.lua
 BridgeSections.lua
+SelfTest.lua
 ArenaMath.lua
 Compliance.lua
 ArenaRating.lua
@@ -179,4 +180,3 @@ ArenaChat.lua
 ArenaSpectate.lua
 ArenaTest.lua
 ArenaHome.lua
-SelfTest.lua
