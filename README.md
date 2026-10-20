@@ -2061,8 +2061,10 @@ and take no place. A Horde player is his GUID, never a name: his name is the one
 that GUID wherever your client can look it up, a row that gives a GUID the game knows another
 character's name is refused, and an entry under someone's name never keeps that player off.
 
-**Last seen online.** Each entry on the list, its tooltip and its page say when he was last seen in
-the world: the newest of the shared rows (a member he killed, or his own death to one), your own
+**Last seen online.** Each entry says when he was last seen in the world: short on his own row of
+the list, after its points and kills ("seen 2h ago", in days past one; a click opens his page like
+the rest of the row), with the date and its source in the row's tooltip and on his page. The time
+is the newest of the shared rows (a member he killed, or his own death to one), your own
 client's sighting of him (only while your Most Wanted sightings are on: the time alone is kept on
 your list, never where, never sent, and your No forgets it) and, for a reviewer, a sighting a
 member sent him this session. It is never a presence lookup: a Horde player nobody saw or fought
