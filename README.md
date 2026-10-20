@@ -178,6 +178,13 @@ channels; the same charter and Join controls work for each side.
   filled or emptied since. Counted by your own addon once a minute from the reports it
   already holds, starting about 3 minutes after login once the census is rebuilt: another
   player's client counts its own evening, and nothing is sent.
+- **The sanitized census** (for the census statistics and the Companion): banned guilds (taken
+  off the network) apart at their last size heard, departed guilds (not heard for 24 hours), how sure
+  each guild's size is (our roster, confirmed by two reporters or more, relayed, one reporter,
+  disputed, older report), and a size that jumps past what a guild can do held at its last good size
+  until two reporters agree. Worked out from the reports your addon already holds; it keeps each
+  guild's last good size for 7 days in its SavedVariables and sends nothing. The header's count is
+  not changed by it. The definition is `docs/CENSUS-STATS.md`.
 - Olympus guilds where nobody runs the addon show too, in grey: opening the window (and any click in it) also searches
   `/who` and lists every Olympus guild it sees online, with how many. They count in no total.
 

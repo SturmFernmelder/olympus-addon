@@ -91,6 +91,7 @@ Campaign.lua
 GuildFinance.lua
 Moderation.lua
 Alts.lua
+CensusClean.lua
 Keys.lua
 Loot.lua
 War.lua

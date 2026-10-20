@@ -114,7 +114,8 @@ Besides the census checkpoint, Olympus offers versioned read-only sections throu
 `OlympusBridge.RegisterSection(name, version, exporter)` / `GetSection(name)` (`Olympus/Bridge.lua`,
 exporters in `Olympus/BridgeSections.lua`). Olympus copies each into fresh plain tables within
 `OlympusBridge.SECTION_LIMITS`. At logout this sidecar saves only the sections it knows, at the
-version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `wanted` and `self`.
+version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `stats`, `wanted` and
+`self`. `stats` is the census statistics page's figures (`docs/CENSUS-STATS.md`).
 A failing or unknown section is skipped and never blocks the census.
 
 What a section may carry: only what every member already sees on Olympus's own pages, plus the
