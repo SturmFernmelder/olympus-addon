@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections", "BridgePeople" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -30333,8 +30333,10 @@ test("1.2.6 companion sections: guilds, rankings and wanted carry only public ro
 		local rankings = assert(OlympusBridge.GetSection("rankings")).data
 		eq(rankings.treasury, nil, "no treasury numbers while the King keeps the balance private")
 		eq(type(rankings.crafting), "table")
+		-- (1.2.6, the Companion's Rankings tab: `boards`, each public board's rows and the player's own
+		-- place, BridgeSections.lua; tests/bridge-people.lua checks what each holds.)
 		for k in pairs(rankings) do
-			assert(({ slayers = true, donors = true, church = true, games = true, crafting = true, treasury = true })[k], "ranking " .. k)
+			assert(({ slayers = true, donors = true, church = true, games = true, crafting = true, treasury = true, boards = true })[k], "ranking " .. k)
 		end
 
 		eq(rankings.church.missionaries[1], "Pious"); eq(rankings.staff, nil, "only the public kinds")
@@ -63640,7 +63642,7 @@ assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
 		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord", "tag-follow",
-		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats", "cover" }
+		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats", "cover", "bridge-people" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
 	-- (1.1.6: the Church's files get the harness's UI helpers.)
