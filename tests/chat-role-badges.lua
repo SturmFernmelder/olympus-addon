@@ -125,7 +125,12 @@ test("Chat role badge: the native sender filter works out a sender's coin once, 
 			local badge, member, hides = C.RoleBadge, ns.IsMember, ns.Moderation.Hides
 			local asked = 0
 			C.RoleBadge = function(...) asked = asked + 1; return badge(...) end
-			local c = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+			-- This copy's listeners are kept, not wired into the shared namespace, so the test can fire
+			-- its own DATA_CHANGED the way ns.Fire would.
+			local listeners = {}
+			local function On(name, fn) listeners[name] = listeners[name] or {}; table.insert(listeners[name], fn) end
+			local function Fire(name) for _, fn in ipairs(listeners[name] or {}) do fn() end end
+			local c = setmetatable({ On = On, RegisterEvent = function() end }, { __index = ns })
 			c.Gate = setmetatable({ Hooks = function() end }, { __index = ns.Gate })
 			ChatFrameUtil = { AddSenderNameFilter = function() end }
 			local ok, err = pcall(function()
@@ -149,7 +154,9 @@ test("Chat role badge: the native sender filter works out a sender's coin once, 
 				-- A moderator's word on him: DATA_CHANGED's listener forgets the marks, and the coin
 				-- is worked out again (none now).
 				ns.Moderation.Hides = function() return { kind = "c" } end
-				c.Borders.ChatForget()
+				eq(Count(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary), coin), 1, "kept until forgotten")
+				eq(asked, 2, "the word alone does not work him out again")
+				Fire("DATA_CHANGED")
 				eq(Count(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary) or "Test Coin", coin), 0)
 				eq(asked, 3)
 			end)
