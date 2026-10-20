@@ -71,11 +71,13 @@ local function Unkeyed(where, msg, stack)
 	return "slash key", Without(Without(msg, typed), kept), Without(Without(stack, typed), kept)
 end
 
+-- An error already kept is counted and its stack is not read again: one that repeats in a burst (a
+-- timer's, an event's, the game's error handler's in Bootstrap.lua, for each repeat) reads it once.
 function ns.CaptureError(where, err)
 	local db = ns.db
-	local msg = tostring(err)
-	local stack = debugstack and debugstack(3, 12, 0) or ""
-	where, msg, stack = Unkeyed(where, msg, stack)
+	local said, raw = where, tostring(err)
+	local msg
+	where, msg = Unkeyed(said, raw, nil)
 	if not db then
 		print("|cffff4040Olympus error (before load):|r " .. msg)
 		return
@@ -88,6 +90,9 @@ function ns.CaptureError(where, err)
 			return
 		end
 	end
+	-- (Read here, in this function itself, so its level is the one it always was; a key typed with
+	-- /oly key comes out of it as out of the message.)
+	local _, _, stack = Unkeyed(said, raw, debugstack and debugstack(3, 12, 0) or "")
 	table.insert(db.errors, {
 		key = key,
 		where = where,
