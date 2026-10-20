@@ -741,5 +741,16 @@ test("Squads: the Companion's chat record: each squad line kept, the sender's ow
 		eq(#rec, 1, "nothing refused")
 		eq(s.ReceiveChat("WHISPER", "Leader", Line(2, "on me")), true)
 		eq(#rec, 2); eq(rec[2].sender, "Leader-Realm"); eq(rec[2].text, "on me"); eq(rec[2].isSelf, false)
+		-- (The record's review: a leader alone, nobody to whisper, saw his line kept and recorded at
+		-- once, though nothing left.) It shows in his room; it is never recorded.
+		w.c.me = "Officer-Realm"; eq(s.Replace("OtherLeader", {}), true)
+		local alone = s.Get("OtherLeader").room
+		w.c.me = "OtherLeader-Realm"
+		local jobs = #w.jobs
+		eq(s.ChatSend(alone, "anyone here?"), true)
+		eq(#w.jobs, jobs, "nobody to whisper")
+		local shown = s.ChatHistory(alone)
+		eq(#shown, 1); eq(shown[1].text, "anyone here?", "it shows in his room")
+		eq(#rec, 2, "a line that reached nobody is never recorded")
 	end)
 end)

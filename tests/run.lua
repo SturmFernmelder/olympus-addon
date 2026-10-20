@@ -29914,9 +29914,15 @@ test("1.2.6 the Companion's chat record: each Olympus channel line shown, ours a
 		ns.RecordChat("A", "Member49-Realm", "while the gate errs", false)
 		ns.AccordAccepted = savedGate
 		eq(#rec, 6, "nothing recorded while the Accord's gate errs")
-		-- Four recorders at most (one, realistically: the Companion's).
+		-- Four recorders at most (one, realistically: the Companion's). One refused says so in the log,
+		-- once a session (the record's review: other addons can take every slot first, and nothing
+		-- said why the Companion's record stayed empty).
 		for _ = 3, 4 do eq(B.RegisterChatRecorder(function() end), true) end
+		local logged = #ns.db.log
 		eq(B.RegisterChatRecorder(function() end), false, "four recorders at most")
+		eq(B.RegisterChatRecorder(function() end), false)
+		eq(#ns.db.log, logged + 1, "one log line for the refusals")
+		assert(ns.db.log[#ns.db.log]:find("bridge: a chat recorder refused, all 4 slots taken", 1, true), ns.db.log[#ns.db.log])
 		-- The README's privacy table names it: who receives it, which lines, when it is saved.
 		local f = assert(io.open(ROOT .. "README.md", "rb"))
 		local readme = f:read("*a")
@@ -29926,9 +29932,36 @@ test("1.2.6 the Companion's chat record: each Olympus channel line shown, ours a
 			if line:sub(1, 2) == "| " and line:find("RegisterChatRecorder", 1, true) then row = line end
 		end
 		assert(row, "README: the chat record's privacy row")
-		for _, must in ipairs({ "Olympus's staff", "your own Olympus Companion", "only the staff see them", "confirm what was said",
-			"to moderate", "your own once it left", "never a line a chat warning refused", "Olympus Accord", "saved at logout or `/reload`" }) do
+		for _, must in ipairs({ "The Olympus and guild chat lines your client receives", "Olympus's staff", "your own Olympus Companion", "only the staff see them", "confirm what was said",
+			"to moderate", "your own once one of its sends left", "never a line a chat warning refused", "nor a pinned line",
+			"including those a muted channel, the Olympus channels' flood guard or your own block terms hide locally",
+			"Olympus Accord", "saved at logout or `/reload`" }) do
 			assert(row:find(must, 1, true), "README's chat record row: " .. must)
+		end
+		-- (The record's review.) The bridge's own row says any addon reads these lines too, ours and
+		-- the rooms' included, and the privacy section's first words name the Companion beside
+		-- Olympus Link as what leaves the game, on the README and on the CurseForge page.
+		for _, path in ipairs({ "README.md", "docs/CURSEFORGE.md" }) do
+			local g = assert(io.open(ROOT .. path, "rb"))
+			local doc = g:read("*a")
+			g:close()
+			local bridgeRow
+			for line in doc:gmatch("[^\n]+") do
+				if not bridgeRow and line:sub(1, 2) == "| " and line:find("`OlympusBridge` (made for OfficerSpy", 1, true) then bridgeRow = line end
+			end
+			assert(bridgeRow, path .. ": the bridge's row")
+			for _, must in ipairs({ "`RegisterChatRecorder`", "as your client receives them", "yours included and locally hidden lines too", "the rooms you are in", "the fight and Bones rooms",
+				"any addon you install can read it, with no Companion", "only once you accepted the Olympus Accord" }) do
+				assert(bridgeRow:find(must, 1, true), path .. ": the bridge's row: " .. must)
+			end
+			local privacy = doc:match("\n## Privacy\n(.-)\n|")
+			assert(privacy, path .. ": the privacy section's first words")
+			privacy = privacy:gsub("%s+", " ")
+			for _, must in ipairs({ "One exception is Olympus Link", "The other is the Olympus Companion app, only if you install it",
+				"the Olympus and guild chat lines your client shows to Olympus's server, for its staff alone" }) do
+				assert(privacy:find(must, 1, true), path .. ": the privacy section's first words: " .. must)
+			end
+			assert(not privacy:find("The one exception", 1, true), path .. ": no single exception")
 		end
 	end)
 	live = false

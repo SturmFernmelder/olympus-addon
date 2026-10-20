@@ -459,8 +459,12 @@ end)
 
 -- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in on each client noting each
 -- call): a fight room's line other than a Bones table's (a match room, its whisper to the other
--- fighter) is recorded on the sender's client at once, as his own, and on the other's as it shows.
-test("1.2.6 the Companion's chat record: a match room's line, the sender's own at once as his own, the other fighter's as it shows", function()
+-- fighter) is recorded on the sender's client once its whisper left, as his own, and on the
+-- other's as it shows; a line none of whose sends left, never.
+-- (Changed on purpose, the record's review: this test said "at once: its whisper left with the
+-- call", but the whisper was still in Arena.Send's queue then; the record waited for nothing, so a
+-- line that never left was recorded too. It now waits for Arena.Send's done.)
+test("1.2.6 the Companion's chat record: a match room's line, the sender's own once its whisper left as his own, the other fighter's as it shows, never a line that never left", function()
 	local w, a, b = Pair()
 	for _, c in ipairs({ a, b }) do
 		CH.WithRooms(w, c)
@@ -480,13 +484,25 @@ test("1.2.6 the Companion's chat record: a match room's line, the sender's own a
 		end)
 		w:As(c, function() assert(c.ns.ArenaChat.Open(mid), "the accepted match is an ArenaChat event") end)
 	end
+	local function By(c) local out = {} for _, e in ipairs(rec) do if e.by == c.name then out[#out + 1] = e end end return out end
 	w:As(a, function() assert(a.ns.ArenaChat.Send(mid, "same tavern?")) end)
-	eq(#rec, 1, "the sender's own line at once: its whisper left with the call")
-	eq(rec[1].by, a.name); eq(rec[1].tier, mid); eq(rec[1].sender, a.name); eq(rec[1].text, "same tavern?"); eq(rec[1].isSelf, true)
+	eq(#w:As(a, a.ns.ArenaChat.Lines, mid), 1, "shown on the sender's client at once")
+	eq(#rec, 0, "not while its whisper waits in the queue")
 	w:Run(0)
 	eq(#w:As(b, b.ns.ArenaChat.Lines, mid), 1, "the other fighter's client shows it")
 	eq(#rec, 2, "each line once on each client")
-	eq(rec[2].by, b.name); eq(rec[2].tier, mid); eq(rec[2].sender, a.name); eq(rec[2].text, "same tavern?"); eq(rec[2].isSelf, false)
+	local mine, theirs = By(a)[1], By(b)[1]
+	eq(#By(a), 1); eq(mine.tier, mid); eq(mine.sender, a.name); eq(mine.text, "same tavern?"); eq(mine.isSelf, true)
+	eq(#By(b), 1); eq(theirs.tier, mid); eq(theirs.sender, a.name); eq(theirs.text, "same tavern?"); eq(theirs.isSelf, false)
+	-- A line none of whose sends left (the game refused its whisper): shown, never recorded.
+	w.clock = w.clock + 30
+	a.comm.results[#a.comm.results + 1] = 2 -- (the test world's result for the next send: refused)
+	w:As(a, function() assert(a.ns.ArenaChat.Send(mid, "never delivered")) end)
+	w:Run(0)
+	local lines = w:As(a, a.ns.ArenaChat.Lines, mid)
+	eq(lines[#lines].text, "never delivered", "still in the sender's view")
+	eq(#w:As(b, b.ns.ArenaChat.Lines, mid), 1, "it reached nobody")
+	eq(#rec, 2, "a line that never left is never recorded")
 	MW.NoErrors(w)
 end)
 

@@ -370,20 +370,31 @@ end)
 --   tier   the chat, as a moderator's deletion names it (WatchChat.lua): "A", "C" or "L" for
 --          [Olympus], [Captains] and [Lords]; a room's id for the rooms this character is in
 --          ("guild", a role room's, a squad's, a crafting deal's); a fight or Bones room's id.
+--          (A pinned line is no chat's line: never here, as README's chat record row says.)
 --   text   as Olympus keeps it, after its checks and Codec.SanitizeChat: a muted channel's lines,
 --          the flood guard's and those the player's block terms grey out too (each still shows
 --          in its tab). Never a line a chat warning refused (it never left), nor one Olympus kept
 --          off for moderation (net-off, a timeout, a deleted line's late copy).
---   isSelf true for the player's own line, once it left (a line none of whose sends left goes from
---          the view and is never recorded); false for everyone else's.
+--   isSelf true for the player's own line, once one of its sends left (a line none of whose sends
+--          left is never recorded, whether it goes from the view or, a squad leader's alone, stays);
+--          false for everyone else's.
 -- Nothing until the Olympus Accord is accepted at its current version. The Accord's letter
 -- (ACCORD_T6_3), the privacy page (CONSENT_INTRO) and README's Privacy table say so: this
 -- function's existence is what the private Companion bridge looks for, so it ships with them.
 -- RECORDERS_MAX at most; a recorder that errors is skipped and stops nothing (nor does anything
 -- here: ns.RecordChat throws nothing back). RegisterChatObserver above stays as it was.
-local recorders = {}
+-- (The slots are first come: other addons that took them all first leave the Companion's bridge a
+-- false. The log says so, once a session, so /oly bug shows why its record stays empty.)
+local recorders, recorderRefused = {}, false
 function OlympusBridge.RegisterChatRecorder(fn)
-	if type(fn) ~= "function" or #recorders >= RECORDERS_MAX then return false end
+	if type(fn) ~= "function" then return false end
+	if #recorders >= RECORDERS_MAX then
+		if not recorderRefused and ns.Log and ns.db then -- (before the saved log loads: next time)
+			recorderRefused = true
+			ns.Log("bridge: a chat recorder refused, all %d slots taken", RECORDERS_MAX)
+		end
+		return false
+	end
 	recorders[#recorders + 1] = fn
 	return true
 end

@@ -748,10 +748,11 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 			-- owner's ask; its 12 words, its full terms on the privacy page's line. The sanction that
 			-- follows the BattleTag, 5.5, took the place of "It helps spot one player's characters", its
 			-- wording trimmed by one word so the merged letter still fits 389. Then, 2026-10-20, the
-			-- disclosure of the chat record the owner approved, 6.3: with the Companion, the Olympus
-			-- chat lines the player sees go to staff, kept to confirm what was said and moderate. Its 21
+			-- disclosure of the chat record the owner approved, 6.3: with the Companion, staff keep the
+			-- Olympus and guild chats the player sees, to confirm what was said and moderate. Its 21
 			-- words grow the bound to 410, as the moderator protection's bullet grew it; nothing else in
-			-- the letter changed.)
+			-- the letter changed. Its review named the guild chat, which the record takes too, in the
+			-- same 21 words.)
 			assert(total <= 410, "the letter is " .. total .. " words")
 			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
 			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a
@@ -929,20 +930,32 @@ test("accord: its words in English and pt-BR, the same format codes; the name in
 	-- (2026-10-20) The Companion's chat record (Bridge.lua's OlympusBridge.RegisterChatRecorder, the
 	-- switch the private Companion bridge looks for): the letter's 6.3 and the privacy page say who
 	-- gets the Olympus chat lines the player sees, his own too, and why, in both languages.
-	for _, must in ipairs({ "Olympus Companion app", "Olympus chat lines you see", "go to staff", "confirm what was said", "moderate" }) do
+	-- (Changed on purpose, the record's review: it takes the game's own guild chat too, through the
+	-- Guild room, guildmates without Olympus included, so both name the guild chat beside Olympus's.)
+	for _, must in ipairs({ "Olympus Companion", "staff keep", "Olympus and guild chats your client receives", "including locally hidden lines", "confirm and moderate" }) do
 		assert(en.ACCORD_T6_3:find(must, 1, true), "ACCORD_T6_3: " .. must)
 	end
-	for _, must in ipairs({ "Olympus Companion", "linhas dos chats do Olympus que você vê", "para a staff", "confirmar o que foi dito", "moderar" }) do
+	for _, must in ipairs({ "Olympus Companion", "a staff guarda", "chats recebidos do Olympus e da guilda", "até os ocultos", "conferir e moderar" }) do
 		assert(pt.ACCORD_T6_3:find(must, 1, true), "pt-BR ACCORD_T6_3: " .. must)
 	end
-	assert(en.CONSENT_INTRO:find("If you use the Olympus Companion app, it sends every Olympus chat line you see, your own included, to Olympus's staff, who keep them to confirm what was said and to moderate.", 1, true), "the privacy page: the chat record")
-	assert(pt.CONSENT_INTRO:find("Se você usa o app Olympus Companion, ele manda cada linha dos chats do Olympus que você vê, as suas também, para a staff do Olympus, que as guarda para confirmar o que foi dito e para moderar.", 1, true), "pt-BR privacy page: the chat record")
+	assert(en.CONSENT_INTRO:find("If you use the Olympus Companion app, it sends every Olympus and guild chat line your client receives, your own and locally hidden lines included, to Olympus's staff, who keep them to confirm what was said and to moderate.", 1, true), "the privacy page: the chat record")
+	assert(pt.CONSENT_INTRO:find("Se você usa o app Olympus Companion, ele manda cada linha dos chats do Olympus e da guilda recebida pelo seu cliente, incluindo as suas e as ocultas por filtros locais, para a staff do Olympus, que as guarda para confirmar o que foi dito e moderar.", 1, true), "pt-BR privacy page: the chat record")
 	eq(select(2, en.CONSENT_INTRO:gsub("%%s", "")), 1, "the privacy page's intro keeps its one %s")
 	-- Each topic's bullets are the letter's (Accord.TOPICS), in both languages: none past its count.
 	for _, t in ipairs(ns.Accord.TOPICS) do
 		for _, lang in ipairs({ en, pt }) do
 			assert(type(rawget(lang, "ACCORD_T" .. t[1] .. "_" .. t[2])) == "string", "topic " .. t[1] .. ": its last bullet")
 			eq(rawget(lang, "ACCORD_T" .. t[1] .. "_" .. (t[2] + 1)), nil, "topic " .. t[1] .. ": a bullet the letter never shows")
+		end
+	end
+	-- Short in pt-BR too, each bullet within the English letter's caps (30 words for 1.1, 22 for
+	-- every other). (The chat record's review: nothing held the pt-BR bullets, its 6.3 came in at 27
+	-- words and 1.1 at 32; both trimmed, 1.1 by "do Olympus" after "os chats", plain from the line.)
+	for _, t in ipairs(ns.Accord.TOPICS) do
+		for i = 1, t[2] do
+			local count = select(2, pt["ACCORD_T" .. t[1] .. "_" .. i]:gsub("%S+", ""))
+			local cap = (t[1] == 1 and i == 1) and 30 or 22
+			assert(count <= cap, ("pt-BR bullet %d.%d is %d words"):format(t[1], i, count))
 		end
 	end
 	local enKeys, ptKeys = {}, {}
