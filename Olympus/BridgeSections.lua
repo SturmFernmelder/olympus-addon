@@ -138,7 +138,8 @@ end)
 -- The census statistics (docs/CENSUS-STATS.md): the census page's own figures and series
 -- (Data.Summary, and CensusStats.lua's history where this build has it), so the Companion shows what
 -- the game shows, and beside them the sanitized census (CensusClean.lua): banned and departed
--- guilds, how sure each part is, sizes held back. Counts and guild names only; rows as
+-- guilds, how sure each part is, sizes held back; on a moderation team client, how many validated
+-- BattleTags it holds (numbers only). Counts and guild names only; rows as
 -- "a~b~...~name" strings, which keep every guild inside the section's value budget. Registered
 -- addon users and Battle.net accounts are not counted yet: they are left out.
 local STATS_GUILDS = 256
@@ -177,6 +178,13 @@ OlympusBridge.RegisterSection("stats", 1, function()
 	}
 	local avg = Call("CensusStats", "AverageLevel", s)
 	if type(avg) == "string" then out.avgLevel = avg end
+	-- Validated people (the Olympus Accord's BattleTags): only on a moderation team client, the only
+	-- one that holds any (Accord.lua's team store), and as two numbers, never a tag or a name. Every
+	-- other client sends none, and its Companion says "not counted yet".
+	if Call("Accord", "TeamShown") == true then
+		local groups = Call("Accord", "Groups")
+		out.validated = { battleTags = type(groups) == "table" and #groups or 0, characters = Whole(Call("Accord", "Count")) }
+	end
 	for _, b in ipairs(c.banned.list) do out.banned.list[#out.banned.list + 1] = ("%d~%s"):format(b.members, b.name) end
 	for _, d in ipairs(c.departed.list) do out.departed.list[#out.departed.list + 1] = ("%d~%d~%s"):format(d.members, d.t, d.name) end
 	for _, o in ipairs(c.outliers.list) do out.outliers.list[#out.outliers.list + 1] = ("%d~%d~%s"):format(o.reported, o.kept, o.name) end
