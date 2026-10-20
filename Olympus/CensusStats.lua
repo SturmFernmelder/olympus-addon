@@ -412,15 +412,19 @@ function CS.Build(s, now)
 	local online, hours = OnlineGraph(now)
 	GraphLines(lines, L.CENSUS_STATS_ONLINE_GRAPH, online, hours, function(e) return e.o end, HourLabel)
 
-	-- The largest guilds counted, each against the game's cap of a guild.
+	-- The largest guilds counted, each against the game's cap of a guild: by their size alone (the
+	-- default order puts the guilds reporting now first, and would leave out a large one whose
+	-- reporters logged off), a tie as every count of guilds breaks it (Data.SortGuildCounts).
 	local cap = ns.Codec.GUILD_CAP
 	local largest = {}
-	for _, e in ipairs(s.guilds or {}) do if e.counted then largest[#largest + 1] = e end end
+	for _, e in ipairs(s.guilds or {}) do
+		if e.counted then largest[#largest + 1] = { name = e.name, e = e, size = math.min(tonumber(e.g.total) or 0, cap) } end
+	end
+	ns.Data.SortGuildCounts(largest, "size")
 	if #largest > 0 then
 		lines[#lines + 1] = { text = L.CENSUS_STATS_LARGEST, header = true }
 		for i = 1, math.min(CS.TOP_GUILDS, #largest) do
-			local e = largest[i]
-			local size = math.min(tonumber(e.g.total) or 0, cap)
+			local e, size = largest[i].e, largest[i].size
 			local name = Plain(e.name)
 			lines[#lines + 1] = {
 				text = e.fresh and name or Grey(name),

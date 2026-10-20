@@ -2395,7 +2395,9 @@ function Wanted.LastOnline(t)
 		if at and (not best or at > best.at) then best = { at = at, source = source, live = live } end
 	end
 	Take(t.lastOnline, (t.lastOnlineKind == "kill" or t.lastOnlineKind == "death") and t.lastOnlineKind or "record", false)
-	Take(t.seenOnline, "own", true)
+	-- (Only while the sightings are on: the setting is the account's, each realm group and faction
+	-- keeps its own list, and a No said on another of them forgets this one's times too.)
+	if Wanted.SightingsOn() then Take(t.seenOnline, "own", true) end
 	local pin = Wanted.LiveSighting(t)
 	if pin then Take(pin.at, pin.own and "own" or "nearby", true) end
 	return best
@@ -3346,6 +3348,26 @@ function Wanted.ObserveUnit(unit)
 	return true, e
 end
 
+-- (RH-09) The No forgets the times this client saw each one (Sight.NoteOnline) on every Most
+-- Wanted list it keeps: the setting is the account's (ns.db), but each realm group keeps its own
+-- list (ns.rdb), each faction its own stores (Core's Stores: the Horde's under ns.db.horde), and
+-- Store(false) opens only the current one. A list it cannot reach drops them at its next Prune.
+function Sight.ForgetOnline()
+	local stores = { ns.rdb }
+	local db = type(ns.db) == "table" and ns.db or {}
+	for _, side in ipairs({ db, type(db.horde) == "table" and db.horde or false }) do
+		if type(side) == "table" and type(side.realms) == "table" then
+			for _, R in pairs(side.realms) do stores[#stores + 1] = R end
+		end
+	end
+	for _, R in ipairs(stores) do
+		local s = type(R) == "table" and R.wanted or nil
+		for _, t in pairs(type(s) == "table" and type(s.targets) == "table" and s.targets or {}) do
+			if type(t) == "table" then t.seenOnline = nil end
+		end
+	end
+end
+
 -- The No (or Yes again). Off, at once: no more collecting, what waits in Comm cancelled, what
 -- reached a reviewer taken back (Withdraw), every pin off this client's map, and a reviewer stops
 -- taking them: his lease goes off on the channel (WS~R~0), so members stop whispering him. On
@@ -3361,9 +3383,8 @@ function Wanted.SetSightings(on, silent)
 		for guid in pairs(pins) do pins[guid] = nil end
 		for key in pairs(ownSeen) do ownSeen[key] = nil end
 		ownSeenCount = 0
-		-- (RH-09: and the times it saw them, Sight.NoteOnline.)
-		local s = Store(false)
-		for _, t in pairs(s and s.targets or {}) do if type(t) == "table" then t.seenOnline = nil end end
+		-- (RH-09: and the times it saw them, Sight.NoteOnline, on every list of the account.)
+		Sight.ForgetOnline()
 		local C = ns.Comm
 		if leaseAt ~= nil and type(C) == "table" and type(C.Send) == "function" then
 			leaseAt = nil
@@ -6459,7 +6480,9 @@ function Wanted.Prune()
 			t.source = SOURCES[t.source] and t.source or "manual"
 			t.removedAt, t.removedBy = Whole(t.removedAt, 0, 4294967295), CleanName(t.removedBy)
 			t.wireName = t.wireName == true and t.name ~= nil or nil
-			t.seenOnline = Whole(t.seenOnline, 0, 4294967295) -- (RH-09: Sight.NoteOnline)
+			-- (RH-09: Sight.NoteOnline. Kept only while the sightings are on: a No said on another
+			-- realm group or faction forgets this list's times too, Sight.ForgetOnline.)
+			t.seenOnline = SightingsOn() and Whole(t.seenOnline, 0, 4294967295) or nil
 			local d = TargetDerived(t)
 			for field, value in pairs(d) do t[field] = value end
 			t.victims, t.claims = CopyList(t.victims, Wanted.MAX_VICTIMS), CopyList(t.claims, Wanted.MAX_CLAIMS)

@@ -230,6 +230,60 @@ test("Wanted last seen online (RH-09): this client's own sighting stays on the l
 	end)
 end)
 
+-- Regression: the No cleared the times on the current realm group's list alone (Store(false)),
+-- but the setting is the account's: another realm group's list, or the other faction's, kept its
+-- times and still showed "Your client saw him in the world" while the sightings were off.
+test("Wanted last seen online (RH-09): a No said on another realm group or faction forgets this list's times too; off, none shows and the next Prune drops one kept", function()
+	WithMapWanted(function(c, _, _, _, guid)
+		c.WatchChat = { Barred = function() return nil end }
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		c.Wanted.CanManage = function() return true end
+		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
+		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
+		c.Wanted.Rebuild()
+		local online = "wanted-online:g:" .. guid
+		local function Find(id)
+			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
+			return nil
+		end
+		local home = c.rdb
+		local function Seen()
+			c.rdb = home
+			c.db.wantedSightings = true
+			home.wanted.targets["g:" .. guid].seenOnline = nil
+			c.TestAdvance(c.Wanted.SIGHT_GAP + 1)
+			assert(c.Wanted.ObserveUnit("target"))
+			local at = assert(home.wanted.targets["g:" .. guid].seenOnline, "the time he was seen goes on his entry")
+			assert(TipText(assert(Find(online))):find(c.L.WANTED_ONLINE_OWN, 1, true), "his line: this client's own sighting")
+			return at
+		end
+
+		-- The No on a character of another realm group, a list this one's walk cannot see: none shows
+		-- while off, and the login's Prune drops the time.
+		Seen()
+		c.rdb = {}
+		c.Wanted.SetSightings(false, true)
+		c.rdb = home
+		eq(Find(online), nil, "sightings off: no Last seen online from a time kept")
+		assert(c.Wanted.Prune())
+		eq(home.wanted.targets["g:" .. guid].seenOnline, nil, "the next Prune drops it")
+
+		-- The account's stores (Core: ns.db.realms, the Horde's under ns.db.horde): a No said on a
+		-- Horde character forgets the Alliance lists' times at once, every realm group's.
+		Seen()
+		local other = { wanted = { targets = { ["g:Player-2-0B000001"] = { name = "Other-Realm", seenOnline = 1800000000 } } } }
+		local horde = {}
+		c.db.realms = { ["Realm A"] = home, ["Realm B"] = other }
+		c.db.horde = { realms = { ["Realm A"] = horde } }
+		c.rdb, c.faction = horde, "Horde"
+		c.Wanted.SetSightings(false, true)
+		eq(home.wanted.targets["g:" .. guid].seenOnline, nil, "this realm group's Alliance list forgets it")
+		eq(other.wanted.targets["g:Player-2-0B000001"].seenOnline, nil, "and another realm group's")
+		c.rdb, c.faction = home, "Alliance"
+		eq(Find(online), nil, "nothing dates him")
+	end)
+end)
+
 test("Wanted map refresh: gamepad gate is checked before the periodic path reads WorldMapFrame", function()
 	WithMapWanted(function(c)
 		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)

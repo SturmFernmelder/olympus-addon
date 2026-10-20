@@ -226,6 +226,48 @@ test("census page: characters, people, linked alts, online, guilds counted, the 
 	end)
 end)
 
+-- Regression: the largest guilds were the first five in the default order, which puts every guild
+-- reporting now ahead of the rest. A guild still counted (a report within the day) but not reporting
+-- now (its reporters logged off) fell behind smaller ones and out of the five, however large it was.
+test("census page: the largest guilds by their size, a large guild not reporting now still among them (grey); ties: the exact <OLYMPUS>, the average level, the name", function()
+	local old = os.time() - ns.Data.FRESH - 10 * 60
+	WithCensus({
+		["Olympus"] = Report(300, { online = 30 }),
+		["Olympus II"] = Report(200, { online = 20 }),
+		["Olympus III"] = Report(150, { online = 15 }),
+		["Olympus IV"] = Report(120, { online = 12 }),
+		["Olympus V"] = Report(110, { online = 11, avgLevel = 30 }),
+		["Olympus VI"] = Report(950, { online = 0, t = old }),
+		["Olympus VII"] = Report(110, { online = 0, avgLevel = 50, t = old }),
+	}, 0, function()
+		local w = World({ realData = true, clock = os.time() })
+		local lines = w.CS.Build()
+		local _, at = Find(lines, L.CENSUS_STATS_LARGEST)
+		local names = {}
+		for i = at + 1, at + w.CS.TOP_GUILDS do names[#names + 1] = Bare(lines[i].text) end
+		eq(table.concat(names, " | "), "Olympus VI | Olympus | Olympus II | Olympus III | Olympus IV")
+		eq(lines[at + 1].text, V.Grey("Olympus VI"), "not reporting now: grey, still the largest")
+		eq(lines[at + 1].meter.value, 950)
+		eq(lines[at + 2].text, "Olympus", "reporting now: plain")
+		eq(Bare(lines[at + w.CS.TOP_GUILDS + 1].text), L.CENSUS_STATS_MORE_GUILDS:format(2))
+	end)
+	-- A tie at the same size: the exact <OLYMPUS> first, then the higher average level, then the name,
+	-- whether reporting now or not.
+	WithCensus({
+		["Olympus Reborn"] = Report(400, { online = 40, avgLevel = 20 }),
+		["Olympus Rising"] = Report(400, { online = 0, avgLevel = 55, t = old }),
+		["OLYMPUS"] = Report(400, { online = 0, avgLevel = 10, t = old }),
+		["Olympus Alpha"] = Report(400, { online = 40, avgLevel = 20 }),
+	}, 0, function()
+		local w = World({ realData = true, clock = os.time() })
+		local lines = w.CS.Build()
+		local _, at = Find(lines, L.CENSUS_STATS_LARGEST)
+		local names = {}
+		for i = at + 1, at + 4 do names[#names + 1] = Bare(lines[i].text) end
+		eq(table.concat(names, " | "), "OLYMPUS | Olympus Rising | Olympus Alpha | Olympus Reborn")
+	end)
+end)
+
 test("census page: the graphs: 30 days of characters, the scale's ends written on its left, today last and brighter; 24 hours of online from 0; each slot its own tooltip", function()
 	WithCensus({ ["Olympus"] = Report(900, { online = 200 }) }, 0, function()
 		-- (Noon today: the samples' days and hours whatever the time the test runs.)
