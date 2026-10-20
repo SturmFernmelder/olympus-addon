@@ -119,7 +119,7 @@ version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `st
 A failing or unknown section is skipped and never blocks the census.
 
 What a section may carry: only what every member already sees on Olympus's own pages, plus the
-`self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, at = <server
+`self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, guild = "Guild Name", at = <server
 time>, roles = { "officer", "guildMaster", "council", "crown", "author" } }`, the player's own
 character and BattleTag as his own game gives it (`Accord.ReadTag`), the Olympus Accord's version,
 the server's time of the export, and the roles this character holds (only those that apply; an

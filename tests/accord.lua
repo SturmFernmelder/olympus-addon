@@ -1186,7 +1186,7 @@ test("accord: the Companion's self section: nothing before the Olympus Accord is
 			eq(d.accord, ns.ACCORD_VERSION); eq(d.accord, 1)
 			eq(d.at, 1800000777, "the server's clock, not this computer's")
 			for k, v in pairs(d) do
-				assert(({ character = true, battleTag = true, accord = true, at = true, roles = true })[k], "field " .. tostring(k))
+				assert(({ character = true, battleTag = true, accord = true, at = true, roles = true, guild = true })[k], "field " .. tostring(k))
 				-- (roles, 10-19, the Windows Companion's tabs: a flat list of role names; every other field flat.)
 				if k == "roles" then
 					for _, r in ipairs(v) do assert(type(r) == "string" and #r <= 32, "a role name") end
@@ -1232,6 +1232,12 @@ test("accord: the Companion's self section lists this character's own roles for 
 			ns.IsKingCharacter = function() return false end
 			W.IsAuthorName = function() return false end
 			eq(#B.GetSection("self").data.roles, 0, "a plain member: no roles")
+			-- (10-20) His own guild, by the census's name, for the Companion's relay; none outside a guild.
+			eq(B.GetSection("self").data.guild, (GetGuildInfo("player")), "his own guild's name")
+			local savedIn = IsInGuild
+			IsInGuild = function() return false end
+			eq(B.GetSection("self").data.guild, nil, "outside a guild: no guild")
+			IsInGuild = savedIn
 			R.IsOfficer = function() return true end
 			R.MyRank = function() return 0 end
 			ns.IsHighCouncillor = function(n) return n == ns.me end

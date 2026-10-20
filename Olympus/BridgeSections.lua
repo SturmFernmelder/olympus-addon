@@ -110,6 +110,14 @@ local function Yes(fn, ...)
 	local ok, v = pcall(fn, ...)
 	return ok and v == true
 end
+-- This character's own guild, by the name the census uses (GetGuildInfo, as the census reads it),
+-- or nil outside a guild: the Companion's relay hands a guild's own musters only to its members.
+local function SelfGuild()
+	if type(IsInGuild) ~= "function" or not IsInGuild() or type(GetGuildInfo) ~= "function" then return nil end
+	local ok, name = pcall(GetGuildInfo, "player")
+	if not ok or type(name) ~= "string" or name == "" then return nil end
+	return name
+end
 local function SelfRoles(me)
 	local out, R, W = {}, ns.Roster, ns.Workshop
 	if type(R) == "table" then
@@ -132,7 +140,7 @@ OlympusBridge.RegisterSection("self", 1, function()
 	if type(tag) ~= "string" or type(me) ~= "string" or not me:find("^[^%-]+%-.+$") then return nil end
 	local at = Call("Data", "ServerTime")
 	return { character = me, battleTag = tag, accord = ns.ACCORD_VERSION, at = Whole(at or (ns.Now and ns.Now())),
-		roles = SelfRoles(me) }
+		roles = SelfRoles(me), guild = SelfGuild() }
 end)
 
 -- The census statistics (docs/CENSUS-STATS.md): the census page's own figures and series
