@@ -569,7 +569,8 @@ local function OnChat(dist, sender, mode, body)
 	if (not r.seen[seenKey] and Count(r.seen) >= ArenaChat.SEEN_MAX)
 		or (not r.buckets[sender] and Count(r.buckets) >= ArenaChat.SENDERS_MAX) then return Drop("cache") end
 	local admitted, reason = ns.Channels.Admit(sender, guild, text, now,
-		{ id = id, chat = room, line = id, level = level, buckets = r.buckets, seen = r.seen, mine = r.mine, stats = r.stats, where = room })
+		{ id = id, chat = room, line = id, level = level, buckets = r.buckets, seen = r.seen, mine = r.mine, stats = r.stats, where = room,
+			evidence = true }) -- (an EC line his own addon sent: TagFollow.Evidence)
 	if not admitted then
 		-- (A line the player's block terms hide is kept, marked, as the Chat tab keeps it.)
 		if reason == "filtered" then

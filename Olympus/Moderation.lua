@@ -115,8 +115,9 @@ Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR
 	-- fail closed from the one-way boundary they already accepted.
 	H2 = true, H3 = true,
 	-- The Watch's guild-private moderation actions, and (1.1.6) the players' reports to it, and its
-	-- chat moderation (WatchChat.lua: deletions, timeouts, the Watchers' and moderators' lists).
-	MW = true, MR = true, MD = true,
+	-- chat moderation (WatchChat.lua: deletions, timeouts, the Watchers' and moderators' lists),
+	-- and a sanction that follows a BattleTag (TagFollow.lua).
+	MW = true, MR = true, MD = true, TF = true,
 	-- 1.2, the Blood Arena: its fight-room lines, bet slips, deposits, sign-ups and challenges, its
 	-- profile, its level-race claims, and Farkle's invitations, arbiter asks and public tables; and
 	-- matchmaking's asks, offers and answers (AM, the design: a net-off player sends none).
@@ -246,6 +247,7 @@ local function Weight(e)
 	return w
 end
 local function Reaches(e, rank) return e ~= nil and (rank == 0 or Weight(e) > rank) end
+Moderation.Weight = Weight
 
 -- The King's own word: heard from him (not passed on), or given on his own client.
 local function KingsOwn(e) return type(e) == "table" and not e.via and ns.IsKingCharacter(e.by) end
@@ -299,6 +301,10 @@ local function Dirty() index = nil end
 
 -- A name's own word, "on" words included (the index holds "off" words alone), or nil.
 local function OwnWord(full) return Store().c[Key("c", full)] end
+function Moderation.OwnWord(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	return OwnWord(ns.FullName(ns.Normal(name)))
+end
 
 -- Does a name's own word stand above a word found on another name of its player (the same name
 -- on another realm of the group, or a name its player linked)? It does when it weighs more, or
@@ -342,7 +348,9 @@ end
 -- hidden only by a word from higher up (a councillor's word on a Steward's alt hides no Steward).
 -- A word on a linked name doesn't hide one whose own word stands above it (Overrides: the King
 -- showed him again, and a Hand's word on his alt doesn't hide him again).
-function Moderation.Hidden(name)
+-- direct (TagFollow.lua): only the words on him and the names his player linked. Otherwise also a
+-- word on another character of his BattleTag a follow points at: then a third value, "tag".
+function Moderation.Hidden(name, direct)
 	if type(name) ~= "string" or name == "" or IsKing(name) then return nil end
 	if Index().n.c == 0 then return nil end
 	-- (1.2.3: his rank read once, at the first word found, without a closure made at each call: the
@@ -364,6 +372,38 @@ function Moderation.Hidden(name)
 			if Reaches(e, rank) then
 				if own == nil then own = OwnWord(ns.FullName(ns.Normal(name))) or false end
 				if not Overrides(own, e) then return e, other end
+			end
+		end
+	end
+	if not direct then
+		local TF = ns.TagFollow
+		if type(TF) == "table" and not TF.missing and TF.Watching and TF.Watching(name, "N") then
+			local w, source = TF.Guarded(Moderation.ByTag, name)
+			if w then return w, source, "tag" end
+		end
+	end
+	return nil
+end
+
+-- (TagFollow.lua) The word a follow of `name`'s BattleTag points at, while it stands, and whose it
+-- is: a net-off word on that other character (never one through a follow), at the lower of its
+-- own weight and the follow's, above his own rank (and, on his own client, his account's: the
+-- King's account never), unless an "on" word on his own name from as high is newer than that word
+-- (a moderator freed him of it: until that character's word changes, whatever follow of it comes
+-- later). Nil otherwise. Only through TagFollow.Guarded (Hidden).
+function Moderation.ByTag(name)
+	local TF = ns.TagFollow
+	if type(TF) ~= "table" or TF.missing or type(name) ~= "string" or name == "" or IsKing(name) then return nil end
+	local full = ns.FullName(ns.Normal(name))
+	local own, shield = OwnWord(full), nil
+	for _, F in ipairs(TF.Sources(full, "N")) do
+		local w = Moderation.Hidden(F.source, true)
+		if type(w) == "table" and w.off then
+			local applied = math.min(Weight(w), tonumber(F.weight) or 0)
+			shield = shield or TF.Shield(full, "N")
+			if applied > 0 and (shield == 0 or applied > shield)
+				and not (type(own) == "table" and not own.off and Weight(own) >= applied and own.at > w.at) then
+				return w, F.source
 			end
 		end
 	end
@@ -396,8 +436,8 @@ end
 -- marks, Borders.MarkOfName, try the guilds he may be proven in): the same answer, nothing noted.
 function Moderation.Hides(sender, guild, look)
 	if type(sender) == "string" and IsKing(sender) then return nil end
-	local e, on = Moderation.Hidden(sender)
-	if e then return e, on end
+	local e, on, via = Moderation.Hidden(sender)
+	if e then return e, on, via end
 	if guild and not look then Moderation.NoteGuild(sender, guild) end
 	if Index().n.g == 0 then return nil end
 	local rank -- (1.2.3: read once, at the first word found, as Moderation.Hidden)
@@ -424,9 +464,11 @@ end
 -- nil. (A guild's word from lower down leaves one who gives words speaking, as Hides does.)
 function Moderation.SelfOff()
 	if ns.me and IsKing(ns.me) then return nil end
-	local e = ns.me and Moderation.Hidden(ns.me)
-	if e then return e end
-	e = Moderation.OwnGuildOff()
+	if ns.me then
+		local e, on, via = Moderation.Hidden(ns.me)
+		if e then return e, on, via end
+	end
+	local e = Moderation.OwnGuildOff()
 	if e and ns.me and not Reaches(e, Rank(ns.me)) then return nil end
 	return e
 end
@@ -552,6 +594,13 @@ end
 function Moderation.YouText(e)
 	local reason, by = e.reason ~= "" and e.reason or "-", ByText(e)
 	if e.kind == "g" then return L.NETOFF_YOUR_GUILD:format(e.name, reason, by, When(e)) end
+	-- (TagFollow.lua) Another character's word that reaches us through our BattleTag: never who gave
+	-- it. Asked of the follow itself, not of AboutMe: the same name on another realm of the group
+	-- (Moderation.Character) is our own word, told as before.
+	if ns.me then
+		local mine, _, via = Moderation.Hidden(ns.me)
+		if via == "tag" and mine == e then return L.ACCORD_FOLLOW_YOU_NETOFF:format(reason, When(e)) end
+	end
 	return L.NETOFF_YOU:format(reason, by, When(e))
 end
 
@@ -745,7 +794,13 @@ function Moderation.Set(kind, input, off, reason)
 	if not off and kind == "g" and not (type(kept) == "table" and kept.off) and Moderation.TimedFor(name) then
 		return Moderation.CancelExile(name)
 	end
-	if not off and not (type(kept) == "table" and kept.off) then ns.Print(L.NETOFF_NOT_OFF:format(label)) return false end
+	if not off and not (type(kept) == "table" and kept.off) then
+		-- (TagFollow.lua) A character hidden only through his BattleTag's follow: an "on" word on his own
+		-- name frees him of it (his other characters' sanction stays).
+		local via
+		if kind == "c" then via = select(3, Moderation.Hidden(name)) end
+		if via ~= "tag" then ns.Print(L.NETOFF_NOT_OFF:format(label)) return false end
+	end
 	local at = Clock()
 	if type(kept) == "table" and kept.at >= at then at = kept.at + 1 end
 	local e = { kind = kind, name = name, off = off and true or false, at = at, by = ns.me, reason = reason }
@@ -758,6 +813,11 @@ function Moderation.Set(kind, input, off, reason)
 		ns.Print(off and L.NETOFF_GUILD_DONE:format(label, reason) or L.NETOFF_GUILD_UNDONE:format(label))
 	else
 		ns.Print(off and L.NETOFF_DONE:format(label, reason) or L.NETOFF_UNDONE:format(label))
+	end
+	-- (TagFollow.lua) Our own word on a character: it follows his BattleTag where this client holds it.
+	if kind == "c" and off then
+		local TF = ns.TagFollow
+		if type(TF) == "table" and not TF.missing and TF.AfterSanction then ns.SafeCall("tag follow", TF.AfterSanction, "N", name, reason) end
 	end
 	return true
 end
@@ -832,7 +892,7 @@ function Moderation.Lines()
 	local lines = {}
 	local issuer = Moderation.CanIssue()
 	local list = Moderation.List()
-	local mine = Moderation.SelfOff()
+	local mine, _, via = Moderation.SelfOff()
 	local timed, exile = Moderation.TimedList(), Moderation.ExileOfMine()
 	if #list == 0 and #timed == 0 and not issuer and not mine then return lines end
 	lines[#lines + 1] = { header = true, text = L.NETOFF_TITLE, right = #list > 0 and Grey(tostring(#list)) or nil,
@@ -842,7 +902,9 @@ function Moderation.Lines()
 			tt:AddLine(L.NETOFF_GUILD_TIP, 1, 1, 1, true)
 		end }
 	if mine then
-		lines[#lines + 1] = { indent = 1, text = Red(mine.kind == "g" and L.NETOFF_YOUR_GUILD_SHORT or L.NETOFF_YOU_SHORT),
+		-- (TagFollow.lua: another character's word through our BattleTag says so, never who gave it.)
+		local short = via == "tag" and L.ACCORD_FOLLOW_YOU_SHORT or mine.kind == "g" and L.NETOFF_YOUR_GUILD_SHORT or L.NETOFF_YOU_SHORT
+		lines[#lines + 1] = { indent = 1, text = Red(short),
 			tooltip = function(tt) tt:AddLine(Moderation.YouText(mine), 1, 1, 1, true) end }
 	elseif exile then
 		-- 1.1.6: our guild's timed word waits: the parchment again, with a click.

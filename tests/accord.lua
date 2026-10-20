@@ -123,8 +123,9 @@ local function Shown(lines)
 	return table.concat(out, "\n")
 end
 
--- A BT as the player's client words it.
-local function BT(at, guild, tag) return ("BT~1~1~%d~%s~%s"):format(at or 1799990000, guild or "Olympus II", tag or TAG) end
+-- A BT as the player's client words it (its game account's follow key last, TagFollow.lua).
+local KEY = "5eed00000000a001"
+local function BT(at, guild, tag, key) return ("BT~1~1~%d~%s~%s~%s"):format(at or 1799990000, guild or "Olympus II", tag or TAG, key or KEY) end
 
 test("accord: an account that has not accepted it is no member: nothing is sent (the hello, a line, a whisper, the Join screen's asks), no channel joined, no census election, no recruiting nag", function()
 	local saved = { accord = ns.db.accord, info = C_ChatInfo, join = rawget(_G, "JoinChannelByName"), channel = GetChannelName,
@@ -433,6 +434,56 @@ test("accord: an alt of the same game account is not asked again; each character
 	end)
 end)
 
+-- (The tag follow's review: its code is made of the BattleTag and this key, which only the
+-- moderation team receives, so nobody else can tell whose BattleTag a code is.)
+test("accord: the follow key: 16 random hex digits made at the first accept, kept through a new version and another BattleTag, sent last in BT; an account that accepted in an earlier build gets one at its first answer; an answer without one is kept with no code", function()
+	Scene(function(w, A)
+		eq(A.Accept(), true)
+		local key = ns.db.accord.key
+		eq(A.IsKey(key), true, tostring(key))
+		eq(A.AccountKey(), key)
+		ns.ACCORD_VERSION = ns.ACCORD_VERSION + 1
+		eq(A.Accept(), true)
+		eq(ns.db.accord.key, key, "kept through a new version")
+		w.bn.tag = "Other#9999"
+		eq(A.Accept(), true)
+		eq(ns.db.accord.key, key, "kept through another BattleTag")
+		ns.ACCORD_VERSION = ns.ACCORD_VERSION - 1
+	end)
+	Scene(function(w, A)
+		eq(ns.db.accord.key, nil, "an earlier build's acceptance")
+		eq(A.AccountKey(), nil, "none made by a read")
+		eq(A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1"), true)
+		w.Run(A.DELAY_MAX)
+		local job = w.whispers[#w.whispers]
+		assert(job, "answered")
+		eq(A.IsKey(ns.db.accord.key), true, "made for the answer")
+		eq(job.msg:sub(-17), "~" .. ns.db.accord.key)
+	end, { accepted = true })
+	Scene(function(w, A)
+		ns.rdb.council.names.tester = "Tester"
+		eq(A.AskTeam(), true)
+		eq(A.HandleTag("WHISPER", MEMBER, "BT~1~1~5~Olympus II~Old#1"), true, "an earlier build's answer")
+		local row = ns.rdb.battletags.rows[ns.Fold(MEMBER)]
+		eq(row.tag, "Old#1"); eq(row.key, nil, "kept without a key (tests/tag-follow.lua: no code then)")
+		eq(select(2, A.HandleTag("WHISPER", "Some One-Realm", "BT~1~1~5~Olympus II~Old#1~ABCDEF0123456789")), "shape", "a key not of the shape")
+		eq(A.HandleTag("WHISPER", "Some One-Realm", BT(5, nil, "Old#1")), true)
+		eq(ns.rdb.battletags.rows[ns.Fold("Some One-Realm")].key, KEY)
+	end, { accepted = true, team = true })
+end)
+
+test("accord: any character of the King's game account answers the King and the author alone, never a councillor or a moderator (no other team client holds a row of his account)", function()
+	Scene(function(w, A)
+		eq(A.MayTell(COUNCILLOR), true, "an ordinary account answers a councillor")
+		ns.db.kingAccount = true
+		ns.me = "Kings Alt-Realm"
+		eq(A.MayTell(COUNCILLOR), false, "the King's account does not")
+		eq(select(2, A.HandleAsk("CHANNEL", COUNCILLOR, "BQ~1")), "level")
+		w.Run(A.DELAY_MAX)
+		eq(#w.whispers, 0, "nothing sent")
+	end, { accepted = true })
+end)
+
 test("accord: the team's ask: only a team member's, on the channel, answered once by a logged whisper after a random delay, to him alone, its permit checked again at the game's send; not again within 20 hours; I accept tells recent askers at once", function()
 	Scene(function(w, A)
 		A.random = function(lo, hi) return lo end
@@ -450,7 +501,10 @@ test("accord: the team's ask: only a team member's, on the channel, answered onc
 		eq(#w.whispers, 1)
 		local job = w.whispers[1]
 		eq(job.to, COUNCILLOR); eq(job.logged, true, "logged: the server keeps it")
-		eq(job.msg, ("BT~1~1~%d~Olympus II~%s"):format(ns.db.accord.at, TAG))
+		-- (Changed on purpose, the tag follow's review: the answer ends with this game account's follow
+		-- key, made at the accept; the rest of the word is the same.)
+		eq(A.IsKey(ns.db.accord.key), true, "a follow key made at the accept")
+		eq(job.msg, ("BT~1~1~%d~Olympus II~%s~%s"):format(ns.db.accord.at, TAG, ns.db.accord.key))
 		assert(#job.msg <= 255)
 		local o = job.options
 		local function Permit(to, payload) return o.permit(o.owner, o.key, "WHISPER", to or COUNCILLOR, payload or job.msg) end
@@ -572,7 +626,10 @@ test("accord: the team's page groups one player's characters, the digits hidden 
 		assert(not text:find("1234", 1, true) and not text:find("7777", 1, true), "no digits until Show: " .. text)
 		assert(text:find("Tester#****", 1, true) and text:find("Bob#****", 1, true), text)
 		assert(text:find(L.ACCORD_TEAM_SHARED:format(2), 1, true)); assert(text:find(L.ACCORD_TEAM_ONE, 1, true))
-		assert(text:find(L.ACCORD_TEAM_SCOPE, 1, true), "never act on one alone")
+		-- (Changed on purpose, the tag follow (TagFollow.lua): the scope line no longer says "never act on
+		-- a BattleTag alone", since a sanction now follows one by itself; it says to stop a wrong follow
+		-- here. The check is the same: the page shows that line.)
+		assert(text:find(L.ACCORD_TEAM_SCOPE, 1, true), "stop a wrong follow here")
 		assert(text:find(L.ACCORD_TEAM_PROFILE:format("Tester#****"), 1, true))
 		assert(text:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Second Alt"), 1, true), text)
 		assert(Shown(A.ProfileLines("Nobody Here-Realm")):find(L.ACCORD_TEAM_PROFILE_NONE, 1, true))
@@ -688,7 +745,9 @@ test("accord: the letter: Olympus's own bronze window over parchment, the Accord
 				end
 			end
 			-- (Changed on purpose: 380 until moderator protection's bullet, 4.7, joined the letter at the
-			-- owner's ask; its 12 words, its full terms on the privacy page's line.)
+			-- owner's ask; its 12 words, its full terms on the privacy page's line. The sanction that
+			-- follows the BattleTag, 5.5, took the place of "It helps spot one player's characters", its
+			-- wording trimmed by one word so the merged letter still fits 389.)
 			assert(total <= 389, "the letter is " .. total .. " words")
 			-- Bold where it matters: who gets the BattleTag (the moderation team in game, the
 			-- Companion's census staff), that no other player sees it, and Blizzard's rules first, a

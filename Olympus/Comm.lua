@@ -413,6 +413,8 @@ end
 --   1.2.5.1, the Olympus Accord: Accord BT BQ (the first, a player's BattleTag to a moderation team
 --   member who asked, a logged whisper; the second, that member's ask, on the Olympus channel).
 --   Cover MC (a moderator's cover name, from their own client, over the channel and GUILD).
+--   TagFollow TF (a sanction that follows a BattleTag: a code of it, the character, the kind; logged,
+--   on the Olympus channel).
 local handlers = {}
 -- 1.1 (Moderation.lua): a client the moderators took off (net-off) sends none of what they hide.
 local function Held(msg)

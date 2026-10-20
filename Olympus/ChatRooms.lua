@@ -1345,6 +1345,7 @@ function Rooms.Receive(dist, sender, text, now)
 	local admitted, why = ns.Channels.Admit(sender, guild, words, now, {
 		id = id .. ":" .. lineId, chat = id, line = lineId, level = info.scope == "guild" and 0 or 1,
 		buckets = receiveBuckets, seen = receiveSeen, mine = receiveMine, stats = stats, where = id,
+		evidence = true, -- (an M2 line his own addon sent: TagFollow.Evidence; never the native guild chat)
 	})
 	if not admitted and why ~= "filtered" then return Drop(why) end
 	local r = State(id, true)

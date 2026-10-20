@@ -63528,7 +63528,7 @@ end)
 assert(loadfile(ROOT .. "tests/hop-regressions.lua"))(ns, test, eq, WithHop)
 local focused = Harness.watchOnly and { "watch", "watch-chat", "chat-strikes", "watch-council-view" }
 		or { "hop", "hop-sightings", "player-sightings", "transport", "admission", "privacy", "census", "authority", "chat-rooms", "war", "watch", "watch-chat", "chat-strikes", "wanted", "wanted-guilds", "wanted-sightings", "map-wanted", "king-arrow",
-		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord",
+		"church", "church-count", "church-fullness", "church-view", "church-head", "department-access", "nominees-durable", "watch-council-view", "innkeeper-arrow", "squads", "king-centurions", "court-calls", "weekly-brief", "main-key", "guild-charter", "officer-muster", "dues-history", "accord", "tag-follow",
 		"campaign", "guild-finance", "dues-grace", "dues-roster-checkpoints", "justice-tasks", "justice-shared", "chat-channel-links", "perf", "roster", "census-avg-level", "ranking-rules", "profile-menu", "history-carry", "carry-history", "carry-merger", "party-guard", "profile-effects", "quiet-presence", "record", "realm-pages", "census-clean", "census-stats", "cover" }
 for _, name in ipairs(focused) do
 	print("tests/" .. name .. ".lua")
@@ -63540,6 +63540,8 @@ for _, name in ipairs(focused) do
 		or name == "dues-history" and { FreshComm = FreshComm, WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		-- (1.2.5.1: the Olympus Accord's, its letter and the window's page.)
 		or name == "accord" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, FreshComm = FreshComm, LoadUI = LoadUI }
+		-- (A sanction that follows the BattleTag, TagFollow.lua: its pop-ups under the gamepad UI, an old client's transport.)
+		or name == "tag-follow" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI, FreshComm = FreshComm }
 		or name == "campaign" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI }
 		or name == "chat-channel-links" and { WithGamepadUI = WithGamepadUI }
 		or name == "chat-strikes" and { WithUI = WithUI, WithGamepadUI = WithGamepadUI } -- (the chat warnings' pop-ups under the gamepad UI)
