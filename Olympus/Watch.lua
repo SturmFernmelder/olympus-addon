@@ -3449,7 +3449,9 @@ StaticPopupDialogs["OLYMPUS_WATCH_WHO"] = {
 	OnShow = function(self)
 		local eb = self.editBox or self.EditBox
 		if eb then
-			local target = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target")
+			-- (Nothing while the game hides who the target is, in a battleground: Moderation.TargetName.)
+			local M = ns.Moderation
+			local target = M and M.TargetName and M.TargetName()
 			eb:SetText(target and (ns.DisplayName(target) or target) or "")
 			eb:SetFocus()
 		end

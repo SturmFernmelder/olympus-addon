@@ -98,7 +98,10 @@ local lastShare, sharePending = -math.huge, false
 local lastFlagsSent, lastKeepersSent = -math.huge, -math.huge
 local lastRelay = -math.huge
 local lastEarlySent, earlySending = -math.huge, nil
-local earlyPending           -- a list of early supporters coming in pieces: { at, pieces, got, count, from }
+local earlyAnswer             -- an ask heard inside EARLY_GAP, answered once it is over (its token)
+-- Lists of early supporters coming in pieces, one per sender: from -> { at, pieces, got, count, from }
+-- (TreasurerSpeaking: his pinned characters alone, so a few at most).
+local earlyPending = {}
 local earlyAsks, lastEarlyAsk, earlyArmed, heardEarlyAsk = 0, -math.huge, false, -math.huge
 local earlyShown = Treasury.EARLY_SHOWN
 local earlyOpen = false
@@ -1857,7 +1860,8 @@ ns.Comm.Handle("TB", function(...) Treasury.HandleReport(...) end)
 
 -- His mail character's book as the Treasurer's client passes it on (TR): from the Treasurer
 -- himself (his name, set by the server, in <Olympus>), about his mail character alone, of this
--- era; taken unless our copy of that book is as new (its own TB, dated when it came, always is).
+-- era; taken unless our copy of that book is newer, or as new and its own TB (dated when it came,
+-- it always is): a copy as new that was passed on too is replaced (its week moves on).
 -- The book is checked as a keeper's own is (ReadBook), and its date too: DATE_SLACK ahead of the
 -- server's clock at most (Konig's review of 1.0.0).
 function Treasury.HandleRelay(dist, sender, text)
@@ -1879,8 +1883,13 @@ function Treasury.HandleRelay(dist, sender, text)
 	-- part we hold takes its place.)
 	if dist == "WHISPER" and (r.part or not Treasury.IsInsider()) then return end
 	Treasury.Migrate()
+	-- A copy passed on again of the same book (its date unchanged) takes the place of the one
+	-- passed on before: its week is as the Treasurer's client counts it when it sends it (today
+	-- and the 6 days before: Treasury.Totals), so a book that stops changing no longer shows the
+	-- week it had when it first reached us. Its own TB as new still stays.
 	for from, old in pairs(Reports()) do
-		if SameChar(from, whose) and type(old) == "table" and (tonumber(old.t) or 0) >= r.t and (r.part or not old.part) then return end
+		local held = type(old) == "table" and (tonumber(old.t) or 0)
+		if SameChar(from, whose) and held and (held > r.t or (held == r.t and not old.relayed)) and (r.part or not old.part) then return end
 	end
 	r.relayed = true
 	Keep(r)
@@ -3125,7 +3134,7 @@ function Treasury.SendEarly(force)
 	if not list then return false end
 	local now = ns.Now()
 	if not force and now - lastEarlySent < Treasury.EARLY_GAP then return false end
-	lastEarlySent = now
+	lastEarlySent, earlyAnswer = now, nil -- (an answer waiting for the gap: this one is it)
 	local guild = Clean(GetGuildInfo("player"))
 	local pieces, token = EarlyPieces(list, guild), {}
 	earlySending = token
@@ -3160,7 +3169,9 @@ Treasury.OnPrivate("TE", { send = function(to) return MaySendEarly() and Insider
 -- A piece of the list: from one of the Treasurer's pinned characters (his name, set by the
 -- server). A list as new as ours changes nothing; a newer one replaces ours once all its
 -- pieces are in (an older list's piece meanwhile is dropped). By whisper (1.1) only to the King,
--- a Steward or a keeper.
+-- a Steward or a keeper. Each sender's pieces are put together apart: two of his characters
+-- cut the same list where their guild's name leaves room (EarlyPieces), so one's pieces never
+-- fill the gaps of the other's (a name at a cut lost for good once the list is taken).
 function Treasury.HandleEarly(dist, sender, text)
 	if (dist ~= "CHANNEL" and dist ~= "WHISPER") or type(text) ~= "string" or not ns.rdb then return end
 	if dist == "WHISPER" and not Treasury.IsInsider() then return end
@@ -3170,11 +3181,12 @@ function Treasury.HandleEarly(dist, sender, text)
 	if at < 1 or at > Clock() + 600 or n < 1 or n > Treasury.EARLY_PIECES or i < 1 or i > n then return end
 	local held = ns.rdb.treasuryEarly
 	if type(held) == "table" and (tonumber(held.at) or 0) >= at then return end
-	local p = earlyPending
+	local from = ns.FullName(sender)
+	local p = earlyPending[from]
 	if not p or p.at ~= at or p.pieces ~= n then
 		if p and p.at > at then return end
-		p = { at = at, pieces = n, got = {}, count = 0, from = ns.FullName(sender) }
-		earlyPending = p
+		p = { at = at, pieces = n, got = {}, count = 0, from = from }
+		earlyPending[from] = p
 	end
 	if p.got[i] then return end
 	local list = {}
@@ -3184,7 +3196,7 @@ function Treasury.HandleEarly(dist, sender, text)
 	end
 	p.got[i], p.count = list, p.count + 1
 	if p.count < p.pieces then return end
-	earlyPending = nil
+	for k, q in pairs(earlyPending) do if q.at <= at then earlyPending[k] = nil end end
 	local all = {}
 	for k = 1, p.pieces do
 		for _, name in ipairs(p.got[k]) do if #all < Treasury.EARLY_MAX then all[#all + 1] = name end end
@@ -3214,9 +3226,11 @@ end
 
 -- Someone asks: the holder answers when its list is newer than the asker's (EARLY_GAP apart at
 -- the soonest, however many ask: the answer goes to the whole channel), with the same yeses as
--- its own sending (SendEarly). Anyone's ask holds ours (EARLY_ASK_HOLD) only when its answer
--- reaches us too: it asks for no newer list than ours, so any list newer than it has is newer
--- than ours (Konig's review of 1.0.0: an ask as new as the holder's list, or dated ahead, is
+-- its own sending (SendEarly). An ask inside EARLY_GAP is answered once the gap is over, never
+-- left to its asker's next ask (EARLY_ASK_AGAIN later, and some of its EARLY_ASKS gone): a late
+-- login waits EARLY_GAP at most, and the list still goes out once each EARLY_GAP at most.
+-- Anyone's ask holds ours (EARLY_ASK_HOLD) only when its answer reaches us too: it asks for no
+-- newer list than ours, so any list newer than it has is newer than ours (Konig's review of 1.0.0: an ask as new as the holder's list, or dated ahead, is
 -- never answered, and anyone repeating one kept every client without the list from asking).
 function Treasury.HandleEarlyAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" then return end
@@ -3229,7 +3243,17 @@ function Treasury.HandleEarlyAsk(dist, sender, text)
 	if not (list and list.at > at) then return end
 	-- (1.1: while the ranking is off the channel, the King, a Steward or a keeper asking gets it
 	-- by whisper; nobody else.)
-	if Treasury.PublicShows("ranking") then Treasury.SendEarly()
+	if Treasury.PublicShows("ranking") then
+		if Treasury.SendEarly() or earlyAnswer or not MaySendEarly() then return end
+		local wait = lastEarlySent + Treasury.EARLY_GAP - ns.Now()
+		if wait <= 0 then return end
+		local token = {}
+		earlyAnswer = token
+		ns.After(wait, "treasury early answer", function()
+			if earlyAnswer ~= token then return end
+			earlyAnswer = nil
+			Treasury.SendEarly()
+		end)
 	elseif Treasury.InsiderName(sender) and CanSend() then Treasury.SendEarlyTo(sender) end
 end
 ns.Comm.Handle("TQ", function(...) Treasury.HandleEarlyAsk(...) end)
@@ -4908,7 +4932,7 @@ function Treasury.Reset()
 	wipe(pending)
 	wipe(itemPending)
 	lastMoney, lastRelay = nil, -math.huge
-	lastEarlySent, earlySending, earlyPending, earlyCache = -math.huge, nil, nil, nil
+	lastEarlySent, earlySending, earlyPending, earlyCache, earlyAnswer = -math.huge, nil, {}, nil, nil
 	Treasury.ResetPrivate()
 	donating, lastDonationSent = nil, -math.huge
 	wipe(donors); wipe(pinged)

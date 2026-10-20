@@ -1789,6 +1789,87 @@ test("1.2 matchmaking: a Where I am point's pin goes through the HereBeDragons h
 	MW.NoErrors(w)
 end)
 
+test("1.2.6 matchmaking: on the minimap's edge the meeting place's pin is the game's minimap arrow, turned toward the tavern or the other player's spot; in range, the icon", function()
+	local w, a, b = Pair({ findable = false })
+	b.Match.SetFindable(true, { d = false, b = true })
+	local function Near(x, want, what)
+		assert(type(x) == "number" and math.abs(x - want) < 1e-9, (what or "") .. ": " .. tostring(x) .. ", want " .. want)
+	end
+	-- The pin library as the client has it (HereBeDragons-Pins-2.0.lua): a pin goes on the minimap,
+	-- its parent, and the library says whether it floats on the edge (IsMinimapIconOnEdge).
+	local minimap = World.NewFrame("Frame", "Minimap")
+	minimap.GetCenter = function() return 500, 300 end
+	local pin, kinds, edge = nil, {}, nil
+	local function Add(kind)
+		return function(_, ref, icon) pin = icon; kinds[#kinds + 1] = kind; icon:SetParent(minimap); icon:Show(); return true end
+	end
+	local P = {
+		AddMinimapIconMap = Add("map"), AddMinimapIconWorld = Add("world"),
+		AddWorldMapIconMap = function() end, AddWorldMapIconWorld = function() end,
+		RemoveAllMinimapIcons = function() if pin then pin:Hide() end end, RemoveAllWorldMapIcons = function() end,
+		IsMinimapIconOnEdge = function(_, icon) if icon == pin then return edge end end,
+	}
+	b.globals.LibStub = function(name) if name == "HereBeDragons-Pins-2.0" then return P end end
+	b.globals.C_Texture = { GetAtlasInfo = function(atlas) if atlas == "UI-HUD-Minimap-Arrow-Player" then return { width = 32, height = 32 } end end }
+	-- Textures that keep what is set on them (the stand-in's do nothing).
+	local make = b.globals.CreateFrame
+	b.globals.CreateFrame = function(...)
+		local f = make(...)
+		local texture = f.CreateTexture
+		f.CreateTexture = function(self, ...)
+			local t = texture(self, ...)
+			t.SetAlpha = function(s, v) s.alpha = v end
+			t.SetRotation = function(s, r) s.rotation = r end
+			t.SetAtlas = function(s, atlas) s.atlas = atlas end
+			return t
+		end
+		return f
+	end
+	Matched(w, a, b, { game = "b", kind = "c" })
+	-- The tavern: the Salty Sailor (the Bone Throw practice test above), on its map.
+	eq(b.Match.View().match.place.id, "inn_booty_bay"); eq(kinds[1], "map")
+	local arrow, icon = pin.arrow, pin.icon
+	assert(arrow, "the game's minimap arrow on the pin")
+	eq(arrow.atlas, "UI-HUD-Minimap-Arrow-Player")
+	-- In range (not floated): the icon, no arrow.
+	eq(b.Match.TurnArrow(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	-- Floated on the edge east of the minimap's centre: the arrow, pointing right (SetRotation turns
+	-- counter-clockwise from up: -pi/2), the icon hidden; through the pin's own OnUpdate, paced.
+	edge = true
+	pin.GetCenter = function() return 570, 300 end
+	w:As(b, pin.scripts.OnUpdate, pin, 0.05)
+	eq(arrow.alpha, 0, "not before ARROW_EVERY")
+	w:As(b, pin.scripts.OnUpdate, pin, 0.05)
+	Near(arrow.rotation, -math.pi / 2, "east"); eq(arrow.alpha, 1); eq(icon.alpha, 0)
+	-- North: up; west: left; south: down.
+	for _, case in ipairs({ { 500, 370, 0, "north" }, { 430, 300, math.pi / 2, "west" }, { 500, 230, -math.pi, "south" } }) do
+		pin.GetCenter = function() return case[1], case[2] end
+		eq(b.Match.TurnArrow(), true)
+		Near(arrow.rotation, case[3], case[4])
+	end
+	-- Back in range: the icon again.
+	edge = false
+	eq(b.Match.TurnArrow(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	-- Lida's Where I am: Parric's pin is her spot (the library's world pin), the same arrow; drawn
+	-- again it starts as the icon until the library floats it.
+	edge = true; pin.GetCenter = function() return 570, 300 end
+	assert(b.Match.TurnArrow())
+	a.mapPos = { 0.3, 0.45 }
+	MW.Press(w, a, "other")
+	local where
+	for i, r in ipairs(MW.Card(a).rows) do if r.shown and r.text == "Where I am" then where = i end end
+	MW.Row(w, a, where)
+	w:Run(0)
+	eq(kinds[#kinds], "world"); eq(pin.arrow, arrow)
+	eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	pin.GetCenter = function() return 500, 230 end
+	eq(b.Match.TurnArrow(), true); Near(arrow.rotation, -math.pi, "south"); eq(arrow.alpha, 1)
+	-- The match over: the pin gone, and the arrow with it.
+	MW.Press(w, b, "cancel")
+	eq(pin:IsShown(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	MW.NoErrors(w)
+end)
+
 test("1.2 matchmaking: match.open and /oly arena find: the screens' Find dialog when there, else the card's short sheet the first time (what goes out), with location off its two share buttons", function()
 	local w = World.New()
 	local a = MW.Client(w, "Lida Fenn", { pos = SEEKER })

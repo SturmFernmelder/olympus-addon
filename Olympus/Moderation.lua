@@ -151,13 +151,35 @@ local function Clean(s)
 	return ns.Cut(s, Moderation.REASON_MAX)
 end
 
+-- The player's target, for a box left empty or the dialogs' first guess: its name as the server
+-- writes it, or nil. In a battleground, an arena or a dungeon the game may hide who a unit is from
+-- addons (a secret value: whether it is a player, its name, its guild), and a secret stops the code
+-- with an error on any test or comparison, the first look included: each answer is asked inside
+-- pcall and checked with issecretvalue before anything tests it, and a hidden one is no target
+-- (the moderator types the name).
+local function Secret(v) return type(issecretvalue) == "function" and issecretvalue(v) == true end
+local function TargetName()
+	if type(UnitIsPlayer) ~= "function" then return nil end
+	local ok, player = pcall(UnitIsPlayer, "target")
+	if not ok or Secret(player) or not player then return nil end
+	local okName, name = pcall(ns.UnitFullName, "target")
+	if not okName or Secret(name) or type(name) ~= "string" or name == "" then return nil end
+	return name
+end
+Moderation.TargetName = TargetName
+local function TargetGuild()
+	if type(GetGuildInfo) ~= "function" then return nil end
+	local ok, guild = pcall(GetGuildInfo, "target")
+	if not ok or Secret(guild) or type(guild) ~= "string" or guild == "" then return nil end
+	return guild
+end
+Moderation.TargetGuild = TargetGuild
+
 -- A character's name as the server writes it ("First Surname-Realm"); nil if it can't be one.
 -- target: an empty input takes the player's target (the dialog, the slash command).
 local function CharName(input, target)
 	local name = tostring(input or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	if name == "" and target then
-		name = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target") or ""
-	end
+	if name == "" and target then name = TargetName() or "" end
 	if name == "" then return nil end
 	name = ns.Normal(name)
 	local short = ns.King and ns.King.CleanName and ns.King.CleanName(name)
@@ -172,7 +194,7 @@ Moderation.CharName = CharName
 -- takes the guild of the player's target.
 local function GuildName(input, target)
 	local name = tostring(input or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("^<(.*)>$", "%1")
-	if name == "" and target and GetGuildInfo then name = GetGuildInfo("target") or "" end
+	if name == "" and target then name = TargetGuild() or "" end
 	if name == "" then return nil end
 	local clean = ns.King and ns.King.CleanGuild and ns.King.CleanGuild(name)
 	-- 1.1.5: a guild the High Council removed is no Olympus guild here any more, but the word that
@@ -924,13 +946,15 @@ local function WhoDialog(prompt, width, letters, default, after)
 	}
 end
 StaticPopupDialogs["OLYMPUS_NETOFF_WHO"] = WhoDialog(L.NETOFF_WHO_PROMPT, 240, 60, function()
-	local target = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target")
+	local target = TargetName()
 	return target and ns.DisplayName(target) or ""
 end)
-StaticPopupDialogs["OLYMPUS_NETOFF_GUILD"] = WhoDialog(L.NETOFF_GUILD_PROMPT, 240, 40, function()
-	local guild = GetGuildInfo and GetGuildInfo("target")
+-- (The target's guild, when it is an Olympus one; nothing while the game hides it: TargetGuild.)
+local function TargetOlympusGuild()
+	local guild = TargetGuild()
 	return guild and ns.IsFederation(guild) and guild or ""
-end)
+end
+StaticPopupDialogs["OLYMPUS_NETOFF_GUILD"] = WhoDialog(L.NETOFF_GUILD_PROMPT, 240, 40, TargetOlympusGuild)
 
 StaticPopupDialogs["OLYMPUS_NETOFF_WHY"] = {
 	text = L.NETOFF_WHY_PROMPT,
@@ -1431,10 +1455,7 @@ local function ExileNext(_, text)
 	if not full then return ns.Print(L.NETOFF_GUILD_BAD) end
 	ns.ShowDialog("OLYMPUS_EXILE_WHEN", Label({ kind = "g", name = full }), nil, { name = full })
 end
-StaticPopupDialogs["OLYMPUS_EXILE_GUILD"] = WhoDialog(L.NETOFF_EXILE_GUILD_PROMPT, 240, 40, function()
-	local guild = GetGuildInfo and GetGuildInfo("target")
-	return guild and ns.IsFederation(guild) and guild or ""
-end, ExileNext)
+StaticPopupDialogs["OLYMPUS_EXILE_GUILD"] = WhoDialog(L.NETOFF_EXILE_GUILD_PROMPT, 240, 40, TargetOlympusGuild, ExileNext)
 
 local function ExileWhy(data, delay)
 	if type(data) ~= "table" or not data.name then return end

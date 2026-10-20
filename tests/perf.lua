@@ -821,3 +821,105 @@ test("1.2.3 profiler: going on with a session 1.2.2 measured, the frames whose h
 		end)
 	end)
 end)
+
+-- A burst of one error (a player's stutter, with an error the game counted 45 times, and "insecure
+-- scripts exceeded execution limits for addon Olympus" naming Bootstrap.lua): the game runs
+-- Olympus's error handler for every error of every addon and of its own UI, and the error list
+-- (Diagnostics.lua) for each of Olympus's. A repeat must cost them no stack read (debugstack is
+-- among the dearest calls the game has). debugstack here counts its reads and gives `text`.
+local function CountingStack(fn)
+	local saved = rawget(_G, "debugstack")
+	local reads = { n = 0, text = "" }
+	debugstack = function() reads.n = reads.n + 1; return reads.text end
+	local ok, err = pcall(fn, reads)
+	debugstack = saved
+	if not ok then error(err, 0) end
+end
+
+test("Error storm: an error the error list already keeps is counted at each repeat and its stack read once (Diagnostics.lua)", function()
+	local db = ns.db
+	local was = { errors = db.errors, log = db.log, print = ns.Print }
+	db.errors, db.log = {}, {}
+	ns.Print = function() end
+	local ok, err = pcall(CountingStack, function(reads)
+		reads.text = "Interface/AddOns/Olympus/ChatMarks.lua:12: in function <Interface/AddOns/Olympus/ChatMarks.lua:10>"
+		for _ = 1, 45 do ns.CaptureError("chat marks", "Interface/AddOns/Olympus/ChatMarks.lua:12: boom") end
+		eq(#db.errors, 1); eq(db.errors[1].count, 45, "every repeat counted")
+		eq(reads.n, 1, "its stack read once, not at each repeat")
+		eq(db.errors[1].stack, reads.text, "the stack of its first time")
+		-- Another error: its own stack, once.
+		reads.text = "Interface/AddOns/Olympus/UI.lua:5: in function 'Refresh'"
+		for _ = 1, 3 do ns.CaptureError("ui refresh", "Interface/AddOns/Olympus/UI.lua:5: other") end
+		eq(reads.n, 2); eq(#db.errors, 2); eq(db.errors[2].stack, reads.text); eq(db.errors[2].count, 3)
+		-- A failure inside /oly key <key>: the key comes out of the stack as out of the message.
+		reads.text = "Interface/AddOns/Olympus/Comm.lua:1: in function 'SetRealmKey' (Quiet Hollow 12)"
+		for _ = 1, 3 do ns.CaptureError("slash key Quiet Hollow 12", "failed with Quiet Hollow 12") end
+		eq(reads.n, 3)
+		local e = db.errors[3]
+		eq(e.where, "slash key"); eq(e.count, 3)
+		assert(not e.stack:find("Quiet Hollow", 1, true) and not e.msg:find("Quiet Hollow", 1, true), e.msg .. " / " .. e.stack)
+		assert(e.stack:find("SetRealmKey", 1, true), "the rest of the stack kept: " .. e.stack)
+	end)
+	db.errors, db.log, ns.Print = was.errors, was.log, was.print
+	if not ok then error(err, 0) end
+end)
+
+test("Error storm: the game's error handler Olympus puts in place (Bootstrap.lua) reads no stack for a repeat: ours counted, another addon's known, one naming no file read once a second at most, a secret one never; each goes on to the game's as it came", function()
+	local saved = { get = geterrorhandler, set = seterrorhandler, time = GetTime, secret = rawget(_G, "issecretvalue") }
+	local ok, err = pcall(CountingStack, function(reads)
+		local gave = {}
+		local function Game(e, ...) gave[#gave + 1] = { e = e, n = select("#", ...) } end
+		local current = Game
+		geterrorhandler = function() return current end
+		seterrorhandler = function(f) current = f end
+		local now = 100
+		GetTime = function() return now end
+		local peeked = 0
+		local SECRET = setmetatable({}, { __tostring = function() peeked = peeked + 1; return "a secret value" end })
+		issecretvalue = function(v) return v == SECRET end
+		local b = {}
+		assert(loadfile(ROOT .. "Olympus/Bootstrap.lua"))("Olympus", b)
+		assert(current ~= Game, "ours in place with mouse and keyboard")
+		local handler = current
+		local captured = 0
+		b.db = {}
+		b.CaptureError = function() captured = captured + 1 end
+		-- Ours, 45 times: one stack read, every repeat counted (and told to the error list).
+		local mine = "Interface/AddOns/Olympus/ChatMarks.lua:12: attempt to index a nil value"
+		reads.text = "Interface/AddOns/Olympus/Bootstrap.lua:70: in function <Interface/AddOns/Olympus/Bootstrap.lua:69>\n" .. mine
+		for _ = 1, 45 do handler(mine) end
+		eq(reads.n, 1, "ours: its stack read once"); eq(#b.allErrors, 1); eq(b.allErrors[1].count, 45); eq(captured, 45)
+		-- One naming no addon's file (a C function's, called from Blizzard's chat code): read once in
+		-- the burst, again a second later (our calls may cause it next time), and kept when they did.
+		reads.n = 0
+		reads.text = "[C]: in function 'SetText'\nInterface/AddOns/Blizzard_ChatFrameBase/Shared/ChatFrame.lua:99: in function"
+		local blizz = "bad argument #1 to 'SetText' (string expected, got nil)"
+		for _ = 1, 45 do handler(blizz) end
+		eq(reads.n, 1, "no file named: read once in the burst, not 45 times")
+		eq(#b.allErrors, 1, "not ours")
+		now = now + 0.5
+		handler(blizz); eq(reads.n, 1, "half a second later: still not read")
+		now = now + 0.5
+		handler(blizz); eq(reads.n, 2, "a second later: read again")
+		now = now + 1
+		reads.text = "[C]: in function 'SetText'\nInterface/AddOns/Olympus/Channels.lua:867: in function 'Say'"
+		handler(blizz)
+		eq(reads.n, 3); eq(#b.allErrors, 2, "our call caused it this time: ours"); eq(b.allErrors[2].msg, blizz)
+		handler(blizz); eq(reads.n, 3, "and counted from then on"); eq(b.allErrors[2].count, 2)
+		-- Another addon's (Blizzard's own files are in AddOns too): known at its first time.
+		reads.n = 0
+		reads.text = "Interface/AddOns/OtherAddon/Main.lua:3: in function"
+		for _ = 1, 45 do handler("Interface/AddOns/OtherAddon/Main.lua:3: boom") end
+		eq(reads.n, 1, "another addon's: read once")
+		-- A secret one (an instance's): not even made a string.
+		reads.n = 0
+		handler(SECRET, "more")
+		eq(reads.n, 0); eq(peeked, 0, "a secret error is never read")
+		-- Each went on to the game's handler as it came.
+		eq(#gave, 45 + 45 + 2 + 2 + 45 + 1)
+		eq(gave[1].e, mine); eq(gave[46].e, blizz)
+		assert(gave[#gave].e == SECRET, "the secret one, untouched"); eq(gave[#gave].n, 1, "with what came with it")
+	end)
+	geterrorhandler, seterrorhandler, GetTime, issecretvalue = saved.get, saved.set, saved.time, saved.secret
+	if not ok then error(err, 0) end
+end)

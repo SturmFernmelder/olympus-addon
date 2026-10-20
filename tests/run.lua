@@ -23297,6 +23297,8 @@ test("1.0 the Treasurer's client passes on his mail character's book (it never r
 		if not ok then error(err, 0) end
 	end)
 end)
+assert(loadfile(ROOT .. "tests/treasury-relays.lua"))(ns, test, eq, { WithThrone = WithThrone, MailWorld = MailWorld, AsTreasurer = AsTreasurer,
+	AsAndarai = AsAndarai, AsSoldier = AsSoldier, ANDARAI = ANDARAI, ANDARAI_KEY = ANDARAI_KEY, TREASURER_KEY = TREASURER_KEY })
 
 test("1.0 the early supporters: everyone who gave before 1.0, names only, alphabetical, with the ranking's switch, from the Treasurer alone", function()
 	WithThrone(function(w, K)
@@ -41433,6 +41435,9 @@ end)
 	print("tests/recruit-netoff.lua")
 	assert(loadfile(ROOT .. "tests/recruit-netoff.lua"))(ns, test, eq, { WithNetoff = WithNetoff, KING = KING, HC = HC,
 		AsSoldier = AsSoldier, AsKing = AsKing, WithUI = WithUI, WithGamepadUI = WithGamepadUI, PtBR = PtBR })
+	print("tests/netoff-battleground.lua")
+	assert(loadfile(ROOT .. "tests/netoff-battleground.lua"))(ns, test, eq, { WithNetoff = WithNetoff, KING = KING, HC = HC,
+		AsSoldier = AsSoldier, AsKing = AsKing, WithUI = WithUI, LoadUI = LoadUI, LoadWatch = Harness.LoadWatch })
 
 end)()
 ---------------------------------------------------------------------------

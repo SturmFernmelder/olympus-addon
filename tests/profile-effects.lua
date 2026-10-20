@@ -376,6 +376,51 @@ test("profile effects: an unavailable target position is omitted instead of show
 	end)
 end)
 
+-- In a battleground the game may hide who the target is, and where, from addons (secret values),
+-- and a secret stops the code with an error on any test, comparison or sum. Mock fidelity: a real
+-- secret has the type of what it hides, which no stand-in can have. SECRET is a table that errors
+-- on everything but a truth test (which Lua can't make fail), so a hidden "it exists" or "it is a
+-- player" shows as being taken for a yes; the hidden place is a plain number the mock's
+-- issecretvalue names, so a hidden place shows as being written out.
+test("profile effects: in a battleground, a target the game hides is no target and a hidden place is none, at a net-off word and a census report as at a target change", function()
+	WithWorld(function(w)
+		local issuer = w.client("Council")
+		local sender, receiver = w.client("UnitMember", false), w.client("Observer", false)
+		w.openFor(issuer, { sender, receiver })
+		w.trust(receiver, sender, false)
+		assert(w.use(sender, sender.ProfileEffects.Set, "one", "shadow", true, CAPTION))
+		assert(w.deliver(sender, receiver))
+		receiver.target = sender.me
+		local function Boom() error("a secret value was used", 2) end
+		local SECRET = setmetatable({}, { __index = Boom, __newindex = Boom, __tostring = Boom, __concat = Boom,
+			__lt = Boom, __le = Boom, __eq = Boom, __len = Boom, __call = Boom, __unm = Boom, __add = Boom, __mul = Boom })
+		local HIDDEN_X = 0.4242
+		issecretvalue = function(v) return rawequal(v, SECRET) or (type(v) == "number" and v == HIDDEN_X) end
+		local exists, player, fullName = UnitExists, UnitIsPlayer, receiver.UnitFullName
+		local function Hidden(which)
+			UnitExists = which == "exists" and function(unit) if unit == "target" then return SECRET end return exists(unit) end or exists
+			UnitIsPlayer = which == "player" and function(unit) if unit == "target" then return SECRET end return player(unit) end or player
+			receiver.UnitFullName = which == "name" and function(unit) if unit == "target" then return SECRET end return fullName(unit) end or fullName
+		end
+		-- Each hidden answer about who the target is: no presentation, on a target change, a net-off
+		-- word (the moderator's ban) and a census report alike.
+		for _, which in ipairs({ "exists", "player", "name" }) do
+			Hidden(which)
+			eq(w.use(receiver, receiver.ProfileEffects.Refresh), false, which .. " hidden: no target")
+			eq(w.use(receiver, receiver.ProfileEffects.Visible), false, which .. " hidden: nothing shown")
+			w.use(receiver, receiver.Fire, "NETOFF_CHANGED")
+			w.use(receiver, receiver.Fire, "DATA_CHANGED")
+			eq(w.use(receiver, receiver.ProfileEffects.Visible), false, which .. " hidden: a net-off word shows nothing")
+		end
+		-- Who he is shown, where he is hidden: the presentation without its place.
+		Hidden(nil)
+		receiver.targetCoordinates = { HIDDEN_X, 0.61 }
+		assert(w.use(receiver, receiver.ProfileEffects.Refresh))
+		eq(w.use(receiver, receiver.ProfileEffects.Visible), true)
+		eq(w.fonts[#w.fonts].text, "", "a hidden place is not written out")
+	end)
+end)
+
 test("profile effects: moderation and membership fail closed on both ends", function()
 	WithWorld(function(w)
 		local issuer = w.client("Council")

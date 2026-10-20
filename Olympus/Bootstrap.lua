@@ -40,39 +40,66 @@ local function GamepadUI()
 	return ok and style == gamepad
 end
 
+-- A burst of one error (a player's stutter, with an error the game counted 45 times, and
+-- "insecure scripts exceeded execution limits for addon Olympus" naming this file): the game runs
+-- this handler, Olympus's code, for every error of every addon and of its own UI, and the game's
+-- own handler from it. A repeat costs it no stack read: one of ours is counted
+-- (Diagnostics.lua keeps its stack once too), another addon's is known at once, and one that names
+-- no addon's file (a C function's, the client's) is read again, our calls may cause it next time,
+-- but once every UNREAD_GAP seconds at most while it repeats. An error the game hides from addons
+-- (a secret value, in an instance) is never read: it goes on to the game's handler untouched.
+local UNREAD_GAP = 1
+local UNREAD_MAX = 200
+local unread, nUnread = {}, 0 -- such an error's key -> GetTime() its stack was last read
+
+local function Handle(err)
+	if issecretvalue and issecretvalue(err) then return end
+	local msg = tostring(err)
+	local key = msg:sub(1, 240)
+	local e = index[key]
+	if e then
+		e.count = e.count + 1
+	elseif others[key] then
+		return
+	elseif #ns.allErrors < 40 then
+		local now = GetTime and GetTime() or 0
+		local last = unread[key]
+		if last and now - last < UNREAD_GAP then return end
+		-- (Handle, pcall, the handler: the stack read from the handler's line down, as before.)
+		local stack = debugstack and debugstack(3, 10, 0) or ""
+		-- Another addon's (or Blizzard's, with none of our files in it): not ours to keep.
+		-- One that names an addon's file (Blizzard's own are in AddOns too) is known at once when
+		-- it repeats (its stack is not read again); one that names none is read again (above).
+		if not ns.OwnError(msg, stack) then
+			if nOthers < 200 and msg:find("AddOns[\\/]") then
+				others[key], nOthers = true, nOthers + 1
+			else
+				if not last then
+					if nUnread >= UNREAD_MAX then unread, nUnread = {}, 0 end
+					nUnread = nUnread + 1
+				end
+				unread[key] = now
+			end
+			return
+		end
+		e = { msg = msg, count = 1, stack = stack, t = date and date("%H:%M:%S") }
+		index[key] = e
+		ns.allErrors[#ns.allErrors + 1] = e
+	end
+	if Ours(msg) then
+		if ns.CaptureError and ns.db then
+			ns.CaptureError("global", msg)
+		elseif #ns.earlyErrors < 20 then
+			ns.earlyErrors[#ns.earlyErrors + 1] = { msg, debugstack and debugstack(3, 10, 0) or "" }
+		end
+	end
+end
+
 -- Every error still goes on to the handler that was there before, as it came, whatever this
 -- one makes of it (a tail call: that handler reads the same stack as without us).
 local previous = not GamepadUI() and geterrorhandler()
 local ours = previous and function(err, ...)
-	local ok = pcall(function()
-		local msg = tostring(err)
-		local key = msg:sub(1, 240)
-		local e = index[key]
-		if e then
-			e.count = e.count + 1
-		elseif others[key] then
-			return
-		elseif #ns.allErrors < 40 then
-			local stack = debugstack and debugstack(3, 10, 0) or ""
-			-- Another addon's (or Blizzard's, with none of our files in it): not ours to keep.
-			-- One that names another addon's file is known at once when it repeats (its stack
-			-- is not read again); Blizzard's are read again, our calls may cause them next time.
-			if not ns.OwnError(msg, stack) then
-				if nOthers < 200 and msg:find("AddOns[\\/]") then others[key], nOthers = true, nOthers + 1 end
-				return
-			end
-			e = { msg = msg, count = 1, stack = stack, t = date and date("%H:%M:%S") }
-			index[key] = e
-			ns.allErrors[#ns.allErrors + 1] = e
-		end
-		if Ours(msg) then
-			if ns.CaptureError and ns.db then
-				ns.CaptureError("global", msg)
-			elseif #ns.earlyErrors < 20 then
-				ns.earlyErrors[#ns.earlyErrors + 1] = { msg, debugstack and debugstack(3, 10, 0) or "" }
-			end
-		end
-	end)
+	pcall(Handle, err)
 	return previous(err, ...)
 end
 if ours then seterrorhandler(ours) end -- gp:error-handler

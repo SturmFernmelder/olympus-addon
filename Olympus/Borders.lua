@@ -991,8 +991,10 @@ end
 -- An Apostle's own look (1.2.1, the owner's call, for an Apostle who asked for it)
 ---------------------------------------------------------------------------
 -- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
--- on his own screen alone, while everyone else sees his normal frame. Offered in the frame picker
--- (ProfileEdit) to anyone the signed Apostles list names (Church.SignedApostles: the author's
+-- on his own screen alone, while everyone else sees the Apostles' cross he holds in the Church's
+-- ranking (1.2.5, the owner's rule: his pick follows it, HonorsNet.OwnLookFrame), or with none
+-- held his normal frame. Offered in the frame picker (ProfileEdit) to anyone the signed Apostles
+-- list names (Church.SignedApostles: the author's
 -- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the
 -- plain underlay tinted black (UNDERLAY.black). Kept in this account's save, by character
 -- (ns.db.ownLooks), and never sent: the profile's word (AP) carries his pick as ever, so every
@@ -1428,10 +1430,11 @@ end
 -- master's bronze or the star there instead, if any), a character or a guild the moderators took
 -- off (net-off), a secret name or sender, and `/oly chatmarks off` (ns.db.chatMarks false).
 -- Blizzard runs the callback for every line on every chat window: it reads a boolean, the event
--- list and one table entry; a sender not seen yet is worked out once (ChatName: lookups only, at
--- most two guilds' census rows, never a walk over every guild), and the table is emptied every
--- CHAT_FORGET seconds and whenever the census, the council's lists, our guild or the council's
--- names hidden or shown change, so a new list or icon shows within a minute.
+-- list and two table entries (his mark, the Treasurer's coin); a sender not seen yet is worked out
+-- once (ChatName and Channels.RoleBadge: lookups only, at most two guilds' census rows, never a
+-- walk over every guild), and the tables are emptied every CHAT_FORGET seconds and whenever the
+-- census, the council's lists, a moderator's word, our guild or the council's names hidden or shown
+-- change, so a new list or icon shows within a minute.
 
 Borders.CHAT_EVENTS = {
 	CHAT_MSG_SAY = true, CHAT_MSG_YELL = true, CHAT_MSG_EMOTE = true,
@@ -1448,6 +1451,9 @@ local CHAT_GUILD_EVENTS = Borders.CHAT_GUILD_EVENTS
 Borders.CHAT_FORGET = 60
 Borders.CHAT_MAX = 500 -- senders kept between two emptyings (then it starts again)
 local chatMarks, chatKept = {}, 0 -- sender, as the line gives him -> { text, council, dragon } or false for none
+-- The Treasurer's coin (Channels.RoleBadge) the same way: sender -> the coin or "", worked out once
+-- and emptied with the marks (it was worked out again on every line in every window).
+local chatBadges, badgesKept = {}, 0
 local chatOn, chatHooked, chatPreview = false, false, false -- chatPreview: the author's mark ("gold"...) or false
 
 local CHAT_STAR_FILE = "Interface\\AddOns\\Olympus\\media\\borders\\star"
@@ -1572,6 +1578,21 @@ local function ChatMarkOf(name, sender, guild)
 	return text .. name
 end
 
+-- The coin before a sender's name: worked out once per sender between two emptyings, as his mark
+-- is. Whether we are in an Olympus guild is asked again on every line, as for the marks.
+local function ChatBadge(sender)
+	local okMember, member = pcall(ns.IsMember)
+	if not okMember or member ~= true then return "" end
+	local badge = chatBadges[sender]
+	if badge == nil then
+		local C = ns.Channels
+		badge = C and type(C.RoleBadge) == "function" and C.RoleBadge(sender) or ""
+		if badgesKept >= Borders.CHAT_MAX then chatBadges, badgesKept = {}, 0 end
+		chatBadges[sender], badgesKept = badge, badgesKept + 1
+	end
+	return badge
+end
+
 -- Blizzard's callback: the name to show, or nil for the name as it was (an error is nil too).
 function Borders.ChatFilter(event, name, text, sender)
 	if not chatOn or not CHAT_EVENTS[event] then return nil end
@@ -1579,9 +1600,8 @@ function Borders.ChatFilter(event, name, text, sender)
 	if not ok then return nil end
 	-- The same public Treasury identity badge as the addon chats, through the existing name
 	-- filter only. No frame/hook and no role inferred from a message's labels.
-	if not Secret(name, sender) and type(name) == "string" and type(sender) == "string" then
-		local C = ns.Channels
-		local badge = C and type(C.RoleBadge) == "function" and C.RoleBadge(sender) or ""
+	if not Secret(name, sender) and type(name) == "string" and type(sender) == "string" and sender ~= "" then
+		local badge = ChatBadge(sender)
 		if badge ~= "" then
 			local shown = out or name
 			return shown:find(badge, 1, true) and shown or badge .. shown
@@ -1590,7 +1610,7 @@ function Borders.ChatFilter(event, name, text, sender)
 	return out
 end
 
-function Borders.ChatForget() chatMarks, chatKept = {}, 0 end
+function Borders.ChatForget() chatMarks, chatKept, chatBadges, badgesKept = {}, 0, {}, 0 end
 
 function Borders.ChatEnabled() return not (ns.db and ns.db.chatMarks == false) end
 

@@ -114,6 +114,52 @@ test("Chat role badge: the existing native sender filter adds one coin and keeps
 	end)
 end)
 
+-- The game runs the sender filter for every line on every chat window (a stutter reported with busy
+-- chat, the addon's chat named in its errors): the coin is worked out once per sender, as his mark
+-- is, and again only after the marks are forgotten (every minute, DATA_CHANGED: a moderator's word).
+test("Chat role badge: the native sender filter works out a sender's coin once, not on every line in every window", function()
+	WithWindow(function()
+		Pins(function(primary, _, coin)
+			local api, marks = ChatFrameUtil, ns.db.chatMarks
+			local C = ns.Channels
+			local badge, member, hides = C.RoleBadge, ns.IsMember, ns.Moderation.Hides
+			local asked = 0
+			C.RoleBadge = function(...) asked = asked + 1; return badge(...) end
+			local c = setmetatable({ On = function() end, RegisterEvent = function() end }, { __index = ns })
+			c.Gate = setmetatable({ Hooks = function() end }, { __index = ns.Gate })
+			ChatFrameUtil = { AddSenderNameFilter = function() end }
+			local ok, err = pcall(function()
+				assert(loadfile(ROOT .. "Olympus/Borders.lua"))("Olympus", c)
+				ns.db.chatMarks = true; assert(c.Borders.ChatRefresh())
+				-- 45 lines of his in Trade, each shown in three windows: one coin each, one working out.
+				for _ = 1, 45 do
+					for _ = 1, 3 do eq(Count(assert(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary)), coin), 1) end
+				end
+				eq(asked, 1, "worked out once, not at each line in each window")
+				-- Someone else: no coin, worked out once too.
+				local other = "Someone-" .. ns.realm
+				for _ = 1, 3 do eq(Count(c.Borders.ChatFilter("CHAT_MSG_SAY", "Someone", "hi", other) or "Someone", coin), 0) end
+				eq(asked, 2)
+				-- Out of an Olympus guild: no coin at once, without working it out again.
+				ns.IsMember = function() return false end
+				eq(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary), nil)
+				ns.IsMember = member
+				eq(Count(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary), coin), 1)
+				eq(asked, 2)
+				-- A moderator's word on him: DATA_CHANGED's listener forgets the marks, and the coin
+				-- is worked out again (none now).
+				ns.Moderation.Hides = function() return { kind = "c" } end
+				c.Borders.ChatForget()
+				eq(Count(c.Borders.ChatFilter("CHAT_MSG_CHANNEL", "Test Coin", "wts", primary) or "Test Coin", coin), 0)
+				eq(asked, 3)
+			end)
+			ChatFrameUtil, ns.db.chatMarks = api, marks
+			C.RoleBadge, ns.IsMember, ns.Moderation.Hides = badge, member, hides
+			if not ok then error(err, 0) end
+		end)
+	end)
+end)
+
 test("Chat role badge: actual Arena room and private crafting-provider bubbles keep guildless verified identity", function()
 	WithWindow(function(w)
 		Pins(function(primary, _, coin)

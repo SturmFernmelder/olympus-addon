@@ -1,7 +1,8 @@
 -- 1.2.1: an Apostle's own look (Borders.OwnLook, the frame picker in ProfileEdit.lua): the red
 -- cross on his own portrait, on his own screen alone, offered to anyone the signed Apostles list
 -- names (Church.SignedApostles over the signed titles list we hold), never sent; everyone else sees
--- his normal frame. On the test world. Every name is invented.
+-- his normal frame (1.2.5: the Apostles' cross he holds in the Church's ranking, below, when he holds
+-- one). On the test world. Every name is invented.
 local H = ...
 local test, eq = H.test, H.eq
 local World = H.World
@@ -92,7 +93,7 @@ local function SignedApostles(clients, apostles)
 	return Sign
 end
 
-test("1.2.1 an Apostle's own look: a signed Apostle picks the red cross in the frame picker, labelled that only he sees it; it shows round his own portrait on the black underlay, never sent: his pick stays, and every other client shows his normal frame", function()
+test("1.2.1 an Apostle's own look: a signed Apostle picks the red cross in the frame picker, labelled that only he sees it; it shows round his own portrait on the black underlay, never sent: holding no Apostles' cross, his pick stays, and every other client shows his normal frame", function()
 	local w, cast = W3.New()
 	local apostle, viewer = cast.A, cast.spectator
 	apostle.rank, apostle.rankName = 0, "Guild Master" -- (his normal frame: a guild master's bronze wings)
@@ -190,6 +191,111 @@ test("1.2.1 an Apostle's own look: never offered to anyone the signed Apostles l
 	-- (No signed list held at all: none either.)
 	SignedApostles({ other }, {})
 	eq(r.B.SetOwnLook("apostle-red"), false)
+	W3.NoErrors(w)
+end)
+
+-- 1.2.5 (the owner's rule of 10-19, agreed with the Apostle who wears it): the red cross stays on
+-- his own screen alone, and every other client shows him with the Apostles' cross he holds in the
+-- Church's ranking. The real Church.lua and ChurchCount.lua over client c's namespace (as
+-- tests/arena/honors-places.lua), holding a signed titles list naming `apostles`.
+local function ChurchWith(w, clients, apostles)
+	local titles = {}
+	local field = "Department of War^^Brannoc Weald=Marshal;^apostles^Alliance^" .. table.concat(apostles, ",")
+	titles.at, titles.depts = 1800000000, {}
+	titles.blob = ("HT1~%d~Emberfall~1~%s~%s"):format(titles.at, field, ("ab"):rep(256))
+	for _, c in ipairs(clients) do
+		w:Logout(c)
+		w:Login(c)
+		W3.Rules(w, c)
+		local cns = setmetatable({ Comm = { Handle = function() end, Send = function() end, Whisper = function() end },
+			On = function() end, ChatRooms = false, CouncilTitles = function() return titles end }, { __index = c.ns })
+		w:As(c, function()
+			assert(loadfile(H.ADDON_DIR .. "Church.lua"))("Olympus", cns)
+			assert(loadfile(H.ADDON_DIR .. "ChurchCount.lua"))("Olympus", cns)
+		end)
+		rawset(c.ns, "Church", cns.Church)
+		rawset(c.ns, "ChurchCount", cns.ChurchCount)
+		c.rdb.church = c.rdb.church or {}
+		c.rdb.church.pub = { on = true, at = w.clock - 3600 }
+	end
+end
+-- The Church's top 3 (the King's word, NR~1~t): its Apostles, then its missionaries, on each client.
+local function Top(w, to, apostles, missionaries)
+	local function Names(list)
+		local out = {}
+		for i, c in ipairs(list) do out[i] = c.short end
+		return #out > 0 and table.concat(out, ",") or "-"
+	end
+	for _, c in ipairs(to) do
+		local text = ("NR~1~t~%s~%s~%s"):format(c.ns.Arena.B36(w.clock), Names(apostles), Names(missionaries or {}))
+		eq(w:As(c, c.ns.ChurchCount.Receive, "NR", "CHANNEL", World.NAMES.king, text), true, "the King's top 3 taken")
+	end
+	w:Run(3)
+end
+
+test("1.2.5 the red cross: on his own screen alone; every other client shows the Apostles' cross he holds in the Church's ranking, his pick following it while he wears it (a new honour switching on included); another frame worn ends it", function()
+	local w, cast = W3.New()
+	local apostle, viewer, first = cast.A, cast.spectator, cast.B
+	local all = { apostle, viewer, first }
+	-- (A changed profile word is taken a minute after the last one heard: ArenaProfile.RATE_CHANGED.)
+	local function Later() w:Run(apostle.ns.ArenaProfile.RATE_CHANGED + 1) end
+	ChurchWith(w, all, { first.short, apostle.short })
+	-- The ranking's 2nd: the silver cross, switched on by itself. He wears his rank's frame instead.
+	Top(w, all, { first, apostle })
+	eq(apostle.ns.ArenaProfile.Pick().frame, "apostle-2", "the silver cross switched on")
+	w:As(apostle, apostle.ns.HonorsNet.CloseLetter, false)
+	Later()
+	eq(PE(w, apostle).PickFrame("rank"), true)
+	w:Run(3)
+	local mine, theirs = Frames(w, apostle), Frames(w, viewer)
+	viewer.target = apostle.name
+	eq(w:As(viewer, viewer.ns.HonorsNet.Verified, apostle.name, apostle.guid).frame, "rank", "his rank's frame elsewhere")
+	theirs.B.Refresh("target", true)
+	eq(theirs.Shown("target"), nil, "(a member's rank: no frame)")
+	-- He takes the red cross: his own portrait shows it, and the pick everyone else sees is the cross
+	-- he holds (never the red one: no message names it).
+	Later()
+	eq(PE(w, apostle).PickFrame("apostle-red"), true)
+	eq(apostle.db.ownLooks[apostle.name], "apostle-red")
+	eq(apostle.ns.ArenaProfile.Pick().frame, "apostle-2", "his pick: the cross he holds")
+	w:Run(3)
+	mine.B.Refresh("player", true)
+	eq(mine.Shown("player"), MEDIA .. "cross-red", "the red cross on his own screen")
+	eq(w:As(viewer, viewer.ns.HonorsNet.Verified, apostle.name, apostle.guid).frame, "apostle-2")
+	theirs.B.Refresh("target", true)
+	eq(theirs.Shown("target"), MEDIA .. "cross-silver", "the silver cross elsewhere")
+	local vm = PE(w, apostle).ViewModel()
+	for _, x in ipairs(vm.frames) do
+		eq(x.selected, x.key == "apostle-red", x.key)
+		eq(x.shows == true, x.key == "apostle-2", x.key .. ": the frame others see")
+	end
+	-- First in the ranking: the gold cross elsewhere; the red one still his alone.
+	Later()
+	Top(w, all, { apostle, first })
+	w:As(apostle, apostle.ns.HonorsNet.CloseLetter, false)
+	eq(apostle.ns.ArenaProfile.Pick().frame, "apostle-1")
+	mine.B.Refresh("player", true)
+	eq(mine.Shown("player"), MEDIA .. "cross-red")
+	theirs.B.Refresh("target", true)
+	eq(theirs.Shown("target"), MEDIA .. "cross-gold", "the gold cross elsewhere")
+	-- A new honour (the missionaries' crook) switches on by itself, not over the cross others see.
+	Later()
+	Top(w, all, { apostle, first }, { apostle })
+	eq(apostle.ns.ArenaProfile.Pick().frame, "apostle-1", "the cross kept while the red cross is worn")
+	eq(apostle.db.ownLooks[apostle.name], "apostle-red")
+	theirs.B.Refresh("target", true)
+	eq(theirs.Shown("target"), MEDIA .. "cross-gold")
+	-- Its letter's "Wear it": another frame worn ends the red cross; that frame everywhere.
+	Later()
+	w:As(apostle, apostle.ns.HonorsNet.CloseLetter, true)
+	eq(apostle.ns.ArenaProfile.Pick().frame, "missionary-1")
+	eq(apostle.db.ownLooks, nil, "the red cross ended")
+	w:Run(3)
+	mine.B.Refresh("player", true)
+	eq(mine.Shown("player"), MEDIA .. "crook-gold")
+	theirs.B.Refresh("target", true)
+	eq(theirs.Shown("target"), MEDIA .. "crook-gold")
+	for _, x in ipairs(w:Sent{}) do eq(x.msg:find("apostle-red", 1, true), nil, "no message ever names it: " .. x.msg:sub(1, 2)) end
 	W3.NoErrors(w)
 end)
 
