@@ -1278,3 +1278,29 @@ test("record mode: record-check says how many exact repeats of a session it left
 	assert(out:find("chain OK, head " .. DOC_HEAD.A, 1, true), out)
 	assert(out:find("exit=0", 1, true), out)
 end)
+
+-- A regression: the evidence pack (scripts/record-verify.lua) read each session's raw lines, which
+-- record-check no longer returns, and stopped on the committed samples. It must read the census
+-- reports from Record.VerifyFile, and give the samples' figure at 14:15 with their reports apart.
+test("record mode: record-verify writes the evidence pack for the samples: 7 online at 14:15 from two agreeing witnesses, the reports listed apart", function()
+	local out = os.tmpname()
+	os.remove(out)
+	local lua = (arg and arg[-1]) or "luajit"
+	local pipe = assert(io.popen(("%s %sscripts/record-verify.lua %s %stests/fixtures/record-sample.lua %stests/fixtures/record-sample-b.lua; echo \"exit=$?\"")
+		:format(lua, ROOT, out, ROOT, ROOT)))
+	local said = pipe:read("*a")
+	pipe:close()
+	assert(said:find("exit=0", 1, true), said)
+	assert(said:find("read by 2 or more witnesses who agree: 1", 1, true), said)
+	local function Read(name)
+		local f = assert(io.open(out .. "/" .. name, "rb"))
+		local text = f:read("*a")
+		f:close()
+		return text
+	end
+	assert(Read("figures.csv"):find("2026-10-20 14:15:00,7,1,+2s", 1, true), Read("figures.csv"))
+	local claims = Read("claims.csv")
+	assert(claims:find("Olympus Second,330,955,12,Sample Reporter-ClassicBetaPvP2", 1, true), claims)
+	assert(claims:find("read 58 s after T", 1, true), "a report 58 s late is listed, not added")
+	os.execute(("rm -rf %q"):format(out))
+end)
