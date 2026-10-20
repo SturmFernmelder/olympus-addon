@@ -1028,6 +1028,330 @@ test("1.2.5 the API area sightings: hostile-area shape, privacy, ownership, host
 	W3.NoErrors(w)
 end)
 
+-- The pin library (HereBeDragons-Pins) as the game runs it, for the sighting pins: a map it does not
+-- know gives false; the library itself shows a minimap dot, and only for the player's own zone
+-- (UpdateMinimapPins/drawMinimapPin), hides one it takes off without clearing its anchors
+-- (RemoveMinimapIcon, RemoveAllMinimapIcons), and re-adding a frame replaces its entry. The world map
+-- stays closed here, so it shows none. ns.WorldMapIcons as Core.lua's: without the world map (the
+-- gamepad UI) it takes the ref's world-map icons off itself. Plain frames, a tooltip, and a way back.
+local PIN_KNOWN_MAPS = { [1453] = true, [1429] = true, [1415] = true }
+local function PinLibrary(viewer)
+	local pins = { world = {}, mini = {}, miniAdds = 0, worldAdds = 0 }
+	local function Without(list, ref, frame)
+		local keep = {}
+		for _, row in ipairs(list) do if row.ref ~= ref or (frame and row.frame ~= frame) then keep[#keep + 1] = row end end
+		return keep
+	end
+	function pins:AddWorldMapIconMap(ref, frame, mapID, x, y)
+		self.worldAdds = self.worldAdds + 1
+		if not PIN_KNOWN_MAPS[mapID] then return false end
+		self.world = Without(self.world, ref, frame)
+		self.world[#self.world + 1] = { ref = ref, frame = frame, mapID = mapID, x = x, y = y }
+		return true
+	end
+	function pins:AddMinimapIconMap(ref, frame, mapID, x, y)
+		self.miniAdds = self.miniAdds + 1
+		if not PIN_KNOWN_MAPS[mapID] then return false end
+		self.mini = Without(self.mini, ref, frame)
+		self.mini[#self.mini + 1] = { ref = ref, frame = frame, mapID = mapID, x = x, y = y }
+		if mapID == viewer.mapID and not viewer.instance then
+			frame:Show(); frame:ClearAllPoints(); frame:SetPoint("CENTER", "Minimap", "CENTER", x, y)
+		elseif frame.libraryShown then
+			frame:Hide()
+		end
+		frame.libraryShown = mapID == viewer.mapID and not viewer.instance or nil
+		return true
+	end
+	function pins:RemoveWorldMapIcon(ref, frame) self.world = Without(self.world, ref, frame) frame:Hide() end
+	function pins:RemoveMinimapIcon(ref, frame) self.mini = Without(self.mini, ref, frame) frame.libraryShown = nil frame:Hide() end
+	function pins:RemoveAllWorldMapIcons(ref)
+		for _, row in ipairs(self.world) do if row.ref == ref then row.frame:Hide() end end
+		self.world = Without(self.world, ref)
+	end
+	function pins:RemoveAllMinimapIcons(ref)
+		for _, row in ipairs(self.mini) do if row.ref == ref then row.frame.libraryShown = nil row.frame:Hide() end end
+		self.mini = Without(self.mini, ref)
+	end
+	viewer.ns.Pins = function() return pins end
+	local state = { worldOn = true }
+	viewer.ns.WorldMapIcons = function(P, ref)
+		if not state.worldOn then P:RemoveAllWorldMapIcons(ref) end
+		return state.worldOn
+	end
+	local tip = { lines = {} }
+	function tip:SetOwner() self.lines = {} end
+	function tip:AddLine(text, r, g, bl) self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = bl } end
+	function tip:Show() self.shown = true end
+	function tip:Hide() self.shown = false end
+	-- (The viewer's own globals: its files run in that client's world.)
+	local G = viewer.globals
+	local saved = { create = rawget(G, "CreateFrame"), parent = rawget(G, "UIParent"), tip = rawget(G, "GameTooltip") }
+	rawset(G, "UIParent", {}); rawset(G, "GameTooltip", tip)
+	rawset(G, "CreateFrame", function()
+		local frame = { hidden = false, scripts = {} }
+		function frame:SetSize() end
+		function frame:EnableMouse() end
+		function frame:SetAlpha(alpha) self.alpha = alpha end
+		function frame:SetPoint(...) self.point = { ... } end
+		function frame:ClearAllPoints() self.point = nil end
+		function frame:CreateTexture()
+			local t = {}
+			function t:SetTexture() end
+			function t:SetAllPoints() end
+			function t:SetPoint() end
+			function t:SetVertexColor(r, g, bl) self.color = { r, g, bl } end
+			return t
+		end
+		function frame:SetScript(name, fn) self.scripts[name] = fn end
+		function frame:Hide() self.hidden = true end
+		function frame:Show() self.hidden = false end
+		return frame
+	end)
+	function state.Restore()
+		rawset(G, "CreateFrame", saved.create); rawset(G, "UIParent", saved.parent); rawset(G, "GameTooltip", saved.tip)
+	end
+	return pins, tip, state
+end
+
+-- The sighting pins' timers still to fire on the viewer.
+local function PinTicks(viewer)
+	local n = 0
+	for _, tick in ipairs(viewer.pinTicks or {}) do if not tick.fired then n = n + 1 end end
+	return n
+end
+
+-- Two invented authorized addons with their Yes, and the pin library above.
+local function PinSetup()
+	local w, cast, viewer, API = Setup()
+	-- The pins' timer, told apart from the world's other timers by its ns.After name.
+	local after = viewer.ns.After
+	viewer.pinTicks = {}
+	viewer.ns.After = function(seconds, where, fn)
+		if where ~= "api sighting pins" then return after(seconds, where, fn) end
+		local tick = {}
+		viewer.pinTicks[#viewer.pinTicks + 1] = tick
+		viewer.pinTicksMost = math.max(viewer.pinTicksMost or 0, PinTicks(viewer))
+		return after(seconds, where, function() tick.fired = true return fn() end)
+	end
+	viewer.mapID = 1453
+	local O, C = viewer.OlympusAPI, viewer.Consent
+	SightingHost(viewer)
+	Install(viewer, "MapPins", "Map Pins")
+	Install(viewer, "BountyBoard", "Bounty Board")
+	local a = w:As(viewer, O.Register, "MapPins")
+	local b = w:As(viewer, O.Register, "BountyBoard")
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", {})), "pending", "the permission comes first")
+	w:As(viewer, C.Choose, "api:mappins", true)
+	w:As(viewer, C.Choose, "api:bountyboard", true)
+	local pins, tip, state = PinLibrary(viewer)
+	return w, viewer, a, b, pins, tip, state
+end
+
+test("1.2.5.1 the API sighting pins: coloured world-map and minimap dots, Olympus's own tooltip, no world map with the gamepad UI, gone with the permission", function()
+	local w, viewer, a, b, pins, tip, state = PinSetup()
+	local C = viewer.Consent
+	local now = w:As(viewer, viewer.ns.Now)
+	local list = {
+		{ target = "Enemy One-Emberfall", category = "hostile", mapID = 1453, x = 410, y = 520, seenAt = now - 30,
+			expiresAt = now + 600, kind = "nearby", accuracyYards = 30, own = true },
+		{ target = "Marked Rogue-Emberfall", category = "marked", mapID = 1453, x = 500, y = 500, seenAt = now - 400,
+			expiresAt = now + 500, kind = "exact-unit", marks = { "Watch", "Wanted", "|cffff0000Red|r", "Fourth" } },
+		{ target = "Passing Stranger-Emberfall", category = "outsider", mapID = 1429, x = 300, y = 300, seenAt = now - 150,
+			expiresAt = now + 600, kind = "nearby", label = "|cff00ff00Minorities|r" },
+		{ target = "Expired-Emberfall", category = "hostile", mapID = 1453, x = 1, y = 1, seenAt = now - 900, expiresAt = now - 1 },
+		{ target = "Odd Colour-Emberfall", category = "purple", mapID = 1453, x = 1, y = 1, seenAt = now, expiresAt = now + 60 },
+		{ target = "Off Map-Emberfall", category = "hostile", mapID = 1453, x = 1001, y = 1, seenAt = now, expiresAt = now + 60 },
+	}
+	local ok, drawn = Do(w, viewer, a, "SetSightingPins", list)
+	eq(ok, true, drawn); eq(drawn, 3, "an expired row, an unknown category and an off-map point are not drawn")
+	eq(#pins.world, 3); eq(#pins.mini, 3)
+	eq(pins.mini[3].mapID, 1429); eq(pins.mini[3].x, 0.3, "the dots on another map wait for that map")
+	eq(pins.world[1].frame.dot.color[1], 0.92, "hostile: red")
+	eq(pins.world[2].frame.dot.color[2], 0.62, "marked: orange")
+	eq(pins.mini[3].frame.dot.color[3], 1, "outsider: blue")
+	eq(pins.world[1].frame.alpha, 1); eq(pins.world[3].frame.alpha, 0.75); eq(pins.world[2].frame.alpha, 0.5, "an older dot fades")
+
+	w:As(viewer, pins.mini[1].frame.scripts.OnEnter, pins.mini[1].frame)
+	local text = {}
+	for _, line in ipairs(tip.lines) do text[#text + 1] = line.text end
+	eq(text[1], "Enemy One-Emberfall"); eq(tip.lines[1].r, 0.92)
+	eq(text[2], viewer.ns.L.API_PIN_HOSTILE); eq(text[3], viewer.ns.L.API_PIN_UNMARKED)
+	eq(text[4], viewer.ns.L.API_PIN_SEEN:format(viewer.ns.L.AGO_SEC:format(30)))
+	eq(text[5], viewer.ns.L.API_PIN_YARDS:format(30)); eq(text[6], viewer.ns.L.API_PIN_OWN)
+	w:As(viewer, pins.world[2].frame.scripts.OnEnter, pins.world[2].frame)
+	eq(tip.lines[3].text, viewer.ns.L.API_PIN_MARKS:format("Watch, Wanted, Red"), "at most three plain marks")
+	eq(tip.lines[5].text, viewer.ns.L.API_AREA_EXACT); eq(#tip.lines, 5, "not seen by this player")
+	w:As(viewer, pins.world[3].frame.scripts.OnEnter, pins.world[3].frame)
+	eq(tip.lines[2].text, "Minorities", "the consumer's own plain name for the category")
+	eq(tip.lines[5].text, viewer.ns.L.API_PIN_NEARBY)
+
+	-- Each call replaces the whole set and reuses the frames; another handle has its own.
+	local firstMini = pins.mini[1].frame
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { list[1] })), 1)
+	eq(#pins.world, 1); eq(#pins.mini, 1); eq(pins.mini[1].frame, firstMini)
+	eq(Do(w, viewer, b, "ClearSightingPins"), true)
+	eq(#pins.mini, 1, "another handle cannot clear these dots")
+	-- With the gamepad UI the world map gets none; the minimap keeps them.
+	state.worldOn = false
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { list[1], list[3] })), 2)
+	eq(#pins.world, 0); eq(#pins.mini, 2)
+	state.worldOn = true
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", "nope")), "invalid")
+	-- Security boundary: only the documented first 96 inputs are inspected, and a consumer cannot
+	-- turn a short last-seen result into a permanent marker with invented lifetime metadata.
+	local bounded = {}
+	for i = 1, viewer.ns.API.PIN_MAX do bounded[i] = { category = "invalid" } end
+	bounded[viewer.ns.API.PIN_MAX + 1] = list[1]
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", bounded)), 0, "nothing after the 96-row input cap is inspected")
+	local forever = {}
+	for k, v in pairs(list[1]) do forever[k] = v end
+	forever.expiresAt = forever.seenAt + viewer.ns.API.PIN_LIFETIME_MAX + 1
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { forever })), 0, "a pin cannot outlive a sighting result")
+	forever.expiresAt = forever.seenAt
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { forever })), 0, "expiry must follow the sighting")
+	-- A permission's No removes them.
+	w:As(viewer, C.Choose, "api:mappins", false)
+	eq(#pins.world, 0); eq(#pins.mini, 0)
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { list[1] })), "refused")
+	eq(#pins.mini, 0)
+	state.Restore()
+	W3.NoErrors(w)
+end)
+
+-- Review of the sighting pins (2026-10-20): Olympus showed each dot itself after adding it, so a
+-- reused minimap frame given a row in another zone (or one the library could not place) stood on
+-- the minimap where its old row had been, with the new row's colour and tooltip.
+test("1.2.5.1 the API sighting pins: the library alone shows a minimap dot, no stale dot from a reused frame, an unknown map neither drawn nor counted, unchanged rows not placed again", function()
+	local w, viewer, a, b, pins, tip, state = PinSetup()
+	local now = w:As(viewer, viewer.ns.Now)
+	local here = { target = "Here One-Emberfall", category = "hostile", mapID = 1453, x = 410, y = 520, seenAt = now - 30,
+		expiresAt = now + 600, kind = "nearby", accuracyYards = 30 }
+	local away = { target = "Away One-Emberfall", category = "outsider", mapID = 1429, x = 300, y = 300, seenAt = now - 30,
+		expiresAt = now + 600, kind = "nearby" }
+	local unknown = { target = "Nowhere One-Emberfall", category = "marked", mapID = 9999, x = 300, y = 300, seenAt = now - 30,
+		expiresAt = now + 600, kind = "nearby" }
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { here })), 1)
+	local slot1 = pins.mini[1].frame
+	eq(slot1.hidden, false, "in the player's zone the library shows it"); assert(slot1.point, "and places it")
+	-- The same slot now holds a row in another zone: hidden, with no anchor left behind.
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { away, here })), 2)
+	eq(pins.mini[1].frame == slot1 or pins.mini[2].frame == slot1, true, "the frame is reused")
+	eq(slot1.pinRow.target, "Away One-Emberfall")
+	eq(slot1.hidden, true, "no dot of another zone on this minimap"); eq(slot1.point, nil, "nor its old anchor")
+	-- In an instance the library has no position: a re-added dot stays hidden.
+	viewer.instance = true
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { here })), 1)
+	eq(slot1.hidden, true, "never shown by Olympus itself")
+	viewer.instance = nil
+	-- A map the library does not know: not drawn, not counted, its frame left for the next row.
+	eq(Do(w, viewer, a, "ClearSightingPins"), true)
+	local ok, drawn = Do(w, viewer, a, "SetSightingPins", { unknown, here })
+	eq(ok, true); eq(drawn, 1, "only the row on a map")
+	eq(#pins.mini, 1); eq(#pins.world, 1); eq(pins.mini[1].frame.pinRow.target, "Here One-Emberfall", "its frame went to the next row")
+	eq(pins.mini[1].frame.hidden, false)
+	-- The same rows again: their dots stay where they are (no blink, nothing placed again).
+	local miniAdds, worldAdds = pins.miniAdds, pins.worldAdds
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { here, away })), 2)
+	local moved = pins.miniAdds - miniAdds
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { here, away })), 2)
+	eq(pins.miniAdds - miniAdds, moved, "an unchanged set places nothing again"); eq(#pins.mini, 2); eq(#pins.world, 2)
+	eq(pins.worldAdds - worldAdds, moved)
+	-- A row that moved is placed again, at its new point.
+	local moving = { target = "Here One-Emberfall", category = "hostile", mapID = 1453, x = 600, y = 610, seenAt = now - 5,
+		expiresAt = now + 600, kind = "exact-unit" }
+	miniAdds = pins.miniAdds
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { moving, away })), 2)
+	eq(pins.miniAdds - miniAdds, 1, "only the moved row")
+	local at
+	for _, row in ipairs(pins.mini) do if row.frame.pinRow.target == "Here One-Emberfall" then at = row end end
+	eq(at.x, 0.6); eq(at.y, 0.61); eq(#pins.world, 2)
+	state.Restore()
+	W3.NoErrors(w)
+end)
+
+-- Review of the sighting pins (2026-10-20): the fading and the expiry ran only inside a Set, so a
+-- consumer that stopped calling left full-opacity dots up past their rows' expiresAt.
+test("1.2.5.1 the API sighting pins: dots fade and go by themselves while nobody calls, and go once the player is no longer a member; no timer left without dots", function()
+	local w, viewer, a, b, pins, tip, state = PinSetup()
+	local now = w:As(viewer, viewer.ns.Now)
+	local soon = { target = "Soon Gone-Emberfall", category = "hostile", mapID = 1453, x = 410, y = 520, seenAt = now - 110,
+		expiresAt = now + 100, kind = "nearby" }
+	local later = { target = "Later Gone-Emberfall", category = "marked", mapID = 1453, x = 500, y = 500, seenAt = now - 10,
+		expiresAt = now + 400, kind = "exact-unit" }
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { soon, later })), 2)
+	eq(PinTicks(viewer), 1, "one timer while there are dots")
+	local soonFrame, laterFrame = pins.mini[1].frame, pins.mini[2].frame
+	-- (The dots' frames exist now: the world's own frames back for the clock's other pages.)
+	state.Restore()
+	eq(soonFrame.alpha, 1)
+	local adds = pins.miniAdds
+	w:Run(2 * viewer.ns.API.PIN_TICK + 1)
+	eq(soonFrame.alpha, 0.75, "an older dot fades with nobody calling"); eq(laterFrame.alpha, 1)
+	eq(pins.miniAdds, adds, "its alpha alone: nothing placed again")
+	w:Run(100)
+	eq(#pins.mini, 1, "a dot past its row's expiresAt goes by itself"); eq(#pins.world, 1)
+	eq(soonFrame.hidden, true); eq(soonFrame.pinRow, nil); eq(pins.mini[1].frame, laterFrame)
+	w:Run(300)
+	eq(#pins.mini, 0); eq(#pins.world, 0); eq(laterFrame.hidden, true)
+	eq(PinTicks(viewer), 0, "no timer once the dots are gone")
+	-- No longer a member (the guild left, the Accord asked again): every dot goes on the next tick.
+	now = w:As(viewer, viewer.ns.Now)
+	later.seenAt, later.expiresAt = now - 10, now + 600
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { later })), 1)
+	local isMember = viewer.ns.IsMember
+	viewer.ns.IsMember = function() return false end
+	w:Run(2 * viewer.ns.API.PIN_TICK + 1)
+	viewer.ns.IsMember = isMember
+	eq(#pins.mini, 0); eq(#pins.world, 0); eq(PinTicks(viewer), 0)
+	-- After a Clear the pending timer fires once and asks for no other.
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { later })), 1)
+	eq(PinTicks(viewer), 1)
+	eq(Do(w, viewer, a, "ClearSightingPins"), true)
+	eq(#pins.mini, 0)
+	w:Run(viewer.ns.API.PIN_TICK + 1)
+	eq(PinTicks(viewer), 0); eq(#pins.mini, 0); eq(viewer.pinTicksMost, 1, "one timer at a time")
+	state.Restore()
+	W3.NoErrors(w)
+end)
+
+-- Review of the sighting pins (2026-10-20): while Olympus hides locations from a player (a
+-- moderator's timeout, a hold), the guildmates' dots, the crown and the Wanted pins go; these
+-- dots stayed and could be set again.
+test("1.2.5.1 the API sighting pins: none while Olympus hides locations from this player, and those up go at once", function()
+	local w, viewer, a, b, pins, tip, state = PinSetup()
+	local now = w:As(viewer, viewer.ns.Now)
+	local row = { target = "Enemy One-Emberfall", category = "hostile", mapID = 1453, x = 410, y = 520, seenAt = now - 30,
+		expiresAt = now + 600, kind = "nearby" }
+	-- (This world's client has WatchChat's stand-in: a module that answers Barred, the rest its own.)
+	local ownWC = rawget(viewer.ns, "WatchChat")
+	local barred = false
+	rawset(viewer.ns, "WatchChat", setmetatable({ missing = false, Barred = function(kind, name)
+		if kind == "locations" and name == nil and barred then return { kind = "timeout" } end
+		return nil
+	end }, { __index = ownWC }))
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { row })), 1)
+	eq(select(2, Do(w, viewer, b, "SetSightingPins", { row })), 1)
+	eq(#pins.mini, 2); eq(#pins.world, 2)
+	state.Restore() -- (the dots' frames exist now)
+	-- The sanction arrives: every handle's dots go at once.
+	barred = true
+	w:As(viewer, viewer.ns.Fire, "WATCHCHAT_CHANGED", "W", viewer.ns.me)
+	eq(#pins.mini, 0, "gone at once"); eq(#pins.world, 0)
+	-- And none can be set while it lasts.
+	local ok, why = Do(w, viewer, a, "SetSightingPins", { row })
+	eq(ok, false); eq(why, "barred"); eq(#pins.mini, 0); eq(#pins.world, 0)
+	-- Lifted: they may come back.
+	barred = false
+	eq(select(2, Do(w, viewer, a, "SetSightingPins", { row })), 1)
+	-- A sanction no event announced: the next tick takes them off.
+	barred = true
+	w:Run(2 * viewer.ns.API.PIN_TICK + 1)
+	eq(#pins.mini, 0); eq(#pins.world, 0); eq(PinTicks(viewer), 0)
+	rawset(viewer.ns, "WatchChat", ownWC)
+	state.Restore()
+	W3.NoErrors(w)
+end)
+
 test("1.2.5 the API area sightings: a partial host reports unavailable without spending quota", function()
 	local w, cast, viewer, API = Setup()
 	viewer.mapID = 1453
@@ -1354,6 +1678,7 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 		GetLeaderPresence = {}, StartPlayerSearch = { "Tracked Name-Emberfall" }, GetPlayerSearch = { "7" },
 		GetPlayerSearches = {}, StartAreaSearch = { 1453 }, GetAreaSearch = { "7" }, GetAreaSearches = {},
 		CancelPlayerSearch = { "7" }, CancelAreaSearch = { "7" }, ShowAreaSearchOnMap = { "7" }, ClearAreaSearchMap = {},
+		SetSightingPins = { {} }, ClearSightingPins = {},
 		SetQuietPresence = { true }, GetQuietPresence = {},
 		StartProfileSession = { "shadow" }, StopProfileSession = {}, SetProfileEffect = { "shadow", true, caption }, GetProfileSession = {},
 	}
@@ -1365,7 +1690,7 @@ test("1.2.5.1 the API reserved features: an addon that is not authorized gets \"
 		eq(why, "unauthorized", method)
 		if no == "false" then eq(result, false, method) else eq(result, nil, method) end
 	end
-	eq(count, 17, "every leader, sightings, quiet presence and profile-presentation method is reserved")
+	eq(count, 19, "every leader, sightings, quiet presence and profile-presentation method is reserved")
 	-- Even a release: its own state is none, so another addon's cannot be touched through it.
 	eq(select(2, Do(w, viewer, crier, "SetQuietPresence", false)), "unauthorized")
 	eq(select(2, Do(w, viewer, crier, "SetProfileEffect", "shadow", false)), "unauthorized")
@@ -2304,7 +2629,9 @@ test("1.2.4 the API: its words in English and pt-BR; docs/API.md names every met
 	local en, pt = {}, {}
 	for k in head:gmatch("\nL%.([%w_]+) =") do en[k] = true end
 	for k in tail:gmatch("\n\tL%.([%w_]+) =") do pt[k] = true end
-	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT,API_CONSENT_TEXT_BASIC"); eq(Keys(pt), Keys(en))
+	eq(Keys(en), "API_AREA_EXACT,API_AREA_NEARBY,API_AREA_OUTSIDER,API_CONSENT_LABEL,API_CONSENT_TEXT,API_CONSENT_TEXT_BASIC,"
+		.. "API_PIN_HOSTILE,API_PIN_MARKED,API_PIN_MARKS,API_PIN_NEARBY,API_PIN_OUTSIDER,API_PIN_OWN,API_PIN_SEEN,API_PIN_UNMARKED,API_PIN_YARDS")
+	eq(Keys(pt), Keys(en))
 	-- (1.2.5.1) An addon that is not authorized for the reserved features is asked only about its
 	-- reads: since the quiet presence and the profile presentation are reserved too (2026-10-19), its
 	-- line offers neither, while the authorized addon's line still describes both.

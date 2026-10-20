@@ -1116,3 +1116,66 @@ test("player sightings: quiet presence answers and withdraws nothing, its own re
 		eq(#requester.ns.PlayerSightings.Results(laterId), 1)
 	end)
 end)
+
+test("player sightings: the requester's own sightings enter its own area request with no other member and nothing sent", function()
+	WithWorld(function(world)
+		-- A security member alone on the map, without the sharing consent: what its own game shows
+		-- still belongs in its own request (the Stormwind report: someone on screen, nothing marked).
+		local requester = world:Client("Requester")
+		Authorize(requester)
+		eq(requester.ns.PlayerSightings.Sharing(), false)
+		requester.units.nameplate3 = Player("Early Horde-Realm", { hostile = true, guid = "Player-4619-00003001" })
+		local started, id = world:As(requester, requester.ns.PlayerSightings.StartArea, 1453, "outsiders")
+		eq(started, true)
+		local rows, n = AreaRows(requester, id)
+		eq(n, 1, "a player already on screen when the request starts")
+		eq(rows["Early Horde-Realm"].own, true)
+		eq(rows["Early Horde-Realm"].hostile, true)
+		eq(rows["Early Horde-Realm"].kind, "nearby")
+		eq(rows["Early Horde-Realm"].x, 123); eq(rows["Early Horde-Realm"].y, 568)
+		eq(rows["Early Horde-Realm"].observer, nil)
+
+		requester.units.target = Player("Exact Stranger-Realm", { guild = "Silver Hand", directPosition = true,
+			mapID = 1453, x = 0.3, y = 0.4, guid = "Player-4619-00003002" })
+		eq(world:As(requester, requester.ns.PlayerSightings.ObserveUnit, "target"), true)
+		requester.units.mouseover = Player("Ember Friend-Realm", { guild = "Olympus Ember", guid = "Player-4619-00003003" })
+		world:As(requester, requester.ns.PlayerSightings.ObserveUnit, "mouseover")
+		requester.units.nameplate4 = Player("Far Horde-Realm", { hostile = true, directPosition = true,
+			mapID = 1429, x = 0.2, y = 0.2, guid = "Player-4619-00003004" })
+		world:As(requester, requester.ns.PlayerSightings.ObserveUnit, "nameplate4")
+		rows, n = AreaRows(requester, id)
+		eq(n, 2)
+		eq(rows["Exact Stranger-Realm"].hostile, false, "an outsider, in the scope that asked for one")
+		eq(rows["Exact Stranger-Realm"].kind, "exact-unit"); eq(rows["Exact Stranger-Realm"].own, true)
+		eq(rows["Ember Friend-Realm"], nil, "an Olympus guild's player is never a row")
+		eq(rows["Far Horde-Realm"], nil, "another map stays out")
+
+		local sentBefore = #world.queue
+		for _, item in ipairs(world.queue) do assert(not item.msg:find("^PS~B~"), "nothing answers on the wire: " .. item.msg) end
+		eq(sentBefore <= 2, true, "only the query and its scope are queued")
+		world.now = world.now + requester.ns.PlayerSightings.RESULT_TTL + 1
+		world:As(requester, requester.ns.PlayerSightings.Tick)
+		eq(requester.ns.PlayerSightings.AreaSession(id), nil, "the request and its own rows expire on the usual clock")
+	end)
+	WithWorld(function(world)
+		-- The hostile scope keeps outsiders out of own rows too, and an observer's network rows still
+		-- arrive beside them.
+		local requester, observer = AreaPair(world)
+		local id = StartAreaAndDeliver(world, requester, observer, 1453)
+		requester.units.target = Player("Lone Walker-Realm", { guid = "Player-4619-00003005" })
+		world:As(requester, requester.ns.PlayerSightings.ObserveUnit, "target")
+		requester.units.target = Player("Seen Twice-Realm", { hostile = true, guid = "Player-4619-00003006" })
+		eq(world:As(requester, requester.ns.PlayerSightings.ObserveUnit, "target"), true)
+		-- The same moment from the network: its serialized age is rounded up by QUEUE_TTL, so it
+		-- reads as the same second. A tie goes to the own row, whatever order pairs walks them in.
+		observer.units.target = Player("Seen Twice-Realm", { hostile = true, guid = "Player-4619-00003006" })
+		world.now = world.now + requester.ns.PlayerSightings.QUEUE_TTL
+		eq(world:As(observer, observer.ns.PlayerSightings.ObserveUnit, "target"), true)
+		eq(world:Flush(observer, requester), true)
+		local rows, n = AreaRows(requester, id)
+		eq(n, 1, "one row per target")
+		eq(rows["Lone Walker-Realm"], nil)
+		eq(rows["Seen Twice-Realm"].own, true, "a tie keeps the own row")
+		eq(rows["Seen Twice-Realm"].observer, nil)
+	end)
+end)
