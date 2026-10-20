@@ -111,15 +111,45 @@ read a stable file, and keep the preceding valid checkpoint if parsing fails.
 ## Sections
 
 Besides the census checkpoint, Olympus offers versioned read-only sections through
-`OlympusBridge.RegisterSection(name, version, exporter)` / `GetSection(name)` (`Olympus/Bridge.lua`,
-exporters in `Olympus/BridgeSections.lua`). Olympus copies each into fresh plain tables within
-`OlympusBridge.SECTION_LIMITS`. At logout this sidecar saves only the sections it knows, at the
-version it knows, under `OlympusCompanionDB.sections`: `guilds`, `rankings`, `stats`, `wanted` and
-`self`. `stats` is the census statistics page's figures (`docs/CENSUS-STATS.md`).
-A failing or unknown section is skipped and never blocks the census.
+`OlympusBridge.RegisterSection(name, version, exporter, limits)` / `GetSection(name)`
+(`Olympus/Bridge.lua`, exporters in `Olympus/BridgeSections.lua` and `Olympus/BridgeAffairs.lua`).
+Olympus copies each into fresh plain tables within `OlympusBridge.SECTION_LIMITS` (or the larger
+limits a section asked for, never past `OlympusBridge.SECTION_MAX`). At logout this sidecar saves
+only the sections it knows, at version 1, under `OlympusCompanionDB.sections`: `guilds`,
+`rankings`, `stats`, `wanted`, `self`, `realm`, `roster`, `church`, `games`, `profile`, `crafting`,
+`crafters`, `treasury`, `decrees`, `agenda`, `notices`, `watch` and `chatRooms` (a name Olympus
+does not register is simply absent). `stats` is the census statistics page's figures
+(`docs/CENSUS-STATS.md`). A failing or unknown section is skipped and never blocks the census.
 
-What a section may carry: only what every member already sees on Olympus's own pages, plus the
-`self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, guild = "Guild Name", at = <server
+The affairs' sections (`Olympus/BridgeAffairs.lua`), each nil before the Olympus Accord is accepted
+and for a character who is no member:
+
+- `crafting`: the request board's open cards (100: item, quantity, guild, state; no requester, as
+  the board names none) and this character's own open deals (30: the same and the other party);
+  never the terms, the price or the request's chat;
+- `crafters`: the crafters' directory (300, the best skill first): name, guild, professions with
+  their skill, cap and recipe count;
+- `treasury`: the public numbers alone, only while the King shows the balance (`shown = false`
+  otherwise): balance, in, out, this week's donations and donors; never an item or a name;
+- `decrees`: the Decrees tab's decrees (30): kind, whole army or one guild, role and name of the
+  sender (no role for a councillor's while the King's screen hides the councillors' names), zone,
+  words as the page shows them, times;
+- `agenda`: the week (30, soonest first): the King's Agenda and dated entries, this guild's
+  calendar events, the Arena's fights;
+- `notices`: `{ items }` (30, newest first): musters (and those ended within a day, as withdrawn,
+  with the same audience and role; an ended one this character's client may not place is left
+  out), the Crown's and the High Council's decrees for the whole army, and this character's own
+  letters from the King (`audience = "self"`: his alone);
+- `watch`: only on a moderation team client or for the desk's own staff: counts, the cases, the
+  guild's records, the inspected players and the untabarded list (100 each), on the King's stream
+  as the page shows them there (an accused name cut short until upheld, no report counts or
+  dates); never a reporter, a note, an evidence line, a moderator's reason or a chat line;
+- `chatRooms`: the rooms this character is in, with member and unread counts; no chat text.
+
+What a section may carry: only what this character's own client already shows on Olympus's own
+pages, to the audience that page has. Staff-only sections (`watch`) exist only on the clients whose
+page shows them; personal rows (`crafting.own`, the letters in `notices`) carry this character's
+own. And the `self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, guild = "Guild Name", at = <server
 time>, roles = { "officer", "guildMaster", "council", "crown", "author" } }`, the player's own
 character and BattleTag as his own game gives it (`Accord.ReadTag`), the Olympus Accord's version,
 the server's time of the export, and the roles this character holds (only those that apply; an
@@ -127,9 +157,9 @@ empty list for a plain member), which the Companion uses to show only the tabs h
 accepted at the current version (its letter tells the player), and while Battle.net can't give the
 tag; never another player's BattleTag (not the ones a moderation team client keeps), and never
 shown or printed on screen. The Companion shows BattleTags to staff only, never publicly. Never
-chat text or chat-strike lines, council or High Council-only data, treasury items (numbers only,
-and only while the King publishes the balance), or anything private to an audience the player is
-not in.
+chat text or chat-strike lines, another player's private data, treasury items (numbers only, and
+only while the King publishes the balance), or anything private to an audience the player is not
+in.
 
 LAN synchronization and encryption are deliberately not responsibilities of this Bridge slice.
 The Companion core has an encrypted-envelope/replay protocol foundation, but discovery, pairing,

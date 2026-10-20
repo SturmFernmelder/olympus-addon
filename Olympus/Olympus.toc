@@ -148,6 +148,7 @@ PlayerSightings.lua
 API.lua
 BridgeSections.lua
 BridgePeople.lua
+BridgeAffairs.lua
 Record.lua
 ArenaMath.lua
 Compliance.lua

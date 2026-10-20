@@ -483,6 +483,12 @@ end
 function ChatWindow.IsShown()
 	return frame ~= nil and frame:IsShown() and host ~= nil and host:IsShown() and true or false
 end
+-- (931, read only) A channel's or room's unread count as the tab shows it (counted while the tab is
+-- open, cleared when it is looked at): the Companion's chatRooms section (BridgeAffairs.lua).
+function ChatWindow.Unread(key)
+	local n = type(key) == "string" and unread[key] or nil
+	return type(n) == "number" and n or 0
+end
 local function Shown() return ChatWindow.IsShown() end
 
 ---------------------------------------------------------------------------

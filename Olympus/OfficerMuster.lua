@@ -65,6 +65,9 @@ local function Authorized(by, guild, dist)
 	if K and not K.missing and ((K.IsStewardName and K.IsStewardName(by)) or (K.IsHandName and K.IsHandName(by))) then return true end
 	return ns.IsKingGuild ~= nil and ns.IsKingGuild(guild) and Rank0(by, guild, CROWN_SOURCES)
 end
+-- (931, read-only) The same rule for the Companion's notices (BridgeAffairs.lua): an ended call's
+-- reach, which the acts log does not keep. It reads; it changes nothing.
+Muster.Authorized = Authorized
 -- Whether this player may post, his guild, and where his muster goes: "CHANNEL" (the Crown's, for
 -- the whole army) or "GUILD" (another guild's master's, for his guild alone).
 function Muster.CanPost()

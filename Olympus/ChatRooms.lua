@@ -1051,6 +1051,14 @@ function Rooms.RecipientCount(id)
 	return c.n, c.left
 end
 function Rooms.Recount(id) counts[id] = nil end
+-- (931, read only) How many members room `id` reached when the page last counted it (RecipientCount:
+-- those a line goes to and those online it left out, this character not counted), or nil when it
+-- was not counted this session. Counts nothing itself: the Companion's chatRooms section.
+function Rooms.KnownRecipientCount(id)
+	local c = type(id) == "string" and counts[id] or nil
+	if type(c) ~= "table" then return nil end
+	return (tonumber(c.n) or 0) + (tonumber(c.left) or 0)
+end
 
 -- What a sender is told when his line left `left` members online out: the audience's own words
 -- (the Church's), else the rooms'.
