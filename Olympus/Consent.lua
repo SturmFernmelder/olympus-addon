@@ -640,8 +640,9 @@ function Consent.Refresh()
 		if f.done.SetNormalFontObject then f.done:SetNormalFontObject("GameFontDisable") end
 		if f.done.SetHighlightFontObject then f.done:SetHighlightFontObject("GameFontHighlight") end
 		if f.done.SetAlpha then f.done:SetAlpha(0.8) end
-		f.all:SetPoint("TOPRIGHT", f, "TOP", -6, y)
-		f.done:SetPoint("TOPLEFT", f, "TOP", 6, y)
+		-- (Daniel, 2026-10-20: Authorize all on the right of the other button.)
+		f.done:SetPoint("TOPRIGHT", f, "TOP", -6, y)
+		f.all:SetPoint("TOPLEFT", f, "TOP", 6, y)
 		f.all:Show()
 	else
 		f.done:SetText(L.CONSENT_DONE)
