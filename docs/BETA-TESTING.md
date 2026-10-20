@@ -421,7 +421,11 @@ that holds S's BattleTag (step 6), plus a named moderator's client (M) for the t
 
 13. On C: `/oly netoff S: test`. Expected: C's chat says S's sanction follows his BattleTag too
     (the count of his other characters C knows). `/oly status` on C counts `follows 1 (yours 1)`.
-14. Log in as A. Expected: within about 30 seconds Olympus's pop-up says a sanction on another
+14. Log in as A. Precondition: S was logged in during step 13 (so the follow is in the account's
+    saved file) and A is on the same realm group and faction. Otherwise the pop-up comes only with
+    C's next repeat, within about 6.5 minutes while C stays online (at once if A chats on an Olympus
+    channel first: C's addon sends it again), and never while C is offline. Expected: within about
+    30 seconds Olympus's pop-up says a sanction on another
     character of his BattleTag applies to this one (the reason and the time, never C's name);
     `/ol hi` is refused; the Decrees tab shows the red "Your BattleTag's sanction is on you" line,
     its tooltip the same text. If A sent C his BattleTag, C sees none of A's lines, and The Watch's
@@ -442,3 +446,9 @@ that holds S's BattleTag (step 6), plus a named moderator's client (M) for the t
 21. After A logs out, search A's `WTF/Account/<account>/SavedVariables/Olympus.lua` for the
     BattleTag (`Name#digits`) and for its name alone: neither appears (A keeps the follow without
     its code).
+22. Step 14 with its precondition unmet (S logged out during step 13, C online): A's first `/ol hi`
+    goes out; a moment later A's own pop-up comes (C's addon sent the follow again for that line),
+    the next `/ol hi` is refused, and C's `/oly status` still counts `derived 0`. A typing in the
+    game's own guild chat (`/g hi`) never changes that count.
+23. A character of the King's game account (once the King's own character logged in on it) and a
+    councillor's client C that asks for BattleTags: C's BattleTags page never lists that character.

@@ -14,15 +14,30 @@ local ROOT = (debug.getinfo(1, "S").source:sub(2):match("^(.*)tests[/\\]tag%-fol
 local L = ns.L
 
 local TAG, TAG2, OTHER = "Lantern#1234", "Lantern#1235", "Ember#5678"
-local CODE, CODE2 = "afc28b0eb8b84eab", "9bff7414dfa715b8"
+-- The game account of TAG's follow key (Accord.AccountKey), and its codes: SHA-256 of
+-- "olympus-tag-2|" .. the folded tag .. "|" .. the key, 16 hex digits (shasum's answers).
+local KEY = "5eed00000000a001"
+local CODE, CODE2 = "204fd53eb90ad60f", "807e08f5ca538598"
 local X, Y = "Olympus II", "Olympus of Ash"
 local AAT = 1799990000 -- (one game account's Accord accept time: its characters share it)
+
+local function Fold(s) return ns.Fold(tostring(s or "")) end
+-- Each game account's follow key: TAG's (and TAG2's, the same account renamed) is KEY; any other
+-- BattleTag stands for an account of its own, with a key of its own.
+local function KeyFor(tag)
+	if tag == nil then return nil end
+	local f = Fold(tag)
+	if f == Fold(TAG) or f == Fold(TAG2) then return KEY end
+	local h = ns.Sign.SHA256("tests: another account|" .. f)
+	local out = {}
+	for i = 1, 8 do out[i] = ("%02x"):format(h:byte(i)) end
+	return table.concat(out)
+end
 
 local GLOBALS = { "GetGuildInfo", "IsInGuild", "UnitIsPlayer", "C_ChatInfo", "GetTime", "GetChannelName", "DEFAULT_CHAT_FRAME", "IsCombatLog",
 	"issecretvalue", "UnitClass", "C_FriendList", "BNGetInfo", "BNConnected", "BNFeaturesEnabledAndConnected", "InCombatLockdown", "IsInInstance",
 	"SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
 
-local function Fold(s) return ns.Fold(tostring(s or "")) end
 local function Full(name)
 	name = tostring(name or ""):gsub("^%s+", ""):gsub("%s+$", "")
 	if name == "" or name:find("-", 1, true) then return name end
@@ -123,7 +138,8 @@ local function World(fn)
 			end
 		end
 
-		-- opts: tag (its BattleTag), aat (its game account's Accord accept time), kingAccount, standIn
+		-- opts: tag (its BattleTag), aat (its game account's Accord accept time), key (its game
+		-- account's follow key: KeyFor(tag) by default, so one BattleTag is one account), kingAccount, standIn
 		-- (TagFollow.lua not loaded: Core.lua's stand-in, as a client updated without a restart),
 		-- realDialogs (the harness's ns.ShowDialog: Olympus's own window under the gamepad UI).
 		function w.Client(short, guild, rank, opts)
@@ -139,7 +155,7 @@ local function World(fn)
 			c.CAPTAIN_RANK = 1
 			c.db = { addonChat = true, chatRooms = true, chatWarned = { A = true, C = true, L = true }, blocked = {}, log = {},
 				kingAccount = opts.kingAccount or nil,
-				accord = { v = ns.ACCORD_VERSION, yes = true, at = opts.aat or AAT, told = {} } }
+				accord = { v = ns.ACCORD_VERSION, yes = true, at = opts.aat or AAT, told = {}, key = opts.key or KeyFor(opts.tag) } }
 			c.rdb = { guilds = {} }
 			c.Now = function() return w.epoch end
 			c.Data = { ServerTime = function() return w.epoch end, ClaimGuild = function() return true end,
@@ -323,10 +339,11 @@ local function World(fn)
 			w.Run()
 			assert(w.As(team, team.A.TagOf, cl.name), "kept on " .. team.short)
 		end
-		-- A BattleTag answer of a character that has no client in the scene.
-		function w.TagOf(team, name, tag, aat, guild)
+		-- A BattleTag answer of a character that has no client in the scene (key: its game account's
+		-- follow key, KeyFor(tag) by default; a modified addon sends any tag with its own key).
+		function w.TagOf(team, name, tag, aat, guild, key)
 			w.Asked(team)
-			local ok, why = w.Inject("WHISPER", Full(name), team, ("BT~1~1~%d~%s~%s"):format(aat or AAT, guild or X, tag), true)
+			local ok, why = w.Inject("WHISPER", Full(name), team, ("BT~1~1~%d~%s~%s~%s"):format(aat or AAT, guild or X, tag, key or KeyFor(tag)), true)
 			assert(ok, "BT of " .. name .. ": " .. tostring(why))
 		end
 
@@ -402,25 +419,31 @@ end
 -- The code
 ---------------------------------------------------------------------------
 
-test("accord: tag follow: the code: SHA-256 of a fixed public prefix and the folded BattleTag, 16 hex digits; the same for any case, another for other digits; never for what is no BattleTag; its header says it can be found by guessing", function()
+-- (Changed on purpose, the review: the code now takes the game account's follow key, which only
+-- the moderation team receives, so it can no longer be found by guessing a BattleTag; the header's
+-- line that said it could is gone, and this test asserts the opposite claim instead.)
+test("accord: tag follow: the code: SHA-256 of the prefix, the folded BattleTag and the game account's follow key, 16 hex digits; the same for any case, another for other digits or another key; never without a BattleTag or a key; its header says only the team can tell whose it is", function()
 	local savedStop = StaticPopupDialogs.OLYMPUS_TAGFOLLOW_STOP
 	local tns = setmetatable({ On = function() end, Comm = { Handle = function() end } }, { __index = ns })
 	assert(loadfile(ROOT .. "Olympus/TagFollow.lua"))("Olympus", tns)
 	StaticPopupDialogs.OLYMPUS_TAGFOLLOW_STOP = savedStop
 	local TF = tns.TagFollow
-	-- (The known answers, from `printf 'olympus-tag-1|lantern#1234' | shasum -a 256`.)
-	eq(TF.Hash(TAG), CODE)
-	eq(TF.Hash(TAG2), CODE2)
-	eq(TF.Hash("lantern#1234"), CODE, "case folded"); eq(TF.Hash("LANTERN#1234"), CODE)
-	assert(TF.Hash(TAG) ~= TF.Hash(OTHER))
+	-- (The known answers, from `printf 'olympus-tag-2|lantern#1234|5eed00000000a001' | shasum -a 256`.)
+	eq(TF.Hash(TAG, KEY), CODE)
+	eq(TF.Hash(TAG2, KEY), CODE2)
+	eq(TF.Hash(TAG, "0000000000000002"), "387d653788508cac", "another account's key: another code")
+	eq(TF.Hash("lantern#1234", KEY), CODE, "case folded"); eq(TF.Hash("LANTERN#1234", KEY), CODE)
+	assert(TF.Hash(TAG, KEY) ~= TF.Hash(OTHER, KEY))
+	eq(TF.Hash(TAG), nil, "never without a key"); eq(TF.Hash(TAG, "5EED00000000A001"), nil); eq(TF.Hash(TAG, KEY:sub(2)), nil)
 	for _, bad in ipairs({ "Lantern", "Lantern#", "Lan~tern#12", "#1234", "Lantern#12a", "", string.rep("a", 70) .. "#1" }) do
-		eq(TF.Hash(bad), nil, "no code for " .. bad)
+		eq(TF.Hash(bad, KEY), nil, "no code for " .. bad)
 	end
 	eq(TF.IsCode(CODE), true); eq(TF.IsCode(CODE:upper()), false); eq(TF.IsCode(CODE:sub(2)), false)
 	local f = assert(io.open(ROOT .. "Olympus/TagFollow.lua", "rb"))
 	local src = f:read("*a")
 	f:close()
-	assert(src:find("It is NOT secret", 1, true) and src:find("can try every digit string", 1, true), "the header says the code is guessable")
+	assert(src:find("nobody else can tell from a code whose BattleTag it is", 1, true), "the header says the key keeps it private")
+	assert(not src:find("It is NOT secret", 1, true), "the old claim is gone")
 end)
 
 ---------------------------------------------------------------------------
@@ -613,7 +636,11 @@ end)
 -- Evidence and the derived by-name word
 ---------------------------------------------------------------------------
 
-test("accord: tag follow: a character whose addon skips the follow and keeps chatting: one line after EVADE_AFTER gives exactly one by-name word; never one for an honest character; six an hour at most; taken back once the sanction ends", function()
+-- (Changed on purpose, the review: a line counts as evidence only once the follow reached him, its
+-- word on the wire right after one of his hidden lines (here the giver's client sends it again for
+-- his first line), so each evading character now chats once, then again EVADE_AFTER later; and the
+-- giver's TF count includes that second send, so "never followed again" is checked by source.)
+test("accord: tag follow: a character whose addon skips the follow and keeps chatting: his first hidden line makes the giver send the follow again; a line EVADE_AFTER after that gives exactly one by-name word; never one for an honest character; six an hour at most; taken back once the sanction ends", function()
 	World(function(w)
 		local HC, S, V = Basic(w)
 		local V2 = w.Client("Sootclaw", Y, 3, { tag = TAG })
@@ -627,7 +654,8 @@ test("accord: tag follow: a character whose addon skips the follow and keeps cha
 		w.Run()
 		assert(w.Printed(HC, L.ACCORD_FOLLOW_DONE:format(8)), "eight other characters known")
 		eq(w.As(V2, V2.M.SelfOff), nil, "the modified client does not apply it")
-		-- Too early: hidden on the team's client, nothing by name yet.
+		-- His first line: hidden on the team's client, the follow sent again (he is online now),
+		-- nothing by name.
 		w.epoch = w.epoch + 2
 		assert(w.As(V2, V2.C.Send, "A", "first line"))
 		w.Run()
@@ -638,6 +666,12 @@ test("accord: tag follow: a character whose addon skips the follow and keeps cha
 			for _, s in ipairs(w.Sent("O1~c~1~")) do if s.msg:find(HC.TF.DERIVED_REASON, 1, true) then out[#out + 1] = s end end
 			return out
 		end
+		eq(#Derived(), 0, "not on his first line")
+		eq(#w.Sent("TF~1~N~1~"), 2, "the follow sent again for his line")
+		-- Still too early: EVADE_AFTER counts from that send.
+		w.epoch = w.epoch + 60
+		assert(w.As(V2, V2.C.Send, "A", "early line"))
+		w.Run()
 		eq(#Derived(), 0, "not before EVADE_AFTER")
 		-- After it: one line gives exactly one word by name.
 		w.epoch = w.epoch + HC.TF.EVADE_AFTER
@@ -646,7 +680,7 @@ test("accord: tag follow: a character whose addon skips the follow and keeps cha
 		local derived = Derived()
 		eq(#derived, 1, "one by-name word")
 		assert(derived[1].msg:find("~" .. V2.name .. "~" .. HC.name .. "~", 1, true), derived[1].msg)
-		eq(#w.Sent("TF~1~N~1~"), 1, "a derived word is never followed again")
+		for _, t in ipairs(w.Sent("TF~")) do assert(not t.msg:find("~" .. V2.name .. "~", 1, true), "a derived word is never followed again: " .. t.msg) end
 		assert(w.As(V2, V2.M.SelfOff), "now off by name on his own client")
 		-- His client ignoring that too: the next line is hidden by name, no second word.
 		w.Inject("CHANNEL", V2.name, HC, w.Line(V2.name, "third line"))
@@ -655,8 +689,12 @@ test("accord: tag follow: a character whose addon skips the follow and keeps cha
 		eq(w.As(V, V.C.Send, "A", "a line"), false)
 		w.Run()
 		for _, s in ipairs(Derived()) do assert(not s.msg:find(V.name, 1, true), "nothing for the honest one") end
-		-- Six an hour at most from one client.
+		-- Six an hour at most from one client (each chats once, the follow goes again, each chats on).
 		for _, name in ipairs(more) do w.Inject("CHANNEL", Full(name), HC, w.Line(name, "evading")) end
+		w.Run()
+		eq(#Derived(), 1, "nothing on their first lines")
+		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 1
+		for _, name in ipairs(more) do w.Inject("CHANNEL", Full(name), HC, w.Line(name, "still evading")) end
 		w.Run()
 		eq(#Derived(), HC.TF.DERIVE_HOUR, "the seventh is refused by the hour's budget")
 		local last = Full(more[#more])
@@ -684,8 +722,11 @@ test("accord: tag follow: a team member's stop takes back the by-name word his c
 		w.epoch = w.epoch + 5
 		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
 		w.Run()
-		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 1
+		w.epoch = w.epoch + 5
 		assert(w.As(V2, V2.C.Send, "A", "a line"))
+		w.Run()
+		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 1
+		assert(w.As(V2, V2.C.Send, "A", "another line"))
 		w.Run()
 		assert(w.As(V2, V2.M.SelfOff), "off by name")
 		eq(w.As(HC, HC.TF.Stop, "N", S.name), true)
@@ -871,7 +912,10 @@ end)
 -- The giver's checks
 ---------------------------------------------------------------------------
 
-test("accord: tag follow: the giver follows only within his reach: a BattleTag shared with a Steward is not followed (told so); a disputed one (two game accounts) waits for a click in The Watch", function()
+-- (Changed on purpose, the review: two game accounts of one BattleTag are now two codes, each
+-- account's key in it. The sanctioned player's own account is followed by itself (no copied tag
+-- can reach it, and a copy no longer stops it), and the other account waits for the click, as before.)
+test("accord: tag follow: the giver follows only within his reach: a BattleTag shared with a Steward is not followed (told so); another game account of the same BattleTag (another code) waits for a click in The Watch, his own is followed", function()
 	World(function(w)
 		local HC, S, V = Basic(w)
 		w.stewards[Fold("Highreeve-Realm")] = true
@@ -886,12 +930,14 @@ test("accord: tag follow: the giver follows only within his reach: a BattleTag s
 	end)
 	World(function(w)
 		local HC, S, V = Basic(w)
-		V.ns.db.accord.at = AAT + 777 -- (another game account, or a copied BattleTag)
+		V.ns.db.accord.key = "0000000000000002" -- (another game account, or a copied BattleTag)
 		w.TagTo(HC, S); w.TagTo(HC, V)
 		w.epoch = w.epoch + 5
 		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
 		w.Run()
-		eq(#w.Sent("TF~"), 0, "not followed by itself")
+		eq(#w.Sent("TF~1~N~1~"), 1, "his own account's code followed by itself")
+		assert(w.Sent("TF~1~N~1~")[1].msg:find("~" .. CODE .. "~", 1, true))
+		eq(w.As(V, V.M.SelfOff), nil, "the other account not by itself")
 		assert(w.Printed(HC, L.ACCORD_FOLLOW_CONTESTED))
 		local page = w.As(HC, HC.A.TeamLines)
 		local click
@@ -899,7 +945,8 @@ test("accord: tag follow: the giver follows only within his reach: a BattleTag s
 		assert(click and click.onClick, "the disputed line, with a click: " .. Shown(page))
 		w.As(HC, click.onClick)
 		w.Run()
-		eq(#w.Sent("TF~1~N~1~"), 1, "the click follows it")
+		eq(#w.Sent("TF~1~N~1~"), 2, "the click follows it there")
+		assert(w.Sent("TF~1~N~1~")[2].msg:find("~387d653788508cac~", 1, true), "on the other account's code")
 		local _, _, via = w.As(V, V.M.SelfOff)
 		eq(via, "tag")
 	end)
@@ -1183,5 +1230,439 @@ test("accord: tag follow: the hot paths: with no follow, 1,000 lines ask no Batt
 		assert(calls <= 3, "looked up once a name, not each line: " .. calls)
 		local _, _, via = w.As(HC, HC.M.Hides, V.name)
 		eq(via, "tag", "and the team's client hides him")
+	end)
+end)
+
+---------------------------------------------------------------------------
+-- The review (each test fails on the first draft and passes now)
+---------------------------------------------------------------------------
+
+-- The by-name words given for evading a follow: net-off (O1) or timeout (MD) on `name`, from `from`.
+local function DerivedOn(w, name, prefix, from)
+	local out = {}
+	for _, s in ipairs(w.Sent(prefix)) do
+		if s.msg:find("~" .. name .. "~", 1, true) and s.msg:find(w.clients[1].TF.DERIVED_REASON, 1, true)
+			and (not from or s.from == from) then out[#out + 1] = s end
+	end
+	return out
+end
+
+-- A sanctioned player's modified addon answers the team with someone else's BattleTag (a copied
+-- tag goes with his own account's key: the other account's key never left it).
+test("accord: tag follow: a sanctioned player's addon that sends someone else's BattleTag reaches nobody, before or after his sanction; a tag sent again and again follows on a few codes at most", function()
+	World(function(w)
+		local HC, S, _, B = Basic(w)
+		w.TagTo(HC, S); w.TagTo(HC, B)
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		w.epoch = w.epoch + 700
+		w.TagOf(HC, S.name, OTHER, AAT + 5, X, KEY)
+		w.Run()
+		local _, _, via = w.As(B, B.M.SelfOff)
+		eq(via, nil, "the bystander stays free")
+		eq(w.As(B, B.WC.Barred, "powers"), nil)
+		eq(select(3, w.As(HC, HC.M.Hides, B.name)), nil, "and is not hidden on the team's client")
+		-- Tag after tag: the follows of his sanction go on a few codes at most.
+		for i = 1, 6 do
+			w.epoch = w.epoch + 5
+			w.TagOf(HC, S.name, ("Decoy%d#%d"):format(i, 1000 + i), AAT + 5, X, KEY)
+			w.Run()
+		end
+		local codes = {}
+		for _, t in ipairs(w.Sent("TF~1~N~1~")) do
+			local code = t.msg:match("^TF~1~N~1~%d+~(%x+)~" .. S.name:gsub("%-", "%%-") .. "~")
+			if code then codes[code] = true end
+		end
+		local n = 0
+		for _ in pairs(codes) do n = n + 1 end
+		eq(n <= HC.TF.CODES_PER_SOURCE, true, "codes followed: " .. n)
+	end)
+	World(function(w)
+		local HC, S, _, B = Basic(w)
+		w.TagTo(HC, B)
+		w.TagOf(HC, S.name, OTHER, AAT + 5, X, KEY) -- (from the start: a throwaway plan)
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		local _, _, via = w.As(B, B.M.SelfOff)
+		eq(via, nil, "the bystander stays free")
+		eq(w.As(B, B.WC.Barred, "powers"), nil)
+		-- The team sees the copy: one BattleTag, two codes, the other account's waits for a click.
+		assert(Shown(w.As(HC, HC.A.TeamLines)):find(L.ACCORD_FOLLOW_CONTESTED, 1, true), "the copy shows")
+	end)
+end)
+
+-- The King's account: his alts' tag reaches the King and the author alone; a forged King's tag
+-- reaches none of his characters; a code with his own character on it never resolves.
+test("accord: tag follow: never the King's game account: his alts answer no councillor or moderator; a player who sends the King's BattleTag reaches no character of his, and no by-name word reaches his alt; a code holding the King's own row never resolves on the King's client", function()
+	World(function(w)
+		local HC, S = Basic(w)
+		local CROWN = "Crown#0001"
+		w.king = "Crownhold-Realm"
+		local K = w.Client("Crownhold", X, 3, { tag = CROWN, kingAccount = true })
+		local KA = w.Client("Crownalt", X, 3, { tag = CROWN, kingAccount = true })
+		local M = w.Client("Gloomwatch", Y, 3, { tag = "Gloom#1111" })
+		w.Mods(HC, M)
+		w.Asked(HC)
+		eq(w.As(KA, KA.A.SendTag, HC.name), false, "no councillor gets the King's alt's tag")
+		w.Asked(M)
+		eq(w.As(KA, KA.A.SendTag, M.name), false, "nor a moderator")
+		-- S sends the King's BattleTag (with his own account's key) and is timed out.
+		w.TagOf(M, S.name, CROWN, AAT + 5, X, KEY)
+		w.epoch = w.epoch + 5
+		assert(w.As(M, M.WC.Act, "T", S.name, { seconds = 3600, reason = "spam" }))
+		w.Run()
+		eq(w.As(KA, KA.WC.SelfTimeout), nil)
+		w.Pass(HC.TF.EVADE_AFTER + 5)
+		w.As(KA, KA.C.Send, "A", "hello chat")
+		w.Run()
+		w.Pass(HC.TF.EVADE_AFTER + 5)
+		w.As(KA, KA.C.Send, "A", "hello again")
+		w.Run()
+		eq(#DerivedOn(w, KA.name, "MD~"), 0, "never a by-name sanction on the King's account")
+		eq(w.As(KA, KA.WC.SelfTimeout), nil)
+		-- The King's own client holds his rows (his main's and his alts', one code): a follow on that
+		-- code (here sent by hand) never resolves there.
+		w.TagOf(K, K.name, CROWN, AAT, X, KeyFor(CROWN))
+		w.TagOf(K, "Crownbit", CROWN, AAT, X, KeyFor(CROWN))
+		w.Asked(K)
+		assert(w.As(KA, KA.A.SendTag, K.name), "the King gets it")
+		w.Run()
+		local code = w.As(K, K.A.HashOf, KA.name)
+		assert(code, "a code on the King's client")
+		eq(w.As(K, K.TF.KingCode, code), true)
+		w.epoch = w.epoch + 5
+		assert(w.As(M, M.WC.Act, "T", "Crownbit-Realm", { seconds = 3600, reason = "spam" }))
+		w.Run()
+		local word = ("TF~1~T~1~%d~%s~Crownbit-Realm~%s"):format(w.epoch, code, M.name)
+		eq(w.TF(K, "CHANNEL", M.name, word, true), true, "kept")
+		eq(w.As(K, K.WC.TimeoutOf, KA.name), nil, "but it never reaches the King's alt there")
+		eq(#w.As(K, K.TF.Sources, KA.name, "T"), 0)
+	end)
+end)
+
+-- An honest alt that never had the follow: nothing by name for his lines.
+test("accord: tag follow: an honest alt that logs in after the follow went, or while its giver is away, gets nothing by name for chatting: his first line makes the giver send the follow, his own addon then applies it", function()
+	World(function(w)
+		local HC, S, V = Basic(w)
+		w.TagTo(HC, S); w.TagTo(HC, V)
+		V.online = false
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		eq(#w.Kept(V), 0, "offline: nothing kept")
+		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 60
+		V.online = true
+		-- (At login his client hears the net-off word on Sootfang, as Moderation's repeats bring it.)
+		w.Inject("CHANNEL", HC.name, V, w.Sent("O1~c~1~")[1].msg)
+		eq(w.As(V, V.C.Send, "A", "hi all, just logged in"), true, "his addon had no follow yet")
+		w.Run()
+		eq(#DerivedOn(w, V.name, "O1~c~1~"), 0, "nothing by name for that line")
+		eq(#w.Sent("TF~1~N~1~"), 2, "the giver sent the follow again")
+		local _, _, via = w.As(V, V.M.SelfOff)
+		eq(via, "tag", "his own addon applies it now")
+		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 60
+		eq(w.As(V, V.C.Send, "A", "why can't I talk"), false, "and sends nothing more")
+		w.Run()
+		eq(#DerivedOn(w, V.name, "O1~c~1~"), 0)
+	end)
+	World(function(w)
+		local HC, S, V = Basic(w)
+		w.council[Fold("Ironbrow-Realm")] = true
+		local C2 = w.Client("Ironbrow", Y, 3, { tag = "Brow#7777" })
+		w.TagTo(HC, S); w.TagTo(C2, S); w.TagTo(C2, V)
+		V.online = false
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		HC.online = false -- (the giver logs off: nobody repeats it)
+		w.epoch = w.epoch + 7200
+		V.online = true
+		w.Inject("CHANNEL", HC.name, V, w.Sent("O1~c~1~")[1].msg)
+		w.As(V, V.C.Send, "A", "hello")
+		w.Run()
+		w.epoch = w.epoch + C2.TF.EVADE_AFTER + 60
+		w.As(V, V.C.Send, "A", "anyone here")
+		w.Run()
+		eq(#DerivedOn(w, V.name, "O1~c~1~"), 0, "the other councillor never saw the follow reach him")
+		eq(#DerivedOn(w, V.name, "MD~"), 0)
+	end)
+end)
+
+test("accord: tag follow: a line in the game's own guild chat is never evidence (an honest addon cannot stop it); an Olympus line is", function()
+	World(function(w)
+		w.council[Fold("Warden-Realm")] = true
+		local HC = w.Client("Warden", X, 3, { tag = "Warden#4242" })
+		local S = w.Client("Sootfang", X, 3, { tag = TAG })
+		local V = w.Client("Sootwing", X, 3, { tag = TAG })
+		w.TagTo(HC, S); w.TagTo(HC, V)
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		local _, _, via = w.As(V, V.M.SelfOff)
+		eq(via, "tag", "his addon obeys")
+		for i = 1, 3 do
+			w.As(HC, HC.ns.ChatRooms.ReceiveGuild, "typed in /g " .. i, V.name)
+			w.epoch = w.epoch + HC.TF.EVADE_AFTER + 1
+		end
+		w.Run()
+		eq(#DerivedOn(w, V.name, "O1~c~1~"), 0, "the game's guild chat proves nothing")
+		eq(#w.Sent("TF~1~N~1~"), 1, "nor sends the follow again")
+		-- The same character's Olympus line (his addon skipping the follow) is.
+		w.Inject("CHANNEL", V.name, HC, w.Line(V.name, "olympus line"))
+		w.Run()
+		w.epoch = w.epoch + HC.TF.EVADE_AFTER + 1
+		w.Inject("CHANNEL", V.name, HC, w.Line(V.name, "olympus line again"))
+		w.Run()
+		eq(#DerivedOn(w, V.name, "O1~c~1~"), 1)
+	end)
+end)
+
+-- A freeing word or lift on the followed character's own name lasts until his source's sanction changes.
+test("accord: tag follow: an on word that freed the alt lasts through another team client's sweep and a later follow by hand, until the sanctioned character's own word changes", function()
+	World(function(w)
+		local HC, S, V = Basic(w)
+		w.king = "Crownhold-Realm"
+		local K = w.Client("Crownhold", X, 3, { tag = "Crown#0001" })
+		w.TagTo(HC, S); w.TagTo(HC, V); w.TagTo(K, S)
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		eq(select(3, w.As(V, V.M.SelfOff)), "tag", "followed")
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", V.name, false, ""), "freed by an on word")
+		w.Run()
+		eq(w.As(V, V.M.SelfOff), nil, "freed")
+		local before = #w.Sent("TF~1~N~1~")
+		w.epoch = w.epoch + 700
+		w.As(K, K.TF.Tick)
+		w.Run()
+		eq(#w.Sent("TF~1~N~1~"), before, "the King's sweep leaves the kept follow alone")
+		eq(w.As(V, V.M.SelfOff), nil, "still free after the sweep")
+		w.epoch = w.epoch + 5
+		eq(w.As(K, K.A.Slash, "follow Sootfang"), true, "a follow by hand, newer than the on word")
+		w.Run()
+		eq(w.As(V, V.M.SelfOff), nil, "still free: the on word stands until Sootfang's word changes")
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, false, ""))
+		w.Run()
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "again"))
+		w.Run()
+		eq(select(3, w.As(V, V.M.SelfOff)), "tag", "a new word on Sootfang follows again")
+	end)
+end)
+
+test("accord: tag follow: a stop given while a higher team member was away holds against his automatic follow when he comes back, everywhere, the stop's giver's client included; his follow by hand passes it", function()
+	World(function(w)
+		local HC, S, V = Basic(w)
+		w.king = "Crownhold-Realm"
+		local K = w.Client("Crownhold", X, 3, { tag = "Crown#0001" })
+		w.TagTo(HC, S); w.TagTo(K, S)
+		K.online = false
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		w.epoch = w.epoch + 5
+		eq(w.As(HC, HC.TF.Stop, "N", S.name), true)
+		w.Run()
+		eq(w.As(V, V.M.SelfOff), nil, "stopped")
+		-- Back on, the King's client hears Sootfang's word and, after WARMUP, its sweep follows it by
+		-- itself (it never heard the stop), at the King's weight, above the councillor's stop.
+		K.online = true
+		w.Inject("CHANNEL", HC.name, K, w.Sent("O1~c~1~")[1].msg)
+		local before = #w.Sent("TF~1~N~1~")
+		w.epoch = w.epoch + K.TF.WARMUP + 61
+		w.As(K, K.TF.Tick)
+		w.Run()
+		eq(#w.Sent("TF~1~N~1~"), before + 1, "his automatic follow went")
+		eq(select(3, w.As(V, V.M.SelfOff)), nil, "the stop holds on the other character's client")
+		local stops = 0
+		for _, k in ipairs(w.Kept(HC)) do if k.F.on == false then stops = stops + 1 end end
+		eq(stops, 1, "and on the stop's giver's client")
+		-- The stop's next repeat reaches the King's client, which takes it (every client orders the
+		-- two words the same way) and stops repeating its own follow.
+		w.epoch = w.epoch + HC.TF.STOP_EVERY + HC.TF.JITTER + 1
+		w.As(HC, HC.TF.Repeat)
+		w.Run()
+		local kept
+		for _, k in ipairs(w.Kept(K)) do if k.F.hash == CODE then kept = k.F end end
+		eq(kept and kept.on, false, "the King's client keeps the stop")
+		-- The King's own click: a follow given after the stop, so it passes it.
+		w.epoch = w.epoch + 5
+		eq(w.As(K, K.A.Slash, "follow Sootfang"), true)
+		w.Run()
+		eq(select(3, w.As(V, V.M.SelfOff)), "tag", "followed again by hand")
+	end)
+end)
+
+-- A giver who lost his standing takes his follows with him.
+test("accord: tag follow: a councillor removed from the council: his follow goes on every client within a minute; a team client takes a code only of the sanctioned player's own BattleTag", function()
+	World(function(w)
+		local HC, S, V, B = Basic(w)
+		w.king = "Crownhold-Realm"
+		local K = w.Client("Crownhold", X, 3, { tag = "Crown#0001" })
+		w.TagTo(HC, S)
+		assert(w.As(K, K.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		w.epoch = w.epoch + 5
+		eq(w.As(HC, HC.TF.Give, "N", S.name), true)
+		w.Run()
+		eq(select(3, w.As(V, V.M.SelfOff)), "tag", "followed")
+		w.council[Fold(HC.name)] = nil
+		w.epoch = w.epoch + 60
+		w.As(V, V.TF.Tick)
+		eq(select(3, w.As(V, V.M.SelfOff)), nil, "his follow went with his seat")
+		-- A code that is not the sanctioned player's, on a team client holding his BattleTag: refused.
+		w.council[Fold(HC.name)] = true
+		w.council[Fold("Ironbrow-Realm")] = true
+		local C2 = w.Client("Ironbrow", Y, 3, { tag = "Brow#7777" })
+		w.TagTo(HC, B)
+		local other = w.As(HC, HC.A.HashOf, B.name)
+		local ok, why = w.TF(HC, "CHANNEL", C2.name, ("TF~1~N~1~%d~%s~%s~%s"):format(w.epoch, other, S.name, C2.name), true)
+		eq(ok, false); eq(why, "code")
+		eq(select(3, w.As(HC, HC.M.Hides, B.name)), nil)
+	end)
+end)
+
+test("accord: tag follow: /oly accord forget drops the follows that carry that BattleTag's code: never sent again from here", function()
+	World(function(w)
+		local HC, S = Basic(w)
+		w.TagTo(HC, S)
+		w.epoch = w.epoch + 5
+		assert(w.As(HC, HC.M.Set, "c", S.name, true, "spam"))
+		w.Run()
+		eq(w.As(HC, HC.A.Forget, S.name), true)
+		for _, k in ipairs(w.Kept(HC)) do assert(k.F.hash ~= CODE, "a follow with the forgotten code kept") end
+		local before = #w.Sent("TF~")
+		w.epoch = w.epoch + HC.TF.REPEAT + HC.TF.JITTER + 5
+		w.As(HC, HC.TF.Tick)
+		w.Run()
+		eq(#w.Sent("TF~") - before, 0, "not repeated")
+	end)
+end)
+
+-- The derived word: never above the follow's weight, never a guild's, once for one evasion.
+test("accord: tag follow: a by-name timeout for evading a moderator's follow comes from a moderator's client, never a councillor's (it would weigh more)", function()
+	World(function(w)
+		local HC, S = Basic(w)
+		local M = w.Client("Gloomwatch", Y, 3, { tag = "Gloom#1111" })
+		local V2 = w.Client("Sootclaw", Y, 3, { tag = TAG })
+		V2.TF.Mine = function() return nil end
+		w.Mods(HC, M)
+		w.TagTo(M, S); w.TagTo(M, V2); w.TagTo(HC, S); w.TagTo(HC, V2)
+		w.epoch = w.epoch + 5
+		assert(w.As(M, M.WC.Act, "T", S.name, { seconds = 7200, reason = "flood" }))
+		w.Run()
+		w.As(V2, V2.C.Send, "A", "one")
+		w.Run()
+		w.Pass(HC.TF.EVADE_AFTER + 5)
+		w.As(V2, V2.C.Send, "A", "two")
+		w.Run()
+		eq(#DerivedOn(w, V2.name, "MD~", HC.name), 0, "not from the councillor's client")
+		eq(#DerivedOn(w, V2.name, "MD~", M.name), 1, "from the moderator's")
+	end)
+end)
+
+test("accord: tag follow: a guild's timeout followed to an alt that evades it is never given by name (it binds in that guild alone)", function()
+	World(function(w)
+		w.council[Fold("Warden-Realm")] = true
+		local HC = w.Client("Warden", X, 3, { tag = "Warden#4242" })
+		local A = w.Client("Watchoff", X, 1, { tag = "Watch#8888" })
+		local S = w.Client("Sootfang", X, 3, { tag = TAG })
+		local V2 = w.Client("Sootclaw", X, 3, { tag = TAG })
+		V2.TF.Mine = function() return nil end
+		w.TagTo(HC, S); w.TagTo(HC, V2)
+		w.epoch = w.epoch + 5
+		assert(w.As(A, A.WC.Act, "T", S.name, { seconds = 3600, reason = "spam" }))
+		w.Run()
+		assert(w.As(HC, HC.TF.Give, "T", S.name))
+		w.Run()
+		w.As(V2, V2.C.Send, "A", "one")
+		w.Run()
+		w.Pass(HC.TF.EVADE_AFTER + 5)
+		w.As(V2, V2.C.Send, "A", "two")
+		w.Run()
+		eq(#DerivedOn(w, V2.name, "MD~"), 0, "a guild's timeout binds in that guild alone: never derived Olympus-wide")
+	end)
+end)
+
+test("accord: tag follow: two moderators' clients that see the same evasion give one by-name timeout, not two", function()
+	World(function(w)
+		local HC, S = Basic(w)
+		w.king = "Crownhold-Realm"
+		local K = w.Client("Crownhold", "Olympus", 0, { tag = "Crown#0001" })
+		local M = w.Client("Gloomwatch", Y, 3, { tag = "Gloom#1111" })
+		local M2 = w.Client("Dusktally", Y, 3, { tag = "Dusk#3333" })
+		local V2 = w.Client("Sootclaw", Y, 3, { tag = TAG })
+		V2.TF.Mine = function() return nil end
+		w.Mods(HC, M, M2)
+		w.TagTo(M, S); w.TagTo(M, V2); w.TagTo(M2, S); w.TagTo(M2, V2)
+		w.epoch = w.epoch + 5
+		assert(w.As(K, K.WC.Act, "T", S.name, { seconds = 7200, reason = "abuse" }))
+		w.Run()
+		assert(w.As(M, M.TF.Give, "T", S.name))
+		w.Run()
+		w.As(V2, V2.C.Send, "A", "one")
+		w.Run()
+		w.Pass(HC.TF.EVADE_AFTER + 5)
+		w.Inject("CHANNEL", V2.name, M, w.Line(V2.name, "two"))
+		w.Run()
+		eq(#DerivedOn(w, V2.name, "MD~", M.name), 1, "the first moderator's client gives it")
+		w.Inject("CHANNEL", V2.name, M2, w.Line(V2.name, "three"))
+		w.Run()
+		eq(#DerivedOn(w, V2.name, "MD~"), 1, "the second sees it and gives none")
+	end)
+end)
+
+test("accord: tag follow: a followed alt's client never says the guild timeout as its own on the channel (it would show the two share a BattleTag)", function()
+	World(function(w)
+		w.council[Fold("Warden-Realm")] = true
+		local HC = w.Client("Warden", X, 3, { tag = "Warden#4242" })
+		local A = w.Client("Watchoff", X, 1, { tag = "Watch#8888" })
+		local S = w.Client("Sootfang", X, 3, { tag = TAG })
+		local V = w.Client("Sootwing", X, 3, { tag = TAG })
+		w.TagTo(HC, S)
+		w.epoch = w.epoch + 5
+		assert(w.As(A, A.WC.Act, "T", S.name, { seconds = 3600, reason = "spam" }))
+		w.Run()
+		assert(w.As(HC, HC.TF.Give, "T", S.name))
+		w.Run()
+		local _, via = w.As(V, V.WC.SelfTimeout)
+		eq(via, S.name, "followed")
+		w.epoch = w.epoch + 5
+		w.As(S, S.WC.Tick); w.As(V, V.WC.Tick)
+		w.Run()
+		local fromS, fromV = 0, 0
+		for _, s in ipairs(w.Sent("MD~1~S~")) do
+			if s.from == S.name then fromS = fromS + 1 end
+			if s.from == V.name then fromV = fromV + 1 end
+		end
+		eq(fromS >= 1, true, "the sanctioned character's own client says his, as before")
+		eq(fromV, 0, "the followed alt's says nothing")
+	end)
+end)
+
+test("accord: tag follow: at login a followed timeout's pop-up shows once, not twice", function()
+	World(function(w)
+		local HC, S, V = Basic(w)
+		local M = w.Client("Gloomwatch", Y, 3, { tag = "Gloom#1111" })
+		w.Mods(HC, M)
+		w.TagTo(M, S)
+		w.epoch = w.epoch + 5
+		assert(w.As(M, M.WC.Act, "T", S.name, { seconds = 3600, reason = "flooding" }))
+		w.Run()
+		assert(w.As(V, V.WC.SelfTimeout), "followed")
+		-- A new session on V's client: its login notices, 30 seconds on.
+		w.As(V, V.TF.ResetForTests, w.epoch)
+		w.As(V, V.WC.ResetForTests)
+		local n = #V.dialogs
+		w.As(V, V.ns.Fire, "LOGIN")
+		w.epoch = w.epoch + 31
+		w.Run()
+		local shown = 0
+		for i = n + 1, #V.dialogs do if V.dialogs[i].which == "OLYMPUS_WATCHCHAT_TIMED_OUT" then shown = shown + 1 end end
+		eq(shown, 1)
 	end)
 end)

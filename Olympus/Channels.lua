@@ -1227,6 +1227,8 @@ end
 --            (the channels' by default);
 --   where    the log's label for a dropped line (the tier by default).
 --   chat, line (1.1.6) the chat's key and the line's id, for a deleted line's tombstone (WatchChat).
+--   evidence a chat line the sender's own Olympus addon sent (M1, M2, EC): one hidden only by his
+--            BattleTag's follow tells TagFollow.Evidence he still chats.
 -- A refusal's reason: "netoff", "timeout" (1.1.6, a moderator's), "tier", "ignored", "own", "dup",
 -- "deleted" (1.1.6, a late copy of a deleted line), "rate", "forged", "rank", "unverified", or
 -- "filtered" (a line the player's block terms hide: the caller keeps it or not).
@@ -1242,8 +1244,10 @@ function Channels.Admit(sender, guild, text, now, o)
 	if off then
 		Bump(st, "netoff")
 		-- (TagFollow.lua) Hidden here only through his BattleTag's follow, and still chatting: his
-		-- addon does not apply it (a team client may give him the same sanction by name).
-		if offVia == "tag" and o.id ~= nil then Evidence(sender, "N", offOn) end
+		-- addon may not apply it (a team client may give him the same sanction by name). Only a line
+		-- his own Olympus addon sent (o.evidence: M1, M2, EC), never the game's own guild chat (an
+		-- honest addon cannot keep him from typing there) nor another lane that admits no chat line.
+		if offVia == "tag" and o.evidence then Evidence(sender, "N", offOn) end
 		return false, "netoff"
 	end
 	-- 1.1.6: a moderator's timeout on this sender (WatchChat.lua): not shown, not kept, nothing to a
@@ -1254,7 +1258,7 @@ function Channels.Admit(sender, guild, text, now, o)
 	if silenced then
 		Bump(st, "timeout")
 		if WC.CountBlocked then WC.CountBlocked(sender, "timeout") end
-		if silencedVia and o.id ~= nil then Evidence(sender, "T", silencedVia) end
+		if silencedVia and o.evidence then Evidence(sender, "T", silencedVia) end
 		return false, "timeout"
 	end
 	local level = o.level
@@ -1353,7 +1357,7 @@ function Channels.Receive(dist, sender, text, now)
 		stats.bad = stats.bad + 1
 		return false, "bad"
 	end
-	local ok, reason = Channels.Admit(sender, m.guild, m.text, now, { tier = m.tier, id = m.id, chat = m.tier, line = m.id })
+	local ok, reason = Channels.Admit(sender, m.guild, m.text, now, { tier = m.tier, id = m.id, chat = m.tier, line = m.id, evidence = true })
 	if not ok then
 		-- (A line the block terms hide is kept, see Admit.)
 		if reason == "filtered" then Keep(m.tier, sender, m.guild, m.class, m.text, false, m.id) end

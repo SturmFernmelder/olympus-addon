@@ -640,7 +640,8 @@ end
 -- it is: that other character's own timeout or hold in Olympus or guild scope (a guild's only on a
 -- member of that guild here), at the lower of its weight and the follow's, above his protection
 -- (and, on his own client, his account's: the King's account never), unless a lift on his own name
--- from as high came after both (the council's answer to his appeal, a moderator's lift). Nil
+-- from as high came after that timeout (the council's answer to his appeal, a moderator's lift):
+-- it frees him until that character's timeout changes, whatever follow of it comes later. Nil
 -- otherwise. Only through TagFollow.Guarded (TimeoutOf).
 function WC.ByTag(name, now, guild)
 	local TF = Live(ns.TagFollow)
@@ -655,7 +656,7 @@ function WC.ByTag(name, now, guild)
 		if e and (e.scope == "O" or (e.scope == "G" and (Same(full, ns.me) or InOwnRoster(full)))) then
 			local applied = math.min(tonumber(e.weight) or 0, tonumber(F.weight) or 0)
 			shield = shield or TF.Shield(full, "T")
-			if applied > shield and not LiftedAt(key, math.max(e.at, tonumber(F.at) or 0), applied, e.scope, e.guild) and Before(e, best) then
+			if applied > shield and not LiftedAt(key, e.at, applied, e.scope, e.guild) and Before(e, best) then
 				best, via, weight = e, F.source, applied
 			end
 		end
@@ -1172,9 +1173,19 @@ function WC.RecordFollowed(e)
 	return true
 end
 
+-- (TagFollow.lua) A followed timeout's forced notice once a session: the login's notice below and
+-- TagFollow's own (TellMine) both come 30 seconds after login.
+local toldFollowed = {}
 function WC.TellTimeout(e, force)
 	if not e then return false end
-	if Followed(e) then WC.RecordFollowed(e) end
+	if Followed(e) then
+		WC.RecordFollowed(e)
+		if force then
+			local k = Key(e.by) .. "#" .. tostring(e.seq)
+			if toldFollowed[k] then return false end
+			toldFollowed[k] = true
+		end
+	end
 	if not force and Now() - lastPopup < WC.POPUP_GAP then
 		ns.Print(Red(L.WATCHCHAT_REFUSED_LINE:format((tonumber(e.untilAt) or 0) == 0 and L.WATCHCHAT_UNTIL_LIFTED or Hour(e.untilAt),
 			WC.RoleText(e.role, true))))
@@ -1307,11 +1318,13 @@ end
 -- This character's testimony about his current guild timeout is not an actor's action. Bind
 -- the queued word to that same character, guild and exact timeout; a lift, replacement or
 -- expiry before the paced native send must not reannounce the old restriction to late peers.
+-- (Its own timeout alone: one that follows its BattleTag, TagFollow.lua, is another character's,
+-- and saying it here would tell every client that the two share a BattleTag.)
 local function SelfTimeoutPermit(e, msg)
 	local character, guild = ns.me, OwnGuild()
 	return function(owner, _, dist, _, payload)
 		if owner ~= WC or dist ~= "CHANNEL" or payload ~= msg then return false, "guard" end
-		local current = WC.SelfTimeout()
+		local current = ns.me and WC.TimeoutOf(ns.me, nil, true)
 		if not Same(ns.me, character) or not ns.IsMember() or OwnGuild() ~= guild or current ~= e
 			or current.scope ~= "G" or current.guild ~= guild or WC.EndOf(current) <= Clock() then return false, "revoked" end
 		local word = SelfWire({ op = "T", seq = current.seq, at = current.at, guild = current.guild,
@@ -2388,8 +2401,9 @@ function WC.Tick()
 		if not Same(d.target, ns.me) and mono - (tonumber(d.sent) or -math.huge) >= WC.DECISION_EVERY then WC.SendDecision(key) end
 	end
 	-- This character's current guild timeout, as his own client says it: repeated for late
-	-- reviewers, without the guild reason. It remains S testimony, never proof of its actor.
-	local e = WC.SelfTimeout()
+	-- reviewers, without the guild reason. It remains S testimony, never proof of its actor. (His
+	-- own alone, never one that follows his BattleTag: SelfTimeoutPermit.)
+	local e = WC.TimeoutOf(ns.me, nil, true)
 	if budget > 0 and e and e.scope == "G" and type(e.by) == "string" and CharName(e.by) == e.by
 		and Int(e.seq, 1, WC.MAX_SEQ) and Int(e.at, 1, WC.MAX_SEQ) and e.at <= Clock() + WC.DATE_AHEAD then
 		local now, last = math.floor(Clock()), s.ownTimeoutSent
@@ -3048,6 +3062,7 @@ function WC.Stats() return stats end
 
 function WC.ResetForTests()
 	wipe(rates); wipe(rateAll); wipe(rateSelf); wipe(purgeGrace); wipe(held); wipe(pages); wipe(printed); wipe(printedOrder)
+	wipe(toldFollowed)
 	lastPopup, listsPending, jitter = -math.huge, false, nil
 	for k in pairs(stats) do stats[k] = 0 end
 end

@@ -366,8 +366,9 @@ end
 -- (TagFollow.lua) The word a follow of `name`'s BattleTag points at, while it stands, and whose it
 -- is: a net-off word on that other character (never one through a follow), at the lower of its
 -- own weight and the follow's, above his own rank (and, on his own client, his account's: the
--- King's account never), unless an "on" word on his own name from as high is newer than both (a
--- moderator freed him of it). Nil otherwise. Only through TagFollow.Guarded (Hidden).
+-- King's account never), unless an "on" word on his own name from as high is newer than that word
+-- (a moderator freed him of it: until that character's word changes, whatever follow of it comes
+-- later). Nil otherwise. Only through TagFollow.Guarded (Hidden).
 function Moderation.ByTag(name)
 	local TF = ns.TagFollow
 	if type(TF) ~= "table" or TF.missing or type(name) ~= "string" or name == "" or IsKing(name) then return nil end
@@ -379,7 +380,7 @@ function Moderation.ByTag(name)
 			local applied = math.min(Weight(w), tonumber(F.weight) or 0)
 			shield = shield or TF.Shield(full, "N")
 			if applied > 0 and (shield == 0 or applied > shield)
-				and not (type(own) == "table" and not own.off and Weight(own) >= applied and own.at > math.max(w.at, tonumber(F.at) or 0)) then
+				and not (type(own) == "table" and not own.off and Weight(own) >= applied and own.at > w.at) then
 				return w, F.source
 			end
 		end

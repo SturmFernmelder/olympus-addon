@@ -16,24 +16,35 @@ local L = ns.L
 -- Never a guild's net-off or exile (they aim at guilds), nor a chat warning's hold (ChatStrikes.lua:
 -- self-held; it follows once a moderator decides the case with a timeout).
 --
--- The code: the first 8 bytes of SHA-256("olympus-tag-1|" .. the folded BattleTag), 16 hex digits.
--- It is NOT secret: its prefix is in this public source, so anyone who guesses a BattleTag's name
--- can try every digit string, find the whole tag and learn that it is sanctioned. It is what lets an
--- ordinary client recognise its own BattleTag without anyone sending it a BattleTag.
+-- The code: the first 8 bytes of SHA-256("olympus-tag-2|" .. the folded BattleTag .. "|" .. the
+-- game account's follow key), 16 hex digits. The key (Accord.AccountKey: 16 random hex digits made
+-- once per game account, at its first accept) reaches the moderation team alone, with the tag (BT),
+-- so nobody else can tell from a code whose BattleTag it is, nor match a friend's. And a copied
+-- BattleTag gives a code no other account has: a modified addon that sends someone else's tag can
+-- only ever reach its own account. One code is one game account's characters (on one computer: the
+-- key is in its saved variables). It is what lets an ordinary client recognise its own BattleTag
+-- without anyone sending it a BattleTag.
 --
 -- Who gives one: a moderation team member's client (Accord.TeamMember) that holds the sanctioned
 -- player's BattleTag and may give that sanction itself (N: Moderation.CanIssue; T: an Olympus
 -- moderator's level, WatchChat.ActorLevel), at most at the weight of the sanction and of its own,
--- and only when every character of that BattleTag it knows is within that reach (never the King's).
--- It gives it right after its own sanction (G1), when the BattleTag arrives later (G2), and for the
--- others' sanctions (G3: a sweep, once online WARMUP, one a minute). A BattleTag reported by two
--- game accounts (two Accord accept times: two accounts, or a copied tag) is never followed by
--- itself: a team member decides it with one click in The Watch. A follow is stopped there, or by
--- `/oly accord unfollow <name>`: his other characters are free, his own sanction stays.
+-- and only when every character of that code it knows is within that reach (never the King's: his
+-- game account's tag reaches only the King and the author, Accord.MayTell, and a code with the
+-- King's own character on it is never followed). It gives it right after its own sanction (G1),
+-- when the BattleTag arrives later (G2), and for the others' sanctions (G3: a sweep, once online
+-- WARMUP, one a minute), always on that player's own code. Such an automatic follow never re-dates,
+-- raises or replaces a word kept here, and is dated at the sanction's own time, so a stop or a
+-- freeing word given since stays above it. Another game account that sent the same BattleTag (two
+-- computers, two licences, or a copied tag) has another code: a team member follows it there with
+-- one click in The Watch. A follow is stopped there, or by `/oly accord unfollow <name>`: his other
+-- characters are free, his own sanction stays.
 --   TF~1~<N|T>~<1 follow|0 stop>~<server time>~<code>~<sanctioned Name-Realm>~<giver Name-Realm>
 -- On the Olympus channel only, logged (the server keeps it), first hand only (the giver's own
 -- client: the server stamps the sender), its giver's client repeating it every REPEAT while the
--- sanction stands (a stop every STOP_EVERY, for KEEP). Rate-limited per sender and for all.
+-- sanction stands (a stop every STOP_EVERY, for KEEP). Rate-limited per sender and for all. A
+-- word weighs its giver's standing, checked again each minute (Recheck): a giver who lost it takes
+-- his words with him. A team client that holds the sanctioned character's BattleTag takes a code
+-- only of his own, his previous one, or another account's of the same BattleTag.
 --
 -- Who keeps it: a team client every word (it holds the BattleTags to match); any other client only
 -- the words made from its own player's BattleTag (TagFollow.Mine, read from his own game, cached
@@ -44,19 +55,23 @@ local L = ns.L
 -- What it does: his own client applies it to himself (his chats, his powers, games, map and
 -- Crafting, as every sanction: WatchChat.Barred) and tells him in Olympus's own pop-up, never who
 -- gave it; a team client hides the followed characters it holds the BattleTag of and marks them in
--- The Watch. Nothing goes out by name on a match alone: a modified addon can send someone else's
--- BattleTag, and a by-name word shows in every member's Decrees. Only when a followed character's
--- addon shows it does not apply it to itself (he keeps chatting EVADE_AFTER after the follow came)
--- does a team client that may give that sanction by name give it (DERIVED_REASON), at most
--- DERIVE_HOUR an hour, and take it back once the follow ends. Never on the King's game account
+-- The Watch. Nothing goes out by name on a match alone, and a by-name word shows in every member's
+-- Decrees. Only when a followed character's addon shows it does not apply it to itself does a team
+-- client that may give that sanction by name give it (DERIVED_REASON): his Olympus chat line
+-- (M1, M2, EC: never the game's own guild chat) hidden by the follow, then the follow on the wire
+-- here (sent or heard) within ONLINE_WINDOW after such a line (he was online to receive it; the
+-- giver's client sends it again on his first such line), then still another line EVADE_AFTER
+-- later. At most DERIVE_HOUR an hour, never above the weight the follow reaches him with, never a
+-- guild's timeout, and taken back once the follow ends. Never on the King's game account
 -- (ns.db.kingAccount), never on anyone whose own rank or protection reaches the follow's weight
--- (his own client also remembers it for the account, ns.db.tagShield). Never logged: a tag or a
--- code; the log names the kind, the sanctioned character and the outcome.
+-- (his own client also remembers it for the account, ns.db.tagShield). An "on" word or a lift on
+-- the followed character's own name frees him until the sanction he was freed of changes. Never
+-- logged: a tag or a code; the log names the kind, the sanctioned character and the outcome.
 
 local TF = {}
 ns.TagFollow = TF
 
-TF.PREFIX = "olympus-tag-1|"
+TF.PREFIX = "olympus-tag-2|"
 TF.KINDS = { N = true, T = true }
 TF.KEEP = 30 * 86400        -- a follow lapses this long after it was given; a stop is kept (and repeated) this long
 TF.STALE = 3 * 86400        -- a follow its giver did not repeat this long lapses (his own client keeps it while he may give it)
@@ -73,7 +88,10 @@ TF.MINE_MAX = 20            -- words another client keeps (its own BattleTag's)
 TF.BUFFER_MAX = 300         -- words held in memory while this client's own BattleTag can't be read
 TF.SWEEP_EVERY = 600        -- a team client looks for the others' sanctions it may follow
 TF.AUTO_EVERY = 60          -- ...and gives one at most this often
-TF.EVADE_AFTER = 600        -- a followed character still chatting this long after the follow came: his addon does not apply it
+TF.EVADE_AFTER = 600        -- a followed character still chatting this long after the follow reached him: his addon does not apply it
+TF.ONLINE_WINDOW = 60       -- the follow on the wire this soon after his hidden line: he was online to receive it
+TF.RESEND_GAP = 60          -- its giver's client sends a follow again for a hidden line at most this often
+TF.CODES_PER_SOURCE = 4     -- codes one client follows a sanctioned character's sanction on by itself, at most
 TF.DERIVE_HOUR = 6          -- by-name words one client gives that way in an hour at most
 -- (The author's decision: false gives a by-name word only on that evidence; true gives it on the
 -- match alone, each minute, to every character a follow reaches here, which would list a possibly
@@ -89,11 +107,12 @@ local refusedWhy = {}
 local rates, rateAll = {}, {}
 local buffer = {}       -- words heard while this client's own BattleTag could not be read (memory only)
 local memo, memoN = {}, 0 -- [raw name] = code or false: a team client's lookups (TagFollow.Bump empties it)
+local kingMemo = {}     -- [code] = true when a row of it is the King's own character (TagFollow.Bump empties it)
 local index             -- the kept words by code, rebuilt after any change
 local busy = 0          -- a resolver running (Guarded): a nested one resolves no follow
 local sentNow = {}      -- keys this client sent this session
 local session = { mine = nil, read = false, loginAt = nil, told = {}, under = false, queue = {}, queued = {},
-	lastAuto = -math.huge, lastSweep = -math.huge, derivedAt = {} }
+	lastAuto = -math.huge, lastSweep = -math.huge, derivedAt = {}, evidence = {}, resent = {} }
 
 local function Live(t) return type(t) == "table" and not t.missing and t or nil end
 local function Acc() return Live(ns.Accord) end
@@ -129,12 +148,13 @@ end
 local function IsCode(h) return type(h) == "string" and #h == 16 and h:find("^[0-9a-f]+$") ~= nil end
 TF.IsCode = IsCode
 
--- A BattleTag's code (see the top: not secret), or nil when it is no BattleTag.
-function TF.Hash(tag)
+-- A BattleTag's code with its game account's follow key (see the top), or nil when either is not one.
+function TF.Hash(tag, key)
 	local A = ns.Accord
 	local shape = type(A) == "table" and A.TAG_SHAPE or "^[^#~|%c]+#%d+$"
 	if type(tag) ~= "string" or tag == "" or #tag > 64 or not tag:match(shape) then return nil end
-	local h = ns.Sign.SHA256(TF.PREFIX .. ns.Fold(tag))
+	if type(key) ~= "string" or #key ~= 16 or not key:find("^[0-9a-f]+$") then return nil end
+	local h = ns.Sign.SHA256(TF.PREFIX .. ns.Fold(tag) .. "|" .. key)
 	local out = {}
 	for i = 1, 8 do out[i] = ("%02x"):format(h:byte(i)) end
 	return table.concat(out)
@@ -197,6 +217,7 @@ function TF.Any(kind) return (Index()[kind] or 0) > 0 end
 -- After a change of the BattleTags or the follows: the lookups start again.
 function TF.Bump()
 	wipe(memo)
+	wipe(kingMemo)
 	memoN = 0
 	Dirty()
 end
@@ -211,6 +232,23 @@ local function HashFor(name)
 	memo[name], memoN = h or false, memoN + 1
 	return h
 end
+
+-- A code one of whose rows here is the King's own character: his game account's, never followed
+-- (his alts' rows reach only the author's client, which holds his own row too).
+local function KingCode(h)
+	local m = kingMemo[h]
+	if m ~= nil then return m end
+	local A, M = ns.Accord, ns.Moderation
+	local yes = false
+	if type(A) == "table" and not A.missing and type(A.Rows) == "function" and type(M) == "table" and not M.missing then
+		for _, r in ipairs(A.Rows(h)) do
+			if M.IsKing(r.name) then yes = true break end
+		end
+	end
+	kingMemo[h] = yes
+	return yes
+end
+TF.KingCode = KingCode
 
 ---------------------------------------------------------------------------
 -- This account's own code (never on disk on an ordinary client)
@@ -235,8 +273,9 @@ local Take -- (below)
 function TF.Refresh(changed)
 	local A = Acc()
 	local tag = A and A.ReadTag and A.ReadTag()
+	local key = A and A.AccountKey and A.AccountKey(true)
 	local was = session.mine
-	session.mine, session.read = tag and TF.Hash(tag) or nil, true
+	session.mine, session.read = tag and TF.Hash(tag, key) or nil, true
 	if changed or (was and session.mine and was ~= session.mine) then
 		if DropMine() > 0 then ns.Log("tag follow: this account's BattleTag changed, its follows dropped") end
 	end
@@ -310,7 +349,7 @@ function TF.Sources(name, kind)
 		if mine then Add(x.byHash[mine]) end
 	elseif team then
 		local h = HashFor(full)
-		if h then Add(x.byHash[h]) end
+		if h and not KingCode(h) then Add(x.byHash[h]) end
 	end
 	return out or NONE
 end
@@ -437,6 +476,24 @@ local function Outranks(e, kept)
 	return e.on and not kept.on
 end
 
+-- Does word F replace the kept one (every client the same)? Two follows or two stops: the higher
+-- weight, then the newer, then Outranks. A follow and a stop: the stop when it is the newer (a
+-- decision given after that follow, whatever its weight; an automatic follow is dated at its
+-- sanction's time, so it never passes a stop given since), and also when it weighs more than a
+-- newer follow (a follow by hand from lower down never passes a stop from higher up).
+local function Wins(F, kept)
+	if F.on ~= kept.on then
+		local stop, follow = F.on and kept or F, F.on and F or kept
+		local stopWins
+		if stop.at ~= follow.at then stopWins = stop.at > follow.at or stop.weight > follow.weight
+		else stopWins = stop.weight >= follow.weight end
+		return (F == stop) == stopWins
+	end
+	if F.weight ~= kept.weight then return F.weight > kept.weight end
+	if F.at ~= kept.at then return F.at > kept.at end
+	return Outranks(F, kept)
+end
+
 -- Our own word is newer, or from higher up: our next round answers with it.
 local function AnswerOwn(kept)
 	if Given(kept) and MayGive(kept.kind) then kept.heard = Now() - TF.REPEAT - TF.JITTER - 1 end
@@ -451,7 +508,8 @@ local function Place(F)
 	return nil, "other"
 end
 
--- "taken", "same" (a repeat), "older", "tie", "outranked", "full", "buffered" or "other".
+-- "taken", "same" (a repeat), "stopped", "older", "tie", "outranked", "full", "buffered" or "other"
+-- (Wins: a follow dated before a stop never replaces it, whatever its weight).
 Take = function(F)
 	local key, mine = Place(F)
 	if not key then
@@ -470,19 +528,20 @@ Take = function(F)
 	local kept = s.f[key]
 	if type(kept) == "table" then
 		if SameWord(F, kept) then
-			kept.heard = Now()
+			kept.heard, kept.wired = Now(), Now()
 			stats.same = stats.same + 1
 			return true, "same"
 		end
-		if F.weight < kept.weight then AnswerOwn(kept) return false, "outranked" end
-		if F.weight == kept.weight then
-			if F.at < kept.at then AnswerOwn(kept) return false, "older" end
-			if F.at == kept.at and not Outranks(F, kept) then AnswerOwn(kept) return false, "tie" end
+		if not Wins(F, kept) then
+			AnswerOwn(kept)
+			if F.on and not kept.on then return false, "stopped" end
+			if F.weight < kept.weight then return false, "outranked" end
+			return false, F.at < kept.at and "older" or "tie"
 		end
 	elseif not MakeRoom(s, mine, F.weight) then
 		return false, "full"
 	end
-	F.heard = Now()
+	F.heard, F.wired = Now(), Now()
 	F.firstHeard = (type(kept) == "table" and kept.on and F.on and kept.firstHeard) or Now()
 	if mine then F.hash, F.mine = nil, true end
 	s.f[key] = F
@@ -507,7 +566,7 @@ local function Send(F)
 	if #msg > 255 or type(C) ~= "table" or type(C.Send) ~= "function" then return false end
 	local key = KeyOf(F.kind, F.hash, F.source)
 	local guardKey = "tf:" .. key
-	F.heard = Now()
+	F.heard, F.wired = Now(), Now() -- (wired: on the wire here, the evidence's clock)
 	sentNow[key] = true
 	stats.sent = stats.sent + 1
 	-- At the game's send: still a member who may give it, and this exact word still the one kept.
@@ -556,6 +615,23 @@ local function Standing(kind, name)
 	local lvl = tonumber(W.ActorLevel(name)) or 0
 	return lvl >= W.LEVEL.mod and lvl or nil
 end
+TF.Standing = Standing
+
+-- May `hash` carry `source`'s sanction here? Anywhere but a team client that holds his BattleTag;
+-- there only his code, the one he had before, another game account's code of the same BattleTag (a
+-- team member's click), or the new code of a character that had his (his BattleTag changed).
+local function CodeOf(source, hash)
+	if not TeamClient() then return true end
+	local own = HashFor(source)
+	if not own or own == hash then return true end
+	local A = Acc()
+	if not A then return true end
+	if A.PrevHashOf and A.PrevHashOf(source) == hash then return true end
+	local tag = A.TagOf and A.TagOf(source)
+	for _, c in ipairs(tag and A.CodesOf and A.CodesOf(tag) or NONE) do if c == hash then return true end end
+	for _, r in ipairs(A.Rows and A.Rows(hash) or NONE) do if r.pcode == own then return true end end
+	return false
+end
 
 -- TF, heard on the channel (Comm dispatches it to members alone). True and how it was kept, or
 -- false and why not.
@@ -583,6 +659,7 @@ function TF.Handle(dist, sender, text)
 	if not at or at < 1 or at > clock + TF.DATE_AHEAD or clock - at > TF.KEEP then return Refuse("time", sender) end
 	-- (Its weight, as this client knows him now: never computed again while it resolves.)
 	if not Reaches(kind, src, weight) then return Refuse("rank", sender) end
+	if not CodeOf(src, hash) then return Refuse("code", sender) end
 	return Take({ kind = kind, on = on == "1", at = at, hash = hash, source = src, by = sender, weight = weight })
 end
 
@@ -600,7 +677,7 @@ end
 local function KeepOwn(s, key, F)
 	local kept = s.f[key]
 	if type(kept) == "table" then
-		if F.weight < kept.weight then return false, "outranked" end
+		if not Wins(F, kept) then return false, "outranked" end
 	elseif not MakeRoom(s, false, F.weight) then
 		return false, "full"
 	end
@@ -611,27 +688,33 @@ local function KeepOwn(s, key, F)
 	return true
 end
 
--- Every character of that BattleTag this client knows, within the reach of `cap`; and how many
--- besides the sanctioned one, whether two game accounts reported it (two Accord accept times).
+-- Every character of that code (one game account) this client knows, within the reach of `cap`;
+-- and how many besides the sanctioned one, and how many other codes of the same BattleTag it holds
+-- (other game accounts: a team member's click follows it there, never this by itself).
 local function Group(kind, hash, source, cap)
 	local A = Acc()
 	local rows = A and A.Rows and A.Rows(hash) or NONE
-	local others, times, n = 0, {}, 0
+	local others = 0
 	if not Reaches(kind, source, cap) then return nil, "reach" end
 	for _, r in ipairs(rows) do
 		if not Reaches(kind, r.name, cap) then return nil, "reach" end
 		if not Same(r.name, source) then others = others + 1 end
-		local aat = tonumber(r.aat)
-		if aat and not times[aat] then times[aat], n = true, n + 1 end
 	end
-	return others, n >= 2
+	local elsewhere = 0
+	local tag = rows[1] and rows[1].tag or (A and A.TagOf and A.TagOf(source))
+	for _, c in ipairs(tag and A and A.CodesOf and A.CodesOf(tag) or NONE) do if c ~= hash then elsewhere = elsewhere + 1 end end
+	return others, elsewhere
 end
 TF.Group = Group
 
 -- `source`'s sanction of `kind` (his own, given by anyone) follows his BattleTag. opts.hash: that
--- code instead of the one this client holds for him; opts.manual: a team member's own click (a
--- disputed BattleTag, or one a stop holds). True and how many other characters it reaches here
--- (and "held" when a follow of ours or from higher up already stands); false and why not.
+-- code instead of his own here (opts.moved: the new code of a character that had his; otherwise
+-- another game account's, only by hand); opts.manual: a team member's own click (another game
+-- account's code, or one a stop holds), dated now. An automatic one never touches a word kept here
+-- (a follow stands: "held"; a stop: "stopped"), is dated at the sanction's own time (at most KEEP -
+-- STALE ago), and goes on at most CODES_PER_SOURCE codes of one sanctioned character. True, how
+-- many other characters it reaches here, "held" when a follow already stands, and how many other
+-- codes of that BattleTag are known here; false and why not.
 function TF.Give(kind, source, opts)
 	opts = opts or NONE
 	if not TF.KINDS[kind] then return false, "kind" end
@@ -640,34 +723,79 @@ function TF.Give(kind, source, opts)
 	if not MayGive(kind) then return false, "authority" end
 	local A, M = Acc(), Mod()
 	if M.IsKing(source) or Me(source) then return false, "source" end
-	local hash = opts.hash or (A.HashOf and A.HashOf(source))
+	local own = A.HashOf and A.HashOf(source)
+	local hash = opts.hash or own
 	if not IsCode(hash) then return false, "tag" end
+	if hash ~= own and not opts.manual and not opts.moved then return false, "contested" end
+	if KingCode(hash) then return false, "reach" end
 	local sanction, sw = Direct(kind, source)
 	if not sanction then return false, "none" end
 	if not opts.manual and Derived(source, sanction) then return false, "derived" end
 	local mine = MyWeight(kind)
 	local cap = math.min(mine, sw)
 	if cap <= 0 then return false, "authority" end
-	local others, disputed = Group(kind, hash, source, cap)
-	if not others then return false, disputed end
-	if disputed and not opts.manual then return false, "contested" end
+	local others, elsewhere = Group(kind, hash, source, cap)
+	if not others then return false, elsewhere end
 	local s = Store(true)
 	if not s then return false, "store" end
 	local key = KeyOf(kind, hash, source)
 	local kept = s.f[key]
-	if type(kept) == "table" then
-		if not kept.on and not opts.manual then return false, "stopped" end
-		if kept.on and kept.weight >= mine and Alive(kept) then return true, others, "held" end
+	local clock = math.floor(Clock())
+	local at
+	if opts.manual then
+		-- (By hand: a word dated now, so it passes a stop given before it, unless a follow from
+		-- higher up already stands.)
+		if type(kept) == "table" and kept.on and kept.weight > mine and Alive(kept) then return true, others, "held", elsewhere end
+		at = clock
+		if type(kept) == "table" and kept.at >= at then at = kept.at + 1 end
+	else
+		if type(kept) == "table" then
+			if kept.on then return true, others, "held", elsewhere end
+			return false, "stopped"
+		end
+		local n = 0
+		for _, F in pairs(s.f) do
+			if F.on and F.kind == kind and Given(F) and Same(F.source, source) then n = n + 1 end
+		end
+		if n >= TF.CODES_PER_SOURCE then return false, "many" end
+		at = math.min(clock, math.max(math.floor(tonumber(sanction.at) or clock), clock - TF.KEEP + TF.STALE))
 	end
-	local at = math.floor(Clock())
-	if type(kept) == "table" and kept.at >= at then at = kept.at + 1 end
 	local F = { kind = kind, on = true, at = at, hash = hash, source = source, by = ns.me, weight = mine }
 	local ok, why = KeepOwn(s, key, F)
 	if not ok then return false, why end
 	Send(F)
 	stats.given = stats.given + 1
 	ns.Log("tag follow: %s on %s given (%d other characters)", kind, source, others)
-	return true, others
+	return true, others, nil, elsewhere
+end
+
+-- By hand (/oly accord follow, The Watch): on his own code, then on every other game account's
+-- code of his BattleTag known here. True and how many other characters it reaches, or false and
+-- why not (the last refusal).
+function TF.GiveByHand(kind, source)
+	local A = Acc()
+	source = CharName(source)
+	if not source or not A then return false, "name" end
+	local codes, seen = {}, {}
+	local own = A.HashOf and A.HashOf(source)
+	if own then codes[1], seen[own] = own, true end
+	local tag = A.TagOf and A.TagOf(source)
+	for _, c in ipairs(tag and A.CodesOf and A.CodesOf(tag) or NONE) do
+		if not seen[c] then seen[c], codes[#codes + 1] = true, c end
+	end
+	if #codes == 0 then return false, "tag" end
+	local done, total, last = false, 0, nil
+	for _, c in ipairs(codes) do
+		local ok, n = TF.Give(kind, source, { manual = true, hash = c })
+		if ok then
+			done = true
+			total = total + (tonumber(n) or 0)
+		else
+			last = n
+		end
+	end
+	if done then return true, total end
+	return false, last
 end
 
 -- A team member stops the follows of `source`'s sanction (his other characters are free, his own
@@ -709,35 +837,39 @@ function TF.Stop(kind, source, quiet)
 end
 
 -- G1: right after this client's own sanction (Moderation.Set, WatchChat.Act): its follow, and the
--- giver told (nothing when no BattleTag of him is known here).
+-- giver told (nothing when no BattleTag of him is known here); another game account's code of the
+-- same BattleTag waits for his click.
 function TF.AfterSanction(kind, name, reason)
 	if reason == TF.DERIVED_REASON or Derived(name) then return false end
 	local A = Acc()
 	if not (A and A.HashOf and A.HashOf(name)) then return false end
-	local ok, n = TF.Give(kind, name)
-	if ok then ns.Print(L.ACCORD_FOLLOW_DONE:format(n))
-	elseif n == "reach" then ns.Print(L.ACCORD_FOLLOW_SKIPPED)
-	elseif n == "contested" then ns.Print(Gold(L.ACCORD_FOLLOW_CONTESTED)) end
+	local ok, n, _, elsewhere = TF.Give(kind, name)
+	if ok then
+		ns.Print(L.ACCORD_FOLLOW_DONE:format(n))
+		if (tonumber(elsewhere) or 0) > 0 then ns.Print(Gold(L.ACCORD_FOLLOW_CONTESTED)) end
+	elseif n == "reach" then ns.Print(L.ACCORD_FOLLOW_SKIPPED) end
 	return ok
 end
 
--- G2: a BattleTag a team client just kept (Accord.HandleTag). Its code is kept with it; a
--- sanctioned sender's follows go; and when his BattleTag changed, the follows on the old one's
--- code go to the new one too.
+-- G2: a BattleTag a team client just kept (Accord.HandleTag, which keeps its code and the code he
+-- had before). A sanctioned sender's follows go; and when his code changed (another BattleTag, or
+-- his account's key), the follows on the old code go to the new one too (CODES_PER_SOURCE: a
+-- modified addon that sends tag after tag fills no list).
 function TF.OnTag(name, row)
 	if type(row) ~= "table" then return end
-	row.h = TF.Hash(row.tag)
 	TF.Bump()
-	if not row.h then return end
-	local old = type(row.prev) == "string" and TF.Hash(row.prev) or nil
+	local A = Acc()
+	local code = A and A.HashOf and A.HashOf(name)
+	if not code then return end
+	local old = IsCode(row.pcode) and row.pcode ~= code and row.pcode or nil
 	local s = Store(false)
 	for kind in pairs(TF.KINDS) do
 		if MayGive(kind) then
 			if Direct(kind, name) then TF.Give(kind, name) end
-			if old and old ~= row.h and s then
+			if old and s then
 				local list = {}
 				for _, F in pairs(s.f) do if F.kind == kind and F.hash == old and Alive(F) then list[#list + 1] = F.source end end
-				for _, source in ipairs(list) do TF.Give(kind, source, { hash = row.h }) end
+				for _, source in ipairs(list) do TF.Give(kind, source, { hash = code, moved = true }) end
 			end
 		end
 	end
@@ -836,7 +968,12 @@ end
 ---------------------------------------------------------------------------
 
 -- Gives `sender` the sanction a follow (`kind`, of `source`'s) reaches him with here, by name, when
--- this client may (once for him, at most DERIVE_HOUR an hour). onMatch: without the evidence.
+-- this client may (once for him, at most DERIVE_HOUR an hour). onMatch: without the evidence (the
+-- caller, Evidence, holds that). Never on a code of the King's account (TagFollow.Sources holds
+-- none), never a guild's timeout (it binds inside that guild alone, and a by-name word from here
+-- would bind everywhere), never above the weight the follow reaches him with (a by-name word weighs
+-- its giver's standing on every client: a client standing higher leaves it to one that does not),
+-- and never a second by-name timeout for the same evasion.
 local function Derive(sender, kind, source, onMatch)
 	sender = CharName(sender)
 	if not sender or not TF.KINDS[kind] or not TeamClient() then return false, "team" end
@@ -850,7 +987,6 @@ local function Derive(sender, kind, source, onMatch)
 	end
 	if not F then return false, "follow" end
 	local now = Now()
-	if not onMatch and now - (tonumber(F.firstHeard) or now) < TF.EVADE_AFTER then return false, "early" end
 	local hour = session.derivedAt
 	for i = #hour, 1, -1 do if now - hour[i] >= 3600 then table.remove(hour, i) end end
 	if #hour >= TF.DERIVE_HOUR then return false, "rate" end
@@ -858,13 +994,24 @@ local function Derive(sender, kind, source, onMatch)
 	local ok
 	if kind == "N" then
 		if not (M and M.CanIssue()) then return false, "authority" end
+		local w, sw = Direct("N", F.source)
+		if not w then return false, "follow" end
+		local applied = math.min(sw, tonumber(F.weight) or 0)
+		local mine = tonumber(M.Rank(ns.me)) or 0
+		if mine > applied then return false, "weight" end
 		local t = tonumber(M.TargetRank(sender)) or 0
-		if t > 0 and (tonumber(M.Rank(ns.me)) or 0) <= t then return false, "reach" end
+		if t > 0 and mine <= t then return false, "reach" end
 		ok = M.Set("c", sender, true, TF.DERIVED_REASON)
 	else
-		if not (W and W.CanModerate(sender) == "O") then return false, "authority" end
-		local e = TF.Guarded(W.ByTag, sender)
+		if not W then return false, "authority" end
+		local direct = W.TimeoutOf(sender, nil, true)
+		if type(direct) == "table" and direct.reason == TF.DERIVED_REASON then return false, "derived" end
+		local scope, mine = W.CanModerate(sender)
+		if scope ~= "O" then return false, "authority" end
+		local e, _, applied = TF.Guarded(W.ByTag, sender)
 		if not e then return false, "follow" end
+		if e.scope ~= "O" then return false, "guild" end
+		if (tonumber(mine) or 0) > (tonumber(applied) or 0) then return false, "weight" end
 		ok = W.Act("T", sender, { untilAt = tonumber(e.untilAt) or 0, reason = TF.DERIVED_REASON })
 	end
 	if not ok then return false, "refused" end
@@ -876,10 +1023,50 @@ local function Derive(sender, kind, source, onMatch)
 	return true
 end
 
--- Channels.Admit dropped a line of `sender` that only a follow (`kind`, of `source`'s sanction)
--- hides here: he is still chatting, so his addon does not apply it. This client gives him the same
--- sanction by name when it may, EVADE_AFTER after the follow came here. True when given.
-function TF.Evidence(sender, kind, source) return Derive(sender, kind, source, false) end
+-- Channels.Admit dropped an Olympus chat line of `sender` (M1, M2, EC: his own addon sent it) that
+-- only a follow (`kind`, of `source`'s sanction) hides here. It is evidence that his addon does not
+-- apply the follow only once the follow reached him: the follow on the wire here (sent or heard)
+-- within ONLINE_WINDOW after one such line (he was online then), and another line EVADE_AFTER
+-- after that. On a line before that, its giver's client sends the follow again (once in
+-- RESEND_GAP), so his next line can show it; an honest addon then sends no more. True when this
+-- client gave him the sanction by name; false and why not.
+function TF.Evidence(sender, kind, source)
+	sender = CharName(sender)
+	if not sender or not TF.KINDS[kind] or not TeamClient() or type(source) ~= "string" then return false, "team" end
+	local list = {}
+	for _, f in ipairs(TF.Sources(sender, kind)) do if Same(f.source, source) then list[#list + 1] = f end end
+	if #list == 0 then return false, "follow" end
+	local now = Now()
+	local key = kind .. "|" .. Fold(sender)
+	local ev = session.evidence[key]
+	if not ev or not Same(ev.source, source) then
+		session.evidenceN = (session.evidenceN or 0) + 1
+		if session.evidenceN > TF.MAX then wipe(session.evidence) session.evidenceN = 1 end -- (memory only, bounded)
+		ev = { source = source }
+		session.evidence[key] = ev
+	end
+	local prev = ev.line
+	if not ev.proof and prev then
+		for _, f in ipairs(list) do
+			local w = tonumber(f.wired)
+			if w and w >= prev and w - prev <= TF.ONLINE_WINDOW and w <= now and (not ev.proof or w < ev.proof) then ev.proof = w end
+		end
+	end
+	ev.line = now
+	if not ev.proof then
+		for _, f in ipairs(list) do
+			local k = KeyOf(f.kind, f.hash, f.source)
+			if Given(f) and MayGive(f.kind) and now - (session.resent[k] or -math.huge) >= TF.RESEND_GAP then
+				session.resent[k] = now
+				Send(f)
+				break
+			end
+		end
+		return false, "unproven"
+	end
+	if now - ev.proof < TF.EVADE_AFTER then return false, "early" end
+	return Derive(sender, kind, source, false)
+end
 
 -- DERIVE_ON_MATCH (off: see the top): each minute, every character whose BattleTag this team client
 -- holds and a follow reaches is given that sanction by name.
@@ -997,8 +1184,59 @@ function TF.Repeat()
 	return sent
 end
 
+-- Once a minute: each word weighs its giver's standing now (Standing: a councillor off the council,
+-- a moderator no longer named, a giver now sanctioned), never more than when it came; a giver with
+-- none takes it with him, as a net-off word weighs its giver's rank now (Moderation.Weight). His
+-- next word, once he stands again, brings it back.
+function TF.Recheck()
+	local s = Store(false)
+	if not s then return 0 end
+	local cache, changed = {}, {}
+	for key, F in pairs(s.f) do
+		if type(F) == "table" and TF.KINDS[F.kind] then
+			local ck = F.kind .. "|" .. Fold(F.by)
+			local w = cache[ck]
+			if w == nil then
+				w = Standing(F.kind, F.by) or false
+				cache[ck] = w
+			end
+			if not w then
+				s.f[key] = nil
+				changed[#changed + 1] = F
+				ns.Log("tag follow: %s on %s dropped, its giver no longer stands", F.kind, tostring(F.source))
+			elseif w < (tonumber(F.weight) or 0) then
+				F.weight = w
+				changed[#changed + 1] = F
+			end
+		end
+	end
+	for _, F in ipairs(changed) do Changed(F) end
+	return #changed
+end
+
+-- `/oly accord forget` (Accord.Forget): the words that carry a forgotten BattleTag's codes go here,
+-- so this client never sends them again (the others lapse them after STALE unheard).
+function TF.Forget(codes)
+	local s = Store(false)
+	if not s or type(codes) ~= "table" then return 0 end
+	local n = 0
+	for key, F in pairs(s.f) do
+		if type(F) == "table" and type(F.hash) == "string" and codes[F.hash] then
+			s.f[key] = nil
+			n = n + 1
+		end
+	end
+	if n > 0 then
+		Dirty()
+		ns.Log("tag follow: %d words dropped with a forgotten BattleTag", n)
+		ns.Fire("DATA_CHANGED")
+	end
+	return n
+end
+
 function TF.Tick()
 	TF.Prune()
+	TF.Recheck()
 	NoteShield()
 	if not session.mine then TF.Refresh() end
 	TF.TellMine()
@@ -1034,45 +1272,55 @@ local function ReachedBy(name)
 end
 TF.ReachedBy = ReachedBy
 
--- The lines under a BattleTag's group on the BattleTags page: each follow in force (a click stops
--- it), and on a disputed BattleTag each sanction not followed (a click follows it).
+-- The lines under a BattleTag's group on the BattleTags page: each follow in force on any of its
+-- codes (a click stops it), and when two game accounts sent it (two codes) each sanction not
+-- followed on one of them (a click follows it there).
 function TF.GroupLines(g, shown)
 	local out = {}
 	if type(g) ~= "table" or type(g.rows) ~= "table" or not g.rows[1] then return out end
 	shown = shown or ShownName
-	local hash = HashFor(g.rows[1].name) or TF.Hash(g.tag)
-	if not hash then return out end
-	local followed = {}
-	for _, F in ipairs(Index().byHash[hash] or NONE) do
-		if Alive(F) and Direct(F.kind, F.source) then
-			followed[F.kind .. Fold(F.source)] = true
-			local data = { kind = F.kind, source = F.source }
-			local may = MayGive(F.kind)
-			out[#out + 1] = { indent = 1, text = Red(L.ACCORD_FOLLOW_GROUP:format(shown(F.source), KindText(F))),
-				tooltip = function(tt)
-					tt:AddLine(L.ACCORD_FOLLOW_GROUP:format(shown(F.source), KindText(F)), 1, 0.4, 0.4, true)
-					tt:AddLine(L.ACCORD_FOLLOW_BY:format(shown(F.by), date and date("%Y-%m-%d %H:%M", F.at) or tostring(F.at)), 0.7, 0.7, 0.7)
-					if may then tt:AddLine(L.ACCORD_FOLLOW_STOP_TIP, 0.6, 0.6, 0.6, true) end
-				end,
-				onClick = may and function() ns.ShowDialog("OLYMPUS_TAGFOLLOW_STOP", shown(F.source), nil, data) end or nil }
+	local A = Acc()
+	local codes = A and A.CodesOf and A.CodesOf(g.tag) or NONE
+	if #codes == 0 then return out end
+	local followed, listed = {}, {}
+	for _, hash in ipairs(codes) do
+		for _, F in ipairs(Index().byHash[hash] or NONE) do
+			if Alive(F) and Direct(F.kind, F.source) then
+				followed[F.kind .. Fold(F.source) .. "|" .. hash] = true
+				local fk = F.kind .. Fold(F.source)
+				if not listed[fk] then
+					listed[fk] = true
+					local data = { kind = F.kind, source = F.source }
+					local may = MayGive(F.kind)
+					out[#out + 1] = { indent = 1, text = Red(L.ACCORD_FOLLOW_GROUP:format(shown(F.source), KindText(F))),
+						tooltip = function(tt)
+							tt:AddLine(L.ACCORD_FOLLOW_GROUP:format(shown(F.source), KindText(F)), 1, 0.4, 0.4, true)
+							tt:AddLine(L.ACCORD_FOLLOW_BY:format(shown(F.by), date and date("%Y-%m-%d %H:%M", F.at) or tostring(F.at)), 0.7, 0.7, 0.7)
+							if may then tt:AddLine(L.ACCORD_FOLLOW_STOP_TIP, 0.6, 0.6, 0.6, true) end
+						end,
+						onClick = may and function() ns.ShowDialog("OLYMPUS_TAGFOLLOW_STOP", shown(F.source), nil, data) end or nil }
+				end
+			end
 		end
 	end
-	local times, n = {}, 0
-	for _, r in ipairs(g.rows) do
-		local aat = tonumber(r.aat)
-		if aat and not times[aat] then times[aat], n = true, n + 1 end
-	end
-	if n >= 2 then
+	-- Two game accounts sent this BattleTag (two codes): each sanction not followed on the other
+	-- account's code waits for a click, which follows it there.
+	if #codes >= 2 then
 		for _, r in ipairs(g.rows) do
 			for kind in pairs(TF.KINDS) do
-				if not followed[kind .. Fold(r.name)] and MayGive(kind) and Direct(kind, r.name) then
-					local name = r.name
-					out[#out + 1] = { indent = 1, text = Gold(L.ACCORD_FOLLOW_CONTESTED), wrap = true,
-						onClick = function()
-							local ok, why = TF.Give(kind, name, { manual = true })
-							if ok then ns.Print(L.ACCORD_FOLLOW_DONE:format(why))
-							elseif why == "reach" then ns.Print(L.ACCORD_FOLLOW_SKIPPED) end
-						end }
+				if MayGive(kind) and Direct(kind, r.name) then
+					for _, hash in ipairs(codes) do
+						if not followed[kind .. Fold(r.name) .. "|" .. hash] and not KingCode(hash) then
+							local name = r.name
+							followed[kind .. Fold(r.name) .. "|" .. hash] = true
+							out[#out + 1] = { indent = 1, text = Gold(L.ACCORD_FOLLOW_CONTESTED), wrap = true,
+								onClick = function()
+									local ok, why = TF.Give(kind, name, { manual = true, hash = hash })
+									if ok then ns.Print(L.ACCORD_FOLLOW_DONE:format(why))
+									elseif why == "reach" then ns.Print(L.ACCORD_FOLLOW_SKIPPED) end
+								end }
+						end
+					end
 				end
 			end
 		end
@@ -1133,7 +1381,7 @@ function TF.Slash(verb, rest)
 	local full = CharName(name)
 	for _, kind in ipairs({ "N", "T" }) do
 		if full and Direct(kind, full) then
-			local ok, why = TF.Give(kind, full, { manual = true })
+			local ok, why = TF.GiveByHand(kind, full)
 			if ok then
 				done = true
 				ns.Print(L.ACCORD_FOLLOW_DONE:format(why))
@@ -1227,7 +1475,8 @@ function TF.ResetForTests(login)
 	wipe(rates); wipe(rateAll); wipe(buffer); wipe(sentNow); wipe(refusedWhy)
 	for k in pairs(stats) do stats[k] = 0 end
 	session.mine, session.read, session.loginAt, session.under = nil, false, tonumber(login), false
-	wipe(session.told); wipe(session.queue); wipe(session.queued); wipe(session.derivedAt)
+	wipe(session.told); wipe(session.queue); wipe(session.queued); wipe(session.derivedAt); wipe(session.evidence); wipe(session.resent)
+	session.evidenceN = 0
 	session.lastAuto, session.lastSweep = -math.huge, -math.huge
 	busy = 0
 	TF.Bump()
