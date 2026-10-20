@@ -30165,6 +30165,27 @@ test("1.2.6 companion sections: the registry takes each name once, copies plain 
 	eq(B.GetSection("missing"), nil)
 end)
 
+test("1.2.6 companion sections (931): a section may ask for more room when it registers, a whole roster's or a room's lines, never past the ceilings", function()
+	local B = OlympusBridge
+	eq(B.SECTION_LIMITS.sections, 32, "room for every tab's section")
+	local function F() return {} end
+	eq(select(2, B.RegisterSection("t_lim_bad", 1, F, "big")), "limits")
+	eq(select(2, B.RegisterSection("t_lim_over", 1, F, { values = B.SECTION_MAX.values + 1 })), "limits")
+	eq(select(2, B.RegisterSection("t_lim_str", 1, F, { string = B.SECTION_MAX.string + 1 })), "limits")
+	eq(select(2, B.RegisterSection("t_lim_zero", 1, F, { values = 0 })), "limits")
+	local rows = {}
+	for i = 1, 3000 do rows[i] = { n = i, text = string.rep("w", 300) } end
+	assert(B.RegisterSection("t_lim_big", 1, function() return { rows = rows } end, { values = 10000, string = 255 }))
+	local d = assert(B.GetSection("t_lim_big")).data
+	eq(#d.rows, 3000, "its own budget: every row")
+	eq(#d.rows[1].text, 255, "its own string length")
+	-- The defaults still hold for a section that asked for nothing.
+	assert(B.RegisterSection("t_lim_default", 1, function() return { rows = rows } end))
+	local small = assert(B.GetSection("t_lim_default")).data
+	assert(#small.rows < 3000, "the default budget still cuts")
+	eq(#small.rows[1].text, B.SECTION_LIMITS.string)
+end)
+
 test("1.2.6 companion sections: guilds, rankings and wanted carry only public rows and allowlisted fields", function()
 	local D = ns.Data
 	local saved = { rdb = ns.rdb, now = ns.Now, realm = ns.realm, group = ns.group, faction = ns.faction, api = ns.API }

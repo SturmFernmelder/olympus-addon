@@ -213,18 +213,32 @@ end
 -- council/High Council-only view, treasury items or anything private to an audience the player is
 -- not in: an exporter that would need one does not belong here.
 OlympusBridge.SECTIONS_API_VERSION = 1
-OlympusBridge.SECTION_LIMITS = { sections = 16, depth = 5, values = 1500, string = 120 }
+OlympusBridge.SECTION_LIMITS = { sections = 32, depth = 5, values = 1500, string = 120 }
+-- (931) A section that needs more than the defaults (a whole roster, a room's chat lines, a decree's
+-- text) asks for it when it registers, never past these ceilings.
+OlympusBridge.SECTION_MAX = { values = 200000, string = 512 }
 
 local sections, sectionNames = {}, {}
 
 -- Registers `name` (lowercase letters, digits, "_"); a name is taken once, by its first exporter.
-function OlympusBridge.RegisterSection(name, version, exporter)
+-- `limits` (optional): { values = n, string = n } for this section, each at most SECTION_MAX's.
+local function Limit(v, default, max)
+	if v == nil then return default end
+	if type(v) ~= "number" or v < 1 or v ~= math.floor(v) or v > max then return nil end
+	return v
+end
+function OlympusBridge.RegisterSection(name, version, exporter, limits)
 	if type(name) ~= "string" or not name:match("^[a-z][a-z0-9_]*$") or #name > 32 then return false, "name" end
 	if type(version) ~= "number" or version < 1 or version ~= math.floor(version) then return false, "version" end
 	if type(exporter) ~= "function" then return false, "exporter" end
+	if limits ~= nil and type(limits) ~= "table" then return false, "limits" end
+	local L, M = OlympusBridge.SECTION_LIMITS, OlympusBridge.SECTION_MAX
+	local values = Limit(limits and limits.values, L.values, M.values)
+	local str = Limit(limits and limits.string, L.string, M.string)
+	if not values or not str then return false, "limits" end
 	if sections[name] then return false, "taken" end
-	if #sectionNames >= OlympusBridge.SECTION_LIMITS.sections then return false, "full" end
-	sections[name] = { version = version, exporter = exporter }
+	if #sectionNames >= L.sections then return false, "full" end
+	sections[name] = { version = version, exporter = exporter, values = values, string = str }
 	sectionNames[#sectionNames + 1] = name
 	table.sort(sectionNames)
 	return true
@@ -244,7 +258,7 @@ local function SectionCopy(value, depth, budget)
 	local t = type(value)
 	if t == "string" then
 		budget.left = budget.left - 1
-		return Plain(value, OlympusBridge.SECTION_LIMITS.string)
+		return Plain(value, budget.string or OlympusBridge.SECTION_LIMITS.string)
 	elseif t == "number" then
 		budget.left = budget.left - 1
 		if value ~= value or value == math.huge or value == -math.huge then return nil end
@@ -283,7 +297,7 @@ function OlympusBridge.GetSection(name)
 	local ok, data = pcall(entry.exporter)
 	if not ok or type(data) ~= "table" then return nil end
 	return { name = name, version = entry.version,
-		data = SectionCopy(data, 0, { left = OlympusBridge.SECTION_LIMITS.values }) }
+		data = SectionCopy(data, 0, { left = entry.values, string = entry.string }) }
 end
 
 OlympusBridge.RegisterSection("census", 1, OlympusBridge.GetCensusCheckpoint)
