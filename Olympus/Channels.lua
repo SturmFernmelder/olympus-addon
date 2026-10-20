@@ -1208,6 +1208,12 @@ end
 
 local function Bump(t, key) t[key] = (t[key] or 0) + 1 end
 
+-- (TagFollow.lua) A line only a BattleTag's follow keeps out (Admit, below).
+local function Evidence(sender, kind, source)
+	local TF = ns.TagFollow
+	if type(TF) == "table" and not TF.missing and type(TF.Evidence) == "function" then ns.SafeCall("tag follow evidence", TF.Evidence, sender, kind, source) end
+end
+
 -- 1.2: the checks a line from another player passes before it may show, in Receive's order, one
 -- code shared with the Blood Arena's fight rooms (ArenaChat.lua, EC) rather than a copy:
 --   Channels.Admit(sender, guild, text, now, o) -> ok, reason
@@ -1231,16 +1237,24 @@ function Channels.Admit(sender, guild, text, now, o)
 	local st = o.stats or stats
 	local m = { tier = o.where or o.tier or "?", guild = guild }
 	-- 1.1: a name the moderators took off (net-off, Moderation.lua): not shown, not kept.
-	if ns.Moderation.Hides and ns.Moderation.Hides(sender, guild) then
+	local off, offOn, offVia
+	if ns.Moderation.Hides then off, offOn, offVia = ns.Moderation.Hides(sender, guild) end
+	if off then
 		Bump(st, "netoff")
+		-- (TagFollow.lua) Hidden here only through his BattleTag's follow, and still chatting: his
+		-- addon does not apply it (a team client may give him the same sanction by name).
+		if offVia == "tag" and o.id ~= nil then Evidence(sender, "N", offOn) end
 		return false, "netoff"
 	end
 	-- 1.1.6: a moderator's timeout on this sender (WatchChat.lua): not shown, not kept, nothing to a
 	-- companion. Every chat that calls Admit takes it: the three channels, the rooms, the fight rooms.
 	local WC = ns.WatchChat
-	if WC and WC.Silenced and WC.Silenced(sender, guild) then
+	local silenced, silencedVia
+	if WC and WC.Silenced then silenced, silencedVia = WC.Silenced(sender, guild) end
+	if silenced then
 		Bump(st, "timeout")
 		if WC.CountBlocked then WC.CountBlocked(sender, "timeout") end
+		if silencedVia and o.id ~= nil then Evidence(sender, "T", silencedVia) end
 		return false, "timeout"
 	end
 	local level = o.level

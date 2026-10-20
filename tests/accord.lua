@@ -566,7 +566,10 @@ test("accord: the team's page groups one player's characters, the digits hidden 
 		assert(not text:find("1234", 1, true) and not text:find("7777", 1, true), "no digits until Show: " .. text)
 		assert(text:find("Tester#****", 1, true) and text:find("Bob#****", 1, true), text)
 		assert(text:find(L.ACCORD_TEAM_SHARED:format(2), 1, true)); assert(text:find(L.ACCORD_TEAM_ONE, 1, true))
-		assert(text:find(L.ACCORD_TEAM_SCOPE, 1, true), "never act on one alone")
+		-- (Changed on purpose, the tag follow (TagFollow.lua): the scope line no longer says "never act on
+		-- a BattleTag alone", since a sanction now follows one by itself; it says to stop a wrong follow
+		-- here. The check is the same: the page shows that line.)
+		assert(text:find(L.ACCORD_TEAM_SCOPE, 1, true), "stop a wrong follow here")
 		assert(text:find(L.ACCORD_TEAM_PROFILE:format("Tester#****"), 1, true))
 		assert(text:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Second Alt"), 1, true), text)
 		assert(Shown(A.ProfileLines("Nobody Here-Realm")):find(L.ACCORD_TEAM_PROFILE_NONE, 1, true))

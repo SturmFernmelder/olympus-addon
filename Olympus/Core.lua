@@ -1863,6 +1863,7 @@ StandIn("Judgment", {}) -- 1.2: a case to the King, the High Council's votes, hi
 StandIn("Church", { "Slash" }) -- 1.1.6: the Missionary Church of Olympus (Church.lua)
 StandIn("WatchChat", {}) -- 1.1.6: chat moderation (deleted lines, timeouts, sanctions' bars)
 StandIn("ChatStrikes", {}) -- the chat warnings: three in 24 hours (ChatStrikes.lua)
+StandIn("TagFollow", {}) -- a sanction that follows the BattleTag (TagFollow.lua)
 StandIn("Wanted", { "SightingsSlash", "Slash" }) -- 1.2: the Horde Most Wanted ledger and its sightings (1.2.3: /oly wanted)
 StandIn("Board", { "Slash" }) -- (1.1: the Board)
 StandIn("Week", {}) -- (1.1: the King's week)
@@ -2088,7 +2089,7 @@ ns.RegisterEvent("PLAYER_LOGIN", function()
 	local missing = {}
 	-- (1.2: the file of a key named otherwise: the Blood Arena's core is ArenaNet.lua.)
 	local FILES = { Arena = "ArenaNet.lua" }
-	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes" }) do
+	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes", "TagFollow" }) do
 		if ns[key].missing then missing[#missing + 1] = FILES[key] or (key .. ".lua") end
 	end
 	if ns.Gate.missing then missing[#missing + 1] = "Gamepad.lua" end -- (1.1.5, the gamepad gate)

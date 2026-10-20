@@ -134,6 +134,7 @@ Nameplates.lua
 ChatWindow.lua
 WatchChat.lua
 ChatStrikes.lua
+TagFollow.lua
 OfficerMuster.lua
 Bridge.lua
 Wanted.lua

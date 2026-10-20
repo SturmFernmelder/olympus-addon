@@ -725,6 +725,38 @@ their listing, answers and recipe lists as a crafter, and their elite border and
 (they show as no Olympus player). The names their player already linked as alts are hidden with
 them (alt links, below). The rest of their guild, and
 the census, are not touched: one name stops the spam.
+- **A sanction follows the BattleTag** (the author: one with the same BattleTag as a banned or
+  censured player gets the same on that new character). A BattleTag the Olympus Accord sends the
+  moderation team is one Battle.net account, so one person. When a character is taken off the
+  network, or given a timeout or a hold in Olympus or guild scope, a moderation team client that
+  holds his BattleTag and may give that sanction itself sends a code of it on the Olympus channel,
+  logged, with his name (16 hex digits of SHA-256 with a fixed public prefix: not secret, anyone who
+  guesses a BattleTag can make its code and compare): his sanction then follows his other
+  characters. It does so right after the team member's own sanction, when the BattleTag arrives
+  later, and (a team client online ten minutes) for the others' sanctions. A follow points at his
+  sanction and never copies one: when his own sanction is lifted, ends or is replaced, whoever does
+  it, his other characters are free at once. Each player's addon reads his own BattleTag from his own
+  game and applies a follow of it to himself alone (his Olympus chats, what net-off holds, his
+  powers, games, map and Crafting, as every sanction); an Olympus pop-up tells him, never who gave
+  it, the Decrees say so, and a followed timeout is appealed as his own. A team client hides the
+  other characters whose BattleTag it holds, and The Watch's BattleTags page marks them; a click
+  there stops a wrong follow (`/oly accord unfollow <name>`; `/oly accord follow <name>` follows one
+  by hand). The giver follows only within his reach: never when a character of that BattleTag he
+  knows stands as high as he or the sanction does, or is the King; never on the King's game account,
+  never at or below a character's own rank or protection (his addon remembers its account's highest
+  for two days); a BattleTag two game accounts
+  reported (two Accord accept times: two accounts, or a copied tag) waits for a team member's click.
+  Nothing goes out by name on a match alone, since a modified addon can send someone else's
+  BattleTag: only when a followed character still chats ten minutes after the follow came (his addon
+  does not apply it) does a team client that may give that sanction by name give it, six an hour at
+  most, and take it back once the follow ends. An "on" word or a lift on the followed character's
+  own name frees him alone. Limits: clients from before this release send no BattleTag and apply no
+  follow, so they are sanctioned by name as before; a modified addon can skip it or send a false
+  BattleTag (the by-name word covers one that still sends its real BattleTag and chats); a follow
+  stays within one realm group and faction, as the network does; a new Battle.net account is a new
+  BattleTag; a follow needs its giver (or another team client holding the BattleTag) online every
+  three days and lapses 30 days after it was given; guild net-off, exile and the chat warnings' holds
+  are not followed (a hold follows once a moderator decides the case with a timeout).
 - The Decrees tab lists who is hidden, with the reason, who hid them and when (the server's
   clock), and who passed the word on when it reached you through another issuer's addon (the
   server's name for that one: nobody writes a word in someone else's name unseen). The same
@@ -1854,6 +1886,7 @@ message (the game adds it). What goes where:
 | The Church's numbers (rankings, a person's detail) and the keepers' ledger | the Church's audience who asked (the Church, the High Council, the King, the author), alone; the ledger between keepers alone | when a member of that audience opens the tab or refreshes; never on the channel, except, while the author's switch is open, the rows of the people who chose to show theirs and the top 3 of each ranking (names only) |
 | Your BattleTag, the Olympus Accord's version and when you accepted it, your guild (BT, 1.2.5.1) | one moderation team member alone (the author, the King, a High Councillor or an Olympus moderator they named) at your team level or higher, by a logged whisper; never the Olympus channel, guild chat or any other player | once you accepted the Accord, only to a team member whose addon just asked on your channel, at most once every 20 hours to each, from each of your characters; his client keeps it up to 180 days after he last got it |
 | A moderation team member's ask for BattleTags (BQ, 1.2.5.1): nothing but his name | everyone on the Olympus channel | from a team member's addon, 90 seconds after login and every 30 minutes |
+| A sanction that follows a BattleTag (TF): a 16-character code of a sanctioned player's BattleTag (SHA-256 with a fixed public prefix: not secret, anyone who guesses a BattleTag can make its code and compare), the sanctioned character's name, which sanction (net-off or chat timeout), when, and the team member who gave it | everyone on the Olympus channel (logged); each addon keeps only the ones made from its own player's BattleTag, without the code (a moderation team addon keeps them all), never the BattleTag itself | when a team member's addon follows or stops following a sanction it may give and whose player's BattleTag it holds, then every 5 minutes from that addon while the sanction lasts (a stop every 30 minutes, for 30 days) |
 
 Decrees and the King's calls go out when someone sends one (a decree carries its sender's
 position on the map).
@@ -1893,8 +1926,10 @@ whisper, stays out of your chat. His client keeps it up to 180 days after he las
 Watch's BattleTags, the digits hidden until its **Show**), and drops them all once it is off the
 team: at once on its own sanction or a lost seat, else after two days. A player who asks to have
 his removed: `/oly accord forget <name>` on a team client. It never goes on the Olympus channel or
-guild chat, and no other player's client keeps or shows one. Nothing is done with a BattleTag automatically (no ban or match by tag): a
-modified addon can send someone else's.
+guild chat, and no other player's client keeps or shows one. Its one automatic use: a sanction follows
+it (TF, above), each addon applying a follow of its own player's BattleTag to him alone, never a word
+by name on a match alone. A modified addon can send someone else's, so a wrong follow is stopped from
+The Watch.
 
 **What waits for your yes.** Your zone and layer (below), layer help, your dot on your guild's
 map, a treasury keeper's book, a sister guild's bank (1.1), a Royal Inspection's report, your answers to the author's roll
@@ -2204,9 +2239,12 @@ authenticates ranks; it does not encrypt officer chat.
 
 Other limits:
 - **A BattleTag is what each player's own addon reads and sends** (the Olympus Accord, 1.2.5.1):
-  a modified addon can send someone else's. The moderation team sees it as a lead, never as proof,
-  and nothing happens automatically. Another addon running on a team member's client can read his
-  saved variables, the BattleTags his client keeps included.
+  a modified addon can send someone else's. The moderation team sees it as a lead, never as proof.
+  Its one automatic use is a sanction that follows it, which a false BattleTag can misdirect: each
+  follow shows in The Watch, where a click stops it, and nothing goes out by name on a match alone.
+  The code a follow carries is not secret: anyone who guesses a BattleTag can make it and see that it
+  is followed. Another addon running on a team member's client can read his saved variables, the
+  BattleTags his client keeps included.
 - **The Forever beta forgets addon data at every login**: its client saves it but never loads
   it back ([a known beta bug](https://us.forums.blizzard.com/en/wow/t/savedvariables-never-load-in-the-beta-%E2%80%94-all-addon-settings-reset-on-login-69913/2354798)),
   so settings and the realm key reset every session. The census still refills in seconds: a
@@ -2270,7 +2308,7 @@ Other limits:
 | `/oly need <count> <item>` · `/oly need` | Lords and Captains: ask the treasury for an item (shift-click it into the chat line, or its name or number); alone, your requests and where each stands (1.1) |
 | `/oly bank share on\|off` | the guild master or an officer of an Olympus guild other than the King's shows his guild bank's snapshot to the King, his Steward and his Hands (by whisper, never on the channel), or not (1.1) |
 | `/oly rollcall on\|off` | answer the author's roll calls (version, client, channel state) or not (1.1: not until you say yes) |
-| `/oly accord` · `/oly accord forget <name>` | the Olympus Accord (Olympus's terms of use) again: its version and date; while it waits, I accept or Not now. On a moderation team client, forget drops the BattleTag a player asked to have removed (1.2.5.1) |
+| `/oly accord` · `/oly accord forget <name>` · `/oly accord follow <name>` · `/oly accord unfollow <name>` | the Olympus Accord (Olympus's terms of use) again: its version and date; while it waits, I accept or Not now. On a moderation team client, forget drops the BattleTag a player asked to have removed (1.2.5.1); follow makes that player's sanction follow his BattleTag by hand (a disputed one included), unfollow stops it (his other characters are free, his own sanction stays) |
 | `/oly privacy` | the first-open page again: what the addon shares, and your Yes or No to each (1.1) |
 | `/oly profile [Name]` | a player's profile in the Olympus window, yours (**My profile**) with no name |
 | `/oly letters [version]` | the version letters (1.1.5): every one, newest first, a click opens one; with a version, that letter |

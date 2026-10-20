@@ -41,8 +41,10 @@ local L = ns.L
 -- digits hidden until the page's Show (REVEAL seconds), and on the King's screen no part of a tag,
 -- his eye button included. `/oly accord forget <name>` drops that player's tag on a team client (a
 -- removal asked for). A tag is what that player's own addon read and sent: a modified addon can
--- send someone else's, so nothing is ever done with one automatically (a later option, with that
--- in mind).
+-- send someone else's. Its one automatic use: a sanction follows the BattleTag (TagFollow.lua), a
+-- code of it (not secret: anyone who guesses a BattleTag can make its code) reaching every client,
+-- each applying it to its own player alone; nothing goes out by name on a match alone, and a wrong
+-- follow is stopped from The Watch (`/oly accord unfollow <name>`).
 --
 --   BQ~1                                          a team member's ask (the channel, not logged)
 --   BT~1~<version>~<accepted at>~<guild>~<tag>    a player's answer (a logged whisper to the asker)
@@ -92,6 +94,11 @@ local watchingNotFound, filtering = false, false
 local stats = { asks = 0, heard = 0, told = 0, kept = 0, refused = 0, askNotTeam = 0, lower = 0, gone = 0, wiped = 0 }
 
 local function Mono() return type(GetTime) == "function" and GetTime() or 0 end
+-- A sanction that follows the BattleTag (TagFollow.lua, loaded after this file): its calls, guarded.
+local function TF()
+	local t = ns.TagFollow
+	return type(t) == "table" and not t.missing and t or nil
+end
 local function Grey(s) return "|cff9d9d9d" .. tostring(s) .. "|r" end
 
 -- Values the client hides from addons (secret values): never compared, never read.
@@ -296,7 +303,8 @@ function Accord.Check()
 	local a = Saved()
 	local tag = Accord.ReadTag()
 	if type(ns.db) == "table" and ns.IsKingCharacter and ns.IsKingCharacter(ns.me) == true then ns.db.kingAccount = true end
-	if a and ns.AccordAccepted() and tag and SavedFp(a) and SavedFp(a) ~= Accord.Fp(tag) then
+	local changed = a and ns.AccordAccepted() and tag and SavedFp(a) and SavedFp(a) ~= Accord.Fp(tag) or false
+	if changed then
 		a.yes, a.why = false, "tag"
 		ns.Log("olympus accord: this account's BattleTag changed, asked again")
 		Changed(false)
@@ -307,6 +315,9 @@ function Accord.Check()
 		ns.Print(L.ACCORD_NEW_VERSION:format(ns.ACCORD_VERSION))
 	end
 	if frame and frame:IsShown() then Accord.Refresh(true) end
+	-- (This account's own BattleTag's code, for the follows: read again; another tag drops its own.)
+	local T = TF()
+	if T and T.Refresh then ns.SafeCall("tag follow refresh", T.Refresh, changed == true) end
 end
 
 ---------------------------------------------------------------------------
@@ -540,9 +551,13 @@ function Accord.Prune()
 		if type(r) ~= "table" or type(r.tag) ~= "string" or type(r.name) ~= "string" or now - (tonumber(r.last) or 0) > Accord.KEEP then
 			s.rows[k] = nil
 		else
+			-- (Its code for the follows, TagFollow.lua: made again from the tag when it is not one.)
+			if r.h ~= nil and not (type(r.h) == "string" and #r.h == 16 and r.h:find("^[0-9a-f]+$")) then r.h = nil end
 			list[#list + 1] = { k = k, last = tonumber(r.last) or 0 }
 		end
 	end
+	local T = TF()
+	if T and T.Bump then T.Bump() end
 	if #list <= Accord.ROWS_MAX then return end
 	table.sort(list, function(x, y) return x.last < y.last end)
 	for i = 1, #list - Accord.ROWS_MAX do s.rows[list[i].k] = nil end
@@ -593,6 +608,9 @@ function Accord.HandleTag(dist, sender, text)
 	Accord.Prune()
 	stats.kept = stats.kept + 1
 	ns.Log("olympus accord: a BattleTag from %s kept (%s)", sender, via) -- (never the tag)
+	-- (TagFollow.lua: its code kept with it; a sanction on him, or on the tag he had before, follows it.)
+	local T = TF()
+	if T and T.OnTag and s.rows[key] then ns.SafeCall("tag follow", T.OnTag, sender, s.rows[key]) end
 	ns.Fire("ACCORD_TEAM_CHANGED")
 	return true
 end
@@ -616,6 +634,9 @@ function Accord.Guard()
 	local unseated = same and s.namer == true and w ~= nil and type(w.NamerLevel) == "function" and (tonumber(w.NamerLevel(ns.me)) or 0) == 0
 	local why = barred and "sanction" or unseated and "seat" or now - s.teamAt > Accord.TEAM_GRACE and "lapsed" or nil
 	if not why then return false end
+	-- (TagFollow.lua: only this account's own follows stay, without their code.)
+	local T = TF()
+	if T and T.DropTeam then ns.SafeCall("tag follow", T.DropTeam) end
 	ns.rdb.battletags = nil
 	stats.wiped = stats.wiped + 1
 	ns.Log("olympus accord: off the moderation team (%s), its BattleTags dropped", why)
@@ -640,8 +661,43 @@ function Accord.Forget(name)
 		end
 	end
 	ns.Log("olympus accord: a BattleTag dropped on request (%d characters)", n) -- (never the tag)
+	local T = TF()
+	if T and T.Bump then T.Bump() end
 	ns.Fire("ACCORD_TEAM_CHANGED")
 	return true, n
+end
+
+-- (TagFollow.lua) A team client's kept BattleTag for `name`, its code, and the rows of one code:
+-- the characters one player plays, as this client knows them. Nothing on any other client. Read
+-- from the store itself, never through TeamMember (WatchChat asks TagFollow, which asks this).
+local function RowOf(name)
+	local s = Store(false)
+	if not s or type(name) ~= "string" or name == "" then return nil end
+	local row = s.rows[ns.Fold(ns.FullName(ns.Normal(name)))]
+	return type(row) == "table" and type(row.tag) == "string" and row or nil
+end
+local function RowHash(row)
+	if type(row.h) == "string" and #row.h == 16 and row.h:find("^[0-9a-f]+$") then return row.h end
+	local T = TF()
+	row.h = T and T.Hash and T.Hash(row.tag) or nil
+	return row.h
+end
+function Accord.TagOf(name)
+	local row = RowOf(name)
+	return row and row.tag or nil
+end
+function Accord.HashOf(name)
+	local row = RowOf(name)
+	return row and RowHash(row) or nil
+end
+function Accord.Rows(hash)
+	local s, out = Store(false), {}
+	if not s or type(hash) ~= "string" then return out end
+	for _, r in pairs(s.rows) do
+		if type(r) == "table" and type(r.tag) == "string" and type(r.name) == "string" and RowHash(r) == hash then out[#out + 1] = r end
+	end
+	table.sort(out, function(x, y) return tostring(x.name) < tostring(y.name) end)
+	return out
 end
 
 function Accord.Count()
@@ -701,22 +757,29 @@ function Accord.TeamLines()
 	end
 	local masked = ns.CouncilMasked()
 	local W = ns.Watch
+	local T = TF()
 	for i, g in ipairs(groups) do
 		if i > Accord.SHOWN_MAX then break end
 		local n = #g.rows
 		lines[#lines + 1] = { text = Accord.ShownTag(g.tag, i), right = Grey(n == 1 and L.ACCORD_TEAM_ONE or L.ACCORD_TEAM_SHARED:format(n)) }
+		-- (TagFollow.lua: the sanctions that follow this BattleTag, a click stops one; on a disputed one,
+		-- each sanction not followed, a click follows it.)
+		for _, l in ipairs(T and T.GroupLines and T.GroupLines(g, ShownName) or {}) do lines[#lines + 1] = l end
 		for _, r in ipairs(g.rows) do
 			local name = r.name
 			local open = type(W) == "table" and not W.missing and type(W.CanRead) == "function" and W.CanRead() == true
 				and type(W.OpenMember) == "function"
+			local note, noteTip
+			if T and T.RowNote then note, noteTip = T.RowNote(name) end
 			lines[#lines + 1] = {
-				indent = 1, text = L.ACCORD_TEAM_ROW:format(ShownName(name), masked and "?" or tostring(r.guild or "?")),
+				indent = 1, text = L.ACCORD_TEAM_ROW:format(ShownName(name), masked and "?" or tostring(r.guild or "?")) .. (note or ""),
 				right = Grey(L.ACCORD_TEAM_LAST:format(ns.Ago(r.last))),
 				tooltip = function(tt)
 					tt:AddLine(ShownName(name), 1, 0.82, 0)
 					tt:AddLine(rawget(L, VIA[r.via] or "") or L.ACCORD_TEAM_UNVERIFIED, 1, 1, 1, true)
 					tt:AddLine(L.ACCORD_TEAM_ACCORD:format(tonumber(r.av) or 0, date("%Y-%m-%d", tonumber(r.aat) or 0)), 0.7, 0.7, 0.7)
 					if type(r.prev) == "string" then tt:AddLine(L.ACCORD_TEAM_PREV:format(Accord.ShownTag(r.prev)), 0.7, 0.7, 0.7) end
+					if noteTip then tt:AddLine(noteTip, 1, 0.4, 0.4, true) end
 				end,
 				onClick = open and function() W.OpenMember(name) end or nil,
 			}
@@ -745,6 +808,9 @@ function Accord.ProfileLines(target)
 	if #others > 0 then
 		out[#out + 1] = { id = "watch-profile-battletag-also", text = L.ACCORD_TEAM_PROFILE_ALSO:format(table.concat(others, ", ")), wrap = true }
 	end
+	-- (TagFollow.lua: reached by another character's sanction, or his own follows his BattleTag.)
+	local T = TF()
+	for _, l in ipairs(T and T.ProfileLines and T.ProfileLines(target, ShownName) or {}) do out[#out + 1] = l end
 	return out
 end
 
@@ -1042,7 +1108,8 @@ function Accord.Show(reason)
 	return frame
 end
 -- /oly accord: the letter; /oly accord forget <name> (a team client): that player's BattleTag
--- dropped here, as he asked.
+-- dropped here, as he asked; /oly accord follow|unfollow <name> (a team client): that player's
+-- sanction follows his BattleTag, or no longer does (TagFollow.lua).
 function Accord.Slash(rest)
 	local name = type(rest) == "string" and rest:match("^%s*forget%s+(.-)%s*$")
 	if name then
@@ -1050,6 +1117,13 @@ function Accord.Slash(rest)
 		if ok then ns.Print(L.ACCORD_FORGOT:format(n))
 		else ns.Print(n == "team" and L.ACCORD_FORGET_TEAM or L.ACCORD_FORGET_NONE:format(name)) end
 		return ok
+	end
+	local verb, who = (type(rest) == "string" and rest or ""):match("^%s*(%a+)%s*(.-)%s*$")
+	verb = verb and verb:lower()
+	if verb == "follow" or verb == "unfollow" then
+		local T = TF()
+		if not (T and T.Slash) then ns.Print(L.RESTART_NEEDED) return false end
+		return T.Slash(verb, who)
 	end
 	return Accord.Show("slash")
 end
@@ -1075,8 +1149,10 @@ function Accord.StatusLine()
 	else state = ("v%d not accepted%s"):format(ns.ACCORD_VERSION, session.declined and " (not now)" or "") end
 	local _, why = Accord.ReadTag()
 	local team = Accord.TeamMember() and (" | team: %d characters, %d BattleTags"):format(Accord.Count(), #Accord.Groups()) or ""
-	return ("%s | battletag %s%s | asks %d, heard %d, told %d, kept %d, refused %d, not team %d, below %d, gone %d, wiped %d"):format(state,
-		why or "readable", team, stats.asks, stats.heard, stats.told, stats.kept, stats.refused, stats.askNotTeam, stats.lower, stats.gone, stats.wiped)
+	local T = TF()
+	local follows = T and T.StatusLine and (" | " .. T.StatusLine()) or ""
+	return ("%s | battletag %s%s | asks %d, heard %d, told %d, kept %d, refused %d, not team %d, below %d, gone %d, wiped %d%s"):format(state,
+		why or "readable", team, stats.asks, stats.heard, stats.told, stats.kept, stats.refused, stats.askNotTeam, stats.lower, stats.gone, stats.wiped, follows)
 end
 function Accord.Stats() return stats end
 
