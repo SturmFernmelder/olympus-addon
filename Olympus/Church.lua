@@ -477,7 +477,9 @@ function Church.IsKeeper(name) return KEEPER_ROLES[Church.Role(name or ns.me) or
 -- create and verify records; the King and signed High Council may retain and retransmit the
 -- verified ledger so it does not disappear merely because the Apostle that saw it logged out.
 -- This is also the trust boundary a future companion must use instead of becoming another source
--- of Church facts.
+-- of Church facts. (The Church ledger itself, ChurchCount.lua: a keeper takes its lines only from
+-- keepers, a council client keeps a copy, and the King's client, as in 1.2.5.1, does no background
+-- Church work: no catch-up, no copy.)
 function Church.IsLedgerRelay(name)
 	name = name or ns.me
 	return Church.IsKeeper(name) or Church.IsKing(name)

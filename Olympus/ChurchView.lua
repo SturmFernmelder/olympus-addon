@@ -269,10 +269,11 @@ end
 -- Ranking
 ---------------------------------------------------------------------------
 
-local function AsOfLine(asOf, remote)
+-- (catching: a keeper's own numbers while its first catch-up goes on, Count.RankingView.)
+local function AsOfLine(asOf, remote, catching)
 	local desk = Church.Desk()
 	local text
-	if not remote then text = L.CHURCH_ASOF_LIVE
+	if not remote then text = catching and L.CHURCH_ASOF_CATCHING or L.CHURCH_ASOF_LIVE
 	elseif asOf then text = L.CHURCH_ASOF:format(ns.Ago(asOf))
 	else text = L.CHURCH_ASOF_NONE end
 	if remote then text = text .. "  " .. (desk and L.CHURCH_DESK:format(Name(desk)) or L.CHURCH_NO_KEEPER) end
@@ -322,9 +323,9 @@ function View.RankingLines()
 		if #rows == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.CHURCH_RANKING_EMPTY) } end
 		return lines, L.CHURCH_TITLE, L.CHURCH_FULLNESS_RULE
 	end
-	local rows, asOf, remote = Count.RankingView(View.list, View.window)
+	local rows, asOf, remote, catching = Count.RankingView(View.list, View.window)
 	if remote and not PreviewRole() then Count.Ask(View.list, View.window) end
-	lines[#lines + 1] = AsOfLine(asOf, remote)
+	lines[#lines + 1] = AsOfLine(asOf, remote, catching)
 	lines[#lines + 1] = { header = true, text = L["CHURCH_RANKING_" .. View.list:upper()],
 		tooltip = Tip(L["CHURCH_RANKING_" .. View.list:upper()], L.CHURCH_POINTS_TIP) }
 	local rules = ns.RankingRules and ns.RankingRules.Link("church-score", function() ShowRules("church-score") end)
@@ -362,12 +363,12 @@ local STATE_LABEL = { open = "CHURCH_REG_OPEN", credited = "CHURCH_REG_CREDITED"
 	transfer = "CHURCH_REG_TRANSFER", alt = "CHURCH_REG_TRANSFER", withdrawn = "CHURCH_REG_WITHDRAWN", expired = "CHURCH_REG_EXPIRED" }
 
 local function DetailLinesFor(person, lines, skipRegs)
-	local detail, asOf, remote = Count.DetailView(person, View.window)
+	local detail, asOf, remote, catching = Count.DetailView(person, View.window)
 	if remote then
 		local mine = Church.Key(person) == Church.Key(ns.me)
 		Count.Ask(mine and "me" or "p", View.window, not mine and person or nil)
 	end
-	lines[#lines + 1] = AsOfLine(asOf, remote)
+	lines[#lines + 1] = AsOfLine(asOf, remote, catching)
 	local seen = false
 	for _, d in ipairs(detail or {}) do
 		seen = true
