@@ -257,6 +257,7 @@ test("Wanted last seen online (RH-09): a No said on another realm group or facti
 		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
 		c.Wanted.Rebuild()
 		local online = "wanted-online:g:" .. guid
+		local rowId = "wanted:g:" .. guid
 		local function Find(id)
 			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
 			return nil
@@ -269,7 +270,13 @@ test("Wanted last seen online (RH-09): a No said on another realm group or facti
 			c.TestAdvance(c.Wanted.SIGHT_GAP + 1)
 			assert(c.Wanted.ObserveUnit("target"))
 			local at = assert(home.wanted.targets["g:" .. guid].seenOnline, "the time he was seen goes on his entry")
-			assert(TipText(assert(Find(online))):find(c.L.WANTED_ONLINE_OWN, 1, true), "his line: this client's own sighting")
+			-- The compact list keeps the time and its source on the target row; the separate
+			-- Last seen online line belongs only to the target's detail page.
+			local row = assert(Find(rowId), "his compact list row")
+			assert(row.right:find("|cff9d9d9d  ·  ", 1, true), "his row has the short last-seen time")
+			local seenTip = TipText(row)
+			assert(seenTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "his row: this client's own sighting: " .. seenTip)
+			eq(Find(online), nil, "the compact list has no separate last-seen line")
 			return at
 		end
 

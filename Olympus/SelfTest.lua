@@ -1956,7 +1956,15 @@ function Sweep.Visit(stepId, way, opts)
 		if opts.expect and not opts.expect() then return P(step, "skip", "not shown for this character (" .. SafeId(PageKey()) .. ")") end
 		local key = PageKey()
 		if opts.dedupe and run.seen[key] then return end
-		if opts.linkOnly and #((View() or {}).lines or {}) == 0 then
+		-- The Realm renderer always adds its navigation and search chrome, even when this
+		-- registered page has no lines of its own. Ignore those two lines when deciding that a
+		-- Link-only registration is not a page which needs a Back button.
+		local visible = (View() or {}).lines or {}
+		local ownLines = 0
+		for _, line in ipairs(visible) do
+			if type(line) ~= "table" or (line.pageNav ~= true and line.pageSearch ~= true) then ownLines = ownLines + 1 end
+		end
+		if opts.linkOnly and ownLines == 0 then
 			run.seen[key] = true
 			return P(step, "skip", SafeId(key) .. ": nothing of its own (its link opens another page)")
 		end
@@ -2073,8 +2081,7 @@ SelfTest.OPENERS = {
 	{ id = "census-stats", back = true, open = function()
 		local UI = Mod("UI")
 		if not (UI and type(UI.OpenCensusStats) == "function") then return false, "not in this build" end
-		UI.OpenCensusStats()
-		return true
+		return UI.OpenCensusStats() == true, "not available for this character"
 	end },
 	{ id = "board", back = true, tab = "realm", key = "realm/board", open = function()
 		local V = ns.Views
