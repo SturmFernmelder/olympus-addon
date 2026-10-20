@@ -51,6 +51,7 @@ Locales\PlayerSightingsText.lua
 Locales\AccordText.lua
 Locales\RecordText.lua
 Locales\CensusStatsText.lua
+Locales\SelfTestText.lua
 Core.lua
 GamepadRegistry.lua
 Gamepad.lua
@@ -150,6 +151,7 @@ BridgeSections.lua
 BridgePeople.lua
 BridgeAffairs.lua
 Record.lua
+SelfTest.lua
 ArenaMath.lua
 Compliance.lua
 ArenaRating.lua

@@ -2107,6 +2107,19 @@ function UI.PageId()
 	return PageOf(main.tab, UI.Locked())
 end
 
+-- The self-test (SelfTest.lua): what the window shows now, read only. Its rows (each with the line
+-- it draws), the page's strips, its buttons, whether its parchment shows.
+function UI.SelfTestView()
+	if not main then return nil end
+	local content = main.views and main.views[main.tab]
+	local lines = {}
+	for i = 1, content and content.lineCount or 0 do lines[i] = content.rows and content.rows[i] and content.rows[i].line end
+	return { frame = main, tab = main.tab, page = UI.PageId(), shown = main:IsShown(), docked = main.docked == true,
+		content = content, rows = content and content.rows or {}, lines = lines, nav = main.pageNavLines or {},
+		parchment = main.parchment ~= nil and main.parchment:IsShown(), profile = playerProfile ~= nil,
+		buttons = main.buttons, detailButtons = main.detailButtons }
+end
+
 -- 1.2: how many person pages Back walks through before the list (A -> B -> C... -> Back -> B):
 -- past it the oldest page is dropped, never the list the first one was opened from.
 UI.PROFILE_BACK_MAX = 8
