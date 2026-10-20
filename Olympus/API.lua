@@ -49,11 +49,11 @@ local L = ns.L
 --     (never Olympus's error report) and never stops Olympus or the other callbacks; one that keeps
 --     failing (CALLBACK_FAILS) is dropped.
 --   - Reserved (Daniel, 2026-10-19: no third-party addon may keep a log of where the King has been).
---     The leader's presence and the sightings searches answer only the addons the Olympus team
---     authorized (API.AUTHORIZED: a digest of each one's folded name, so the list names nobody). Any
---     other addon gets "unauthorized" from those methods (RESERVED_METHODS), cannot listen to their
---     events (RESERVED_EVENTS), and its privacy line says only what it may read
---     (API_CONSENT_TEXT_BASIC). OlympusAPI.Has still says what this build has.
+--     The leader's presence, the sightings searches, the quiet presence and the profile presentation
+--     answer only the addons the Olympus team authorized (API.AUTHORIZED: a digest of each one's
+--     folded name, so the list names nobody). Any other addon gets "unauthorized" from those methods
+--     (RESERVED_METHODS), cannot listen to their events (RESERVED_EVENTS), and its privacy line says
+--     only what it may read (API_CONSENT_TEXT_BASIC). OlympusAPI.Has still says what this build has.
 -- A handle is the addon's own: Register gives it once a session for a name, to the first caller
 -- (a second Register for that name gets nil, "taken"), and only for an addon the game has installed
 -- (its TOC's Title, which the privacy line shows). That is a courtesy boundary, not a lock: every
@@ -99,7 +99,8 @@ API.AREA_SCOPES = { hostile = true, outsiders = true }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
 
 -- The reserved features (the header's Reserved): their methods, with the "no" an addon that is not
--- authorized gets ("nil" for a read or a start, "false" for a cancel or a map call), and their events.
+-- authorized gets, as each method says no itself ("nil" for a read and a search's start, "false" for
+-- a setter, the profile session's start and stop, a cancel or a map call), and their events.
 -- A method a reserved feature adds later belongs here too (the tests look for it).
 API.RESERVED_METHODS = {
 	GetLeaderPresence = "nil", StartPlayerSearch = "nil", GetPlayerSearch = "nil", GetPlayerSearches = "nil",

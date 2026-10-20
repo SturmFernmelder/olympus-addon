@@ -57095,9 +57095,17 @@ do
 	-- ARIALN (the copy box's ChatFontNormal) draws it as nothing or as a box is not known offline
 	-- (the review of test33: the fonts are in the client's archive, not in the UI source): an
 	-- in-game check, the copy box of a text with an "@". Allowed in Codec.lua alone: anywhere else
-	-- the scan finds it.
+	-- the scan finds it. (1.2.5.1, the chat warnings) A second exception, no word drawn either: the
+	-- tables ChatStrikes.lua matches other players' chat lines with, U+FEFF deleted (INVISIBLE) and
+	-- the Cyrillic and Greek letters drawn as Latin ones read as those (LOOK): keys a received line
+	-- is compared against, never a label. Those code points alone, in ChatStrikes.lua alone.
 	test("test33: no string of the addon holds a character the game's fonts lack", function()
-		local ALLOWED = { ["Olympus/Codec.lua"] = { [0x200B] = true } }
+		local ALLOWED = { ["Olympus/Codec.lua"] = { [0x200B] = true }, ["Olympus/ChatStrikes.lua"] = { [0xFEFF] = true } }
+		for _, cp in ipairs({ 0x0430, 0x0435, 0x043E, 0x0440, 0x0441, 0x0443, 0x0445, 0x0456, 0x0458, 0x0455, -- а е о р с у х і ј ѕ
+			0x0410, 0x0415, 0x041E, 0x0420, 0x0421, 0x0423, 0x0425, 0x0406, 0x0408, 0x0405, -- their capitals
+			0x03BF, 0x03B1, 0x03BD, 0x03B9, 0x03BA, 0x03C1, 0x03C4, 0x039F, 0x0391, 0x039D, 0x0399, 0x039A, 0x03A1, 0x03A4 }) do -- ο α ν ι κ ρ τ, capitals
+			ALLOWED["Olympus/ChatStrikes.lua"][cp] = true
+		end
 		local ESC = { n = "\n", t = "\t", r = "\r", a = "\a", b = "\b", f = "\f", v = "\v" }
 		-- The string literals of a Lua source, escapes read, each with its line.
 		local function Literals(src)
@@ -63268,8 +63276,12 @@ end)()
 		assert(at["UI.lua"] < at["Accord.lua"] and at["Watch.lua"] < at["Accord.lua"] and at["Accord.lua"] < at["Consent.lua"], "Accord.lua's place")
 		assert(comm:find("Accord BT BQ", 1, true), "BT and BQ in Comm.lua's list")
 		-- Olympus's own right-click lines (1.2.5.1): for a player known to be in Olympus alone.
+		-- (Changed on purpose, e9f74f77: the Arena's group is no longer flagged as a whole, so that
+		-- "Watch duel" shows on any duel in sight; ArenaHome.MenuLines gates its challenge, Bones,
+		-- watch-table and profile lines on the shared hook's target.olympus itself. Their behaviour:
+		-- the Accord's Olympus-only menu test and the gamepad duel view's Watch duel on a duelist.)
 		for file, line in pairs({ ["Watch.lua"] = 'ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30, { olympus = true })',
-			["ArenaHome.lua"] = 'P.Add("arena", ArenaHome.MenuLines, 60, { olympus = true })',
+			["ArenaHome.lua"] = 'P.Add("arena", ArenaHome.MenuLines, 60) and "shared" or false\n',
 			["ChurchView.lua"] = 'ns.PlayerMenu.Add("church", function(target, menu) View.MenuLines(target, menu) end, 40, { olympus = true })',
 			["Versions.lua"] = 'ns.PlayerMenu.Add("versions", function(target, menu) Versions.MenuLines(target, menu) end, 10)\n' }) do
 			assert(assert(ReadFile(ADDON_DIR .. file)):find(line, 1, true), file .. ": " .. line)

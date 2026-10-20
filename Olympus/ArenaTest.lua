@@ -770,8 +770,8 @@ ArenaTest.CHECKLIST = {
 	Item("Z08", "S2", "Copper mode's record", "Every copper deposit and bet in db.arenaCopper; test clear refused until refunded"),
 	-- (1.2.6) Watch duel: a member watching two players duel (ArenaSpectate.lua, the companion's Spectate.lua).
 	Item("D01", "S1", "Right-click a duelling player: Watch duel", "One window split in two: A red on the left, B blue on the right; health as on the target frame"),
-	Item("D02", "S1", "A spectator at 10, 25, 40 and 100 yd, and on another layer", "In sight: live bars; out of sight: \"—\", his last model kept, the status line says so"),
-	Item("D03", "S1", "Stand beyond inspect range, then come within 10 yd out of combat", "\"Waiting for inspection – move within inspect range\", then gear and talents; no chat line, sound or tabard row"),
+	Item("D02", "S1", "A spectator at 10, 25, 40 and 100 yd, and on another layer", "In sight: live bars; out of sight: \"-\", his last model kept, the status line says so"),
+	Item("D03", "S1", "Stand beyond inspect range, then come within 10 yd out of combat", "\"Waiting for inspection - move within inspect range\", then gear and talents; no chat line, sound or tabard row"),
 	Item("D04", "S1", "His gear against the game's own Inspect window", "The same items in the same slots; a slot's tooltip is the game's; stats from gear add up"),
 	Item("D05", "S1", "Talents: hover one in each tree", "Name, Passive or Active, what it does, Rank r / max; points as the game's own talent frame shows"),
 	Item("D06", "S1", "A fighter casts, then channels (First Aid)", "Name, icon and fill; seconds on Era and TBC only; a channel's bright part shrinks"),

@@ -417,8 +417,8 @@ reserved feature, for an authorized addon only (see **Reserved features**). Olym
 art, layout, transport, lifetime and target-frame rendering. The public contract accepts only a
 host-defined style identifier and the exact pre-approved caption for that style. It accepts no
 texture or atlas path, colour, coordinate, arbitrary message or target player. A presentation is
-self-only: each admitted member can announce it only for their own character while a current
-signed issuer's session remains live.
+self-only: each admitted member can announce it only for their own character while a session
+opened by a current signed issuer or the addon's author remains live.
 
 `handle:StartProfileSession(style)` asks the host to open the short shared session and returns
 `true`, or `false` and a reason. Opening is restricted to a current signed issuer or the addon's author. The host renews

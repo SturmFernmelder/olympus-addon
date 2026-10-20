@@ -32,6 +32,9 @@ local function Scene(fn, opts)
 	local w = { now = 1800000000, mono = 5000, printed = {}, timers = {}, tickers = {}, fired = {}, whispers = {}, sends = {},
 		calls = {}, events = {}, claims = {}, bn = { up = true, tag = TAG }, channel = "OlympusNet" }
 	local ok, err = pcall(function()
+		-- This account's own character, the harness's: in the whole suite an earlier test's identity
+		-- stays behind (AsSoldier's "Soldier-Realm" did), and opts.team names "Tester" on the list.
+		ns.me = "Tester-Realm"
 		GetTime = function() return w.mono end
 		ns.Now = function() return w.now end
 		ns.Print = function(m) w.printed[#w.printed + 1] = tostring(m) end
@@ -608,7 +611,12 @@ test("accord: the team's page groups one player's characters, the digits hidden 
 end)
 
 test("accord: never a BattleTag in the log, the errors, the bug report or /oly status", function()
-	H.WithUI(function() Scene(function(w, A)
+	-- (The log keeps its last 400 lines, ns.Log: in the whole suite it is full by now and each new line
+	-- drops the oldest, so its length said nothing of the flows. They get an empty log and error list
+	-- of their own, the harness's put back after.)
+	local savedLog, savedErrors = ns.db.log, ns.db.errors
+	ns.db.log, ns.db.errors = {}, {}
+	local ok, err = pcall(H.WithUI, function() Scene(function(w, A)
 		C_ChatInfo = { SendAddonMessageLogged = function() end }
 		local log, errors = #ns.db.log, #ns.db.errors
 		A.random = function(lo) return lo end
@@ -630,6 +638,8 @@ test("accord: never a BattleTag in the log, the errors, the bug report or /oly s
 		assert(not all:find("1234", 1, true) and not all:find("Tester#", 1, true), "a tag written out")
 		assert(A.StatusLine():find("team: 1 characters, 1 BattleTags", 1, true), A.StatusLine())
 	end, { team = true }) end)
+	ns.db.log, ns.db.errors = savedLog, savedErrors
+	if not ok then error(err, 0) end
 end)
 
 -- (Changed on purpose, 1.2.5.1's review: the owner asked for a letter "não muito grande, em tópicos

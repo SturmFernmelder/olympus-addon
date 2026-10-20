@@ -207,7 +207,7 @@ test("watch duel: Era's and TBC's plain values: 37 of 100 for a player outside t
 	W3.NoErrors(w)
 end)
 
-test("watch duel: out of sight the bars empty and say \"—\" and the class and race come from the game's word on the GUID; a nameplate showing him brings him back at the next forced sight pass", function()
+test("watch duel: out of sight the bars empty and say \"-\" and the class and race come from the game's word on the GUID; a nameplate showing him brings him back at the next forced sight pass", function()
 	local w, cast = Cast()
 	local V = cast.V
 	local o = Scene(w, V, { units = { target = cast.A, targettarget = cast.B }, bodies = {
@@ -366,7 +366,7 @@ test("watch duel: Forever's talents: each tree's grid from the trait tree (tier,
 	W3.NoErrors(w)
 end)
 
-test("watch duel: Era's and TBC's talents (C_SpecializationInfo.GetTalentInfo on the inspected player, as its own inspect frame asks); points only where the client gives no grid; a secret count hidden (\"—\"), never guessed; nothing at all: nil", function()
+test("watch duel: Era's and TBC's talents (C_SpecializationInfo.GetTalentInfo on the inspected player, as its own inspect frame asks); points only where the client gives no grid; a secret count hidden (\"-\"), never guessed; nothing at all: nil", function()
 	local w, cast = Cast()
 	local V = cast.V
 	Scene(w, V, { units = { target = cast.A, targettarget = cast.B } })
@@ -408,7 +408,7 @@ test("watch duel: Era's and TBC's talents (C_SpecializationInfo.GetTalentInfo on
 	Answer(w, V, I, "spectate:A")
 	t = S(w, V).Model().sides.A.talents
 	eq(t.trees[1].points, nil); eq(t.trees[1].secret, true); eq(Secret.Any(t), false)
-	assert(S(w, V).Text():find("Arms " .. V.ns.L.ARENA_WATCH_DASH, 1, true), "\"—\" in the text")
+	assert(S(w, V).Text():find("Arms " .. V.ns.L.ARENA_WATCH_DASH, 1, true), "\"-\" in the text")
 	-- Nothing given: nil.
 	g.C_SpecializationInfo = nil
 	S(w, V).Reinspect("A")
@@ -546,7 +546,7 @@ test("watch duel: the model copies a fighter's gear, stats and talents once per 
 	W3.NoErrors(w)
 end)
 
-test("watch duel: each inspection status has its line: \"Waiting for inspection – move within inspect range\", Inspecting…, After combat, Close the Inspect window, cannot be inspected here (refused, or given up), not in sight, inspected just now / N min ago", function()
+test("watch duel: each inspection status has its line: \"Waiting for inspection - move within inspect range\", Inspecting..., After combat, Close the Inspect window, cannot be inspected here (refused, or given up), not in sight, inspected just now / N min ago", function()
 	local w, cast = Cast()
 	local V = cast.V
 	Scene(w, V, { units = { target = cast.A, targettarget = cast.B } })
@@ -560,7 +560,7 @@ test("watch duel: each inspection status has its line: \"Waiting for inspection 
 		want.status = case[1]
 		eq(S(w, V).StatusLine("A"), case[2], case[1])
 	end
-	eq(L.ARENA_WATCH_ST_RANGE, "Waiting for inspection – move within inspect range", "the screenshot's words")
+	eq(L.ARENA_WATCH_ST_RANGE, "Waiting for inspection - move within inspect range", "the screenshot's words, its dash the fonts' \"-\" (test33)")
 	want.status, want.tries = "timeout", 1
 	eq(S(w, V).StatusLine("A"), L.ARENA_WATCH_ST_INSPECTING, "asked again soon")
 	want.tries = 3

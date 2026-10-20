@@ -225,7 +225,7 @@ test("watch duel view: Era's and TBC's plain values: 37 of 100 for a player outs
 	W3.NoErrors(w)
 end)
 
-test("watch duel view: out of sight the bars empty to \"—\" and the stage says so, his last model kept (drawn once); one never seen keeps his class's picture; a nameplate showing him (NAME_PLATE_UNIT_ADDED) brings his bars and model back at once", function()
+test("watch duel view: out of sight the bars empty to \"-\" and the stage says so, his last model kept (drawn once); one never seen keeps his class's picture; a nameplate showing him (NAME_PLATE_UNIT_ADDED) brings his bars and model back at once", function()
 	local e = Watch()
 	local w, V, o, cast, A, B = e.w, e.V, e.o, e.cast, e.A, e.B
 	o.bodies[cast.A] = { hp = 1200, hpMax = 1500, class = { "Mage", "MAGE", 8 } }
@@ -570,12 +570,12 @@ test("watch duel view: Talents for both halves (kept): each tree's grid by tier 
 	W3.NoErrors(w)
 end)
 
-test("watch duel view: each half's status line is the core's (\"Waiting for inspection – move within inspect range\"); Inspect again asks again", function()
+test("watch duel view: each half's status line is the core's (\"Waiting for inspection - move within inspect range\"); Inspect again asks again", function()
 	local e = Watch()
 	local w, V, A, I = e.w, e.V, e.A, e.I
 	I.wants["spectate:A"].status = "range"
 	w:Run(1.2)
-	eq(A.status.text, "Waiting for inspection – move within inspect range")
+	eq(A.status.text, "Waiting for inspection - move within inspect range")
 	-- (Asked again while it waits: the same want, back in line; Inspect.Want keeps a want still
 	-- waiting rather than replacing it, so the ask is counted, not a new want.)
 	local asked = I.asked["spectate:A"] or 0

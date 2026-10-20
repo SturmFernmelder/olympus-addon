@@ -26,7 +26,7 @@ local _, own = ...; local ns = own.host; if not ns then return end
 --     and points, a talent's tooltip its name, Passive or Active, what it does and "Rank r / max";
 --     the points per tree alone where the client gives no grid, and the line saying so;
 --     his cast bar on either tab (the half's own: on the stage above the weapons, or under the trees);
---     the status line ("Waiting for inspection – move within inspect range"...) and Inspect again.
+--     the status line ("Waiting for inspection - move within inspect range"...) and Inspect again.
 -- OlympusArenaWatchBar (560 x 56, its own place, on UIParent, HIGH): the compact bar on a bronze-
 -- edged wood strip, both fighters (class icon, name, health with "NN%", power, a thin cast bar)
 -- and the seal (the score and round when this client knows them, else VS). Auto shows it while
