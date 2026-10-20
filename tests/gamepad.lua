@@ -2926,6 +2926,46 @@ test("gamepad pass 7: the chat's channel names as links: hooked once with mouse 
 	GP.Covers("chat-links"); GP.Covers("chat-box")
 end)
 
+-- A moderator's cover name (Cover.lua) on a name the game updates (a nameplate's, a raid frame's):
+-- the target "Someone" a councillor under a cover, this player's Yes to moderator protection.
+local function CoverScene(ns)
+	ns.rdb.council = { at = 1, names = { someone = "Someone" } }
+	ns.rdb.covers = { ["Someone-Realm"] = { alias = "Aldric Stonebrook", t = ns.Now() } }
+	ns.db.coverConsent = true
+end
+local function CoverFlow(C)
+	C.units.target = { name = "Someone", realm = "Realm", guid = "Player-1-00000002", guild = "Olympus II", rank = "Titan", rankIndex = 1 }
+	local fs = C.NewWidget("FontString", nil, nil, nil, true)
+	fs:SetText("Someone")
+	local mark = C.Mark()
+	C.env.CompactUnitFrame_UpdateName({ unit = "target", name = fs })
+	C.units.target = nil
+	return fs:GetText(), fs, C.Since(mark)
+end
+test("gamepad pass 8: cover names: written over the game's name text with mouse and keyboard, the game's own given back at a switch to the gamepad UI, nothing written there or at a gamepad login", function()
+	local C, ns = Session(false)
+	CoverScene(ns)
+	local text, fs = CoverFlow(C)
+	eq(text, "Aldric Stonebrook", "the cover name, with mouse and keyboard")
+	C.Switch(true); C.Advance(1)
+	eq(fs:GetText(), "Someone", "the game's name back at the switch")
+	local padText, _, padLedger = CoverFlow(C)
+	eq(padText, "Someone", "nothing written with the gamepad UI")
+	for _, r in ipairs(padLedger) do assert(not (r.ids and r.ids[1] == "cover-names"), "nothing of cover-names: " .. Describe(r)) end
+	C.Switch(false); C.Advance(1)
+	eq((CoverFlow(C)), "Aldric Stonebrook", "again with mouse and keyboard")
+	Check(C.ledger, "the whole session")
+	NoErrors(C, "cover names")
+	local P, pns = Session(true)
+	CoverScene(pns)
+	eq((CoverFlow(P)), "Someone", "a gamepad login: nothing written")
+	P.Switch(false); P.Advance(1)
+	eq((CoverFlow(P)), "Aldric Stonebrook", "hooked at the switch to mouse and keyboard")
+	Check(P.ledger, "a gamepad login, then mouse and keyboard")
+	NoErrors(P, "cover names, a gamepad login")
+	GP.Covers("cover-names")
+end)
+
 test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login, both input-style switches and saved binding changes preserve the native owner", function()
 	local P, pad = Session(true)
 	eq(pad.MainKey.Held(), false); eq(P.env.OlympusMainKey, nil, "no key button at a gamepad login")

@@ -45,6 +45,7 @@ Locales\CampaignText.lua
 Locales\GuildFinanceText.lua
 Locales\RankingRulesText.lua
 Locales\PerfText.lua
+Locales\CoverText.lua
 Locales\APIText.lua
 Locales\PlayerSightingsText.lua
 Locales\AccordText.lua
@@ -119,6 +120,7 @@ JusticeTasks.lua
 KingArrow.lua
 Accord.lua
 Consent.lua
+Cover.lua
 WeeklyBrief.lua
 Carry.lua
 ChatRooms.lua

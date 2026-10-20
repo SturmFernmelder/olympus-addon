@@ -332,6 +332,15 @@ end
 
 -- What decides a unit's border, or nil for anyone no border is for: not a player, of the other
 -- faction (the census is per faction, and so is the King), or a value the client hides.
+-- A moderator under a cover name (Cover.lua), on this client: none of the marks or borders that
+-- would say what they are (the King's, the council's, the dev's, the Treasurer's), as any member.
+local function Uncover(f)
+	local C = ns.Cover
+	if type(C) ~= "table" or type(C.AliasOf) ~= "function" or not C.AliasOf(f.who) then return end
+	f.covered = true
+	f.councillor, f.council, f.dev, f.treasurer, f.king = false, false, false, false, false
+end
+
 local function Facts(unit)
 	if not UnitExists(unit) or not UnitIsPlayer(unit) then return nil end
 	local faction = UnitFactionGroup(unit)
@@ -348,11 +357,12 @@ local function Facts(unit)
 	f.dev = IsDev(who)
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
+	Uncover(f)
 	if not f.guild or not ns.IsFederation(f.guild) then return f end
 	f.olympus = true
 	-- A nominee: named by the master of the guild the server gives him (Nominees.RoleOf).
 	f.nominee = Nominee(who, f.guild)
-	f.king = ns.IsKingGuild(f.guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rankIndex == 0))
+	f.king = not f.covered and ns.IsKingGuild(f.guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rankIndex == 0))
 	local guilds = ns.rdb and ns.rdb.guilds
 	local report = type(guilds) == "table" and guilds[f.guild] or nil
 	f.report = report
@@ -408,6 +418,10 @@ local function NomineesVersion()
 	local N = ns.Nominees
 	return type(N) == "table" and type(N.Version) == "function" and N.Version() or nil
 end
+local function CoverVersion()
+	local C = ns.Cover
+	return type(C) == "table" and type(C.Version) == "function" and C.Version() or nil
+end
 local function Inputs(f)
 	local report = f and f.report
 	local row = type(report) == "table"
@@ -415,7 +429,8 @@ local function Inputs(f)
 	if f and f.councillor then masked = ns.CouncilMasked() == true end
 	return { guild = f and f.guild, report = report, rt = row and report.t or nil, vouch = row and report.vouch or nil,
 		council = ns.rdb and ns.rdb.council, roster = f and f.fromRoster and (ns.Roster and ns.Roster.byName or false) or nil,
-		masked = masked, who = f and f.who, off = f and f.off, nominees = NomineesVersion(), treasurer = f and f.treasurer }
+		masked = masked, who = f and f.who, off = f and f.off, nominees = NomineesVersion(), treasurer = f and f.treasurer,
+		cover = CoverVersion() }
 end
 
 -- Has anything a unit's border or mark was worked out from (Inputs) changed since? Lookups only:
@@ -429,6 +444,7 @@ function Borders.Changed(k)
 		or (k.masked ~= nil and k.masked ~= (ns.CouncilMasked() == true))
 		or (k.who ~= nil and NetOff(k.who, k.guild) ~= k.off)
 		or k.nominees ~= NomineesVersion()
+		or k.cover ~= CoverVersion()
 		or (k.who ~= nil and k.treasurer ~= (type(ns.Treasury) == "table" and type(ns.Treasury.TreasurerPin) == "function" and ns.Treasury.TreasurerPin(k.who) == 1))
 end
 
@@ -495,6 +511,7 @@ function Borders.MarkOfName(who, guild)
 	if f.off then return nil, f end
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
+	Uncover(f)
 	if guild and ns.IsFederation(guild) then
 		f.olympus = true
 		local rank
@@ -513,7 +530,7 @@ function Borders.MarkOfName(who, guild)
 				and ((type(K.IsStewardName) == "function" and K.IsStewardName(who)) or (type(K.IsHandName) == "function" and K.IsHandName(who))))))
 				and true or false
 		end
-		f.king = ns.IsKingGuild(guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rank == 0))
+		f.king = not f.covered and ns.IsKingGuild(guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rank == 0))
 		f.leader = rank == 0
 	end
 	local t = Match(f, true)
@@ -1685,6 +1702,8 @@ ns.On("HONORS_CHANGED", function() Borders.RefreshAll(true) end) -- (1.2)
 ns.On("WANTED_CHANGED", function() Borders.RefreshAll(true) end) -- (1.2)
 -- The King shows or hides the council's names (the eye in the Realm, ns.SetCouncilNamesShown).
 ns.On("COUNCIL_MASK_CHANGED", function() Borders.CensusChanged() end)
+-- A moderator's cover name heard, ended, or our answer to it (Cover.lua).
+ns.On("COVER_CHANGED", function() Borders.ChatForget(); Borders.CensusChanged() end)
 ns.RegisterEvent("PLAYER_TARGET_CHANGED", function() Borders.Refresh("target") end)
 -- Joining, leaving, places swapped: a member new to his place worked out (the frames are the game's to update).
 ns.RegisterEvent("GROUP_ROSTER_UPDATE", function() Borders.RefreshParty() end)

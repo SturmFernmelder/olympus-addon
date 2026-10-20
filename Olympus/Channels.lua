@@ -216,11 +216,13 @@ function Channels.SetGuildNamesShown(shown)
 end
 
 function Channels.FormatLine(tier, sender, guild, class, text, bare)
-	local name = ns.DisplayName(sender) or "?"
+	-- A moderator's cover name (Cover.lua): that name, plain, without the marks below.
+	local covered = ns.IsCovered(sender)
+	local name = ns.CoverSwap(ns.DisplayName(sender)) or "?"
 	-- The High Council (the moderators, Core.lua): their colour. For everyone, as in 0.9.8, but the
 	-- King while the councillors' names are hidden on his screen (his stream, ns.CouncilMasked): a
 	-- plain line.
-	local council = ns.IsHighCouncillor(sender) and not ns.CouncilMasked()
+	local council = not covered and ns.IsHighCouncillor(sender) and not ns.CouncilMasked()
 	if council then
 		name = "|c" .. ns.HIGH_COUNCIL_COLOR .. name .. "|r"
 	else
@@ -233,10 +235,10 @@ function Channels.FormatLine(tier, sender, guild, class, text, bare)
 	-- the game's own chat (Borders.ChatName). It was the Chat tab's mark (1.1.2), and the High
 	-- Council's mark and icon from 0.9.9. The Treasurer keeps the gold coin he carries in tooltips
 	-- and the census (0.9.9).
-	name = Channels.RoleBadge(sender) .. name
+	if not covered then name = Channels.RoleBadge(sender) .. name end
 	-- 1.2: the marks other files put before the name (Channels.nameDecorators: the honour's chat
 	-- mark, ChatMarks.lua), inside the link's brackets like the Treasurer's coin.
-	name = Channels.Decorations(sender) .. name
+	if not covered then name = Channels.Decorations(sender) .. name end
 	local guildLabel = Channels.ShowGuildNames() and (" <" .. tostring(guild or "?"):gsub("|", "||") .. ">") or ""
 	return (bare and "" or Channels.Tag(tier) .. " ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h"
 		.. guildLabel .. ": " .. Codec.SanitizeChat(text)

@@ -130,6 +130,18 @@ function ns.DisplayName(name)
 	return name
 end
 
+-- A name as Olympus's pages show it (Cover.lua): a moderator's cover name, for a player who accepted
+-- it, in place of the name given; else that name. Never for what goes out or is kept (ns.DisplayName).
+function ns.CoverSwap(name)
+	local C = ns.Cover
+	if type(name) ~= "string" or type(C) ~= "table" or type(C.AliasOf) ~= "function" then return name end
+	return C.AliasOf(name) or name
+end
+function ns.IsCovered(name)
+	local C = ns.Cover
+	return type(name) == "string" and type(C) == "table" and type(C.AliasOf) == "function" and C.AliasOf(name) ~= nil
+end
+
 -- The name a whisper, an invite or /who takes. WoW: Forever's server finds "First Surname"
 -- but not "First Surname-Realm" ("No player named ... is currently playing"), and its names
 -- are one across a realm group: there the realm is left out for our realms. Elsewhere the
@@ -2219,6 +2231,7 @@ local function Help()
 	print(L.HELP_CMD_SHARE)
 	print(L.HELP_CMD_BUG)
 	print(L.HELP_CMD_STATUS)
+	if ns.Cover and ns.Cover.Eligible(ns.me) then print(L.HELP_CMD_COVER) end
 	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
 	if not ns.Record.missing then print(L.HELP_CMD_RECORD) end -- (record mode, Record.lua: a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
@@ -2567,6 +2580,9 @@ local function Slash(input)
 		elseif cmd == "lfg" or cmd == "board" or cmd == "camp" or cmd == "camps" or cmd == "week" then
 			-- The Board (Board.lua, 1.1): who is looking for a group, and where; camps; the King's week.
 			ns.Board.Slash(cmd, rest)
+		elseif cmd == "cover" or cmd == "anon" or cmd == "anonimo" then
+			-- Embrace Anonymity: a moderator's cover name, and off the network (Cover.lua).
+			if ns.Cover then ns.Cover.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "netoff" or cmd == "neton" then
 			-- 1.1: a character or a guild off Olympus for the army, or back on (Moderation.lua).
 			ns.Moderation.Slash(cmd == "netoff", rest)
