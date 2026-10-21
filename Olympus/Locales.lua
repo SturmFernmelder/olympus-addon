@@ -105,7 +105,7 @@ L.LETTER_1_3_2 = [==[Version 1.3.2.
 - {news} Census Stats now labels people as an estimate and shows its formula: counted characters minus confirmed linked alts known to this client. Updating alone does not link alts, so missing confirmations can keep the estimate high.
 - {craft} Accepted Treasury ranking rows are kept ahead of newer unconfirmed proposals.
 - {team} Two full-suite order-dependent UI and ranking regressions found by CI are fixed.
-- {team} The optional Companion Bridge now exports named identity and accepted Olympus chat only after its separate disclosure is accepted; it never exports a BattleTag.
+- {team} The optional Companion Bridge now exports named identity and accepted Olympus chat only after its separate disclosure is accepted. Your own BattleTag is included only with both Accords, for staff display and linking, never as membership or witness authority.
 ]==]
 
 L.LETTER_1_3_0_TITLE = "A shared Olympus"
@@ -130,7 +130,7 @@ if GetLocale() == "ptBR" then
 - {news} A página de Stats do Censo agora chama pessoas de estimativa e mostra a fórmula: personagens contados menos alts ligados e confirmados conhecidos por este cliente. Só atualizar não liga alts, então confirmações ausentes podem manter a estimativa alta.
 - {craft} Linhas aceitas do ranking do Treasury são preservadas antes de propostas mais novas ainda não confirmadas.
 - {team} Duas regressões de interface e ranking dependentes da ordem da suíte completa, encontradas pelo CI, foram corrigidas.
-- {team} O Companion Bridge opcional agora só exporta identidade nominal e chats Olympus aceitos depois da aceitação da própria divulgação; ele nunca exporta BattleTag.
+- {team} O Companion Bridge opcional agora só exporta identidade nominal e chats Olympus aceitos depois da aceitação da própria divulgação. Seu próprio BattleTag só é incluído com os dois Accords, para exibição e vínculo pela equipe, nunca como autoridade de filiação ou testemunho.
 ]==]
 
 	L.LETTER_1_3_0_TITLE = "Um Olympus compartilhado"
