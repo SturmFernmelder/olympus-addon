@@ -99,6 +99,14 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.JUSTICE_TASKS_CONFIRM_HINT = "Confirmar a conclusão para %s após sua própria revisão? A tentativa e a ausência observada não comprovam quem agiu ou a causa. O registro será identificado como confirmado por revisão humana."
 end
 
+L.LETTER_1_3_1_TITLE = "Shared counts, clarified"
+L.LETTER_1_3_1 = [==[Version 1.3.1.
+
+- {news} Census Stats now labels people as an estimate and shows its formula: counted characters minus confirmed linked alts known to this client. Updating alone does not link alts, so missing confirmations can keep the estimate high.
+- {craft} Accepted Treasury ranking rows are kept ahead of newer unconfirmed proposals.
+- {team} Two full-suite order-dependent UI and ranking regressions found by CI are fixed.
+]==]
+
 L.LETTER_1_3_0_TITLE = "A shared Olympus"
 L.LETTER_1_3_0 = [==[Version 1.3.0.
 
@@ -115,6 +123,14 @@ L.LETTER_1_3_0 = [==[Version 1.3.0.
 This is a large release and therefore starts the 1.3 line. Offline tests cover the rules and data boundaries; multiplayer relay, client-specific UI and map placement still depend on live in-game observation.]==]
 
 if GetLocale() == "ptBR" then
+	L.LETTER_1_3_1_TITLE = "Contagens compartilhadas, explicadas"
+	L.LETTER_1_3_1 = [==[Versão 1.3.1.
+
+- {news} A página de Stats do Censo agora chama pessoas de estimativa e mostra a fórmula: personagens contados menos alts ligados e confirmados conhecidos por este cliente. Só atualizar não liga alts, então confirmações ausentes podem manter a estimativa alta.
+- {craft} Linhas aceitas do ranking do Treasury são preservadas antes de propostas mais novas ainda não confirmadas.
+- {team} Duas regressões de interface e ranking dependentes da ordem da suíte completa, encontradas pelo CI, foram corrigidas.
+]==]
+
 	L.LETTER_1_3_0_TITLE = "Um Olympus compartilhado"
 	L.LETTER_1_3_0 = [==[Versão 1.3.0.
 

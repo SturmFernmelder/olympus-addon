@@ -59,9 +59,19 @@ test("1.2.5 letter content: both languages describe only the shipped reply, offi
 			assert(not previous or at > previous, locale .. ": release points stay ordered")
 			previous = at
 		end
-		eq(cns.Letters.Versions()[1], "1.3.0", locale .. ": current release first")
-		eq(cns.Letters.Versions()[2], "1.2.5.1", locale .. ": hotfix retained")
-		eq(cns.Letters.Versions()[3], "1.2.5", locale .. ": previous release retained")
+		eq(cns.Letters.Versions()[1], "1.3.1", locale .. ": current release first")
+		eq(cns.Letters.Versions()[2], "1.3.0", locale .. ": previous release retained")
+		eq(cns.Letters.Versions()[3], "1.2.5.1", locale .. ": hotfix retained")
+	end
+end)
+
+test("1.3.1 letter content: both languages explain the approximate people count and the correction scope", function()
+	for _, locale in ipairs({ "enUS", "ptBR" }) do
+		local cns = Language(locale)
+		local title, body = cns.Letters.Text("1.3.1")
+		assert(type(title) == "string" and title ~= "", locale .. ": title")
+		assert(type(body) == "string" and body:find("1.3.1", 1, true), locale .. ": current letter")
+		assert(body:find(locale == "ptBR" and "estimativa" or "estimate", 1, true), locale .. ": estimate explained")
 	end
 end)
 
