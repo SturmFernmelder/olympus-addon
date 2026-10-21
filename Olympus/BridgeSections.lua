@@ -3,7 +3,7 @@ local ADDON, ns = ...
 -- The Companion's sections beyond the census (Bridge.lua's registry). Each reads only a module's
 -- public function, what every member already sees on Olympus's own pages, and builds its rows
 -- field by field: a field a module adds later never reaches the Companion by itself.
--- Never a BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury
+-- Never another player's BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury
 -- items, the Wanted page's victims or
 -- sightings, or Church/Watch detail meant for fewer people.
 if type(OlympusBridge) ~= "table" or type(OlympusBridge.RegisterSection) ~= "function" then return end
@@ -360,6 +360,12 @@ local function SelfGuild()
 	if not ok or type(guild) ~= "string" or guild == "" then return nil end
 	return guild
 end
+local function SelfBattleTag()
+	local A = ns.Accord
+	if type(A) ~= "table" or type(A.ReadTag) ~= "function" then return nil end
+	local ok, tag = pcall(A.ReadTag)
+	return ok and type(tag) == "string" and tag ~= "" and tag or nil
+end
 local function SelfRoles(me)
 	local out, R, W = {}, ns.Roster, ns.Workshop
 	if type(R) == "table" then
@@ -393,20 +399,22 @@ end)
 
 -- The character on this computer, after explicit consent. The name and guild are direct game
 -- facts; roles use the same current native/signed checks as the addon. The UI supplies its actual
--- (not View-as preview) tab keys when available. No BattleTag, census-inferred role or remote rank
--- crosses this boundary. The unnamed closed value is still exported when access disappears so a
+-- (not View-as preview) tab keys when available. The player's own BattleTag comes only from the
+-- game's Accord.ReadTag after both explicit accords; it is display/linking data, never membership
+-- authority. No census-inferred role or remote rank crosses this boundary. The unnamed closed value is still exported when access disappears so a
 -- Companion can overwrite a previously relayed identity instead of leaving it stale.
 OlympusBridge.RegisterSection("self", 1, function()
 	local closed = { roles = {}, olympus = false, tabs = {} }
 	if not ns.CompanionAccordAccepted() or not Yes(ns.IsMember) then return closed end
-	local me, guild = ns.me, SelfGuild()
-	if type(me) ~= "string" or not me:find("^[^%-]+%-.+$") or not guild then return closed end
+	local me, guild, battleTag = ns.me, SelfGuild(), SelfBattleTag()
+	if type(me) ~= "string" or not me:find("^[^%-]+%-.+$") or not guild or not battleTag then return closed end
 	local tabs, UI = nil, ns.UI
 	if type(UI) == "table" and not UI.missing and type(UI.CompanionTabs) == "function" then
 		local ok, value = pcall(UI.CompanionTabs)
 		if ok and type(value) == "table" then tabs = value end
 	end
-	return { character = me, guild = guild, roles = SelfRoles(me), olympus = true, tabs = tabs }
+	return { character = me, guild = guild, battleTag = battleTag, accord = Whole(ns.ACCORD_VERSION),
+		at = Whole(type(ns.Now) == "function" and ns.Now() or 0), roles = SelfRoles(me), olympus = true, tabs = tabs }
 end)
 
 -- The census statistics (docs/CENSUS-STATS.md): the census page's own figures and series

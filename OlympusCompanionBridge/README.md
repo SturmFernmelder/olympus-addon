@@ -149,15 +149,17 @@ and for a character who is no member:
 What a section may carry: only what this character's own client already shows on Olympus's own
 pages, to the audience that page has. Staff-only sections (`watch`) exist only on the clients whose
 page shows them; personal rows (`crafting.own`, the letters in `notices`) carry this character's
-own. And the `self` section: `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1, guild = "Guild Name", at = <server
-time>, roles = { "officer", "guildMaster", "council", "crown", "author" } }`, the player's own
-character and BattleTag as his own game gives it (`Accord.ReadTag`), the Olympus Accord's version,
-the server's time of the export, and the roles this character holds (only those that apply; an
-empty list for a plain member), which the Companion uses to show only the tabs he may open. It is nil until the Accord is
-accepted at the current version (its letter tells the player), and while Battle.net can't give the
-tag; never another player's BattleTag (not the ones a moderation team client keeps), and never
-shown or printed on screen. The Companion shows BattleTags to staff only, never publicly. Never
-chat text or chat-strike lines, another player's private data, treasury items (numbers only, and
+own. The `self` section is `{ character = "Name-Realm", battleTag = "Name#1234", accord = 1,
+at = <server time>, guild = "Guild Name", olympus = true, roles = { "officer", "guildMaster",
+"council", "crown", "author" }, tabs = { ... } }`: the player's own character and BattleTag as
+his own game gives them, current native Olympus guild, roles and actual tabs. It is named only after
+both the Olympus Accord and the separate Olympus Companion Accord are accepted. The BattleTag is
+staff-only display/linking data and never membership or witness authority. Before consent, after
+withdrawal, outside an Olympus guild or while the game cannot authenticate the tag, it is the
+anonymous revocation `{ olympus = false, roles = {}, tabs = {} }`, so the relay can remove a stale
+identity. It carries never another player's BattleTag (not the ones a moderation team client keeps).
+Never chat text or
+chat-strike lines, another player's private data, treasury items (numbers only, and
 only while the King publishes the balance), or anything private to an audience the player is not
 in.
 

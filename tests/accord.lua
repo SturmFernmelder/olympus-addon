@@ -23,7 +23,9 @@ local COMM = { "Whisper", "Send", "CheckMembership", "JoinSoon", "RequestKey", "
 local function Scene(fn, opts)
 	opts = opts or {}
 	local A = ns.Accord
-	local saved = { g = {}, f = {}, c = {}, accord = ns.db.accord, kingAccount = ns.db.kingAccount, wc = rawget(ns, "WatchChat"), viewAs = rawget(ns, "ViewAs"),
+	local saved = { g = {}, f = {}, c = {}, accord = ns.db.accord, companionAccord = ns.db.companionAccord,
+		companionAttached = OlympusBridge.COMPANION_ATTACHED,
+		kingAccount = ns.db.kingAccount, wc = rawget(ns, "WatchChat"), viewAs = rawget(ns, "ViewAs"),
 		council = ns.rdb.council, tags = ns.rdb.battletags, chatMod = ns.rdb.chatMod, claimed = ns.Data.ClaimedGuild,
 		consentAsk = ns.Consent.Ask }
 	for _, k in ipairs(GLOBALS) do saved.g[k] = rawget(_G, k) end
@@ -76,6 +78,8 @@ local function Scene(fn, opts)
 		A.Reset()
 		ns.db.kingAccount = nil
 		ns.db.accord = opts.accepted and { v = ns.ACCORD_VERSION, yes = true, at = w.now - 100, fp = A.Fp(TAG), told = {} } or nil
+		ns.db.companionAccord = nil
+		OlympusBridge.COMPANION_ATTACHED = opts.companion == true
 		-- Time on, and every timer due runs (in order).
 		function w.Run(sec)
 			local stop = w.mono + (sec or 0)
@@ -103,7 +107,9 @@ local function Scene(fn, opts)
 	for _, k in ipairs(GLOBALS) do rawset(_G, k, saved.g[k]) end
 	for _, k in ipairs(FIELDS) do rawset(ns, k, saved.f[k]) end
 	for _, k in ipairs(COMM) do ns.Comm[k] = saved.c[k] end
-	ns.db.accord, ns.db.kingAccount, ns.WatchChat, ns.ViewAs = saved.accord, saved.kingAccount, saved.wc, saved.viewAs
+	ns.db.accord, ns.db.companionAccord, ns.db.kingAccount, ns.WatchChat, ns.ViewAs =
+		saved.accord, saved.companionAccord, saved.kingAccount, saved.wc, saved.viewAs
+	OlympusBridge.COMPANION_ATTACHED = saved.companionAttached
 	ns.rdb.council, ns.rdb.battletags, ns.rdb.chatMod, ns.Data.ClaimedGuild = saved.council, saved.tags, saved.chatMod, saved.claimed
 	ns.Consent.Ask = saved.consentAsk
 	A.Reset()
@@ -1230,10 +1236,10 @@ test("accord: the saved fingerprint keeps one byte: for a known name dozens of f
 	end, { accepted = true })
 end)
 
--- The Companion's "self" section (Olympus/BridgeSections.lua; the owner, 2026-10-19: the BattleTag
--- goes to the Companion's online census, staff only, "para a gente poder saber quem é quem"): the
--- player's own character and tag, once the Accord that says so is accepted. The real registry
--- (Olympus/Bridge.lua) copies it; the sidecar's own tests are in tests/run.lua.
+-- The Companion's "self" section (Olympus/BridgeSections.lua): a separate explicit disclosure
+-- controls the player's own character, BattleTag, current Olympus guild, native roles and tabs.
+-- The tag is this account's own and never authority. The real registry copies it; the sidecar's integration
+-- tests are in tests/run.lua.
 local function Strings(v, out, depth)
 	out = out or {}
 	depth = depth or 0
@@ -1247,72 +1253,65 @@ local function Strings(v, out, depth)
 	return out
 end
 
-local function WithServerTime(t, fn)
-	local saved = rawget(_G, "GetServerTime")
-	GetServerTime = t and function() return t end or nil
-	local ok, err = pcall(fn)
-	GetServerTime = saved
-	if not ok then error(err, 0) end
-end
-
-test("accord: the Companion's self section: nothing before the Olympus Accord is accepted, for an older version or while the tag can't be read; after it, this character, his own BattleTag, the Accord's version and the server's time, a fresh copy within the bridge's limits", function()
+test("accord: the Companion's self section stays anonymous until both accords are accepted; after them it carries this character's native identity and own BattleTag", function()
 	H.WithUI(function() Scene(function(w, A)
 		local B = OlympusBridge
 		local listed
 		for _, s in ipairs(B.Sections()) do if s.name == "self" then listed = s.version end end
 		eq(listed, 1, "registered as self, version 1")
-		WithServerTime(1800000777, function()
-			eq(ns.AccordAccepted(), false)
-			eq(B.GetSection("self"), nil, "not accepted: nothing")
-			ns.db.accord = { v = ns.ACCORD_VERSION - 1, yes = true, at = w.now - 100, fp = A.Fp(TAG), told = {} }
-			eq(B.GetSection("self"), nil, "an older version accepted: nothing")
-			ns.db.accord = nil
-			eq(A.Accept(), true)
-			local got = assert(B.GetSection("self"), "accepted: the section")
+		local function Closed(why)
+			local got = assert(B.GetSection("self"), why)
 			eq(got.name, "self"); eq(got.version, 1)
-			local d = got.data
-			eq(d.character, ns.me); eq(d.character, "Tester-Realm")
-			eq(d.battleTag, TAG, "his own, as his game gives it")
-			eq(d.accord, ns.ACCORD_VERSION); eq(d.accord, 1)
-			eq(d.at, 1800000777, "the server's clock, not this computer's")
-			for k, v in pairs(d) do
-				assert(({ character = true, battleTag = true, accord = true, at = true, roles = true, guild = true })[k], "field " .. tostring(k))
-				-- (roles, 10-19, the Windows Companion's tabs: a flat list of role names; every other field flat.)
-				if k == "roles" then
-					for _, r in ipairs(v) do assert(type(r) == "string" and #r <= 32, "a role name") end
-				else
-					assert(type(v) ~= "table", "flat: " .. k)
-				end
-				if type(v) == "string" then assert(#v <= B.SECTION_LIMITS.string and not v:find("[|%c]"), k) end
+			eq(got.data.character, nil); eq(got.data.guild, nil)
+			eq(got.data.olympus, false); eq(#got.data.roles, 0); eq(#got.data.tabs, 0)
+			return got.data
+		end
+		eq(ns.AccordAccepted(), false)
+		Closed("before the Olympus Accord: an anonymous revocation")
+		ns.db.accord = { v = ns.ACCORD_VERSION - 1, yes = true, at = w.now - 100, fp = A.Fp(TAG), told = {} }
+		Closed("an older Olympus Accord: still anonymous")
+		ns.db.accord = nil
+		eq(A.Accept(), true)
+		Closed("the Olympus Accord alone does not grant Companion disclosure")
+		assert(ns.Consent.Choose("companionAccord", true), "the separate Companion Accord accepts")
+		local d = assert(B.GetSection("self")).data
+		eq(d.character, "Tester-Realm"); eq(d.guild, GetGuildInfo("player")); eq(d.olympus, true)
+		eq(d.battleTag, TAG); eq(d.accord, ns.ACCORD_VERSION); eq(d.at, w.now)
+		for k, v in pairs(d) do
+			assert(({ character = true, guild = true, battleTag = true, accord = true, at = true,
+				roles = true, olympus = true, tabs = true })[k], "field " .. tostring(k))
+			if k == "roles" or k == "tabs" then
+				for _, r in ipairs(v) do assert(type(r) == "string" and #r <= 32, "a capability name") end
+			elseif type(v) == "string" then
+				assert(#v <= B.SECTION_LIMITS.string and not v:find("[|%c]"), k)
 			end
-			d.battleTag = "Changed#1"
-			eq(B.GetSection("self").data.battleTag, TAG, "every call a fresh copy")
-			-- Read again each time: Battle.net down, a tag of another shape, a secret value: nothing.
-			w.bn.up = false
-			eq(B.GetSection("self"), nil, "Battle.net down: nothing")
-			w.bn.up = true
-			w.bn.tag = "No Digits Here"
-			eq(B.GetSection("self"), nil, "not Name#digits: nothing")
-			w.bn.tag = TAG
-			issecretvalue = function(v) return v == TAG end
-			eq(B.GetSection("self"), nil, "a secret value: never read")
-			issecretvalue = nil
-			eq(B.GetSection("self").data.battleTag, TAG)
-		end)
-		-- A client without the server's clock: this computer's.
-		WithServerTime(nil, function() eq(B.GetSection("self").data.at, w.now) end)
-		-- Asked again (another tag on the account): nothing until accepted again.
-		w.bn.tag = "Other Name#4321"
+		end
+		d.character, d.battleTag = "Changed-Realm", "Changed#1"
+		eq(B.GetSection("self").data.character, "Tester-Realm", "every call is a fresh copy")
+		eq(B.GetSection("self").data.battleTag, TAG, "the own tag is a fresh copy too")
+		w.bn.up, w.bn.tag = false, "No Digits Here"
+		Closed("Battle.net down: no unauthenticated identity")
+		w.bn.up = true
+		Closed("a malformed BattleTag cannot authenticate the identity")
+		w.bn.tag = TAG
+		issecretvalue = function() return true end
+		Closed("a secret BattleTag is never read")
+		issecretvalue = nil
+		eq(B.GetSection("self").data.battleTag, TAG)
+		-- Asked for the Olympus Accord again (another tag on the account): access closes even while the
+		-- separate Companion answer remains accepted.
+		w.bn.up, w.bn.tag = true, "Other Name#4321"
 		A.Check()
 		eq(ns.AccordAccepted(), false)
-		eq(B.GetSection("self"), nil, "the account asked again: nothing")
-	end) end)
+		Closed("the account asked again: the named identity is revoked")
+	end, { companion = true }) end)
 end)
 
 test("accord: the Companion's self section lists this character's own roles for the Companion's tabs: none for a plain member; officer, guildMaster, council, crown and author as he holds them", function()
 	H.WithUI(function() Scene(function(w, A)
 		local B = OlympusBridge
 		eq(A.Accept(), true)
+		assert(ns.Consent.Choose("companionAccord", true))
 		local R, W = ns.Roster, ns.Workshop
 		local saved = { off = R.IsOfficer, rank = R.MyRank, hc = ns.IsHighCouncillor, king = ns.IsKingCharacter, author = W.IsAuthorName }
 		local ok, err = pcall(function()
@@ -1326,7 +1325,9 @@ test("accord: the Companion's self section lists this character's own roles for 
 			eq(B.GetSection("self").data.guild, (GetGuildInfo("player")), "his own guild's name")
 			local savedIn = IsInGuild
 			IsInGuild = function() return false end
-			eq(B.GetSection("self").data.guild, nil, "outside a guild: no guild")
+			local closed = B.GetSection("self").data
+			eq(closed.guild, nil, "outside a guild: no guild")
+			eq(closed.character, nil); eq(closed.olympus, false)
 			IsInGuild = savedIn
 			R.IsOfficer = function() return true end
 			R.MyRank = function() return 0 end
@@ -1342,13 +1343,14 @@ test("accord: the Companion's self section lists this character's own roles for 
 		end)
 		R.IsOfficer, R.MyRank, ns.IsHighCouncillor, ns.IsKingCharacter, W.IsAuthorName = saved.off, saved.rank, saved.hc, saved.king, saved.author
 		if not ok then error(err, 0) end
-	end) end)
+	end, { companion = true }) end)
 end)
 
-test("accord: the Companion's self section never carries another player's BattleTag: a moderation team client's kept tags stay out of every section, a kept row under his own name included; nothing printed or logged, the King's screen too", function()
+test("accord: the Companion's self section carries only this account's own consented BattleTag; every other kept tag stays out of every section, log and screen", function()
 	Scene(function(w, A)
 		C_ChatInfo = { SendAddonMessageLogged = function() end }
 		local B = OlympusBridge
+		assert(ns.Consent.Choose("companionAccord", true))
 		A.AskTeam()
 		eq(A.HandleTag("WHISPER", MEMBER, BT(nil, nil, "Other Player#5678")), true)
 		eq(A.HandleTag("WHISPER", "Brisk Lantern-Realm", BT(nil, nil, "Lantern#7777")), true)
@@ -1370,23 +1372,24 @@ test("accord: the Companion's self section never carries another player's Battle
 				local got = B.GetSection(s.name)
 				local all = table.concat(Strings(got and got.data), "\n")
 				for _, other in ipairs({ "5678", "7777", "9999", "Other Player#", "Lantern#", "Spoofed#" }) do
-					assert(not all:find(other, 1, true), s.name .. " carries another player's tag: " .. other)
+					assert(not all:find(other, 1, true), s.name .. " carries another player's BattleTag: " .. other)
 				end
-				if s.name ~= "self" then assert(not all:find(TAG, 1, true), s.name .. " carries the player's tag") end
+				if s.name ~= "self" then assert(not all:find(TAG, 1, true), s.name .. " carries the player's own BattleTag") end
 			end
-			-- The King's screen: a file on his own computer, not a screen; exported, never printed.
+			-- The King's screen follows the same contract.
 			w.kingScreen = true
-			eq(B.GetSection("self").data.battleTag, TAG, "file-only: kept on his account")
+			eq(B.GetSection("self").data.battleTag, TAG)
+			eq(B.GetSection("self").data.character, ns.me)
 			w.kingScreen = false
 		end)
 		ns.Log = realLog
 		if not ok then error(err, 0) end
 		eq(#w.printed, printed, "nothing printed")
 		for _, line in ipairs(logged) do assert(not line:find("1234", 1, true) and not line:find("Tester#", 1, true), "a tag logged: " .. line) end
-	end, { accepted = true, team = true })
+	end, { accepted = true, team = true, companion = true })
 end)
 
-test("accord: the private Companion sidecar saves the self section at logout once the Accord is accepted, never before, and the docs say where it goes", function()
+test("accord: the private Companion sidecar saves an anonymous self revocation until the separate Companion Accord is accepted, then saves only the consented native identity", function()
 	Scene(function(w, A)
 		local saved = { db = rawget(_G, "OlympusCompanionDB") }
 		local before = #EVENT_SCRIPTS
@@ -1396,11 +1399,19 @@ test("accord: the private Companion sidecar saves the self section at logout onc
 			local OnEvent = assert(EVENT_SCRIPTS[before + 1], "the sidecar's event frame")
 			OnEvent(nil, "ADDON_LOADED", "OlympusCompanionBridge")
 			OnEvent(nil, "PLAYER_LOGOUT")
-			eq((OlympusCompanionDB.sections or {}).self, nil, "before the Accord: no self section")
+			local s = assert(OlympusCompanionDB.sections and OlympusCompanionDB.sections.self,
+				"before either Accord: the relay gets an anonymous revocation")
+			eq(s.data.character, nil); eq(s.data.olympus, false)
 			eq(A.Accept(), true)
 			OnEvent(nil, "PLAYER_LOGOUT")
-			local s = assert(OlympusCompanionDB.sections and OlympusCompanionDB.sections.self, "after it: saved")
-			eq(s.version, 1); eq(s.data.battleTag, TAG); eq(s.data.character, ns.me); eq(s.data.accord, 1)
+			s = assert(OlympusCompanionDB.sections and OlympusCompanionDB.sections.self)
+			eq(s.data.character, nil); eq(s.data.olympus, false,
+				"the Olympus Accord alone does not disclose the identity")
+			assert(ns.Consent.Choose("companionAccord", true))
+			OnEvent(nil, "PLAYER_LOGOUT")
+			s = assert(OlympusCompanionDB.sections and OlympusCompanionDB.sections.self, "after both: saved")
+			eq(s.version, 1); eq(s.data.character, ns.me); eq(s.data.guild, GetGuildInfo("player")); eq(s.data.olympus, true)
+			eq(s.data.battleTag, TAG); eq(s.data.accord, ns.ACCORD_VERSION); eq(s.data.at, w.now)
 		end)
 		for i = #EVENT_SCRIPTS, before + 1, -1 do EVENT_SCRIPTS[i] = nil end
 		OlympusCompanionDB = saved.db
@@ -1417,11 +1428,11 @@ test("accord: the private Companion sidecar saves the self section at logout onc
 			if line:sub(1, 2) == "| " and line:find("`self` section", 1, true) then row = line end
 		end
 		assert(row, "README: the self section's privacy row")
-		for _, must in ipairs({ "Olympus Accord", "Olympus Companion", "online census", "staff", "never another player's BattleTag", "`OlympusBridge`" }) do
+		for _, must in ipairs({ "Olympus Accord", "Olympus Companion Accord", "character", "BattleTag", "staff", "`OlympusBridge`" }) do
 			assert(row:find(must, 1, true), "README's self row: " .. must)
 		end
 		local sidecar = Read("OlympusCompanionBridge/README.md"):gsub("%s+", " ")
-		for _, must in ipairs({ "`self`", "character", "battleTag", "accord", "never another player's" }) do
+		for _, must in ipairs({ "`self`", "character", "battleTag", "guild", "roles", "never another player's" }) do
 			assert(sidecar:find(must, 1, true), "the sidecar's README: " .. must)
 		end
 	end)

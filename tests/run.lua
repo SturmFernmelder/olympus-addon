@@ -30389,7 +30389,8 @@ end)
 
 test("companion identity export: real consent, native membership and the sidecar carry self plus a witnessed chat line; outsiders fail closed", function()
 	local saved = { db = ns.db, me = ns.me, realm = ns.realm, guildInfo = GetGuildInfo, inGuild = IsInGuild,
-		companion = OlympusBridge.COMPANION_ATTACHED, bridgeDB = OlympusCompanionDB, fire = ns.Fire }
+		companion = OlympusBridge.COMPANION_ATTACHED, bridgeDB = OlympusCompanionDB, fire = ns.Fire,
+		bnInfo = rawget(_G, "BNGetInfo"), bnConnected = rawget(_G, "BNConnected"), secret = rawget(_G, "issecretvalue") }
 	local before = #EVENT_SCRIPTS
 	local ok, err = pcall(function()
 		ns.db = { log = {}, accord = saved.db and saved.db.accord }
@@ -30397,6 +30398,9 @@ test("companion identity export: real consent, native membership and the sidecar
 		ns.me, ns.realm = "Tester-Realm", "Realm"
 		IsInGuild = function() return true end
 		GetGuildInfo = function() return "Olympus II", "Officer", 1 end
+		BNConnected = function() return true end
+		BNGetInfo = function() return 1, "Tester#1234" end
+		issecretvalue = nil
 		OlympusBridge.COMPANION_ATTACHED = true
 
 		local membership = assert(OlympusBridge.GetSection("membership")).data
@@ -30409,9 +30413,10 @@ test("companion identity export: real consent, native membership and the sidecar
 
 		local self = assert(OlympusBridge.GetSection("self")).data
 		eq(self.character, "Tester-Realm"); eq(self.guild, "Olympus II"); eq(self.olympus, true)
+		eq(self.battleTag, "Tester#1234", "only this account's game-authenticated tag")
 		eq(#self.roles, 1, "only the native officer rank applies")
 		eq(self.roles[1], "officer")
-		for _, never in ipairs({ "battleTag", "reporter", "census" }) do eq(self[never], nil, "no " .. never) end
+		for _, never in ipairs({ "reporter", "census" }) do eq(self[never], nil, "no " .. never) end
 		GetGuildInfo = function() return "Olympus II", "Member", 4 end
 		self = assert(OlympusBridge.GetSection("self")).data
 		eq(#self.roles, 0, "a plain native rank gains no role")
@@ -30432,6 +30437,7 @@ test("companion identity export: real consent, native membership and the sidecar
 		eq(OlympusCompanionDB.sections.membership.data.olympus, true)
 		eq(OlympusCompanionDB.sections.self.data.character, "Tester-Realm")
 		eq(OlympusCompanionDB.sections.self.data.guild, "Olympus II")
+		eq(OlympusCompanionDB.sections.self.data.battleTag, "Tester#1234")
 		local at, room, mine, author, text = OlympusCompanionDB.chat.lines[1]:match("^(%d+)~([^~]+)~([01])~([^~]+)~(.+)$")
 		assert(tonumber(at) and tonumber(at) > 0, "the witnessed line has a native timestamp")
 		eq(room, "A"); eq(mine, "0"); eq(author, "Victim-Realm"); eq(text, "OLY-BCDFGH")
@@ -30464,6 +30470,7 @@ test("companion identity export: real consent, native membership and the sidecar
 		eq(OlympusCompanionDB.chat, nil, "withdrawal removes the retained chat record")
 	end)
 	ns.db, ns.me, ns.realm, GetGuildInfo, IsInGuild, ns.Fire = saved.db, saved.me, saved.realm, saved.guildInfo, saved.inGuild, saved.fire
+	BNGetInfo, BNConnected, issecretvalue = saved.bnInfo, saved.bnConnected, saved.secret
 	OlympusBridge.COMPANION_ATTACHED, OlympusCompanionDB = saved.companion, saved.bridgeDB
 	for i = #EVENT_SCRIPTS, before + 1, -1 do EVENT_SCRIPTS[i] = nil end
 	if not ok then error(err, 0) end
