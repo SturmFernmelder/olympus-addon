@@ -75,3 +75,37 @@ test("treasury ranking relay: malformed totals and a sender without source autho
 		eq(ok, false); eq(why, "source")
 	end)
 end)
+
+test("treasury ranking relay: unconfirmed newer candidates cannot evict a row already accepted by two holders", function()
+	local w = World.New({ compliance = "shipped" })
+	local late = Client(w, "Quillon Scribe")
+	local first = "Brannoc Weald-Emberfall"
+	local second = "Idris Vane-Emberfall"
+	w:As(late, function()
+		late.rankAllowed[late.ns.Fold(first)] = true
+		late.rankAllowed[late.ns.Fold(second)] = true
+		local base = { guild = "Olympus Ash", by = "Aster Officer-Emberfall", t = w.clock - 100,
+			money = 120000, units = 41, stacks = 12, value = 33000, pending = 2, unpriced = 1,
+			total = 153000, level = 57, correspondent = "Cora Ledger-Emberfall", home = false }
+		local accepted = assert(late.ns.Treasury.RankRelayWire(base))
+		eq(select(2, late.ns.Treasury.HandleRankRelay("WHISPER", first, accepted)), "witness")
+		eq(select(2, late.ns.Treasury.HandleRankRelay("WHISPER", second, accepted)), "accepted")
+
+		-- One authorized holder can propose newer rows, but cannot establish any of them alone.
+		-- They must not push the already corroborated row out of the bounded candidate store.
+		for i = 1, late.ns.Treasury.RANK_RELAY_CANDIDATES do
+			local candidate = {}
+			for k, v in pairs(base) do candidate[k] = v end
+			candidate.t = base.t + i
+			candidate.money = base.money + i
+			candidate.total = candidate.money + candidate.value
+			eq(select(2, late.ns.Treasury.HandleRankRelay("WHISPER", first,
+				assert(late.ns.Treasury.RankRelayWire(candidate)))), "witness")
+		end
+
+		local rows = late.ns.Treasury.RelayedRanking()
+		eq(#rows, 1, "the accepted row remains durable while newer claims await consensus")
+		eq(rows[1].t, base.t)
+		eq(rows[1].total, base.total)
+	end)
+end)

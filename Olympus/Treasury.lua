@@ -2513,8 +2513,11 @@ local function PruneRankRelays()
 			end
 			table.sort(list, function(a, b)
 				local ar, br = ReadRankRelay(a.wire), ReadRankRelay(b.wire)
-				if ar.t ~= br.t then return ar.t > br.t end
 				if (a.e.accepted == true) ~= (b.e.accepted == true) then return a.e.accepted == true end
+				-- A newer proposal with only one witness must never evict a row that already
+				-- reached consensus.  Keep corroborated history first inside the bounded set;
+				-- RelayedRanking still chooses the newest accepted row for display.
+				if ar.t ~= br.t then return ar.t > br.t end
 				return a.wire < b.wire
 			end)
 			for i = Treasury.RANK_RELAY_CANDIDATES + 1, #list do set[list[i].wire] = nil end
