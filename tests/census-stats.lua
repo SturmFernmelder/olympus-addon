@@ -191,6 +191,9 @@ test("census page: characters, people, linked alts, online, guilds counted, the 
 		local w = World({ realData = true, clock = os.time() })
 		local lines, title, text = w.CS.Build()
 		eq(title, L.CENSUS_STATS_DETAIL_TITLE); eq(text, L.CENSUS_STATS_DETAIL)
+		assert(L.CENSUS_STATS_PEOPLE:lower():find("estimated", 1, true), "the page labels people as an estimate")
+		assert(text:find("characters - confirmed linked alts", 1, true), "the visible detail explains the formula")
+		assert(text:find("estimate can be high", 1, true), "the visible detail explains why it is approximate")
 		eq(Bare(lines[1].text), L.CENSUS_STATS_BACK, "the way back first"); assert(lines[1].onClick)
 		eq(lines[2].text, L.CENSUS_STATS_TITLE); eq(lines[2].header, true)
 		eq(Bare(Find(lines, L.CENSUS_STATS_CHARACTERS).right), "1,300")
@@ -510,6 +513,8 @@ test("census page: every line in English and Portuguese, the Portuguese its own"
 		if key ~= "CENSUS_STATS_DAY_FORMAT" then eq(Codes(pt.L[key]), Codes(text), key .. ": the same format codes") end
 	end
 	assert(n >= 40, "lines: " .. n)
-	eq(pt.L.ARMY_PEOPLE:format("80.544"), "80.544 pessoas")
+	eq(pt.L.ARMY_PEOPLE:format("80.544"), "aprox. 80.544 pessoas")
 	eq(pt.L.CENSUS_STATS_TITLE, "O censo em números")
+	assert(pt.L.CENSUS_STATS_PEOPLE:find("estimativa", 1, true))
+	assert(pt.L.CENSUS_STATS_DETAIL:find("personagens contados - alts ligados", 1, true))
 end)

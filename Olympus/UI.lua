@@ -3398,14 +3398,18 @@ function UI.ShowCopy(title, text, action, opts)
 	end
 	-- (1.1.5) A second button after the first (and Select all), made the first time one is asked for.
 	local second = type(opts.second) == "table" and type(opts.second.fn) == "function" and opts.second or nil
-	if second and not copyFrame.second then
+	-- As with selectAll, only a button this window created counts.  Frame
+	-- metatables may expose a method named "second" on some clients/mocks.
+	local secondButton = rawget(copyFrame, "second")
+	if second and not secondButton then
 		local b = CreateFrame("Button", nil, copyFrame, "UIPanelButtonTemplate")
 		b:SetSize(140, 20)
 		b:SetScript("OnClick", function(self) ns.SafeCall("copy second", function() if self.fn then self.fn() end end) end)
 		copyFrame.second = b
+		secondButton = b
 	end
-	if copyFrame.second then
-		local b = copyFrame.second
+	if secondButton then
+		local b = secondButton
 		b.fn = second and second.fn or nil
 		b:SetShown(second ~= nil)
 		if second then

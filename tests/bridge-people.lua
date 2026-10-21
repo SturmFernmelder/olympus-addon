@@ -10,7 +10,9 @@ local ns, test, eq = ...
 local B = OlympusBridge
 
 local NOW = 1800000000
-local ME = ns.me -- "Tester-Realm"
+-- Keep this fixture independent from whichever character a preceding full-suite
+-- scenario left in the shared harness. With() installs and restores it below.
+local ME = "Tester-Realm"
 local MY_GK = "4619-0000ABCD"
 local NEW = { "realm", "roster", "church", "games", "profile" }
 -- (The census's guilds and statistics too: no page shows them before the Accord or to an outsider,

@@ -3,16 +3,16 @@ local L = ns.L
 
 -- CR-02 / KH-08 (the author's ask, 2026-10-19): the people next to the characters in the window's
 -- header, and the Census's own page behind that count (CensusStats.lua).
-L.ARMY_PEOPLE = "%s people"
+L.ARMY_PEOPLE = "about %s people"
 L.HEADER_TIP_OPEN = "Click: the census in numbers, its people and its last 30 days."
 
 L.CENSUS_STATS_BACK = "< The Census"
 L.CENSUS_STATS_TITLE = "The census in numbers"
 L.CENSUS_STATS_CHARACTERS = "Characters"
 L.CENSUS_STATS_CHARACTERS_TIP = "Every character on the rosters of the Olympus guilds counted: each guild's newest report, counted for a day after it."
-L.CENSUS_STATS_PEOPLE = "People"
-L.CENSUS_STATS_PEOPLE_TIP = "The same characters, each player once: characters their players linked as alts (/oly alts, confirmed on each character) count once, whatever guilds they are in. A player who linked none counts once per character."
-L.CENSUS_STATS_ALTS = "Linked alts"
+L.CENSUS_STATS_PEOPLE = "Estimated people"
+L.CENSUS_STATS_PEOPLE_TIP = "Estimate = characters - confirmed linked alts. A link counts only after both the main and that alt confirmed it; installing this version does not create a link. Characters not linked by their player, or whose two confirmations have not reached this client, still count separately; the estimate can therefore be higher than the real number of people and fall as confirmations arrive. Olympus never reads account data to guess."
+L.CENSUS_STATS_ALTS = "Linked alts known here"
 L.CENSUS_STATS_ONLINE = "Online now"
 L.CENSUS_STATS_GUILDS = "Guilds counted"
 L.CENSUS_STATS_GUILDS_LIVE = "(%d reporting now)"
@@ -47,21 +47,21 @@ L.CENSUS_STATS_LEVEL_BAND = "Level %d-%d"
 L.CENSUS_STATS_LEVEL_TOP = "Level %d+"
 L.CENSUS_STATS_LEVELS_TIP = "Who is online now, by level: from the guilds reporting now whose reports carry it (a count repeated by a ledger holder carries none)."
 
-L.CENSUS_STATS_DETAIL_TITLE = "How this page is kept"
-L.CENSUS_STATS_DETAIL = "This client writes down its census every 15 minutes while you play (characters, people, online) and keeps 30 days of it. Nothing is sent: another player's client keeps its own, so its curves can differ from yours."
+L.CENSUS_STATS_DETAIL_TITLE = "How the people estimate is calculated"
+L.CENSUS_STATS_DETAIL = "People = counted characters - confirmed linked alts known here. Updating alone does not link alts. Missing confirmations count separately, so the estimate can be high."
 L.CENSUS_STATS_KEPT = "Kept on this client since %s."
 
 if GetLocale and GetLocale() == "ptBR" then
-	L.ARMY_PEOPLE = "%s pessoas"
+	L.ARMY_PEOPLE = "aprox. %s pessoas"
 	L.HEADER_TIP_OPEN = "Clique: o censo em números, as pessoas e os últimos 30 dias."
 
 	L.CENSUS_STATS_BACK = "< O Censo"
 	L.CENSUS_STATS_TITLE = "O censo em números"
 	L.CENSUS_STATS_CHARACTERS = "Personagens"
 	L.CENSUS_STATS_CHARACTERS_TIP = "Todo personagem nas listas das guildas Olympus contadas: o report mais novo de cada guilda, contado por um dia depois dele."
-	L.CENSUS_STATS_PEOPLE = "Pessoas"
-	L.CENSUS_STATS_PEOPLE_TIP = "Os mesmos personagens, cada jogador uma vez: personagens que os jogadores ligaram como alts (/oly alts, confirmado em cada personagem) contam uma vez, em qualquer guilda. Quem não ligou nenhum conta uma vez por personagem."
-	L.CENSUS_STATS_ALTS = "Alts ligados"
+	L.CENSUS_STATS_PEOPLE = "Pessoas (estimativa)"
+	L.CENSUS_STATS_PEOPLE_TIP = "Estimativa = personagens - alts ligados e confirmados. Um vínculo só conta depois que o main e aquele alt o confirmam; instalar esta versão não cria um vínculo. Personagens que o jogador não vinculou, ou cujas duas confirmações ainda não chegaram a este cliente, continuam contando separados; por isso a estimativa pode ficar acima do número real de pessoas e cair quando novas confirmações chegam. O Olympus nunca lê dados da conta para adivinhar."
+	L.CENSUS_STATS_ALTS = "Alts ligados conhecidos aqui"
 	L.CENSUS_STATS_ONLINE = "Online agora"
 	L.CENSUS_STATS_GUILDS = "Guildas contadas"
 	L.CENSUS_STATS_GUILDS_LIVE = "(%d reportando agora)"
@@ -96,7 +96,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CENSUS_STATS_LEVEL_TOP = "Nível %d+"
 	L.CENSUS_STATS_LEVELS_TIP = "Quem está online agora, por nível: das guildas reportando agora cujos reports trazem isso (uma contagem repetida por um guardião do livro não traz)."
 
-	L.CENSUS_STATS_DETAIL_TITLE = "Como esta página é guardada"
-	L.CENSUS_STATS_DETAIL = "Este cliente anota o seu censo a cada 15 minutos enquanto você joga (personagens, pessoas, online) e guarda 30 dias disso. Nada é enviado: o cliente de outro jogador guarda o dele, então as curvas dele podem ser diferentes das suas."
+	L.CENSUS_STATS_DETAIL_TITLE = "Como a estimativa de pessoas é calculada"
+	L.CENSUS_STATS_DETAIL = "Pessoas = personagens contados - alts ligados e confirmados aqui. Atualizar não liga alts. Confirmações ausentes contam separadas, então a estimativa pode ficar alta."
 	L.CENSUS_STATS_KEPT = "Guardado neste cliente desde %s."
 end
