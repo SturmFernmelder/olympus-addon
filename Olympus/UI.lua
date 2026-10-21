@@ -2336,6 +2336,45 @@ local function ShowOwnPortrait(art)
 	if shown then ns.SafeCall("my profile portrait", PE.DressPortrait, rig, art) end
 end
 
+-- The native tab rules in one place, so the visible rail and the Companion export cannot drift.
+-- `views` is presentation-only and is used by the addon's View-as preview; the Companion always
+-- passes nil and therefore exports only this character's actual access.
+local function TabRules(locked, views)
+	local only = {
+		chat = ChatTabVisible(),
+		throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false,
+		vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
+		treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false,
+		workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
+	}
+	for key, visible in pairs(added) do
+		local okVisible, shows = pcall(visible)
+		only[key] = okVisible and shows == true
+	end
+	if views and not locked then
+		for _, definition in ipairs(TABS) do
+			if not definition.apiSurface then
+				local shows = views.TabShown(definition.key, only[definition.key])
+				if shows ~= nil then only[definition.key] = shows end
+			end
+		end
+	end
+	return only
+end
+
+-- The tabs this character can actually open now, independent of whether the window was ever
+-- built and independent of the author's View-as preview. Contributed third-party surfaces are not
+-- Olympus authority and stay out.
+function UI.CompanionTabs()
+	local out = {}
+	if not ns.IsMember() then return out end
+	local only = TabRules(false, nil)
+	for _, definition in ipairs(TABS) do
+		if not definition.apiSurface and only[definition.key] ~= false then out[#out + 1] = definition.key end
+	end
+	return out
+end
+
 function UI.Refresh()
 	if not main or not main:IsShown() then return end
 	UI.lastRedraw = GetTime()
@@ -2361,28 +2400,9 @@ function UI.Refresh()
 		-- Joined or left a guild while the window is open: lay it out again (KH-08: and the census's
 		-- own page opened or closed: its column titles).
 		if locked ~= main.layoutLocked or (main.tab == "census" and CensusStatsShown()) ~= main.statsLaid then UI.Layout() end
-			-- Role-only native pages keep their existing rules. A contributed surface decides only
-			-- whether its own page is available; it never participates in Olympus's role-preview model.
-			local only = {
-				chat = ChatTabVisible(), -- (1.1.1)
-				throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false, -- (1.1.5: or a guild master's Guild tab)
-				vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
-				treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false, -- (1.1: the dues' button too)
-				workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
-			}
-			for key, visible in pairs(added) do
-				local okVisible, shows = pcall(visible)
-				only[key] = okVisible and shows == true
-			end
-			if views and not locked then
-				for _, tab in ipairs(main.tabs) do
-					local definition = TAB_BY_KEY[tab.key]
-					if not (definition and definition.apiSurface) then
-						local shows = views.TabShown(tab.key, only[tab.key])
-						if shows ~= nil then only[tab.key] = shows end
-					end
-				end
-			end
+			-- Role-only native pages keep their existing rules (the Companion reads the same rules,
+			-- without the presentation-only View-as override).
+			local only = TabRules(locked, views)
 
 			local tabsWere = main.tabs[1] and main.tabs[1]:IsShown()
 			local function LayoutAvailableTabs()

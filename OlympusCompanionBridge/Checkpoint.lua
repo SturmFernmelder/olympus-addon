@@ -423,9 +423,118 @@ local function ResetDB(checkpoint)
 	return OlympusCompanionDB
 end
 
+-- Chat reaches this private SavedVariable only through Olympus's consent-gated recorder. Rows are
+-- compact because the file shares the addon's 4 MiB read budget; text is last and may contain ~.
+-- A revoked/missing answer discards both the in-memory record and a previous session's copy.
+local CHAT_VERSION = 1
+local CHAT_MAX = 5000
+local CHAT_BYTES = 1572864
+local CHAT_TEXT = 255
+local CHAT_ROOMS = { A = true, C = true, L = true }
+local chatLines, chatBytes = {}, 0
+
+local function ClearChat()
+	chatLines, chatBytes = {}, 0
+end
+
+local function CompanionAccepted()
+	local bridge = rawget(_G, "OlympusBridge")
+	if type(bridge) ~= "table" or type(bridge.CompanionAccepted) ~= "function" then return false end
+	local ok, accepted = pcall(bridge.CompanionAccepted)
+	return ok and accepted == true
+end
+
+local function Cut(value, maximum)
+	if #value <= maximum then return value end
+	local byte = value:byte(maximum + 1)
+	while maximum > 0 and byte and byte >= 128 and byte < 192 do
+		maximum = maximum - 1
+		byte = value:byte(maximum + 1)
+	end
+	return value:sub(1, maximum)
+end
+
+local function ChatText(value)
+	if type(value) ~= "string" then return nil end
+	local s = value:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|H.-|h(.-)|h", "%1"):gsub("|T.-|t", "")
+	s = s:gsub("[|%c]", ""):gsub("^%s+", ""):gsub("%s+$", "")
+	if s == "" then return nil end
+	if #s > CHAT_TEXT then s = Cut(s, CHAT_TEXT) end
+	return s
+end
+
+local function ChatRow(at, room, isSelf, author, text)
+	at = Whole(at, MAX_TIME)
+	room = CHAT_ROOMS[room] and room or nil -- the exact native Olympus/Captains/Lords lane
+	author = Plain(author, 64)
+	if author and author:find("~", 1, true) then author = nil end
+	text = ChatText(text)
+	if not (at and room and author and text) then return nil end
+	return ("%d~%s~%d~%s~%s"):format(at, room, isSelf and 1 or 0, author, text)
+end
+
+local function KeepChat(row)
+	if not row then return end
+	chatLines[#chatLines + 1] = row
+	chatBytes = chatBytes + #row
+	while #chatLines > CHAT_MAX or chatBytes > CHAT_BYTES do
+		chatBytes = chatBytes - #table.remove(chatLines, 1)
+	end
+end
+
+local function ChatNow()
+	for _, name in ipairs({ "GetServerTime", "time" }) do
+		local get = rawget(_G, name)
+		if type(get) == "function" then
+			local ok, now = pcall(get)
+			if ok and Whole(now, MAX_TIME) and now > 0 then return now end
+		end
+	end
+	return 0
+end
+
+local function OnChatLine(room, author, text, isSelf)
+	if not CompanionAccepted() then ClearChat() return end
+	KeepChat(ChatRow(ChatNow(), room, isSelf == true, author, text))
+end
+
+local chatObserved, consentObserved = false, false
+local function ObserveChat()
+	local bridge = rawget(_G, "OlympusBridge")
+	if type(bridge) ~= "table" then return end
+	if not chatObserved and type(bridge.RegisterChatRecorder) == "function" then
+		local ok, registered = pcall(bridge.RegisterChatRecorder, OnChatLine)
+		chatObserved = ok and registered == true
+	end
+	if not consentObserved and type(bridge.RegisterCompanionConsentObserver) == "function" then
+		local ok, registered = pcall(bridge.RegisterCompanionConsentObserver, function(accepted)
+			if accepted ~= true then ClearChat() end
+		end)
+		consentObserved = ok and registered == true
+	end
+end
+
+local function ChatRecord()
+	if not CompanionAccepted() then ClearChat() return nil end
+	if #chatLines == 0 then return nil end
+	local lines = {}
+	for i, row in ipairs(chatLines) do lines[i] = row end
+	return { version = CHAT_VERSION, lines = lines }
+end
+
 local function LoadDB()
 	local db = CurrentDB()
 	local checkpoint = db and CopyFinal(db.checkpoint) or nil
+	ClearChat()
+	if CompanionAccepted() and db and type(db.chat) == "table" and db.chat.version == CHAT_VERSION and type(db.chat.lines) == "table" then
+		for i = 1, math.min(#db.chat.lines, CHAT_MAX) do
+			local row = db.chat.lines[i]
+			if type(row) == "string" then
+				local at, room, isSelf, author, text = row:match("^(%d+)~([^~]+)~([01])~([^~]+)~(.+)$")
+				if at then KeepChat(ChatRow(tonumber(at), room, isSelf == "1", author, text)) end
+			end
+		end
+	end
 	return ResetDB(checkpoint)
 end
 
@@ -433,7 +542,7 @@ end
 -- already copied each into plain tables within its limits; an unknown name or version is skipped.
 -- (931: every tab's, companion/BRIDGE-SECTIONS.md: the realm's, the roster's, the Church's, the
 -- games', the profile's, and the affairs' of Olympus/BridgeAffairs.lua.)
-local KNOWN_SECTIONS = { guilds = 1, rankings = 1, self = 1, stats = 1, wanted = 1,
+local KNOWN_SECTIONS = { guilds = 1, membership = 1, rankings = 1, self = 1, stats = 1, wanted = 1,
 	realm = 1, roster = 1, church = 1, games = 1, profile = 1,
 	crafting = 1, crafters = 1, treasury = 1, decrees = 1, agenda = 1, notices = 1, watch = 1, chatRooms = 1 }
 
@@ -455,8 +564,11 @@ local function Finalize()
 	local previous = CopyFinal(db.checkpoint)
 	local bridge = rawget(_G, "OlympusBridge")
 	local sections = CopySections(bridge)
+	local chat = ChatRecord()
 	local function Keep(checkpoint)
-		ResetDB(checkpoint).sections = sections
+		local out = ResetDB(checkpoint)
+		out.sections = sections
+		out.chat = chat
 	end
 	if type(bridge) ~= "table" or bridge.CENSUS_CHECKPOINT_API_VERSION ~= VERSION
 		or type(bridge.GetCensusCheckpoint) ~= "function" then Keep(previous) return false end
@@ -474,12 +586,16 @@ addon.Finalize = Finalize
 addon.LoadDB = LoadDB
 addon.CopySource = CopySource
 addon.Fingerprint = Fingerprint
+addon.OnChatLine = OnChatLine
 
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGOUT")
 frame:SetScript("OnEvent", function(_, event, name)
 	if event == "ADDON_LOADED" and name == ADDON then
+		local bridge = rawget(_G, "OlympusBridge")
+		if type(bridge) == "table" then bridge.COMPANION_ATTACHED = true end
+		ObserveChat()
 		LoadDB()
 	elseif event == "PLAYER_LOGOUT" then
 		Finalize()

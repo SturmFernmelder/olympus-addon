@@ -3,8 +3,8 @@ local ADDON, ns = ...
 -- The Companion's sections beyond the census (Bridge.lua's registry). Each reads only a module's
 -- public function, what every member already sees on Olympus's own pages, and builds its rows
 -- field by field: a field a module adds later never reaches the Companion by itself.
--- Never another player's BattleTag (only "self", below, carries the player's own), chat text or
--- chat-strike line, a council/High Council-only view, treasury items, the Wanted page's victims or
+-- Never a BattleTag, chat text or chat-strike line, a council/High Council-only view, treasury
+-- items, the Wanted page's victims or
 -- sightings, or Church/Watch detail meant for fewer people.
 if type(OlympusBridge) ~= "table" or type(OlympusBridge.RegisterSection) ~= "function" then return end
 
@@ -22,6 +22,36 @@ local function Whole(v)
 	v = tonumber(v)
 	if not v or v ~= v or v < 0 then return 0 end
 	return math.floor(v)
+end
+
+-- The Companion keeps an account-level answer to its own disclosure. It is deliberately
+-- separate from the ordinary chat switch: reading an Olympus chat in game is not consent to keep
+-- that chat in the private Bridge file or send it to the relay. A changed disclosure version asks
+-- again; nil and No both fail closed.
+local COMPANION_ACCORD_VERSION = 1
+local function CompanionAnswer()
+	local a = type(ns.db) == "table" and ns.db.companionAccord or nil
+	if type(a) ~= "table" or a.version ~= COMPANION_ACCORD_VERSION or type(a.accepted) ~= "boolean" then return nil end
+	return a.accepted
+end
+function ns.CompanionAccordAccepted() return CompanionAnswer() == true end
+
+local C = ns.Consent
+if type(C) == "table" and type(C.Register) == "function" then
+	C.Register({
+		key = "companionAccord", label = "CONSENT_COMPANION", text = "CONSENT_COMPANION_TEXT",
+		version = COMPANION_ACCORD_VERSION, explicit = true, adopt = false,
+		shown = function()
+			return type(OlympusBridge) == "table" and OlympusBridge.COMPANION_ATTACHED == true
+		end,
+		get = CompanionAnswer,
+		set = function(on)
+			if type(ns.db) ~= "table" then return end
+			ns.db.companionAccord = { version = COMPANION_ACCORD_VERSION, accepted = on == true,
+				at = Whole(type(ns.Now) == "function" and ns.Now() or 0) }
+			ns.Fire("COMPANION_ACCORD_CHANGED", on == true)
+		end,
+	})
 end
 
 -- The helpers the Companion's other section files share (BridgePeople.lua, loaded after this one):
@@ -313,14 +343,6 @@ OlympusBridge.RegisterSection("wanted", 1, function()
 	return { targets = targets }
 end)
 
--- The player himself (Daniel, 2026-10-19: his BattleTag to the Companion's online census, so the
--- staff know who is who; the Companion shows it to staff alone, never publicly): this character's
--- Name-Realm and his own BattleTag, read from his own game as the Accord reads it (Accord.ReadTag),
--- the Accord's version and the server's time now. Nothing until this account accepted the Olympus
--- Accord, whose letter says so (ACCORD_T5_3), and nothing while the tag can't be read. Never the
--- tags a moderation team client keeps of other players (ns.rdb.battletags). A file of the
--- player's own computer, not a screen: the King's account exports it too, and it is never printed
--- or logged.
 -- The roles this character holds, as the Companion's tabs read them: officer (his guild rank may
 -- act as an officer, Roster.IsOfficer), guildMaster (rank 0), council (the signed High Council),
 -- crown (the pinned King), author (the addon's author). His own, never another player's; absent
@@ -333,17 +355,17 @@ end
 -- This character's own guild, by the name the census uses (GetGuildInfo, as the census reads it),
 -- or nil outside a guild: the Companion's relay hands a guild's own musters only to its members.
 local function SelfGuild()
-	if type(IsInGuild) ~= "function" or not IsInGuild() or type(GetGuildInfo) ~= "function" then return nil end
-	local ok, name = pcall(GetGuildInfo, "player")
-	if not ok or type(name) ~= "string" or name == "" then return nil end
-	return name
+	if not Yes(IsInGuild) or type(GetGuildInfo) ~= "function" then return nil end
+	local ok, guild = pcall(GetGuildInfo, "player")
+	if not ok or type(guild) ~= "string" or guild == "" then return nil end
+	return guild
 end
 local function SelfRoles(me)
 	local out, R, W = {}, ns.Roster, ns.Workshop
 	if type(R) == "table" then
 		if Yes(R.IsOfficer) then out[#out + 1] = "officer" end
 		local ok, rank = pcall(type(R.MyRank) == "function" and R.MyRank or function() return nil end)
-		if ok and rank == 0 and type(IsInGuild) == "function" and IsInGuild() then out[#out + 1] = "guildMaster" end
+		if ok and rank == 0 and Yes(IsInGuild) then out[#out + 1] = "guildMaster" end
 	end
 	if Yes(ns.IsHighCouncillor, me) then out[#out + 1] = "council" end
 	if Yes(ns.IsKingCharacter, me) then out[#out + 1] = "crown" end
@@ -351,16 +373,40 @@ local function SelfRoles(me)
 	return out
 end
 
+local function RealmGroup()
+	local realm = ns.realm
+	if type(realm) ~= "string" or realm == "" then
+		local ok, current = pcall(type(ns.CurrentRealm) == "function" and ns.CurrentRealm or function() return nil end)
+		if ok then realm = current end
+	end
+	if type(realm) ~= "string" or realm == "" or type(ns.GroupOf) ~= "function" then return nil end
+	local ok, group = pcall(ns.GroupOf, realm)
+	return ok and type(group) == "string" and group ~= "" and group or nil
+end
+
+-- Membership names nobody and is therefore safe to export before the Companion disclosure is
+-- accepted. `olympus` comes only from this character's native guild membership plus Olympus's
+-- fixed/signed guild rule; a census row is never authority. `accord` controls every named export.
+OlympusBridge.RegisterSection("membership", 1, function()
+	return { olympus = Yes(ns.IsMember), accord = ns.CompanionAccordAccepted(), realmGroup = RealmGroup() }
+end)
+
+-- The character on this computer, after explicit consent. The name and guild are direct game
+-- facts; roles use the same current native/signed checks as the addon. The UI supplies its actual
+-- (not View-as preview) tab keys when available. No BattleTag, census-inferred role or remote rank
+-- crosses this boundary. The unnamed closed value is still exported when access disappears so a
+-- Companion can overwrite a previously relayed identity instead of leaving it stale.
 OlympusBridge.RegisterSection("self", 1, function()
-	if type(ns.AccordAccepted) ~= "function" or ns.AccordAccepted() ~= true then return nil end
-	local A = ns.Accord
-	if type(A) ~= "table" or A.missing or type(A.ReadTag) ~= "function" then return nil end
-	local tag = A.ReadTag()
-	local me = ns.me
-	if type(tag) ~= "string" or type(me) ~= "string" or not me:find("^[^%-]+%-.+$") then return nil end
-	local at = Call("Data", "ServerTime")
-	return { character = me, battleTag = tag, accord = ns.ACCORD_VERSION, at = Whole(at or (ns.Now and ns.Now())),
-		roles = SelfRoles(me), guild = SelfGuild() }
+	local closed = { roles = {}, olympus = false, tabs = {} }
+	if not ns.CompanionAccordAccepted() or not Yes(ns.IsMember) then return closed end
+	local me, guild = ns.me, SelfGuild()
+	if type(me) ~= "string" or not me:find("^[^%-]+%-.+$") or not guild then return closed end
+	local tabs, UI = nil, ns.UI
+	if type(UI) == "table" and not UI.missing and type(UI.CompanionTabs) == "function" then
+		local ok, value = pcall(UI.CompanionTabs)
+		if ok and type(value) == "table" then tabs = value end
+	end
+	return { character = me, guild = guild, roles = SelfRoles(me), olympus = true, tabs = tabs }
 end)
 
 -- The census statistics (docs/CENSUS-STATS.md): the census page's own figures and series

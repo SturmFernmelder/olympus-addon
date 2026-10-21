@@ -351,16 +351,48 @@ end
 -- muted channel and a line the flood guard holds back pass on the same way, as those only decide
 -- what this player's chat frame shows. Plain strings only, and an observer that errors is
 -- skipped: it can never stop a line or the others.
-local observers = {}
+local observers, recorders, companionConsentObservers = {}, {}, {}
 function OlympusBridge.RegisterChatObserver(fn)
 	if type(fn) ~= "function" or #observers >= OBSERVERS_MAX then return false end
 	observers[#observers + 1] = fn
 	return true
 end
 
+-- The private Companion Bridge uses a separate recorder contract. Unlike a generic observer it
+-- fires only after the player explicitly accepted the Companion disclosure. The callback receives
+-- only lines from other players because CHAT_LINE is the addon's already-accepted incoming lane;
+-- the linking player never witnesses their own code.
+function OlympusBridge.CompanionAccepted()
+	local fn = ns.CompanionAccordAccepted
+	if type(fn) ~= "function" then return false end
+	local ok, accepted = pcall(fn)
+	return ok and accepted == true
+end
+
+function OlympusBridge.RegisterChatRecorder(fn)
+	if type(fn) ~= "function" or #recorders >= OBSERVERS_MAX then return false end
+	recorders[#recorders + 1] = fn
+	return true
+end
+
+-- The sidecar clears its in-memory record at the instant consent is withdrawn. This callback is
+-- intentionally only a boolean transition; it carries no identity or chat content.
+function OlympusBridge.RegisterCompanionConsentObserver(fn)
+	if type(fn) ~= "function" or #companionConsentObservers >= OBSERVERS_MAX then return false end
+	companionConsentObservers[#companionConsentObservers + 1] = fn
+	return true
+end
+
+ns.On("COMPANION_ACCORD_CHANGED", function(accepted)
+	for i = 1, #companionConsentObservers do pcall(companionConsentObservers[i], accepted == true) end
+end)
+
 ns.On("CHAT_LINE", function(tier, sender, text)
 	if type(tier) ~= "string" or type(sender) ~= "string" or type(text) ~= "string" then return end
 	for i = 1, #observers do pcall(observers[i], tier, sender, text) end
+	if OlympusBridge.CompanionAccepted() then
+		for i = 1, #recorders do pcall(recorders[i], tier, sender, text, false) end
+	end
 end)
 
 -- The Olympus Companion's chat record (the author, 2026-10-20: the Companion may record the chat

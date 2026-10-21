@@ -30271,7 +30271,7 @@ test("1.2.6 companion sections: the registry takes each name once, copies plain 
 	eq(B.SECTIONS_API_VERSION, 1)
 	local names = {}
 	for _, s in ipairs(B.Sections()) do names[s.name] = s.version end
-	eq(names.census, 1); eq(names.guilds, 1); eq(names.rankings, 1); eq(names.wanted, 1); eq(names.self, 1)
+	eq(names.census, 1); eq(names.guilds, 1); eq(names.membership, 1); eq(names.rankings, 1); eq(names.self, 1); eq(names.wanted, 1)
 
 	local function F() return {} end
 	eq(select(2, B.RegisterSection("Bad Name", 1, F)), "name")
@@ -30387,6 +30387,101 @@ test("1.2.6 companion sections: guilds, rankings and wanted carry only public ro
 	assert(ok, err)
 end)
 
+test("companion identity export: real consent, native membership and the sidecar carry self plus a witnessed chat line; outsiders fail closed", function()
+	local saved = { db = ns.db, me = ns.me, realm = ns.realm, guildInfo = GetGuildInfo, inGuild = IsInGuild,
+		companion = OlympusBridge.COMPANION_ATTACHED, bridgeDB = OlympusCompanionDB, fire = ns.Fire }
+	local before = #EVENT_SCRIPTS
+	local ok, err = pcall(function()
+		ns.db = { log = {}, accord = saved.db and saved.db.accord }
+		ns.Fire = CoreFire -- the harness normally silences events; exercise the addon's real consent event here
+		ns.me, ns.realm = "Tester-Realm", "Realm"
+		IsInGuild = function() return true end
+		GetGuildInfo = function() return "Olympus II", "Officer", 1 end
+		OlympusBridge.COMPANION_ATTACHED = true
+
+		local membership = assert(OlympusBridge.GetSection("membership")).data
+		eq(membership.olympus, true); eq(membership.accord, false)
+		local closed = assert(OlympusBridge.GetSection("self")).data
+		eq(closed.character, nil); eq(closed.guild, nil); eq(closed.olympus, false,
+			"before the explicit answer only an unnamed revocation can leave")
+		assert(ns.Consent.Choose("companionAccord", true), "the real privacy-page setter accepts")
+		eq(ns.Consent.Answer("companionAccord"), true)
+
+		local self = assert(OlympusBridge.GetSection("self")).data
+		eq(self.character, "Tester-Realm"); eq(self.guild, "Olympus II"); eq(self.olympus, true)
+		eq(#self.roles, 1, "only the native officer rank applies")
+		eq(self.roles[1], "officer")
+		for _, never in ipairs({ "battleTag", "reporter", "census" }) do eq(self[never], nil, "no " .. never) end
+		GetGuildInfo = function() return "Olympus II", "Member", 4 end
+		self = assert(OlympusBridge.GetSection("self")).data
+		eq(#self.roles, 0, "a plain native rank gains no role")
+		GetGuildInfo = function() return "Olympus II", "Officer", 1 end
+
+		OlympusCompanionDB = nil
+		local private = {}
+		assert(loadfile(ROOT .. "OlympusCompanionBridge/Checkpoint.lua"))("OlympusCompanionBridge", private)
+		local OnEvent = assert(EVENT_SCRIPTS[before + 1], "the real private bridge event frame")
+		OnEvent(nil, "ADDON_LOADED", "OlympusCompanionBridge")
+		-- Earlier bridge-contract coverage deliberately fills all four recorder slots for the rest
+		-- of this harness. Its real path is already exercised there; call the sidecar's exposed
+		-- recorder here so this later integration test still verifies retention and withdrawal.
+		private.OnChatLine("A", "Victim-Realm", "OLY-BCDFGH", false)
+		private.OnChatLine("A", "Victim-Realm", string.rep("x", 254) .. "é", false)
+		private.OnChatLine("guild", "Victim-Realm", "not a native Olympus lane", false)
+		OnEvent(nil, "PLAYER_LOGOUT")
+		eq(OlympusCompanionDB.sections.membership.data.olympus, true)
+		eq(OlympusCompanionDB.sections.self.data.character, "Tester-Realm")
+		eq(OlympusCompanionDB.sections.self.data.guild, "Olympus II")
+		local at, room, mine, author, text = OlympusCompanionDB.chat.lines[1]:match("^(%d+)~([^~]+)~([01])~([^~]+)~(.+)$")
+		assert(tonumber(at) and tonumber(at) > 0, "the witnessed line has a native timestamp")
+		eq(room, "A"); eq(mine, "0"); eq(author, "Victim-Realm"); eq(text, "OLY-BCDFGH")
+		local unicode = OlympusCompanionDB.chat.lines[2]:match("~([^~]+)$")
+		eq(#unicode, 254, "the 255-byte cap never leaves half an accented letter")
+		eq(#OlympusCompanionDB.chat.lines, 2, "the sidecar preserves only the native A/C/L rooms")
+
+		IsInGuild = function() return false end
+		membership = assert(OlympusBridge.GetSection("membership")).data
+		closed = assert(OlympusBridge.GetSection("self")).data
+		eq(membership.olympus, false); eq(closed.character, nil); eq(closed.guild, nil); eq(closed.olympus, false,
+			"no guild exports only an unnamed revocation")
+		IsInGuild = function() return true end
+		GetGuildInfo = function() return "Other Guild", "Member", 4 end
+		membership = assert(OlympusBridge.GetSection("membership")).data
+		eq(membership.olympus, false, "a Discord/census claim cannot replace native membership")
+		closed = assert(OlympusBridge.GetSection("self")).data
+		eq(closed.character, nil); eq(closed.guild, nil); eq(closed.olympus, false,
+			"an outsider exports only an unnamed revocation")
+		GetGuildInfo = function() return "Olympus II", "Officer", 1 end
+		assert(ns.Consent.Choose("companionAccord", false), "withdrawal is immediate")
+		assert(ns.Consent.Choose("companionAccord", true), "accepting again does not restore old lines")
+		OnEvent(nil, "PLAYER_LOGOUT")
+		eq(OlympusCompanionDB.chat, nil, "a re-accept in the same session cannot revive pre-withdrawal chat")
+		private.OnChatLine("A", "Later-Realm", "OLY-BCDFGH", false)
+		assert(ns.Consent.Choose("companionAccord", false), "the second withdrawal also clears")
+		OnEvent(nil, "PLAYER_LOGOUT")
+		eq(OlympusCompanionDB.sections.self.data.character, nil, "withdrawal removes the named self")
+		eq(OlympusCompanionDB.sections.self.data.olympus, false, "withdrawal carries the relay tombstone")
+		eq(OlympusCompanionDB.chat, nil, "withdrawal removes the retained chat record")
+	end)
+	ns.db, ns.me, ns.realm, GetGuildInfo, IsInGuild, ns.Fire = saved.db, saved.me, saved.realm, saved.guildInfo, saved.inGuild, saved.fire
+	OlympusBridge.COMPANION_ATTACHED, OlympusCompanionDB = saved.companion, saved.bridgeDB
+	for i = #EVENT_SCRIPTS, before + 1, -1 do EVENT_SCRIPTS[i] = nil end
+	if not ok then error(err, 0) end
+end)
+
+test("companion identity export: the tab list uses this character's native access and fails closed outside Olympus", function()
+	WithUI(function()
+		GetGuildInfo = function() return "Olympus II", "Member", 4 end
+		local UI = LoadUI()
+		local shown = {}
+		for _, key in ipairs(UI.CompanionTabs()) do shown[key] = true end
+		for _, key in ipairs({ "census", "realm", "decrees", "crafters" }) do eq(shown[key], true, key) end
+		for _, key in ipairs({ "treasury", "throne", "vox", "workshop" }) do eq(shown[key], nil, key) end
+		GetGuildInfo = function() return "Other Guild", "Member", 4 end
+		eq(#UI.CompanionTabs(), 0, "an outsider gets no Olympus tab capability")
+	end)
+end)
+
 test("1.2.6 companion sections: the sidecar saves only the sections it knows, at their version, even when the census fails", function()
 	local saved = { db = OlympusCompanionDB, bridge = OlympusBridge }
 	local before = #EVENT_SCRIPTS
@@ -30408,6 +30503,7 @@ test("1.2.6 companion sections: the sidecar saves only the sections it knows, at
 				if name == "guilds" then return { name = name, version = 1, data = { people = 3 } } end
 				if name == "rankings" then return { name = name, version = 2, data = { slayers = {} } } end
 				if name == "wanted" then error("boom") end
+				if name == "membership" then return { name = name, version = 1, data = { olympus = true, accord = false } } end
 				if name == "self" then return { name = name, version = 1, data = { character = "Me-Realm" } } end
 				if name == "stats" then return { name = name, version = 1, data = { people = 7 } } end -- (the census statistics)
 				if TABS[name] then return { name = name, version = 1, data = { tab = name } } end
@@ -30421,12 +30517,13 @@ test("1.2.6 companion sections: the sidecar saves only the sections it knows, at
 		eq(db.sections.guilds.version, 1); eq(db.sections.guilds.data.people, 3)
 		eq(db.sections.rankings, nil, "a version it does not know is skipped")
 		eq(db.sections.wanted, nil, "a failing section is skipped, the others still go")
+		eq(db.sections.membership.data.olympus, true)
 		eq(db.sections.self.data.character, "Me-Realm")
 		eq(db.sections.stats.data.people, 7, "the census statistics' figures")
 		eq(asked.chat, nil, "it only asks for the sections it knows"); eq(asked.census, nil, "the census goes as the checkpoint alone")
 		for name in pairs(TABS) do eq(db.sections[name] and db.sections[name].data.tab, name, "the tab's section " .. name) end
 		for name, s in pairs(db.sections) do
-			assert(({ guilds = true, self = true, stats = true })[name] or TABS[name], "unexpected section " .. name)
+			assert(({ guilds = true, membership = true, self = true, stats = true })[name] or TABS[name], "unexpected section " .. name)
 			eq(s.data.leaked, nil, name)
 		end
 
@@ -63595,13 +63692,13 @@ end)()
 		assert(#pt.VERSION_INVITE_TEXT:format("https://www.curseforge.com/wow/addons/olympus-guild") <= 255)
 	end)
 
-	test("1.3.1: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
-		eq(ns.VERSION, "1.3.1") -- the release has one identity in both folders
+	test("1.3.2: the version, the TOC's files in order, the new message types in Comm.lua's list", function()
+		eq(ns.VERSION, "1.3.2") -- the release has one identity in both folders
 		local toc = assert(ReadFile(ADDON_DIR .. "Olympus.toc"))
-		assert(toc:find("## Version: 1.3.1", 1, true))
-		eq(ns.Workshop.Newer("1.3.1", "1.3.0"), true, "the new patch is newer")
-		eq(ns.Workshop.Newer("1.3.0", "1.3.1"), false)
-		eq(ns.Workshop.Newer("1.3.2", "1.3.1"), true, "the next patch remains newer")
+		assert(toc:find("## Version: 1.3.2", 1, true))
+		eq(ns.Workshop.Newer("1.3.2", "1.3.0"), true, "the new patch is newer")
+		eq(ns.Workshop.Newer("1.3.0", "1.3.2"), false)
+		eq(ns.Workshop.Newer("1.3.3", "1.3.2"), true, "the next patch remains newer")
 		eq(ns.Workshop.Newer("1.2.5.", "1.2.5"), false, "a trailing dot is not a version")
 		eq(ns.Codec.Versions({ ["1.2.5.1"] = 2, broken = 9 })["1.2.5.1"], 2, "the census carries hotfix versions")
 		local at = {}
@@ -64039,8 +64136,8 @@ end)()
 		return n
 	end
 
-	test("1.3.1 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
-		eq(ns.VERSION, "1.3.1")
+	test("1.3.2 version letters: release identity agrees across both TOCs and localized letters; reading the old release does not hide the new letter", function()
+		eq(ns.VERSION, "1.3.2")
 		for _, path in ipairs({ "Olympus/Olympus.toc", "Olympus_Arena/Olympus_Arena.toc" }) do
 			local toc = assert(ReadFile(ROOT .. path))
 			eq(toc:match("## Version:%s*(%S+)"), ns.VERSION, path)
@@ -64502,7 +64599,7 @@ end)()
 			eq(f.title:IsShown(), false); eq(f.body:IsShown(), false); eq(f.all:IsShown(), false)
 			local versions = Lt.Versions()
 			eq(#versions, #Lt.LIST, "a letter for every version listed")
-			eq(table.concat(versions, " "), "1.3.1 1.3.0 1.2.5.1 1.2.5 1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
+			eq(table.concat(versions, " "), "1.3.2 1.3.0 1.2.5.1 1.2.5 1.2.4 1.2.3 1.2.2 1.2.1 1.2.0 1.1.5 1.1.4 1.1.3 1.1.2 1.1.1 1.1.0", "newest first")
 			for i, v in ipairs(versions) do
 				local r = f.rows[i]
 				eq(r:IsShown(), true); eq(r.version, v)

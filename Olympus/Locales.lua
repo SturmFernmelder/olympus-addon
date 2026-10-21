@@ -99,12 +99,13 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.JUSTICE_TASKS_CONFIRM_HINT = "Confirmar a conclusão para %s após sua própria revisão? A tentativa e a ausência observada não comprovam quem agiu ou a causa. O registro será identificado como confirmado por revisão humana."
 end
 
-L.LETTER_1_3_1_TITLE = "Shared counts, clarified"
-L.LETTER_1_3_1 = [==[Version 1.3.1.
+L.LETTER_1_3_2_TITLE = "Shared counts, clarified"
+L.LETTER_1_3_2 = [==[Version 1.3.2.
 
 - {news} Census Stats now labels people as an estimate and shows its formula: counted characters minus confirmed linked alts known to this client. Updating alone does not link alts, so missing confirmations can keep the estimate high.
 - {craft} Accepted Treasury ranking rows are kept ahead of newer unconfirmed proposals.
 - {team} Two full-suite order-dependent UI and ranking regressions found by CI are fixed.
+- {team} The optional Companion Bridge now exports named identity and accepted Olympus chat only after its separate disclosure is accepted; it never exports a BattleTag.
 ]==]
 
 L.LETTER_1_3_0_TITLE = "A shared Olympus"
@@ -123,12 +124,13 @@ L.LETTER_1_3_0 = [==[Version 1.3.0.
 This is a large release and therefore starts the 1.3 line. Offline tests cover the rules and data boundaries; multiplayer relay, client-specific UI and map placement still depend on live in-game observation.]==]
 
 if GetLocale() == "ptBR" then
-	L.LETTER_1_3_1_TITLE = "Contagens compartilhadas, explicadas"
-	L.LETTER_1_3_1 = [==[Versão 1.3.1.
+	L.LETTER_1_3_2_TITLE = "Contagens compartilhadas, explicadas"
+	L.LETTER_1_3_2 = [==[Versão 1.3.2.
 
 - {news} A página de Stats do Censo agora chama pessoas de estimativa e mostra a fórmula: personagens contados menos alts ligados e confirmados conhecidos por este cliente. Só atualizar não liga alts, então confirmações ausentes podem manter a estimativa alta.
 - {craft} Linhas aceitas do ranking do Treasury são preservadas antes de propostas mais novas ainda não confirmadas.
 - {team} Duas regressões de interface e ranking dependentes da ordem da suíte completa, encontradas pelo CI, foram corrigidas.
+- {team} O Companion Bridge opcional agora só exporta identidade nominal e chats Olympus aceitos depois da aceitação da própria divulgação; ele nunca exporta BattleTag.
 ]==]
 
 	L.LETTER_1_3_0_TITLE = "Um Olympus compartilhado"
@@ -4567,6 +4569,8 @@ L.CONSENT_ROLLCALL = "The author's roll call"
 L.CONSENT_ROLLCALL_TEXT = "When the addon's author asks, your addon whispers him alone its version, the game client, and whether it joined the channel, is your guild's reporter and has the channel sealed. Nothing about your character. His update notices show unless you say No. (/oly rollcall on|off)"
 L.CONSENT_CHAT = "The Olympus chats"
 L.CONSENT_CHAT_TEXT = "[Olympus], [Captains] and [Lords] (/ol, /olc, /oll), and the pinned line. Yes: other players' lines show here, and you can write; every line you write reaches everyone on the Olympus channel. No: this client neither sends nor shows them. (/oly chat on|off)"
+L.CONSENT_COMPANION = "Olympus Companion Accord"
+L.CONSENT_COMPANION_TEXT = "Only while the private Olympus Companion Bridge is installed. Yes: at /reload or logout it may save this character's name, current Olympus guild, actual roles and tabs, plus the Olympus chat lines from other players that this client accepted. The Companion may send those lines to the Olympus relay for staff review and to witness an OLY link code. It never exports your BattleTag. No: it exports no named identity and records no chat; the anonymous census checkpoint still works."
 L.CONSENT_TABARD_SELF_V2 = "Your own tabard report"
 L.CONSENT_TABARD_SELF_V2_TEXT = "Your server-stamped character identity, Olympus guild, level and current tabard result (guild tabard, another, none, exempt below level 15, or incomplete) are whispered only to the exact King client authenticated in the last 10 minutes. At most every 10 minutes and when your tabard changes. Raw evidence is kept for up to 24 hours. No leaves it off; changing to No cancels every waiting report before delivery. A new data contract asks again."
 L.CONSENT_TABARD_NEARBY_V2 = "Direct nearby tabard observations"
@@ -4649,6 +4653,8 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.CONSENT_ROLLCALL_TEXT = "Quando o autor do addon pergunta, o seu addon sussurra só para ele a versão, o cliente do jogo, e se entrou no canal, se é o repórter da sua guilda e se o canal está selado. Nada sobre o seu personagem. Os avisos de atualização dele aparecem, a menos que você diga Não. (/oly rollcall on|off)"
 	L.CONSENT_CHAT = "Os chats Olympus"
 	L.CONSENT_CHAT_TEXT = "[Olympus], [Captains] e [Lords] (/ol, /olc, /oll), e a linha fixada. Sim: as linhas dos outros jogadores aparecem aqui, e você pode escrever; cada linha que você escreve chega a todos no canal Olympus. Não: este cliente não manda nem mostra esses chats. (/oly chat on|off)"
+	L.CONSENT_COMPANION = "Acordo do Olympus Companion"
+	L.CONSENT_COMPANION_TEXT = "Somente enquanto o Olympus Companion Bridge privado estiver instalado. Sim: no /reload ou ao sair, ele pode salvar o nome deste personagem, sua guilda Olympus atual, cargos e abas reais, além das linhas dos chats Olympus de outros jogadores aceitas por este cliente. O Companion pode enviar essas linhas ao relay do Olympus para revisão da equipe e para testemunhar um código OLY de vínculo. Ele nunca exporta sua BattleTag. Não: nenhuma identidade nominal é exportada e nenhum chat é registrado; o checkpoint anônimo do censo continua funcionando."
 	L.CONSENT_TABARD_SELF_V2 = "Relatório do seu próprio tabardo"
 	L.CONSENT_TABARD_SELF_V2_TEXT = "A identidade do seu personagem carimbada pelo servidor, guilda Olympus, nível e resultado atual do tabardo (da guilda, outro, nenhum, isento abaixo do nível 15 ou incompleto) são sussurrados somente para o cliente exato do Rei autenticado nos últimos 10 minutos. No máximo a cada 10 minutos e quando o tabardo muda. A evidência bruta fica por até 24 horas. Não mantém desligado; mudar para Não cancela todo relatório na fila antes da entrega. Um novo contrato de dados pergunta de novo."
 	L.CONSENT_TABARD_NEARBY_V2 = "Observações diretas de tabardos próximos"
