@@ -20,11 +20,100 @@ Inspect.STATUS_ORDER = STATUS_ORDER
 
 local patrol = false
 local queue, queued = {}, {}
-local pending -- { guid, unit, at }
+-- { guid, unit, at, patrol (recorded as the patrol's), gear (an officer's click), want (a want's: read) }
+local pending
 -- During a Royal Inspection: at most one request every `pace` seconds (King.INSPECT_PACE).
 local pace, lastRequest = nil, -math.huge
 function Inspect.SetPace(seconds) pace = seconds end
 Inspect.stats = { requests = 0, ready = 0, timeouts = 0 }
+
+-- A value the client hides from addons (Forever's secret values): asked before any comparison,
+-- since a secret errors on every one (even with nil). UnitGUID is SecretWhenUnitIdentityRestricted:
+-- a unit token that pointed at a player may point at a creature by the time it is read again.
+local function Secret(v) return type(issecretvalue) == "function" and issecretvalue(v) == true end
+-- fn(...)'s first value, nil when it errors or is secret.
+local function Plain(fn, ...)
+	if type(fn) ~= "function" then return nil end
+	local ok, v = pcall(fn, ...)
+	if not ok or Secret(v) then return nil end
+	return v
+end
+-- Is `unit` (a plain token) the player with this GUID now?
+local function GuidIs(unit, guid)
+	if Secret(unit) or type(unit) ~= "string" or unit == "" then return false end
+	local g = Plain(UnitGUID, unit)
+	return type(g) == "string" and g == guid
+end
+
+---------------------------------------------------------------------------
+-- Wants (1.2.6, the duel view's gear and talents; Daniel's duel-view request, 2026-10-19): a
+-- feature that needs one player's inspection asks for it by key, Inspect.Want(guid, key, { unit =
+-- fn() -> his token now, read = fn(unit, guid) }). The same pump and pace as the patrol (one
+-- NotifyInspect at a time, never in combat, never while the game's inspect window is open), a want
+-- first in line; out of range it waits ("range") instead of being dropped, and a patrol's item for
+-- the same player is the same request (the server asked once). Its reader runs inside the game's
+-- answer, before ClearInspectPlayer. A want's inspection alone records nothing: no tabard row, no
+-- chat line, no sound, no officer share, no nearby report, nothing saved. Statuses (WantStatus):
+-- queued, sight (no token), refused (CanInspect no), range, combat, busy (the inspect window open),
+-- pending (asked), timeout (no answer: again WANT_RETRY later, WANT_TRIES times), done.
+---------------------------------------------------------------------------
+
+Inspect.WANT_RETRY = 10
+Inspect.WANT_TRIES = 3
+Inspect.WANTS_MAX = 4
+local wants = {} -- in the order asked: { key, guid, unit, read, status, tries, retryAt, at }
+
+local function WantOf(key)
+	for i, w in ipairs(wants) do if w.key == key then return w, i end end
+	return nil
+end
+local function Stopped(w) return w.status == "timeout" and w.tries >= Inspect.WANT_TRIES end
+-- Wants for this GUID still waiting for an answer (not done, not given up).
+local function Waiting(guid)
+	for _, w in ipairs(wants) do
+		if w.guid == guid and w.status ~= "done" and not Stopped(w) then return true end
+	end
+	return false
+end
+local function Mark(guid, status, from)
+	for _, w in ipairs(wants) do
+		if (guid == nil or w.guid == guid) and (from == nil or w.status == from) and w.status ~= "done" and not Stopped(w) then
+			w.status = status
+		end
+	end
+end
+
+function Inspect.Unwant(key)
+	local _, i = WantOf(key)
+	if i then table.remove(wants, i) end
+end
+
+function Inspect.Want(guid, key, o)
+	if Secret(guid) or type(guid) ~= "string" or not guid:find("^Player%-") or type(key) ~= "string" or key == "" then return false end
+	if type(o) ~= "table" or type(o.unit) ~= "function" or type(o.read) ~= "function" then return false end
+	-- Asked again while it still waits: the same want. Its request out stays out and its answer is
+	-- read (one request, one read); one not out yet goes at the next turn; its timeouts still count
+	-- (WANT_TRIES). Only one done, given up or for another player is replaced.
+	local was = WantOf(key)
+	if was and was.guid == guid and was.status ~= "done" and not Stopped(was) then
+		was.unit, was.read = o.unit, o.read
+		if was.status ~= "pending" then was.status, was.retryAt = "queued", -math.huge end
+		return true
+	end
+	Inspect.Unwant(key)
+	if #wants >= Inspect.WANTS_MAX then return false end
+	wants[#wants + 1] = { key = key, guid = guid, unit = o.unit, read = o.read, status = "queued", tries = 0, retryAt = -math.huge }
+	return true
+end
+
+-- The want for this GUID: its status, when its reader ran (ns.Now), its timeouts.
+function Inspect.WantStatus(guid)
+	for _, w in ipairs(wants) do
+		if w.guid == guid then return w.status, w.at, w.tries end
+	end
+	return nil
+end
+function Inspect.ResetWants() wipe(wants) end -- (tests)
 
 -- Kept per realm (ns.rdb): the players of one realm say nothing about another one.
 local function Store()
@@ -162,11 +251,11 @@ end
 -- pace as every other request, first in line.
 local function Enqueue(unit, force, gear)
 	if not UnitExists(unit) or not UnitIsPlayer(unit) or UnitIsUnit(unit, "player") then return end
-	local guid = UnitGUID(unit)
-	if not guid then return end
+	local guid = Plain(UnitGUID, unit)
+	if type(guid) ~= "string" or guid == "" then return end
 	if gear then
-		-- Already waiting (a patrol's) or asked: that request brings the gear too.
-		if pending and pending.guid == guid then pending.gear = true return end
+		-- Already waiting (a patrol's) or asked: that request brings the gear too (and is recorded).
+		if pending and pending.guid == guid then pending.gear, pending.patrol = true, true return end
 		for i, item in ipairs(queue) do
 			if item.guid == guid then
 				table.remove(queue, i)
@@ -176,7 +265,7 @@ local function Enqueue(unit, force, gear)
 			end
 		end
 	end
-	if queued[guid] or (pending and pending.guid == guid) then return end
+	if queued[guid] or (pending and pending.guid == guid and pending.patrol) then return end
 	local guild = GetGuildInfo(unit)
 	if not force and not ns.IsFederation(guild) then return end
 	-- Olympus guilds of the other faction are not ours to inspect (the Horde has its own too).
@@ -186,6 +275,8 @@ local function Enqueue(unit, force, gear)
 		local p = Store().players[Key(ns.UnitFullName(unit))]
 		if p and p.status ~= "UNKNOWN" and p.status ~= "UNCHECKED" and ns.Now() - (p.t or 0) < RECHECK then return end
 	end
+	-- (1.2.6) A want's request for this player is out now: its answer is the patrol's too.
+	if pending and pending.guid == guid then pending.patrol = true return end
 	queued[guid] = true
 	table.insert(queue, force and 1 or #queue + 1, { unit = unit, guid = guid, gear = gear or nil })
 end
@@ -204,25 +295,89 @@ local function ScanNearby()
 	end
 end
 
+-- The game's own inspection in use (1.2.6: the duel view puts the pump on every member who
+-- watches): its inspect window shown; its request out, the window not shown yet (InspectFrame_Show
+-- sets InspectFrame.unit and calls NotifyInspect, and shows the window only at the answer); or its
+-- talent window on the inspected player (Forever: PlayerSpellsFrame:IsInspecting(), and the game's
+-- own inspect window then keeps the inspection when it closes). Then no NotifyInspect of ours (it
+-- would replace the game's inspected player) and no ClearInspectPlayer. A request of the game's that
+-- found no window to show (no answer, or the target changed before it) leaves the unit set: past
+-- HAND_WAIT it is the game's no more.
+Inspect.HAND_WAIT = TIMEOUT
+local handUnit, handAt
+local function GameInspecting()
+	local f = InspectFrame
+	if f and f:IsShown() then handUnit, handAt = nil, nil return true end
+	local spells = PlayerSpellsFrame
+	if spells and type(spells.IsInspecting) == "function" and spells:IsShown() then
+		local ok, on = pcall(spells.IsInspecting, spells) -- gp:inspect-patrol
+		if ok and on == true then return true end
+	end
+	local unit = type(f) == "table" and rawget(f, "unit") or nil
+	if Secret(unit) or type(unit) ~= "string" then handUnit, handAt = nil, nil return false end -- gp:inspect-patrol
+	if unit ~= handUnit then handUnit, handAt = unit, GetTime() end -- gp:inspect-patrol
+	return GetTime() - handAt < Inspect.HAND_WAIT
+end
+Inspect.GameInspecting = GameInspecting -- (tests)
+
+-- The one request to the server (how: { patrol, gear, want }); the wants for that player wait for it.
+local function Request(unit, guid, how)
+	pending = { guid = guid, unit = unit, at = GetTime(), gear = how.gear, patrol = how.patrol, want = how.want }
+	lastRequest = GetTime()
+	Inspect.stats.requests = Inspect.stats.requests + 1
+	if how.want then Mark(guid, "pending") end
+	NotifyInspect(unit) -- gp:inspect-patrol
+end
+
+-- A want's turn: its token now, the game's yes, in range. The first that can go is asked for
+-- (with the patrol's item for the same player, if one waits); the others keep their status.
+local function PumpWants()
+	local now = GetTime()
+	for _, w in ipairs(wants) do
+		if w.status ~= "done" and w.status ~= "pending" and not Stopped(w) and now >= w.retryAt then
+			local okU, unit = pcall(w.unit)
+			if not okU or not GuidIs(unit, w.guid) then w.status = "sight"
+			elseif not Plain(CanInspect, unit) then w.status = "refused"
+			elseif not Plain(CheckInteractDistance, unit, 1) then w.status = "range"
+			else
+				local item
+				for i, q in ipairs(queue) do
+					if q.guid == w.guid then item = table.remove(queue, i) break end
+				end
+				if item then queued[item.guid] = nil end
+				Request(unit, w.guid, { want = true, patrol = item ~= nil, gear = item and item.gear })
+				return true
+			end
+		end
+	end
+	return false
+end
+
 local function Pump()
 	if pending then
 		if GetTime() - pending.at < TIMEOUT then return end
 		Inspect.stats.timeouts = Inspect.stats.timeouts + 1
+		for _, w in ipairs(wants) do
+			if w.guid == pending.guid and w.status == "pending" then
+				w.tries, w.status, w.retryAt = w.tries + 1, "timeout", GetTime() + Inspect.WANT_RETRY
+			end
+		end
 		pending = nil
 	end
-	if InCombatLockdown() then return end
-	if InspectFrame and InspectFrame:IsShown() then return end -- the player is inspecting by hand
+	if InCombatLockdown() then Mark(nil, "combat") return end
+	-- the player is inspecting by hand (the game's inspect or talent window, or its request out)
+	if GameInspecting() then Mark(nil, "busy") return end
 	if pace and GetTime() - lastRequest < pace then return end
+	-- (Back from combat or the inspect window: those wait their turn again.)
+	Mark(nil, "queued", "combat"); Mark(nil, "queued", "busy")
 	if patrol then ScanNearby() end
+	if PumpWants() then return end
 	while #queue > 0 do
 		local item = table.remove(queue, 1)
 		queued[item.guid] = nil
 		local unit = item.unit
-		if UnitGUID(unit) == item.guid and CanInspect(unit) and CheckInteractDistance(unit, 1) then
-			pending = { guid = item.guid, unit = unit, at = GetTime(), gear = item.gear }
-			lastRequest = GetTime()
-			Inspect.stats.requests = Inspect.stats.requests + 1
-			NotifyInspect(unit) -- gp:inspect-patrol
+		if GuidIs(unit, item.guid) and CanInspect(unit) and CheckInteractDistance(unit, 1) then
+			Request(unit, item.guid, { patrol = true, gear = item.gear, want = Waiting(item.guid) })
 			return
 		end
 	end
@@ -230,12 +385,12 @@ end
 Inspect.Pump = Pump -- (tests)
 
 local function FindUnit(guid, hint)
-	if hint and UnitGUID(hint) == guid then return hint end
+	if hint and GuidIs(hint, guid) then return hint end
 	for _, u in ipairs({ "target", "mouseover", "focus" }) do
-		if UnitGUID(u) == guid then return u end
+		if GuidIs(u, guid) then return u end
 	end
 	for i = 1, 40 do
-		if UnitGUID("nameplate" .. i) == guid then return "nameplate" .. i end
+		if GuidIs("nameplate" .. i, guid) then return "nameplate" .. i end
 	end
 	return nil
 end
@@ -258,14 +413,27 @@ local function ReadGear(unit)
 	end
 	return items, n
 end
+Inspect.ReadGear = ReadGear
+
+-- The wants' readers for the player the game answered for, inside its answer.
+local function ReadWants(unit, guid)
+	for _, w in ipairs(wants) do
+		if w.guid == guid and w.status == "pending" then
+			local ok, err = pcall(w.read, unit, guid)
+			if not ok then ns.Log("inspect want %s: %s", tostring(w.key), tostring(err)) end
+			w.status, w.at = "done", ns.Now()
+		end
+	end
+end
 
 local function OnInspectReady(guid)
-	if not pending or pending.guid ~= guid then return end
+	if Secret(guid) or not pending or pending.guid ~= guid then return end
 	local unit = FindUnit(guid, pending.unit)
-	local gear = pending.gear
+	local gear, record, wanted = pending.gear, pending.patrol, pending.want
 	pending = nil
 	Inspect.stats.ready = Inspect.stats.ready + 1
-	if unit then
+	-- (1.2.6: a want's inspection alone records nothing, below: only the patrol's and an officer's.)
+	if unit and record then
 		local anyGear = false
 		for slot = 1, 18 do
 			if GetInventoryItemID(unit, slot) then anyGear = true break end
@@ -289,16 +457,19 @@ local function OnInspectReady(guid)
 				ns.Print(L.GEAR_NOT_LOADED:format(ns.ShortName(p.name)))
 			end
 		end
-	elseif gear then
+	elseif gear and not unit then
 		ns.Print(L.GEAR_GONE)
 	end
-	if not (InspectFrame and InspectFrame:IsShown()) and ClearInspectPlayer then ClearInspectPlayer() end -- gp:inspect-patrol
+	if wanted then
+		if unit then ReadWants(unit, guid) else Mark(guid, "sight", "pending") end
+	end
+	if not GameInspecting() and ClearInspectPlayer then ClearInspectPlayer() end -- gp:inspect-patrol
 end
 Inspect.OnInspectReady = OnInspectReady -- (tests)
 
 function Inspect.SetPatrol(on)
 	if on and not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return
 	end
 	patrol = on and true or false
@@ -323,7 +494,7 @@ end
 -- again. Nothing scored, nothing sent, nobody told how to play. Officers: the guild master and the
 -- officer rank right below (Roster.IsOfficer).
 function Inspect.InspectGear()
-	if not ns.IsMember() then return ns.Print(L.MEMBERS_ONLY) end
+	if not ns.IsMember() then return ns.Print(ns.MembersOnlyText()) end
 	if not ns.Roster.IsOfficer() then return ns.Print(L.GEAR_OFFICERS_ONLY) end
 	if not UnitIsPlayer("target") or UnitIsUnit("target", "player") then return ns.Print(L.NEED_PLAYER_TARGET) end
 	local name = ns.ShortName(ns.UnitFullName("target") or "?")
@@ -847,6 +1018,7 @@ end
 -- is when the client hides its text (a secret value) or with the gamepad UI, where Olympus writes
 -- nothing into the game's frames; the lines below are added as the Treasurer's is.
 function Inspect.CouncilTooltip(tooltip, name, guild) -- gp:tooltip-unit
+	if Inspect.CoverOf(name) then return false end
 	if not (ns.IsMember() == true and ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(name)) then return false end
 	local M = ns.Moderation
 	if name ~= ns.me and type(M) == "table" and type(M.Hides) == "function" and M.Hides(name, guild) ~= nil then return false end
@@ -863,6 +1035,31 @@ function Inspect.CouncilTooltip(tooltip, name, guild) -- gp:tooltip-unit
 	return true
 end
 
+-- A moderator's cover name on this client (Cover.lua), or nil.
+function Inspect.CoverOf(name)
+	local C = ns.Cover
+	return type(C) == "table" and type(C.AliasOf) == "function" and C.AliasOf(name) or nil
+end
+
+-- Their tooltip's first line says the cover name: the real name in it replaced (a title the game
+-- puts around it stays), or the whole line when the real name isn't in it. Left as it is when the
+-- client hides its text (a secret value).
+function Inspect.CoverTooltip(tooltip, name) -- gp:tooltip-unit
+	local alias = Inspect.CoverOf(name)
+	if not alias or ns.GamepadUI() or type(tooltip.GetName) ~= "function" then return false end
+	local left = _G[(tooltip:GetName() or "") .. "TextLeft1"] -- gp:tooltip-unit
+	local text = left and type(left.GetText) == "function" and left:GetText()
+	if type(text) ~= "string" or SecretTooltipValue(text) or text == "" then return false end
+	local real = ns.ShortName(name)
+	local at, stop = text:find(real, 1, true)
+	if not at then
+		local first = real:match("^(%S+) ")
+		if first then at, stop = text:find(first, 1, true) end
+	end
+	left:SetText(at and (text:sub(1, at - 1) .. alias .. text:sub(stop + 1)) or alias)
+	return true
+end
+
 -- 1.1.5, the gamepad gate (GamepadRegistry.lua's "tooltip-unit"): nothing with the gamepad UI on, from
 -- the first line (the game's soft target shows the tooltip again and again there, and Olympus writes
 -- nothing in the game's frames there): no line, no patrol. Not registered at a login with it.
@@ -875,11 +1072,12 @@ function Inspect.TooltipUnit(tooltip) -- gp:tooltip-unit
 	if SecretTooltipValue(isPlayer) or not isPlayer then return false end
 	local name = TooltipUnitName(unit)
 	if not name then return false end
+	Inspect.CoverTooltip(tooltip, name)
 	local line = Inspect.TooltipLine(name)
 	if line then tooltip:AddLine(line) end
 	-- The Treasurer of Olympus: his name and the game's own word on his guild.
 	local guild = GetGuildInfo and GetGuildInfo(unit)
-	if not SecretTooltipValue(guild) and ns.IsTreasurer(name, guild) then tooltip:AddLine(ns.COIN .. L.TREASURER_TITLE, 1, 0.82, 0) end
+	if not SecretTooltipValue(guild) and not Inspect.CoverOf(name) and ns.IsTreasurer(name, guild) then tooltip:AddLine(ns.COIN .. L.TREASURER_TITLE, 1, 0.82, 0) end
 	Inspect.CouncilTooltip(tooltip, name, not SecretTooltipValue(guild) and guild or nil)
 	if patrol then Enqueue(unit) end
 	return true

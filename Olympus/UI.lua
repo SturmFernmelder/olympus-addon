@@ -280,6 +280,10 @@ local RECRUIT_BUTTONS = {
 	{ "RECRUIT_FIND", function() ns.Recruit.Search() end },
 	{ "RECRUIT_NEXT", function() ns.Recruit.PromptNext(ns.Recruit.lastContact and ns.Recruit.lastContact.guild) end },
 }
+-- 1.2.5.1: the Olympus Accord's page (Accord.lua): its letter again.
+local ACCORD_BUTTONS = {
+	{ "ACCORD_READ", function() ns.Accord.Show("window") end },
+}
 
 -- Small extra buttons inside the detail box (only where needed).
 local function KingOnly() return ns.King.IsKing() or ns.King.Preview() end
@@ -1051,6 +1055,18 @@ end
 -- (RinglessHelpPlateButtonTemplate).
 UI.HELP_ICON = "Interface\\Common\\help-i"
 
+-- CR-02 / KH-08: the header's people count, dimmer gold than the characters before it and lit
+-- while the mouse is on the count (a click opens the census's own page, UI.OpenCensusStats).
+UI.PEOPLE_COLOR, UI.PEOPLE_LIT, UI.PEOPLE_GAP = { 0.72, 0.6, 0.34 }, { 1, 0.82, 0 }, 6
+UI.PEOPLE_CODE = ("|cff%02x%02x%02x"):format(math.floor(UI.PEOPLE_COLOR[1] * 255 + 0.5), math.floor(UI.PEOPLE_COLOR[2] * 255 + 0.5),
+	math.floor(UI.PEOPLE_COLOR[3] * 255 + 0.5)) -- (the same colour inside a line of text: the minimap button's)
+-- CensusStats.lua loaded (a client updated without a restart has not got it yet).
+local function CensusStatsReady()
+	local CS = ns.CensusStats
+	return type(CS) == "table" and not CS.missing and type(CS.Open) == "function" and type(CS.Build) == "function"
+end
+local function CensusStatsShown() return CensusStatsReady() and ns.CensusStats.Shown() == true end
+
 -- The help button in the title bar, just left of the close button, where Blizzard puts a
 -- window's minimize button (0.9.9, asked for by Max of Asmongold's moderators). A plain button:
 -- a click opens the copy box (UI.ShowHelp), which already keeps to the gamepad UI's rules.
@@ -1141,10 +1157,15 @@ local function AuthorView()
 end
 
 -- The Join screen alone: outside an Olympus guild, or the author's "Not in Olympus" preview.
+-- (1.2.5.1: in an Olympus guild before the Olympus Accord is accepted, the Accord's page alone.)
 function UI.Locked()
 	if not ns.IsMember() then return true end
 	local V = AuthorView()
 	return V ~= nil and V.Is("outsider") == true
+end
+-- Locked by the Olympus Accord alone (Accord.lua): in an Olympus guild, not accepted yet.
+function UI.AccordLocked()
+	return ns.InOlympusGuild() == true and not ns.AccordAccepted()
 end
 
 -- The portrait belongs to the Olympus shell. A registered surface may replace its picture while
@@ -1239,21 +1260,37 @@ local function CreateMain(style)
 	f.total:SetPoint("TOPLEFT", hx, -28)
 	f.sub = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	f.sub:SetPoint("TOPLEFT", f.total, "BOTTOMLEFT", 0, -1)
-	for _, fs in ipairs({ f.total, f.sub }) do
+	-- CR-02 (the author's ask): the people, each player once (Data.Summary's total), next to the
+	-- characters, smaller and darker; set and placed by UI.Refresh and FitHeader.
+	f.people = f:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+	f.people:SetPoint("BOTTOMLEFT", f.total, "BOTTOMLEFT", 0, 1)
+	f.people:SetTextColor(unpack(UI.PEOPLE_COLOR))
+	f.people:Hide()
+	for _, fs in ipairs({ f.total, f.sub, f.people }) do
 		fs:SetJustifyH("LEFT")
 		fs:SetWordWrap(false)
 	end
 	-- The count explains itself on hover: how the census is gathered, why two players can see
-	-- different totals for a while. The window still drags from there.
+	-- different totals for a while. The window still drags from there; a click (no drag) opens the
+	-- census's own page in the Census tab (KH-08, UI.OpenCensusStats), the people lit meanwhile.
 	local hover = CreateFrame("Frame", nil, f)
 	hover:SetPoint("TOPLEFT", f.total, "TOPLEFT", 0, 2)
 	hover:SetPoint("BOTTOMLEFT", f.sub, "BOTTOMLEFT", 0, -2)
 	hover:SetWidth(200)
 	hover:EnableMouse(true)
 	hover:RegisterForDrag("LeftButton")
-	hover:SetScript("OnDragStart", function() f:StartMoving() end)
+	hover:SetScript("OnMouseDown", function(self) self.dragged = false end)
+	hover:SetScript("OnDragStart", function(self)
+		self.dragged = true
+		f:StartMoving()
+	end)
 	hover:SetScript("OnDragStop", function() f:GetScript("OnDragStop")(f) end)
+	hover:SetScript("OnMouseUp", function(self, button)
+		if button ~= "LeftButton" or self.dragged then return end
+		ns.SafeCall("census page", UI.OpenCensusStats)
+	end)
 	hover:SetScript("OnEnter", function(self)
+		f.people:SetTextColor(unpack(UI.PEOPLE_LIT))
 		GameTooltip:SetOwner(self, "ANCHOR_BOTTOMLEFT")
 		GameTooltip:AddLine(L.HEADER_TIP_TITLE, 1, 0.82, 0)
 		GameTooltip:AddLine(L.HEADER_TIP, 1, 1, 1, true)
@@ -1266,9 +1303,14 @@ local function CreateMain(style)
 		GameTooltip:AddLine(L.HEADER_TIP_DIFFER, 0.8, 0.8, 0.8, true)
 		-- 1.1.2: why the list's columns don't add up to these totals (the answer bank's).
 		if ns.Answers and ns.Answers.WhyTip then ns.Answers.WhyTip(GameTooltip, "count-columns-dont-add-up") end
+		-- (KH-08: and what a click opens.)
+		if CensusStatsReady() then GameTooltip:AddLine(L.HEADER_TIP_OPEN, 0.25, 1, 0.25, true) end
 		GameTooltip:Show()
 	end)
-	hover:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	hover:SetScript("OnLeave", function()
+		f.people:SetTextColor(unpack(UI.PEOPLE_COLOR))
+		GameTooltip:Hide()
+	end)
 	f.headerHover = hover
 
 	-- Column titles
@@ -1398,6 +1440,9 @@ local function CreateMain(style)
 	f:SetScript("OnShow", function()
 		UI.Refresh()
 		ns.SafeCall("issue reporter", ClearOfIssueReporter, MainClearOfIssueReporter)
+		-- 1.2.5.1: the Olympus Accord (Accord.lua) first, in an Olympus guild until it is accepted:
+		-- opening the window is a deliberate ask, whatever Not now said at login.
+		ns.SafeCall("olympus accord", ns.Accord.Ask, "window")
 		-- 1.1 (Fern's #11): the first-open page, over the window, while anything is unanswered
 		-- (Consent.lua: once a session, never in combat or an instance). The window works anyway.
 		ns.SafeCall("privacy page", ns.Consent.Ask, "window")
@@ -1638,11 +1683,26 @@ function UI.LayoutTabs()
 	end
 end
 
+-- (CR-02) The people show with the characters (main.peopleText, UI.Refresh's): never on the Join
+-- screen, a person page, the Chat tab or a contributed surface, whose header is theirs.
+local function PeopleShown(locked)
+	if main.peopleText == nil or playerProfile or locked or APISurfaceByTab(main.tab) then return false end
+	return not (main.tab == "chat" and ChatPaneReady())
+end
+
 -- The small line drops to the tiny font (9 pt, also white) before it is cut: the census
 -- line with a long realm name is just over the width of Forever's window.
 local function FitHeader()
 	local room = main:GetWidth() - main.headerX
-	FitText(main.total, room - HEADER_RIGHT, { "GameFontNormalLarge", "GameFontNormal" })
+	-- (CR-02: the people right after the characters, in the room the characters leave them.)
+	local people = main.people and main.people:IsShown() and main.people or nil
+	local function Wide(fs) return fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth() end
+	local peopleW = people and math.ceil(Wide(people)) + UI.PEOPLE_GAP or 0
+	FitText(main.total, room - HEADER_RIGHT - peopleW, { "GameFontNormalLarge", "GameFontNormal" })
+	if people then
+		people:ClearAllPoints()
+		people:SetPoint("BOTTOMLEFT", main.total, "BOTTOMLEFT", math.min(math.ceil(Wide(main.total)), main.total:GetWidth()) + UI.PEOPLE_GAP, 1)
+	end
 	FitText(main.sub, room - SUB_RIGHT, { "GameFontHighlightSmall", "GameFontWhiteTiny" })
 	if main.headerHover then main.headerHover:SetWidth(math.max(40, room - HEADER_RIGHT)) end
 end
@@ -1713,10 +1773,15 @@ function UI.Layout()
 	local g = GEOMETRY[main.style]
 	LayoutButtons()
 	LayoutDetailButtons()
-	FitHeader()
 	main.layoutLocked = UI.Locked()
+	-- (CR-02: the people shown or not before the header is fitted.)
+	if main.people then main.people:SetShown(PeopleShown(main.layoutLocked)) end
+	FitHeader()
 	local surface = APISurfaceByTab(main.tab)
+	-- (KH-08: the census's own page has no column titles.)
+	main.statsLaid = main.tab == "census" and CensusStatsShown()
 	local hasCols = not surface and not playerProfile and not main.layoutLocked and ns.Views.COLUMNS[main.tab] ~= nil and main.tab == "census"
+		and not main.statsLaid
 	main.colHeader:SetShown(hasCols)
 	-- The Chat tab: the header's counts, the list and the detail box give their place to its parts.
 	local chat = not surface and not playerProfile and not main.layoutLocked and main.tab == "chat" and ChatPaneReady()
@@ -1887,6 +1952,10 @@ local function ShowTab(key, focus)
 		ns.SafeCall("leave tab " .. previous.key, previous.onLeave)
 	end
 	if key ~= "realm" and ns.Views.CloseChat then ns.Views.CloseChat() end
+	-- (The Decrees' pages too, the officer musters': another tab opens them on their list again.)
+	if key ~= "decrees" and ns.Views.CloseDecreePage then ns.Views.CloseDecreePage() end
+	-- (KH-08: a tab opened shows its own list, the Census's too: CensusStats.lua's page closes.)
+	if CensusStatsReady() then ns.CensusStats.Close() end
 	main.tab = key
 	for k, v in pairs(main.views) do v:SetShown(not surface and k == key) end
 	for k, v in pairs(main.apiSurfaceViews or {}) do v:SetShown(surface ~= nil and k == key) end
@@ -1966,6 +2035,22 @@ function UI.SelectTab(key, focus)
 	return ok, reason
 end
 
+-- KH-08 (the author's ask): a click on the header's count opens the census's own page
+-- (CensusStats.lua) in the Census tab, from any tab; never on the Join screen or a person page.
+function UI.OpenCensusStats()
+	if not CensusStatsReady() then
+		ns.Print(L.RESTART_NEEDED)
+		return false
+	end
+	if not main or UI.Locked() or playerProfile then return false end
+	if main.tab ~= "census" and not UI.SelectTab("census") then return false end
+	ns.CensusStats.Open()
+	main.scroll:SetVerticalScroll(0)
+	UI.Layout()
+	UI.Refresh()
+	return true
+end
+
 -- Whose census this is: our realm, or the realms sharing it ("A + B").
 function UI.CensusName()
 	local group = ns.group or ns.realm
@@ -1988,7 +2073,8 @@ UI.PLACE_HOLD = 1  -- seconds a redraw's place is given again when the client me
 
 -- Which page of its tab the list shows: another one starts at the top.
 local function PageOf(tab, locked)
-	if locked then return "join" end
+	-- (1.2.5.1: in an Olympus guild before the Olympus Accord, its page, UI.AccordLocked.)
+	if locked then return UI.AccordLocked() and "accord" or "join" end
 	if playerProfile then
 		local id = "player-profile:" .. tostring(ns.FullName(playerProfile.name, playerProfile.realm))
 		-- (1.2.4: his own page's sections, "My profile", each a page of its own, each from the top.)
@@ -2007,8 +2093,10 @@ local function PageOf(tab, locked)
 	elseif tab == "throne" then
 		-- (1.1.5: a guild master's Guild tab, in the Throne's place.)
 		sub = ns.King and ns.King.ThroneShown and not ns.King.ThroneShown() and "guild" or ns.King and ns.King.mode
+	elseif tab == "decrees" then sub = ns.Views.DecreePageShown and ns.Views.DecreePageShown() -- (the officer musters')
 	elseif tab == "treasury" then sub = ns.Treasury and ns.Treasury.mode
 	elseif tab == "wanted" then sub = ns.Wanted and ns.Wanted.PageId and ns.Wanted.PageId()
+	elseif tab == "census" then sub = CensusStatsShown() and "stats" or nil -- (KH-08, CensusStats.lua)
 	elseif tab == "watch" then sub = ns.Watch and ns.Watch.PageId and ns.Watch.PageId() end -- (1.1.6: desk, reports, cases, case)
 	return tab .. "/" .. tostring(sub or "")
 end
@@ -2017,6 +2105,19 @@ end
 function UI.PageId()
 	if not main then return nil end
 	return PageOf(main.tab, UI.Locked())
+end
+
+-- The self-test (SelfTest.lua): what the window shows now, read only. Its rows (each with the line
+-- it draws), the page's strips, its buttons, whether its parchment shows.
+function UI.SelfTestView()
+	if not main then return nil end
+	local content = main.views and main.views[main.tab]
+	local lines = {}
+	for i = 1, content and content.lineCount or 0 do lines[i] = content.rows and content.rows[i] and content.rows[i].line end
+	return { frame = main, tab = main.tab, page = UI.PageId(), shown = main:IsShown(), docked = main.docked == true,
+		content = content, rows = content and content.rows or {}, lines = lines, nav = main.pageNavLines or {},
+		parchment = main.parchment ~= nil and main.parchment:IsShown(), profile = playerProfile ~= nil,
+		buttons = main.buttons, detailButtons = main.detailButtons }
 end
 
 -- 1.2: how many person pages Back walks through before the list (A -> B -> C... -> Back -> B):
@@ -2235,6 +2336,45 @@ local function ShowOwnPortrait(art)
 	if shown then ns.SafeCall("my profile portrait", PE.DressPortrait, rig, art) end
 end
 
+-- The native tab rules in one place, so the visible rail and the Companion export cannot drift.
+-- `views` is presentation-only and is used by the addon's View-as preview; the Companion always
+-- passes nil and therefore exports only this character's actual access.
+local function TabRules(locked, views)
+	local only = {
+		chat = ChatTabVisible(),
+		throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false,
+		vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
+		treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false,
+		workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
+	}
+	for key, visible in pairs(added) do
+		local okVisible, shows = pcall(visible)
+		only[key] = okVisible and shows == true
+	end
+	if views and not locked then
+		for _, definition in ipairs(TABS) do
+			if not definition.apiSurface then
+				local shows = views.TabShown(definition.key, only[definition.key])
+				if shows ~= nil then only[definition.key] = shows end
+			end
+		end
+	end
+	return only
+end
+
+-- The tabs this character can actually open now, independent of whether the window was ever
+-- built and independent of the author's View-as preview. Contributed third-party surfaces are not
+-- Olympus authority and stay out.
+function UI.CompanionTabs()
+	local out = {}
+	if not ns.IsMember() then return out end
+	local only = TabRules(false, nil)
+	for _, definition in ipairs(TABS) do
+		if not definition.apiSurface and only[definition.key] ~= false then out[#out + 1] = definition.key end
+	end
+	return out
+end
+
 function UI.Refresh()
 	if not main or not main:IsShown() then return end
 	UI.lastRedraw = GetTime()
@@ -2242,7 +2382,10 @@ function UI.Refresh()
 	ns.SafeCall("ui refresh", function()
 		local s = ns.Data.Summary()
 		local F = ns.FormatNumber
-		main.total:SetText(L.ARMY_TOTAL:format(F(s.total)))
+		-- CR-02 (the author's ask): the characters, and next to them, smaller and darker, the
+		-- people (each player once: Data.Summary's total, linked alts counted once).
+		main.total:SetText(L.ARMY_TOTAL:format(F(s.characters or s.total)))
+		main.peopleText = L.ARMY_PEOPLE:format(F(s.total))
 		main.sub:SetText(L.ARMY_SUB:format(F(s.online), #s.guilds, ns.Ago(s.newest)) .. "  ·  " .. UI.CensusName())
 		-- Right after login (1.1): the census is being rebuilt, and the header says so.
 		local heard = ns.Data.Rebuilding and ns.Data.Rebuilding()
@@ -2254,30 +2397,12 @@ function UI.Refresh()
 		local previewing = views ~= nil and views.Previewing() == true
 		local inert = locked and ns.IsMember() -- (locked by the preview alone)
 		if locked and playerProfile then LeaveProfile() end
-		-- Joined or left a guild while the window is open: lay it out again.
-		if locked ~= main.layoutLocked then UI.Layout() end
-			-- Role-only native pages keep their existing rules. A contributed surface decides only
-			-- whether its own page is available; it never participates in Olympus's role-preview model.
-			local only = {
-				chat = ChatTabVisible(), -- (1.1.1)
-				throne = ns.King and ns.King.TabVisible and ns.King.TabVisible() or false, -- (1.1.5: or a guild master's Guild tab)
-				vox = ns.Vox and ns.Vox.Visible and ns.Vox.Visible() or false,
-				treasury = ns.Treasury and ns.Treasury.TabVisible and ns.Treasury.TabVisible() or false, -- (1.1: the dues' button too)
-				workshop = ns.Workshop and ns.Workshop.Visible and ns.Workshop.Visible() or false,
-			}
-			for key, visible in pairs(added) do
-				local okVisible, shows = pcall(visible)
-				only[key] = okVisible and shows == true
-			end
-			if views and not locked then
-				for _, tab in ipairs(main.tabs) do
-					local definition = TAB_BY_KEY[tab.key]
-					if not (definition and definition.apiSurface) then
-						local shows = views.TabShown(tab.key, only[tab.key])
-						if shows ~= nil then only[tab.key] = shows end
-					end
-				end
-			end
+		-- Joined or left a guild while the window is open: lay it out again (KH-08: and the census's
+		-- own page opened or closed: its column titles).
+		if locked ~= main.layoutLocked or (main.tab == "census" and CensusStatsShown()) ~= main.statsLaid then UI.Layout() end
+			-- Role-only native pages keep their existing rules (the Companion reads the same rules,
+			-- without the presentation-only View-as override).
+			local only = TabRules(locked, views)
 
 			local tabsWere = main.tabs[1] and main.tabs[1]:IsShown()
 			local function LayoutAvailableTabs()
@@ -2336,7 +2461,15 @@ function UI.Refresh()
 				return
 			end
 		local lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt
-		if locked then
+		if locked and not inert and UI.AccordLocked() then
+			-- 1.2.5.1: in an Olympus guild, the Olympus Accord not accepted yet: its page alone.
+			local A = ns.Accord
+			lines = A.LockedLines and A.LockedLines() or {}
+			if A.missing then lines[#lines + 1] = { text = L.RESTART_NEEDED, wrap = true } end
+			title, text = L.ACCORD_LOCKED_TITLE, L.ACCORD_LOCKED_HINT
+			main.total:SetText(L.ACCORD_NAME)
+			main.sub:SetText(L.ACCORD_LOCKED_HINT)
+		elseif locked then
 			-- Not an Olympus member yet: the only thing on offer is joining one.
 			lines = ns.Views.RecruitLines()
 			if inert then lines = views.Inert(lines) end
@@ -2344,24 +2477,31 @@ function UI.Refresh()
 			local header, sub = ns.Recruit.Roast()
 			main.total:SetText(header)
 			main.sub:SetText(sub)
+			main.peopleText = nil
 		elseif playerProfile and ns.PlayerProfile and ns.PlayerProfile.Build then
 			-- (1.2.4: his own page, "My profile", gives its portrait's art too: ShowOwnPortrait.)
 			lines, title, text, profileButtons, profileHeader, profileSubheader, profileArt = ns.PlayerProfile.Build(playerProfile)
 			main.total:SetText(profileHeader or L.PLAYER_PROFILE_TITLE)
 			main.sub:SetText(profileSubheader or "")
+			main.peopleText = nil
 		else
 			lines, title, text = ns.Views.Build(main.tab, s) -- (1.2.3: the header's summary, not a second one)
 			-- The treasury next to the soldiers, on the Treasury tab (Treasury.HeaderText; 1.1.5, the
 			-- author's call: no longer on the Throne, the treasury has its own tab).
 			if main.tab == "treasury" then
 				local gold = ns.Treasury and ns.Treasury.HeaderText and ns.Treasury.HeaderText()
-				if type(gold) == "string" then main.total:SetText(L.ARMY_TOTAL:format(F(s.total)) .. "   " .. gold) end
+				if type(gold) == "string" then
+					main.total:SetText(L.ARMY_TOTAL:format(F(s.characters or s.total)) .. "   " .. gold)
+					main.peopleText = nil -- (the gold after the characters; the people on every other tab)
+				end
 			end
 		end
 		-- 1.2: the author's View as says in the header that what shows is a role's preview.
 		SetParchment(not locked and not playerProfile and (main.tab == "throne"
 			or main.tab == "realm" and ns.Views.PageParchment and ns.Views.PageParchment() == true))
 		if previewing then main.sub:SetText("|cffff9933" .. L.VIEW_AS_PREVIEWING:format(views.Label()) .. "|r") end
+		main.people:SetText(main.peopleText or "")
+		main.people:SetShown(PeopleShown(locked))
 		FitHeader()
 		if main.viewAs then
 			main.viewAs:SetShown(views ~= nil)
@@ -2387,7 +2527,7 @@ function UI.Refresh()
 		main.detailText:SetText(text or "")
 		ShowOwnPortrait(not locked and playerProfile and profileArt or nil)
 		local recruit = inert and InertButtons(RECRUIT_BUTTONS) or RECRUIT_BUTTONS
-		SetButtons(main.buttons, locked and recruit or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
+		SetButtons(main.buttons, locked and (not inert and UI.AccordLocked() and ACCORD_BUTTONS or recruit) or profileButtons or Shown(BUTTONS[view] or addedButtons[view]))
 			-- Preserve the internal tab contract: its builder runs before a role or surface rule sends
 			-- the window back to Census (some builders create state used by the next interaction).
 		if only[main.tab] == false then return ShowTab("census") end
@@ -2775,7 +2915,10 @@ function UI.BasePersonDetails(p)
 	-- (0.9.9), for whoever may see the council in the census (ns.CouncilVisible); not on the
 	-- King's screen while the councillors' names are hidden there (ns.CouncilMasked).
 	local full = ns.FullName(p.name, p.realm)
-	local councillor = ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(full)
+	-- A moderator's cover name (Cover.lua): their name above, and no council or Treasurer row.
+	local covered = ns.IsCovered(full)
+	if covered then name = ns.Codec.Plain(ns.CoverSwap(full)) end
+	local councillor = not covered and ns.CouncilVisible() and not ns.CouncilMasked() and ns.IsHighCouncillor(full)
 	local className = (file and LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[file]) or ""
 	local rows, rowMeta = {}, {}
 	local function Add(text, key, source, at, state)
@@ -2811,7 +2954,7 @@ function UI.BasePersonDetails(p)
 			if okEdit and type(open) == "function" and not edit then edit = open end
 		end
 	end
-	if ns.IsTreasurer(p.name, p.guild) then Add("|cffffd200" .. ns.COIN .. L.TREASURER_TITLE .. "|r", "treasurer", "derived", at, "derived") end
+	if not covered and ns.IsTreasurer(p.name, p.guild) then Add("|cffffd200" .. ns.COIN .. L.TREASURER_TITLE .. "|r", "treasurer", "derived", at, "derived") end
 	if councillor then
 		-- "High Councillor - <title> (<department>)", as the signed titles list gives them.
 		local t = ns.CouncilTitle(full) or {}
@@ -3043,6 +3186,8 @@ ns.On("LAYERS_CHANGED", function()
 	if main and (main.tab == "decrees" or main.tab == "realm" or main.tab == "census") then UI.RefreshSoon() end
 end)
 ns.On("HOP_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm") then UI.RefreshSoon() end end)
+-- 1.2.5.1: the quiet presence's line (Views.QuietLine) on top of the Census and the Realm.
+ns.On("QUIET_PRESENCE_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm") then UI.RefreshSoon() end end)
 ns.On("DECREES_CHANGED", function() UI.RefreshSoon() end)
 -- The King's calls show on the Throne, the roll call in the Realm, the inspection in the Tabards
 -- (The Watch's, 1.2); since 1.1.5 the Agenda's current event shows in the King's week on top of
@@ -3061,6 +3206,9 @@ end)
 -- The court's public line tops the Census and Realm; its restricted queue lives in The Watch.
 ns.On("COURT_CHANGED", function() if main and (main.tab == "census" or main.tab == "realm" or main.tab == "watch") then UI.RefreshSoon() end end)
 ns.On("WATCH_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
+-- 1.2.5.1: a BattleTag kept, dropped or its digits shown or hidden again (Accord.lua): The Watch's
+-- BattleTags page, its count and the person page follow.
+ns.On("ACCORD_TEAM_CHANGED", function() if main and main.tab == "watch" then UI.RefreshSoon() end end)
 -- A page of the Realm tab changed (1.1: the loot notes), or the standalone Crafters board changed.
 ns.On("REALM_PAGE_CHANGED", function(key)
 	if not main then return end
@@ -3242,11 +3390,15 @@ function UI.ShowCopy(title, text, action, opts)
 		if not copyFrame then return nil end
 	end
 	local button = copyFrame.action
+	-- A small copy window has no Select all button.  Read only the field CopyFrame
+	-- installed: frame mixins (and the offline frame toolkit) may expose a method
+	-- with the same name through the frame's metatable.
+	local selectAll = rawget(copyFrame, "selectAll")
 	button.fn = action and action.fn or nil
 	button:SetShown(action ~= nil)
 	-- With the button on the left, the hint moves right.
 	copyFrame.hint:ClearAllPoints()
-	if action or copyFrame.selectAll then
+	if action or selectAll then
 		copyFrame.hint:SetPoint("BOTTOMRIGHT", -12, 10)
 		copyFrame.hint:SetJustifyH("RIGHT")
 	else
@@ -3260,20 +3412,24 @@ function UI.ShowCopy(title, text, action, opts)
 		button:SetWidth(math.max(120, math.ceil(textW) + 24))
 		button:Enable()
 	end
-	if copyFrame.selectAll then
-		copyFrame.selectAll:ClearAllPoints()
-		if action then copyFrame.selectAll:SetPoint("LEFT", button, "RIGHT", 6, 0) else copyFrame.selectAll:SetPoint("BOTTOMLEFT", 10, 6) end
+	if selectAll then
+		selectAll:ClearAllPoints()
+		if action then selectAll:SetPoint("LEFT", button, "RIGHT", 6, 0) else selectAll:SetPoint("BOTTOMLEFT", 10, 6) end
 	end
 	-- (1.1.5) A second button after the first (and Select all), made the first time one is asked for.
 	local second = type(opts.second) == "table" and type(opts.second.fn) == "function" and opts.second or nil
-	if second and not copyFrame.second then
+	-- As with selectAll, only a button this window created counts.  Frame
+	-- metatables may expose a method named "second" on some clients/mocks.
+	local secondButton = rawget(copyFrame, "second")
+	if second and not secondButton then
 		local b = CreateFrame("Button", nil, copyFrame, "UIPanelButtonTemplate")
 		b:SetSize(140, 20)
 		b:SetScript("OnClick", function(self) ns.SafeCall("copy second", function() if self.fn then self.fn() end end) end)
 		copyFrame.second = b
+		secondButton = b
 	end
-	if copyFrame.second then
-		local b = copyFrame.second
+	if secondButton then
+		local b = secondButton
 		b.fn = second and second.fn or nil
 		b:SetShown(second ~= nil)
 		if second then
@@ -3282,7 +3438,7 @@ function UI.ShowCopy(title, text, action, opts)
 			local textW = fs and (fs.GetUnboundedStringWidth and fs:GetUnboundedStringWidth() or fs:GetStringWidth()) or 120
 			b:SetWidth(math.max(110, math.ceil(textW) + 24))
 			b:ClearAllPoints()
-			local after = copyFrame.selectAll or (action and button) or nil
+			local after = selectAll or (action and button) or nil
 			if after then b:SetPoint("LEFT", after, "RIGHT", 6, 0) else b:SetPoint("BOTTOMLEFT", 10, 6) end
 			-- The hint takes the room right of the buttons, wrapped there if it must (a longer
 			-- language's), never under them.
@@ -3367,7 +3523,8 @@ local function CreateMinimapButton() -- gp:minimap
 		local s = ns.Data.Summary()
 		GameTooltip:SetOwner(self, "ANCHOR_LEFT")
 		GameTooltip:AddLine(L.TITLE, 1, 0.82, 0)
-		GameTooltip:AddLine(L.ARMY_TOTAL:format(ns.FormatNumber(s.total)), 1, 1, 1)
+		-- (CR-02: the characters, then the people, as the window's header has them.)
+		GameTooltip:AddLine(L.ARMY_TOTAL:format(ns.FormatNumber(s.characters or s.total)) .. "  " .. UI.PEOPLE_CODE .. L.ARMY_PEOPLE:format(ns.FormatNumber(s.total)) .. "|r", 1, 1, 1)
 		GameTooltip:AddLine(L.ARMY_SUB:format(ns.FormatNumber(s.online), #s.guilds, ns.Ago(s.newest)), 0.8, 0.8, 0.8)
 		local heard = ns.Data.Rebuilding and ns.Data.Rebuilding()
 		if heard then GameTooltip:AddLine(L.REBUILDING_SUB:format(heard), 1, 0.82, 0) end

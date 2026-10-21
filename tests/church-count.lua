@@ -562,7 +562,49 @@ test("1.1.6 Church: the keepers' ledger: a keeper catches up from another; the m
 	eq(w:As(c.head, c.head.Count.StateOf, Key("Merge Guy") .. ":" .. Key("Mira Wells")), "credited")
 	-- A line from a non-keeper is refused.
 	local line = w:As(c.a1, c.a1.Count.RecordLine, "x", r1)
-	eq(select(2, w:As(c.head, c.head.Count.TakeLine, "Wes Brook-Realm", line)), "keeper")
+	eq(select(2, w:As(c.head, c.head.Count.TakeLine, "Wes Brook-Realm", line)), "relay")
+end)
+
+test("global Church ledger: signed council preserves verified rankings after the source Apostle goes offline: another council client recovers them; a keeper takes none of them from a council relay (1.2.5.1)", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	local other = w:Client("Dela Moss-Realm")
+	c.a2.online = false
+	w:Presence({ c.a1, council, other })
+	w:Run(30) -- (the book, from the desk: Church.TakePresence asks a keeper whose book differs)
+	other.online = false -- (away while the record goes out)
+	local id = Key("Relay Recruit") .. ":" .. Key("Mira Wells")
+	local rec = { n = "Relay Recruit", bn = "Mira Wells", g = World.GUILD, kind = "i",
+		tc = w.clock - 7200, tj = w.clock - 3600, ws = { Key("Wes Brook") }, c = 1 }
+	eq(w:As(c.a1, c.a1.Count.MergeIn, id, rec, true), true)
+	w:Run(20)
+	assert(Rec(w, council, "Relay Recruit", "Mira Wells"), "signed council retained the verified ledger line")
+	eq(Rec(w, other, "Relay Recruit", "Mira Wells"), nil)
+
+	-- The only Apostle holding the record leaves. Another council client, with no keeper online,
+	-- recovers it from the council relay, not waiting for the original observer to return.
+	c.a1.online = false
+	other.online = true
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence({ council, other })
+	eq(w:As(other, other.Count.CatchUp, true), true)
+	w:Run(30)
+	assert(Rec(w, other, "Relay Recruit", "Mira Wells"), "late council client recovered it while the source was offline")
+	local found
+	for _, row in ipairs((w:As(other, other.Count.RankingView, "m", "a"))) do
+		if row.key == Key("Mira Wells") then found = row break end
+	end
+	assert(found and found.joins == 1, "its page, with no keeper online, shows the verified recruit")
+
+	-- A keeper takes no ledger line from a council relay: the author's client asks it for no catch-up,
+	-- and the council's record line changes nothing there. (Changed from a test that had the author
+	-- recover the record from the council relay: the lead restored the 1.2.5.1 rule, 2026-10-19.)
+	c.author.online = true
+	w:Presence({ council, other, c.author })
+	eq(w:As(c.author, c.author.Count.CatchUp, true), false, "no keeper online to ask")
+	local line = w:As(council, council.Count.RecordLine, id, Rec(w, council, "Relay Recruit", "Mira Wells"))
+	eq(w:As(c.author, c.author.Count.TakeLine, World.COUNCILLOR, line), false)
+	eq(Rec(w, c.author, "Relay Recruit", "Mira Wells"), nil, "not from a council relay")
 end)
 
 test("1.1.6 Church: reading the log: never in combat, at most every minute, drawn among guildmates, never on the King's client; the event registered once, on first use", function()
@@ -2085,4 +2127,681 @@ test("1.2.3 Church: a keeper's first upkeep of its ledger comes PRUNE_AFTER afte
 	end)
 	K.Count.GONE_MAX = saved
 	if not ok then error(err, 0) end
+end)
+
+-- The global ledger's relays (the keepers, the King, the signed High Council): what a relay's pages
+-- show, whom a catch-up asks, and where a keeper's verified word goes.
+
+-- A /reload, or a login the next day: the same character's saved data (its SavedVariables), nothing
+-- of the session (its memory, whom it asked), the files loaded again (INIT). (As tests/church.lua's.)
+local function Reload(w, cl)
+	cl.online = false
+	local again = w:Client(cl.name, { guild = cl.guild or false, rank = cl.rank, rdb = cl.ns.rdb })
+	w:As(again, again.ns.Fire, "INIT")
+	return again
+end
+-- Whether a client's page shows another client's numbers (RankingView's third value).
+local function Remote(w, cl, list, window)
+	return w:As(cl, function() return select(3, cl.Count.RankingView(list, window)) end)
+end
+local function JoinsOn(w, cl, by, list, window)
+	for _, r in ipairs((w:As(cl, cl.Count.RankingView, list or "m", window or "m"))) do
+		if r.key == Key(by) then return r.joins end
+	end
+end
+
+test("global Church ledger: a council relay whose copy is behind shows a keeper's numbers, not its own smaller copy; its own copy only with nothing kept and no keeper online", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	w:Presence()
+	-- Aldric credits three of Mira's recruits; nothing reaches the council's copy (no push, no catch-up).
+	for i = 1, 3 do Give(w, c.a1, "Behind Rec" .. Letters(i), "Mira Wells", 2) end
+	eq(JoinsOn(w, c.a1, "Mira Wells"), 3, "the keeper's own page")
+	eq(Rec(w, council, "Behind Recb", "Mira Wells"), nil, "the council's copy is behind")
+	-- Its page asks a keeper, as every audience page does (a 1.2.5.1 keeper answers that ask; it drops
+	-- the council's catch-up), and shows that keeper's numbers.
+	eq(Remote(w, council, "m", "m"), true, "not its own copy while a keeper is online")
+	local ok, why = w:As(council, council.Count.Ask, "m", "m", nil, true)
+	eq(ok, true, "asked a keeper (" .. tostring(why) .. ")")
+	local q = w:Sent(council, "NR", "WHISPER", "q")
+	eq(Key(q[#q].target), Key(A1), "the desk")
+	w:Run(30)
+	eq(JoinsOn(w, council, "Mira Wells"), 3, "the keeper's numbers")
+	-- Only a keeper answers a page, and only a keeper's rows are taken.
+	eq(select(2, w:As(council, council.Count.Answer, "Nils Ford-Realm", "m", "m")), "not keeper")
+	eq(select(2, w:As(c.m2, c.m2.Count.TakeAnswerLine, World.COUNCILLOR, "NR~1~e~m~m~-~0~0")), "keeper")
+	-- Every keeper offline: the page keeps that answer, not the smaller copy.
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(Rec(w, council, "Behind Recb", "Mira Wells"), nil, "still behind")
+	eq(JoinsOn(w, council, "Mira Wells"), 3, "kept while no keeper is online")
+	-- A page it never had an answer for, with no keeper online: its own copy, shown as its own.
+	eq(Remote(w, council, "m", "a"), false, "nothing kept, no keeper online")
+end)
+
+test("global Church ledger: an audience page asks in the desk's order, the Apostles before the author: not the author's client while an Apostle is online", function()
+	local Z = "Zed Last-Realm"
+	local w = World.New({ apostles = { A1, A2, Z }, head = false })
+	local c = { a1 = w:Client(A1), a2 = w:Client(A2, { guild = World.GUILD2 }), z = w:Client(Z), author = w:Client(World.AUTHOR),
+		m1 = w:Client("Mira Wells"), wes = w:Client("Wes Brook") }
+	w:Act(c.a1, c.a1.Church.NameMissionary, "Mira Wells")
+	w:Run(8 * 3600)
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.z.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(w:As(c.m1, c.m1.Count.Ask, "m", "m", nil, true), true)
+	local q = w:Sent(c.m1, "NR", "WHISPER", "q")
+	eq(#q, 1)
+	eq(Key(q[1].target), Key(Z), "the Apostle, the desk, not the author whose name sorts first")
+end)
+
+test("global Church ledger: after a reload a keeper first asks the keeper it never completed a catch-up from: not the first by name again, and one a reload cut short before one it completed later", function()
+	local w, c = Cast()
+	Give(w, c.a1, "Rot Recb", "Mira Wells", 2)
+	Give(w, c.a2, "Rot Recc", "Mira Wells", 2)
+	-- (Seconds before the catch-ups below. A catch-up now ends a second before the one it is answered
+	-- in, and a record of that second goes again in the next: changed in the same second as the first
+	-- one, Rot Recb would be the first round of the two-round catch-up below, not Rot Recd.)
+	w:Run(2)
+	c.author.online = true
+	w:Presence()
+	local function Asks(cl)
+		w:ClearSent()
+		eq(w:As(cl, cl.Count.CatchUp, true), true)
+		local q = w:Sent(cl, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		return Key(q[1].target)
+	end
+	eq(Asks(c.author), Key(A1))
+	w:Run(60)
+	assert(Rec(w, c.author, "Rot Recb", "Mira Wells"), "caught up from the first keeper asked")
+	local author = Reload(w, c.author)
+	w:Presence()
+	eq(Asks(author), Key(A2), "the keeper never caught up from")
+	w:Run(60)
+	assert(Rec(w, author, "Rot Recc", "Mira Wells"), "and its records")
+	-- Aldric's next catch-up takes two rounds, and a reload comes after the first: the next session
+	-- asks him first again, from where it stopped, not Bera, caught up from since.
+	Give(w, c.a1, "Rot Recd", "Mira Wells", 2)
+	w:Run(10)
+	Give(w, c.a1, "Rot Rece", "Mira Wells", 2)
+	c.a1.Count.CATCHUP_LINES = 1
+	eq(Asks(author), Key(A1), "the one caught up from longest ago")
+	w:Run(1)
+	assert(Rec(w, author, "Rot Recd", "Mira Wells"), "the first round")
+	eq(Rec(w, author, "Rot Rece", "Mira Wells"), nil, "not the second yet")
+	local again = Reload(w, author)
+	w:Presence()
+	eq(Asks(again), Key(A1), "the catch-up cut short")
+end)
+
+test("global Church ledger: a keeper asks only keepers for a catch-up: never a council relay, while a keeper is online or while none is", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	c.author.online = true
+	w:Presence()
+	-- A 1.2.5.1 councillor's client answers no catch-up: it is no keeper (that release's Count.TakeLine
+	-- drops every ledger line on a client that is not one, "keeper").
+	council.Count.TakeLine = function() return false, "keeper" end
+	local function Asks()
+		w:ClearSent()
+		eq(w:As(c.author, c.author.Count.CatchUp, true), true)
+		local q = w:Sent(c.author, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		w:Run(60)
+		return Key(q[1].target)
+	end
+	eq(Asks(), Key(A1))
+	eq(Asks(), Key(A2))
+	eq(Asks(), Key(A1), "a keeper again, not the silent council relay")
+
+	-- With no keeper online, the council relay online is not asked either: a keeper takes no ledger
+	-- line from it (Count.TakeLine, 1.2.5.1). (Changed from a test that had the author complete a
+	-- catch-up from the council relay and ask it in its turn: the lead restored that rule, 2026-10-19.)
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence({ council, c.author })
+	w:ClearSent()
+	eq(w:As(c.author, c.author.Count.CatchUp, true), false)
+	eq(#w:Sent(c.author, "NL", "WHISPER", "q"), 0, "nobody asked")
+end)
+
+test("global Church ledger: a keeper's verified word goes to the keepers online, a relay online costing them nothing; to the other relays only while the queue has room", function()
+	local w, c = Cast()
+	w:Client(World.COUNCILLOR)
+	w:Presence()
+	local B = ns.Codec.Base36
+	local hour = math.floor(w.clock / 3600)
+	local own = ("NV~1~w~Mira Wells-Realm~Push Guy-Realm~%s~%s~%s"):format(World.GUILD, B(hour - 2), B(hour - 1))
+	Join(w, World.GUILD, "Push Guy")
+	w:As(c.a2, c.a2.Count.TakeEvidence, "Mira Wells-Realm", own)
+	w:As(c.a1, c.a1.Count.TakeEvidence, "Mira Wells-Realm", own)
+	eq(StateOf(w, c.a2, "Push Guy", "Mira Wells"), "pending")
+	-- Room for one line to each keeper online (Bera), not for one to each relay (Bera and the council).
+	w.room = c.a1.Count.SEND_ROOM + 2
+	w:As(c.a1, c.a1.Count.TakeEvidence, "Wes Brook-Realm", own)
+	w:Flush()
+	eq(StateOf(w, c.a2, "Push Guy", "Mira Wells"), "credited", "Bera has Wes's word from Aldric")
+	-- With no room past SEND_ROOM, the keepers still have it; the council's copy waits for its catch-up.
+	w.room = c.a1.Count.SEND_ROOM
+	w:ClearSent()
+	local line = w:As(c.a1, c.a1.Count.RecordLine, Key("Push Guy") .. ":" .. Key("Mira Wells"), Rec(w, c.a1, "Push Guy", "Mira Wells"))
+	w:As(c.a1, c.a1.Count.ToRelays, line)
+	local to = {}
+	for _, e in ipairs(w:Sent(c.a1, "NL", "WHISPER", "r")) do to[Key(e.target)] = true end
+	eq(to[Key(A2)], true, "the keeper")
+	eq(to[Key(World.COUNCILLOR)], nil, "not the council, with no room")
+end)
+
+-- The review of the relays' catch-up (2026-10-19): when a session's first catch-up goes, whom a
+-- keeper that never answers leaves first, what a keeper takes from a council or King client, and the
+-- King's client, which does no background Church work.
+
+test("global Church ledger: just logged in, a keeper's first catch-up waits until every keeper online has been heard: not the one heard first, the one it never caught up from", function()
+	local w, c = Cast()
+	Give(w, c.a1, "Race Recb", "Mira Wells", 2)
+	Give(w, c.a2, "Race Recc", "Mira Wells", 2)
+	c.author.online = true
+	w:Presence()
+	-- A first session completes a catch-up from Aldric only.
+	w:ClearSent()
+	eq(w:As(c.author, c.author.Count.CatchUp, true), true)
+	eq(Key(w:Sent(c.author, "NL", "WHISPER", "q")[1].target), Key(A1))
+	w:Run(60)
+	-- A login: Bera, never caught up from, is the one to ask, and Aldric's presence comes in first (a
+	-- keeper's presence is KEEPER_EVERY apart, the Church tick every 30 seconds).
+	local again = Reload(w, c.author)
+	Login(w, again)
+	w:Presence({ c.a1, again })
+	local function Ticked()
+		w:ClearSent()
+		w:Tick({ again })
+		local q = w:Sent(again, "NL", "WHISPER", "q")
+		eq(#q <= 1, true)
+		return q[1] and Key(q[1].target) or "nobody"
+	end
+	eq(Ticked(), "nobody", "only Aldric heard yet")
+	w:Run(240)
+	w:Presence({ c.a2 })
+	eq(Ticked(), "nobody", "both heard, but a keeper whose presence was lost may be online too")
+	local settle = again.Church.KEEPER_EVERY * again.Church.FRESH_FACTOR
+	assert(settle < again.Count.SETTLE_MAX, "inside the time a desk waits for its catch-up before it answers pages")
+	w:Run(settle - 240 + 1)
+	w:Presence({ c.a1, c.a2 })
+	eq(Ticked(), Key(A2), "the keeper never caught up from")
+	w:Run(60)
+	assert(Rec(w, again, "Race Recc", "Mira Wells"), "and its records")
+	eq(w:As(again, again.Count.Settled), true)
+end)
+
+test("global Church ledger: a keeper that never answers a catch-up is not asked first in every session: asked, it goes behind the others", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	-- Aldric (first by name) drops every ask, as a desk too busy to answer does.
+	c.a1.Count.TakeLine = function() return false, "busy" end
+	local author, asked = c.author, {}
+	for _ = 1, 4 do
+		w:ClearSent()
+		eq(w:As(author, author.Count.CatchUp, true), true)
+		local q = w:Sent(author, "NL", "WHISPER", "q")
+		eq(#q, 1)
+		asked[#asked + 1] = Key(q[1].target)
+		w:Run(60)
+		author = Reload(w, author)
+		w:Presence()
+	end
+	eq(table.concat(asked, ", "), table.concat({ Key(A1), Key(A2), Key(A1), Key(A2) }, ", "), "each in turn, not Aldric first every session")
+end)
+
+test("global Church ledger: on a keeper, record, person and archive lines only from a keeper: a council or King client adds no recruit and raises no count (1.2.5.1)", function()
+	local w, c = Cast()
+	w:Client(World.COUNCILLOR)
+	c.king.online = true
+	w:Presence()
+	local K, B = c.a1, c.a1.Church.B36
+	local u, hour = B(w.clock), B(math.floor(w.clock / 3600) * 3600 - 3600)
+	local lines = {
+		w:As(K, K.Count.RecordLine, Key("Made Recb") .. ":" .. Key("Mira Wells"), { n = "Made Recb", bn = "Mira Wells", g = World.GUILD,
+			kind = "i", tc = w.clock - 7200, tj = w.clock - 3600, ws = { Key("Wes Brook") }, c = 1, u = w.clock }),
+		("NL~1~p~Mira Wells-Realm~0~0~50000~5000~0~%s"):format(u),
+		("NL~1~z~Made Recc-Realm~Mira Wells-Realm~%s~1~%s"):format(hour, u),
+	}
+	local function Counts() return Joins(w, K, "Mira Wells", "m") .. " in 30 days, " .. Joins(w, K, "Mira Wells", "a") .. " all time" end
+	eq(Counts(), "0 in 30 days, 0 all time")
+	for _, from in ipairs({ World.COUNCILLOR, World.KING }) do
+		for _, line in ipairs(lines) do eq(w:As(K, K.Count.TakeLine, from, line), false, from .. ": " .. line) end
+	end
+	eq(Counts(), "0 in 30 days, 0 all time", "nothing added, nothing raised")
+	eq(Rec(w, K, "Made Recb", "Mira Wells"), nil)
+	-- The same lines from a keeper are taken.
+	for _, line in ipairs(lines) do eq(w:As(K, K.Count.TakeLine, A2, line), true, line) end
+	eq(Counts(), "2 in 30 days, 5001 all time")
+end)
+
+test("global Church ledger: the King's client does no background Church work: it asks for no catch-up, a keeper answers none of its asks and pushes nothing to it", function()
+	local w, c = Cast()
+	c.king.online = true
+	w:Presence()
+	local id = Key("King Recb") .. ":" .. Key("Mira Wells")
+	Give(w, c.a1, "King Recb", "Mira Wells", 2)
+	w:ClearSent()
+	-- No catch-up from the King's client, on its tick or asked for.
+	w:Tick({ c.king })
+	eq(#w:Sent(c.king, "NL"), 0, "nothing on its tick")
+	eq(w:As(c.king, c.king.Count.CatchUp, true), false)
+	-- An ask in the King's name: Aldric answers none of it.
+	w:As(c.a1, c.a1.Count.TakeLine, World.KING, "NL~1~q~0")
+	w:Run(60)
+	local n = 0
+	for _, e in ipairs(w:Sent(c.a1, "NL", "WHISPER")) do if Key(e.target) == Key(World.KING) then n = n + 1 end end
+	eq(n, 0, "no ledger line to the King")
+	-- A keeper's verified word goes to the keepers, not to the King's client.
+	w:ClearSent()
+	w:As(c.a1, c.a1.Count.Push, id)
+	local to = {}
+	for _, e in ipairs(w:Sent(c.a1, "NL", "WHISPER", "r")) do to[Key(e.target)] = true end
+	eq(to[Key(A2)], true, "Bera")
+	eq(to[Key(World.KING)], nil, "not the King")
+	-- A ledger line whispered to the King's client anyway is not kept there, and its page shows no
+	-- copy of its own (with no keeper online and no answer kept, nothing).
+	local line = w:As(c.a1, c.a1.Count.RecordLine, id, Rec(w, c.a1, "King Recb", "Mira Wells"))
+	eq(w:As(c.king, c.king.Count.TakeLine, A1, line), false)
+	eq(Rec(w, c.king, "King Recb", "Mira Wells"), nil)
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(#(w:As(c.king, c.king.Count.RankingView, "m", "a")), 0)
+end)
+
+test("global Church ledger: a council client catches up only while no keeper is online, from a council relay, never the King's client", function()
+	local w, c = Cast()
+	w:Client(World.COUNCILLOR)
+	local other = w:Client("Dela Moss-Realm")
+	c.king.online = true
+	w:Presence()
+	-- Keepers online: its pages ask them (Count.Ask); no catch-up.
+	w:ClearSent()
+	eq(w:As(other, other.Count.CatchUp, true), false)
+	w:Tick({ other })
+	eq(#w:Sent(other, "NL", "WHISPER", "q"), 0, "none on its tick")
+	-- Every keeper offline: it asks the council relay online, not the King's client (sorted first).
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	w:ClearSent()
+	eq(w:As(other, other.Count.CatchUp, true), true)
+	local q = w:Sent(other, "NL", "WHISPER", "q")
+	eq(#q, 1)
+	eq(Key(q[1].target), Key(World.COUNCILLOR))
+end)
+
+-- The review of the Church's count (2026-10-19, "numbers still much smaller than the prints"): a desk
+-- just logged in answering pages and sending the public rows from a ledger behind the others', a
+-- keeper answering a council client's catch-up, and one account's council character's copy read as
+-- its Apostle character's ledger. Each test below fails on the build before it.
+
+test("global Church ledger: a desk just logged in sends the public rows only once its first catch-up ended: its first rows carry the recruits it missed", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	w:Act(c.m1, c.m1.Count.SetPublicRow, true)
+	w:Act(c.author, c.author.Church.SetPublic, true)
+	w:Tick()
+	c.author.online = false
+	w:Run(5) -- (the records below come seconds after that tick's catch-ups ended)
+	-- Bera takes five of Mira's recruits while Aldric (the desk) is away.
+	c.a1.online = false
+	for i = 1, 5 do Give(w, c.a2, "Pub Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	local again = Reload(w, c.a1)
+	Login(w, again)
+	w:Presence()
+	local t0, first = w.clock, nil
+	while w.clock - t0 < 1000 and not first do
+		w:ClearSent()
+		w:Tick()
+		local sent = w:Sent(again, "NR", "CHANNEL")
+		if #sent > 0 then first = sent end
+		w:Run(30)
+	end
+	assert(first, "the desk sent its public rows")
+	eq(w:As(again, again.Count.Settled), true, "after its first catch-up")
+	eq(Joins(w, again, "Mira Wells", "m"), 5)
+	local s30
+	for _, e in ipairs(first) do s30 = s30 or e.msg:match("^NR~1~p~[0-9a-z]+~m~1~Mira Wells~(%d+)~%d+$") end
+	eq(s30, "500", "Mira first, her five recruits' 50 points (not her row missing: the ledger before the catch-up had none)")
+	local v = w:As(c.wes, c.wes.Count.PublicView)
+	eq(v and v.m[1] and v.m[1].name, "Mira Wells")
+	eq(v.m[1].s30, 50)
+end)
+
+test("global Church ledger: a desk just logged in answers no page while its first catch-up goes on, SETTLE_MAX counted from the end of its wait to hear the keepers", function()
+	local w, c = Cast()
+	-- Bera holds 80 records Aldric (the desk) lacks, one a round (about 5 s a round: as 150 lines take in game).
+	for i = 1, 80 do Give(w, c.a2, "Long Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	c.a2.Count.CATCHUP_LINES = 1
+	local again = Reload(w, c.a1)
+	Login(w, again)
+	w:Presence()
+	local t0 = w.clock
+	local cap = again.Church.KEEPER_EVERY * again.Church.FRESH_FACTOR + again.Count.SETTLE_MAX
+	while w.clock - t0 < again.Count.SETTLE_MAX + 5 do w:Tick(); w:Run(30) end
+	local behind = Joins(w, again, "Mira Wells", "a")
+	assert(behind < 80, "still catching up: " .. behind)
+	eq(w:As(again, again.Count.Settled), false, "SETTLE_MAX after the login is not yet SETTLE_MAX after the wait")
+	eq(select(2, w:As(again, again.Count.Answer, "Nils Ford-Realm", "m", "a")), "catching up")
+	-- Its catch-up ends inside the cap: it answers, with Bera's numbers.
+	while not w:As(again, again.Count.Settled) and w.clock - t0 < cap do w:Tick(); w:Run(30) end
+	assert(w.clock - t0 < cap, "caught up before the cap")
+	eq(Joins(w, again, "Mira Wells", "a"), 80)
+	eq(w:As(again, again.Count.Answer, "Nils Ford-Realm", "m", "a"), true)
+end)
+
+test("global Church ledger: a keeper just logged in that has heard no other keeper yet is not settled: an audience page keeps its numbers until the wait to hear them ends", function()
+	local w, c = Cast()
+	for i = 1, 3 do Give(w, c.a2, "Login Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	-- Nils's page has Bera's numbers, asked while Aldric (the desk, first by name) was away.
+	c.a1.online = false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence()
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "a", nil, true), true)
+	w:Run(30)
+	eq(JoinsOn(w, c.m2, "Mira Wells", "m", "a"), 3)
+	-- Aldric logs in: his presence goes out at once, the others' on their next one.
+	local again = Reload(w, c.a1)
+	Login(w, again)
+	w:Presence({ again })
+	w:Run(10)
+	eq(#w:As(again, again.Church.KeepersOnline, false), 0, "no keeper heard yet")
+	eq(w:As(again, again.Count.Settled), false, "no keeper heard is not no keeper online")
+	-- Nils's page asks him: unanswered, it keeps Bera's numbers.
+	w:ClearSent()
+	eq(w:As(c.m2, c.m2.Count.Ask, "m", "a", nil, true), true)
+	eq(Key(w:Sent(c.m2, "NR", "WHISPER", "q")[1].target), Key(A1))
+	w:Run(30)
+	eq(JoinsOn(w, c.m2, "Mira Wells", "m", "a"), 3, "not a ledger without them")
+	-- No keeper heard by the end of that wait (Bera gone): its ledger is the one there is.
+	c.a2.online = false
+	w:Run(again.Church.KEEPER_EVERY * again.Church.FRESH_FACTOR)
+	eq(w:As(again, again.Count.Settled), true)
+end)
+
+test("global Church ledger: a keeper answers no council client's catch-up ask, a keeper's only (1.2.5.1)", function()
+	local w, c = Cast()
+	w:Client(World.COUNCILLOR)
+	w:Presence()
+	for i = 1, 5 do Give(w, c.a1, "Ask Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	local function LinesTo(name)
+		local n = 0
+		for _, e in ipairs(w:Sent(c.a1, "NL", "WHISPER")) do if Key(e.target) == Key(name) then n = n + 1 end end
+		return n
+	end
+	w:ClearSent()
+	for _ = 1, 8 do eq(select(2, w:As(c.a1, c.a1.Count.TakeLine, World.COUNCILLOR, "NL~1~q~0")), "keeper") end
+	eq(select(2, w:As(c.a1, c.a1.Count.AnswerCatchUp, World.COUNCILLOR, 0)), "keeper")
+	w:Run(60)
+	eq(LinesTo(World.COUNCILLOR), 0, "no round to the council (it was 6 lines an ask)")
+	-- Bera's ask is answered: the five records and the end.
+	w:ClearSent()
+	eq(w:As(c.a1, c.a1.Count.TakeLine, A2, "NL~1~q~0"), true)
+	w:Run(60)
+	eq(LinesTo(A2), 6)
+end)
+
+test("global Church ledger: one account with a council and an Apostle character: the council's copy is saved apart, and a line it took reaches neither the Apostle's ledger nor another keeper's", function()
+	local w, c = Cast()
+	local council = w:Client(World.COUNCILLOR)
+	local dela = w:Client("Dela Moss-Realm")
+	w:Presence()
+	w:Run(30) -- (the book, from the desk)
+	-- Every keeper away: the council character takes another council relay's line no keeper sent.
+	c.a1.online, c.a2.online = false, false
+	w:Run(c.a1.Church.KEEPER_EVERY * 3)
+	w:Presence({ council, dela })
+	local line = ("NL~1~p~Mira Wells-Realm~0~0~50000~5000~0~%s"):format(c.a1.Church.B36(w.clock))
+	eq(w:As(council, council.Count.TakeLine, "Dela Moss-Realm", line), true, "a council client keeps its copy")
+	eq(Joins(w, council, "Mira Wells", "a"), 5000, "in its copy")
+	-- The same account's Apostle character logs in (OlympusDB is account-wide; ns.rdb, one realm group's).
+	council.online = false
+	local alt = w:Client(A2, { guild = World.GUILD2, rdb = council.ns.rdb })
+	w:As(alt, alt.ns.Fire, "INIT")
+	eq(Joins(w, alt, "Mira Wells", "a"), 0, "not in the Apostle's ledger")
+	-- Aldric catches up from it: nothing of the council's line.
+	c.a1.online = true
+	w:Presence({ c.a1, alt })
+	w:ClearSent()
+	eq(w:As(c.a1, c.a1.Count.CatchUp, true), true)
+	eq(Key(w:Sent(c.a1, "NL", "WHISPER", "q")[1].target), Key(A2))
+	w:Run(60)
+	eq(Joins(w, c.a1, "Mira Wells", "a"), 0, "no keeper's count raised")
+	-- The Apostle catches up from Aldric: its cursor goes in its own ledger.
+	eq(w:As(alt, alt.Count.CatchUp, true), true)
+	w:Run(60)
+	-- The council character back: its copy as it left it, and the Apostle's catch-up cursor not in it.
+	alt.online = false
+	local back = Reload(w, council)
+	eq(Joins(w, back, "Mira Wells", "a"), 5000, "its copy kept")
+	eq(w:As(back, back.Count.Led).from[Key(A1)], nil, "the Apostle's own cursor stays in its ledger")
+	eq(w:As(back, back.Church.Store).led.from[Key(A1)] ~= nil, true)
+	-- The load's check takes the copy as it takes the ledger: a saved record that fails goes alone, a
+	-- malformed copy whole.
+	local store = w:As(back, back.Church.Store)
+	store.copy.r["odd guy:mira wells"] = { n = "Odd Guy", bn = "Mira Wells", g = "Plain Guild", kind = "i", tc = w.clock - 7200, tj = w.clock - 3600 }
+	w:As(back, back.Count.CheckSaved)
+	eq(store.copy.r["odd guy:mira wells"], nil, "the record that fails goes")
+	eq(Joins(w, back, "Mira Wells", "a"), 5000, "the rest kept")
+	store.copy = { v = 1, r = "x" }
+	w:As(back, back.Count.CheckSaved)
+	eq(store.copy, nil)
+	eq(store.led ~= nil, true, "the Apostle's ledger untouched")
+end)
+
+-- The third review of the Church's count (2026-10-19): a first catch-up asked once and never again
+-- before the cap, a desk caught up from a keeper itself catching up, the ledger's choice looked for
+-- for each person of a ranking, a record of the second a catch-up ended never sent, and a keeper's
+-- own tab showing the ledger it had before as live. Each test below fails on the build before it (the
+-- one about many rounds only for want of CATCHUP_RETRY: it keeps the retry from cutting a catch-up short).
+
+test("global Church ledger: a desk just logged in whose first catch-up ask goes unanswered asks the next keeper CATCHUP_RETRY later, and is caught up long before the cap", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	-- Bera and the author take five of Mira's recruits while Aldric (the desk) is away.
+	c.a1.online = false
+	for i = 1, 5 do
+		Give(w, c.a2, "Unans Rec" .. Letters(i), "Mira Wells", 2)
+		Give(w, c.author, "Unans Rec" .. Letters(i), "Mira Wells", 2)
+		w:Run(1)
+	end
+	w:Run(10)
+	-- Bera's sends are full: eight transfers queued, no room in her Comm queue. An ask is dropped.
+	c.a2.ns.Comm.QueueRoom = function() return 0 end
+	for i = 1, 8 do eq(w:As(c.a2, c.a2.Count.SendLines, "Some One" .. Letters(i) .. "-Realm", { "NL~1~e~0~0" }), true) end
+	local again = Reload(w, c.a1)
+	Login(w, again)
+	w:Presence()
+	local t0 = w.clock
+	local cap = again.Church.KEEPER_EVERY * again.Church.FRESH_FACTOR + again.Count.SETTLE_MAX
+	w:ClearSent()
+	while w.clock - t0 < cap and not w:As(again, again.Count.Settled) do w:Tick(); w:Run(30) end
+	local q = w:Sent(again, "NL", "WHISPER", "q")
+	assert(#q >= 2, "asked again before the cap: " .. #q .. " ask(s)")
+	eq(Key(q[1].target), Key(A2), "Bera first")
+	eq(Key(q[2].target), Key(World.AUTHOR), "then the next keeper, not Bera again")
+	assert(q[2].at - q[1].at <= again.Count.CATCHUP_RETRY + 30, "CATCHUP_RETRY after the first: " .. (q[2].at - q[1].at))
+	assert((w:As(c.a2, c.a2.Count.Stats).dropped.busy or 0) >= 1, "Bera's client dropped the ask")
+	assert(w.clock - t0 < cap, "caught up before the cap")
+	eq(Joins(w, again, "Mira Wells", "a"), 5)
+	eq(w:As(again, again.Count.Answer, "Nils Ford-Realm", "m", "a"), true)
+end)
+
+test("global Church ledger: a first catch-up in many rounds is not cut short by the retry: while its keeper's lines come, no other keeper is asked", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	c.a1.online = false
+	for i = 1, 40 do Give(w, c.a2, "Round Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	-- (One record a round, about 5 s a round: the 40 take longer than CATCHUP_RETRY.)
+	c.a2.Count.CATCHUP_LINES = 1
+	local again = Reload(w, c.a1)
+	Login(w, again)
+	w:Presence()
+	local t0 = w.clock
+	w:ClearSent()
+	while w.clock - t0 < 1500 and not w:As(again, again.Count.Settled) do w:Tick(); w:Run(30) end
+	local q = w:Sent(again, "NL", "WHISPER", "q")
+	assert(#q >= 40 and q[#q].at - q[1].at > again.Count.CATCHUP_RETRY, "a catch-up of many rounds: " .. #q)
+	for _, e in ipairs(q) do eq(Key(e.target), Key(A2), "only Bera, whose rounds kept coming") end
+	eq(Joins(w, again, "Mira Wells", "a"), 40)
+end)
+
+test("global Church ledger: a keeper whose own first catch-up goes on answers no catch-up: the desk asking it asks the next keeper, and has the third keeper's records once caught up", function()
+	local w, c = Cast()
+	c.author.online = true
+	w:Presence()
+	-- Aldric (the desk) and Bera away; the author takes five of Mira's recruits.
+	c.a1.online, c.a2.online = false, false
+	for i = 1, 5 do Give(w, c.author, "Third Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	w:Run(10)
+	-- Bera logs in, Aldric a minute later: each one's ledger lacks the five.
+	local bera = Reload(w, c.a2)
+	Login(w, bera)
+	w:Presence()
+	w:Run(60)
+	local ald = Reload(w, c.a1)
+	Login(w, ald)
+	w:Presence()
+	local t0 = w.clock
+	w:ClearSent()
+	while w.clock - t0 < 1500 and not w:As(ald, ald.Count.Settled) do w:Tick(); w:Run(30) end
+	assert(w.clock - t0 < ald.Church.KEEPER_EVERY * ald.Church.FRESH_FACTOR + ald.Count.SETTLE_MAX, "caught up before the cap")
+	eq(Joins(w, ald, "Mira Wells", "a"), 5, "the author's five, not Bera's ledger as behind as his")
+	eq(Joins(w, bera, "Mira Wells", "a"), 5, "Bera's too")
+	eq(w:As(bera, bera.Count.Settled), true)
+	assert((w:As(ald, ald.Count.Stats).dropped["catching up"] or 0) >= 1, "Aldric answered no catch-up while his went on")
+	assert((w:As(bera, bera.Count.Stats).dropped["catching up"] or 0) >= 1, "nor Bera")
+	eq(select(2, w:As(ald, ald.Count.AnswerCatchUp, World.AUTHOR, 0)), nil, "caught up, he answers")
+	eq(w:As(ald, ald.Count.Answer, "Nils Ford-Realm", "m", "a"), true)
+end)
+
+test("global Church ledger: two keepers just logged in together are no catch-up for each other: settled only at the cap, and each has the other's records the next ask after it", function()
+	local w, c = Cast()
+	for i = 1, 3 do Give(w, c.a1, "Ald Own" .. Letters(i), "Mira Wells", 2) end
+	for i = 1, 4 do Give(w, c.a2, "Ber Own" .. Letters(i), "Mira Wells", 2) end
+	w:Run(10)
+	local ald, bera = Reload(w, c.a1), Reload(w, c.a2)
+	Login(w, ald); Login(w, bera)
+	w:Presence()
+	local t0 = w.clock
+	local cap = ald.Church.KEEPER_EVERY * ald.Church.FRESH_FACTOR + ald.Count.SETTLE_MAX
+	while w.clock - t0 < cap - 30 do w:Tick(); w:Run(30) end
+	eq(w:As(ald, ald.Count.Settled), false, "not from Bera's ledger, itself catching up")
+	eq(w:As(bera, bera.Count.Settled), false)
+	while w.clock - t0 < cap + ald.Count.CATCHUP_REASK + 60 and (Joins(w, ald, "Mira Wells", "a") < 7 or Joins(w, bera, "Mira Wells", "a") < 7) do
+		w:Tick(); w:Run(30)
+	end
+	eq(Joins(w, ald, "Mira Wells", "a"), 7)
+	eq(Joins(w, bera, "Mira Wells", "a"), 7)
+end)
+
+test("global Church ledger: which ledger a client reads is looked for once a second, not for each person of a ranking; at once again when the Church's state or the data changed", function()
+	local w, c = Cast()
+	local K = c.a1
+	for i = 1, 200 do Give(w, K, "Perf Rec" .. Letters(i), (i % 2 == 0) and "Mira Wells" or "Nils Ford", 2) end
+	local n, orig = 0, K.Church.IsKeeper
+	K.Church.IsKeeper = function(name, ...)
+		if name == nil or Key(name) == Key(K.ns.me) then n = n + 1 end
+		return orig(name, ...)
+	end
+	w:Run(1)
+	w:As(K, function()
+		for _ = 1, 2000 do K.Count.Own(Key("Mira Wells"), "a") end
+	end)
+	assert(n <= 1, "this client's role asked " .. n .. " times for 2000 Own (3 each before)")
+	eq(Joins(w, K, "Mira Wells", "a"), 100)
+	-- Aldric's Apostle role ends with a newer signed list: his copy the next second.
+	local store = w:As(K, K.Church.Store)
+	w:SignedList({ A2 }, true, w.clock + 1)
+	w:Run(1)
+	eq(w:As(K, K.Count.Led) == store.copy, true, "no keeper reads the copy")
+	-- Signed again, the data changed (as Authority's saved bundle fires): his ledger in the same second.
+	w:SignedList({ A1, A2 }, true, w.clock + 2)
+	w:As(K, K.ns.Fire, "DATA_CHANGED")
+	eq(w:As(K, K.Count.Led) == store.led, true, "his ledger again at once")
+	eq(Joins(w, K, "Mira Wells", "a"), 100)
+	K.Church.IsKeeper = orig
+end)
+
+test("global Church ledger: a record changed in the second a catch-up ended comes with the next catch-up", function()
+	local w, c = Cast()
+	Give(w, c.a2, "Gap Reca", "Mira Wells", 2)
+	w:ClearSent()
+	eq(w:As(c.a1, c.a1.Count.CatchUp, true), true)
+	w:Flush()
+	assert(Rec(w, c.a1, "Gap Reca", "Mira Wells"), "the first catch-up")
+	local e = w:Sent(c.a2, "NL", "WHISPER", "e")
+	local u, at = e[#e] and c.a1.Church.UnB36(e[#e].msg:match("^NL~1~e~0~([0-9a-z]+)$")), w.clock
+	-- Later in that same second, Bera takes another record.
+	Give(w, c.a2, "Gap Recb", "Mira Wells", 2)
+	eq(Rec(w, c.a1, "Gap Recb", "Mira Wells"), nil)
+	w:Run(3600)
+	w:Presence()
+	eq(w:As(c.a1, c.a1.Count.CatchUp, true), true)
+	w:Run(60)
+	assert(Rec(w, c.a1, "Gap Recb", "Mira Wells"), "not left behind by the cursor")
+	assert(Rec(w, c.a1, "Gap Reca", "Mira Wells"), "the one of that second, merged again, still there")
+	assert(u and u < at, "the first ended a second before the one it was answered in")
+end)
+
+test("global Church ledger: a keeper's own tab says it is catching up while its first catch-up goes on, and is live once it ended", function()
+	local w, c = Cast()
+	c.a1.online = false
+	for i = 1, 5 do Give(w, c.a2, "Own Rec" .. Letters(i), "Mira Wells", 2); w:Run(1) end
+	-- Aldric logs in again, with the tab (ChurchView.lua).
+	local again = w:Client(c.a1.name, { guild = c.a1.guild, rank = c.a1.rank, rdb = c.a1.ns.rdb, view = true })
+	w:As(again, again.ns.Fire, "INIT")
+	Login(w, again)
+	w:Presence()
+	w:Run(30)
+	local L = ns.L
+	local function Line()
+		again.View.page, again.View.list, again.View.window = "ranking", "m", "a"
+		local lines = w:As(again, again.View.Build)
+		local all = {}
+		for _, line in ipairs(lines) do all[#all + 1] = line.text or "" end
+		return table.concat(all, "\n")
+	end
+	local _, _, remote, catching = w:As(again, again.Count.RankingView, "m", "a")
+	eq(remote, false, "his own ledger")
+	eq(catching, true, "still catching up")
+	eq(select(4, w:As(again, again.Count.DetailView, "Mira Wells", "a")), true)
+	assert(Line():find(L.CHURCH_ASOF_CATCHING, 1, true), "the tab says so")
+	assert(not Line():find(L.CHURCH_ASOF_LIVE, 1, true), "not live")
+	-- Caught up from Bera: live, with her five.
+	local t0 = w.clock
+	while w.clock - t0 < 1500 and not w:As(again, again.Count.Settled) do w:Tick(); w:Run(30) end
+	eq(select(4, w:As(again, again.Count.RankingView, "m", "a")), false)
+	eq(JoinsOn(w, again, "Mira Wells", "m", "a"), 5)
+	assert(Line():find(L.CHURCH_ASOF_LIVE, 1, true), "live")
+	-- Settled with no catch-up (no other keeper heard by the end of the wait to hear them): the tick
+	-- that settles it tells the tab, which said it was catching up.
+	c.a2.online = false
+	local alone = Reload(w, again)
+	Login(w, alone)
+	w:Presence({ alone })
+	local wait = alone.Church.KEEPER_EVERY * alone.Church.FRESH_FACTOR
+	local function Told(seconds)
+		w:Run(seconds)
+		alone.fired = {}
+		w:As(alone, alone.Count.Tick)
+		for _, event in ipairs(alone.fired) do if event == "CHURCH_COUNT_CHANGED" then return true end end
+		return false
+	end
+	eq(Told(0), false)
+	Told(wait - 60) -- (the ledger's first upkeep, Count.Prune, a change of its own)
+	eq(Told(30), false, "still waiting")
+	eq(select(4, w:As(alone, alone.Count.RankingView, "m", "a")), true)
+	eq(Told(30), true, "settled")
+	eq(select(4, w:As(alone, alone.Count.RankingView, "m", "a")), false)
 end)

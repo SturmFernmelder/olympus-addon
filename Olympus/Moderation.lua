@@ -108,22 +108,26 @@ Moderation.EXILE_MAX_KEPT = 50    -- timed words kept, one per guild
 -- census report: Comm.Broadcast.) The guild's own hello and key over GUILD go on, but (1.1.6) not
 -- a guild master's Vox question to his guild nor its results (Y3, as the Throne's T1~V and T1~E
 -- in HIDDEN_CALLS).
-Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR = true, LN = true, LX = true, LY = true, Y1 = true, Y2 = true, G1 = true,
+Moderation.BLOCKED = { M1 = true, D1 = true, L1 = true, LQ = true, LO = true, LR = true, LN = true, LX = true, LY = true, PS = true, Y1 = true, Y2 = true, G1 = true,
 	Y3 = true,
 	W1 = true, WA = true, WL = true,
 	-- A removed client neither asks for nor relays signed write authority. Existing clients still
 	-- fail closed from the one-way boundary they already accepted.
 	H2 = true, H3 = true,
 	-- The Watch's guild-private moderation actions, and (1.1.6) the players' reports to it, and its
-	-- chat moderation (WatchChat.lua: deletions, timeouts, the Watchers' and moderators' lists).
-	MW = true, MR = true, MD = true,
+	-- chat moderation (WatchChat.lua: deletions, timeouts, the Watchers' and moderators' lists),
+	-- and a sanction that follows a BattleTag (TagFollow.lua).
+	MW = true, MR = true, MD = true, TF = true,
 	-- 1.2, the Blood Arena: its fight-room lines, bet slips, deposits, sign-ups and challenges, its
 	-- profile, its level-race claims, and Farkle's invitations, arbiter asks and public tables; and
 	-- matchmaking's asks, offers and answers (AM, the design: a net-off player sends none).
 	-- Never a player's own obligations (AW, ZX, ZR, ZT, ZF, KD): a net-off player's result, debt
 	-- marks and receipts still go out, and receivers ignore a net-off witness's AW (Moderation.Hides).
 	EC = true, BS = true, ZD = true, AS = true, AP = true, IL = true, KI = true, KO = true, KN = true, KS = true,
-	AM = true }
+	AM = true,
+	-- A temporary, self-owned profile presentation is never announced while this character or
+	-- guild is held back. Receivers independently apply the same moderation boundary.
+	FX = true }
 
 Moderation.random = math.random -- tests
 
@@ -148,13 +152,35 @@ local function Clean(s)
 	return ns.Cut(s, Moderation.REASON_MAX)
 end
 
+-- The player's target, for a box left empty or the dialogs' first guess: its name as the server
+-- writes it, or nil. In a battleground, an arena or a dungeon the game may hide who a unit is from
+-- addons (a secret value: whether it is a player, its name, its guild), and a secret stops the code
+-- with an error on any test or comparison, the first look included: each answer is asked inside
+-- pcall and checked with issecretvalue before anything tests it, and a hidden one is no target
+-- (the moderator types the name).
+local function Secret(v) return type(issecretvalue) == "function" and issecretvalue(v) == true end
+local function TargetName()
+	if type(UnitIsPlayer) ~= "function" then return nil end
+	local ok, player = pcall(UnitIsPlayer, "target")
+	if not ok or Secret(player) or not player then return nil end
+	local okName, name = pcall(ns.UnitFullName, "target")
+	if not okName or Secret(name) or type(name) ~= "string" or name == "" then return nil end
+	return name
+end
+Moderation.TargetName = TargetName
+local function TargetGuild()
+	if type(GetGuildInfo) ~= "function" then return nil end
+	local ok, guild = pcall(GetGuildInfo, "target")
+	if not ok or Secret(guild) or type(guild) ~= "string" or guild == "" then return nil end
+	return guild
+end
+Moderation.TargetGuild = TargetGuild
+
 -- A character's name as the server writes it ("First Surname-Realm"); nil if it can't be one.
 -- target: an empty input takes the player's target (the dialog, the slash command).
 local function CharName(input, target)
 	local name = tostring(input or ""):gsub("^%s+", ""):gsub("%s+$", "")
-	if name == "" and target then
-		name = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target") or ""
-	end
+	if name == "" and target then name = TargetName() or "" end
 	if name == "" then return nil end
 	name = ns.Normal(name)
 	local short = ns.King and ns.King.CleanName and ns.King.CleanName(name)
@@ -169,7 +195,7 @@ Moderation.CharName = CharName
 -- takes the guild of the player's target.
 local function GuildName(input, target)
 	local name = tostring(input or ""):gsub("^%s+", ""):gsub("%s+$", ""):gsub("^<(.*)>$", "%1")
-	if name == "" and target and GetGuildInfo then name = GetGuildInfo("target") or "" end
+	if name == "" and target then name = TargetGuild() or "" end
 	if name == "" then return nil end
 	local clean = ns.King and ns.King.CleanGuild and ns.King.CleanGuild(name)
 	-- 1.1.5: a guild the High Council removed is no Olympus guild here any more, but the word that
@@ -221,6 +247,7 @@ local function Weight(e)
 	return w
 end
 local function Reaches(e, rank) return e ~= nil and (rank == 0 or Weight(e) > rank) end
+Moderation.Weight = Weight
 
 -- The King's own word: heard from him (not passed on), or given on his own client.
 local function KingsOwn(e) return type(e) == "table" and not e.via and ns.IsKingCharacter(e.by) end
@@ -274,6 +301,10 @@ local function Dirty() index = nil end
 
 -- A name's own word, "on" words included (the index holds "off" words alone), or nil.
 local function OwnWord(full) return Store().c[Key("c", full)] end
+function Moderation.OwnWord(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	return OwnWord(ns.FullName(ns.Normal(name)))
+end
 
 -- Does a name's own word stand above a word found on another name of its player (the same name
 -- on another realm of the group, or a name its player linked)? It does when it weighs more, or
@@ -317,7 +348,9 @@ end
 -- hidden only by a word from higher up (a councillor's word on a Steward's alt hides no Steward).
 -- A word on a linked name doesn't hide one whose own word stands above it (Overrides: the King
 -- showed him again, and a Hand's word on his alt doesn't hide him again).
-function Moderation.Hidden(name)
+-- direct (TagFollow.lua): only the words on him and the names his player linked. Otherwise also a
+-- word on another character of his BattleTag a follow points at: then a third value, "tag".
+function Moderation.Hidden(name, direct)
 	if type(name) ~= "string" or name == "" or IsKing(name) then return nil end
 	if Index().n.c == 0 then return nil end
 	-- (1.2.3: his rank read once, at the first word found, without a closure made at each call: the
@@ -339,6 +372,38 @@ function Moderation.Hidden(name)
 			if Reaches(e, rank) then
 				if own == nil then own = OwnWord(ns.FullName(ns.Normal(name))) or false end
 				if not Overrides(own, e) then return e, other end
+			end
+		end
+	end
+	if not direct then
+		local TF = ns.TagFollow
+		if type(TF) == "table" and not TF.missing and TF.Watching and TF.Watching(name, "N") then
+			local w, source = TF.Guarded(Moderation.ByTag, name)
+			if w then return w, source, "tag" end
+		end
+	end
+	return nil
+end
+
+-- (TagFollow.lua) The word a follow of `name`'s BattleTag points at, while it stands, and whose it
+-- is: a net-off word on that other character (never one through a follow), at the lower of its
+-- own weight and the follow's, above his own rank (and, on his own client, his account's: the
+-- King's account never), unless an "on" word on his own name from as high is newer than that word
+-- (a moderator freed him of it: until that character's word changes, whatever follow of it comes
+-- later). Nil otherwise. Only through TagFollow.Guarded (Hidden).
+function Moderation.ByTag(name)
+	local TF = ns.TagFollow
+	if type(TF) ~= "table" or TF.missing or type(name) ~= "string" or name == "" or IsKing(name) then return nil end
+	local full = ns.FullName(ns.Normal(name))
+	local own, shield = OwnWord(full), nil
+	for _, F in ipairs(TF.Sources(full, "N")) do
+		local w = Moderation.Hidden(F.source, true)
+		if type(w) == "table" and w.off then
+			local applied = math.min(Weight(w), tonumber(F.weight) or 0)
+			shield = shield or TF.Shield(full, "N")
+			if applied > 0 and (shield == 0 or applied > shield)
+				and not (type(own) == "table" and not own.off and Weight(own) >= applied and own.at > w.at) then
+				return w, F.source
 			end
 		end
 	end
@@ -371,8 +436,8 @@ end
 -- marks, Borders.MarkOfName, try the guilds he may be proven in): the same answer, nothing noted.
 function Moderation.Hides(sender, guild, look)
 	if type(sender) == "string" and IsKing(sender) then return nil end
-	local e, on = Moderation.Hidden(sender)
-	if e then return e, on end
+	local e, on, via = Moderation.Hidden(sender)
+	if e then return e, on, via end
 	if guild and not look then Moderation.NoteGuild(sender, guild) end
 	if Index().n.g == 0 then return nil end
 	local rank -- (1.2.3: read once, at the first word found, as Moderation.Hidden)
@@ -399,9 +464,11 @@ end
 -- nil. (A guild's word from lower down leaves one who gives words speaking, as Hides does.)
 function Moderation.SelfOff()
 	if ns.me and IsKing(ns.me) then return nil end
-	local e = ns.me and Moderation.Hidden(ns.me)
-	if e then return e end
-	e = Moderation.OwnGuildOff()
+	if ns.me then
+		local e, on, via = Moderation.Hidden(ns.me)
+		if e then return e, on, via end
+	end
+	local e = Moderation.OwnGuildOff()
 	if e and ns.me and not Reaches(e, Rank(ns.me)) then return nil end
 	return e
 end
@@ -527,6 +594,13 @@ end
 function Moderation.YouText(e)
 	local reason, by = e.reason ~= "" and e.reason or "-", ByText(e)
 	if e.kind == "g" then return L.NETOFF_YOUR_GUILD:format(e.name, reason, by, When(e)) end
+	-- (TagFollow.lua) Another character's word that reaches us through our BattleTag: never who gave
+	-- it. Asked of the follow itself, not of AboutMe: the same name on another realm of the group
+	-- (Moderation.Character) is our own word, told as before.
+	if ns.me then
+		local mine, _, via = Moderation.Hidden(ns.me)
+		if via == "tag" and mine == e then return L.ACCORD_FOLLOW_YOU_NETOFF:format(reason, When(e)) end
+	end
 	return L.NETOFF_YOU:format(reason, by, When(e))
 end
 
@@ -694,7 +768,7 @@ end
 -- sent at once. kind "c" a character (the target's by default), "g" an Olympus guild (the
 -- target's by default). Returns true when given.
 function Moderation.Set(kind, input, off, reason)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	if not Moderation.KINDS[kind] then return false end
 	local name
@@ -720,7 +794,13 @@ function Moderation.Set(kind, input, off, reason)
 	if not off and kind == "g" and not (type(kept) == "table" and kept.off) and Moderation.TimedFor(name) then
 		return Moderation.CancelExile(name)
 	end
-	if not off and not (type(kept) == "table" and kept.off) then ns.Print(L.NETOFF_NOT_OFF:format(label)) return false end
+	if not off and not (type(kept) == "table" and kept.off) then
+		-- (TagFollow.lua) A character hidden only through his BattleTag's follow: an "on" word on his own
+		-- name frees him of it (his other characters' sanction stays).
+		local via
+		if kind == "c" then via = select(3, Moderation.Hidden(name)) end
+		if via ~= "tag" then ns.Print(L.NETOFF_NOT_OFF:format(label)) return false end
+	end
 	local at = Clock()
 	if type(kept) == "table" and kept.at >= at then at = kept.at + 1 end
 	local e = { kind = kind, name = name, off = off and true or false, at = at, by = ns.me, reason = reason }
@@ -733,6 +813,11 @@ function Moderation.Set(kind, input, off, reason)
 		ns.Print(off and L.NETOFF_GUILD_DONE:format(label, reason) or L.NETOFF_GUILD_UNDONE:format(label))
 	else
 		ns.Print(off and L.NETOFF_DONE:format(label, reason) or L.NETOFF_UNDONE:format(label))
+	end
+	-- (TagFollow.lua) Our own word on a character: it follows his BattleTag where this client holds it.
+	if kind == "c" and off then
+		local TF = ns.TagFollow
+		if type(TF) == "table" and not TF.missing and TF.AfterSanction then ns.SafeCall("tag follow", TF.AfterSanction, "N", name, reason) end
 	end
 	return true
 end
@@ -807,7 +892,7 @@ function Moderation.Lines()
 	local lines = {}
 	local issuer = Moderation.CanIssue()
 	local list = Moderation.List()
-	local mine = Moderation.SelfOff()
+	local mine, _, via = Moderation.SelfOff()
 	local timed, exile = Moderation.TimedList(), Moderation.ExileOfMine()
 	if #list == 0 and #timed == 0 and not issuer and not mine then return lines end
 	lines[#lines + 1] = { header = true, text = L.NETOFF_TITLE, right = #list > 0 and Grey(tostring(#list)) or nil,
@@ -817,7 +902,9 @@ function Moderation.Lines()
 			tt:AddLine(L.NETOFF_GUILD_TIP, 1, 1, 1, true)
 		end }
 	if mine then
-		lines[#lines + 1] = { indent = 1, text = Red(mine.kind == "g" and L.NETOFF_YOUR_GUILD_SHORT or L.NETOFF_YOU_SHORT),
+		-- (TagFollow.lua: another character's word through our BattleTag says so, never who gave it.)
+		local short = via == "tag" and L.ACCORD_FOLLOW_YOU_SHORT or mine.kind == "g" and L.NETOFF_YOUR_GUILD_SHORT or L.NETOFF_YOU_SHORT
+		lines[#lines + 1] = { indent = 1, text = Red(short),
 			tooltip = function(tt) tt:AddLine(Moderation.YouText(mine), 1, 1, 1, true) end }
 	elseif exile then
 		-- 1.1.6: our guild's timed word waits: the parchment again, with a click.
@@ -921,13 +1008,15 @@ local function WhoDialog(prompt, width, letters, default, after)
 	}
 end
 StaticPopupDialogs["OLYMPUS_NETOFF_WHO"] = WhoDialog(L.NETOFF_WHO_PROMPT, 240, 60, function()
-	local target = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target")
+	local target = TargetName()
 	return target and ns.DisplayName(target) or ""
 end)
-StaticPopupDialogs["OLYMPUS_NETOFF_GUILD"] = WhoDialog(L.NETOFF_GUILD_PROMPT, 240, 40, function()
-	local guild = GetGuildInfo and GetGuildInfo("target")
+-- (The target's guild, when it is an Olympus one; nothing while the game hides it: TargetGuild.)
+local function TargetOlympusGuild()
+	local guild = TargetGuild()
 	return guild and ns.IsFederation(guild) and guild or ""
-end)
+end
+StaticPopupDialogs["OLYMPUS_NETOFF_GUILD"] = WhoDialog(L.NETOFF_GUILD_PROMPT, 240, 40, TargetOlympusGuild)
 
 StaticPopupDialogs["OLYMPUS_NETOFF_WHY"] = {
 	text = L.NETOFF_WHY_PROMPT,
@@ -1370,7 +1459,7 @@ end
 -- Exiles `input` (an Olympus guild; the target's by default) `delay` seconds from now (one of
 -- EXILE_DELAYS), with a reason: this client's timed word, kept and sent at once. True when given.
 function Moderation.Exile(input, delay, reason)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	local name = GuildName(input, true)
 	if not name then ns.Print(L.NETOFF_GUILD_BAD) return false end
@@ -1395,7 +1484,7 @@ end
 
 -- Cancels the timed word that waits on `input` (its giver, or one from higher up). True when done.
 function Moderation.CancelExile(input)
-	if not ns.IsMember() then ns.Print(L.MEMBERS_ONLY) return false end
+	if not ns.IsMember() then ns.Print(ns.MembersOnlyText()) return false end
 	if not Moderation.CanIssue() then ns.Print(L.NETOFF_ONLY) return false end
 	local name = GuildName(input, true)
 	if not name then ns.Print(L.NETOFF_GUILD_BAD) return false end
@@ -1428,10 +1517,7 @@ local function ExileNext(_, text)
 	if not full then return ns.Print(L.NETOFF_GUILD_BAD) end
 	ns.ShowDialog("OLYMPUS_EXILE_WHEN", Label({ kind = "g", name = full }), nil, { name = full })
 end
-StaticPopupDialogs["OLYMPUS_EXILE_GUILD"] = WhoDialog(L.NETOFF_EXILE_GUILD_PROMPT, 240, 40, function()
-	local guild = GetGuildInfo and GetGuildInfo("target")
-	return guild and ns.IsFederation(guild) and guild or ""
-end, ExileNext)
+StaticPopupDialogs["OLYMPUS_EXILE_GUILD"] = WhoDialog(L.NETOFF_EXILE_GUILD_PROMPT, 240, 40, TargetOlympusGuild, ExileNext)
 
 local function ExileWhy(data, delay)
 	if type(data) ~= "table" or not data.name then return end
@@ -1626,12 +1712,35 @@ local function HiddenCall(msg)
 	if msg:find("^T1~D~%d+~[^~]*~0~") then return false end
 	return msg:sub(1, 3) == "T1~" and type(K) == "table" and type(K.HIDDEN_CALLS) == "table" and K.HIDDEN_CALLS[msg:sub(4, 4)] == true
 end
+
+-- A player-sighting cleanup packet carries no coordinate. It may leave after this client turns its
+-- network participation off so accepted remote state is cancelled or withdrawn immediately. Keep
+-- this exception as strict as PlayerSightings's wire parser: C/X/W carry one canonical Name-Realm;
+-- D carries the positive integer map of the accepted area request. Queries and answers never pass.
+local function PlayerSightingCleanup(msg)
+	local mode, id, value = msg:match("^PS~([CDXW])~1~(%d+)~([^~]+)$")
+	if not mode then return false end
+	id = tonumber(id)
+	if not id or id ~= math.floor(id) or id < 1 or id > 99999 then return false end
+	if mode == "D" then
+		local mapID = tonumber(value)
+		return mapID ~= nil and mapID == math.floor(mapID) and mapID >= 1 and mapID <= 9999999
+	end
+	if #value > 96 or value:find("[|%c]") or value:match("^%s") or value:match("%s$") then return false end
+	local name, realm = value:match("^([^%-]+)%-([^%-]+)$")
+	return name ~= nil and realm ~= nil and not name:find("  ", 1, true)
+		and name:match("^[%a\128-\255][%a\128-\255 ]*$") ~= nil
+		and realm:match("^[%w\128-\255]+$") ~= nil
+end
 function Moderation.Blocks(msg)
 	if type(msg) ~= "string" or msg:sub(3, 3) ~= "~" then return false end
 	-- A private LY withdrawal carries no location: it only invalidates this sender's answer to
 	-- one still-active discovery request. Let it leave after a local opt-out/net-off, as the
 	-- week lets a setter withdraw their own entry, so already delivered evidence fails closed.
 	if msg:match("^LY~X~1~%d+~%d+$") then return false end
+	-- Player-sighting C/D/X/W cleanup packets likewise carry no position: after permission or network
+	-- access is removed they may only cancel an accepted request or withdraw a prior answer.
+	if PlayerSightingCleanup(msg) then return false end
 	if not Moderation.BLOCKED[msg:sub(1, 2)] and not HiddenCall(msg) then return false end
 	if not Moderation.SelfOff() then return false end
 	stats.blocked = stats.blocked + 1

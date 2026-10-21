@@ -33,6 +33,15 @@ local function Frame(name, frames)
 	return setmetatable(f, { __index = function() return function() end end })
 end
 
+-- What a line's tooltip says, its lines joined.
+local function TipText(line)
+	local tt = { lines = {} }
+	function tt:AddLine(text) self.lines[#self.lines + 1] = tostring(text) end
+	assert(line and line.tooltip, "a line with a tooltip")
+	line.tooltip(tt)
+	return table.concat(tt.lines, "\n")
+end
+
 local function WithMapWanted(fn)
 	local names = { "CreateFrame", "WorldMapFrame", "UIParent", "ShowUIPanel", "GameTooltip", "IsInInstance", "UnitGUID", "UnitIsPlayer",
 		"UnitFactionGroup", "UnitCanAttack", "UnitIsPVP", "GetGuildInfo", "C_Map", "issecretvalue", "hooksecurefunc" }
@@ -150,22 +159,150 @@ test("Wanted last seen: an old zone stays dated on the list and map, focuses wit
 
 		assert(target.onClick())
 		local profile = c.Wanted.Build()
-		local profileLocation
+		local profileLocation, online
 		for _, line in ipairs(profile) do
 			if line.id == "wanted-location:g:" .. guid then profileLocation = line end
-			assert(not tostring(line.text):find(c.L.WANTED_LAST_OBSERVED_LABEL, 1, true),
-				"stored combat evidence is not called an online observation")
+			if line.id == "wanted-online:g:" .. guid then online = line end
 		end
 		assert(profileLocation and profileLocation.onClick, "the profile keeps the same dated map action")
+		-- (RH-09, changed on purpose: Daniel's "visto online por último" counts the shared records too,
+		-- so the stored death now dates the profile's one "Last seen online" line, which replaced
+		-- 1.2.4's session-only "Last observed online". What this assertion kept is kept: its source
+		-- says the record, never a sighting by this client.)
+		assert(online and online.text:find(date("%Y-%m-%d %H:%M", 1799000000), 1, true), online and online.text)
+		local tip = TipText(online)
+		assert(tip:find(c.L.WANTED_ONLINE_KILL, 1, true), tip)
+		assert(not tip:find(c.L.WANTED_ONLINE_OWN, 1, true), "stored combat evidence is not called this client's own sighting")
 		c.db.wantedSightings = true
 		assert(c.Wanted.ObserveUnit("target"), "the game genuinely observes this unit")
 		profile = c.Wanted.Build()
-		local observed
+		online = nil
 		for _, line in ipairs(profile) do
-			if tostring(line.text):find(c.L.WANTED_LAST_OBSERVED_LABEL, 1, true) then observed = line end
+			if line.id == "wanted-online:g:" .. guid then online = line end
 		end
-		assert(observed and observed.text:find(date("%Y-%m-%d %H:%M", 1800000000), 1, true),
-			"native in-game observation gets its own dated line")
+		assert(online and online.text:find(date("%Y-%m-%d %H:%M", 1800000000), 1, true),
+			"the newer native in-game observation dates the line")
+		assert(TipText(online):find(c.L.WANTED_ONLINE_OWN, 1, true), "and its source says so")
+	end)
+end)
+
+test("Wanted last seen online (RH-09): this client's own sighting stays on the list row after its pin and a reload, the time alone; off records none and the No forgets it", function()
+	WithMapWanted(function(c, _, _, _, guid)
+		c.WatchChat = { Barred = function() return nil end }
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		c.Wanted.CanManage = function() return true end
+		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
+		-- (A kill counted long ago with no time kept: nothing dates him yet.)
+		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
+		c.Wanted.Rebuild()
+		local function Find(id)
+			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
+			return nil
+		end
+		-- (Daniel, 2026-10-20, changed on purpose: "ficou ruim last seen online em linha nova". The
+		-- list says it short on his own row, dim after its counts, never on a line of its own; the
+		-- row's tooltip keeps the date and the source, and his page keeps its own line.)
+		local online, rowId, sep = "wanted-online:g:" .. guid, "wanted:g:" .. guid, "|cff9d9d9d  ·  "
+		local function Short()
+			local right = assert(Find(rowId), "his row").right
+			local at = right:find(sep, 1, true)
+			return at and right:sub(at + #sep, -3) or nil -- (his short item, its "|r" aside)
+		end
+		eq(Short(), nil, "nothing dates him yet")
+		eq(Find(online), nil)
+		c.db.wantedSightings = false
+		eq(select(2, c.Wanted.ObserveUnit("target")), "off")
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "sightings off: no time is recorded")
+		c.db.wantedSightings = true
+		assert(c.Wanted.ObserveUnit("target"))
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, 1800000000, "the time he was seen goes on his entry")
+
+		-- His pin's 15 minutes pass, then a reload: no pin is left, the list still says when.
+		c.TestAdvance(c.Wanted.SIGHT_TTL + 60)
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		assert(c.Wanted.Prune())
+		eq(c.Wanted.LiveSighting(assert(c.Wanted.Target(nil, guid))), nil, "no session pin is left")
+		eq(Short(), c.L.WANTED_ROW_SEEN:format(c.L.AGO_MIN:format(math.floor((c.Wanted.SIGHT_TTL + 60) / 60))),
+			"the list row still says when, short")
+		eq(Find(online), nil, "never on a line of its own on the list")
+		local when = date("%Y-%m-%d %H:%M", 1800000000)
+		local rowTip = TipText(assert(Find(rowId)))
+		assert(rowTip:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), rowTip)
+		assert(rowTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "the row's tooltip names its source: this client's own sighting")
+		assert(Find(rowId).onClick(), "a click on the row opens his page")
+		local line = assert(Find(online), "his page has his Last seen online line")
+		assert(line.text:find(c.L.WANTED_LAST_ONLINE:format(when), 1, true), line.text)
+		assert(TipText(line):find(c.L.WANTED_ONLINE_OWN, 1, true), "its source: this client's own sighting")
+		assert(c.Wanted.Back())
+		-- The time alone on the entry, never where he or the observer stood.
+		local stored = c.rdb.wanted.targets["g:" .. guid]
+		for _, field in ipairs({ "mapID", "x", "y", "layer", "observer", "zone" }) do eq(stored[field], nil, field) end
+
+		c.Wanted.SetSightings(false, true)
+		eq(c.rdb.wanted.targets["g:" .. guid].seenOnline, nil, "the No forgets the time")
+		eq(Short(), nil, "and nothing else dates him")
+		eq(Find(online), nil)
+	end)
+end)
+
+-- Regression: the No cleared the times on the current realm group's list alone (Store(false)),
+-- but the setting is the account's: another realm group's list, or the other faction's, kept its
+-- times and still showed "Your client saw him in the world" while the sightings were off.
+test("Wanted last seen online (RH-09): a No said on another realm group or faction forgets this list's times too; off, none shows and the next Prune drops one kept", function()
+	WithMapWanted(function(c, _, _, _, guid)
+		c.WatchChat = { Barred = function() return nil end }
+		assert(loadfile(ROOT .. "Olympus/Wanted.lua"))("Olympus", c)
+		c.Wanted.CanManage = function() return true end
+		assert(c.Wanted.AddTarget("Enemy-Realm", guid))
+		c.rdb.wanted.targets["g:" .. guid].base = { lifetimeKills = 1 }
+		c.Wanted.Rebuild()
+		local online = "wanted-online:g:" .. guid
+		local rowId = "wanted:g:" .. guid
+		local function Find(id)
+			for _, line in ipairs(c.Wanted.Build()) do if line.id == id then return line end end
+			return nil
+		end
+		local home = c.rdb
+		local function Seen()
+			c.rdb = home
+			c.db.wantedSightings = true
+			home.wanted.targets["g:" .. guid].seenOnline = nil
+			c.TestAdvance(c.Wanted.SIGHT_GAP + 1)
+			assert(c.Wanted.ObserveUnit("target"))
+			local at = assert(home.wanted.targets["g:" .. guid].seenOnline, "the time he was seen goes on his entry")
+			-- The compact list keeps the time and its source on the target row; the separate
+			-- Last seen online line belongs only to the target's detail page.
+			local row = assert(Find(rowId), "his compact list row")
+			assert(row.right:find("|cff9d9d9d  ·  ", 1, true), "his row has the short last-seen time")
+			local seenTip = TipText(row)
+			assert(seenTip:find(c.L.WANTED_ONLINE_OWN, 1, true), "his row: this client's own sighting: " .. seenTip)
+			eq(Find(online), nil, "the compact list has no separate last-seen line")
+			return at
+		end
+
+		-- The No on a character of another realm group, a list this one's walk cannot see: none shows
+		-- while off, and the login's Prune drops the time.
+		Seen()
+		c.rdb = {}
+		c.Wanted.SetSightings(false, true)
+		c.rdb = home
+		eq(Find(online), nil, "sightings off: no Last seen online from a time kept")
+		assert(c.Wanted.Prune())
+		eq(home.wanted.targets["g:" .. guid].seenOnline, nil, "the next Prune drops it")
+
+		-- The account's stores (Core: ns.db.realms, the Horde's under ns.db.horde): a No said on a
+		-- Horde character forgets the Alliance lists' times at once, every realm group's.
+		Seen()
+		local other = { wanted = { targets = { ["g:Player-2-0B000001"] = { name = "Other-Realm", seenOnline = 1800000000 } } } }
+		local horde = {}
+		c.db.realms = { ["Realm A"] = home, ["Realm B"] = other }
+		c.db.horde = { realms = { ["Realm A"] = horde } }
+		c.rdb, c.faction = horde, "Horde"
+		c.Wanted.SetSightings(false, true)
+		eq(home.wanted.targets["g:" .. guid].seenOnline, nil, "this realm group's Alliance list forgets it")
+		eq(other.wanted.targets["g:Player-2-0B000001"].seenOnline, nil, "and another realm group's")
+		c.rdb, c.faction = home, "Alliance"
+		eq(Find(online), nil, "nothing dates him")
 	end)
 end)
 

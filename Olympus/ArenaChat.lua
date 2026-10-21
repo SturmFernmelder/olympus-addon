@@ -330,9 +330,12 @@ local function MaySend(room)
 	local M = ns.Moderation
 	local off = M and M.SelfOff and M.SelfOff()
 	if off then return false, "netoff" end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers the fight rooms too (ArenaChat.Send tells why).
+	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers the fight rooms too (ArenaChat.Send tells why);
+	-- so does a chat warning's pause or hold ("paused", ChatStrikes.lua: WatchChat.ChatBlock).
 	local WC = ns.WatchChat
 	if WC and WC.SelfTimeout and WC.SelfTimeout() then return false, "timeout" end
+	local block = WC and WC.ChatBlock and WC.ChatBlock()
+	if block then return false, block end
 	local ev = Event(room)
 	if not ev then return false, "room" end
 	if not ArenaChat.IsOpen(room) then return false, "closed" end
@@ -385,6 +388,16 @@ local function Keep(r, e)
 	r.usedAt = ns.Now()
 	if Persist then Persist() end
 end
+-- The Companion's chat record (Bridge.lua's ns.RecordChat): each line kept and shown, once. Our own
+-- line once one of its sends left: on the match and duel lanes when Arena.Send's done says one
+-- did, a Bones table's when its attempts settle (a line that reached nobody leaves the view,
+-- Completed, and is never recorded).
+local recorded = setmetatable({}, { __mode = "k" })
+local function Record(room, e)
+	if recorded[e] or not ns.RecordChat then return end
+	recorded[e] = true
+	ns.RecordChat(room, e.sender, e.text, e.mine == true)
+end
 local function AlsoInChat(room, e)
 	local ui = ns.db and ns.db.arenaUI
 	local chat = type(ui) == "table" and type(ui.chat) == "table" and ui.chat
@@ -427,14 +440,22 @@ function ArenaChat.Send(room, text)
 		return false, "room"
 	end
 	local A = ns.Arena
+	local WC = ns.WatchChat
 	local ok, why = A.Can("chat", room)
 	if not ok then
-		-- 1.1.6: a moderator's timeout: its own pop-up (who, until when, why).
-		local WC = ns.WatchChat
-		if why == "timeout" and WC and WC.RefuseSend and WC.RefuseSend() then return false, why end
+		-- 1.1.6: a moderator's timeout: its own pop-up (who, until when, why); a chat warning's
+		-- pause or hold, its own too.
+		if (why == "timeout" or why == "paused") and WC and WC.RefuseSend and WC.RefuseSend() then return false, why end
 		local key = "ARENA_CHAT_WHY_" .. tostring(why):upper()
 		ns.Print(rawget(L, key) or L.ARENA_CHAT_REFUSED)
 		return false, why
+	end
+	-- The chat warnings' words (WatchChat.RefuseSevere), on the line as typed: the fight rooms, /ola,
+	-- the arena's actions and the Bones pane all come here.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, "F")
+		if severe then return false, severe end
+		text = body or text
 	end
 	text = ArenaChat.Clean(text)
 	if text == "" then return false, "empty" end
@@ -460,6 +481,14 @@ function ArenaChat.Send(room, text)
 	local body = ("%s~%d~%s~%s~%s"):format(room, nextLine, class, GuildWord(guild), text)
 	local sent
 	local e, attempts = nil, {}
+	-- (The match and duel lanes: Arena.Send's done, once a send of this line left, maybe within the
+	-- call itself, before e exists; the line is recorded then, or as soon as it is kept.)
+	local left = false
+	local function Left(ok)
+		if ok ~= true then return end
+		left = true
+		if e then Record(room, e) end
+	end
 	local function Completed(quiet)
 		if not e then return end -- immediate refusal before any own line was retained
 		local waiting, delivered = false, false
@@ -469,6 +498,7 @@ function ArenaChat.Send(room, text)
 			end
 		end
 		e.sendPending = waiting and true or nil
+		if delivered then Record(room, e) end
 		-- A successful native API call is not an acknowledgement from another client. Retain
 		-- partially delivered lines; only a wholly failed admission warns and leaves the view.
 		if not waiting and not delivered and not e.sendFailed then
@@ -490,13 +520,13 @@ function ArenaChat.Send(room, text)
 	end
 	if ev.public == true then
 		if ev.kind == "farkle" then sent, why = QueueTable()
-		else sent, why = A.Send("EC", mode, body, { chat = true, logged = true }) end
+		else sent, why = A.Send("EC", mode, body, { chat = true, logged = true, done = Left }) end
 	else
 		for _, name in ipairs(Party(ev)) do
 			if not Same(name, ns.me) then
 				local one, w
 				if ev.kind == "farkle" then one, w = QueueTable(name)
-				else one, w = A.Send("EC", mode, body, { to = name, logged = true }) end
+				else one, w = A.Send("EC", mode, body, { to = name, logged = true, done = Left }) end
 				sent = sent or one
 				why = why or w
 			end
@@ -512,7 +542,7 @@ function ArenaChat.Send(room, text)
 	r.mine[nextLine .. "#" .. text] = now
 	e = { chat = room, t = ns.Now(), sender = ns.me, guild = guild, class = class ~= "" and class or nil, text = text, id = nextLine, mine = true }
 	Keep(r, e)
-	if ev.kind == "farkle" then Completed(true) end
+	if ev.kind == "farkle" then Completed(true) elseif left then Record(room, e) end
 	AlsoInChat(room, e)
 	ns.Fire("ARENA_CHAT", room)
 	return true
@@ -558,11 +588,14 @@ local function OnChat(dist, sender, mode, body)
 	if (not r.seen[seenKey] and Count(r.seen) >= ArenaChat.SEEN_MAX)
 		or (not r.buckets[sender] and Count(r.buckets) >= ArenaChat.SENDERS_MAX) then return Drop("cache") end
 	local admitted, reason = ns.Channels.Admit(sender, guild, text, now,
-		{ id = id, chat = room, line = id, level = level, buckets = r.buckets, seen = r.seen, mine = r.mine, stats = r.stats, where = room })
+		{ id = id, chat = room, line = id, level = level, buckets = r.buckets, seen = r.seen, mine = r.mine, stats = r.stats, where = room,
+			evidence = true }) -- (an EC line his own addon sent: TagFollow.Evidence)
 	if not admitted then
 		-- (A line the player's block terms hide is kept, marked, as the Chat tab keeps it.)
 		if reason == "filtered" then
-			Keep(r, { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id, hidden = true })
+			local e = { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id, hidden = true }
+			Keep(r, e)
+			Record(room, e)
 			ns.Fire("ARENA_CHAT", room)
 		end
 		return Drop(reason)
@@ -584,6 +617,7 @@ local function OnChat(dist, sender, mode, body)
 	r.times[#r.times + 1] = now
 	local e = { chat = room, t = ns.Now(), sender = sender, guild = guild, class = class ~= "" and class or nil, text = text, id = id }
 	Keep(r, e)
+	Record(room, e)
 	stats.shown = stats.shown + 1
 	AlsoInChat(room, e)
 	ns.Fire("ARENA_CHAT", room)

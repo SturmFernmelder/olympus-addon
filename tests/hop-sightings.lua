@@ -681,6 +681,7 @@ end)
 
 test("hop sighting moderation: LY queries/answers are held under net-off, withdrawals remain possible", function()
 	eq(base.Moderation.BLOCKED.LY, true)
+	eq(base.Moderation.BLOCKED.PS, true)
 	local saved = base.Moderation.SelfOff
 	base.Moderation.SelfOff = function() return { off = true } end
 	local ok, err = pcall(function()
@@ -688,6 +689,18 @@ test("hop sighting moderation: LY queries/answers are held under net-off, withdr
 		eq(base.Moderation.Blocks("LY~R~1~1~77~1453~8~2~5"), true)
 		eq(base.Moderation.Blocks("LY~X~1~1~77"), false)
 		eq(base.Moderation.Blocks("LY~X~1~1~77~1453"), true, "only the location-free withdrawal bypasses net-off")
+		eq(base.Moderation.Blocks("PS~Q~1~7~Target-Realm"), true)
+		eq(base.Moderation.Blocks("PS~R~1~7~Olympus~84~500~500~9~0~Target-Realm"), true)
+		eq(base.Moderation.Blocks("PS~A~1~8~1453"), true, "an area query remains held")
+		eq(base.Moderation.Blocks("PS~B~1~8~Olympus~1453~500~500~9~0~Enemy-Realm~nearby"), true,
+			"an area answer remains held")
+		eq(base.Moderation.Blocks("PS~C~1~7~Target-Realm"), false, "a request can still be cancelled")
+		eq(base.Moderation.Blocks("PS~X~1~7~Target-Realm"), false, "an observation can still be withdrawn")
+		eq(base.Moderation.Blocks("PS~D~1~8~1453"), false, "an area request can still be cancelled")
+		eq(base.Moderation.Blocks("PS~W~1~8~Enemy-Realm"), false, "an area row can still be withdrawn")
+		eq(base.Moderation.Blocks("PS~D~1~8~not-a-map"), true, "malformed area cancellation stays held")
+		eq(base.Moderation.Blocks("PS~W~1~8~not canonical"), true, "malformed withdrawal stays held")
+		eq(base.Moderation.Blocks("PS~W~1~8~Enemy-Realm~extra"), true, "extra fields stay held")
 	end)
 	base.Moderation.SelfOff = saved
 	if not ok then error(err, 0) end
@@ -734,5 +747,34 @@ test("hop sighting integration: Hop never installs one sighting as King authorit
 		eq(requested, nil, "a local exact sighting broadcasts no needless discovery query")
 		assert(h.Hop.KingLines()[1].text:find(h.L.HOP_KING_HERE:format("Asmon"), 1, true),
 			"the local UI says the player is already on the King's layer")
+	end)
+end)
+
+-- 1.2.5.1, the quiet presence (Core.lua's ns.QuietPresence): an observer that has it on answers
+-- nothing and withdraws nothing (the asker's copy expires on its own, as after a logout); an asker
+-- that has it on still sends its own query, a read.
+test("hop sighting: quiet presence answers and withdraws nothing, its own query still goes, and it answers again once off", function()
+	WithWorld(function(w)
+		local asker, observer, later = w.client("Asker"), w.client("Observer"), w.client("Later")
+		for _, c in ipairs({ asker, observer, later }) do c.QuietPresence = function() return c.quiet == true end end
+		Observe(w, observer)
+		asker.quiet = true
+		local query = Start(w, asker) -- (a read: it goes)
+		asker.members[observer.me:lower()] = true
+		local first = Answer(w, observer, asker, query)
+		eq(w.use(asker, asker.HopSightings.Receive, "WHISPER", observer.me, first.msg), true, "a quiet asker still takes answers")
+		observer.quiet = true
+		w.use(observer, observer.HopSightings.Tick)
+		eq(#observer.jobs, 0, "no withdrawal")
+		local second = Start(w, later)
+		observer.members[later.me:lower()] = true
+		eq(w.use(observer, observer.HopSightings.Receive, "CHANNEL", later.me, second.msg), true)
+		eq(#observer.jobs, 0, "no answer while it is on")
+		observer.quiet = false
+		w.use(observer, observer.HopSightings.Tick)
+		eq(#observer.jobs, 1, "the query still waiting is answered once it is off")
+		local ok, _, response = w.use(observer, observer.flush)
+		eq(ok, true); eq(response.target, later.me)
+		assert(response.msg:match("^LY~R~1~%d+~77~1453~8~2~%d+$"), response.msg)
 	end)
 end)

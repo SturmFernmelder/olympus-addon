@@ -160,6 +160,8 @@ local function WithSightings(fn)
 			c.Now = function() return world.epoch end
 			c.Data = { ServerTime = function() return world.epoch end }
 			c.IsMember = function() return cl.member end
+			-- (1.2.5.1: the quiet presence, Core.lua's answer for this client: cl.quiet.)
+			c.QuietPresence = function() return cl.quiet == true end
 			c.Moderation = { CanIssue = function() return cl.manager == true end, SelfOff = function() return cl.netoff end,
 				Hides = function(sender) return world.hidden[Fold(sender)] end, Blocks = function() return false end }
 			local function Role(name) return world.authorities[Fold(name)] end
@@ -455,9 +457,12 @@ test("wanted sightings (1.2.0): off until the member's own Yes, a line of its ow
 		for _, part in ipairs({ "Horde player", "name and GUID", "your own map position (rounded) and layer", "the time, your name and your guild",
 			"15 minutes", "whispered to one reviewer", "the one you choose with Sightings to on the Most Wanted page", "the King, a High Councillor or the author",
 			"until you choose one, nobody gets it", "seen nearby", "Nothing goes while you keep your zone and layer private",
-			"the King's only while his crown shows on the map", "Never anyone off the list", "never on the Olympus channel", "never in an instance", "nothing saved",
+			-- (RH-09, changed on purpose: the time a wanted Horde player was last seen is now kept on
+			-- the member's own list, his "Last seen online"; the page says so, and that a No forgets it.)
+			"the King's only while his crown shows on the map", "Never anyone off the list", "never on the Olympus channel", "never in an instance",
+			"Nothing saved but the time your client last saw each one, on your own Most Wanted list (never where, never sent)",
 			"Authorize all while it is pending",
-			"No stops it at once", "take your pins off his map", "before you logged out stays there until its 15 minutes are up",
+			"No stops it at once, forgets those times", "take your pins off his map", "before you logged out stays there until its 15 minutes are up",
 			"/oly sightings on|off" }) do
 			assert(text:find(part, 1, true), "the page says: " .. part)
 		end
@@ -1328,12 +1333,22 @@ test("wanted sightings: an open Wanted profile refreshes only when a pin is adde
 		eq(o.uiRefreshes, 1, "adding a local pin redraws the open profile")
 		world:Pump()
 		eq(king.uiRefreshes, 1, "receiving a pin redraws the open profile")
-		local function HasObserved(cl)
+		-- (RH-09, changed on purpose: 1.2.4's session-only "Last observed online" line is now the
+		-- kept "Last seen online" line, wanted-online, whose tooltip names its source. A pin a member
+		-- sent shows as seen nearby; the king's own sighting is kept after its pin, as Daniel asked.)
+		local function Source(cl)
 			for _, line in ipairs(world:As(cl, cl.W.Build)) do
-				if line.id == "wanted-observed:g:" .. GROM then return true end
+				if line.id == "wanted-online:g:" .. GROM then
+					local tip = Tooltip()
+					world:As(cl, line.tooltip, tip)
+					local text = table.concat(tip.lines, "\n")
+					return text:find(L.WANTED_ONLINE_NEARBY, 1, true) and "nearby"
+						or text:find(L.WANTED_ONLINE_OWN, 1, true) and "own" or "other"
+				end
 			end
-			return false
+			return nil
 		end
+		local function HasObserved(cl) return Source(cl) == "nearby" end
 		assert(HasObserved(king), "the received observation appears without a manual page refresh")
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 1, "an unchanged pin refresh does not create a redraw loop")
@@ -1344,14 +1359,18 @@ test("wanted sightings: an open Wanted profile refreshes only when a pin is adde
 		eq(king.uiRefreshes, 2, "taking back the delivered pin redraws the reviewer's profile")
 		eq(HasObserved(king), false, "the withdrawn observation disappears immediately")
 
+		eq(Source(king), nil, "and nothing else dates him on the king's page")
+
 		assert(world:See(king, "target", Horde("Grom-Realm", GROM)))
 		eq(king.uiRefreshes, 3, "a new native observation redraws once")
+		eq(Source(king), "own")
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 3, "the normal pin beat is quiet while nothing changed")
 		world:Advance(king.W.SIGHT_TTL + 1)
 		world:As(king, king.W.RefreshPins)
 		eq(king.uiRefreshes, 4, "expiry redraws once")
-		eq(HasObserved(king), false, "the expired observation disappears immediately")
+		eq(#world:Pins(king), 0, "the expired pin disappears immediately")
+		eq(Source(king), "own", "his own sighting's time stays on the page after its pin (RH-09)")
 	end)
 end)
 
@@ -1376,5 +1395,65 @@ test("wanted sightings: the real transport rechecks location sharing before a qu
 		o.private = true; world:As(o, assert(o.listeners.LAYER_SHARING_CHANGED), false)
 		Pump(); eq(#world.wire, 2)
 		eq(world.wire[2].msg, "WS~X~1", "only withdrawal leaves after the location switch")
+	end)
+end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): a reviewer's lease says he is online, and he is
+-- the King, a councillor or the author, the very people who may turn it on; a sighting carries its
+-- sender's map, x, y and layer. Both still left a quiet client, as did the No and the taking back.
+test("wanted sightings: while the quiet presence is on, no sighting, lease, No or taking back leaves this client (its own map still pins what it sees); once off, its lease at once and its sightings again", function()
+	WithSightings(function(world)
+		local king = world:Client("Kingly-Realm", "Player-1-AB0000F1", { role = "king", crown = true })
+		local c1 = world:Client("Councilone-Realm", "Player-1-AB0000F2", { role = "council" })
+		world:Lease(king, c1)
+		world:Choose(king, c1)
+		local function FromKing()
+			local n = 0
+			for _, m in ipairs(world.delivered) do if m.from == king and m.msg:sub(1, 3) == "WS~" then n = n + 1 end end
+			return n
+		end
+		local ok, e = world:See(king, "nameplate1", Horde("Grom-Realm", GROM))
+		assert(ok, e); eq(e.sent, 1, "before: to his reviewer")
+		world:Pump()
+		eq(#world:Pins(c1), 1)
+		-- One waits when it begins: Comm's own check keeps it home.
+		ok, e = world:See(king, "nameplate2", Horde("Thrall-Realm", THRALL))
+		eq(e.sent, 1)
+		king.quiet = true
+		world:Pump()
+		eq(Dropped(world, "quiet"), 1, "the waiting one stays home")
+		local sent = FromKing()
+		-- What he sees now: on his own map alone.
+		world:Advance(king.W.SIGHT_WINDOW + 1)
+		ok, e = world:See(king, "nameplate3", Horde("Rexxar-Realm", REXXAR))
+		assert(ok, e); eq(e.sent, 0, "sent to nobody"); eq(#world:Pins(king), 3, "his own map shows it")
+		-- His lease: neither on its beat nor on a role's change; the councillor's copy lapses.
+		eq(world:As(king, king.W.AnnounceReviewer), false)
+		world:As(king, king.listeners.DATA_CHANGED)
+		world:Run(king.W.REVIEWER_FOR + 1)
+		eq(FromKing(), sent, "no lease while it is on")
+		world:Choose(c1, king)
+		eq(world:Recipients(c1), "", "his lease lapsed on the councillor's client, as after a logout")
+		-- Off: his lease at once, and his sightings go again.
+		king.quiet = false
+		world:As(king, king.listeners.QUIET_PRESENCE_CHANGED, false)
+		world:Pump()
+		eq(FromKing(), sent + 1, "his lease at once")
+		eq(world:Recipients(c1), "Kingly-Realm")
+		world:Lease(c1)
+		world:Advance(king.W.SIGHT_WINDOW + 1)
+		ok, e = world:See(king, "nameplate4", Horde("Garrosh-Realm", GARROSH))
+		eq(e.sent, 1, "to his reviewer again")
+		world:Pump()
+		eq(FromKing(), sent + 2)
+		-- Quiet again, then his No: no lease off (WS~R~0) and nothing taken back (WS~X): what reached
+		-- the councillor expires there on its own.
+		king.quiet = true
+		local pins = #world:Pins(c1)
+		world:As(king, king.W.SetSightings, false, true)
+		world:Pump()
+		eq(FromKing(), sent + 2, "no No and no taking back while it is on")
+		eq(#world:Pins(c1), pins, "the councillor's pins stay until they expire")
+		eq(world:Recipients(c1), "Kingly-Realm", "nor did the No reach him")
 	end)
 end)

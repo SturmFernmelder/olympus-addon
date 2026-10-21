@@ -763,6 +763,8 @@ function ArenaUI.Open(where, arg)
 		return ArenaUI.OpenFind and ArenaUI.OpenFind(arg == "b" and "b" or "d")
 	end
 	if where == "overlay" then return ArenaUI.Overlay and ArenaUI.Overlay.Show() end
+	-- (1.2.6) Watch duel: the duel view, a window of its own (ArenaSpectate's subject).
+	if where == "duel.watch" then return ArenaUI.Spectate and ArenaUI.Spectate.Show and ArenaUI.Spectate.Show(arg) end
 	if where == "copy" then return ArenaUI.CopyPane() end
 	if where == "profile" or where == "history" then
 		Show()

@@ -589,6 +589,19 @@ local UI_FIELDS = {
 	find = function(v) return type(v) == "table" and v or nil end,
 	sounds = function(v) return type(v) == "boolean" and v or nil end,
 	seen = function(v) return type(v) == "table" and v or nil end,
+	-- (1.2.6) The duel view's place and the bar's, its scale, pin and tab (Olympus_Arena/Spectate.lua).
+	watch = function(v)
+		if type(v) ~= "table" then return nil end
+		local function Point(p)
+			if type(p) ~= "table" or type(p[1]) ~= "string" or type(p[2]) ~= "string" or not tonumber(p[3]) or not tonumber(p[4]) then return nil end
+			return { p[1], p[2], tonumber(p[3]), tonumber(p[4]) }
+		end
+		local scale = tonumber(v.scale)
+		local out = { point = Point(v.point), barPoint = Point(v.barPoint), scale = scale and math.max(0.6, math.min(1.6, scale)) or nil,
+			pin = (v.pin == "auto" or v.pin == "full" or v.pin == "compact") and v.pin or nil,
+			tab = (v.tab == "gear" or v.tab == "talents") and v.tab or nil }
+		return next(out) and out or nil
+	end,
 }
 function ArenaHome.CheckUI()
 	if not ns.db then return end
@@ -638,7 +651,8 @@ local function Red(s) return "|cffff5050" .. s .. "|r" end
 
 -- Opens the Arena window on a place: "events", "rankings", "history", "profile", "bone",
 -- "bone.live", "lottery", "wallet", "director", "games.mine" and "games.all" (the games' ledger's
--- page, 1.1.6) ... with an argument (an event, a name).
+-- page, 1.1.6), "duel.watch" (the duel view, 1.2.6: ArenaSpectate's subject) ... with an argument
+-- (an event, a name).
 function ArenaHome.Open(where, arg)
 	if (where == "wallet" or where == "bets" or where == "bank" or where == "ledgers") and not WalletShown() then return false end
 	local A = ns.Arena
@@ -1978,7 +1992,8 @@ function ArenaHome.ResetLetters() queue = {} end -- (tests)
 
 ---------------------------------------------------------------------------
 -- The right-click lines on a player (the design): "Challenge to a duel", "Invite to Bones",
--- "Watch" (when his table lets spectators in), "Arena profile". Through PlayerMenu.lua's shared
+-- "Watch" (when his table lets spectators in), "Watch duel" (1.2.6, when he fights a duel in
+-- sight), "Arena profile". Through PlayerMenu.lua's shared
 -- hook where this build has it (1.1.2), with its target and its menu helper; else through
 -- Blizzard's Menu.ModifyMenu directly, with the same checks. Opening a menu sends nothing.
 ---------------------------------------------------------------------------
@@ -1988,16 +2003,29 @@ function ArenaHome.MenuLines(target, menu)
 	local name = target.name
 	local n = 0
 	local off = target.locked == true or ns.Arena.Blocked()
-	menu.Button(L.ARENA_MENU_CHALLENGE, function() ArenaHome.Challenge(name) end, L.ARENA_MENU_CHALLENGE, off and L.ARENA_MENU_LOCKED or (ArenaHome.ArbitersOn() and L.ARENA_MENU_CHALLENGE_TIP or L.ARENA_MENU_CHALLENGE_TIP_POINTS), not off)
-	n = n + 1
-	menu.Button(L.ARENA_MENU_BONE, function() ArenaHome.Open("bone.invite", name) end, L.ARENA_MENU_BONE, off and L.ARENA_MENU_LOCKED or L.ARENA_MENU_BONE_TIP, not off)
-	n = n + 1
-	local table_ = ArenaHome.WatchableTable(name)
-	if table_ then
-		menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+	-- (1.2.5.1) The Arena's own lines only on a player known to be in Olympus: PlayerMenu.lua's shared
+	-- hook sets target.olympus (PlayerMenu.KnownOlympus). "Watch duel" shows on any duel in sight,
+	-- Olympus's or not (the duel view says when it is not an Olympus duel).
+	local olympus = target.olympus ~= false
+	if olympus then
+		menu.Button(L.ARENA_MENU_CHALLENGE, function() ArenaHome.Challenge(name) end, L.ARENA_MENU_CHALLENGE, off and L.ARENA_MENU_LOCKED or (ArenaHome.ArbitersOn() and L.ARENA_MENU_CHALLENGE_TIP or L.ARENA_MENU_CHALLENGE_TIP_POINTS), not off)
+		n = n + 1
+		menu.Button(L.ARENA_MENU_BONE, function() ArenaHome.Open("bone.invite", name) end, L.ARENA_MENU_BONE, off and L.ARENA_MENU_LOCKED or L.ARENA_MENU_BONE_TIP, not off)
+		n = n + 1
+		local table_ = ArenaHome.WatchableTable(name)
+		if table_ then
+			menu.Button(L.ARENA_MENU_WATCH, function() ArenaHome.Open("bone.live", table_) end, L.ARENA_MENU_WATCH, L.ARENA_MENU_WATCH_TIP, true)
+			n = n + 1
+		end
+	end
+	-- (1.2.6) His duel, when he fights one in sight (ArenaSpectate.Watchable): the pair taken now.
+	local S = ns.ArenaSpectate
+	local duel = type(S) == "table" and type(S.Watchable) == "function" and S.Watchable(target) or nil
+	if duel then
+		menu.Button(L.ARENA_MENU_WATCH_DUEL, function() S.Open(duel) end, L.ARENA_MENU_WATCH_DUEL, L.ARENA_MENU_WATCH_DUEL_TIP, true)
 		n = n + 1
 	end
-	if not target.profileAdded then
+	if olympus and not target.profileAdded then
 		menu.Button(L.ARENA_MENU_PROFILE, function() ns.PlayerMenu.OpenProfile(name) end, L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
 		n = n + 1
 	end
@@ -2030,8 +2058,14 @@ function ArenaHome.Challenge(name, prefill)
 end
 
 -- Without PlayerMenu.lua (a 1.1.1 base): Blizzard's hook, our own lines, the same rules as its
--- (never ourselves, an offline name, a Battle.net account, a secret value).
-ArenaHome.MENUS = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_GUILD_MEMBER", "COMMUNITIES_WOW_MEMBER", "GUILD", "CHAT_ROSTER" }
+-- (never ourselves, an offline name, a Battle.net account, a secret value). (1.2.5.1: this build
+-- always has PlayerMenu.lua, so this path is not used here; its Olympus-only rule,
+-- PlayerMenu.KnownOlympus, is the shared list's.)
+-- Never the game's guild roster menus either, as PlayerMenu.NEVER (1.2.1, an officer's failed kick
+-- and rank change): COMMUNITIES_GUILD_MEMBER and GUILD hold the game's own promote, demote, rank and
+-- Remove from Guild, whose calls the game refuses from tainted code.
+ArenaHome.MENUS = { "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_WOW_MEMBER", "CHAT_ROSTER" }
+ArenaHome.NEVER = { COMMUNITIES_GUILD_MEMBER = true, GUILD = true }
 local function Secret(...)
 	if type(issecretvalue) ~= "function" then return false end
 	for i = 1, select("#", ...) do if issecretvalue((select(i, ...))) then return true end end
@@ -2085,6 +2119,7 @@ function ArenaHome.HookMenus()
 	if hooked then return hooked end
 	local P = ns.PlayerMenu
 	if type(P) == "table" and type(P.Add) == "function" then
+		-- (1.2.5.1: an Olympus line, for a player this client knows to be in Olympus alone.)
 		hooked = P.Add("arena", ArenaHome.MenuLines, 60) and "shared" or false
 		return hooked
 	end
@@ -2093,10 +2128,12 @@ function ArenaHome.HookMenus()
 	if not (Menu and type(Menu.ModifyMenu) == "function") then return false end -- gp:player-menu
 	for _, which in ipairs(ArenaHome.MENUS) do
 		local w = which
-		pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx) -- gp:player-menu
-			if not ns.Gate.Allowed("player-menu") then return end
-			ns.SafeCall("arena menu", OwnMenu, w, root, ctx)
-		end)
+		if not ArenaHome.NEVER[w] then
+			pcall(Menu.ModifyMenu, "MENU_UNIT_" .. w, function(_, root, ctx) -- gp:player-menu
+				if not ns.Gate.Allowed("player-menu") then return end
+				ns.SafeCall("arena menu", OwnMenu, w, root, ctx)
+			end)
+		end
 	end
 	hooked = "own"
 	return hooked

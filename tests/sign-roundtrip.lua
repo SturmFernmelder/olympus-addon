@@ -119,7 +119,10 @@ Sign.WithKey(n, mu, k, function()
 	end
 
 	-- Taken by the addon, as a client on Forever's realm group takes them from the channel.
-	ns.realm, ns.group, ns.me, ns.rdb, ns.db = "ClassicBetaPvP", "ClassicBetaPvP+ClassicBetaPvP2", "Tester-ClassicBetaPvP", {}, { log = {} }
+	-- Membership now requires the account-level Olympus Accord as well as an Olympus guild. Keep
+	-- this signer test focused on the signed guild transition with an account that accepted it.
+	ns.realm, ns.group, ns.me, ns.rdb, ns.db = "ClassicBetaPvP", "ClassicBetaPvP+ClassicBetaPvP2", "Tester-ClassicBetaPvP", {},
+		{ log = {}, accord = { v = ns.ACCORD_VERSION, yes = true } }
 	local c1 = councils[1]
 	check(W.TakeCouncil(c1.names, "Relay-ClassicBetaPvP"), "council 1: its names are taken")
 	check(W.TakeTitles(c1.titles, "Relay-ClassicBetaPvP"), "council 1: its titles are taken")

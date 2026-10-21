@@ -457,6 +457,55 @@ test("1.2 P1.8: a fixed Bones search keeps its non-level filters, ignores a stal
 	MW.NoErrors(w)
 end)
 
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in on each client noting each
+-- call): a fight room's line other than a Bones table's (a match room, its whisper to the other
+-- fighter) is recorded on the sender's client once its whisper left, as his own, and on the
+-- other's as it shows; a line none of whose sends left, never.
+-- (Changed on purpose, the record's review: this test said "at once: its whisper left with the
+-- call", but the whisper was still in Arena.Send's queue then; the record waited for nothing, so a
+-- line that never left was recorded too. It now waits for Arena.Send's done.)
+test("1.2.6 the Companion's chat record: a match room's line, the sender's own once its whisper left as his own, the other fighter's as it shows, never a line that never left", function()
+	local w, a, b = Pair()
+	for _, c in ipairs({ a, b }) do
+		CH.WithRooms(w, c)
+		rawset(c.ns, "ChatWindow", { OpenDynamicRoom = function(spec) return { room = spec.id } end })
+	end
+	assert(a.Match.Start({ game = "b", kind = "c", level = 10, reach = "z" }))
+	w:Run(6)
+	local mid = MW.Last(w, a, "R"):match("^R~(M[0-9a-z]+)~")
+	MW.Answer(w, b, "yes")
+	w:Run(0)
+	local rec = {}
+	for _, c in ipairs({ a, b }) do
+		c.Arena.SetRules(true)
+		c.ns.ArenaRoles.Live = function() return true end
+		rawset(c.ns, "RecordChat", function(tier, sender, text, isSelf)
+			rec[#rec + 1] = { by = c.name, tier = tier, sender = sender, text = text, isSelf = isSelf }
+		end)
+		w:As(c, function() assert(c.ns.ArenaChat.Open(mid), "the accepted match is an ArenaChat event") end)
+	end
+	local function By(c) local out = {} for _, e in ipairs(rec) do if e.by == c.name then out[#out + 1] = e end end return out end
+	w:As(a, function() assert(a.ns.ArenaChat.Send(mid, "same tavern?")) end)
+	eq(#w:As(a, a.ns.ArenaChat.Lines, mid), 1, "shown on the sender's client at once")
+	eq(#rec, 0, "not while its whisper waits in the queue")
+	w:Run(0)
+	eq(#w:As(b, b.ns.ArenaChat.Lines, mid), 1, "the other fighter's client shows it")
+	eq(#rec, 2, "each line once on each client")
+	local mine, theirs = By(a)[1], By(b)[1]
+	eq(#By(a), 1); eq(mine.tier, mid); eq(mine.sender, a.name); eq(mine.text, "same tavern?"); eq(mine.isSelf, true)
+	eq(#By(b), 1); eq(theirs.tier, mid); eq(theirs.sender, a.name); eq(theirs.text, "same tavern?"); eq(theirs.isSelf, false)
+	-- A line none of whose sends left (the game refused its whisper): shown, never recorded.
+	w.clock = w.clock + 30
+	a.comm.results[#a.comm.results + 1] = 2 -- (the test world's result for the next send: refused)
+	w:As(a, function() assert(a.ns.ArenaChat.Send(mid, "never delivered")) end)
+	w:Run(0)
+	local lines = w:As(a, a.ns.ArenaChat.Lines, mid)
+	eq(lines[#lines].text, "never delivered", "still in the sender's view")
+	eq(#w:As(b, b.ns.ArenaChat.Lines, mid), 1, "it reached nobody")
+	eq(#rec, 2, "a line that never left is never recorded")
+	MW.NoErrors(w)
+end)
+
 test("1.2 P1.8: Arena and Bones open separate compact fixed-game Find entries; only Arena uses the remembered level filter", function()
 	local w = World.New()
 	local a = MW.Client(w, "Lida Fenn", { pos = SEEKER })
@@ -1786,6 +1835,87 @@ test("1.2 matchmaking: a Where I am point's pin goes through the HereBeDragons h
 	-- Lida's point: steps 280 and 812 of 25 yd, centres 280 x 25 - 20000 + 12.5 = -12987.5 and
 	-- 812 x 25 - 20000 + 12.5 = 312.5; HereBeDragons gets (312.5, -12987.5).
 	eq(mini[1][1], 0); eq(mini[1][2], 312.5); eq(mini[1][3], -12987.5)
+	MW.NoErrors(w)
+end)
+
+test("1.2.6 matchmaking: on the minimap's edge the meeting place's pin is the game's minimap arrow, turned toward the tavern or the other player's spot; in range, the icon", function()
+	local w, a, b = Pair({ findable = false })
+	b.Match.SetFindable(true, { d = false, b = true })
+	local function Near(x, want, what)
+		assert(type(x) == "number" and math.abs(x - want) < 1e-9, (what or "") .. ": " .. tostring(x) .. ", want " .. want)
+	end
+	-- The pin library as the client has it (HereBeDragons-Pins-2.0.lua): a pin goes on the minimap,
+	-- its parent, and the library says whether it floats on the edge (IsMinimapIconOnEdge).
+	local minimap = World.NewFrame("Frame", "Minimap")
+	minimap.GetCenter = function() return 500, 300 end
+	local pin, kinds, edge = nil, {}, nil
+	local function Add(kind)
+		return function(_, ref, icon) pin = icon; kinds[#kinds + 1] = kind; icon:SetParent(minimap); icon:Show(); return true end
+	end
+	local P = {
+		AddMinimapIconMap = Add("map"), AddMinimapIconWorld = Add("world"),
+		AddWorldMapIconMap = function() end, AddWorldMapIconWorld = function() end,
+		RemoveAllMinimapIcons = function() if pin then pin:Hide() end end, RemoveAllWorldMapIcons = function() end,
+		IsMinimapIconOnEdge = function(_, icon) if icon == pin then return edge end end,
+	}
+	b.globals.LibStub = function(name) if name == "HereBeDragons-Pins-2.0" then return P end end
+	b.globals.C_Texture = { GetAtlasInfo = function(atlas) if atlas == "UI-HUD-Minimap-Arrow-Player" then return { width = 32, height = 32 } end end }
+	-- Textures that keep what is set on them (the stand-in's do nothing).
+	local make = b.globals.CreateFrame
+	b.globals.CreateFrame = function(...)
+		local f = make(...)
+		local texture = f.CreateTexture
+		f.CreateTexture = function(self, ...)
+			local t = texture(self, ...)
+			t.SetAlpha = function(s, v) s.alpha = v end
+			t.SetRotation = function(s, r) s.rotation = r end
+			t.SetAtlas = function(s, atlas) s.atlas = atlas end
+			return t
+		end
+		return f
+	end
+	Matched(w, a, b, { game = "b", kind = "c" })
+	-- The tavern: the Salty Sailor (the Bone Throw practice test above), on its map.
+	eq(b.Match.View().match.place.id, "inn_booty_bay"); eq(kinds[1], "map")
+	local arrow, icon = pin.arrow, pin.icon
+	assert(arrow, "the game's minimap arrow on the pin")
+	eq(arrow.atlas, "UI-HUD-Minimap-Arrow-Player")
+	-- In range (not floated): the icon, no arrow.
+	eq(b.Match.TurnArrow(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	-- Floated on the edge east of the minimap's centre: the arrow, pointing right (SetRotation turns
+	-- counter-clockwise from up: -pi/2), the icon hidden; through the pin's own OnUpdate, paced.
+	edge = true
+	pin.GetCenter = function() return 570, 300 end
+	w:As(b, pin.scripts.OnUpdate, pin, 0.05)
+	eq(arrow.alpha, 0, "not before ARROW_EVERY")
+	w:As(b, pin.scripts.OnUpdate, pin, 0.05)
+	Near(arrow.rotation, -math.pi / 2, "east"); eq(arrow.alpha, 1); eq(icon.alpha, 0)
+	-- North: up; west: left; south: down.
+	for _, case in ipairs({ { 500, 370, 0, "north" }, { 430, 300, math.pi / 2, "west" }, { 500, 230, -math.pi, "south" } }) do
+		pin.GetCenter = function() return case[1], case[2] end
+		eq(b.Match.TurnArrow(), true)
+		Near(arrow.rotation, case[3], case[4])
+	end
+	-- Back in range: the icon again.
+	edge = false
+	eq(b.Match.TurnArrow(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	-- Lida's Where I am: Parric's pin is her spot (the library's world pin), the same arrow; drawn
+	-- again it starts as the icon until the library floats it.
+	edge = true; pin.GetCenter = function() return 570, 300 end
+	assert(b.Match.TurnArrow())
+	a.mapPos = { 0.3, 0.45 }
+	MW.Press(w, a, "other")
+	local where
+	for i, r in ipairs(MW.Card(a).rows) do if r.shown and r.text == "Where I am" then where = i end end
+	MW.Row(w, a, where)
+	w:Run(0)
+	eq(kinds[#kinds], "world"); eq(pin.arrow, arrow)
+	eq(arrow.alpha, 0); eq(icon.alpha, 1)
+	pin.GetCenter = function() return 500, 230 end
+	eq(b.Match.TurnArrow(), true); Near(arrow.rotation, -math.pi, "south"); eq(arrow.alpha, 1)
+	-- The match over: the pin gone, and the arrow with it.
+	MW.Press(w, b, "cancel")
+	eq(pin:IsShown(), false); eq(arrow.alpha, 0); eq(icon.alpha, 1)
 	MW.NoErrors(w)
 end)
 

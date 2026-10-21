@@ -55,7 +55,7 @@ Watch.REPORT_TIERS = { "A" }
 Watch.REPORT_DEDUPE = 86400       -- a reporter's client: one report a day on the same name...
 Watch.REPORT_GAP = 60             -- ...one a minute...
 Watch.REPORT_DAY = 5              -- ...and five a day
-Watch.REPORT_HOLD = 86400         -- a report no officer was online for waits this long for one
+Watch.REPORT_HOLD = 30 * 86400    -- a report no officer was online for waits privately for one
 Watch.REPORT_RETRY = 60           -- and is tried again at most this often
 Watch.OUTBOX_MAX = 5
 Watch.MAX_REPORTS = 200           -- reports an officer's client keeps (the oldest go)
@@ -1614,8 +1614,12 @@ local function PowersBarred(name)
 	return type(WC) == "table" and not WC.missing and type(WC.PowersBarred) == "function" and WC.PowersBarred(name) ~= nil
 end
 -- On the signed council list (the King left out), under no sanction.
-local function Councillor(name)
-	return type(name) == "string" and type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true
+local function CouncilObserver(name)
+	if type(name) ~= "string" then return false end
+	local W = ns.Workshop
+	local author = type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(name) == true
+	local councillor = type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(name) == true
+	return (author or councillor)
 		and not (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(name)) and not PowersBarred(name)
 end
 -- This client keeps the council's reports: the King's, a councillor's (Watch.CouncilDeskShown,
@@ -1736,7 +1740,7 @@ local function RelayTo(name, r, kind)
 		local guardKey = "council-relay#" .. Key(name) .. "#" .. Key(r.reporter) .. "#" .. Key(r.target) .. "#" .. i
 		ns.Comm.Whisper(name, msg, nil, false, true, nil, { owner = Watch, key = guardKey, permit = function(owner, key, dist, to, payload)
 			if owner ~= Watch or key ~= guardKey or dist ~= "WHISPER" or payload ~= msg or not Same(to, name) then return false, "guard" end
-			if not KingHere() or not CouncilReader() or not Councillor(name) or Accused(name, r.target) then
+			if not KingHere() or not CouncilReader() or not CouncilObserver(name) or Accused(name, r.target) then
 				stats.revoked = stats.revoked + 1
 				return false, "revoked"
 			end
@@ -1754,7 +1758,7 @@ local function RelayFresh(id)
 		if type(r) ~= "table" or not KingHere() then return end
 		local now = Mono()
 		for _, e in pairs(councilHeard) do
-			if now - e.t <= Watch.COUNCIL_HEARD and Councillor(e.name) then RelayTo(e.name, r, "p") end
+			if now - e.t <= Watch.COUNCIL_HEARD and CouncilObserver(e.name) then RelayTo(e.name, r, "p") end
 		end
 	end)
 end
@@ -1897,7 +1901,7 @@ function Watch.SendReport(name, cat, note, message)
 end
 
 -- The reports waiting for an officer: sent, oldest first, once one is online (the roster says so)
--- while this client is too, dropped a day after they were made (the reporter is told).
+-- while this client is too, dropped after REPORT_HOLD (the reporter is told).
 function Watch.FlushReports(force)
 	local now = Mono()
 	if not force and now - lastFlush < Watch.REPORT_RETRY then return 0 end
@@ -2145,7 +2149,7 @@ end
 
 -- A councillor's client: one the King's client passed on (F), its lines after it (E).
 local function TakeRelay(sender, text)
-	if KingHere() or not Councillor(ns.me) then return false, "access" end
+	if KingHere() or not CouncilObserver(ns.me) then return false, "access" end
 	if not (Same(KingClient(), sender) and ns.IsKingCharacter(sender)) then return false, "sender" end
 	local inAt, kind, prev, seq, at, guild, cat, target, n, reporter, note =
 		text:match("^MR~1~F~(%d+)~([ap])(%d*)~(%d+)~(%d+)~([^~]+)~(%u)~([^~]+)~(%d)~([^~]+)~(.*)$")
@@ -2185,7 +2189,7 @@ end
 local function TakeCouncilAsk(sender, text)
 	local since = tonumber(text:match("^MR~1~Q~(%d+)$"))
 	if not since then return false, "shape" end
-	if not Councillor(sender) then return false, "sender" end
+	if not CouncilObserver(sender) then return false, "sender" end
 	local key, now = Key(sender), Mono()
 	if not councilHeard[key] and Count(councilHeard) >= 200 then
 		for k, e in pairs(councilHeard) do if now - e.t > Watch.COUNCIL_HEARD then councilHeard[k], councilAnswered[k] = nil, nil end end
@@ -2216,7 +2220,7 @@ end
 -- own within COUNCIL_SPREAD, so the councillors' asks do not all reach it at once), then every
 -- COUNCIL_ASK_EVERY; sooner after an answer that came full. force: now.
 function Watch.CouncilTick(force)
-	if KingHere() or not Councillor(ns.me) or not CouncilReader() then return false end
+	if KingHere() or not CouncilObserver(ns.me) or not CouncilReader() then return false end
 	local king = KingClient()
 	if not king then councilAsk.lease = nil return false end
 	local now = Mono()
@@ -2237,7 +2241,7 @@ function Watch.CouncilTick(force)
 	local msg = "MR~1~Q~" .. math.max(0, since)
 	return ns.Comm.Whisper(king, msg, nil, false, true, nil, { owner = Watch, key = "council-ask", permit = function(owner, key, dist, to, payload)
 		if owner ~= Watch or key ~= "council-ask" or dist ~= "WHISPER" or payload ~= msg or not Same(to, king) then return false, "guard" end
-		if not Councillor(ns.me) or not CouncilReader() or not Same(KingClient(), king) then return false, "revoked" end
+		if not CouncilObserver(ns.me) or not CouncilReader() or not Same(KingClient(), king) then return false, "revoked" end
 		return true
 	end }) ~= false
 end
@@ -2343,6 +2347,7 @@ local function Accused(name, upheld)
 end
 Watch.Accused = Accused
 local function Upheld(c) return type(c) == "table" and type(c.finding) == "table" and c.finding.verdict == "up" end
+Watch.Upheld = Upheld -- (931, read-only: the Companion's watch section names the accused as the page does)
 
 local function ShownReason(e)
 	local authenticated = e.via or e.by
@@ -2451,8 +2456,10 @@ function Watch.CouncilDeskShown()
 	if not ns.me or not ns.IsMember() or SelfOff() then return false end
 	local WC = ns.WatchChat
 	if WC and WC.Barred and WC.Barred("powers") then return false end
+	local W = ns.Workshop
 	return (type(ns.IsKingCharacter) == "function" and ns.IsKingCharacter(ns.me) == true)
 		or (type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(ns.me) == true)
+		or (type(W) == "table" and type(W.IsAuthorName) == "function" and W.IsAuthorName(ns.me) == true)
 end
 
 -- The desk's pages show: an officer's (Watch.CanRead), the King and High Council's layout;
@@ -2486,9 +2493,16 @@ local function ChatShown()
 end
 Watch.ChatShown = ChatShown
 
+-- 1.2.5.1: the moderation team's BattleTags (Accord.lua): the team's clients alone.
+local function TagsShown()
+	local A = ns.Accord
+	return type(A) == "table" and not A.missing and type(A.TeamShown) == "function" and A.TeamShown() == true
+end
+Watch.TagsShown = TagsShown
+
 -- The tab (UI.AddTab's visible).
 function Watch.TabVisible() return Watch.DeskShown() or Watch.JudgmentsShown() or ChatShown()
-	or (ns.JusticeTasks and ns.JusticeTasks.Visible()) or false end
+	or (ns.JusticeTasks and ns.JusticeTasks.Visible()) or TagsShown() or false end
 
 -- The sections this player sees, and the one shown when he picked none (or one he no longer
 -- sees): the desk (with its Reports, Cases and a case's page), else the Judgments, else the Tabards.
@@ -2496,7 +2510,10 @@ local function Sections()
 	local desk = Watch.DeskShown()
 	local list = { desk = desk, reports = desk, cases = desk, case = desk,
 		judgments = Watch.JudgmentsShown(), justice = ns.JusticeTasks and ns.JusticeTasks.Visible(), chat = ChatShown(), tabards = Watch.TabardsShown(), member = Watch.MemberShown() }
-	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards" or list.member and "member" or "desk"
+	list.profile = Watch.CanRead()
+	list.tags = TagsShown()
+	list.first = desk and "desk" or list.judgments and "judgments" or list.justice and "justice" or list.chat and "chat" or list.tabards and "tabards"
+		or list.member and "member" or list.tags and "tags" or "desk"
 	return list
 end
 
@@ -2517,21 +2534,35 @@ function Watch.ViewKey()
 	local section = Section()
 	if section == "tabards" then return "heraldry" end
 	if section == "chat" then return Watch.DeskShown() and "watch" or "judgments" end
-	return (section == "judgments" or section == "member" or section == "justice") and "judgments" or "watch"
+	return (section == "judgments" or section == "member" or section == "justice" or section == "tags") and "judgments" or "watch"
 end
 
 -- The page shown, for the window's place and its "?" (UI.PageId: "watch/cases").
 function Watch.PageId()
 	local section = Section()
 	if section == "case" then return "case:" .. tostring(Watch.caseKey or "") end
+	if section == "profile" then return "profile:" .. tostring(Watch.profileKey or "") end
 	return section
 end
 
 function Watch.Show(mode, key)
 	Watch.mode = (mode == "reports" or mode == "cases" or mode == "case" or mode == "tabards" or mode == "judgments"
-		or mode == "chat" or mode == "member" or mode == "justice") and mode or nil
+		or mode == "chat" or mode == "member" or mode == "justice" or mode == "profile" or mode == "tags") and mode or nil
 	Watch.caseKey = Watch.mode == "case" and key or nil
+	Watch.profileKey = Watch.mode == "profile" and key or nil
 	ns.Fire("WATCH_CHANGED")
+end
+
+-- Opens the host-owned, access-controlled record for one named character.  The
+-- caller receives only a success/failure result; every record, audit row and
+-- retained chat line remains inside The Watch and is filtered there exactly as
+-- it is on the normal Watch pages.
+function Watch.OpenMember(name)
+	if not Watch.CanRead() then return false, "access" end
+	local target = Character(name, true)
+	if not target then return false, "name" end
+	Watch.Show("profile", target)
+	return true
 end
 
 local function LinesGot(r)
@@ -2717,6 +2748,8 @@ local function Nav()
 	if ChatShown() then items[#items + 1] = { key = "chat", text = L.WATCHCHAT_NAV } end
 	if Watch.TabardsShown() then items[#items + 1] = { key = "tabards", text = L.TAB_HERALDRY } end
 	if Watch.MemberShown() then items[#items + 1] = { key = "member", text = L.WATCH_MEMBER_NAV } end
+	-- 1.2.5.1: the BattleTags, the moderation team's alone (Accord.lua).
+	if TagsShown() then items[#items + 1] = { key = "tags", text = L.ACCORD_TEAM_NAV:format(ns.Accord.Count()) } end
 	local nav = {}
 	for _, it in ipairs(items) do
 		local key = it.key
@@ -3044,8 +3077,9 @@ function Watch.ShowCard(key)
 end
 function Watch.Card() return cardFrame end
 
--- The right-click menu's line (PlayerMenu.lua): Report to Olympus, for any member, on any player
--- but himself and the King; greyed, with why, when it can't go now (in a dungeon or a raid too).
+-- The right-click menu's line (PlayerMenu.lua): Report to Olympus, for any member, on a player this
+-- client knows to be in Olympus (1.2.5.1: PlayerMenu.KnownOlympus) but himself and the King; greyed,
+-- with why, when it can't go now (in a dungeon or a raid too).
 function Watch.MenuLines(target, menu)
 	if type(target) ~= "table" or type(target.name) ~= "string" or not OwnGuild() or IsKingName(target.name) then return end
 	local why = Watch.ReportBlocked(target.name)
@@ -3054,7 +3088,7 @@ function Watch.MenuLines(target, menu)
 	menu.Button(L.WATCH_REPORT, function() Watch.AskReport(target.name) end, L.WATCH_REPORT, tip, not locked and not why)
 end
 if ns.PlayerMenu and ns.PlayerMenu.Add then
-	ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30)
+	ns.PlayerMenu.Add("report", function(target, menu) Watch.MenuLines(target, menu) end, 30, { olympus = true })
 end
 
 -- What the reporter sees before he sends: the category, and the lines that go with it.
@@ -3214,7 +3248,94 @@ local function MemberLines()
 	return lines
 end
 
+-- One named member's host-owned context. Integrations can open this page, but they never
+-- receive its records or retained words: the same Watch authorization and display filters
+-- used by the native pages remain the only path to the data.
+local function ProfileLines()
+	local target = Character(Watch.profileKey, true)
+	local shown = target and (ns.DisplayName(target) or target) or "?"
+	local lines = { Nav(), { header = true, text = L.WATCH_PROFILE_TITLE:format(shown) } }
+	if not target or not Watch.CanRead() then
+		lines[#lines + 1] = { id = "watch-profile-no-access", text = Grey(L.WATCH_NO_ACCESS), wrap = true }
+		return lines
+	end
+
+	local record = Watch.Record(target)
+	if record then
+		lines[#lines + 1] = { id = "watch-profile-status",
+			text = L.WATCH_PROFILE_STATUS:format(StatusLabel(record), tonumber(record.warnings) or 0,
+				tonumber(record.interventions) or 0), wrap = true }
+		if (tonumber(record.lastAt) or 0) > 0 then
+			lines[#lines + 1] = { text = L.WATCH_LAST_ACTION:format(ShownBy(record.lastBy), ns.Ago(record.lastAt)) }
+			local reason = (ns.CouncilMasked and ns.CouncilMasked() and not ns.IsKingCharacter(record.lastBy))
+				and L.NETOFF_REASON_HIDDEN or Watch.FilterText(record.lastReason)
+			lines[#lines + 1] = { text = L.WATCH_REASON:format(reason ~= "" and reason or "-"), wrap = true }
+		end
+	else
+		lines[#lines + 1] = { id = "watch-profile-no-record", text = Grey(L.WATCH_PROFILE_NO_RECORD), wrap = true }
+	end
+
+	local WC = ns.WatchChat
+	local sanction = WC and not WC.missing and WC.Sanction and WC.Sanction(target)
+	if sanction then
+		local restriction = WC.BarredText and WC.BarredText(sanction) or L.WATCH_MEMBER_RESTRICTED
+		lines[#lines + 1] = { id = "watch-profile-restriction", text = Red(L.WATCH_PROFILE_ACTIVE:format(restriction)),
+			wrap = true }
+	end
+	-- 1.2.5.1: his BattleTag and the characters sharing it, on a moderation team client alone.
+	if TagsShown() then
+		for _, line in ipairs(ns.Accord.ProfileLines(target)) do lines[#lines + 1] = line end
+	end
+	lines[#lines].gapAfter = true
+
+	local audit = {}
+	for _, entry in ipairs(Watch.Audit()) do
+		if Same(entry.name, target) then audit[#audit + 1] = entry end
+		if #audit >= 10 then break end
+	end
+	lines[#lines + 1] = { id = "watch-profile-audit", header = true, text = L.WATCH_PROFILE_AUDIT,
+		right = Grey(tostring(#audit)) }
+	if #audit == 0 then
+		lines[#lines + 1] = { text = Grey(L.WATCH_PROFILE_AUDIT_EMPTY), wrap = true }
+	else
+		for _, entry in ipairs(audit) do
+			local label = entry.op == "W" and L.WATCH_ACTION_WARN or entry.op == "V" and L.WATCH_ACTION_WATCH
+				or entry.op == "B" and L.WATCH_ACTION_BAN or CHAT_OPS[entry.op] and L["WATCHCHAT_OP_" .. entry.op]
+				or L.WATCH_ACTION_CLEAR
+			lines[#lines + 1] = { indent = 1, text = label:format(shown), right = Grey(ns.Ago(entry.at)),
+				tooltip = function(tt)
+					tt:AddLine(label:format(shown), 1, 0.82, 0)
+					if entry.via then tt:AddLine(L.WATCH_RECOVERED_VIA:format(ShownBy(entry.via)), 0.7, 0.7, 0.7)
+					else tt:AddLine(L.WATCH_BY:format(ShownBy(entry.by)), 0.7, 0.7, 0.7) end
+					if entry.reason ~= "" then tt:AddLine(L.WATCH_REASON:format(ShownReason(entry)), 1, 1, 1, true) end
+				end }
+		end
+	end
+	lines[#lines].gapAfter = true
+
+	local evidence = Watch.Evidence(target)
+	lines[#lines + 1] = { id = "watch-profile-messages", header = true, text = L.WATCH_PROFILE_MESSAGES,
+		right = Grey(tostring(#evidence)) }
+	if #evidence == 0 then
+		lines[#lines + 1] = { text = Grey(L.WATCH_PROFILE_MESSAGES_EMPTY), wrap = true }
+	else
+		for i = #evidence, math.max(1, #evidence - 9), -1 do
+			local entry = evidence[i]
+			lines[#lines + 1] = { indent = 1, text = Watch.FilterText(ns.Cut(entry.text, 140)), wrap = true,
+				right = Grey(ns.Ago(entry.at)) }
+		end
+	end
+	return lines
+end
+
 function Watch.Build()
+	if Section() == "profile" then return ProfileLines(), L.TAB_WATCH, L.WATCH_PROFILE_DETAIL end
+	-- 1.2.5.1: the moderation team's BattleTags (Accord.lua's lines) under the same navigation.
+	if Section() == "tags" then
+		local lines = { Nav() }
+		for _, line in ipairs(ns.Accord.TeamLines()) do lines[#lines + 1] = line end
+		return lines, L.TAB_WATCH, L.ACCORD_TEAM_DETAIL
+	end
 	if Section() == "member" then return MemberLines(), L.TAB_WATCH, L.WATCH_MEMBER_DETAIL end
 	if Section() == "justice" and ns.JusticeTasks and ns.JusticeTasks.Visible() then
 		local lines = { Nav() }
@@ -3329,7 +3450,9 @@ StaticPopupDialogs["OLYMPUS_WATCH_WHO"] = {
 	OnShow = function(self)
 		local eb = self.editBox or self.EditBox
 		if eb then
-			local target = UnitIsPlayer and UnitIsPlayer("target") and ns.UnitFullName("target")
+			-- (Nothing while the game hides who the target is, in a battleground: Moderation.TargetName.)
+			local M = ns.Moderation
+			local target = M and M.TargetName and M.TargetName()
 			eb:SetText(target and (ns.DisplayName(target) or target) or "")
 			eb:SetFocus()
 		end
@@ -3427,6 +3550,11 @@ function Watch.Slash(rest)
 		Watch.Show("chat")
 		if ns.UI and ns.UI.SelectTab then ns.UI.SelectTab("watch") end
 		return true
+	elseif verb == "strikes" or verb == "release" then
+		-- The chat warnings' cases sent to the team (ChatStrikes.lua): the open ones, or let one chat.
+		local S = ns.ChatStrikes
+		if not (S and S.Slash) or S.missing then return ns.Print(L.RESTART_NEEDED) end
+		return S.Slash(verb, arg)
 	elseif verb == "timeout" or verb == "purge" or verb == "watchers" or verb == "justice" or verb == "mods" then
 		-- 1.1.6: a timeout, his recent lines, the guild master's Watchers, the Olympus moderators.
 		local WC = ns.WatchChat
@@ -3459,7 +3587,7 @@ function Watch.ResetForTests()
 	wipe(councilHeard); wipe(councilAnswered)
 	councilAsk.lease, councilAsk.at, councilAsk.got = nil, -math.huge, 0
 	lastFlush = -math.huge
-	Watch.mode, Watch.caseKey = nil, nil
+	Watch.mode, Watch.caseKey, Watch.profileKey = nil, nil, nil
 	if cardFrame then cardFrame:Hide() end
 	cardFrame = nil
 	wipe(syncAsked); wipe(syncIncoming); wipe(syncOutgoing); wipe(syncRates); wipe(mwRates)

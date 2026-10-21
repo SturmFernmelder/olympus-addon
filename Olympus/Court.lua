@@ -52,8 +52,13 @@ local function ServerNow() return math.floor((GetServerTime and GetServerTime())
 
 function Court.Holding() return holding end
 
+-- Quiet presence (1.2.5.1, Core.lua): the court names his zone and says he is online, so none of
+-- it leaves while it is on (Comm.QUIET_WORDS), its closing neither: the line the others have
+-- lapses (EXPIRE) as after a logout. Opened or moved meanwhile, it goes out once it is off.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+
 local function Send()
-	if not holding or holding.preview then return end
+	if not holding or holding.preview or Quiet() then return end
 	holding.sentAt = ns.Now()
 	ns.Comm.Send("CHANNEL", ("T1~C~%d~%s~%d~%s"):format(holding.id, GetGuildInfo("player") or "", holding.mapID or 0,
 		Clean(holding.zone, 40)), "court")
@@ -63,7 +68,7 @@ function Court.Toggle()
 	local preview = ns.King.Preview()
 	if not ns.King.IsKing() and not preview then return ns.Print(L.THRONE_ONLY_KING) end
 	if holding then
-		if not holding.preview then ns.Comm.Send("CHANNEL", ("T1~Z~%d~%s"):format(holding.id, GetGuildInfo("player") or ""), "court") end
+		if not holding.preview and not Quiet() then ns.Comm.Send("CHANNEL", ("T1~Z~%d~%s"):format(holding.id, GetGuildInfo("player") or ""), "court") end
 		holding = nil
 		ns.Print(L.COURT_CLOSED)
 	else
@@ -72,6 +77,7 @@ function Court.Toggle()
 		if preview then ns.Print(L.THRONE_PREVIEW_NOTE) end
 		Send()
 		ns.Print(L.COURT_OPENED:format(zone ~= "" and zone or "?"))
+		if not preview and Quiet() then ns.Print(L.QUIET_PRESENCE_HELD) end
 	end
 	ns.Fire("COURT_CHANGED")
 end
@@ -377,6 +383,9 @@ ns.On("LOGIN", function()
 		end
 	end)
 end)
+
+-- Quiet presence turned off (Core.lua): the court he holds, where he stands now, at once.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Send() end end)
 
 -- Tests start from a clean state.
 function Court.Reset() holding, court = nil, nil end

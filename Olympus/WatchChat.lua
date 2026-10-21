@@ -114,9 +114,7 @@ WC.MAX_SEQ = 2147483647
 -- The game's own chat windows: off this switch and nothing of the game's is ever touched (the
 -- in-game taint check decides; the README then says the game's window keeps what it showed).
 WC.GAME_CHAT = true
--- Severe insults blocked at send: EMPTY until an approved word list is supplied.
--- Each entry: [folded word] = category. Nothing is blocked while it is empty.
-WC.SEVERE = {}
+-- (The words refused at send are the chat warnings' list now: ChatStrikes.lua, WatchChat.RefuseSevere.)
 WC.CATEGORIES = { "filtered", "timeout", "deleted", "severe" }
 
 local LADDER = ns.Watch and not ns.Watch.missing and ns.Watch.TIMEOUTS or { 0, 3600, 86400, 604800 }
@@ -184,6 +182,11 @@ end
 local function OwnGuild()
 	local W = TheWatch()
 	return W and W.OwnGuild and W.OwnGuild() or nil
+end
+-- In this client's own guild, by its roster (a guild's timeout follows only its own members).
+local function InOwnRoster(name)
+	local W = TheWatch()
+	return W ~= nil and type(W.RosterRank) == "function" and W.RosterRank(name) ~= nil
 end
 
 -- Split on "~" (empty fields kept); nil past `max` fields.
@@ -600,8 +603,10 @@ local function ActiveOn(key, now, guild)
 end
 
 -- The timeout in force on `name` or a name his player linked: the highest weight, the one that
--- ends last among equals; nil when none.
-function WC.TimeoutOf(name, now)
+-- ends last among equals; nil when none. direct (TagFollow.lua): those alone. Otherwise also one on
+-- another character of his BattleTag a follow points at: then a second value, that character, and
+-- a third, the weight it reaches him with (the lower of its own and the follow's).
+function WC.TimeoutOf(name, now, direct)
 	if type(name) ~= "string" or name == "" or IsKing(name) then return nil end
 	now = tonumber(now) or Clock()
 	local guild = OwnGuild()
@@ -610,7 +615,53 @@ function WC.TimeoutOf(name, now)
 		local e = ActiveOn(Key(ns.FullName(other)), now, guild)
 		if e and Before(e, best) then best = e end
 	end
-	return best
+	local via, applied
+	if not direct then
+		local TF = Live(ns.TagFollow)
+		if TF and TF.Watching and TF.Watching(name, "T") then
+			local e, source, weight = TF.Guarded(WC.ByTag, name, now, guild)
+			if e and Before(e, best) then best, via, applied = e, source, weight end
+		end
+	end
+	return best, via, applied
+end
+
+-- A lift on `key` at `at` or later reaching `weight` (Lifted's rule, for a follow's timeout).
+local function LiftedAt(key, at, weight, scope, guild)
+	local s = Store()
+	for _, lift in ipairs(s and type(s.lifts[key]) == "table" and s.lifts[key] or {}) do
+		if type(lift) == "table" and lift.at >= at and lift.weight >= weight
+			and (lift.scope ~= "G" or scope ~= "G" or Key(lift.guild) == Key(guild)) then return true end
+	end
+	return false
+end
+
+-- (TagFollow.lua) The timeout a follow of `name`'s BattleTag points at, while it stands, and whose
+-- it is: that other character's own timeout or hold in Olympus or guild scope (a guild's only on a
+-- member of that guild here), at the lower of its weight and the follow's, above his protection
+-- (and, on his own client, his account's: the King's account never), unless a lift on his own name
+-- from as high came after that timeout (the council's answer to his appeal, a moderator's lift):
+-- it frees him until that character's timeout changes, whatever follow of it comes later. Nil
+-- otherwise. Only through TagFollow.Guarded (TimeoutOf).
+function WC.ByTag(name, now, guild)
+	local TF = Live(ns.TagFollow)
+	if not TF or type(name) ~= "string" or name == "" or IsKing(name) then return nil end
+	now = tonumber(now) or Clock()
+	if guild == nil then guild = OwnGuild() end
+	local full = ns.FullName(ns.Normal(name))
+	local key = Key(full)
+	local best, via, weight, shield
+	for _, F in ipairs(TF.Sources(full, "T")) do
+		local e = ActiveOn(Key(ns.FullName(F.source)), now, guild)
+		if e and (e.scope == "O" or (e.scope == "G" and (Same(full, ns.me) or InOwnRoster(full)))) then
+			local applied = math.min(tonumber(e.weight) or 0, tonumber(F.weight) or 0)
+			shield = shield or TF.Shield(full, "T")
+			if applied > shield and not LiftedAt(key, e.at, applied, e.scope, e.guild) and Before(e, best) then
+				best, via, weight = e, F.source, applied
+			end
+		end
+	end
+	return best, via, weight
 end
 
 function WC.TimeoutEnd(name)
@@ -618,12 +669,17 @@ function WC.TimeoutEnd(name)
 	return e and WC.EndOf(e) or nil
 end
 
--- This character's own timeout, or nil.
-function WC.SelfTimeout() return ns.me and WC.TimeoutOf(ns.me) or nil end
+-- This character's own timeout, or nil (and, through his BattleTag's follow, whose it is).
+function WC.SelfTimeout()
+	if not ns.me then return nil end
+	return WC.TimeoutOf(ns.me)
+end
 
--- Channels.Admit: drop a timed-out sender's new lines (every 1.1.6 client, moderators' too).
+-- Channels.Admit: drop a timed-out sender's new lines (every 1.1.6 client, moderators' too). And,
+-- when it is a follow's (TagFollow.lua), whose timeout it is.
 function WC.Silenced(sender, guild)
-	return WC.TimeoutOf(sender) ~= nil
+	local e, via = WC.TimeoutOf(sender)
+	return e ~= nil, via
 end
 
 local function Lifted(key, e)
@@ -701,6 +757,10 @@ local function KeepLift(a)
 	if not s then return 0 end
 	local key = Key(a.target)
 	local ended, keep = 0, Clock() + WC.REPEAT
+	-- (TagFollow.lua) A timeout that reaches him through his BattleTag's follow: the lift is kept
+	-- until that one would end (it frees him of it; the other character's stays).
+	local followed, via = WC.TimeoutOf(a.target)
+	if followed and via then keep = math.max(keep, WC.EndOf(followed)) end
 	local list = s.timeouts[key] or {}
 	for i = #list, 1, -1 do
 		local e = list[i]
@@ -717,8 +777,15 @@ local function KeepLift(a)
 	if MakeRoom(s, key) then
 		local lifts = s.lifts[key] or {}
 		s.lifts[key] = lifts
-		lifts[#lifts + 1] = { at = a.at, weight = a.weight, scope = a.scope, guild = a.guild, by = a.by, keep = keep }
-		Trim(lifts, WC.MAX_PER_TARGET)
+		local same
+		for _, l in ipairs(lifts) do
+			if l.at == a.at and l.weight == a.weight and l.scope == a.scope and Same(l.by, a.by) then same = l end
+		end
+		if same then same.keep = math.max(tonumber(same.keep) or 0, keep)
+		else
+			lifts[#lifts + 1] = { at = a.at, weight = a.weight, scope = a.scope, guild = a.guild, by = a.by, keep = keep }
+			Trim(lifts, WC.MAX_PER_TARGET)
+		end
 	end
 	return ended
 end
@@ -1074,19 +1141,51 @@ local function ReasonPart(reason)
 	return reason ~= "" and L.WATCHCHAT_REASON_PART:format(reason) or ""
 end
 
+-- (TagFollow.lua) A timeout on another character that reaches this one through his BattleTag.
+local function Followed(e)
+	return type(e) == "table" and ns.me ~= nil and type(e.name) == "string" and not SamePerson(ns.me, e.name)
+end
+
 function WC.TimeoutText(e)
 	if not e then return "" end
 	local role = WC.RoleText(e.role, true)
+	local lead = Followed(e) and L.ACCORD_FOLLOW_YOU_LEAD or ""
 	if (tonumber(e.untilAt) or 0) == 0 then
 		local wallet = ns.Compliance and ns.Compliance.Wallet and ns.Compliance.Wallet()
-		return (wallet and L.WATCHCHAT_YOU_HELD or L.WATCHCHAT_YOU_HELD_FREE):format(role, ReasonPart(e.reason))
+		return lead .. (wallet and L.WATCHCHAT_YOU_HELD or L.WATCHCHAT_YOU_HELD_FREE):format(role, ReasonPart(e.reason))
 	end
 	local when = L.WATCHCHAT_FOR_UNTIL:format(Span(e.untilAt - e.at), Hour(e.untilAt))
-	return L.WATCHCHAT_YOU_TIMED_OUT:format(role, when, ReasonPart(e.reason))
+	return lead .. L.WATCHCHAT_YOU_TIMED_OUT:format(role, when, ReasonPart(e.reason))
 end
 
+-- (TagFollow.lua) The followed timeout in this character's own record ("Your record": roles
+-- only), so his appeal finds it (WatchChat.Appeal), once.
+function WC.RecordFollowed(e)
+	local s = Store()
+	if not s or not ns.me or type(e) ~= "table" or type(e.by) ~= "string" or not Int(e.seq, 1, WC.MAX_SEQ) then return false end
+	for _, r in ipairs(s.record) do
+		if r.follow and (not r.name or Same(r.name, ns.me)) and Same(r.by, e.by) and r.seq == e.seq then return false end
+	end
+	s.record[#s.record + 1] = { name = ns.me, op = "T", role = e.role, at = e.at, untilAt = e.untilAt or 0, reason = e.reason or "",
+		by = e.by, seq = e.seq, follow = true }
+	Trim(s.record, WC.RECORD_MAX)
+	ns.Fire("WATCH_CHANGED")
+	return true
+end
+
+-- (TagFollow.lua) A followed timeout's forced notice once a session: the login's notice below and
+-- TagFollow's own (TellMine) both come 30 seconds after login.
+local toldFollowed = {}
 function WC.TellTimeout(e, force)
 	if not e then return false end
+	if Followed(e) then
+		WC.RecordFollowed(e)
+		if force then
+			local k = Key(e.by) .. "#" .. tostring(e.seq)
+			if toldFollowed[k] then return false end
+			toldFollowed[k] = true
+		end
+	end
 	if not force and Now() - lastPopup < WC.POPUP_GAP then
 		ns.Print(Red(L.WATCHCHAT_REFUSED_LINE:format((tonumber(e.untilAt) or 0) == 0 and L.WATCHCHAT_UNTIL_LIFTED or Hour(e.untilAt),
 			WC.RoleText(e.role, true))))
@@ -1098,12 +1197,30 @@ function WC.TellTimeout(e, force)
 	return true
 end
 
--- Channels.Send, ChatRooms.Send, ArenaChat.Send: refused while timed out, and told why.
-function WC.RefuseSend()
+-- What keeps this character out of Olympus's chats now: "timeout" and a moderator's timeout (the
+-- one in force), "paused" and a chat warning's block (ChatStrikes.Block: a pause, or a hold until
+-- the team decides), or nil. The timeout first: it is the one he is told of and may appeal.
+function WC.ChatBlock()
 	local e = WC.SelfTimeout()
-	if not e then return nil end
-	WC.TellTimeout(e)
-	return e
+	if e then return "timeout", e end
+	local S = Live(ns.ChatStrikes)
+	local b = S and S.Block and S.Block()
+	if b then return "paused", b end
+	return nil
+end
+
+-- Channels.Send, Channels.SetPin, ChatRooms.Send, ArenaChat.Send: refused while timed out or a chat
+-- warning's block is on, and told why. The block and why ("timeout" or "paused"), or nil.
+function WC.RefuseSend()
+	local why, b = WC.ChatBlock()
+	if why == "timeout" then
+		WC.TellTimeout(b)
+		return b, why
+	elseif why == "paused" then
+		ns.ChatStrikes.TellBlock(b)
+		return b, why
+	end
+	return nil
 end
 
 -- Every other surface a sanction bars (WatchChat.Barred): what he cannot do, and until when.
@@ -1201,11 +1318,13 @@ end
 -- This character's testimony about his current guild timeout is not an actor's action. Bind
 -- the queued word to that same character, guild and exact timeout; a lift, replacement or
 -- expiry before the paced native send must not reannounce the old restriction to late peers.
+-- (Its own timeout alone: one that follows its BattleTag, TagFollow.lua, is another character's,
+-- and saying it here would tell every client that the two share a BattleTag.)
 local function SelfTimeoutPermit(e, msg)
 	local character, guild = ns.me, OwnGuild()
 	return function(owner, _, dist, _, payload)
 		if owner ~= WC or dist ~= "CHANNEL" or payload ~= msg then return false, "guard" end
-		local current = WC.SelfTimeout()
+		local current = ns.me and WC.TimeoutOf(ns.me, nil, true)
 		if not Same(ns.me, character) or not ns.IsMember() or OwnGuild() ~= guild or current ~= e
 			or current.scope ~= "G" or current.guild ~= guild or WC.EndOf(current) <= Clock() then return false, "revoked" end
 		local word = SelfWire({ op = "T", seq = current.seq, at = current.at, guild = current.guild,
@@ -1236,7 +1355,13 @@ local function Apply(a)
 		if not ok then return false, why end
 		if why == "repeat" or seen then return true, "repeat" end
 	elseif a.op == "U" then
-		if seen then return true, "repeat" end
+		if seen then
+			-- (TagFollow.lua) Its record kept until the followed timeout it frees him of would end,
+			-- whichever of the two came here first.
+			local _, via = WC.TimeoutOf(a.target)
+			if via then KeepLift(a) end
+			return true, "repeat"
+		end
 		KeepLift(a)
 		-- A lift from someone else that reaches this client's own timeout on him: its repeats stop
 		-- (a client that comes on later never hears it again from here).
@@ -1249,6 +1374,12 @@ local function Apply(a)
 		end
 	end
 	s.applied[id] = a.at
+	-- (The author, 2026-10-19.) An Olympus moderator's timeout on a player held by a chat warning
+	-- decides his case (ChatStrikes.Decided): the hold gives way to it. Never a guild's, nor a lift.
+	if a.op == "T" and a.scope == "O" and (tonumber(a.weight) or 0) >= LEVEL.mod then
+		local S = Live(ns.ChatStrikes)
+		if S and S.Decided then S.Decided("T", a.target, a.at, a.by) end
+	end
 	Record(a, words)
 	-- The punished player's own client: told; and, of a guild action, his own word on the channel.
 	if ns.me and Same(a.target, ns.me) and a.scope ~= "S" then
@@ -1334,8 +1465,9 @@ function WC.Act(op, target, opts)
 		a.untilAt = untilAt
 	elseif op == "U" then
 		-- Something this lift reaches (and its repeats last until what it lifted would have ended).
-		local e = WC.TimeoutOf(target)
-		if e and e.weight > weight then return false, "rank" end
+		-- (One through his BattleTag's follow reaches him with the follow's weight at most.)
+		local e, via, applied = WC.TimeoutOf(target)
+		if e and (via and applied or e.weight) > weight then return false, "rank" end
 		if not e and not opts.blind then return false, "none" end
 		-- (Blind: repeated as long as any timeout it may reach could last, a hold's 30 days.)
 		a.keep = e and WC.EndOf(e) or now + WC.HOLD_MAX
@@ -1350,6 +1482,11 @@ function WC.Act(op, target, opts)
 	if not applied then return false, why end
 	Send(dist, msg, "md:" .. seq, ActionPermit(a, msg, scope, dist))
 	Remember(a)
+	-- (TagFollow.lua) Our own timeout on a character: it follows his BattleTag where this client holds it.
+	if op == "T" and (scope == "O" or scope == "G") then
+		local TF = Live(ns.TagFollow)
+		if TF and TF.AfterSanction then ns.SafeCall("tag follow", TF.AfterSanction, "T", target, a.reason) end
+	end
 	return true, scope
 end
 
@@ -2134,24 +2271,16 @@ function WC.BlockedCounts(name)
 	return out, total
 end
 
--- The severe-insult block at send (empty until a word list is approved): whole
--- words, folded as the block terms fold them (Filter.WordsOf). Its category, or nil.
-function WC.Severe(text)
-	if next(WC.SEVERE) == nil then return nil end
-	local F = Live(ns.Filter)
-	for _, w in ipairs(F and F.WordsOf and F.WordsOf(text) or {}) do
-		if WC.SEVERE[w] then return WC.SEVERE[w] end
-	end
-	return nil
-end
-
--- Channels.Send, ChatRooms.Send: such a line is refused, the player told, and it is counted.
-function WC.RefuseSevere(text)
-	local cat = WC.Severe(text)
-	if not cat then return nil end
-	if ns.me then WC.CountBlocked(ns.me, "severe") end
-	ns.Print(Red(L.WATCHCHAT_SEVERE_REFUSED))
-	return cat
+-- The chat warnings' words (ChatStrikes.lua; its list ships empty: nothing is refused until the
+-- author adds the approved words) in what this character typed, before anything leaves
+-- (Channels.Send, Channels.SetPin, ChatRooms.Send, ArenaChat.Send): "severe" when refused (he was
+-- told, the line counted here among the blocked ones, never its words, and a warning given), or
+-- nil and the line to send: the raw line, or without its quote of another's line when only the
+-- quote holds such a word.
+function WC.RefuseSevere(raw, where)
+	local S = Live(ns.ChatStrikes)
+	if not S or not S.Refuse then return nil end
+	return S.Refuse(raw, where)
 end
 
 ---------------------------------------------------------------------------
@@ -2272,8 +2401,9 @@ function WC.Tick()
 		if not Same(d.target, ns.me) and mono - (tonumber(d.sent) or -math.huge) >= WC.DECISION_EVERY then WC.SendDecision(key) end
 	end
 	-- This character's current guild timeout, as his own client says it: repeated for late
-	-- reviewers, without the guild reason. It remains S testimony, never proof of its actor.
-	local e = WC.SelfTimeout()
+	-- reviewers, without the guild reason. It remains S testimony, never proof of its actor. (His
+	-- own alone, never one that follows his BattleTag: SelfTimeoutPermit.)
+	local e = WC.TimeoutOf(ns.me, nil, true)
 	if budget > 0 and e and e.scope == "G" and type(e.by) == "string" and CharName(e.by) == e.by
 		and Int(e.seq, 1, WC.MAX_SEQ) and Int(e.at, 1, WC.MAX_SEQ) and e.at <= Clock() + WC.DATE_AHEAD then
 		local now, last = math.floor(Clock()), s.ownTimeoutSent
@@ -2524,10 +2654,13 @@ function WC.Named(data, input, on)
 	return true
 end
 
--- The Chat tab's input hint and strip while timed out.
+-- The Chat tab's input hint and strip while timed out, or while a chat warning's block is on.
 function WC.StripText()
 	local e = WC.SelfTimeout()
-	if not e then return nil end
+	if not e then
+		local S = Live(ns.ChatStrikes)
+		return S and S.StripText and S.StripText() or nil
+	end
 	if (tonumber(e.untilAt) or 0) == 0 then return L.WATCHCHAT_STRIP_HOLD:format(WC.RoleText(e.role, true)) end
 	return L.WATCHCHAT_STRIP:format(Hour(e.untilAt), WC.RoleText(e.role, true))
 end
@@ -2584,7 +2717,8 @@ function WC.PageShown()
 	local V = Preview()
 	if V then return (W ~= nil and W.DeskShown and W.DeskShown() == true) or (V.Allows and V.Allows("judgments") == true) or false end
 	if not ns.IsMember() or WC.Barred("powers") then return false end
-	return (W ~= nil and W.DeskShown and W.DeskShown() == true) or CouncilSide()
+	-- (The Olympus moderators named too, since the chat warnings: their cases are here.)
+	return (W ~= nil and W.DeskShown and W.DeskShown() == true) or CouncilSide() or WC.InRoom(ns.me)
 end
 
 local function TimeoutRows(lines)
@@ -2742,6 +2876,9 @@ function WC.PageLines()
 	lines[#lines + 1] = { header = true, text = "|TInterface\\Icons\\INV_Misc_Eye_01:0|t " .. L.WATCHCHAT_PAGE }
 	lines[#lines + 1] = { text = Grey(L.WATCHCHAT_PAGE_SCOPE), gapAfter = true }
 	TimeoutRows(lines)
+	-- The chat warnings' cases sent to the team (ChatStrikes.Rows).
+	local S = Live(ns.ChatStrikes)
+	if S and S.Rows and WC.InRoom(ns.me) then S.Rows(lines) end
 	if desk and OwnGuild() then WatcherRows(lines) end
 	if CouncilSide() then
 		ModRows(lines)
@@ -2925,6 +3062,7 @@ function WC.Stats() return stats end
 
 function WC.ResetForTests()
 	wipe(rates); wipe(rateAll); wipe(rateSelf); wipe(purgeGrace); wipe(held); wipe(pages); wipe(printed); wipe(printedOrder)
+	wipe(toldFollowed)
 	lastPopup, listsPending, jitter = -math.huge, false, nil
 	for k in pairs(stats) do stats[k] = 0 end
 end
@@ -2933,9 +3071,13 @@ ns.On("DATA_CHANGED", function() if #held > 0 then WC.RetryHeld() end end)
 ns.On("LOGIN", function()
 	WC.Prune()
 	if ns.Every then ns.Every(60, "chat moderation", function() WC.Tick() end) end
-	-- Told at login while a timeout is on him (once the guild and the lists are known).
+	-- Told at login while a timeout is on him (once the guild and the lists are known), or while
+	-- a chat warning's hold waits for the team.
 	WC.after(30, "chat moderation notice", function()
 		local e = WC.SelfTimeout()
-		if e then WC.TellTimeout(e, true) end
+		if e then WC.TellTimeout(e, true) return end
+		local S = Live(ns.ChatStrikes)
+		local b = S and S.Block and S.Block()
+		if b and b.kind == "hold" then S.TellBlock(b, true) end
 	end)
 end)

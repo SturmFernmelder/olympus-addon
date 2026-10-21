@@ -220,7 +220,10 @@ test("chat: an ordinary member right-clicks another player's Olympus line, its w
 			f.input:SetText("answer from me"); f.input:Fire("OnEnterPressed")
 			eq(#sent, 1); eq(sent[1].tier, "A")
 			local quote, answer = w.CW.DecodeReply(sent[1].text)
-			eq(quote.who, ns.DisplayName(ns.me)); eq(quote.text, "my own words"); eq(answer, "answer from me")
+			-- (Changed in CH-04: the quote names its writer in full, Name-Realm, so a client on another
+			-- realm shows him as its own realm does and finds the line quoted; the box still shows the
+			-- name as this client does, above.)
+			eq(quote.who, ns.me); eq(quote.text, "my own words"); eq(answer, "answer from me")
 			eq(f.replyComposer:IsShown(), false); eq(f.input:GetText(), "")
 			-- A client updated without a restart (The Watch a stand-in): reply still works by itself.
 			rawset(ns, "Watch", { missing = true })
@@ -233,16 +236,239 @@ test("chat: an ordinary member right-clicks another player's Olympus line, its w
 	end)
 end)
 
+-- (Changed in CH-04: the prefix is "[reply @Name-Realm: quote] answer", one printable line; 1.2.5's
+-- "[reply @Name] quote" and a newline never survived the chats' cleaning, see below.)
 test("chat replies: the compatible prefix round-trips safely and leaves ordinary text unchanged", function()
 	WithWindow(function(w)
 		local reply = { who = "Rude Guy-Realm", text = "a referenced line with [brackets]\nand controls\t" }
 		local wire = w.CW.EncodeReply(reply, "new answer")
-		assert(wire:find("^%[reply @Rude Guy%-Realm%] "), wire)
+		assert(wire:find("^%[reply @Rude Guy%-Realm: "), wire)
+		assert(not wire:find("%c"), "no control byte: Codec.SanitizeChat would drop it")
+		eq(ns.Codec.SanitizeChat(wire), wire, "the chats' cleaning leaves it as it is")
 		local decoded, body = w.CW.DecodeReply(wire)
 		eq(decoded.who, "Rude Guy-Realm"); eq(decoded.text, "a referenced line with brackets and controls")
 		eq(body, "new answer")
 		local none, plain = w.CW.DecodeReply("ordinary line")
 		eq(none, nil); eq(plain, "ordinary line")
+		-- 1.2.5's form, as it arrived (its newline already gone): ordinary text.
+		none, plain = w.CW.DecodeReply("[reply @Rude Guy] a quotenew answer")
+		eq(none, nil); eq(plain, "[reply @Rude Guy] a quotenew answer")
+		-- A history line's sender names the writer in full, whatever the name shown.
+		wire = w.CW.EncodeReply({ sender = "Quoted Friend", who = "Quoted Friend", text = "hello" }, "hi")
+		eq(wire, "[reply @Quoted Friend-Realm: hello] hi")
+	end)
+end)
+
+-- Two bugs of 1.2.5's quote, each fixed with CH-04: a cut inside a two-byte character left its first
+-- byte behind (a broken character before the "..."), and a link came out as its code ("cff1eff00
+-- Hitem:14342...h Mooncloth hr") instead of its name.
+test("chat replies (CH-04): a quote is cut before a character, never inside one, and shows a link by its name", function()
+	WithWindow(function(w)
+		eq(w.CW.ReplyPart("ab\195\169 and more words", 3), "ab...")
+		eq(w.CW.ReplyPart("ab\195\169 and more words", 4), "ab\195\169...")
+		eq(w.CW.ReplyPart("|cff1eff00|Hitem:14342::::::::60:::::|h[Mooncloth]|h|r for sale", 60), "Mooncloth for sale")
+		eq(w.CW.ReplyPart("a || pipe", 60), "a pipe", "a typed pipe goes, as Codec.Plain takes it")
+	end)
+end)
+
+-- CH-04 (the author, 2026-10-19: "Quando você responde uma mensagem, ela aparece menorzinha em
+-- cima"). The real way out for the three channels: the Chat tab's Enter, Channels.Send, the wire,
+-- Comm (its lane the only stand-in) and the line's arrival at another member's Channels.Receive.
+local function WithChannelLane(fn)
+	local C, Comm = ns.Channels, ns.Comm
+	local saved = { ready = Comm.ChannelReady, room = Comm.ChatRoom, send = Comm.SendChat, warned = ns.db.chatWarned }
+	local at, was
+	for i = 1, 200 do
+		local n, v = debug.getupvalue(C.Send, i)
+		if n == nil then break end
+		if n == "lastSend" then at, was = i, v break end
+	end
+	assert(at, "(Channels.Send's lastSend)")
+	local wire = {}
+	local ok, err = pcall(function()
+		debug.setupvalue(C.Send, at, -math.huge) -- (an earlier test's line is not "too fast" for this one)
+		ns.db.addonChat, ns.db.chatWarned = true, { A = true }
+		Comm.ChannelReady = function() return true end
+		Comm.ChatRoom = function() return 3 end
+		Comm.SendChat = function(msg, done) wire[#wire + 1] = msg; done(true); return true end
+		fn(wire)
+	end)
+	debug.setupvalue(C.Send, at, was)
+	Comm.ChannelReady, Comm.ChatRoom, Comm.SendChat, ns.db.chatWarned = saved.ready, saved.room, saved.send, saved.warned
+	if not ok then error(err, 0) end
+end
+local function Shown(f, body)
+	local out = {}
+	for _, b in ipairs(f.bubbles) do if b:IsShown() and b.body:GetText() == body then out[#out + 1] = b end end
+	return out
+end
+
+-- The bug: 1.2.5 put a "\n" between the quoted words and the answer. Codec.SanitizeChat drops every
+-- control byte in Channels.Send itself (and again on arrival), so the quote and the answer left
+-- glued together as one plain line, and no client ever drew a reply: the test above mocked
+-- Channels.Send and never saw it.
+test("chat replies (CH-04): a reply sent through Channels.Send reaches another member as a smaller quote above the answer", function()
+	WithWindow(function(w)
+		WithChannelLane(function(wire)
+			local C = ns.Channels
+			local clock = 2e6
+			GetTime = function() return clock end
+			ns.rdb.chat = { A = { { t = 1800000000, sender = "Quoted Friend-Realm", guild = "Olympus II", text = "where do we meet tonight?" } } }
+			local f = w.CW.Open("A")
+			local quoted = assert(Shown(f, "where do we meet tonight?")[1], "the line to answer")
+			eq(w.CW.BeginReply(quoted), true)
+			f.input:SetText("at the bank, after the raid")
+			f.input:Fire("OnEnterPressed")
+			eq(#wire, 1, "sent: " .. table.concat(w.printed, " / "))
+			-- What travels: the quote and the answer apart, each whole, on one printable line.
+			local m = assert(ns.Codec.DecodeChat(wire[1]), wire[1])
+			assert(not m.text:find("%c"), "no control byte left to strip")
+			local quote, answer = w.CW.DecodeReply(m.text)
+			assert(quote, "the line as it arrives still reads as a reply: " .. m.text)
+			eq(quote.who, "Quoted Friend-Realm", "the writer's full name: each client shows it as its realm does")
+			eq(quote.text, "where do we meet tonight?"); eq(answer, "at the bank, after the raid")
+			-- Another member's line, as it arrives from the channel (he is in our roster, a member).
+			clock = clock + 5
+			local byName = ns.Roster.byName
+			ns.Roster.byName = { ["Other Member-Realm"] = 3 }
+			local shown, why = C.Receive("CHANNEL", "Other Member-Realm", wire[1], clock)
+			ns.Roster.byName = byName
+			eq(shown, true, tostring(why))
+			w.CW.Render()
+			-- The sender's own bubble (the echo of what left) and the other member's: the answer alone in
+			-- the bubble's words, the quote over it, in the small font, with its writer.
+			local bubbles = Shown(f, "at the bank, after the raid")
+			eq(#bubbles, 2, "ours and his")
+			for _, b in ipairs(bubbles) do
+				eq(b.replyWho:IsShown(), true); eq(b.replyText:IsShown(), true); eq(b.replyBg:IsShown(), true)
+				eq(b.replyWho:GetText(), "Quoted Friend"); eq(b.replyText:GetText(), "where do we meet tonight?")
+				eq(b.replyText.font, "GameFontHighlightSmall"); eq(b.body.font, "ChatFontNormal", "smaller than the answer")
+				local quoteTop, bodyTop = -b.replyBg:Anchor("TOPLEFT")[5], -b.body:Anchor("TOPLEFT")[5]
+				assert(quoteTop < bodyTop, "the quote above the answer")
+			end
+			eq(bubbles[1].mine ~= bubbles[2].mine, true, "one ours, one his")
+		end)
+	end)
+end)
+
+-- CH-04: anyone can type the prefix, so the quote is drawn only over a line this client holds, by
+-- the writer it names, with those words. Else the reply shows as written, prefix and all: no words
+-- put in anyone's mouth. The line it quotes deleted by a moderator: its words stay gone.
+test("chat replies (CH-04): the quote shows only over a line this client holds; a typed prefix quotes nobody, a deleted line's words stay gone", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = rawget(ns, "WatchChat")
+		local lines = {}
+		C.History = function(t) if t == "A" then return lines end return {} end
+		rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+			CanModerateAny = function() return false end, CanModerateEntry = function() return false end,
+			TimeoutOf = function() return nil end, DeletedTip = function() end,
+			DeletedBody = function() return "|cff808080(deleted by a moderator)|r" end })
+		local ok, err = pcall(function()
+			local function Line(t, sender, text, extra)
+				local e = { t = 1800000000 + t, sender = sender, guild = "Olympus II", text = text }
+				for k, v in pairs(extra or {}) do e[k] = v end
+				lines[#lines + 1] = e
+				return e
+			end
+			local function Reply(t, sender, to, answer)
+				return Line(t, sender, w.CW.EncodeReply({ sender = to.sender, text = to.text }, answer))
+			end
+			local long = "a long line about the raid tonight, the bank and the guild's dues, much longer than any quote can be"
+			local friend = Line(1, "Quoted Friend-Realm", "where do we meet tonight?")
+			local said = Line(2, "Quoted Friend-Realm", long)
+			local far = Line(3, "Far Away-OtherRealm", "hello from afar")
+			local mine = Line(4, ns.me, "my own words", { mine = true })
+			local rude = Line(5, "Quoted Friend-Realm", "rude words", { del = true, delAt = 1800000005, delRole = "council" })
+			Reply(10, "Other Member-Realm", friend, "at the bank")
+			Reply(11, "Other Member-Realm", said, "agreed")
+			Reply(12, "Other Member-Realm", far, "hi there")
+			Reply(13, "Other Member-Realm", mine, "you said it")
+			Reply(14, "Other Member-Realm", rude, "how dare you")
+			-- Typed by hand: a quote of words he never said, and of a line this client never had.
+			Line(15, "Forger-Realm", "[reply @Quoted Friend-Realm: I sold the guild bank] he admits it")
+			Line(16, "Forger-Realm", "[reply @Quoted Friend-Realm: where do we meet] a cut that is no cut")
+			local f = w.CW.Open("A")
+			local function Quote(body)
+				local b = assert(Shown(f, body)[1], "a bubble for " .. body)
+				return b.replyWho:IsShown() and b.replyWho:GetText() or nil, b.replyText:IsShown() and b.replyText:GetText() or nil, b
+			end
+			local who, words = Quote("at the bank")
+			eq(who, "Quoted Friend"); eq(words, "where do we meet tonight?")
+			who, words = Quote("agreed")
+			eq(who, "Quoted Friend"); assert(words and words:sub(-3) == "..." and long:find(words:sub(1, -4), 1, true) == 1, tostring(words))
+			eq(#words <= w.CW.REPLY_QUOTE + 3, true, "the quote cut short")
+			who, words = Quote("hi there")
+			eq(who, "Far Away-OtherRealm", "another realm's writer, with his realm"); eq(words, "hello from afar")
+			who, words = Quote("you said it")
+			eq(who, ns.L.CHATWIN_YOU, "a quote of ours: You"); eq(words, "my own words")
+			who, words = Quote("how dare you")
+			eq(who, "Quoted Friend"); eq(words, "|cff808080(deleted by a moderator)|r", "the deleted line's words are not drawn again")
+			-- The typed prefixes: shown as written, no quote.
+			eq(Quote("[reply @Quoted Friend-Realm: I sold the guild bank] he admits it"), nil)
+			eq(Quote("[reply @Quoted Friend-Realm: where do we meet] a cut that is no cut"), nil, "a part of his words without the cut's ...: no match")
+			-- The quoted line leaves this client's history (the oldest of a channel go): the reply shows as written.
+			table.remove(lines, 1)
+			w.CW.Render()
+			eq(#Shown(f, "at the bank"), 0, "no longer drawn as a reply")
+			local _, _, b = Quote(w.CW.EncodeReply({ sender = "Quoted Friend-Realm", text = "where do we meet tonight?" }, "at the bank"))
+			eq(b.replyBg:IsShown(), false)
+		end)
+		rawset(ns, "WatchChat", saved)
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- CH-04: a room keeps 150 bytes of a line (ChatRooms.TEXT_MAX: Guild, the role rooms, a deal's and a
+-- squad's), and 1.2.5's prefix alone could take as many: the room's cut then took the answer. The
+-- quote gives way instead, and an answer that leaves it no room is kept in the box, with why. Here
+-- through ChatRooms.Send's Guild room, to the game's guild chat (the only stand-in: the game's send).
+test("chat replies (CH-04): in a room the quote gives way to the answer, and an answer too long to reply with stays in the box", function()
+	WithWindow(function(w)
+		local R = ns.ChatRooms
+		local savedCI, said = C_ChatInfo, {}
+		C_ChatInfo = setmetatable({ SendChatMessage = function(text, lane) said[#said + 1] = { text = text, lane = lane } end },
+			{ __index = savedCI or {} })
+		local ok, err = pcall(function()
+			ns.db.chatRooms = true
+			R.Reset()
+			local clock = 3e6
+			GetTime = function() return clock end
+			local quoted = { t = 1800000000, sender = "Quoted Friend-Realm", guild = "Olympus II",
+				text = "who brings the flasks and the food for the raid on Thursday, and who keeps the bank tab?" }
+			R.History = function(id) if id == "guild" then return { quoted } end return {} end
+			local f = w.CW.Open("A")
+			eq(w.CW.SelectLogical("guild"), true); eq(w.CW.Tier(), "guild")
+			w.CW.Render()
+			eq(w.CW.BeginReply(assert(Shown(f, quoted.text)[1], "the line to answer")), true)
+			local answer = "I bring the flasks, the cook brings the food, and the bank tab stays with the officers this week."
+			f.input:SetText(answer); f.input:Fire("OnEnterPressed")
+			eq(#said, 1, "sent: " .. table.concat(w.printed, " / ")); eq(said[1].lane, "GUILD")
+			assert(#said[1].text <= R.TEXT_MAX, #said[1].text .. " bytes")
+			local quote, body = w.CW.DecodeReply(said[1].text)
+			assert(quote, said[1].text)
+			eq(body, answer, "the answer whole"); eq(quote.who, "Quoted Friend-Realm")
+			assert(quote.text:sub(-3) == "..." and quoted.text:find(quote.text:sub(1, -4), 1, true) == 1, quote.text)
+			eq(f.input:GetText(), ""); eq(f.replyComposer:IsShown(), false)
+			-- Too long to go with a quote: nothing sent, the words and the reply kept, the room says why.
+			w.CW.BeginReply(Shown(f, quoted.text)[1])
+			local long = answer .. " And the dues are due on Sunday."
+			f.input:SetText(long); f.input:Fire("OnEnterPressed")
+			eq(#said, 1, "not sent"); eq(f.input:GetText(), long); eq(f.replyComposer:IsShown(), true)
+			w.CW.Render()
+			local why = ns.L.CHATWIN_NOT_SENT:format(ns.L.CHATWIN_WHY_REPLY_LONG)
+			local found = false
+			for _, r in ipairs(f.rows) do if r:IsShown() and (r.text:GetText() or ""):find(why, 1, true) then found = true end end
+			eq(found, true, "the room says why")
+			-- The reply cancelled (its x), the same words go, alone.
+			f.replyComposer.cancel:Click()
+			clock = clock + R.SEND_GAP
+			f.input:Fire("OnEnterPressed")
+			eq(#said, 2); eq(said[2].text, long, "as any line of the room")
+			eq(w.CW.DecodeReply(said[2].text), nil, "no quote")
+		end)
+		C_ChatInfo = savedCI
+		if not ok then error(err, 0) end
 	end)
 end)
 
@@ -756,6 +982,113 @@ test("Chat tab (1.2.4): a provider's room refusing a line gets no note from the 
 			eq(sent, 1, "the provider was asked")
 			eq(f.input:GetText(), "a fellow-member price?", "refused: kept in the box")
 			eq(room.RowWith(f, room.NOT_SENT), nil, "no note from the page: the provider answers for itself")
+		end)
+	end)
+end)
+
+-- The chat warnings (ChatStrikes.lua; the author, 2026-10-19: "apaga e esconde a mensagem que a
+-- pessoa mandou"): a line refused for a warning ("severe") leaves the Chat tab's box with its reply
+-- and lets the keyboard go (the pop-up's OK takes the next Enter); a line refused while paused keeps
+-- both, as every other refusal. The same in an embedded pane (the Bones pane), whose composer, while
+-- paused, says why instead of doing nothing.
+test("watch: chat moderation: strikes: the Chat tab and an embedded pane: a struck line leaves the box with its reply and lets the keyboard go; a paused one keeps both; a paused pane says why", function()
+	WithWindow(function(w)
+		local C = ns.Channels
+		local saved = rawget(ns, "WatchChat")
+		local result, told = { false, "severe" }, 0
+		C.Send = function() return result[1], result[2] end
+		rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+			CanModerateAny = function() return false end, CanModerateEntry = function() return false end,
+			RefuseSend = function() told = told + 1 return {}, "paused" end })
+		local ok, err = pcall(function()
+			local f = w.CW.Open("A")
+			local function Try(box, owner, why)
+				result = { false, why }
+				owner.reply = { who = "Other", sender = "Other-Realm", text = "their line" }
+				w.CW.UpdateReplyComposer(owner)
+				box:SetText("typed words"); box.focused = true
+				box:Fire("OnEnterPressed")
+			end
+			Try(f.input, f, "severe")
+			eq(f.input:GetText(), "", "the struck line leaves the box"); eq(f.reply, nil, "its reply too")
+			eq(f.input.focused, false, "the keyboard goes")
+			Try(f.input, f, "paused")
+			eq(f.input:GetText(), "typed words", "a paused line stays"); assert(f.reply, "with its reply")
+			eq(f.input.focused, true, "and the cursor (mouse and keyboard)")
+			WithGamepadUI(true, function()
+				Try(f.input, f, "severe")
+				eq(f.input:GetText(), ""); eq(f.input.focused, false, "the gamepad UI: the box lets go")
+			end)
+			-- An embedded pane (the Bones pane's).
+			local writable, sent = true, {}
+			local p = w.CW.CreateEmbedded(f, { room = function() return "r1" end, lines = function() return {} end,
+				maySend = function() return writable end, label = function() return "Bones" end,
+				send = function(text) sent[#sent + 1] = text return result[1], result[2] end })
+			Try(p.input, p, "severe")
+			eq(#sent, 1); eq(p.input:GetText(), ""); eq(p.reply, nil); eq(p.input.focused, false)
+			Try(p.input, p, "paused")
+			eq(p.input:GetText(), "typed words"); assert(p.reply)
+			writable = false
+			Try(p.input, p, "paused")
+			eq(#sent, 2, "nothing sent while it may not"); eq(told, 1, "told why")
+		end)
+		rawset(ns, "WatchChat", saved)
+		if not ok then error(err, 0) end
+	end)
+end)
+
+-- (The review: the Chat tab's own rooms (Guild, the role rooms, the Church's) put a "not sent" note
+-- under a refused line, and a struck one must leave none: nothing of it stays. The test above swaps
+-- Channels.Send, so it never reached ChatRooms' branch, nor a fight room's, ArenaChat's.) This
+-- harness's box fires no OnTextChanged on SetText: the note is the guard's to keep out.
+test("watch: chat moderation: strikes: the Chat tab's own rooms and a fight room: a struck line leaves the box, its reply and the keyboard, with no note in the room; a paused one stays, and the room says why", function()
+	WithWindow(function(w)
+		WithChurchRoom(w, function(room, R)
+			local saved, savedArena = rawget(ns, "WatchChat"), rawget(ns, "ArenaChat")
+			local result, send = { false, "severe" }, R.Send
+			rawset(ns, "WatchChat", { StripText = function() return nil end, RecordLines = function() return {} end,
+				CanModerateAny = function() return false end, CanModerateEntry = function() return false end })
+			R.Send = function() return result[1], result[2] end
+			local ok, err = pcall(function()
+				local L = ns.L
+				local f = w.CW.Open("A")
+				local function Try(why)
+					result = { false, why }
+					f.reply = { who = "Other", sender = "Other-Realm", text = "their line" }
+					w.CW.UpdateReplyComposer(f)
+					f.input:SetText("typed words"); f.input.focused = true
+					f.input:Fire("OnEnterPressed")
+					w.CW.Render()
+				end
+				eq(w.CW.SelectLogical("church"), true)
+				eq(R.Own("church"), true, "a room of the page's own")
+				Try("severe")
+				eq(f.input:GetText(), "", "the struck line leaves the box"); eq(f.reply, nil, "its reply too")
+				eq(f.input.focused, false, "the keyboard goes")
+				eq(room.RowWith(f, room.NOT_SENT), nil, "no note in the room")
+				Try("paused")
+				eq(f.input:GetText(), "typed words", "a paused line stays"); assert(f.reply, "with its reply")
+				assert(room.RowWith(f, L.CHATWIN_NOT_SENT:format(L.CHATWIN_WHY_PAUSED)), "the room says why")
+				-- A fight room: its line goes through ArenaChat.Send alone.
+				local sent = 0
+				local spec = { id = "Fstrike-1", key = "arena:Fstrike-1", kind = "fight", audience = "duel", access = "participants",
+					title = "Fixture fight", phase = "live", active = true, recoverable = true, supportsComments = true }
+				ns.ArenaChat = { Open = function() return true end, Lines = function() return {} end, Rooms = function() return { spec } end,
+					Close = function() return true end, Send = function() sent = sent + 1 return result[1], result[2] end }
+				local pane = assert(w.CW.OpenDynamicRoom(spec))
+				eq(pane, f)
+				R.Send = function() error("a fight room's line went to ChatRooms") end
+				Try("severe")
+				eq(sent, 1, "ArenaChat's send")
+				eq(f.input:GetText(), ""); eq(f.reply, nil); eq(f.input.focused, false)
+				eq(room.RowWith(f, room.NOT_SENT), nil)
+				Try("paused")
+				eq(sent, 2); eq(f.input:GetText(), "typed words")
+			end)
+			R.Send = send
+			rawset(ns, "WatchChat", saved)
+			rawset(ns, "ArenaChat", savedArena)
+			if not ok then error(err, 0) end
 		end)
 	end)
 end)

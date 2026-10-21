@@ -996,7 +996,7 @@ test("1.2 the arena's foundation: an idle client: no arena timer or frame, only 
 	NoErrors(w)
 end)
 
-test("1.2 the arena's foundation: /oly arena loads the companion with the handoff; its registry, its heavy tables kept across a login where saved data persists", function()
+test("1.2 the arena's foundation: /oly arena loads the Olympus Arena module with the handoff; its registry, its heavy tables kept across a login where saved data persists", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
 	w:As(a, function() a.slashes.OLYMPUS("arena") end)
@@ -1069,7 +1069,7 @@ test("1.2 the arena's foundation: LoadUI refuses in combat and says why for DISA
 	NoErrors(w)
 end)
 
-test("1.2 the arena's foundation: the companion: its TOC (load on demand, Olympus's version and dependency, its saved variables, every file there), each file behind the host line", function()
+test("1.2 the arena's foundation: the Olympus Arena module: its TOC (load on demand, Olympus's version and dependency, its saved variables, every file there), each file behind the host line", function()
 	local toc = Read(H.ARENA_DIR .. "Olympus_Arena.toc")
 	local core = Read(H.ADDON_DIR .. "Olympus.toc")
 	eq(toc:match("## Version:%s*(%S+)"), core:match("## Version:%s*(%S+)"))
@@ -1104,15 +1104,17 @@ print("ArenaNet: the registry, the source rules, the hooks")
 -- winners for the Games tab's rankings: only the bank knows whose tickets they are), and the
 -- games' ledger's AY (1.1.6: a finished game's record, any game, from its players to the auditors;
 -- ArenaLedger's, as Bone Throw's KW was before the ledger took every kind of game), and (1.2.3)
--- the duels' signed halves AX (ArenaLedger's, in Comm.lua's list as every new type).
+-- the duels' signed halves AX (ArenaLedger's, in Comm.lua's list as every new type), and (1.2.6,
+-- changed on purpose: the author's "todos os rankings precisam fazer o relay") the shared records'
+-- RV, a live holder's signed validation of one record (Records'), which takes the count to 76.
 local SPEC_TYPES = {
 	ArenaNet = "EP", ArenaChat = "EC EM", ArenaTest = "ER EH", Wallet = "ZH ZE ZN ZG ZD ZK ZC ZW ZS ZQ ZL ZJ", Debts = "ZT ZX ZY ZR ZF",
 	Stakes = "ZA ZV", Markets = "BM BO BS BK BV", MarketBank = "BF", ArenaFights = "AF AG AC AW AR AS AN", ArenaLedger = "AE AB AQ AV AH AY AX",
 	ArenaTourney = "AT AD", ArenaProfile = "AP", HonorsNet = "IL ID IO", FarkleTable = "KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD KL",
-	ArenaMatch = "AM", Lottery = "LW", ArenaRoles = "AU", Records = "RK RD RA RR RS RT",
+	ArenaMatch = "AM", Lottery = "LW", ArenaRoles = "AU", Records = "RK RD RA RR RV RS RT",
 }
 
-test("1.2 the arena's foundation: the registry: Arena.TYPES names all 75 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
+test("1.2 the arena's foundation: the registry: Arena.TYPES names all 76 types by owner; Comm.lua lists all but runtime KL; a file registers only its own", function()
 	local w = World.New()
 	local a = w:Client("Lida Fenn")
 	local src = Read(H.ADDON_DIR .. "Comm.lua")
@@ -1142,12 +1144,12 @@ test("1.2 the arena's foundation: the registry: Arena.TYPES names all 75 types b
 			eq(a.ns.Arena.TYPES[kind], owner, kind .. " in Arena.TYPES")
 		end
 	end
-	eq(n, 75)
-	eq(legacy, 74)
+	eq(n, 76)
+	eq(legacy, 75)
 	for kind in pairs(listed) do assert(spec[kind], kind .. " in Comm.lua is no arena type") end
 	local m = 0
 	for kind in pairs(a.ns.Arena.TYPES) do m = m + 1; assert(spec[kind], kind .. " is not in the design's list") end
-	eq(m, 75)
+	eq(m, 76)
 	-- Registered only by their owners' files, through Arena.Handle, with a literal.
 	for _, file in ipairs(World.ARENA_FILES) do
 		local code = Read(H.ADDON_DIR .. file .. ".lua"):gsub("%-%-[^\n]*", "")

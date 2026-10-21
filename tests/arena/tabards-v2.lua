@@ -315,3 +315,60 @@ test("1.2.0 tabards v2: two ordinary members of the King's guild cannot put anyo
 		end)
 	end)
 end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): the King's collector lease said he was online
+-- every 8 minutes, and members' clients whispered him at once; a member's own report and a nearby
+-- one say their sender is online to the King's client.
+test("1.2.5.1 tabards v2: while the quiet presence is on, no collector lease, own report or nearby report leaves; the beat brings them back once off", function()
+	local T, comm, now, quiet = ns.TabardsV2, FakeComm(), 40000, false
+	T.Reset()
+	With({
+		db = {}, rdb = {}, Comm = comm, King = KingStub(true), me = "Theking-Realm", realm = "Realm",
+		Now = function() return now end, IsMember = function() return true end,
+		QuietPresence = function() return quiet end,
+	}, function()
+		Globals({ GetGuildInfo = function() return "Olympus" end }, function()
+			assert(T.Announce(true))
+			eq(#comm.sent, 1)
+			quiet = true
+			now = now + T.LEASE_EVERY
+			T.Tick()
+			eq(T.Announce(true), false, "not even a forced one")
+			eq(#comm.sent, 1, "no lease while it is on")
+			quiet = false
+			T.Tick()
+			eq(#comm.sent, 2, "the beat's lease once off")
+			assert(comm.sent[2].msg:find("^U2~2~"), comm.sent[2].msg)
+		end)
+	end)
+	T.Reset()
+	comm = FakeComm()
+	With({
+		db = {}, rdb = {}, Comm = comm, King = KingStub(false), me = "Councillor-Realm", realm = "Realm",
+		Now = function() return now end, IsMember = function() return true end,
+		IsKingCharacter = function(name) return ns.ShortName(name) == "Theking" end,
+		QuietPresence = function() return quiet end,
+	}, function()
+		Globals({
+			GetGuildInfo = function() return "Olympus" end,
+			UnitLevel = function() return 60 end,
+			GetInventoryItemID = function(_, slot) if slot == 19 then return 5976 end end,
+			INVSLOT_TABARD = 19,
+		}, function()
+			T.SetConsent("self", true); T.SetConsent("nearby", true)
+			quiet = true
+			-- The King's lease is heard (a read): no report goes to it.
+			assert(T.HandleLease("CHANNEL", "Theking-Realm", "U2~2~lease3~600~Olympus"))
+			eq(T.SendSelf(true), false)
+			eq(T.Observe({ name = "Subject-Realm", guild = "Olympus II", level = 60, status = "NONE" }, true), false)
+			eq(#comm.sent, 0, "nothing whispered to the King while it is on")
+			quiet = false
+			now = now + 60 -- (the next beat, while the King's lease still holds)
+			T.Tick()
+			eq(#comm.sent, 1, "his own report on the beat once off")
+			assert(comm.sent[1].msg:find("^U3~2~lease3~"), comm.sent[1].msg)
+			assert(T.Observe({ name = "Subject-Realm", guild = "Olympus II", level = 60, status = "NONE" }, true))
+			assert(comm.sent[2].msg:find("^U4~2~lease3~"), comm.sent[2].msg)
+		end)
+	end)
+end)

@@ -56,13 +56,17 @@ local hooked = false -- Menu.ModifyMenu called for every menu above
 -- frame), locked (the game holds addon messages now: a line that sends is shown greyed) }.
 -- `order`: lower first (Versions.lua 10, the Watch's report 30, the author's lines 50, later additions after them). The same key again
 -- replaces its entry (a file loaded twice); no build takes it off.
-function PlayerMenu.Add(key, build, order)
+-- opts.olympus (1.2.5.1): Olympus's own lines (Report to Olympus, the Arena's, the Church's), only
+-- for a player this client knows to be in Olympus (PlayerMenu.KnownOlympus); the others (the
+-- version, Tell them about Olympus: recruiting) for anyone.
+function PlayerMenu.Add(key, build, order, opts)
 	if type(key) ~= "string" then return false end
 	for i = #entries, 1, -1 do
 		if entries[i].key == key then table.remove(entries, i) end
 	end
 	if type(build) ~= "function" then return false end
-	entries[#entries + 1] = { key = key, order = tonumber(order) or 100, build = build }
+	entries[#entries + 1] = { key = key, order = tonumber(order) or 100, build = build,
+		olympus = type(opts) == "table" and opts.olympus == true }
 	table.sort(entries, function(a, b)
 		if a.order ~= b.order then return a.order < b.order end
 		return a.key < b.key
@@ -121,6 +125,36 @@ function PlayerMenu.Target(which, ctx, allowSelf)
 	if ctx.isSelf and not self then return nil end
 	if self and not allowSelf then return nil end
 	return { name = name, which = which, unit = unit, locked = ns.ChatLocked(), self = self or nil }
+end
+
+-- 1.2.5.1 (the owner, right-clicking a portrait: Olympus's lines "even for those who are not in
+-- Olympus"): whether this client knows `name` to be in an Olympus guild, from what it already holds
+-- (opening a menu sends nothing): the unit's guild as the game gives it, our roster, the guild our
+-- last /who showed, his line on the Olympus channels this session, the guild his own Olympus
+-- messages spoke for, the signed manifest. Unknown is no.
+function PlayerMenu.KnownOlympus(name, unit)
+	if type(unit) == "string" and unit ~= "" and type(GetGuildInfo) == "function" then
+		local ok, guild = pcall(GetGuildInfo, unit)
+		if ok and not Secret(guild) and type(guild) == "string" and guild ~= "" then return ns.IsFederation(guild) == true end
+	end
+	if type(name) ~= "string" or name == "" then return false end
+	local R = ns.Roster
+	if R and type(R.RankOf) == "function" and R.RankOf(name) ~= nil then return true end
+	local W = ns.Who
+	if type(W) == "table" and type(W.SeenGuild) == "function" then
+		local guild, ago = W.SeenGuild(name)
+		if type(guild) == "string" and type(ago) == "number" and ago < 1800 then return guild ~= "" and ns.IsFederation(guild) == true end
+	end
+	-- His line heard on the Olympus channels this session, for an Olympus guild (Channels.SpokeFor):
+	-- once the signed leadership boundary is enforced, his line claims nothing (Channels.VerifiedLevel).
+	local C = ns.Channels
+	local spoke = type(C) == "table" and type(C.SpokeFor) == "function" and C.SpokeFor(name) or nil
+	if type(spoke) == "string" and ns.IsFederation(spoke) == true then return true end
+	local D = ns.Data
+	local claimed = type(D) == "table" and type(D.ClaimedGuild) == "function" and D.ClaimedGuild(name) or nil
+	if type(claimed) == "string" then return ns.IsFederation(claimed) == true end
+	local A = ns.Authority
+	return type(A) == "table" and type(A.Role) == "function" and A.Role(name) ~= nil
 end
 
 -- Profiles use the main window, not the Games window. Opening your own menu offers only this
@@ -182,15 +216,17 @@ function PlayerMenu.Build(which, root, ctx)
 	if not ns.IsMember() then return 0 end
 	local target = PlayerMenu.Target(which, ctx, true)
 	if not target then return 0 end
+	-- (1.2.5.1) The Olympus window's own rows list Olympus players: every line there.
+	target.olympus = target.self == true or which == PlayerMenu.ROW or PlayerMenu.KnownOlympus(target.name, target.unit)
 	local menu = Wrap(root)
-	if ns.UI and type(ns.UI.OpenPlayerProfile) == "function" then
+	if target.olympus and ns.UI and type(ns.UI.OpenPlayerProfile) == "function" then
 		menu.Button(L.ARENA_MENU_PROFILE, function() PlayerMenu.OpenProfile(target.name) end,
 			L.ARENA_MENU_PROFILE, L.ARENA_MENU_PROFILE_TIP, true)
 		target.profileAdded = true
 	end
 	if target.self then return menu.count end
 	for _, e in ipairs(entries) do
-		ns.SafeCall("player menu " .. e.key, e.build, target, menu)
+		if not e.olympus or target.olympus then ns.SafeCall("player menu " .. e.key, e.build, target, menu) end
 	end
 	return menu.count
 end

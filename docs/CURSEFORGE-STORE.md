@@ -29,12 +29,12 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
+- **1.3.2**: Correction: explicitly approximate Census people counts, preserve accepted Treasury rows,
+  fix full-suite ordering regressions and export consented Companion identity evidence.
 - **1.2.5.1**: Hotfix: officers can return a guild separated by a mismatched private realm key to the
   public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
 - **1.2.5**: Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,
   safer shared rankings and relay queues, and predictable Most Wanted list expansion.
-- **1.2.3**: The King's stream fixes; the Chat tab's memory; guild masters' decrees to their own guild; Most Wanted
-  from members' own kills and deaths, bounties by office and level; the missionaries' crook
 
 Every version's notes are in the [GitHub releases](https://github.com/dnl-gentile/olympus-addon/releases). This page is the short one for CurseForge: the [README](https://github.com/dnl-gentile/olympus-addon#olympus) has every section in full.
 
@@ -46,7 +46,7 @@ and hears nothing of the army, but for the author's signed list below, over its 
 The only thing it offers there is the **Join Olympus**
 screen described below, and its own few addon whispers are the only ones it sends or hears
 there (1.1: which guild to ask, the answer, and your request, each to or from the one member
-concerned).
+concerned). Using it requires accepting its terms, the Olympus Accord, which shares your BattleTag with Olympus's staff only.
 
 **Approved guilds (1.1).** A guild of Asmon's Olympus whose name the rule leaves out (it leaves
 Olympian and Olympia out on purpose) counts as an Olympus guild once the author names it in his
@@ -241,24 +241,7 @@ off` stops the requests, `/oly layerhelp on` also forgets the answer to the King
 window, `/oly layerauto on` invites them without the window. Helpers must be in the same zone
 as the layer they are on, and the King himself is never asked.
 
-Layers are known from the members who share their zone and layer (see Privacy, below):
-the more share, the better hopping works. Asking works either way, and says on the channel
-the zone you are in and the layer you want. If the King's own layer announcement has not
-arrived yet, clicking his hop line sends one discovery question on the Olympus channel while his crown is visible.
-Clients that can see his exact nameplate keep that fact private until the question; eligible
-helpers answer the asker alone, and two independent answers must agree before the ordinary
-layer-hop ask begins. A lone or conflicting answer moves nobody. Turning location sharing,
-layer help or the crown off cancels a queued answer and privately withdraws one already sent
-while that discovery question remains active.
-
-The King's layer is known only while his crown
-shows on the map (**Show me on the map** on his Throne, off by default): his addon sends it
-the moment he shows the crown and repeats it every minute while it shows. With his crown
-hidden (or while he is in a dungeon, where it hides) the line says so instead of "try again in
-a minute". A layer is a copy of a zone inside one realm: when the census places him on another
-realm than yours, the line says that, even if his layer reaches your channel. The `king:` line
-of `/oly status` (and of `/oly bug`) says what your addon knows of him: online and how sure,
-his realm, his layer and his crown, and how long ago each was heard.
+*Continued in the README: [Layer hop: join the King's layer without begging in chat](https://github.com/dnl-gentile/olympus-addon#layer-hop-join-the-kings-layer-without-begging-in-chat).*
 
 ### Person details
 Click any Lord, Captain, racer or inspected player. Their profile opens in the Olympus window, at
@@ -271,9 +254,7 @@ window's **Edit my profile**): **Look** (frame, title, nickname, emblem; one not
 grey), **Icons**, **Who sees what**, **Letters** (the King's), and you as others see you.
 Any soldier can reach the Lord of another Olympus guild in two clicks.
 
-A High Councillor's tooltip (1.1.5) says so too: their mark and own icon after their name, then
-**High Councillor**, their department and their title, for whoever may see the council (the
-same as their card); none on the King's screen while the council's names are hidden.
+*Continued in the README: [Person details](https://github.com/dnl-gentile/olympus-addon#person-details).*
 
 ### Right-click a player (1.1.2)
 Right-click a player (the target frame, party and raid frames, a name in chat, the Who list, the
@@ -416,24 +397,8 @@ the census, are not touched: one name stops the spam.
 ### Alt links (1.1): one player, counted once
 One player in three guilds used to swell the army by three and look like three donors. Link your
 alts and the census counts people:
-- On your main, `/oly alt add Name` names a character of this account; then log that character
-  and say yes there. The offer waits in this account's saved variables, so only this account's
-  characters can be linked, each confirming on itself: an officer can't attach anyone's alt,
-  and a character added later is linked only once it confirms too. An alt never starts a link
-  (its main does), and it gains nothing of its main's (a Hand's alt is no Hand).
-- The army's total then counts each player once, whatever guilds their characters are in (each
-  guild's own size stays its roster's; the header's tooltip says how many were counted once).
-  The treasury's ranking and its week's donors put a player's characters on one line, under the
-  main's name. Vox Populi takes one vote per player.
-- Each linked character's addon says so on the Olympus channel (its name, its guild and the
-  names it confirmed), and a link counts on a client only when both characters said it: a name
-  someone claims alone links nothing.
-- `/oly alt` shows your links; `/oly alt remove Name` takes one apart, from either character.
-- While any linked name is hidden by the moderators (net-off), the links freeze: your addon adds
-  and removes none, and every addon keeps the links it knew (it takes new names, drops none), so
-  nobody drops the punished character to walk back in on an alt.
-- The same faction and realm group only (one census). Up to 8 alts per player. On the Forever
-  beta, which forgets addon data at every login, the offer can't reach the alt yet.
+
+*The list is in the README, with the rest of this section: [Alt links (1.1): one player, counted once](https://github.com/dnl-gentile/olympus-addon#alt-links-11-one-player-counted-once).*
 
 ### The Throne (the King and his Hands)
 A tab with a crown that only the King sees: the guild master of the guild named exactly
@@ -464,10 +429,6 @@ King's name he:
   Musters), whatever his own rank: every client takes them by his name, `<Olympus>`'s own
   members' too, and they never wait behind the flood guard, like the King's. For the other
   guilds his [Lords] lines are the Crown's, as the Hands' are.
-
-Never the King's own: his crown on the map and his layer, holding court, Royal Writs, Royal
-Pardons, the untabarded list, and the King's own book of the treasury or his yes to share it
-(the Steward keeps no book unless named a keeper).
 
 *Continued in the README: [The King's Steward (1.0.0)](https://github.com/dnl-gentile/olympus-addon#the-kings-steward-100).*
 
@@ -752,21 +713,43 @@ account, `/oly discord forget` drops this character's request and proof.
 Another addon can read, with your permission, what Olympus already shows you: the Wanted list
 and its bounties, the public rankings (the Slayers, the Church's top three, the games the King
 made public, the donors' top three while he shows the Treasury's ranking), your own frame and
-title, and your Olympus guild, rank and role. An addon that asks gets its own line on the privacy
+title, your Olympus guild, rank and role, and the King's presence as his lines and the Realm tab
+show it (online, the zone they name, his crown while he shares it, whether you are on his layer,
+and his zone's layers with their "~N with Olympus" counts while you are there). The King's
+presence, the player-sighting searches and the profile presentation below are reserved for addons
+the Olympus team has authorized; any other addon is asked only about the rest. An addon that asks gets its own line on the privacy
 page and nothing until your **Yes** there or the page's deliberate **Authorize all** action
-(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Olympus sends nothing for it and gives it no way to send anything for
-you, nor your location, the census, other players' private data or Olympus's keys; each addon
-gets its own copy, a limited number of calls at a time. What that addon then does with what it
-read is up to it: say **Yes** only to addons you trust. After the update it loads once the game
-restarts (not on a `/reload`).
+(`/oly privacy` changes it at any time; **Keep current choices** grants nothing). Ordinary reads
+send nothing. A compatible addon can also let an authorized player start a short exact-name
+last-seen search, maintain a bounded set of exact-name searches while a visible tool session the
+player started remains on, or start a five-minute hostile-area search for one selected zone or
+micro-map, which may be widened to labelled not-hostile players outside Olympus guilds (or with
+none), never the observer's group. Its visible Start declares selected/configured names and any included list source. A
+handle has one area at a time: current map or an owned exact-result map until its row expires, then cancel
+and wait 60 seconds to rotate. Its UI shows map/position and Stop/Off; it never opens the map or
+resumes after No or `/reload` automatically. Olympus sends each exact **Name-Realm** sought, or the
+selected map ID, to the network.
+Members who separately enabled **Guild tools: player sightings** may answer privately from a
+current target, nameplate or mouseover observation or one their client kept only in memory after
+the game directly showed that player. While that permission and location sharing stay on, each
+client keeps at most 64 observations for up to 15 minutes, never saves them, and clears them on
+permission, location-sharing or network opt-out. Each observer can contribute at most six hostile
+observations to one area search and the requester keeps at most 48 distinct players. An exact-name
+answer gives that observer's name and guild; a public area row omits both. If WoW returns a native
+point for the visible unit, or the same identity as a party or raid unit, the result carries that
+target point. Otherwise it carries the observer's nearby encounter point, rounded to 0.1% of the
+map. The kind, observation time, expiry and layer are labelled, so this is last-seen information,
+not continuous tracking. Requests and answers expire, and turning either permission off cancels or
+withdraws them. On an explicit action the requester can show sanitized area rows with Olympus-owned
+world-map pins; they clear on cancellation, expiry, permission revocation or `/reload`. Olympus
+can also host one bounded profile presentation. A current signed issuer or the addon's author opens it; an admitted
+member may enable only Olympus's fixed style and pre-approved caption on themself. It accepts no target, asset path or arbitrary text,
+and **No** closes that addon's state. Olympus
+never gives another addon the census, other players' private data or Olympus's keys; each addon gets
+its own bounded copy. What that addon then does with a copy is up to it, so authorize only addons
+you trust. After the update it loads once the game restarts (not on a `/reload`).
 
-The same registered handle can ask to contribute a client-owned page to the Olympus window when
-this build reports `ui.surface`. The shared tab rail hosts one such page per session; the other
-addons' data handles still work if that slot is occupied. Olympus keeps the window shell and puts
-the page in a fixed slot before Workshop; the addon builds and updates the content inside it. That
-page works while the data answer is pending or refused, and hosting it grants no Olympus data. Its
-behavior remains the responsibility of the addon that supplied it.
-For addon authors: [docs/API.md](https://github.com/dnl-gentile/olympus-addon/blob/main/docs/API.md).
+*Continued in the README: [Other addons: the Olympus API (1.2.4)](https://github.com/dnl-gentile/olympus-addon#other-addons-the-olympus-api-124).*
 
 ## Install
 
@@ -825,11 +808,11 @@ retires the old private key so a delayed message cannot split them again.
 4. Every client adds up all the summaries: that is the census.
 
 The addon itself talks only in game, through the game's own addon messages: it has no server of
-its own, and nothing it sends leaves the game. The one exception is Olympus Link (above), and
+its own, and nothing it sends leaves the game. One exception is Olympus Link (above), and
 only when you choose to link a character: it uses a website (the Olympus Link page, on the
 project's GitHub Pages) and the Olympus bot on Discord. A confirmer (a key from the bot's keeper)
 signs other players' requests by itself once the bot is ready, and those signatures reach the bot
-in their proofs.
+in their proofs. The other is the Olympus Companion app, only if you install it (Privacy, below).
 
 **Realms vs layers.** A realm (ClassicBetaPvP, ClassicBetaPvP2...) is a separate world
 with its own guilds; layers are copies of a zone *inside* one realm. Guilds on the same
@@ -844,15 +827,17 @@ window shows which realms you are counting.
 ## Privacy
 
 The addon itself talks only through the game's own addon messages: it has no server of its own,
-and what it sends stays in the game. The one exception is Olympus Link, and only when you choose
+and what it sends stays in the game. One exception is Olympus Link, and only when you choose
 to link a character, or to confirm other players' links: a link's proof goes to the Olympus bot
 on Discord, through the Olympus Link page on GitHub Pages (where you sign in with Discord) or a
 High Councillor's watcher. A confirmer, a High Councillor too, is someone who typed in a key the
 bot's keeper made them (no addon makes or announces a key by itself, and the author's council
 authority is off): once the bot is ready, their addon says so on the Olympus channel every 5
 minutes and signs other players' requests by itself, and their character's name and signature
-reach the bot in those players' proofs, until `/oly discord key off`. Your name is on every
-message (the game adds it). What goes where:
+reach the bot in those players' proofs, until `/oly discord key off`. The other is the Olympus
+Companion app, only if you install it: its own bridge addon takes your character's name and
+BattleTag and the Olympus and guild chat lines your client shows to Olympus's server, for its staff
+alone (the Companion's rows below). Your name is on every message (the game adds it). What goes where:
 
 *The table is in the README, with the rest of this section: [Privacy](https://github.com/dnl-gentile/olympus-addon#privacy).*
 
@@ -980,15 +965,16 @@ also saved in `WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua`.
   shenanigans_ (the nameplate marks), Valdericht (`<OLYMPIAN>`), Pyralis Ashandar (taking
   donations) and Zeal (what the King hides stays off the channel).
 - **Art:** Max (the bronze elite borders, drawn over the game's own; the winged one remains the guild masters').
-- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI), Ignitheus (whispers
-  to Forever names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the
-  player who told us WoW had handed him the channel.
+- **Reports from the field:** Riukensei and PartyRockAce (the gamepad UI; PartyRockAce's report
+  of the world map blocked in controller mode, fixed in 1.0), Ignitheus (whispers to Forever
+  names), Pyralis Ashandar, the Treasurer (the treasury and the guild bank), and the player who
+  told us WoW had handed him the channel.
 - Everyone who reported a bug, tested in game or asked for a feature.
 
 ## License
 
-MIT. A fan project, not affiliated with Blizzard Entertainment, Asmongold or the
-Olympus leadership. The Olympus emblem belongs to its owners and is used for the community.
+MIT. Not made or endorsed by Blizzard Entertainment. The Olympus emblem belongs to its owners
+and is used for the community.
 
 *Sources for the Olympus description: the Olympus Discord welcome message,
 [Prism on X](https://x.com/fwprism/status/2101809316382847172) (10K+ members in the beta),

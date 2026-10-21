@@ -365,3 +365,90 @@ anti-farming, universally portable historical office proof, linked-alt merger co
 moderation-record transport and complete sister-guild negative dues coverage remain separate
 from the implemented original-signature archives, named-heir route, response metrics and
 own-guild private grace. Keep these limits distinct from every unobserved live gate above.
+
+## 5. The Olympus Accord and BattleTag (1.2.5.1) live checks
+
+None of these has been observed yet. Run each on Classic Era 1.15.9, TBC Anniversary 2.5.6 and
+WoW: Forever 1.60.1 where it applies, and record **Pass / Fail / Not run** as in section 4. The
+offline tests stub Battle.net (`BNGetInfo`, `BNConnected`), which proves nothing about a client.
+
+1. Battle.net's answers, on each client: `/dump BNGetInfo()`, `/dump BNConnected()` and
+   `/dump BNFeaturesEnabledAndConnected()`; on Forever also `/dump issecretvalue(select(2, BNGetInfo()))`.
+   Expected: the second value of `BNGetInfo()` is your own `Name#digits`, and connected is true.
+   On the author's PC run `luajit scripts/forever-api.lua <Interface folder> --check`: the fixture's
+   `BNGetInfo`, `BNConnected`, `BNFeaturesEnabledAndConnected` and `BN_*` entries were added by
+   hand for 1.2.5.1 and must match what the script writes.
+2. A fresh account (no saved variables) in an Olympus guild: the Accord's letter appears about 30
+   seconds after login, or when the Olympus window opens. Check the parchment, the Morpheus title,
+   the scroll with the mouse wheel, and that nothing is cut at normal and smaller UI scales. The tag
+   shows as `Name#****`; **Show** reveals it for ten seconds. **I accept** leads to the privacy page
+   and then the version letter; `/oly status` says `accord: v1 accepted`.
+3. **Not now**: Olympus stays dark (no channel, no census, no chats; `/oly status` says not
+   accepted). The window shows the Accord's page; opening the window shows the letter again.
+4. Battle.net disconnected, if it can be reproduced: **I accept** is greyed and the wait text shows;
+   an account that already accepted keeps working.
+5. The gamepad UI: open, scroll, **I accept** and **Not now** with the controller. No Lua error, no
+   game popup, no taint message.
+6. Two clients: log the player in first, then the moderator's (or a High Councillor's) client, or
+   `/reload` it. Its client asks 90 seconds after its login and the player's answer comes up to 4
+   minutes later, so **BattleTags (n)** shows in The Watch within about 5.5 minutes of the
+   moderator's login, and the open page counts up by itself. A player who logs in while the
+   moderator is already online is reached at the moderator's next ask, up to about 35 minutes
+   later. The digits show as `#****` until the page's **Show**, and hide again after ten seconds.
+   Two alts of one account are grouped, and the person page says "Same BattleTag". An ordinary
+   member's client never shows one. The King's client shows no part of a tag, even after the eye
+   button. Answers that arrive after a `/reload` of the moderator (within about 70 minutes of his
+   ask) are still kept.
+7. The moderator logs off within a minute of his ask: the player's chat shows no "No player named"
+   line with mouse and keyboard (with the gamepad UI the line may show: the filter stays off there),
+   and his `/oly status` accord line counts `gone`. `/oly accord forget <player>` on the moderator's
+   client removes that player's characters from the page.
+8. Right-click a player in a guild outside Olympus (Trade, his portrait): only the Olympus version
+   line, **Check version** and, when his addon does not answer, **Tell them about Olympus**. Right-click
+   an Olympus guildmate: the profile, **Report to Olympus** and the Arena's lines too.
+   A member of another Olympus guild who just wrote on `/ol` gets **Report to Olympus** too.
+9. An update with the game running, then `/reload`: the restart message, and Olympus stays off
+   until the game restarts.
+10. Census: with one guildmate who has not accepted, the guild stays in the census from the others.
+11. In an Olympus guild, **Not now**, then `/ol hello` or `/oly profile`: the chat says Olympus stays
+    off until the Accord is accepted (`/oly accord`), not "Olympus members only".
+12. Battle.net disconnected (step 4) in pt-BR too: the red note sits under "Your BattleTag:", never
+    over it, and the band and the words above it make room for its second line.
+
+A sanction that follows the BattleTag (TagFollow.lua). None of these has been observed yet. Use two
+characters of one game account (S, sanctioned, and A, his alt) and a High Councillor's client (C)
+that holds S's BattleTag (step 6), plus a named moderator's client (M) for the timeout steps.
+
+13. On C: `/oly netoff S: test`. Expected: C's chat says S's sanction follows his BattleTag too
+    (the count of his other characters C knows). `/oly status` on C counts `follows 1 (yours 1)`.
+14. Log in as A. Precondition: S was logged in during step 13 (so the follow is in the account's
+    saved file) and A is on the same realm group and faction. Otherwise the pop-up comes only with
+    C's next repeat, within about 6.5 minutes while C stays online (at once if A chats on an Olympus
+    channel first: C's addon sends it again), and never while C is offline. Expected: within about
+    30 seconds Olympus's pop-up says a sanction on another
+    character of his BattleTag applies to this one (the reason and the time, never C's name);
+    `/ol hi` is refused; the Decrees tab shows the red "Your BattleTag's sanction is on you" line,
+    its tooltip the same text. If A sent C his BattleTag, C sees none of A's lines, and The Watch's
+    BattleTags page shows the red "Sanction follows this BattleTag" line and "same BattleTag as a
+    sanctioned player" beside A.
+15. On C: `/oly neton S`. Expected: at once A's chat says the sanction that followed his BattleTag
+    is over, and `/ol hi` goes again.
+16. M gives S a 5-minute timeout. Expected: A's pop-up starts with "This sanction was given to another
+    character of your BattleTag"; **Appeal** sends (the council sees it); after five minutes A chats again.
+17. With S off again: `/oly accord unfollow S` on C (or the red line's click, Yes). Expected: A is
+    free within a minute while S stays off, and the page drops the red line.
+18. Steps 14 and 17 with the gamepad UI on A and C: the pop-up and the stop dialog are Olympus's own
+    windows, the controller answers them, no taint message and no game popup.
+19. On the King's client (or the author's King preview) with the BattleTags page open: the follow's
+    line and the mark show, the names masked, no part of any BattleTag.
+20. A client on the CurseForge version before this release, on the same channel during steps 13-17:
+    no Lua error; it hides S by name and never A.
+21. After A logs out, search A's `WTF/Account/<account>/SavedVariables/Olympus.lua` for the
+    BattleTag (`Name#digits`) and for its name alone: neither appears (A keeps the follow without
+    its code).
+22. Step 14 with its precondition unmet (S logged out during step 13, C online): A's first `/ol hi`
+    goes out; a moment later A's own pop-up comes (C's addon sent the follow again for that line),
+    the next `/ol hi` is refused, and C's `/oly status` still counts `derived 0`. A typing in the
+    game's own guild chat (`/g hi`) never changes that count.
+23. A character of the King's game account (once the King's own character logged in on it) and a
+    councillor's client C that asks for BattleTags: C's BattleTags page never lists that character.

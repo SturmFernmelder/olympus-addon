@@ -787,6 +787,9 @@ local function OpenData(c)
 	db.links = db.links or {}
 	for _, r in ipairs(World.REALMS) do db.links[r] = World.GROUP end
 	db.addonChat, db.rollCall = true, true
+	-- (1.2.5.1: each account accepted the Olympus Accord, as every account using Olympus does; the
+	-- Accord's own tests, tests/accord.lua, start without it. No fp and no BNGetInfo here.)
+	db.accord = db.accord or { v = 1, yes = true, at = 0 }
 	db.realms = db.realms or {}
 	db.realms[World.GROUP] = db.realms[World.GROUP] or {}
 	local rdb = db.realms[World.GROUP]

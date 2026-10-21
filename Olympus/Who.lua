@@ -463,6 +463,41 @@ function Who.SeenGuild(name)
 	return e.guild, GetTime() - e.t
 end
 
+-- (CR-05) The race an answer of ours showed for each Olympus player, for this session. A census
+-- report carries no race, so another guild's Lord, Captains and top five had one in the Realm's
+-- Races (Views) only while a round listed them: the next round, without them, put them back under
+-- Unknown. A character's race does not change. In memory only, like the roster's GUID races
+-- (Roster.lua): never saved, never sent, gone at a /reload and with /oly reset (Who.Reset), and
+-- forgotten whole past RACE_MAX names, like seenAt. [name-realm, lower case] = a shared pair.
+Who.RACE_MAX = 5000
+local raceSeen, racePairs, nRaces = {}, {}, 0
+local function KeepRace(name, race, raceName)
+	if race == nil then return end
+	local key = ns.FullName(name):lower()
+	if not raceSeen[key] then
+		if nRaces >= Who.RACE_MAX then
+			wipe(raceSeen)
+			nRaces = 0
+		end
+		nRaces = nRaces + 1
+	end
+	local id = tostring(race) .. "\0" .. tostring(raceName or "")
+	local pair = racePairs[id]
+	if not pair then
+		pair = { race = race, name = raceName }
+		racePairs[id] = pair
+	end
+	raceSeen[key] = pair
+end
+
+-- The race an answer of ours showed for `name` this session, and its name as the game gave it;
+-- nil when none did.
+function Who.RaceOf(name)
+	local pair = type(name) == "string" and name ~= "" and raceSeen[ns.FullName(name):lower()]
+	if not pair then return nil end
+	return pair.race, pair.name
+end
+
 -- The answer's Olympus players, each once.
 local function Read()
 	local shown, total = Counts()
@@ -476,6 +511,7 @@ local function Read()
 				zone = zone, race = race, raceName = raceName }
 			byName[name] = p
 			rows[#rows + 1] = p
+			KeepRace(name, race, raceName)
 		end
 	end
 	return rows, shown, total
@@ -603,6 +639,9 @@ function Who.Reset()
 	wipe(wantedNames)
 	wipe(seenAt)
 	nSeen = 0
+	wipe(raceSeen)
+	wipe(racePairs)
+	nRaces = 0
 end
 
 -- One or two lines on how far the round got, for under a list; nil when there is nothing

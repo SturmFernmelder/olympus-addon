@@ -51,7 +51,7 @@ Views.Green, Views.Grey, Views.Red, Views.Gold = Green, Grey, Red, Gold
 local Plain = ns.Codec.Plain
 
 local function ClassColored(name, classFile)
-	name = Plain(name)
+	name = Plain(ns.CoverSwap(name))
 	local c = classFile and RAID_CLASS_COLORS and RAID_CLASS_COLORS[classFile]
 	return c and ("|c%s%s|r"):format(c.colorStr, name) or name
 end
@@ -462,6 +462,47 @@ function Views.SplitPageNav(lines, separateSearch)
 	return body, navigation, search
 end
 
+-- A filter's open menu, one row per choice of `spec` (the selected one lit), as wide as its longest.
+local function FillChoices(menu, spec)
+	local menuWidth = 100
+	for j, option in ipairs(spec.options) do
+		local pick = menu.buttons[j]
+		if not pick then
+			pick = CreateFrame("Button", nil, menu)
+			pick:SetPoint("TOPLEFT", 6, -6 - (j - 1) * 22)
+			pick:SetPoint("TOPRIGHT", -6, -6 - (j - 1) * 22)
+			pick:SetHeight(22)
+			pick.label = pick:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+			pick.label:SetPoint("LEFT", 8, 0)
+			pick.label:SetPoint("RIGHT", -8, 0)
+			pick.label:SetJustifyH("LEFT")
+			local hl = pick:CreateTexture(nil, "HIGHLIGHT")
+			hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.12)
+			pick:SetScript("OnClick", function(button)
+				menu:Hide()
+				if button.choice and button.choice.onClick then ns.SafeCall("view filter", button.choice.onClick) end
+			end)
+			menu.buttons[j] = pick
+		end
+		pick.choice = option
+		pick.label:SetText(option.text)
+		pick.label:SetTextColor(unpack(option.selected and Views.SUBTAB_STYLE.selected or Views.SUBTAB_STYLE.inactive))
+		menuWidth = math.max(menuWidth, math.ceil(StringWidth(pick.label)) + 28)
+		pick:Show()
+	end
+	for j = #spec.options + 1, #menu.buttons do menu.buttons[j]:Hide() end
+	menu:SetSize(menuWidth, 12 + #spec.options * 22)
+end
+
+-- The same filter offering the same choices (its label, each choice's words, in order).
+local function SameChoices(a, b)
+	if type(a) ~= "table" or type(b) ~= "table" or a.label ~= b.label or #(a.options or {}) ~= #(b.options or {}) then return false end
+	for j, option in ipairs(a.options) do
+		if option.text ~= b.options[j].text then return false end
+	end
+	return true
+end
+
 function Views.DrawFilters(holder, filters, width)
 	holder.filters = holder.filters or {}
 	local cell = math.floor(width / math.max(1, #filters))
@@ -514,41 +555,18 @@ function Views.DrawFilters(holder, filters, width)
 				menu:SetFrameLevel(menu.catcher:GetFrameLevel() + 1)
 				menu:ClearAllPoints()
 				menu:SetPoint(self.rightmost and "TOPRIGHT" or "TOPLEFT", self, self.rightmost and "BOTTOMRIGHT" or "BOTTOMLEFT", 0, -2)
-				local menuWidth = 100
-				for j, option in ipairs(spec.options) do
-					local pick = menu.buttons[j]
-					if not pick then
-						pick = CreateFrame("Button", nil, menu)
-						pick:SetPoint("TOPLEFT", 6, -6 - (j - 1) * 22)
-						pick:SetPoint("TOPRIGHT", -6, -6 - (j - 1) * 22)
-						pick:SetHeight(22)
-						pick.label = pick:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-						pick.label:SetPoint("LEFT", 8, 0)
-						pick.label:SetPoint("RIGHT", -8, 0)
-						pick.label:SetJustifyH("LEFT")
-						local hl = pick:CreateTexture(nil, "HIGHLIGHT")
-						hl:SetAllPoints(); hl:SetColorTexture(1, 1, 1, 0.12)
-						pick:SetScript("OnClick", function(button)
-							menu:Hide()
-							if button.choice and button.choice.onClick then ns.SafeCall("view filter", button.choice.onClick) end
-						end)
-						menu.buttons[j] = pick
-					end
-					pick.choice = option
-					pick.label:SetText(option.text)
-					pick.label:SetTextColor(unpack(option.selected and Views.SUBTAB_STYLE.selected or Views.SUBTAB_STYLE.inactive))
-					menuWidth = math.max(menuWidth, math.ceil(StringWidth(pick.label)) + 28)
-					pick:Show()
-				end
-				for j = #spec.options + 1, #menu.buttons do menu.buttons[j]:Hide() end
-				menu:SetSize(menuWidth, 12 + #spec.options * 22)
+				FillChoices(menu, spec)
 				menu.catcher:Show()
 				menu:Show()
 			end)
 			holder.filters[i] = b
 		end
-		-- A reused row can belong to another page; its previous choices are no longer valid.
-		if b.choices then b.choices:Hide() end
+		-- A reused row can belong to another page; its previous choices are no longer valid. (1.2.6: a
+		-- redraw that changed none of them, a census word or a Church answer arriving, keeps the open
+		-- menu, its rows this drawing's choices: it closed under the player's mouse, the author's
+		-- report of 10-06, "eles ficam sumindo".)
+		if b.choices and b.choices:IsShown() and SameChoices(b.filter, filter) then FillChoices(b.choices, filter)
+		elseif b.choices then b.choices:Hide() end
 		b.filter = filter
 		b.rightmost = i == #filters
 		b:ClearAllPoints()
@@ -787,6 +805,162 @@ function Views.DrawMeter(r, meter, width, left)
 	r.meterFill:SetWidth(math.max(0.01, size * ratio)); r.meterFill:SetShown(ratio > 0)
 end
 
+-- CR-02 / KH-08 (the Census's own page, CensusStats.lua): a row that is a small chart of one
+-- series (line.graph), drawn with plain textures only. graph = { n, values = { [i] = number or nil },
+-- min, max (its scale), color = { r, g, b }, top, bottom (the scale's ends, written on its left),
+-- left, right (under its first slot and its last), tips = { [i] = function(tt) }, tip = function(tt) }.
+-- One slot per value across the row: a step line at its value with a faint fill under it, the last
+-- slot (now) brighter, a slot with no value a dot on the baseline; each slot answers the mouse with
+-- its own tooltip, the scale on its left with graph.tip (the whole series). The row itself takes no
+-- mouse (its highlight would light the whole chart). The numbers stay in the text's own white and
+-- grey, the series' colour on its marks alone; the grid lines are recessive.
+Views.GRAPH_H, Views.GRAPH_GUTTER, Views.GRAPH_AXIS_H = 64, 46, 12
+local function Paint(t, r, g, b, a)
+	if t.SetColorTexture then t:SetColorTexture(1, 1, 1, 1) else t:SetTexture("Interface\\Buttons\\WHITE8X8") end
+	t:SetVertexColor(r, g, b, a)
+end
+local function GraphLabel(holder, justify)
+	local fs = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+	fs:SetJustifyH(justify)
+	fs:SetWordWrap(false)
+	fs:SetTextColor(0.62, 0.62, 0.62)
+	return fs
+end
+-- A part of the chart that shows its own tooltip (b.tip), lit faintly under the mouse (`lit`).
+local function TipButton(holder, lit)
+	local b = CreateFrame("Button", nil, holder)
+	if lit then
+		local hl = b:CreateTexture(nil, "HIGHLIGHT")
+		hl:SetAllPoints()
+		Paint(hl, 1, 1, 1, 0.08)
+	end
+	b:SetScript("OnEnter", function(self)
+		local tip = self.tip
+		if type(tip) ~= "function" then return end
+		GameTooltip:SetOwner(self, "ANCHOR_TOP")
+		ns.SafeCall("graph tooltip", tip, GameTooltip)
+		GameTooltip:Show()
+	end)
+	b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+	return b
+end
+local function GraphSlot(holder, k)
+	local s = {}
+	s.fill, s.cap, s.rise = holder:CreateTexture(nil, "BORDER"), holder:CreateTexture(nil, "ARTWORK"), holder:CreateTexture(nil, "ARTWORK")
+	s.hit = TipButton(holder, true)
+	holder.slots[k] = s
+	return s
+end
+-- Its row's height: the plot, the labels under it and 4 px above.
+function Views.GraphHeight(graph) return (tonumber(graph and graph.height) or Views.GRAPH_H) + Views.GRAPH_AXIS_H + 4 end
+function Views.DrawGraph(r, graph, width)
+	local holder = r.graph
+	if type(graph) ~= "table" then
+		if holder then holder:Hide() end
+		return nil
+	end
+	if not holder then
+		holder = CreateFrame("Frame", nil, r)
+		holder:SetAllPoints(r)
+		holder.grid = {}
+		for k = 1, 3 do holder.grid[k] = holder:CreateTexture(nil, "BACKGROUND") end
+		holder.top, holder.bottom = GraphLabel(holder, "RIGHT"), GraphLabel(holder, "RIGHT")
+		holder.left, holder.right = GraphLabel(holder, "LEFT"), GraphLabel(holder, "RIGHT")
+		holder.slots = {}
+		holder.scale = TipButton(holder, false)
+		r.graph = holder
+	end
+	holder:SetFrameLevel((r:GetFrameLevel() or 1) + 1)
+	local plotH, axis, gutter = tonumber(graph.height) or Views.GRAPH_H, Views.GRAPH_AXIS_H, Views.GRAPH_GUTTER
+	local x0 = gutter
+	local plotW = math.max(10, width - x0 - RIGHT_INSET - 2)
+	local base = axis -- the baseline's height from the row's bottom
+	-- The grid: the scale's top, its middle and the baseline, faint.
+	for k, at in ipairs({ plotH, plotH / 2, 0 }) do
+		local t = holder.grid[k]
+		Paint(t, 1, 1, 1, k == 3 and 0.22 or 0.07)
+		t:ClearAllPoints()
+		t:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", x0, base + at)
+		t:SetSize(plotW, 1)
+		t:Show()
+	end
+	holder.top:ClearAllPoints(); holder.top:SetPoint("RIGHT", holder, "BOTTOMLEFT", x0 - 4, base + plotH - 3)
+	holder.bottom:ClearAllPoints(); holder.bottom:SetPoint("RIGHT", holder, "BOTTOMLEFT", x0 - 4, base + 4)
+	holder.top:SetWidth(x0 - 4); holder.bottom:SetWidth(x0 - 4)
+	holder.left:ClearAllPoints(); holder.left:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", x0, 0)
+	holder.right:ClearAllPoints(); holder.right:SetPoint("BOTTOMRIGHT", holder, "BOTTOMLEFT", x0 + plotW, 0)
+	holder.top:SetText(graph.top or ""); holder.bottom:SetText(graph.bottom or "")
+	holder.left:SetText(graph.left or ""); holder.right:SetText(graph.right or "")
+	holder.scale:ClearAllPoints()
+	holder.scale:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", 0, base)
+	holder.scale:SetSize(x0 - 2, plotH)
+	holder.scale.tip = type(graph.tip) == "function" and graph.tip or nil
+	holder.scale:EnableMouse(holder.scale.tip ~= nil)
+	local n = math.max(1, math.floor(tonumber(graph.n) or #(graph.values or {})))
+	local lo, hi = tonumber(graph.min) or 0, tonumber(graph.max) or 1
+	if hi <= lo then hi = lo + 1 end
+	local color = type(graph.color) == "table" and graph.color or { 1, 0.82, 0 }
+	local cr, cg, cb = tonumber(color[1]) or 1, tonumber(color[2]) or 1, tonumber(color[3]) or 1
+	local slotW = plotW / n
+	local function Y(v)
+		local y = (v - lo) / (hi - lo) * plotH
+		return math.max(0, math.min(plotH, y))
+	end
+	local before
+	for k = 1, n do
+		local s = holder.slots[k] or GraphSlot(holder, k)
+		local v = graph.values and tonumber(graph.values[k]) or nil
+		if v ~= v then v = nil end
+		local x = x0 + (k - 1) * slotW
+		local w = math.max(1, math.floor(x + slotW + 0.5) - math.floor(x + 0.5))
+		local left = math.floor(x + 0.5)
+		local latest = k == n
+		for _, t in ipairs({ s.fill, s.cap, s.rise }) do t:ClearAllPoints() end
+		if v then
+			local y = Y(v)
+			Paint(s.fill, cr, cg, cb, latest and 0.32 or 0.16)
+			s.fill:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base)
+			s.fill:SetSize(w, math.max(1, y))
+			s.fill:Show()
+			Paint(s.cap, latest and math.min(1, cr + 0.2) or cr, latest and math.min(1, cg + 0.2) or cg, latest and math.min(1, cb + 0.2) or cb, latest and 1 or 0.85)
+			s.cap:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base + math.max(0, y - 1))
+			s.cap:SetSize(w, 2)
+			s.cap:Show()
+			-- The step from the slot before, where both have a value.
+			if before then
+				local y0 = Y(before)
+				local low, high = math.min(y0, y), math.max(y0, y)
+				Paint(s.rise, cr, cg, cb, 0.85)
+				s.rise:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left - 1, base + math.max(0, low - 1))
+				s.rise:SetSize(2, math.max(2, high - low + 2))
+				s.rise:SetShown(high - low >= 1)
+			else
+				s.rise:Hide()
+			end
+		else
+			-- No value: a dot on the baseline, so the slot still shows where it is.
+			Paint(s.cap, 0.62, 0.62, 0.62, 0.6)
+			s.cap:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left + math.floor((w - 2) / 2), base)
+			s.cap:SetSize(2, 2)
+			s.cap:Show()
+			s.fill:Hide(); s.rise:Hide()
+		end
+		before = v
+		s.hit:ClearAllPoints()
+		s.hit:SetPoint("BOTTOMLEFT", holder, "BOTTOMLEFT", left, base)
+		s.hit:SetSize(w, plotH)
+		s.hit.tip = type(graph.tips) == "table" and graph.tips[k] or nil
+		s.hit:EnableMouse(s.hit.tip ~= nil)
+		s.hit:Show()
+	end
+	for k = n + 1, #holder.slots do
+		local s = holder.slots[k]
+		s.fill:Hide(); s.cap:Hide(); s.rise:Hide(); s.hit:Hide()
+	end
+	holder:Show()
+	return Views.GraphHeight(graph)
+end
+
 function Views.Render(content, lines, layout)
 	local width = content:GetWidth()
 	local hd = content.style == "hd"
@@ -837,6 +1011,11 @@ function Views.Render(content, lines, layout)
 			r.right:Hide()
 			for c = 1, #r.cols do r.cols[c]:Hide() end
 			height = Views.DrawNav(r, line.nav, width)
+		elseif line.graph then
+			r.left:Hide()
+			r.right:Hide()
+			for c = 1, #r.cols do r.cols[c]:Hide() end
+			height = Views.DrawGraph(r, line.graph, width) or height
 		elseif line.cols then
 			r.left:Hide()
 			r.right:Hide()
@@ -868,10 +1047,11 @@ function Views.Render(content, lines, layout)
 			end
 			if line.meter then height = height + 8 end
 		end
-		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and line.meter or nil, width, 4 + (line.indent or 0) * 12)
+		Views.DrawMeter(r, not line.items and not line.filters and not line.nav and not line.cols and not line.graph and line.meter or nil, width, 4 + (line.indent or 0) * 12)
 		if not line.items then for k = 1, #(r.items or {}) do r.items[k]:Hide() end end
 		if not line.nav then for k = 1, #(r.nav or {}) do r.nav[k]:Hide() end end
 		if not line.filters then for k = 1, #(r.filters or {}) do r.filters[k]:Hide() end end
+		if not line.graph and r.graph then r.graph:Hide() end
 		r:SetHeight(height)
 		r:EnableMouse(line.onClick ~= nil or line.tooltip ~= nil)
 		if hd then
@@ -905,6 +1085,8 @@ function Views.LinesHeight(lines, hd, width)
 			return nil
 		elseif line.nav then
 			height = ROW_H_NAV
+		elseif line.graph then
+			height = Views.GraphHeight(line.graph)
 		elseif line.input and not line.cols and not input then
 			input, height = true, ROW_H_INPUT
 		else
@@ -977,17 +1159,14 @@ local function SeenName(name)
 	end
 	return shown
 end
--- Does `name` hold the search `q`, as its row shows it?
-local function NameHolds(q, name)
-	return type(name) == "string" and name ~= "" and SearchName(name):find(q, 1, true) ~= nil
-end
-
 -- 1.2.1: the Census's search reads letters that look alike as one: l, I and 1, and 0 and O (a
 -- guild's name may mix them, "OLYMPUS XIlI", and the player types what he sees). A folded text
--- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o.
+-- (ns.Fold: I and O are i and o already) with l and 1 as i and 0 as o. CR-08 (the author's ask):
+-- the Realm's search too, the same guilds of the same census, their Lords, Captains and members,
+-- and the people of its classes, races and professions.
 local function Lookalike(s) return (s:gsub("[l1]", "i"):gsub("0", "o")) end
--- Does `name` hold the Census's search `lq` (Lookalike of the query), as its row shows it? Kept
--- like SearchName.
+-- Does `name` hold the Census's or the Realm's search `lq` (Lookalike of the query), as its row
+-- shows it? Kept like SearchName.
 local function LookHolds(lq, name)
 	if type(name) ~= "string" or name == "" then return false end
 	local k = lookNames[name]
@@ -1196,6 +1375,18 @@ local function PublicLines(lines)
 end
 Views.PublicLines = PublicLines
 
+-- 1.2.5.1: while the quiet presence is on (Core.lua), one line on top says so, its tooltip what it
+-- holds back and what still goes.
+local function QuietLine(lines)
+	if not (ns.QuietPresence and ns.QuietPresence()) then return false end
+	lines[#lines + 1] = { text = Gold(L.QUIET_PRESENCE_LINE), gapAfter = true, tooltip = function(tt)
+		tt:AddLine(L.QUIET_PRESENCE_LINE, 1, 0.82, 0, true)
+		tt:AddLine(L.QUIET_PRESENCE_TIP, 1, 1, 1, true)
+	end }
+	return true
+end
+Views.QuietLine = QuietLine
+
 -- The pinned line (1.1, Channels.Pin): on top of the Olympus chats and the Realm, for everyone.
 -- Its setter, or a higher rank, takes it down with a click (after a question). Words the
 -- player's block terms hide (Channels.PinWords) show after a first click, as a decree's.
@@ -1300,9 +1491,10 @@ end
 
 -- The reported guilds in the order the column titles say, fresh reports first; `sort` (1.2.4's
 -- review): another order of the same kind, { key, desc } (the Realm's own, Views.realmSort).
--- A tie: the higher average level first (1.2.4, the author's ask: one of the first tie-breaks,
--- whichever way the column runs), then the name. The average level's own column: a guild without
--- one last whichever way, a tie the larger guild first, then the name.
+-- A tie, whichever way the column runs: the exact <OLYMPUS> first (Data.IsStandardBearer, as in
+-- the default order: the author's ask), then the higher average level (1.2.4, the author's ask: one
+-- of the first tie-breaks), then the name. The average level's own column: a guild without one last
+-- whichever way, a tie the standard-bearer first, then the larger guild, then the name.
 local function SortedGuilds(list, sort)
 	sort = sort or Views.sort
 	local key, desc = sort.key, sort.desc
@@ -1321,6 +1513,8 @@ local function SortedGuilds(list, sort)
 			if desc then return va > vb end
 			return va < vb
 		end
+		local ba, bb = ns.Data.IsStandardBearer(a.name), ns.Data.IsStandardBearer(b.name)
+		if ba ~= bb then return ba end
 		if level then
 			local ta, tb = a.g.total or 0, b.g.total or 0
 			if ta ~= tb then return ta > tb end
@@ -1545,8 +1739,12 @@ local function CensusLines(s, q)
 		if #lines == 0 then lines[1] = NoMatch() end
 		return lines
 	end
+	QuietLine(lines)
 	-- Recruits asking to join our guild (1.1, Recruit.lua): an officer's Invite and Decline.
 	for _, l in ipairs(ns.Recruit and ns.Recruit.RequestLines and ns.Recruit.RequestLines() or {}) do lines[#lines + 1] = l end
+	-- Clear party-invite whispers while the King is online (1.2.5.1): local, short-lived and
+	-- manually verified. Nothing interrupts the game or trusts what the whisper claimed.
+	for _, l in ipairs(ns.PartyGuard and ns.PartyGuard.Lines and ns.PartyGuard.Lines() or {}) do lines[#lines + 1] = l end
 	-- The King's Agenda, for the whole army (King.lua).
 	local a = ns.King and ns.King.Agenda and ns.King.Agenda()
 	if a then
@@ -1589,6 +1787,10 @@ local function CensusLines(s, q)
 		lines[#lines].gapAfter = true
 		lines[#lines + 1] = behind
 	end
+	-- Record mode on (Record.lua, the Guinness attempt's witnesses): its line first; a click opens its
+	-- status. Put in last, so the lines above count as before ("No reports yet").
+	local record = ns.Record and ns.Record.Line and ns.Record.Line()
+	if record then table.insert(lines, 1, record) end
 	return lines
 end
 
@@ -1899,19 +2101,19 @@ local function SweptByGuild()
 	return out
 end
 
--- The guilds where the Realm's search `q` finds a player seen online (Views.MembersOf's sources:
--- our roster for our own guild `own`, /who's round for the others), before any member list is
--- made: [guild] = true.
-local function SeenHits(q, own)
+-- The guilds where the Realm's search `lq` (Lookalike) finds a player seen online (Views.MembersOf's
+-- sources: our roster for our own guild `own`, /who's round for the others), before any member list
+-- is made: [guild] = true.
+local function SeenHits(lq, own)
 	local hit = {}
 	local sweep = ns.Who and ns.Who.sweep
 	for _, p in ipairs(sweep and sweep.list or {}) do
 		local guild = p.guild
-		if guild and guild ~= own and not hit[guild] and p.name and NameHolds(q, SeenName(p.name)) then hit[guild] = true end
+		if guild and guild ~= own and not hit[guild] and p.name and LookHolds(lq, SeenName(p.name)) then hit[guild] = true end
 	end
 	if own then
 		for _, m in ipairs(ns.Roster.online or {}) do
-			if NameHolds(q, m.name) then
+			if LookHolds(lq, m.name) then
 				hit[own] = true
 				break
 			end
@@ -1922,19 +2124,20 @@ end
 
 -- What of a guild the Realm's search finds, its name aside: its Lord, its Captains and the
 -- members seen online (our roster, /who), each by name as its row shows it. `ctx`: the search
--- (q, own, hits: SeenHits, swept: SweptByGuild once needed). The member list (Views.MembersOf
--- makes a table for each player and sorts them) is made only for a guild where someone is found
--- and only when `rows` (the guild will show): otherwise `n` counts a member found as one.
+-- (lq: Lookalike of it, own, hits: SeenHits, swept: SweptByGuild once needed). The member list
+-- (Views.MembersOf makes a table for each player and sorts them) is made only for a guild where
+-- someone is found and only when `rows` (the guild will show): otherwise `n` counts a member found
+-- as one.
 local function GuildMatches(e, ctx, rows)
-	local g, q = e.g, ctx.q
-	local found = { lord = NameHolds(q, g.leader), officers = {}, members = {}, all = {} }
+	local g, lq = e.g, ctx.lq
+	local found = { lord = LookHolds(lq, g.leader), officers = {}, members = {}, all = {} }
 	for _, o in ipairs(g.officers or {}) do
-		if NameHolds(q, o.name) then found.officers[#found.officers + 1] = o end
+		if LookHolds(lq, o.name) then found.officers[#found.officers + 1] = o end
 	end
 	local seen = ctx.hits[e.name]
 	if not seen and e.name ~= ctx.own then
 		for _, p in ipairs(ns.Who and ns.Who.GuildSeen and ns.Who.GuildSeen(e.name) or {}) do
-			if p.guild == e.name and p.name and NameHolds(q, SeenName(p.name)) then
+			if p.guild == e.name and p.name and LookHolds(lq, SeenName(p.name)) then
 				seen = true
 				break
 			end
@@ -1944,7 +2147,7 @@ local function GuildMatches(e, ctx, rows)
 		ctx.swept = ctx.swept or SweptByGuild()
 		local members, fromWho = Views.MembersOf(e.name, g, ctx.swept)
 		for _, m in ipairs(members) do
-			if NameHolds(q, m.name) then found.members[#found.members + 1] = m end
+			if LookHolds(lq, m.name) then found.members[#found.members + 1] = m end
 		end
 		found.all, found.fromWho = members, fromWho
 	end
@@ -1987,8 +2190,9 @@ end
 
 -- `q`, the search (Views.Query): the High Council's names (for whoever may see it), then each
 -- guild whose name holds it, whole, and each whose Lord, Captains or members seen do, opened on
--- those alone; "No match" for none. The chats' link stays (the Chat tab it opens has a search of
--- its own). Nothing
+-- those alone, the guilds and their people with look-alike letters as one, as in the Census
+-- (Lookalike, CR-08); "No match" for none. The chats' link stays (the Chat tab it opens has a
+-- search of its own). Nothing
 -- else: the King's lines, the level race, recruiting and the layers show once it is emptied.
 local function RealmLines(s, q)
 	if boardShown and ns.Board and not ns.Board.missing and ns.Board.Lines then return ns.Board.Lines(q) end
@@ -2010,8 +2214,8 @@ local function RealmLines(s, q)
 	local function Mark(name, home, online)
 		return ns.King and ns.King.RollCallMark and ns.King.RollCallMark(ns.FullName(name, home), online) or ""
 	end
-	-- The pinned line on top (1.1), for everyone.
-	if not q then PinLine(lines) end
+	-- The pinned line on top (1.1), for everyone; the quiet presence's under it (1.2.5.1).
+	if not q then PinLine(lines) QuietLine(lines) end
 	-- The King holds court in our zone (Court.lua), then his layer (Hop.lua).
 	local court = not q and ns.Court and ns.Court.Line and ns.Court.Line()
 	if court then lines[#lines + 1] = court end
@@ -2219,14 +2423,14 @@ local function RealmLines(s, q)
 	-- guilds past them counted in `more`, shown on a click.)
 	local ctx, rows, more
 	if q then
-		local own = GetGuildInfo("player")
-		ctx, rows, more = { q = q, own = own, hits = SeenHits(q, own) }, 0, 0
+		local own, lq = GetGuildInfo("player"), Lookalike(q)
+		ctx, rows, more = { lq = lq, own = own, hits = SeenHits(lq, own) }, 0, 0
 	end
 	-- (1.2.4's review: in the Realm's own order, chosen on its line above its guilds; by default
 	-- Data.Summary's own, the shared order, as before. A search's guilds in it too.)
 	if not q and #s.guilds > 1 then lines[#lines + 1] = RealmOrderLine() end
 	for _, e in ipairs(Views.RealmOrdered(s.guilds)) do
-		if not q or NameHolds(q, e.name) then
+		if not q or LookHolds(ctx.lq, e.name) then
 			-- (Found by its name: the guild as ever, opened or not.)
 			if q then found = found + 1 end
 			Guild(e, expanded[e.name])
@@ -2471,6 +2675,13 @@ local function RealmPeople(s)
 	end
 
 	for _, p in ipairs(out) do
+		-- (CR-05) The race a /who answer showed earlier this session, for someone no list of the
+		-- current round has (logged off since, or only in his guild's report): the game's word,
+		-- before an Arena profile's self-report.
+		if not p.race and ns.Who and ns.Who.RaceOf then
+			local race, raceName = ns.Who.RaceOf(p.full)
+			if race ~= nil then p.race, p.raceName = race, raceName end
+		end
 		local profile = ns.ArenaProfile and ns.ArenaProfile.Of and ns.ArenaProfile.Of(p.full)
 		-- A private Arena profile may have been learned from a fight this client witnessed. It is
 		-- not consent to surface those facts in the Realm; only its public flag (or our own profile)
@@ -2506,8 +2717,12 @@ local function RealmRaceName(id, knownName)
 	return L.REALM_RACE_N:format(id)
 end
 
-local function RealmPersonMatches(q, p, group)
-	return ns.Holds(q, p.name, p.full, p.guild, p.rank, p.role, group)
+-- Does the search `lq` (Lookalike of it; nil, none) find the person `p` of the group `group`? Each
+-- text as its row shows it, look-alike letters as one, as the guilds' search (CR-08).
+local function RealmPersonMatches(lq, p, group)
+	if not lq then return true end
+	return LookHolds(lq, p.name) or LookHolds(lq, p.full) or LookHolds(lq, p.guild) or LookHolds(lq, p.rank)
+		or LookHolds(lq, p.role) or LookHolds(lq, group)
 end
 
 local function RealmPersonSort(a, b)
@@ -2598,12 +2813,12 @@ local function RealmGroupedLines(s, mode, q)
 		end
 	end
 
-	local ordered = {}
+	local ordered, lq = {}, q and Lookalike(q)
 	for _, g in pairs(groups) do
 		local matches = {}
 		for _, entry in ipairs(g.people) do
 			local p = entry.person
-			if RealmPersonMatches(q, p, g.label) or (entry.profession and ns.Holds(q, entry.profession.name)) then matches[#matches + 1] = entry end
+			if RealmPersonMatches(lq, p, g.label) or (entry.profession and LookHolds(lq, entry.profession.name)) then matches[#matches + 1] = entry end
 		end
 		if #matches > 0 then g.people = matches; ordered[#ordered + 1] = g end
 	end
@@ -2626,6 +2841,11 @@ local function RealmGroupedLines(s, mode, q)
 				realmGroupOpen[mode][g.key] = not realmGroupOpen[mode][g.key] or nil
 				ns.UI.Refresh()
 			end,
+			-- (CR-05) Races' Unknown says where a race comes from: the census carries none.
+			tooltip = mode == "races" and g.key == "unknown" and function(tt)
+				tt:AddLine(g.label, 1, 0.82, 0)
+				tt:AddLine(L.REALM_RACE_UNKNOWN_TIP, 1, 1, 1, true)
+			end or nil,
 		}
 		if open then for _, entry in ipairs(g.people) do lines[#lines + 1] = RealmPersonLine(entry.person, entry.profession) end end
 	end
@@ -2667,6 +2887,32 @@ end
 -- Decrees (layers + decrees)
 ---------------------------------------------------------------------------
 
+-- Pages of the Decrees tab (2026-10-19, Daniel: the officer musters belong in the Decrees, not in
+-- The Realm): a module lists one in ns.DecreePages, the shape of ns.RealmPages' ({ key, Link =
+-- function() return its link line, or nil end, Lines = function(q) return its lines end, tip =
+-- what its search finds, L.SEARCH_TIP_...}). Its link, under the royal decrees, opens it in place
+-- of the tab's list; its Back line (ShowDecreePage(nil)) or another tab opened (UI.lua's ShowTab)
+-- closes it. A page whose link he no longer gets (he left the guild) closes by itself.
+local decreePageShown -- the page shown instead of the Decrees' list, or nil
+local function DecreePage(key)
+	for _, p in ipairs(ns.DecreePages or {}) do
+		if p.key == key then return p end
+	end
+	return nil
+end
+local function DecreePageNow()
+	local page = decreePageShown and DecreePage(decreePageShown)
+	if page and page.Link and not page.Link() then page = nil end
+	if not page then decreePageShown = nil end
+	return page
+end
+function Views.DecreePageShown() return decreePageShown end
+function Views.ShowDecreePage(key)
+	decreePageShown = DecreePage(key) and key or nil
+	if ns.UI and ns.UI.Refresh then ns.UI.Refresh() end
+end
+function Views.CloseDecreePage() decreePageShown = nil end
+
 local function DecreeLines(q)
 	-- The shared army agenda owns this page's top: the King's current appointment and week,
 	-- consented guild-calendar rows, and read-only Arena providers all keep the one Week identity,
@@ -2705,6 +2951,22 @@ local function DecreeLines(q)
 			end }
 		elseif d.text ~= "" then
 			lines[#lines + 1] = { indent = 1, text = Grey('"' .. d.text .. '"') }
+		end
+	end
+	-- The tab's pages (ns.DecreePages: the officer musters), one link each under the decrees, with
+	-- one gap after the last; none while a search is typed.
+	local links = {}
+	for _, p in ipairs(not q and ns.DecreePages or {}) do
+		local link = p.Link and p.Link()
+		if link then links[#links + 1] = link end
+	end
+	if #links > 0 then
+		local prev = lines[#lines]
+		if prev then prev.gapAfter = true end
+		for i, link in ipairs(links) do
+			link.pageLink = true
+			link.gapAfter = i == #links
+			lines[#lines + 1] = link
 		end
 	end
 	-- 1.1 (#31): a Vox Populi question the player's block terms hid, while it is open.
@@ -3109,6 +3371,9 @@ end
 -- added) is an empty list.
 local BUILD = {
 	census = function(s)
+		-- (CR-02 / KH-08: the census's own page, opened from the header's count, CensusStats.lua.)
+		local stats = ns.CensusStats
+		if type(stats) == "table" and not stats.missing and type(stats.Shown) == "function" and stats.Shown() then return stats.Build(s) end
 		local title, text = CensusDetail(s)
 		return Searched(CensusLines(s, Views.Query("census")), "census", "CENSUS"), title, text
 	end,
@@ -3127,6 +3392,9 @@ local BUILD = {
 	decrees = function()
 		local title, text = DecreeDetail()
 		local q = Views.Query("decrees")
+		-- (A page of the tab, ns.DecreePages: its lines in place of the list, the one box searching it.)
+		local page = DecreePageNow()
+		if page then return Searched(page.Lines(q) or {}, "decrees", page.tip or "LOG"), title, text end
 		local lines = DecreeLines(q)
 		-- 1.1 (#12): this client's log of the acts it saw; the box searches it and the week alone.
 		if ns.Chronicle and not ns.Chronicle.missing then ns.Chronicle.AddLines(lines, q) end

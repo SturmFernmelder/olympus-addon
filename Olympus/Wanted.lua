@@ -332,12 +332,38 @@ end
 
 local CopySlayers
 
+-- RH-09 (Daniel: "visto online por último"): the newest time the Wanted records put this Horde
+-- player in the world, and how: a death he caused (a bounty row, "kill") or his own death to a
+-- member (a claim, "death"). Every client applies the same shared rows (ApplyEvidence), so each
+-- holds the same time, kept with the entry and folded into its base (Checkpoint) like the rest.
+-- An entry saved before it takes the time from what its base already held: its victims, its
+-- claims, its last death and its last sighting.
+function Share.OnlineFrom(t)
+	local kind = (t.lastOnlineKind == "kill" or t.lastOnlineKind == "death") and t.lastOnlineKind or nil
+	local at = Whole(t.lastOnline, 0, 4294967295)
+	if at then return at, kind end
+	local function Take(when, how)
+		when = Whole(when, 0, 4294967295)
+		if when and (not at or when > at) then at, kind = when, how end
+	end
+	for _, v in ipairs(type(t.victims) == "table" and t.victims or {}) do if type(v) == "table" then Take(v.at, "kill") end end
+	for _, c in ipairs(type(t.claims) == "table" and t.claims or {}) do if type(c) == "table" then Take(c.at, "death") end end
+	Take(t.lastDeath, "death")
+	if type(t.lastSighting) == "table" then
+		Take(t.lastSighting.at, t.lastSighting.evidence == "PARTY_KILL" and "death" or "kill")
+	end
+	return at, kind
+end
+
 -- (paid, 1.2.3: what this entry's claims paid each Slayer, in the shape of the Slayers rows. The
 -- Slayers board is built from the entries on the list, so an entry taken off takes its points with
 -- it, folded or not: Rebuild. bounty, 1.2.3: what its rows set going for the next ones, the
--- corpse-camping gaps, the grudges and the cycle's highest level: Bounty.State.)
+-- corpse-camping gaps, the grudges and the cycle's highest level: Bounty.State. lastOnline and
+-- lastOnlineKind: Share.OnlineFrom.)
 local function TargetDerived(t)
+	local lastOnline, lastOnlineKind = Share.OnlineFrom(t)
 	return {
+		lastOnline = lastOnline, lastOnlineKind = lastOnlineKind,
 		bounty = Bounty.State(t.bounty),
 		current = Whole(t.current, 0, Wanted.MAX_POINTS) or 0,
 		lifetimeKills = Whole(t.lifetimeKills, 0, Wanted.MAX_POINTS) or 0,
@@ -706,6 +732,9 @@ local function ApplyEvidence(s, e)
 	else
 		return false
 	end
+	-- (RH-09: the row puts him in the world at its time, Share.OnlineFrom.)
+	local at = Whole(e.at, 0, 4294967295)
+	if at and at >= (tonumber(t.lastOnline) or 0) then t.lastOnline, t.lastOnlineKind = at, e.action == "claim" and "death" or "kill" end
 	if e.zone then t.lastSighting = { zone = e.zone, at = e.at, precision = e.precision, evidence = e.kind,
 		mapID = Whole(e.mapID, 1, 9999999) } end
 	return true
@@ -721,6 +750,7 @@ local function Rebuild(s)
 		t.current, t.lifetimeKills, t.cycle, t.openSince, t.lastDeath = b.current, b.lifetimeKills, b.cycle, b.openSince, b.lastDeath
 		t.cycleVerified = b.cycleVerified
 		t.lastSighting = b.lastSighting
+		t.lastOnline, t.lastOnlineKind = b.lastOnline, b.lastOnlineKind
 		t.victimOverflow, t.victimKillOverflow = b.victimOverflow, b.victimKillOverflow
 		t.victims, t.claims = CopyList(b.victims, Wanted.MAX_VICTIMS), CopyList(b.claims, Wanted.MAX_CLAIMS)
 		t.paid, t.bounty = b.paid, b.bounty
@@ -1448,6 +1478,7 @@ local function PublicTarget(t)
 		addedBy = t.addedBy, source = t.source, removedAt = t.removedAt, removedBy = t.removedBy,
 		current = t.current or 0, lifetimeKills = t.lifetimeKills or 0, cycle = t.cycle or 1,
 		openSince = t.openSince, lastDeath = t.lastDeath, lastSighting = t.lastSighting and CopyList({ t.lastSighting }, 1)[1] or nil,
+		lastOnline = t.lastOnline, lastOnlineKind = t.lastOnlineKind, seenOnline = t.seenOnline,
 		victimOverflow = t.victimOverflow or 0, victimKillOverflow = t.victimKillOverflow or 0,
 		victims = CopyList(t.victims, Wanted.MAX_VICTIMS), claims = CopyList(t.claims, Wanted.MAX_CLAIMS) }
 end
@@ -2236,14 +2267,18 @@ function Wanted.SightingMapID(sighting)
 	return mapID
 end
 
+-- A live sighting's server time translated to this client's clock, for ns.Ago.
+local function AgoAt(at, live)
+	return live and (ns.Now() - math.max(0, math.floor(Clock()) - at)) or at
+end
+
 -- Exact date plus age: an old sighting remains useful and is never silently hidden as "stale".
 -- A live sighting's server time is translated to this client's clock only for ns.Ago.
 function Wanted.SightingWhen(at, live)
 	at = math.floor(tonumber(at) or 0)
 	local dateFn = date or (os and os.date)
 	local stamp = type(dateFn) == "function" and dateFn("%Y-%m-%d %H:%M", at) or tostring(at)
-	local agoAt = live and (ns.Now() - math.max(0, math.floor(Clock()) - at)) or at
-	return L.WANTED_SEEN_WHEN:format(stamp, ns.Ago(agoAt))
+	return L.WANTED_SEEN_WHEN:format(stamp, ns.Ago(AgoAt(at, live)))
 end
 
 -- A separate, genuine in-game observation for this session. It is never inferred from an old
@@ -2349,6 +2384,66 @@ local function EvidenceLabel(kind)
 	return kind == "PARTY_KILL" and L.WANTED_EVIDENCE_PARTY or kind == "SELF_DEATH" and L.WANTED_EVIDENCE_RECAP or L.WANTED_UNKNOWN
 end
 
+-- (RH-09, Daniel: "visto online por último... precisa fazer urgente.") When he was last seen in
+-- the world, the newest of three sources, none of them a presence lookup: this client's own
+-- sighting of him, kept with his entry (the time only: Sight.NoteOnline), a sighting it holds this
+-- session (its own pin, or one a member sent this reviewer: Wanted.LiveSighting), and the Wanted
+-- records every client shares (a death he caused or his own: Share.OnlineFrom). A member's, nil
+-- when none. { at, source = "own" | "nearby" | "kill" | "death" | "record", live }: live, a time
+-- of this client's server clock (Wanted.SightingWhen).
+function Wanted.LastOnline(t)
+	if type(t) ~= "table" or not ns.IsMember or ns.IsMember() ~= true or ns.faction == "Horde" then return nil end
+	local best
+	local function Take(at, source, live)
+		at = Whole(at, 0, 4294967295)
+		if at and (not best or at > best.at) then best = { at = at, source = source, live = live } end
+	end
+	Take(t.lastOnline, (t.lastOnlineKind == "kill" or t.lastOnlineKind == "death") and t.lastOnlineKind or "record", false)
+	-- (Only while the sightings are on: the setting is the account's, each realm group and faction
+	-- keeps its own list, and a No said on another of them forgets this one's times too.)
+	if Wanted.SightingsOn() then Take(t.seenOnline, "own", true) end
+	local pin = Wanted.LiveSighting(t)
+	if pin then Take(pin.at, pin.own and "own" or "nearby", true) end
+	return best
+end
+
+function Wanted.OnlineSource(source)
+	return source == "own" and L.WANTED_ONLINE_OWN or source == "nearby" and L.WANTED_ONLINE_NEARBY
+		or source == "kill" and L.WANTED_ONLINE_KILL or source == "death" and L.WANTED_ONLINE_DEATH or L.WANTED_ONLINE_RECORD
+end
+
+function Wanted.OnlineTip(tt, t, seen)
+	if type(tt) ~= "table" or type(t) ~= "table" or type(seen) ~= "table" then return false end
+	tt:AddLine(Display(t), 1, 0.82, 0)
+	tt:AddLine(L.WANTED_LAST_ONLINE:format(Wanted.SightingWhen(seen.at, seen.live)), 1, 1, 1, true)
+	tt:AddLine(Wanted.OnlineSource(seen.source), 0.8, 0.8, 0.8, true)
+	return true
+end
+
+-- His page's "Last seen online" line, nil without one. (The list says it short on his row:
+-- Wanted.OnlineShort.)
+function Wanted.OnlineLine(t, indent)
+	local seen = Wanted.LastOnline(t)
+	if not seen then return nil end
+	return { id = "wanted-online:" .. tostring(t.key), indent = indent or 1,
+		text = "|cff9d9d9d" .. L.WANTED_LAST_ONLINE:format(Wanted.SightingWhen(seen.at, seen.live)) .. "|r",
+		tooltip = function(tt) return Wanted.OnlineTip(tt, t, seen) end }
+end
+
+-- (Daniel: "ficou ruim last seen online em linha nova... tinha que ser algo clicavel na mesma
+-- linha com pré info curta abrindo pagina do wanted".) The list row's own short "seen 2h ago"
+-- ("seen 3d ago" past a day), nil without a time. It sits after the row's counts, so a click on it
+-- is a click on his row, which opens his page (Wanted.OpenTarget); the row's tooltip (TargetTip)
+-- keeps the date, the age and the source.
+function Wanted.OnlineShort(t)
+	local seen = Wanted.LastOnline(t)
+	if not seen then return nil end
+	local agoAt = AgoAt(seen.at, seen.live)
+	local age = math.max(0, ns.Now() - agoAt)
+	if age >= 86400 then return L.WANTED_ROW_SEEN_DAYS:format(math.floor(age / 86400)) end
+	return L.WANTED_ROW_SEEN:format(ns.Ago(agoAt))
+end
+
 -- (1.2.4: the open cycle's deaths and how many counted, when one did not: the same member again
 -- inside the corpse-camping gap, Bounty.Death. The minutes are the gap's.)
 local function Repeats(t)
@@ -2366,6 +2461,11 @@ local function TargetTip(t)
 		tt:AddLine(L.WANTED_LIFETIME:format(t.lifetimeKills), 0.8, 0.8, 0.8)
 		local repeats = Repeats(t)
 		if repeats then tt:AddLine(repeats, 0.8, 0.8, 0.8, true) end
+		local online = Wanted.LastOnline(t)
+		if online then
+			tt:AddLine(L.WANTED_LAST_ONLINE:format(Wanted.SightingWhen(online.at, online.live)), 0.8, 0.8, 0.8, true)
+			tt:AddLine(Wanted.OnlineSource(online.source), 0.65, 0.65, 0.65, true)
+		end
 		local seen = Wanted.LastSeen(t)
 		if seen then
 			local precision = seen.nearby and L.WANTED_NEARBY
@@ -2538,9 +2638,12 @@ local function ListLines()
 	if #targets == 0 then lines[#lines + 1] = { text = Grey(L.WANTED_EMPTY) } end
 	for i = 1, Wanted.VisibleRows("wanted", #targets) do
 		local t = targets[i]
+		-- (His last seen online on his own row, short and dim after the counts, no line of its own:
+		-- Wanted.OnlineShort. rightWide: a long name gives way before it does.)
+		local seen = Wanted.OnlineShort(t)
 		lines[#lines + 1] = { id = "wanted:" .. t.key, key = t.key, text = Display(t),
-			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills), onClick = function() return Wanted.OpenTarget(t) end,
-			tooltip = TargetTip(t) }
+			right = L.WANTED_ROW_COUNTS:format(t.current, t.lifetimeKills) .. (seen and Grey("  ·  " .. seen) or ""),
+			rightWide = seen ~= nil or nil, onClick = function() return Wanted.OpenTarget(t) end, tooltip = TargetTip(t) }
 		local location = Wanted.LocationLine(t, 1)
 		if location then lines[#lines + 1] = location end
 	end
@@ -2589,17 +2692,12 @@ local function TargetLines()
 	if not t.active and t.removedBy then
 		lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_TAKEN_OFF:format(IssuerName(t.removedBy), t.removedAt and ns.Ago(t.removedAt) or L.WANTED_UNKNOWN)) }
 	end
+	-- (RH-09: one "Last seen online" line, kept, its source in its tooltip: Wanted.LastOnline. It
+	-- replaces 1.2.4's session-only "Last observed online", now one of its sources.)
+	local online = Wanted.OnlineLine(t, 1)
+	if online then lines[#lines + 1] = online end
 	local location = Wanted.LocationLine(t, 1)
 	if location then lines[#lines + 1] = location end
-	local observed = Wanted.LiveSighting(t)
-	if observed then
-		lines[#lines + 1] = { id = "wanted-observed:" .. tostring(t.key), indent = 1,
-			text = Grey(L.WANTED_LAST_OBSERVED:format(Wanted.SightingWhen(observed.at, true))),
-			tooltip = function(tt)
-				tt:AddLine(L.WANTED_LAST_OBSERVED_LABEL, 1, 0.82, 0)
-				tt:AddLine(L.WANTED_LAST_OBSERVED_TIP, 0.8, 0.8, 0.8, true)
-			end }
-	end
 	lines[#lines + 1] = { header = true, text = L.WANTED_OPEN_CYCLE }
 	if #t.victims == 0 then lines[#lines + 1] = { indent = 1, text = Grey(L.WANTED_NO_VICTIMS) } end
 	local repeats = Repeats(t)
@@ -2932,6 +3030,12 @@ function Sight.CrownHidden()
 	return not okShown or shown ~= true
 end
 
+-- Quiet presence (1.2.5.1, Core.lua): a sighting says where this player stands and the lease says a
+-- reviewer is online, so neither goes while it is on, nor their withdrawals (Comm.QUIET_WORDS):
+-- what went before expires on the other clients as after a logout. This client still pins what
+-- it sees, and still takes the sightings whispered to it.
+function Sight.QuietPresence() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
+
 function Sight.GuildName(guild)
 	if Secret(guild) or type(guild) ~= "string" or guild == "" or #guild > 48 or guild:find("[~|%c]") then return nil end
 	return ns.IsFederation and ns.IsFederation(guild) and guild or nil
@@ -3073,6 +3177,7 @@ local function SightPermit(job)
 	local ok, why = Collects()
 	if not ok then return false, why end
 	if Sight.CrownHidden() then return false, "crown" end
+	if Sight.QuietPresence() then return false, "quiet" end
 	if not Sight.Sharing() then return false, "private" end
 	local now = math.floor(Clock())
 	if now - job.at > Wanted.SIGHT_QUEUE_TTL then return false, "stale" end
@@ -3131,6 +3236,8 @@ function Sight.Withdraw()
 	local list = {}
 	for key, r in pairs(told.by) do list[#list + 1] = { key = key, name = r.name, target = r.target } end
 	for key in pairs(told.by) do told.by[key] = nil end
+	-- (Quiet presence: forgotten, not taken back; the reviewers' pins expire, SIGHT_TTL.)
+	if Sight.QuietPresence() then return 0 end
 	if type(C) ~= "table" or type(C.Whisper) ~= "function" then return 0 end
 	table.sort(list, function(a, b) return a.key < b.key end)
 	local n = 0
@@ -3148,6 +3255,7 @@ local function SendSighting(e)
 	-- (Only through a Comm that can cancel what waits: a No must reach every queued sighting.)
 	if type(C) ~= "table" or type(C.Whisper) ~= "function" or type(C.CancelQueued) ~= "function" then return 0, "transport" end
 	if Sight.CrownHidden() then return 0, "crown" end
+	if Sight.QuietPresence() then return 0, "quiet" end
 	-- (1.2.0: a sighting carries where this player stands and his layer: none goes while he keeps
 	-- his zone and layer private.)
 	if not Sight.Sharing() then return 0, "private" end
@@ -3201,6 +3309,18 @@ local function RememberOwn(guid, now, mapID)
 	end
 end
 
+-- (RH-09) A wanted Horde player this client saw: the time goes on his entry, kept (his "Last
+-- seen online" after this session too: Wanted.LastOnline). The time alone, never where, never who
+-- saw him, never sent; only while the sightings are on (Collects), and their No clears it.
+function Sight.NoteOnline(ident, now)
+	local s = Store(false)
+	local t = s and ResolveTarget(s, ident, false)
+	now = Whole(now, 0, 4294967295)
+	if not now or not Wanted.IsWanted(t) or (tonumber(t.seenOnline) or 0) >= now then return false end
+	t.seenOnline = now
+	return true
+end
+
 -- What this client sees (a nameplate, its target, the unit under the mouse). Returns true and the
 -- sighting, or false and why it is none.
 function Wanted.ObserveUnit(unit)
@@ -3229,8 +3349,12 @@ function Wanted.ObserveUnit(unit)
 	if horde then RememberHorde(horde, unit) end
 	if not ident then return false, listed end
 	RememberHorde(ident, unit)
+	local noted = Sight.NoteOnline(ident, now)
 	local mapID, x, y = Sight.Spot()
-	if not mapID then return false, "position" end
+	if not mapID then
+		if noted then Sight.RefreshPage() end
+		return false, "position"
+	end
 	local observer = CleanName(ns.me)
 	local id = observer and Digest(table.concat({ "OLYS1", observer, ident.guid, now, mapID, x, y }, "|"))
 	if not id then return false, "identity" end
@@ -3242,6 +3366,26 @@ function Wanted.ObserveUnit(unit)
 	e.sent = SendSighting(e)
 	Wanted.RefreshPins(changed)
 	return true, e
+end
+
+-- (RH-09) The No forgets the times this client saw each one (Sight.NoteOnline) on every Most
+-- Wanted list it keeps: the setting is the account's (ns.db), but each realm group keeps its own
+-- list (ns.rdb), each faction its own stores (Core's Stores: the Horde's under ns.db.horde), and
+-- Store(false) opens only the current one. A list it cannot reach drops them at its next Prune.
+function Sight.ForgetOnline()
+	local stores = { ns.rdb }
+	local db = type(ns.db) == "table" and ns.db or {}
+	for _, side in ipairs({ db, type(db.horde) == "table" and db.horde or false }) do
+		if type(side) == "table" and type(side.realms) == "table" then
+			for _, R in pairs(side.realms) do stores[#stores + 1] = R end
+		end
+	end
+	for _, R in ipairs(stores) do
+		local s = type(R) == "table" and R.wanted or nil
+		for _, t in pairs(type(s) == "table" and type(s.targets) == "table" and s.targets or {}) do
+			if type(t) == "table" then t.seenOnline = nil end
+		end
+	end
 end
 
 -- The No (or Yes again). Off, at once: no more collecting, what waits in Comm cancelled, what
@@ -3259,11 +3403,14 @@ function Wanted.SetSightings(on, silent)
 		for guid in pairs(pins) do pins[guid] = nil end
 		for key in pairs(ownSeen) do ownSeen[key] = nil end
 		ownSeenCount = 0
+		-- (RH-09: and the times it saw them, Sight.NoteOnline, on every list of the account.)
+		Sight.ForgetOnline()
 		local C = ns.Comm
 		if leaseAt ~= nil and type(C) == "table" and type(C.Send) == "function" then
 			leaseAt = nil
-			-- (The lease's key: a lease still waiting in Comm is replaced, not sent before it.)
-			C.Send("CHANNEL", "WS~R~0", "wanted-reviewer", false, false, nil, { owner = Wanted })
+			-- (The lease's key: a lease still waiting in Comm is replaced, not sent before it. Quiet
+			-- presence: no No either; the members' copy of the lease lapses, REVIEWER_FOR.)
+			if not Sight.QuietPresence() then C.Send("CHANNEL", "WS~R~0", "wanted-reviewer", false, false, nil, { owner = Wanted }) end
 		end
 	end
 	Wanted.RefreshPins(true)
@@ -3285,10 +3432,13 @@ end
 function Wanted.AnnounceReviewer()
 	local C = ns.Comm
 	if not TakesSightings() then return false, "reviewer" end
+	if Sight.QuietPresence() then return false, "quiet" end
 	if type(C) ~= "table" or type(C.Send) ~= "function" then return false, "transport" end
 	leaseAt = math.floor(Clock())
-	return C.Send("CHANNEL", "WS~R~1", "wanted-reviewer", false, false, nil, { owner = Wanted, guard = TakesSightings })
+	return C.Send("CHANNEL", "WS~R~1", "wanted-reviewer", false, false, nil, { owner = Wanted, guard = Sight.Leases })
 end
+-- (Comm's check when the lease leaves: still a reviewer, and not quiet.)
+function Sight.Leases() return TakesSightings() and not Sight.QuietPresence() end
 
 local function HeardLease(dist, sender, text)
 	if dist ~= "CHANNEL" or (text ~= "WS~R~1" and text ~= "WS~R~0") then return false, "shape" end
@@ -3713,7 +3863,7 @@ function Wanted.HistoryFrames() return Sight.historyFrames end
 -- A reviewer's lease is due: he takes sightings and has not said so for a beat (a few seconds'
 -- slack: the timer's beat and the role's arrival may come close together).
 local function LeaseDue()
-	return TakesSightings() and (leaseAt == nil or math.floor(Clock()) - leaseAt >= Wanted.REVIEWER_EVERY - 5)
+	return Sight.Leases() and (leaseAt == nil or math.floor(Clock()) - leaseAt >= Wanted.REVIEWER_EVERY - 5)
 end
 
 -- The lease, LOGIN's REVIEWER_FIRST later, then every REVIEWER_EVERY while the reviewer stays.
@@ -6350,6 +6500,9 @@ function Wanted.Prune()
 			t.source = SOURCES[t.source] and t.source or "manual"
 			t.removedAt, t.removedBy = Whole(t.removedAt, 0, 4294967295), CleanName(t.removedBy)
 			t.wireName = t.wireName == true and t.name ~= nil or nil
+			-- (RH-09: Sight.NoteOnline. Kept only while the sightings are on: a No said on another
+			-- realm group or faction forgets this list's times too, Sight.ForgetOnline.)
+			t.seenOnline = SightingsOn() and Whole(t.seenOnline, 0, 4294967295) or nil
 			local d = TargetDerived(t)
 			for field, value in pairs(d) do t[field] = value end
 			t.victims, t.claims = CopyList(t.victims, Wanted.MAX_VICTIMS), CopyList(t.claims, Wanted.MAX_CLAIMS)
@@ -6623,6 +6776,10 @@ ns.On("KING_LOCATION_CHANGED", function()
 		CancelSightings("crown")
 		Sight.Withdraw()
 	end
+end)
+-- Quiet presence turned off (Core.lua): a reviewer says at once that he takes them again.
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on == false and LeaseDue() then Wanted.AnnounceReviewer() end
 end)
 ns.On("LAYER_SHARING_CHANGED", function(on)
 	if on ~= true and (sightJobCount > 0 or next(told.by) ~= nil) then

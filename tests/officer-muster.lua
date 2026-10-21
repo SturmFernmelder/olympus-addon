@@ -8,7 +8,7 @@ local function World(fn)
 	local w = { clock = 1800000000, now = 1000, guild = "Olympus Ember", kingGuild = "Olympus Ember", map = 1429, member = true, logged = true,
 		roles = { ["Harbor Lord-Realm"] = "lord" }, sources = {}, links = {}, jobs = {}, handlers = {}, events = {}, hidden = {}, barred = {} }
 	local c = setmetatable({ me = "Harbor Lord-Realm", realm = "Realm", group = "Realm", faction = "Alliance", db = {},
-		rdb = { guilds = {} }, L = setmetatable({}, { __index = ns.L }), RealmPages = {} }, { __index = ns })
+		rdb = { guilds = {} }, L = setmetatable({}, { __index = ns.L }), RealmPages = {}, DecreePages = {} }, { __index = ns })
 	w.c = c
 	c.Now = function() return w.now end
 	c.FullName = function(name) return name and (name:find("-", 1, true) and name or name .. "-Realm") end
@@ -37,7 +37,9 @@ local function World(fn)
 		end }
 	c.Zones = { NameForKey = function(key) return key == "m1429" and "Elwynn Forest" or "Westfall" end }
 	c.UI = { RefreshSoon = function() w.refreshes = (w.refreshes or 0) + 1 end }
-	c.Views = { ShowPage = function(key) w.page = key end, PageShown = function() return w.page end }
+	-- (2026-10-19: a page of the Decrees tab, no longer of the Realm: no ShowPage here, so a link
+	-- or Back that still opened a Realm page fails.)
+	c.Views = { ShowDecreePage = function(key) w.page = key end, DecreePageShown = function() return w.page end }
 	c.Comm = { Handle = function(prefix, handler) w.handlers[prefix] = handler end, Hello = function() end,
 		DeliveredLogged = function() return w.logged end,
 		Send = function(dist, msg, key, urgent, logged, done, opts)
@@ -247,11 +249,20 @@ test("Officer muster: queued post and ending guards reject membership, guild, ro
 	end) end
 end)
 
-test("Officer muster: Realm rows require explicit posting, expose zone-only sampled counts, and never open a surprise popup", function()
+-- (Changed on purpose, 2026-10-19, Daniel: "O officer musters. Deveria estar no Decrees, né? Não no
+-- The Realm." The page registers in ns.DecreePages, not ns.RealmPages; its link and Back open and
+-- close it with Views.ShowDecreePage. The same link, lines and gating are checked as before.)
+test("Officer muster: Decrees page rows require explicit posting, expose zone-only sampled counts, and never open a surprise popup", function()
 	World(function(w, c)
 		local M = c.OfficerMuster
-		eq(c.RealmPages[1].key, "officermuster"); M.Link().onClick(); eq(w.page, "officermuster")
+		eq(#c.RealmPages, 0, "no page of the Realm any more")
+		eq(#c.DecreePages, 1); local page = c.DecreePages[1]
+		eq(page.key, "officermuster"); eq(page.Link, M.Link); eq(page.Lines, M.Lines)
+		eq(page.tip, "OFFICER_MUSTER"); eq(c.L.SEARCH_TIP_OFFICER_MUSTER ~= "SEARCH_TIP_OFFICER_MUSTER", true, "its search tip has words")
+		M.Link().onClick(); eq(w.page, "officermuster")
 		local lines = M.Lines()
+		eq(lines[1].text, c.L.OFFICER_MUSTER_BACK); eq(c.L.OFFICER_MUSTER_BACK, "< Back to the Decrees")
+		lines[1].onClick(); eq(w.page, nil, "Back returns to the Decrees' list"); M.Link().onClick()
 		eq(#w.jobs, 0, "opening and reading the page sends nothing")
 		local title, zone, post
 		for _, line in ipairs(lines) do
@@ -274,7 +285,7 @@ test("Officer muster: Realm rows require explicit posting, expose zone-only samp
 	end)
 end)
 
-test("Officer muster: actual Realm row renderer edits and clicks in mouse and gamepad modes without native popups", function()
+test("Officer muster: actual Decrees page row renderer edits and clicks in mouse and gamepad modes without native popups", function()
 	assert(H and H.WithUI and H.WithGamepadUI, "the harness supplies the existing UI helpers")
 	for _, gamepad in ipairs({ false, true }) do
 		H.WithUI(function()
@@ -297,6 +308,92 @@ test("Officer muster: actual Realm row renderer edits and clicks in mouse and ga
 					w.roles[c.me] = "captain"; post:Click(); eq(#w.jobs, 1, "stale visible actions recheck the current role")
 					ns.Views.Render(content, M.Lines()); eq(#M.List(), 0); eq(#c.Chronicle.Entries(), 0)
 					if gamepad then eq(#game.shown, 0, "no native popup under the gamepad UI") end
+				end)
+			end)
+		end)
+	end
+end)
+
+-- (2026-10-19, Daniel: "O officer musters. Deveria estar no Decrees, né? Não no The Realm.") The
+-- addon as loaded: the page is the Decrees tab's, its link under the royal decrees, for members
+-- alone as before; the Realm has no link to it. Opened by a click on the window's own row, with
+-- the mouse and with the gamepad UI, it shows in the Decrees tab; Back, another tab or leaving the
+-- guild bring the Decrees' list back. Nothing is sent and no popup opens.
+test("Officer muster: a page of the Decrees tab under the royal decrees, not of the Realm; its row opens it in the window, Back and another tab close it (mouse and gamepad)", function()
+	assert(H and H.WithUI and H.WithGamepadUI and H.LoadUI, "the harness supplies the UI helpers")
+	local function Find(lines, text)
+		for i, l in ipairs(lines) do if type(l.text) == "string" and l.text:find(text, 1, true) then return l, i end end
+	end
+	for _, gamepad in ipairs({ false, true }) do
+		H.WithUI(function()
+			H.WithGamepadUI(gamepad, function(game)
+				World(function(w, c)
+					local L, M = c.L, c.OfficerMuster
+					-- The real Views over this client (its pages, its Decrees and Realm builders) and
+					-- the real window drawing them.
+					-- (This world's stand-ins first, the harness's own for the rest.)
+					for _, key in ipairs({ "Data", "King", "Moderation", "Roster", "Comm", "Zones" }) do
+						c[key] = setmetatable(c[key], { __index = ns[key] })
+					end
+					c.Data.Summary = function() return ns.Data.Summary() end
+					assert(loadfile(ROOT .. "Olympus/Views.lua"))("Olympus", c)
+					local ui, uns = H.LoadUI()
+					c.UI, uns.Views = ui, c.Views
+					local accord = ns.db.accord
+					ns.db.accord = { v = ns.ACCORD_VERSION, yes = true }
+					local ok, err = pcall(function()
+						eq(#c.RealmPages, 0, "no page of the Realm")
+						eq(#c.DecreePages, 1); eq(c.DecreePages[1].key, "officermuster")
+						ui.Toggle(); ui.SelectTab("decrees")
+						eq(ui.PageId(), "decrees/")
+						-- The link, once, under the royal decrees; never in the Realm.
+						local lines = c.Views.Build("decrees")
+						local link, at = Find(lines, L.OFFICER_MUSTER_TITLE)
+						local _, head = Find(lines, L.DECREES)
+						assert(link and head and head < at, "under the royal decrees")
+						eq(link.pageLink, true); eq(link.gapAfter, true)
+						local count = 0
+						for _, l in ipairs(lines) do if l.text == link.text then count = count + 1 end end
+						eq(count, 1)
+						eq(Find(c.Views.Build("realm"), L.OFFICER_MUSTER_TITLE), nil, "no link in the Realm")
+						-- The window's own row opens it in the Decrees tab.
+						local frame = OlympusFrame or OlympusFrameHD or OlympusFrameBasic or OlympusFrameHDBasic
+						eq(frame:IsShown(), true)
+						local row
+						for _, r in ipairs(frame.views.decrees.rows) do
+							if r.line and r.line.text == link.text and r:IsShown() then row = r end
+						end
+						assert(row, "the link is a row of the Decrees tab"); row:Click()
+						eq(c.Views.DecreePageShown(), "officermuster"); eq(ui.PageId(), "decrees/officermuster")
+						local shown = c.Views.Build("decrees")
+						eq(shown[1].pageSearch, true, "the tab's one search box")
+						local tip = {}
+						shown[1].tooltip({ AddLine = function(_, text) tip[#tip + 1] = tostring(text) end })
+						eq(tip[2], L.SEARCH_TIP_OFFICER_MUSTER)
+						local back = assert(Find(shown, L.OFFICER_MUSTER_BACK))
+						assert(Find(shown, L.OFFICER_MUSTER_HINT), "the muster page's own lines")
+						eq(Find(shown, L.DECREES), nil, "in place of the Decrees' list")
+						local drawn
+						for _, r in ipairs(frame.views.decrees.rows) do
+							if r.line and r.line.text == L.OFFICER_MUSTER_BACK and r:IsShown() then drawn = r end
+						end
+						assert(drawn, "the window draws the page"); drawn:Click()
+						eq(ui.PageId(), "decrees/"); assert(Find(c.Views.Build("decrees"), L.DECREES))
+						-- Another tab closes it; the Decrees open on their list again.
+						link.onClick(); eq(ui.PageId(), "decrees/officermuster")
+						ui.SelectTab("realm"); eq(c.Views.DecreePageShown(), nil)
+						eq(Find(c.Views.Build("realm"), L.OFFICER_MUSTER_BACK), nil, "the Realm never shows it")
+						ui.SelectTab("decrees"); eq(ui.PageId(), "decrees/")
+						-- The same members alone: out of the guild, no link, and the page shown closes.
+						link.onClick(); eq(ui.PageId(), "decrees/officermuster")
+						w.member = false
+						eq(M.Link(), nil)
+						eq(Find(c.Views.Build("decrees"), L.OFFICER_MUSTER_TITLE), nil); eq(c.Views.DecreePageShown(), nil)
+						eq(#w.jobs, 0, "opening, reading and closing it sends nothing")
+						if gamepad then eq(#game.shown, 0, "no native popup under the gamepad UI") end
+					end)
+					ns.db.accord = accord
+					if not ok then error(err, 0) end
 				end)
 			end)
 		end)
@@ -398,4 +495,30 @@ test("Officer muster: English and pt-BR text preserve placeholders", function()
 		local function Formats(s) local out = {}; for f in s:gmatch("%%[sd]") do out[#out + 1] = f end; return table.concat(out) end
 		eq(Formats(value), Formats(texts.ptBR[key]), key)
 	end
+end)
+
+-- 1.2.5.1, review of the quiet presence (Core.lua): the poster's client repeated his call every five
+-- minutes, each repeat saying he was online. A call he posts or withdraws is his own act and goes.
+test("Officer muster: while the quiet presence is on, his call is not repeated (one he posts still goes); the repeat comes back once off", function()
+	World(function(w, c)
+		local quiet = false
+		c.QuietPresence = function() return quiet end
+		w.roles[c.me] = "lord"
+		eq(c.OfficerMuster.Post("Gather for patrol", 1429), true)
+		eq(#w.jobs, 1)
+		quiet = true
+		w.advance(c.OfficerMuster.REPEAT)
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 1, "no repeat while it is on")
+		w.advance(c.OfficerMuster.GAP)
+		eq(c.OfficerMuster.Post("Gather at the bridge", 1436), true, "a call he posts is his own act")
+		eq(#w.jobs, 2); assert(w.jobs[2].msg:find("^OM~1~P~.*~1436~Gather at the bridge$"), w.jobs[2].msg)
+		w.advance(c.OfficerMuster.REPEAT)
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 2)
+		quiet = false
+		c.OfficerMuster.Tick()
+		eq(#w.jobs, 3, "the repeat once off")
+		eq(w.jobs[3].msg, w.jobs[2].msg)
+	end)
 end)

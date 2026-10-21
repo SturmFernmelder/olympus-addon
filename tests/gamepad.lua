@@ -785,6 +785,15 @@ local function NewClient(opts)
 	E.PlaySound = function() end
 	E.GetMaxPlayerLevel = function() return 60 end
 	E.GetMoney = function() return C.money or 0 end
+	-- 1.2.5.1, the Olympus Accord's BattleTag (Accord.ReadTag): Battle.net connected (BNConnected, as
+	-- Blizzard_FriendsFrame's FriendsFrame_CheckBattlenetStatus asks it) and the player's own tag,
+	-- BNGetInfo's second value (a test tag, nobody's). C.bnet = false: disconnected, no tag. (The
+	-- fixture says Forever's source never calls BNFeaturesEnabledAndConnected: nil here.)
+	E.BNConnected = function() return C.bnet ~= false end
+	E.BNGetInfo = function()
+		if C.bnet == false then return nil end
+		return 1, C.battleTag or "Tester#1234", nil, "", false, false, false
+	end
 
 	-- The input style (fidelity rule 1): values from the documentation.
 	local ENUM = {}
@@ -1493,6 +1502,7 @@ local function World(C, opts)
 	for _, n in ipairs({ "SendMailSendMoneyButton", "SendMailCODButton" }) do E[n] = Blizz(n, "CheckButton") end
 	E.SendMailMoney = Blizz("SendMailMoney", "Frame")
 	C.Absent("InspectFrame", "Blizzard_InspectUI loads on demand: not loaded in the pass")
+	C.Absent("PlayerSpellsFrame", "Blizzard_PlayerSpells loads on demand: not loaded in the pass")
 	C.Absent("CalendarFrame", "Blizzard_Calendar loads on demand: not loaded in the pass")
 	C.Absent("GuildFrame", "Forever has no old guild window: no Blizzard_GuildUI in the client's source (its guild window is Communities)")
 	C.Absent("PTR_IssueReporter", "Blizzard_PTRFeedback's frame shows on test clients only (a flow of its own adds it)")
@@ -1954,9 +1964,11 @@ local function TypeSlash(C, line)
 end
 
 -- A player who answered the first-open page (Consent.lua) before: the window opens on its tabs.
+-- (1.2.5.1: and the Olympus Accord accepted, as every account using Olympus has it; a fresh session,
+-- opts.fresh, is asked it first.)
 local function Answered()
 	return { addonChat = true, royalInspection = true, rollCall = true, layerHelp = true, treasurerShares = true,
-		chatWarned = { A = true, C = true, L = true }, shareLocation = true }
+		chatWarned = { A = true, C = true, L = true }, shareLocation = true, accord = { v = 1, yes = true, at = 0 } }
 end
 local function Session(gamepad, opts)
 	opts = opts or {}
@@ -2748,6 +2760,118 @@ test("gamepad pass 6: the Arena's integrations: restricted calls from a click al
 	Check(A.ledger, "the Arena")
 end)
 
+-- 1.2.6, Watch duel (Daniel's duel-view request, 2026-10-19). Two players duelling in front of the
+-- player: target and his target. The game's functions a watch reads that the pass doesn't model
+-- (the fixture's build 70205 lists UnitHealthMax, UnitRace, UnitSex, UnitTokenFromGUID and
+-- GetPlayerInfoByGUID; it predates the others) are stood in as Forever 1.60.1's own documentation
+-- gives them (UnitDocumentation.lua: UnitCanAttack :763, UnitAffectingCombat :614, UnitCastingInfo
+-- :828, UnitChannelInfo :870, UnitHealthMax :1472, UnitHealth :1526, UnitInParty :1637, UnitInRaid
+-- :1683, UnitPower :2732, UnitPowerMax :2801, UnitPowerType :2859), with plain values (the pass has
+-- no secret ones). UnitCanAttack is true between the two duellists only.
+local function DuelScene(C)
+	local E = C.env
+	C.units.target = { name = "Duelist", realm = "Realm", guid = "Player-1-00000003" }
+	C.units.targettarget = { name = "Rival", realm = "Realm", guid = "Player-1-00000004" }
+	local function U(unit) return C.units[unit] end
+	E.UnitCanAttack = function(a, b) return a == "target" and b == "targettarget" end
+	E.UnitTokenFromGUID = function(guid)
+		for _, t in ipairs({ "player", "target", "focus", "mouseover" }) do local u = U(t) if u and u.guid == guid then return t end end
+		return nil
+	end
+	E.GetPlayerInfoByGUID = function(guid)
+		for _, u in pairs(C.units) do if u.guid == guid then return "Warrior", "WARRIOR", "Human", "Human", 2, u.name, u.realm end end
+		return nil
+	end
+	E.UnitRace = function(unit) if U(unit) then return "Human", "Human", 1 end end
+	E.UnitSex = function(unit) if U(unit) then return 2 end end
+	E.UnitPowerType = function(unit) if U(unit) then return 1, "RAGE" end end
+	E.UnitHealth = function(unit) if U(unit) then return 800 end end
+	E.UnitHealthMax = function(unit) if U(unit) then return 1000 end end
+	E.UnitPower = function(unit) if U(unit) then return 30 end end
+	E.UnitPowerMax = function(unit) if U(unit) then return 100 end end
+	E.UnitAffectingCombat = function(unit) return U(unit) ~= nil and C.duelling == true end
+	E.UnitCastingInfo = function() return nil end
+	E.UnitChannelInfo = function() return nil end
+	E.UnitInParty = function() return false end
+	E.UnitInRaid = function() return nil end
+	E.CanInspect = function() return true end
+	E.CheckInteractDistance = function() return true end
+end
+-- The player menu's callbacks the game's way, on his target: the lines Olympus adds (text, click).
+local function MenuLines(C)
+	local lines = {}
+	local function Element()
+		local d = {}
+		function d.SetTooltip() end
+		function d.SetEnabled() end
+		return d
+	end
+	local root = {}
+	function root.CreateTitle() return Element() end
+	function root.CreateButton(_, text, fn) lines[#lines + 1] = { text = text, fn = fn } return Element() end
+	function root.CreateDivider() return Element() end
+	for _, list in pairs(C.menus) do
+		for _, fn in ipairs(list) do C.Isolated(fn, {}, root, { unit = "target", name = "Duelist", server = "Realm" }) end
+	end
+	return lines
+end
+test("gamepad duel view (1.2.6): Watch duel's line only through the player menu's hook with mouse and keyboard, its click asking for the companion alone; a watch with the gamepad UI on, and across switches both ways, reads the fighters and asks their inspection (inspect-patrol, not protected) and reaches nothing else of the game's", function()
+	-- Mouse and keyboard: the line in the player menu (player-menu), the companion asked for on its click.
+	local M = Session(false)
+	DuelScene(M)
+	local watch
+	for _, l in ipairs(MenuLines(M)) do if l.text == M.ns.L.ARENA_MENU_WATCH_DUEL then watch = l end end
+	assert(watch, "Watch duel in the player menu on a duellist")
+	local mark = M.Mark()
+	InClick(M, function() watch.fn() end)
+	local loaded = false
+	for _, r in ipairs(M.Since(mark)) do if r.sym == "C_AddOns.LoadAddOn" then loaded = true end end
+	assert(loaded, "the click asks for the companion")
+	Check(M.Since(mark), "the menu line")
+	NoErrors(M, "the menu line")
+	GP.Covers("player-menu"); GP.Covers("load-companion")
+	-- The gamepad UI: no menu hook, so no line; a watch's own work allowed there.
+	local C, ns = Session(true)
+	DuelScene(C)
+	eq(#MenuLines(C), 0, "no player menu line with the gamepad UI")
+	local S = ns.ArenaSpectate
+	local subject = assert(S.PairFromUnit("target"), "the pair: target and his target")
+	eq(subject.A.name, "Duelist-Realm"); eq(subject.B.name, "Rival-Realm")
+	local before = Snapshot(C)
+	mark = C.Mark()
+	assert(S.Start(subject))
+	local bar = C.env.CreateFrame("StatusBar", nil, C.env.UIParent)
+	local text = bar:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+	local w = { health = bar, healthText = text, power = bar, powerText = text }
+	local function Ticks()
+		S.Track(true)
+		eq(S.Push("A", w), true); eq(S.Push("B", w), true)
+		eq(S.Cast("A", { bar = bar }), nil)
+		C.duelling = not C.duelling
+		eq(S.Fighting(), C.duelling == true)
+		assert(S.Text():find("Duelist", 1, true))
+		C.Advance(5)
+	end
+	Ticks()
+	local asked = 0
+	for _, r in ipairs(C.Since(mark)) do if r.sym == "NotifyInspect" then asked = asked + 1 end end
+	assert(asked >= 1, "his inspection asked for, with the gamepad UI too (not protected)")
+	GP.Covers("inspect-patrol")
+	OnlyAllowed(C.Since(mark), "a duel watch")
+	local diff = Diff(before, Snapshot(C))
+	eq(#diff, 0, "the game's state written: " .. table.concat(diff, ", "))
+	-- Across switches both ways, the same watch goes on (the gate's own work at each switch aside).
+	for _, gamepad in ipairs({ false, true }) do
+		C.Switch(gamepad); C.Advance(1)
+		mark = C.Mark()
+		Ticks()
+		Check(C.Since(mark), "a duel watch after a switch")
+	end
+	S.Stop()
+	eq(S.Watching(), nil)
+	NoErrors(C, "a duel watch")
+end)
+
 -- 1.2.1: [Olympus], [Captains] and [Lords] before a line in the game's chat, links where the player
 -- may write there. A click on one the game's way: the chat window's OnHyperlinkClick calls SetItemRef
 -- (the hooks on it after).
@@ -2802,6 +2926,46 @@ test("gamepad pass 7: the chat's channel names as links: hooked once with mouse 
 	GP.Covers("chat-links"); GP.Covers("chat-box")
 end)
 
+-- A moderator's cover name (Cover.lua) on a name the game updates (a nameplate's, a raid frame's):
+-- the target "Someone" a councillor under a cover, this player's Yes to moderator protection.
+local function CoverScene(ns)
+	ns.rdb.council = { at = 1, names = { someone = "Someone" } }
+	ns.rdb.covers = { ["Someone-Realm"] = { alias = "Aldric Stonebrook", t = ns.Now() } }
+	ns.db.coverConsent = true
+end
+local function CoverFlow(C)
+	C.units.target = { name = "Someone", realm = "Realm", guid = "Player-1-00000002", guild = "Olympus II", rank = "Titan", rankIndex = 1 }
+	local fs = C.NewWidget("FontString", nil, nil, nil, true)
+	fs:SetText("Someone")
+	local mark = C.Mark()
+	C.env.CompactUnitFrame_UpdateName({ unit = "target", name = fs })
+	C.units.target = nil
+	return fs:GetText(), fs, C.Since(mark)
+end
+test("gamepad pass 8: cover names: written over the game's name text with mouse and keyboard, the game's own given back at a switch to the gamepad UI, nothing written there or at a gamepad login", function()
+	local C, ns = Session(false)
+	CoverScene(ns)
+	local text, fs = CoverFlow(C)
+	eq(text, "Aldric Stonebrook", "the cover name, with mouse and keyboard")
+	C.Switch(true); C.Advance(1)
+	eq(fs:GetText(), "Someone", "the game's name back at the switch")
+	local padText, _, padLedger = CoverFlow(C)
+	eq(padText, "Someone", "nothing written with the gamepad UI")
+	for _, r in ipairs(padLedger) do assert(not (r.ids and r.ids[1] == "cover-names"), "nothing of cover-names: " .. Describe(r)) end
+	C.Switch(false); C.Advance(1)
+	eq((CoverFlow(C)), "Aldric Stonebrook", "again with mouse and keyboard")
+	Check(C.ledger, "the whole session")
+	NoErrors(C, "cover names")
+	local P, pns = Session(true)
+	CoverScene(pns)
+	eq((CoverFlow(P)), "Someone", "a gamepad login: nothing written")
+	P.Switch(false); P.Advance(1)
+	eq((CoverFlow(P)), "Aldric Stonebrook", "hooked at the switch to mouse and keyboard")
+	Check(P.ledger, "a gamepad login, then mouse and keyboard")
+	NoErrors(P, "cover names, a gamepad login")
+	GP.Covers("cover-names")
+end)
+
 test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login, both input-style switches and saved binding changes preserve the native owner", function()
 	local P, pad = Session(true)
 	eq(pad.MainKey.Held(), false); eq(P.env.OlympusMainKey, nil, "no key button at a gamepad login")
@@ -2822,6 +2986,59 @@ test("gamepad main shortcut (Shift + the guild key): no binding at gamepad login
 	C.Switch(false); C.Advance(1); eq(ns.MainKey.Held(), true)
 	Check(C.ledger, "main key and native bindings")
 	GP.Covers("main-key")
+end)
+
+-- 1.2.5.1: the Olympus Accord (Accord.lua) on a fresh account's first session, gamepad UI on from the
+-- login: the Accord asks first, in Olympus's own window (no game popup, nothing of the game's UI
+-- reached); the controller's click on I accept starts Olympus; the privacy page comes after it.
+test("gamepad: a fresh account's first session: the Olympus Accord first, in Olympus's own window; I accept by the controller's click, then the privacy page", function()
+	local C, ns = Session(true, { fresh = true })
+	eq(ns.IsMember(), false, "nothing of Olympus before it is accepted")
+	local f = ns.Accord.Frame()
+	assert(f and f:IsShown(), "the letter, LOGIN_WAIT after login")
+	eq(f.acceptEnabled, true, "the test tag is read")
+	assert(f.tag:GetText():find("#****", 1, true), "its digits masked")
+	local page = ns.Consent.Frame()
+	eq(page ~= nil and page:IsShown(), false, "the privacy page waits for it")
+	InClick(C, function() f.accept:Click() end)
+	eq(ns.IsMember(), true); eq(f:IsShown(), false)
+	eq(ns.db.accord.v, ns.ACCORD_VERSION)
+	C.Advance(5)
+	page = ns.Consent.Frame()
+	assert(page and page:IsShown(), "then the privacy page")
+	Check(C.ledger, "the Olympus Accord with the gamepad UI")
+	NoErrors(C, "the Olympus Accord with the gamepad UI")
+	-- Not now, on another fresh session: Olympus stays off, nothing of the game's reached either.
+	local C2, ns2 = Session(true, { fresh = true })
+	InClick(C2, function() ns2.Accord.Frame().notNow:Click() end)
+	eq(ns2.IsMember(), false); eq(ns2.Accord.Frame():IsShown(), false)
+	C2.Advance(120)
+	eq(ns2.Accord.Frame():IsShown(), false, "not again by itself this session")
+	Check(C2.ledger, "Not now with the gamepad UI")
+	NoErrors(C2, "Not now with the gamepad UI")
+end)
+
+-- 1.2.5.1's review: the server's no-such-player line for the BattleTag's whisper to a team member
+-- who just left (Accord.Quiet): no chat filter with the gamepad UI; registered once with mouse and
+-- keyboard; doing nothing from its first line after a switch back to the gamepad UI.
+test("gamepad: the Olympus Accord's quiet not-found line: no chat filter with the gamepad UI, one with mouse and keyboard, inert after the switch back", function()
+	local A = Session(true)
+	local ns = A.ns
+	local before = A.Mark()
+	ns.Accord.Quiet("Iron Warden-Realm")
+	eq(#A.Since(before), 0, "no chat filter with the gamepad UI")
+	A.Switch(false); A.Advance(1)
+	ns.Accord.Quiet("Iron Warden-Realm"); ns.Accord.Quiet("Iron Warden-Realm")
+	local filters = {}
+	for _, cb in ipairs(A.callbacks) do
+		if cb.kind == "AddMessageEventFilter" and cb.fn == ns.Accord.QuietLine then filters[#filters + 1] = cb end
+	end
+	eq(#filters, 1, "registered once, with mouse and keyboard"); eq(filters[1].key, "CHAT_MSG_SYSTEM")
+	A.Switch(true); A.Advance(1)
+	eq(filters[1].fn(nil, "CHAT_MSG_SYSTEM", "No player named 'Iron Warden' is currently playing."), false, "inert with the gamepad UI")
+	GP.Covers("system-filters")
+	Check(A.ledger, "the Olympus Accord's quiet line")
+	NoErrors(A, "the Olympus Accord's quiet line")
 end)
 
 if MODE == "--discover" then

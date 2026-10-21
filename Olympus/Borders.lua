@@ -332,6 +332,15 @@ end
 
 -- What decides a unit's border, or nil for anyone no border is for: not a player, of the other
 -- faction (the census is per faction, and so is the King), or a value the client hides.
+-- A moderator under a cover name (Cover.lua), on this client: none of the marks or borders that
+-- would say what they are (the King's, the council's, the dev's, the Treasurer's), as any member.
+local function Uncover(f)
+	local C = ns.Cover
+	if type(C) ~= "table" or type(C.AliasOf) ~= "function" or not C.AliasOf(f.who) then return end
+	f.covered = true
+	f.councillor, f.council, f.dev, f.treasurer, f.king = false, false, false, false, false
+end
+
 local function Facts(unit)
 	if not UnitExists(unit) or not UnitIsPlayer(unit) then return nil end
 	local faction = UnitFactionGroup(unit)
@@ -348,11 +357,12 @@ local function Facts(unit)
 	f.dev = IsDev(who)
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
+	Uncover(f)
 	if not f.guild or not ns.IsFederation(f.guild) then return f end
 	f.olympus = true
 	-- A nominee: named by the master of the guild the server gives him (Nominees.RoleOf).
 	f.nominee = Nominee(who, f.guild)
-	f.king = ns.IsKingGuild(f.guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rankIndex == 0))
+	f.king = not f.covered and ns.IsKingGuild(f.guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rankIndex == 0))
 	local guilds = ns.rdb and ns.rdb.guilds
 	local report = type(guilds) == "table" and guilds[f.guild] or nil
 	f.report = report
@@ -408,6 +418,10 @@ local function NomineesVersion()
 	local N = ns.Nominees
 	return type(N) == "table" and type(N.Version) == "function" and N.Version() or nil
 end
+local function CoverVersion()
+	local C = ns.Cover
+	return type(C) == "table" and type(C.Version) == "function" and C.Version() or nil
+end
 local function Inputs(f)
 	local report = f and f.report
 	local row = type(report) == "table"
@@ -415,7 +429,8 @@ local function Inputs(f)
 	if f and f.councillor then masked = ns.CouncilMasked() == true end
 	return { guild = f and f.guild, report = report, rt = row and report.t or nil, vouch = row and report.vouch or nil,
 		council = ns.rdb and ns.rdb.council, roster = f and f.fromRoster and (ns.Roster and ns.Roster.byName or false) or nil,
-		masked = masked, who = f and f.who, off = f and f.off, nominees = NomineesVersion(), treasurer = f and f.treasurer }
+		masked = masked, who = f and f.who, off = f and f.off, nominees = NomineesVersion(), treasurer = f and f.treasurer,
+		cover = CoverVersion() }
 end
 
 -- Has anything a unit's border or mark was worked out from (Inputs) changed since? Lookups only:
@@ -429,6 +444,7 @@ function Borders.Changed(k)
 		or (k.masked ~= nil and k.masked ~= (ns.CouncilMasked() == true))
 		or (k.who ~= nil and NetOff(k.who, k.guild) ~= k.off)
 		or k.nominees ~= NomineesVersion()
+		or k.cover ~= CoverVersion()
 		or (k.who ~= nil and k.treasurer ~= (type(ns.Treasury) == "table" and type(ns.Treasury.TreasurerPin) == "function" and ns.Treasury.TreasurerPin(k.who) == 1))
 end
 
@@ -495,6 +511,7 @@ function Borders.MarkOfName(who, guild)
 	if f.off then return nil, f end
 	local T = ns.Treasury
 	f.treasurer = type(T) == "table" and type(T.TreasurerPin) == "function" and T.TreasurerPin(who) == 1
+	Uncover(f)
 	if guild and ns.IsFederation(guild) then
 		f.olympus = true
 		local rank
@@ -513,7 +530,7 @@ function Borders.MarkOfName(who, guild)
 				and ((type(K.IsStewardName) == "function" and K.IsStewardName(who)) or (type(K.IsHandName) == "function" and K.IsHandName(who))))))
 				and true or false
 		end
-		f.king = ns.IsKingGuild(guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rank == 0))
+		f.king = not f.covered and ns.IsKingGuild(guild) and (ns.IsKingCharacter(who) or (ns.KingCharacter() == nil and rank == 0))
 		f.leader = rank == 0
 	end
 	local t = Match(f, true)
@@ -991,8 +1008,10 @@ end
 -- An Apostle's own look (1.2.1, the owner's call, for an Apostle who asked for it)
 ---------------------------------------------------------------------------
 -- The red cross (Honors.RED_CROSS, "apostle-red": its own art, Honors.ArtOf) on his own portrait,
--- on his own screen alone, while everyone else sees his normal frame. Offered in the frame picker
--- (ProfileEdit) to anyone the signed Apostles list names (Church.SignedApostles: the author's
+-- on his own screen alone, while everyone else sees the Apostles' cross he holds in the Church's
+-- ranking (1.2.6, the owner's rule: his pick follows it, HonorsNet.OwnLookFrame), or with none
+-- held his normal frame. Offered in the frame picker (ProfileEdit) to anyone the signed Apostles
+-- list names (Church.SignedApostles: the author's
 -- signed titles list, data; no name in the code), labelled that only he sees it, and drawn on the
 -- plain underlay tinted black (UNDERLAY.black). Kept in this account's save, by character
 -- (ns.db.ownLooks), and never sent: the profile's word (AP) carries his pick as ever, so every
@@ -1428,10 +1447,11 @@ end
 -- master's bronze or the star there instead, if any), a character or a guild the moderators took
 -- off (net-off), a secret name or sender, and `/oly chatmarks off` (ns.db.chatMarks false).
 -- Blizzard runs the callback for every line on every chat window: it reads a boolean, the event
--- list and one table entry; a sender not seen yet is worked out once (ChatName: lookups only, at
--- most two guilds' census rows, never a walk over every guild), and the table is emptied every
--- CHAT_FORGET seconds and whenever the census, the council's lists, our guild or the council's
--- names hidden or shown change, so a new list or icon shows within a minute.
+-- list and two table entries (his mark, the Treasurer's coin); a sender not seen yet is worked out
+-- once (ChatName and Channels.RoleBadge: lookups only, at most two guilds' census rows, never a
+-- walk over every guild), and the tables are emptied every CHAT_FORGET seconds and whenever the
+-- census, the council's lists, a moderator's word, our guild or the council's names hidden or shown
+-- change, so a new list or icon shows within a minute.
 
 Borders.CHAT_EVENTS = {
 	CHAT_MSG_SAY = true, CHAT_MSG_YELL = true, CHAT_MSG_EMOTE = true,
@@ -1448,6 +1468,9 @@ local CHAT_GUILD_EVENTS = Borders.CHAT_GUILD_EVENTS
 Borders.CHAT_FORGET = 60
 Borders.CHAT_MAX = 500 -- senders kept between two emptyings (then it starts again)
 local chatMarks, chatKept = {}, 0 -- sender, as the line gives him -> { text, council, dragon } or false for none
+-- The Treasurer's coin (Channels.RoleBadge) the same way: sender -> the coin or "", worked out once
+-- and emptied with the marks (it was worked out again on every line in every window).
+local chatBadges, badgesKept = {}, 0
 local chatOn, chatHooked, chatPreview = false, false, false -- chatPreview: the author's mark ("gold"...) or false
 
 local CHAT_STAR_FILE = "Interface\\AddOns\\Olympus\\media\\borders\\star"
@@ -1572,6 +1595,21 @@ local function ChatMarkOf(name, sender, guild)
 	return text .. name
 end
 
+-- The coin before a sender's name: worked out once per sender between two emptyings, as his mark
+-- is. Whether we are in an Olympus guild is asked again on every line, as for the marks.
+local function ChatBadge(sender)
+	local okMember, member = pcall(ns.IsMember)
+	if not okMember or member ~= true then return "" end
+	local badge = chatBadges[sender]
+	if badge == nil then
+		local C = ns.Channels
+		badge = C and type(C.RoleBadge) == "function" and C.RoleBadge(sender) or ""
+		if badgesKept >= Borders.CHAT_MAX then chatBadges, badgesKept = {}, 0 end
+		chatBadges[sender], badgesKept = badge, badgesKept + 1
+	end
+	return badge
+end
+
 -- Blizzard's callback: the name to show, or nil for the name as it was (an error is nil too).
 function Borders.ChatFilter(event, name, text, sender)
 	if not chatOn or not CHAT_EVENTS[event] then return nil end
@@ -1579,9 +1617,8 @@ function Borders.ChatFilter(event, name, text, sender)
 	if not ok then return nil end
 	-- The same public Treasury identity badge as the addon chats, through the existing name
 	-- filter only. No frame/hook and no role inferred from a message's labels.
-	if not Secret(name, sender) and type(name) == "string" and type(sender) == "string" then
-		local C = ns.Channels
-		local badge = C and type(C.RoleBadge) == "function" and C.RoleBadge(sender) or ""
+	if not Secret(name, sender) and type(name) == "string" and type(sender) == "string" and sender ~= "" then
+		local badge = ChatBadge(sender)
 		if badge ~= "" then
 			local shown = out or name
 			return shown:find(badge, 1, true) and shown or badge .. shown
@@ -1590,7 +1627,7 @@ function Borders.ChatFilter(event, name, text, sender)
 	return out
 end
 
-function Borders.ChatForget() chatMarks, chatKept = {}, 0 end
+function Borders.ChatForget() chatMarks, chatKept, chatBadges, badgesKept = {}, 0, {}, 0 end
 
 function Borders.ChatEnabled() return not (ns.db and ns.db.chatMarks == false) end
 
@@ -1665,6 +1702,8 @@ ns.On("HONORS_CHANGED", function() Borders.RefreshAll(true) end) -- (1.2)
 ns.On("WANTED_CHANGED", function() Borders.RefreshAll(true) end) -- (1.2)
 -- The King shows or hides the council's names (the eye in the Realm, ns.SetCouncilNamesShown).
 ns.On("COUNCIL_MASK_CHANGED", function() Borders.CensusChanged() end)
+-- A moderator's cover name heard, ended, or our answer to it (Cover.lua).
+ns.On("COVER_CHANGED", function() Borders.ChatForget(); Borders.CensusChanged() end)
 ns.RegisterEvent("PLAYER_TARGET_CHANGED", function() Borders.Refresh("target") end)
 -- Joining, leaving, places swapped: a member new to his place worked out (the frames are the game's to update).
 ns.RegisterEvent("GROUP_ROSTER_UPDATE", function() Borders.RefreshParty() end)

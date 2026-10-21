@@ -6,19 +6,28 @@ local L = ns.L
 -- sees; his worry, someone using it to mine data). docs/API.md is its page for addon authors.
 --
 -- What it is, and what it never is:
---   - Read-only data. Nothing here sends a chat line, a decree, a whisper or any message for the
---     player, nor changes Olympus data. A registered addon may also contribute one page to the
---     Olympus window; Olympus still owns that window and the page's lifecycle.
+--   - Read-only ordinary data. Its getters send no chat line, decree, whisper or other message and
+--     change no Olympus data. Network actions are separately feature-detected: the request-bound
+--     player-sighting search is a verified operator's explicit Start/Cancel, or a
+--     bounded rotation while a visible session the operator explicitly started remains on, with
+--     the observer consent, short life, audience and last-seen semantics below; the bounded
+--     profile-presentation session is host-owned, self-only and fixed-style. A registered addon
+--     may also contribute one page to the Olympus window; Olympus still owns its lifecycle.
 --   - Only what this player already sees on Olympus's own pages, at no more detail: the Wanted list
 --     and its bounties (the Wanted tab's rows), the public rankings (the Slayers boards of the Wanted
 --     tab and the signed top three, the donors' top three while the King shows the army the
 --     Treasury's ranking (Donors below), the Church's public top three, and each game's ranking the
---     King made public: never a staff view), the player's own frame and title, and his own Olympus
---     guild, rank and role. Never the census, another player's private data, a location (the
---     Wanted page's victims and sightings stay on the page), a GUID of an Olympus member, a
---     timestamp of anyone's activity, nor a secret (a key, the sealed channel's name, a signature,
---     a private list). Each row is built here field by field from those pages' own functions, so
---     what a module adds to its tables later never reaches an addon by itself.
+--     King made public: never a staff view), the player's own frame and title, his own Olympus
+--     guild, rank and role, and the leader's presence as the King's lines on the Census and the
+--     Realm, his crown and the Realm tab's layer list show it (LeaderPresence below). Never the
+--     census, another player's private data, the Wanted page's victims or stored sightings, a
+--     movement history, a staff view or a secret (a key, sealed channel name, signature or private
+--     list). The optional search returns only a fresh native
+--     observation or bounded memory-only recent observation: the target's game-reported unit point
+--     when available, its matching group-unit point when it is in the observer's party/raid,
+--     otherwise the observer's encounter point. Each row is labelled with that distinction and
+--     goes only to the verified request's owner.
+--     Each row is built field by field, so what a module adds later never reaches an addon by itself.
 --   - Asked, one addon at a time. OlympusAPI.Register("TheirAddon") gives that addon its handle and
 --     a line of its own on the privacy page (Consent.lua): explicit, so nothing comes back before
 --     its own Yes or the page's clearly labelled Authorize all. The page opens by itself for it once
@@ -29,13 +38,22 @@ local L = ns.L
 --   - Copies. Every table returned (and each callback's) is built fresh for that call: an addon that
 --     changes it changes its own copy, never Olympus's state nor another addon's.
 --   - Versioned and pushed: OlympusAPI.VERSION and OlympusAPI.Has(feature) say what this build gives;
---     handle:On(event, fn) tells of a change (WANTED_CHANGED, RANKINGS_CHANGED, PROFILE_CHANGED, and
---     PERMISSION_CHANGED when the player answers), once a burst of changes settles (DISPATCH_DELAY,
---     never in combat), and only when what that call would return changed: nobody needs to poll.
+--     handle:On(event, fn) tells of a change (WANTED_CHANGED, RANKINGS_CHANGED, PROFILE_CHANGED,
+--     LEADER_CHANGED, SIGHTING_CHANGED for a search that same handle owns,
+--     PROFILE_EFFECT_SESSION_CHANGED for the sanitized host-owned profile session,
+--     QUIET_PRESENCE_CHANGED for the quiet presence, and PERMISSION_CHANGED when the player answers), once
+--     a burst settles (DISPATCH_DELAY, never in combat), and only when what that
+--     call would return changed: nobody needs to poll.
 --   - Bounded. RATE_MAX data calls a RATE_WINDOW per addon, MAX_ADDONS addons a session, MAX_CALLBACKS
 --     callbacks per event. A callback runs protected: its error is logged with the addon's name
 --     (never Olympus's error report) and never stops Olympus or the other callbacks; one that keeps
 --     failing (CALLBACK_FAILS) is dropped.
+--   - Reserved (Daniel, 2026-10-19: no third-party addon may keep a log of where the King has been).
+--     The leader's presence, the sightings searches, the quiet presence and the profile presentation
+--     answer only the addons the Olympus team authorized (API.AUTHORIZED: a digest of each one's
+--     folded name, so the list names nobody). Any other addon gets "unauthorized" from those methods
+--     (RESERVED_METHODS), cannot listen to their events (RESERVED_EVENTS), and its privacy line says
+--     only what it may read (API_CONSENT_TEXT_BASIC). OlympusAPI.Has still says what this build has.
 -- A handle is the addon's own: Register gives it once a session for a name, to the first caller
 -- (a second Register for that name gets nil, "taken"), and only for an addon the game has installed
 -- (its TOC's Title, which the privacy line shows). That is a courtesy boundary, not a lock: every
@@ -51,7 +69,14 @@ local API = {}
 ns.API = API
 
 API.VERSION = 1
-API.CONSENT_VERSION = 1   -- a change in what a Yes lets an addon read asks every addon's line again
+-- Version 8 bounds hostile-area rotation to one live area per handle, no faster than once a minute,
+-- and only the player's current map or a fresh exact result map already owned by that handle. A
+-- visible user-started consumer session must still declare the chosen/configured names or list
+-- sources it includes. Every older Yes must be asked again even though the compatible API version
+-- stays 1.
+-- Version 9 adds the leader's presence (GetLeaderPresence, LEADER_CHANGED) and the wider "outsiders"
+-- area scope: what a Yes gives grew, so it is asked again.
+API.CONSENT_VERSION = 9
 API.MAX_ADDONS = 16       -- addons registered in one session
 API.SURFACE_LIMIT = 1     -- one client-owned page in the shared tab rail per session
 API.RATE_MAX = 20         -- data calls one addon makes...
@@ -60,12 +85,37 @@ API.MAX_CALLBACKS = 4     -- one addon's callbacks for one event
 API.CALLBACK_FAILS = 3    -- a callback that failed this many times is dropped
 API.DISPATCH_DELAY = 2    -- a change is told this long after it, a burst of them once
 API.COMBAT_RETRY = 5      -- in combat, looked at again this long after
+API.AREA_ROTATE_MIN = 60  -- minimum seconds between successful area starts by one handle
+API.AREA_PROOF_MAX = 64   -- fresh exact result maps retained by one handle until those rows expire
 API.MAX_ROWS = 50         -- rows of one Slayers board
 API.MAX_WANTED = 200      -- Wanted rows (Wanted.MAX_TARGETS)
+API.MAX_LEADER_LAYERS = 16 -- layers of the leader's zone (the Realm tab's list)
 API.TITLE_MAX = 40        -- the addon's title on the privacy page
-API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "PERMISSION_CHANGED" }
-API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED" }
+API.EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "SIGHTING_CHANGED",
+	"PROFILE_EFFECT_SESSION_CHANGED", "QUIET_PRESENCE_CHANGED", "PERMISSION_CHANGED" }
+API.DATA_EVENTS = { "WANTED_CHANGED", "RANKINGS_CHANGED", "PROFILE_CHANGED", "LEADER_CHANGED", "PROFILE_EFFECT_SESSION_CHANGED",
+	"QUIET_PRESENCE_CHANGED" }
+API.AREA_SCOPES = { hostile = true, outsiders = true }
 API.RANKINGS = { "slayers", "donors", "church", "games" }
+
+-- The reserved features (the header's Reserved): their methods, with the "no" an addon that is not
+-- authorized gets, as each method says no itself ("nil" for a read and a search's start, "false" for
+-- a setter, the profile session's start and stop, a cancel or a map call), and their events.
+-- A method a reserved feature adds later belongs here too (the tests look for it).
+API.RESERVED_METHODS = {
+	GetLeaderPresence = "nil", StartPlayerSearch = "nil", GetPlayerSearch = "nil", GetPlayerSearches = "nil",
+	StartAreaSearch = "nil", GetAreaSearch = "nil", GetAreaSearches = "nil",
+	CancelPlayerSearch = "false", CancelAreaSearch = "false", ShowAreaSearchOnMap = "false", ClearAreaSearchMap = "false",
+	SetSightingPins = "false", ClearSightingPins = "false",
+	-- The quiet presence and the profile presentation: authorized addons only, as the leader's presence.
+	SetQuietPresence = "false", GetQuietPresence = "nil",
+	StartProfileSession = "false", StopProfileSession = "false", SetProfileEffect = "false", GetProfileSession = "nil",
+}
+API.RESERVED_EVENTS = { LEADER_CHANGED = true, SIGHTING_CHANGED = true, QUIET_PRESENCE_CHANGED = true, PROFILE_EFFECT_SESSION_CHANGED = true }
+-- The authorized addons, each as API.AuthorizedKey(its name) gives it.
+API.AUTHORIZED = {
+	["2def22f6a5e0801fa6e2de4a41ff7be28858d142b209b6c180ebb930ce2cd7dc94aebbc21f452ab7d36e8cc0b2ad61285561c4bd29089f30dfd48e78a77ea072"] = true,
+}
 
 local IS_EVENT = {}
 for _, e in ipairs(API.EVENTS) do IS_EVENT[e] = true end
@@ -73,11 +123,18 @@ for _, e in ipairs(API.EVENTS) do IS_EVENT[e] = true end
 local clients = {} -- [folded addon name] = this session's client
 local order = {}   -- the clients, in the order they registered
 local pending = {} -- [event] = true: a change not looked at yet
+local pendingSightings = {} -- [request id] = true: one request/result changed
 local scheduled = false
 
 ---------------------------------------------------------------------------
 -- Small helpers
 ---------------------------------------------------------------------------
+
+local function Secret(value)
+	if type(issecretvalue) ~= "function" then return false end
+	local ok, secret = pcall(issecretvalue, value)
+	return not ok or secret == true
+end
 
 -- A module of the addon this build has (not a stand-in for a file the game has not loaded yet,
 -- Core.lua's StandIn), with that function.
@@ -97,7 +154,7 @@ end
 -- A plain string for another addon: no colour, texture, atlas or link codes, no control
 -- characters, max bytes at most (never half a letter); nil when nothing is left.
 local function Plain(v, max)
-	if type(v) ~= "string" then return nil end
+	if Secret(v) or type(v) ~= "string" then return nil end
 	v = v:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ""):gsub("|A.-|a", "")
 		:gsub("|H.-|h(.-)|h", "%1"):gsub("|", ""):gsub("%c", " "):gsub("^%s+", ""):gsub("%s+$", "")
 	if v == "" then return nil end
@@ -106,7 +163,10 @@ end
 
 -- A finite number, whole when whole is asked; nil otherwise.
 local function Num(v, whole)
-	v = tonumber(v)
+	if Secret(v) then return nil end
+	local ok, value = pcall(tonumber, v)
+	if not ok or Secret(value) then return nil end
+	v = value
 	if not v or v ~= v or v == math.huge or v == -math.huge then return nil end
 	if whole then v = math.floor(v + 0.5) end
 	return v
@@ -114,6 +174,7 @@ end
 
 -- A fresh copy of plain data (strings, numbers, booleans and tables of them).
 local function Copy(v, depth)
+	if Secret(v) then return nil end
 	if type(v) ~= "table" then
 		if type(v) == "string" or type(v) == "number" or type(v) == "boolean" then return v end
 		return nil
@@ -144,6 +205,18 @@ end
 local function Member() return ns.IsMember and ns.IsMember() == true end
 
 local function Busy() return InCombatLockdown and InCombatLockdown() and true or false end
+
+-- An addon's digest on API.AUTHORIZED: SHA-512 (Ed25519.lua's, loaded before this file) of
+-- "olympus-api-authorized:" and its folded name, in hex; nil without the hash, so nobody is
+-- authorized then.
+function API.AuthorizedKey(name)
+	if type(name) ~= "string" or not Has("Ed25519", "SHA512") then return nil end
+	local ok, digest = pcall(ns.Ed25519.SHA512, "olympus-api-authorized:" .. ns.Fold(name))
+	if not ok or type(digest) ~= "string" then return nil end
+	return (digest:gsub(".", function(ch) return string.format("%02x", ch:byte()) end))
+end
+
+local function Authorized(c) return c.authKey ~= nil and API.AUTHORIZED[c.authKey] == true end
 
 ---------------------------------------------------------------------------
 -- What an addon may read: each built from the page's own functions, field by field
@@ -320,12 +393,339 @@ function API.Profile()
 	return out
 end
 
+-- The current host-owned profile-presentation session, without its internal issuer, grant id,
+-- transport epoch or caption. The remaining lifetime is deliberately approximate and bounded by
+-- the host module; callers should use PROFILE_EFFECT_SESSION_CHANGED instead of polling it.
+function API.ProfileSession()
+	if not Has("ProfileEffects", "Session") then return nil end
+	local state = Call("ProfileEffects", "Session")
+	if type(state) ~= "table" then return nil end
+	local style, expiresIn = Plain(state.style, 32), Num(state.expiresIn, false)
+	if not style or not expiresIn or expiresIn < 0 or expiresIn > 3600 then return nil end
+	return { style = style, expiresIn = expiresIn }
+end
+
+-- The leader's presence, as this player's own pages show it, field by field (review: nothing the
+-- lines do not say, nothing guessed):
+--   - name, online: the King's lines on the Census and the Realm (Hop.KingLines: Hop.King, the name
+--     those lines give him). Not online: { online = false } alone. The King himself: isYou.
+--   - Barred from locations (WatchChat.Barred, as King.Location and Hop.KingLines): no field of
+--     where he is.
+--   - otherRealm (and then realm): Hop.KingOtherRealm, which those lines say.
+--   - mapID, mapName: the zone those lines name (his announced layer's), else his crown's.
+--   - position: his crown on the map (King.Location: only while he shares it), in thousandths.
+--   - onYourLayer: the line "on the King's layer" (Hop.OnKingLayer, strict as the line).
+--   - layers, layer: only while this player is in that zone, the Realm tab's list of its layers
+--     (Layers.ForMap, Layers.Name, its "~N with Olympus" count, a sample), and the name of his.
+-- Never a population (the game gives none), the census, or a member's name beyond the layer
+-- names the Realm tab already shows.
+local function LeaderZone(mapID)
+	local name = Plain(Call("Hop", "ZoneName", mapID), 64)
+	return name ~= "?" and name or nil
+end
+
+function API.LeaderPresence()
+	if not Has("Hop", "King") then return nil end
+	local k = Call("Hop", "King")
+	if type(k) ~= "table" then return { online = false } end
+	local out = { name = Plain(k.name, 72), online = true }
+	if Call("King", "IsKing") == true then out.isYou = true return out end
+	if Call("WatchChat", "Barred", "locations") then return out end
+	local away = Call("Hop", "KingOtherRealm", k) == true
+	out.otherRealm = away
+	if away then out.realm = Plain(k.realm, 64) end
+	local zoneUID, kingMap = Num(k.zoneUID, true), Num(k.mapID, true)
+	local at = Call("King", "Location")
+	at = type(at) == "table" and at or nil
+	local mapID = (not away and zoneUID and kingMap) or (at and Num(at.mapID, true)) or nil
+	if mapID and mapID > 0 then out.mapID, out.mapName = mapID, LeaderZone(mapID) end
+	if at then
+		local am, ax, ay, seenAt = Num(at.mapID, true), Num(at.x), Num(at.y), Num(at.t, true)
+		if am and am > 0 and ax and ay and ax >= 0 and ax <= 1 and ay >= 0 and ay <= 1 then
+			out.position = { mapID = am, x = math.floor(ax * 1000 + 0.5), y = math.floor(ay * 1000 + 0.5), seenAt = seenAt }
+		end
+	end
+	out.onYourLayer = not away and Call("Hop", "OnKingLayer", true) == true or false
+	local here = Num(Call("Layers", "CurrentMap"), true)
+	if not away and here and mapID == here then
+		local mine = Call("Layers", "Mine")
+		local his = (zoneUID and kingMap == here) and zoneUID
+			or (out.onYourLayer and type(mine) == "table" and Num(mine.zoneUID, true)) or nil
+		out.layers = {}
+		for _, layer in ipairs(Call("Layers", "ForMap", here) or {}) do
+			if #out.layers >= API.MAX_LEADER_LAYERS then break end
+			if type(layer) == "table" then
+				local count, name = Num(layer.count, true), Plain(Call("Layers", "Name", layer), 72)
+				if count and count > 0 and name then
+					local leader = his ~= nil and Num(layer.zoneUID, true) == his
+					out.layers[#out.layers + 1] = { name = name, olympus = count, yours = layer.mine == true, leader = leader }
+					if leader then out.layer = name end
+				end
+			end
+		end
+	end
+	return out
+end
+
+-- 1.2.5.1, the quiet presence (Core.lua: ns.QuietPresenceState): { on, since }, since (ns.Now) only
+-- while it is on. Never who turned it on.
+function API.QuietPresence()
+	if type(ns.QuietPresenceState) ~= "function" then return nil end
+	local ok, state = pcall(ns.QuietPresenceState)
+	if not ok or type(state) ~= "table" then return { on = false } end
+	local on = state.on == true
+	return { on = on, since = on and Num(state.since, true) or nil }
+end
+
+-- One short, request-bound search owned by this client. PlayerSightings keeps the transport,
+-- authority, consent, expiry and observation rules; the API only copies the already-normalized
+-- public result. "exact-unit" and "exact-group" are native map/world unit points; "nearby" is the
+-- observer's encounter point. Missing kinds from the pre-release transport remain nearby.
+function API.PlayerSearch(id)
+	if not Has("PlayerSightings", "Session") then return nil end
+	local state = Call("PlayerSightings", "Session", id)
+	if type(state) ~= "table" or state.mode == "area" then return nil end
+	local rawStatus = state.status or state.phase
+	local status = (rawStatus == "sending" or rawStatus == "waiting") and "searching"
+		or ({ searching = true, cancelled = true, expired = true, complete = true })[rawStatus] and rawStatus
+		or "searching"
+	local out = {
+		id = Plain(type(state.id) == "number" and tostring(state.id) or state.id, 64), mode = "player",
+		target = Plain(state.target, 72), status = status,
+		createdAt = Num(state.createdAt, true) or 0, expiresAt = Num(state.expiresAt, true) or 0,
+		sightings = {},
+	}
+	local observers = {}
+	for _, row in ipairs(type(state.sightings) == "table" and state.sightings
+		or type(state.results) == "table" and state.results or {}) do
+		if #out.sightings >= 16 then break end
+		if type(row) == "table" then
+			local observer = Plain(row.observer or row.reporter, 72)
+			local mapID, x, y = Num(row.mapID, true), Num(row.x, true), Num(row.y, true)
+			local at = Num(row.seenAt or row.at, true)
+			local receivedAt, expiresAt = Num(row.receivedAt, true), Num(row.expiresAt, true)
+			local rawKind, kind = row.kind, nil
+			if rawKind == nil or rawKind == "seen-nearby" or rawKind == "nearby" then kind = "nearby"
+			elseif rawKind == "exact-group" or rawKind == "exact-unit" then kind = rawKind end
+			local accuracy = Num(row.accuracyYards, true)
+			local validAccuracy = accuracy == nil or accuracy >= 0 and accuracy <= 100000
+				and (kind ~= "exact-group" and kind ~= "exact-unit" or accuracy == 0)
+			if observer and kind and validAccuracy and mapID and mapID > 0 and x and x >= 0 and x <= 1000
+				and y and y >= 0 and y <= 1000 and at then
+				local sighting = {
+					target = Plain(row.target or state.target, 72), observer = observer,
+					observerGuild = Plain(row.observerGuild or row.guild, 64), seenAt = at,
+					mapID = mapID, x = x, y = y, layer = Num(row.layer, true) or 0, kind = kind,
+				}
+				if receivedAt and receivedAt >= at then sighting.receivedAt = receivedAt end
+				if expiresAt and expiresAt >= at then sighting.expiresAt = expiresAt end
+				if accuracy ~= nil then sighting.accuracyYards = accuracy end
+				out.sightings[#out.sightings + 1] = sighting
+				observers[ns.Fold(observer)] = true
+			end
+		end
+	end
+	local count = 0
+	for _ in pairs(observers) do count = count + 1 end
+	out.observers, out.confirmed = count, count >= 2
+	return out.id and out.target and out or nil
+end
+
+-- A hostile-area session is deliberately a smaller public shape than an exact-name search: rows
+-- identify the directly observed hostile player and the labelled last-seen point, never the member
+-- whose client observed it. The internal transport still verifies that member before accepting it.
+function API.AreaSearch(id)
+	if not Has("PlayerSightings", "AreaSession") then return nil end
+	local state = Call("PlayerSightings", "AreaSession", id)
+	if type(state) ~= "table" or state.mode ~= "area" then return nil end
+	local rawStatus = state.status or state.phase
+	local status = (rawStatus == "sending" or rawStatus == "waiting") and "searching"
+		or ({ searching = true, cancelled = true, expired = true, complete = true })[rawStatus] and rawStatus
+		or "searching"
+	local out = {
+		id = Plain(type(state.id) == "number" and tostring(state.id) or state.id, 64), mode = "area",
+		scope = state.scope == "outsiders" and "outsiders" or "hostile", mapID = Num(state.mapID, true), status = status,
+		createdAt = Num(state.createdAt, true) or 0, expiresAt = Num(state.expiresAt, true) or 0,
+		sightings = {},
+	}
+	local targets = {}
+	for _, row in ipairs(type(state.sightings) == "table" and state.sightings
+		or type(state.results) == "table" and state.results or {}) do
+		if #out.sightings >= 48 then break end
+		if type(row) == "table" then
+			local target = Plain(row.target, 72)
+			local mapID, x, y = Num(row.mapID, true), Num(row.x, true), Num(row.y, true)
+			local at = Num(row.seenAt or row.at, true)
+			local receivedAt, expiresAt = Num(row.receivedAt, true), Num(row.expiresAt, true)
+			local rawKind, kind = row.kind, nil
+			if rawKind == nil or rawKind == "seen-nearby" or rawKind == "nearby" then kind = "nearby"
+			elseif rawKind == "exact-group" or rawKind == "exact-unit" then kind = rawKind end
+			local accuracy = Num(row.accuracyYards, true)
+			local validAccuracy = accuracy == nil or accuracy >= 0 and accuracy <= 100000
+				and (kind ~= "exact-group" and kind ~= "exact-unit" or accuracy == 0)
+			local key = target and ns.Fold(target)
+			-- A not-hostile row only in the wider scope that asked for it.
+			local hostile = row.hostile ~= false
+			if key and not targets[key] and kind and validAccuracy and mapID == out.mapID
+				and (hostile or out.scope == "outsiders")
+				and x and x >= 0 and x <= 1000 and y and y >= 0 and y <= 1000 and at
+				and expiresAt and expiresAt >= at then
+				local sighting = { target = target, seenAt = at, expiresAt = expiresAt,
+					mapID = mapID, x = x, y = y, layer = Num(row.layer, true) or 0, kind = kind, hostile = hostile }
+				if receivedAt and receivedAt >= at then sighting.receivedAt = receivedAt end
+				if accuracy ~= nil then sighting.accuracyYards = accuracy end
+				-- This client's own observation (no other member's identity in it).
+				if row.own == true then sighting.own = true end
+				out.sightings[#out.sightings + 1], targets[key] = sighting, true
+			end
+		end
+	end
+	return out.id and out.mapID and out or nil
+end
+
+local function AnySearch(id)
+	return API.PlayerSearch(id) or API.AreaSearch(id)
+end
+
+-- Ownership is tied to the exact session, not merely its small transport id. PlayerSightings may
+-- reuse an id after a request is gone; a stale handle must never inherit another addon's later
+-- request with that id. The target and creation time are both public, immutable session fields.
+local function SearchFingerprint(state)
+	if type(state) ~= "table" or type(state.createdAt) ~= "number" then return nil end
+	if state.mode == "area" and type(state.mapID) == "number" then
+		return "area\0" .. tostring(state.mapID) .. "\0" .. tostring(state.createdAt)
+	end
+	if type(state.target) ~= "string" then return nil end
+	return "player\0" .. state.target .. "\0" .. tostring(state.createdAt)
+end
+
+local ClearAreaMap, DrawAreaMap
+local HideSightingPins -- (the sighting pins, defined beside the methods)
+
+-- A consumer may rotate an exact-name request before it rotates its hostile-area coverage. Keep
+-- only the already-sanitized exact target/map binding until that result's own expiry; cancellation
+-- of the transport request does not turn the point into a live tracker. The cache belongs to one
+-- API handle, is bounded, and is discarded on permission loss or UI reload.
+local function PruneAreaProofs(c, now)
+	c.areaProofs = type(c.areaProofs) == "table" and c.areaProofs or {}
+	local count = 0
+	for key, proof in pairs(c.areaProofs) do
+		if type(proof) ~= "table" or type(proof.expiresAt) ~= "number" or proof.expiresAt <= now then
+			c.areaProofs[key] = nil
+		else
+			count = count + 1
+		end
+	end
+	while count > API.AREA_PROOF_MAX do
+		local oldestKey, oldestAt
+		for key, proof in pairs(c.areaProofs) do
+			if oldestAt == nil or proof.expiresAt < oldestAt then oldestKey, oldestAt = key, proof.expiresAt end
+		end
+		if not oldestKey then break end
+		c.areaProofs[oldestKey] = nil
+		count = count - 1
+	end
+	return c.areaProofs
+end
+
+local function EachExactAreaProof(state, now, take)
+	now = type(now) == "number" and now or ns.Now and ns.Now() or 0
+	if type(state) ~= "table" or state.mode ~= "player" then return end
+	local target = type(state.target) == "string" and ns.Fold(state.target) or nil
+	if not target then return end
+	for _, row in ipairs(type(state.sightings) == "table" and state.sightings or {}) do
+		local rowTarget = type(row.target) == "string" and ns.Fold(row.target) or nil
+		local exact = row.kind == "exact-unit" or row.kind == "exact-group"
+		local mapID, expiresAt = row.mapID, row.expiresAt
+		if exact and rowTarget == target and type(mapID) == "number" and mapID > 0
+			and mapID == math.floor(mapID) and type(expiresAt) == "number" and expiresAt > now then
+			local key = table.concat({ target, tostring(mapID), row.kind }, "\031")
+			take(key, { target = target, mapID = mapID, kind = row.kind, expiresAt = expiresAt })
+		end
+	end
+end
+
+local function RetainAreaProofs(c, state, now)
+	now = type(now) == "number" and now or ns.Now and ns.Now() or 0
+	PruneAreaProofs(c, now)
+	EachExactAreaProof(state, now, function(key, proof)
+		local old = c.areaProofs[key]
+		if not old or proof.expiresAt > old.expiresAt then c.areaProofs[key] = proof end
+	end)
+	return PruneAreaProofs(c, now)
+end
+
+local function ForgetSearch(c, id)
+	if c.areaMapID == id and ClearAreaMap then ClearAreaMap(c) end
+	c.searches[id] = nil
+	c.sightingTold[id] = nil
+end
+
+local function OwnedSearch(c, id, mode)
+	if Secret(id) then return nil end
+	local fingerprint = type(id) == "string" and c.searches[id] or nil
+	if type(fingerprint) ~= "string" then return nil end
+	local state = AnySearch(id)
+	if not state or SearchFingerprint(state) ~= fingerprint then
+		ForgetSearch(c, id)
+		return nil
+	end
+	if mode and state.mode ~= mode then return nil end
+	return state
+end
+
+-- A handle can choose not to subscribe and never call GetPlayerSearches. Prune its small ownership
+-- index whenever it starts another request so completed/expired transport sessions cannot build up
+-- for the rest of the UI session. PlayerSightings itself keeps at most eight current sessions.
+local function PruneOwnedSearches(c, mode)
+	local ids, out = {}, {}
+	for id in pairs(c.searches) do ids[#ids + 1] = id end
+	for _, id in ipairs(ids) do
+		local state = OwnedSearch(c, id)
+		if state and (not mode or state.mode == mode) then out[#out + 1] = state end
+	end
+	return out
+end
+
+-- Area coverage may follow only evidence the same handle already owns. This is deliberately
+-- narrower than accepting any map id from a consumer: the player's current map is explicit at the
+-- time of the click, and another map must come from an unexpired native point in one of this
+-- handle's exact-name searches. Nearby encounter points do not authorize a different area.
+local function CurrentMapID()
+	if type(C_Map) ~= "table" or type(C_Map.GetBestMapForUnit) ~= "function" then return nil end
+	local ok, mapID = pcall(C_Map.GetBestMapForUnit, "player")
+	mapID = ok and Num(mapID, true) or nil
+	return mapID and mapID > 0 and mapID or nil
+end
+
+local function AreaMapAllowed(c, mapID, now)
+	if CurrentMapID() == mapID then return true end
+	for _, search in ipairs(PruneOwnedSearches(c, "player")) do
+		if search.status ~= "cancelled" and search.status ~= "expired" then
+			local found = false
+			EachExactAreaProof(search, now, function(_, proof)
+				if proof.mapID == mapID then found = true end
+			end)
+			if found then return true end
+		end
+	end
+	for _, proof in pairs(PruneAreaProofs(c, now)) do
+		if proof.mapID == mapID then return true end
+	end
+	return false
+end
+
 -- What each data event's callback is given: what its call returns.
 local BUILD = {
 	WANTED_CHANGED = function() return Member() and API.Wanted() or nil end,
 	RANKINGS_CHANGED = function() return Member() and API.Rankings() or nil end,
 	PROFILE_CHANGED = function() return API.Profile() end,
+	LEADER_CHANGED = function() return Member() and API.LeaderPresence() or nil end,
+	PROFILE_EFFECT_SESSION_CHANGED = function() return Member() and API.ProfileSession() or nil end,
+	QUIET_PRESENCE_CHANGED = function() return API.QuietPresence() end,
 }
+
+local NIL_DATA_EVENT = { PROFILE_EFFECT_SESSION_CHANGED = true }
 
 ---------------------------------------------------------------------------
 -- The addons, their answers and their handles
@@ -358,12 +758,18 @@ local function Status(c)
 	return a == true and "granted" or a == false and "refused" or "pending"
 end
 
+-- This handle turned the quiet presence on (Core.lua), and it is still on.
+local function QuietOwned(c)
+	return type(ns.QuietPresenceOwnedBy) == "function" and ns.QuietPresenceOwnedBy(c.quietOwner) == true
+end
+
 local function Listens(c, event)
 	return type(c.callbacks[event]) == "table" and #c.callbacks[event] > 0
 end
 
 -- The addon's callbacks for the event, each protected; one that keeps failing goes.
 local function Tell(c, event, payload)
+	if API.RESERVED_EVENTS[event] and not Authorized(c) then return end
 	local list = c.callbacks[event]
 	if type(list) ~= "table" then return end
 	local now = {}
@@ -382,16 +788,34 @@ local function Tell(c, event, payload)
 	end
 end
 
+local Dispatch, Mark
+
+-- The leader's crown leaves the map on its own (King.LOCATION_EXPIRE after his last word) with no
+-- event of Olympus's: while a built presence holds a position, one timer looks again just after it
+-- would expire. Never while nobody listens (only a built LEADER_CHANGED arms it), one at a time.
+local leaderTimer = false
+local function WatchLeaderExpiry(data)
+	if leaderTimer or not ns.After or type(data) ~= "table" or type(data.position) ~= "table" then return end
+	local seenAt = data.position.seenAt
+	local life = Has("King", "Location") and tonumber(ns.King.LOCATION_EXPIRE) or nil
+	if type(seenAt) ~= "number" or not life then return end
+	local now = ns.Now and ns.Now() or 0
+	leaderTimer = true
+	ns.After(math.max(1, seenAt + life + 1 - now), "api leader expiry", function()
+		leaderTimer = false
+		Mark("LEADER_CHANGED")
+	end)
+end
+
 -- What a data event would give this addon now becomes what it was last told (no call when it
 -- listens to nothing: nothing is built).
 local function Baseline(c, event)
 	local build = BUILD[event]
 	if not build or not Listens(c, event) or not Granted(c) then return end
 	local data = build()
-	if data ~= nil then c.told[event] = Signature(data) end
+	if event == "LEADER_CHANGED" then WatchLeaderExpiry(data) end
+	if data ~= nil or NIL_DATA_EVENT[event] then c.told[event] = Signature(data) end
 end
-
-local Dispatch
 
 local function Schedule(delay)
 	if scheduled or not ns.After then return end
@@ -401,7 +825,7 @@ end
 
 -- A change Olympus saw: looked at once the burst settles, only for events a granted addon listens
 -- to (nobody listening: nothing is built and no timer starts).
-local function Mark(...)
+Mark = function(...)
 	local any = false
 	for i = 1, select("#", ...) do
 		local event = select(i, ...)
@@ -416,14 +840,15 @@ end
 -- what that addon was last told. In combat, waits.
 Dispatch = function()
 	scheduled = false
-	if next(pending) == nil then return end
+	if next(pending) == nil and next(pendingSightings) == nil then return end
 	if Busy() then Schedule(API.COMBAT_RETRY) return end
 	local events = pending
 	pending = {}
 	for _, event in ipairs(API.DATA_EVENTS) do
 		if events[event] then
 			local data = BUILD[event]()
-			if data ~= nil then
+			if event == "LEADER_CHANGED" then WatchLeaderExpiry(data) end
+			if data ~= nil or NIL_DATA_EVENT[event] then
 				local sig = Signature(data)
 				for _, c in ipairs(order) do
 					if Listens(c, event) and Granted(c) and c.told[event] ~= sig then
@@ -434,6 +859,54 @@ Dispatch = function()
 			end
 		end
 	end
+	local sightings = pendingSightings
+	pendingSightings = {}
+	for id in pairs(sightings) do
+		local state = AnySearch(id)
+		for _, c in ipairs(order) do
+			local terminal = c.sightingEnded[id]
+			if terminal then
+				c.sightingEnded[id] = nil
+				if c.areaMapID == id then ClearAreaMap(c) end
+				if Granted(c) and Listens(c, "SIGHTING_CHANGED") then Tell(c, "SIGHTING_CHANGED", terminal) end
+			elseif c.searches[id] and SearchFingerprint(state) ~= c.searches[id] then
+				-- Gone, or the bounded transport id now names a different session. End only the
+				-- old handle's view. Validate this before drawing so a replacement session is never
+				-- copied into stale map-pin frames, even briefly, across handles.
+				ForgetSearch(c, id)
+				if Granted(c) and Listens(c, "SIGHTING_CHANGED") then
+					Tell(c, "SIGHTING_CHANGED", { id = id, status = "ended" })
+				end
+			else
+				if c.areaMapID == id then
+					if c.searches[id] and state and state.mode == "area" and state.status == "searching" and Granted(c) then
+						DrawAreaMap(c, state, false)
+					else
+						ClearAreaMap(c)
+					end
+				end
+				if c.searches[id] and Granted(c) and Listens(c, "SIGHTING_CHANGED") then
+					local sig = Signature(state)
+					if c.sightingTold[id] ~= sig then
+						c.sightingTold[id] = sig
+						Tell(c, "SIGHTING_CHANGED", state)
+					end
+				end
+			end
+		end
+	end
+end
+
+local function MarkSighting(id)
+	if type(id) == "number" then id = tostring(id) end
+	if type(id) ~= "string" or id == "" then return end
+	for _, c in ipairs(order) do
+		if c.searches[id] and Granted(c) and (Listens(c, "SIGHTING_CHANGED") or c.areaMapID == id) then
+			pendingSightings[id] = true
+			Schedule()
+			return
+		end
+	end
 end
 
 -- The player answered on the privacy page: kept for the account, the addon told (PERMISSION_CHANGED,
@@ -441,8 +914,36 @@ end
 local function SetAnswer(c, on)
 	local all = Answers(true)
 	if not all then return end
+	-- Revocation is active, not merely a read gate: stop every request this handle started before
+	-- saving the No. PlayerSightings also withdraws any live observer evidence when its own sharing
+	-- permission is revoked.
+	if not on then
+		-- Release both sides of this handle's host-owned presentation before the saved answer changes.
+		-- Close/disable are safe after a No as well, but doing them here guarantees that revocation is
+		-- an active boundary rather than waiting for the short network leases to expire.
+		if Has("ProfileEffects", "CloseSession") then pcall(ns.ProfileEffects.CloseSession, c.profileOwner) end
+		if Has("ProfileEffects", "DisableOwner") then pcall(ns.ProfileEffects.DisableOwner, c.profileOwner) end
+		-- The quiet presence this handle turned on ends with its No, as its profile session does.
+		if QuietOwned(c) then pcall(ns.SetQuietPresence, false, c.quietOwner) end
+		local ids = {}
+		for id in pairs(c.searches) do ids[#ids + 1] = id end
+		if Has("PlayerSightings", "Cancel") then
+			for _, id in ipairs(ids) do
+				-- The bounded transport may already have reused this id. Only cancel the exact
+				-- session this handle started; a stale handle must not stop its replacement.
+				if OwnedSearch(c, id) then pcall(ns.PlayerSightings.Cancel, id, "permission") end
+			end
+		end
+		c.searches = {}
+		c.sightingEnded = {}
+		c.areaProofs = {}
+		c.areaStartedAt = nil
+		ClearAreaMap(c)
+		HideSightingPins(c)
+	end
 	all[c.key] = { on = on and true or false, v = API.CONSENT_VERSION, at = ns.Now and ns.Now() or 0 }
 	c.told = {}
+	c.sightingTold = {}
 	if on then for _, event in ipairs(API.DATA_EVENTS) do Baseline(c, event) end end
 	ns.Log("api: %s %s", c.name, on and "granted" or "refused")
 	Tell(c, "PERMISSION_CHANGED", Status(c))
@@ -458,7 +959,8 @@ local function Line(c)
 	return ns.Consent.Register({
 		key = c.consentKey,
 		label = function() return L.API_CONSENT_LABEL:format(c.title) end,
-		text = "API_CONSENT_TEXT",
+		-- An addon that is not authorized is asked only about what it can read (the header's Reserved).
+		text = Authorized(c) and "API_CONSENT_TEXT" or "API_CONSENT_TEXT_BASIC",
 		explicit = true,
 		adopt = false,
 		version = API.CONSENT_VERSION,
@@ -518,6 +1020,133 @@ local function Read(c, needsGuild, build, ...)
 	return build(...)
 end
 
+local function SightingRead(c, build, ...)
+	if not Has("PlayerSightings", "Session") then return nil, "unavailable" end
+	return Read(c, true, build, ...)
+end
+
+local function ProfileAction(c, fn, ...)
+	if not Has("ProfileEffects", fn) then return false, "unavailable" end
+	if not Granted(c) then return false, Status(c) end
+	if not Member() then return false, "guild" end
+	if not Spend(c) then return false, "busy" end
+	local ok, result, why = pcall(ns.ProfileEffects[fn], ...)
+	if not ok then return false, "failed" end
+	return result == true, why
+end
+
+-- Stop/disable remain available after revocation because they can only remove this handle's own
+-- bounded state. The internal owner check prevents one API handle from changing another's state.
+local function ProfileRelease(c, fn, ...)
+	if not Has("ProfileEffects", fn) then return false, "unavailable" end
+	local ok, result, why = pcall(ns.ProfileEffects[fn], ...)
+	if not ok then return false, "failed" end
+	return result == true, why
+end
+
+local function AreaPin(row) -- gp:worldmap-icons
+	if not ns.Gate.Allowed("worldmap-icons") then return nil end
+	if UIParent == nil then return nil end
+	-- An unskinned map marker, not a standalone window. Keep the optional
+	-- template explicit so the window-style guard can verify that invariant.
+	local frame = CreateFrame("Frame", nil, UIParent, nil)
+	frame:SetSize(18, 18)
+	local icon = frame:CreateTexture(nil, "OVERLAY")
+	icon:SetAllPoints()
+	icon:SetTexture("Interface\\Icons\\INV_Misc_Map_01")
+	frame.row = Copy(row)
+	frame:SetScript("OnEnter", function(self) -- gp:worldmap-icons
+		if not ns.Gate.Allowed("worldmap-icons") then return end
+		if type(GameTooltip) ~= "table" or type(GameTooltip.SetOwner) ~= "function" then return end
+		if type(self.row) ~= "table" then return end
+		GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+		GameTooltip:AddLine(self.row.target or "", 1, 0.82, 0)
+		local line = self.row.kind == "nearby" and (L.API_AREA_NEARBY or "Seen nearby")
+			or (L.API_AREA_EXACT or "Exact last-seen point")
+		if self.row.hostile == false then line = line .. "\n" .. (L.API_AREA_OUTSIDER or "Not hostile, outside Olympus's guilds") end
+		GameTooltip:AddLine(line, 0.75, 0.75, 0.75, true)
+		GameTooltip:Show()
+	end)
+	frame:SetScript("OnLeave", function() -- gp:worldmap-icons
+		if not ns.Gate.Allowed("worldmap-icons") then return end
+		if GameTooltip then GameTooltip:Hide() end
+	end)
+	frame:Hide()
+	return frame
+end
+
+-- HereBeDragons owns the anchors, while Olympus owns a bounded pool of the frames it gives the
+-- library. WoW frames cannot be destroyed, so keep at most the 48 frames one area result can use
+-- and reuse them on every refresh instead of orphaning another set after each network answer.
+local function HideAreaPins(c) -- gp:worldmap-icons!undo
+	local P = ns.Pins and ns.Pins()
+	if ns.Gate.Allowed("worldmap-icons") and P and type(P.RemoveAllWorldMapIcons) == "function" and c.areaMapOwner then
+		pcall(P.RemoveAllWorldMapIcons, P, c.areaMapOwner)
+	end
+	for _, frame in ipairs(c.areaMapFrames or {}) do
+		frame.row = nil
+		pcall(frame.Hide, frame)
+	end
+end
+
+ClearAreaMap = function(c, expected)
+	if Secret(expected) then return false, "unknown" end
+	if expected ~= nil and c.areaMapID ~= expected then return false, "unknown" end
+	HideAreaPins(c)
+	c.areaMapID = nil
+	return true
+end
+
+DrawAreaMap = function(c, state, open) -- gp:worldmap-icons
+	if not ns.Gate.Allowed("worldmap-icons") then ClearAreaMap(c) return false, "unsupported" end
+	if type(state) ~= "table" or state.mode ~= "area" then return false, "unknown" end
+	if state.status ~= "searching" then ClearAreaMap(c) return false, "ended" end
+	local P = ns.Pins and ns.Pins()
+	if not P or type(P.AddWorldMapIconMap) ~= "function" or type(P.RemoveAllWorldMapIcons) ~= "function"
+		or type(ns.WorldMapIcons) ~= "function" then ClearAreaMap(c) return false, "unavailable" end
+	local okWorld, world = pcall(ns.WorldMapIcons, P, c.areaMapOwner)
+	if not okWorld or world ~= true then ClearAreaMap(c) return false, "unsupported" end
+	local watched = c.areaMapID == state.id
+	HideAreaPins(c)
+	local now = ns.Now and ns.Now() or 0
+	local used = 0
+	for _, row in ipairs(state.sightings or {}) do
+		if used >= 48 then break end
+		if type(row) == "table" and row.mapID == state.mapID and type(row.x) == "number" and type(row.y) == "number"
+			and type(row.expiresAt) == "number" and row.expiresAt > now then
+			used = used + 1
+			local frame = c.areaMapFrames[used]
+			if not frame then
+				frame = AreaPin(row)
+				c.areaMapFrames[used] = frame
+			else
+				frame.row = Copy(row)
+			end
+			if not frame then ClearAreaMap(c) return false, "unavailable" end
+			local ok, added = pcall(P.AddWorldMapIconMap, P, c.areaMapOwner, frame, row.mapID,
+				row.x / 1000, row.y / 1000, HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
+			if not ok or added ~= true then ClearAreaMap(c) return false, "failed" end
+			if type(frame.Show) == "function" then pcall(frame.Show, frame) end
+		end
+	end
+	if used == 0 then
+		-- A map the player already opened remains armed across a temporarily empty result set. A later
+		-- sighting can therefore restore its pins without forcing the consumer to subscribe to events
+		-- or ask the player to click Show again. A first empty Show still fails closed and opens nothing.
+		c.areaMapID = watched and state.id or nil
+		return false, "empty"
+	end
+	c.areaMapID = state.id
+	if open then
+		if type(WorldMapFrame) ~= "table" or type(WorldMapFrame.SetMapID) ~= "function"
+			or type(ShowUIPanel) ~= "function" then ClearAreaMap(c) return false, "unavailable" end
+		local shown = pcall(ShowUIPanel, WorldMapFrame)
+		local focused = shown and pcall(WorldMapFrame.SetMapID, WorldMapFrame, state.mapID)
+		if not focused then ClearAreaMap(c) return false, "failed" end
+	end
+	return true
+end
+
 -- Surface ownership is deliberately separate from the addon's name and consent key. UI.lua sees
 -- only this session-local slot, so its page context and lifecycle logs do not identify the caller.
 local function SurfaceCall(fn, owner, ...)
@@ -541,6 +1170,507 @@ function METHODS.GetRankings(c, kind)
 	return Read(c, true, API.Rankings, kind)
 end
 function METHODS.GetProfile(c) return Read(c, false, API.Profile) end
+function METHODS.GetLeaderPresence(c)
+	if not Has("Hop", "King") then return nil, "unavailable" end
+	return Read(c, true, API.LeaderPresence)
+end
+function METHODS.StartProfileSession(c, style)
+	style = Plain(style, 32)
+	if not style then return false, "style" end
+	return ProfileAction(c, "OpenSession", c.profileOwner, style)
+end
+function METHODS.StopProfileSession(c)
+	return ProfileRelease(c, "CloseSession", c.profileOwner)
+end
+function METHODS.SetProfileEffect(c, style, enabled, caption)
+	style = Plain(style, 32)
+	if not style then return false, "style" end
+	if enabled ~= true and enabled ~= false then return false, "state" end
+	if enabled then
+		if Secret(caption) or type(caption) ~= "string" then return false, "caption" end
+		return ProfileAction(c, "Set", c.profileOwner, style, true, caption)
+	end
+	return ProfileRelease(c, "Set", c.profileOwner, style, false)
+end
+function METHODS.GetProfileSession(c)
+	if not Has("ProfileEffects", "Session") then return nil, "unavailable" end
+	return Read(c, true, function()
+		local state = API.ProfileSession()
+		return state, state and nil or "none"
+	end)
+end
+-- 1.2.5.1: the quiet presence (Core.lua). Self only, for this session: on, this client sends
+-- nothing that says the player is online or where he is; reads go on. Only the King, a High
+-- Councillor (a current signed issuer) or the addon's author may turn it on ("authority"; "guild"
+-- outside an Olympus guild). The handle that turned it on may always turn it off; another handle
+-- gets "owner". Never saved: a /reload or a logout ends it.
+function METHODS.SetQuietPresence(c, on)
+	if on ~= true and on ~= false then return false, "state" end
+	if type(ns.SetQuietPresence) ~= "function" then return false, "unavailable" end
+	if on == false and QuietOwned(c) then
+		local ok, done, why = pcall(ns.SetQuietPresence, false, c.quietOwner)
+		if not ok then return false, "failed" end
+		return done == true, why
+	end
+	if not Granted(c) then return false, Status(c) end
+	if not Member() then return false, "guild" end
+	if not Spend(c) then return false, "busy" end
+	local ok, done, why = pcall(ns.SetQuietPresence, on, c.quietOwner)
+	if not ok then return false, "failed" end
+	return done == true, why
+end
+function METHODS.GetQuietPresence(c)
+	if type(ns.QuietPresenceState) ~= "function" then return nil, "unavailable" end
+	return Read(c, false, API.QuietPresence)
+end
+function METHODS.StartPlayerSearch(c, target)
+	if not Has("PlayerSightings", "Start") then return nil, "unavailable" end
+	local state, why = SightingRead(c, function() return Call("PlayerSightings", "Start", target) end)
+	-- The internal transport returns true plus its opaque id; keep accepting a table too so this
+	-- adapter remains stable if the internal module later returns its initial snapshot directly.
+	if state == true and (type(why) == "string" or type(why) == "number") then
+		local id = why
+		state, why = API.PlayerSearch(id), nil
+	end
+	if type(state) == "table" and type(state.id) == "string" and state.id ~= "" then
+		PruneOwnedSearches(c)
+		c.sightingEnded[state.id] = nil
+		c.searches[state.id] = SearchFingerprint(state)
+		c.sightingTold[state.id] = Signature(state)
+		return Copy(state)
+	end
+	return nil, why or "failed"
+end
+function METHODS.CancelPlayerSearch(c, id)
+	local state = OwnedSearch(c, id, "player")
+	if not state then return false, "unknown" end
+	if not Has("PlayerSightings", "Cancel") then return false, "unavailable" end
+	-- This method has no read-permission gate because cancellation can only reduce disclosure. A No
+	-- already cancels and forgets every owned request in SetAnswer above.
+	local ok, result, why = pcall(ns.PlayerSightings.Cancel, id, "api")
+	if not ok then return false, "failed" end
+	if result == true then
+		RetainAreaProofs(c, state)
+		ForgetSearch(c, id)
+		if Granted(c) and Listens(c, "SIGHTING_CHANGED") then
+			c.sightingEnded[id] = { id = id, status = "cancelled" }
+			pendingSightings[id] = true
+			Schedule()
+		end
+	elseif why == "not-found" then
+		ForgetSearch(c, id)
+	end
+	return result == true, why
+end
+function METHODS.GetPlayerSearch(c, id)
+	return SightingRead(c, function()
+		local state = OwnedSearch(c, id, "player")
+		return state, state and nil or "unknown"
+	end)
+end
+function METHODS.GetPlayerSearches(c)
+	return SightingRead(c, function()
+		local out = PruneOwnedSearches(c, "player")
+		table.sort(out, function(a, b)
+			local aa, bb = tonumber(a.createdAt) or 0, tonumber(b.createdAt) or 0
+			if aa ~= bb then return aa > bb end
+			return tostring(a.id or "") < tostring(b.id or "")
+		end)
+		return out
+	end)
+end
+function METHODS.StartAreaSearch(c, mapID, scope)
+	if not Has("PlayerSightings", "StartArea") then return nil, "unavailable" end
+	return SightingRead(c, function()
+		if Secret(mapID) then return nil, "map" end
+		mapID = Num(mapID, false)
+		if not mapID or mapID <= 0 or mapID ~= math.floor(mapID) then return nil, "map" end
+		-- "hostile" (also nil: the original contract) or "outsiders", which this build's transport
+		-- must list too.
+		if Secret(scope) then return nil, "scope" end
+		if scope == nil then scope = "hostile" end
+		local scopes = ns.PlayerSightings.AREA_SCOPES
+		if type(scope) ~= "string" or not API.AREA_SCOPES[scope]
+			or (scope ~= "hostile" and not (type(scopes) == "table" and scopes[scope] == true)) then
+			return nil, "scope"
+		end
+		for _, search in ipairs(PruneOwnedSearches(c, "area")) do
+			if search.status == "searching" then return nil, "active" end
+		end
+		local now = ns.Now and ns.Now() or 0
+		if c.areaStartedAt ~= nil and now - c.areaStartedAt < API.AREA_ROTATE_MIN then
+			return nil, "cooldown"
+		end
+		if not AreaMapAllowed(c, mapID, now) then return nil, "map" end
+		local state, why
+		if scope == "hostile" then state, why = Call("PlayerSightings", "StartArea", mapID)
+		else state, why = Call("PlayerSightings", "StartArea", mapID, scope) end
+		if state == true and (type(why) == "string" or type(why) == "number") then
+			local id = why
+			state, why = API.AreaSearch(id), nil
+		end
+		if type(state) == "table" and type(state.id) == "string" and state.id ~= "" then
+			PruneOwnedSearches(c)
+			c.sightingEnded[state.id] = nil
+			c.searches[state.id] = SearchFingerprint(state)
+			c.sightingTold[state.id] = Signature(state)
+			c.areaStartedAt = now
+			return Copy(state)
+		end
+		return nil, why or "failed"
+	end)
+end
+function METHODS.CancelAreaSearch(c, id)
+	if not OwnedSearch(c, id, "area") then return false, "unknown" end
+	if not Has("PlayerSightings", "CancelArea") then return false, "unavailable" end
+	local ok, result, why = pcall(ns.PlayerSightings.CancelArea, id, "api")
+	if not ok then return false, "failed" end
+	if result == true then
+		ClearAreaMap(c, id)
+		ForgetSearch(c, id)
+		if Granted(c) and Listens(c, "SIGHTING_CHANGED") then
+			c.sightingEnded[id] = { id = id, mode = "area", status = "cancelled" }
+			pendingSightings[id] = true
+			Schedule()
+		end
+	elseif why == "not-found" then
+		ForgetSearch(c, id)
+	end
+	return result == true, why
+end
+function METHODS.GetAreaSearch(c, id)
+	return SightingRead(c, function()
+		local state = OwnedSearch(c, id, "area")
+		return state, state and nil or "unknown"
+	end)
+end
+function METHODS.GetAreaSearches(c)
+	return SightingRead(c, function()
+		local out = PruneOwnedSearches(c, "area")
+		table.sort(out, function(a, b)
+			local aa, bb = tonumber(a.createdAt) or 0, tonumber(b.createdAt) or 0
+			if aa ~= bb then return aa > bb end
+			return tostring(a.id or "") < tostring(b.id or "")
+		end)
+		return out
+	end)
+end
+function METHODS.ShowAreaSearchOnMap(c, id)
+	local state, why = SightingRead(c, function() return OwnedSearch(c, id, "area") end)
+	if not state then return false, why or "unknown" end
+	return DrawAreaMap(c, state, true)
+end
+function METHODS.ClearAreaSearchMap(c, id)
+	if Secret(id) then return false, "unknown" end
+	if id ~= nil and type(id) ~= "string" then return false, "unknown" end
+	return ClearAreaMap(c, id)
+end
+-- Sighting pins: the rows a visible, player-started monitoring session chose to keep in sight, as
+-- host-owned dots on the world map (mouse and keyboard only: ns.WorldMapIcons) and on the minimap,
+-- each coloured by a fixed category. Olympus writes the tooltip from the pin's own checked fields:
+-- the name, its category (or the consumer's own short name for it), the consumer's short marks (a list's name, at most three), how long ago
+-- it was seen (Olympus's own clock, the rows' seenAt) and how precise the point is. It never opens
+-- the map. Each call replaces this handle's whole set; permission loss, ClearSightingPins, a
+-- /reload and Olympus hiding locations from this player remove it. A pin past its own expiresAt is
+-- not drawn, and a drawn one goes by itself once past it (TickSightingPins).
+API.PIN_MAX = 96
+API.PIN_LIFETIME_MAX = 15 * 60 -- no dot may outlive the sighting result it represents
+API.PIN_CATEGORIES = {
+	hostile = { 0.92, 0.18, 0.14 },   -- red
+	marked = { 1, 0.62, 0.05 },       -- orange
+	outsider = { 0.3, 0.62, 1 },      -- blue
+}
+local PIN_LABEL = { hostile = "API_PIN_HOSTILE", marked = "API_PIN_MARKED", outsider = "API_PIN_OUTSIDER" }
+
+local function PinRow(raw, now)
+	if type(raw) ~= "table" or Secret(raw.category) or not API.PIN_CATEGORIES[raw.category] then return nil end
+	local target = Plain(raw.target, 72)
+	local mapID, x, y = Num(raw.mapID, true), Num(raw.x), Num(raw.y)
+	local seenAt, expiresAt = Num(raw.seenAt), Num(raw.expiresAt)
+	if not target or not mapID or mapID <= 0 or mapID > 9999999 or not x or x < 0 or x > 1000 or not y or y < 0 or y > 1000
+		or not seenAt or not expiresAt or expiresAt <= now or expiresAt <= seenAt
+		or expiresAt > seenAt + API.PIN_LIFETIME_MAX or seenAt > now + 60 then return nil end
+	local kind = raw.kind
+	if kind ~= "exact-unit" and kind ~= "exact-group" then kind = "nearby" end
+	local yards = kind == "nearby" and Num(raw.accuracyYards) or nil
+	if yards and (yards < 1 or yards > 100000) then yards = nil end
+	local marks = {}
+	for _, mark in ipairs(type(raw.marks) == "table" and raw.marks or {}) do
+		if #marks >= 3 then break end
+		local text = Plain(mark, 24)
+		if text then marks[#marks + 1] = text end
+	end
+	return { target = target, category = raw.category, label = Plain(raw.label, 32), mapID = mapID, x = x, y = y,
+		seenAt = seenAt, expiresAt = expiresAt, kind = kind, accuracyYards = yards, own = raw.own == true, marks = marks }
+end
+
+local function PinTooltip(self) -- gp:minimap
+	local row = self.pinRow
+	if type(row) ~= "table" or type(GameTooltip) ~= "table" or type(GameTooltip.SetOwner) ~= "function" then return end
+	local c = API.PIN_CATEGORIES[row.category] or { 1, 1, 1 }
+	GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+	GameTooltip:AddLine(row.target, c[1], c[2], c[3])
+	GameTooltip:AddLine(row.label or L[PIN_LABEL[row.category]] or row.category, 0.85, 0.85, 0.85)
+	if #row.marks > 0 then
+		GameTooltip:AddLine((L.API_PIN_MARKS or "Marked: %s"):format(table.concat(row.marks, ", ")), 1, 0.82, 0)
+	else
+		GameTooltip:AddLine(L.API_PIN_UNMARKED or "Not marked", 0.6, 0.6, 0.6)
+	end
+	GameTooltip:AddLine((L.API_PIN_SEEN or "Seen %s"):format(ns.Ago(row.seenAt)), 0.85, 0.85, 0.85)
+	local precision
+	if row.kind ~= "nearby" then precision = L.API_AREA_EXACT or "Exact last-seen point"
+	elseif row.accuracyYards then precision = (L.API_PIN_YARDS or "Nearby, within about %d yards"):format(math.floor(row.accuracyYards + 0.5))
+	else precision = L.API_PIN_NEARBY or "Nearby: where the observer stood" end
+	GameTooltip:AddLine(precision, 0.75, 0.75, 0.75, true)
+	if row.own then GameTooltip:AddLine(L.API_PIN_OWN or "Seen by you", 0.5, 0.9, 0.5) end
+	GameTooltip:Show()
+end
+
+local function PinDot(size) -- gp:minimap
+	-- Loaded in WoW after the frame API exists; UIParent is the compatibility
+	-- guard, as it is for the world-map marker above. Avoid passing CreateFrame
+	-- around as a value, which would make the window-style audit unverifiable.
+	if UIParent == nil then return nil end
+	-- An unskinned map marker, not a standalone window. Keep the optional
+	-- template explicit so the window-style guard can verify that invariant.
+	local f = CreateFrame("Frame", nil, UIParent, nil)
+	f.olympus = true
+	f:SetSize(size, size)
+	f.edge = f:CreateTexture(nil, "BACKGROUND")
+	f.edge:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+	f.edge:SetVertexColor(0, 0, 0, 0.9)
+	f.edge:SetAllPoints()
+	f.dot = f:CreateTexture(nil, "ARTWORK")
+	f.dot:SetTexture("Interface\\CHARACTERFRAME\\TempPortraitAlphaMask")
+	f.dot:SetPoint("TOPLEFT", 1.5, -1.5)
+	f.dot:SetPoint("BOTTOMRIGHT", -1.5, 1.5)
+	if f.EnableMouse then f:EnableMouse(true) end
+	f:SetScript("OnEnter", PinTooltip)
+	f:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end) -- gp:minimap
+	f:Hide()
+	return f
+end
+
+-- An older sighting fades: full under two minutes, then three quarters, then half from five.
+local function PinAlpha(row, now)
+	local age = now - row.seenAt
+	if age < 120 then return 1 end
+	if age < 300 then return 0.75 end
+	return 0.5
+end
+
+-- While Olympus hides locations from this player (WatchChat.Barred "locations", as the guildmates'
+-- dots, the King's crown and the Wanted pins), none of these dots either. A check that fails hides.
+local function LocationsBarred()
+	if not Has("WatchChat", "Barred") then return false end
+	local ok, barred = pcall(ns.WatchChat.Barred, "locations")
+	if not ok then return true end
+	return barred ~= nil and barred ~= false
+end
+
+-- Whether this handle may keep its dots up: its Yes, a member, locations not hidden from him.
+local function PinsAllowed(c)
+	return Granted(c) and Member() and not LocationsBarred()
+end
+
+-- A slot's two frames, off every map and with no row. Their anchors go too: a frame the library no
+-- longer places never shows where it last stood (the library shows a minimap dot itself, only in
+-- the player's own zone, and hides it when it takes it off).
+local function ResetPinPair(pair)
+	pair.row, pair.onWorld, pair.onMini, pair.placed = nil, nil, nil, nil
+	for _, frame in ipairs({ pair.world, pair.mini }) do
+		frame.pinRow = nil
+		pcall(frame.Hide, frame)
+		if type(frame.ClearAllPoints) == "function" then pcall(frame.ClearAllPoints, frame) end
+	end
+end
+
+-- One slot's dots taken off the maps (the world map's only while the gate allows: at a switch to
+-- the gamepad UI ns.WorldMapIcons or the gate's park took them off already).
+local function UnplacePin(P, c, pair) -- gp:worldmap-icons!undo
+	if P and pair.onWorld and ns.Gate.Allowed("worldmap-icons") and type(P.RemoveWorldMapIcon) == "function" then
+		pcall(P.RemoveWorldMapIcon, P, c.pinOwner, pair.world)
+	end
+	if P and pair.onMini and type(P.RemoveMinimapIcon) == "function" then pcall(P.RemoveMinimapIcon, P, c.pinOwner, pair.mini) end -- gp:minimap
+	ResetPinPair(pair)
+end
+
+HideSightingPins = function(c) -- gp:worldmap-icons!undo
+	local P = ns.Pins and ns.Pins()
+	if P and c.pinOwner then
+		if ns.Gate.Allowed("worldmap-icons") and type(P.RemoveAllWorldMapIcons) == "function" then
+			pcall(P.RemoveAllWorldMapIcons, P, c.pinOwner)
+		end
+		if type(P.RemoveAllMinimapIcons) == "function" then pcall(P.RemoveAllMinimapIcons, P, c.pinOwner) end -- gp:minimap
+	end
+	for _, pair in ipairs(c.pinFrames or {}) do ResetPinPair(pair) end
+	c.pinCount = 0
+end
+
+-- Every PIN_TICK seconds while a handle has dots: a dot past its row's expiresAt goes, the others fade
+-- with age (their alpha alone: nothing is placed again), and all go once the handle's Yes, the
+-- membership or the player's locations do. One pending timer per handle at most (ns.After, as the
+-- leader's expiry: no ticker), and none once its dots are gone.
+API.PIN_TICK = 15
+local TickSightingPins
+local function SchedulePinTick(c)
+	if c.pinTickPending or not ns.After then return end
+	c.pinTickPending = true
+	ns.After(API.PIN_TICK, "api sighting pins", function()
+		c.pinTickPending = nil
+		if (c.pinCount or 0) > 0 then TickSightingPins(c) end
+	end)
+end
+TickSightingPins = function(c)
+	if not PinsAllowed(c) then HideSightingPins(c) return end
+	local P = ns.Pins and ns.Pins()
+	-- With the gamepad UI the gate's park took the world map's dots off: placed again on a later Set
+	-- once it allows them.
+	local worldOff = not ns.Gate.Allowed("worldmap-icons")
+	local now = ns.Now and ns.Now() or 0
+	local count = 0
+	for _, pair in ipairs(c.pinFrames) do
+		if worldOff then pair.onWorld = nil end
+		local row = pair.row
+		if row then
+			if row.expiresAt <= now then
+				UnplacePin(P, c, pair)
+			else
+				count = count + 1
+				local alpha = PinAlpha(row, now)
+				for _, frame in ipairs({ pair.world, pair.mini }) do
+					if frame.SetAlpha then frame:SetAlpha(alpha) end
+				end
+			end
+		end
+	end
+	c.pinCount = count
+	if count == 0 then HideSightingPins(c) else SchedulePinTick(c) end
+end
+
+-- The world map's dots only with mouse and keyboard (ns.WorldMapIcons), the minimap's always, as
+-- Positions.lua draws guildmates. The pin library shows, places and hides every dot itself (Wanted's
+-- pins too): Olympus never shows one. A slot whose row stands where it stood keeps its dots (no
+-- blink, nothing rebuilt), only its tooltip row, colour and alpha change; a row the library cannot
+-- place (a map it does not know) is not drawn and not counted.
+local function DrawSightingPins(c, list)
+	local P = ns.Pins and ns.Pins()
+	if not P or type(P.AddMinimapIconMap) ~= "function" then return false, "unavailable" end
+	local world = type(ns.WorldMapIcons) == "function" and ns.WorldMapIcons(P, c.pinOwner) == true -- gp:worldmap-icons
+	-- A library without the single-icon removals: every dot off and placed again, as before.
+	if type(P.RemoveMinimapIcon) ~= "function" or type(P.RemoveWorldMapIcon) ~= "function" then HideSightingPins(c) end
+	local now = ns.Now and ns.Now() or 0
+	local used = 0
+	-- The public contract is the first PIN_MAX rows, not PIN_MAX valid rows after walking an
+	-- arbitrarily large hostile table supplied by another addon.
+	for i = 1, math.min(#list, API.PIN_MAX) do
+		local raw = list[i]
+		local row = PinRow(raw, now)
+		if row then
+			local pair = c.pinFrames[used + 1]
+			if not pair then
+				local w, m = PinDot(12), PinDot(10)
+				if not w or not m then HideSightingPins(c) return false, "unavailable" end
+				pair = { world = w, mini = m }
+				c.pinFrames[used + 1] = pair
+			end
+			-- (Without the world map, ns.WorldMapIcons took this handle's dots there off already.)
+			if not world then pair.onWorld = nil end
+			local spot = row.mapID .. ":" .. row.x .. ":" .. row.y
+			if pair.placed ~= spot then
+				UnplacePin(P, c, pair)
+				local ok, added = pcall(P.AddMinimapIconMap, P, c.pinOwner, pair.mini, row.mapID, row.x / 1000, row.y / 1000, false, false) -- gp:minimap
+				if ok and added == true then pair.onMini, pair.placed = true, spot end
+			end
+			if pair.placed == spot then
+				used = used + 1
+				if world and not pair.onWorld and ns.Gate.Allowed("worldmap-icons") then
+					-- gp:worldmap-icons
+					local ok, added = pcall(P.AddWorldMapIconMap, P, c.pinOwner, pair.world, row.mapID, row.x / 1000, row.y / 1000,
+						HBD_PINS_WORLDMAP_SHOW_PARENT or 1)
+					pair.onWorld = ok and added == true or nil
+				end
+				pair.row = row
+				local color, alpha = API.PIN_CATEGORIES[row.category], PinAlpha(row, now)
+				for _, frame in ipairs({ pair.world, pair.mini }) do
+					frame.pinRow = row
+					frame.dot:SetVertexColor(color[1], color[2], color[3])
+					if frame.SetAlpha then frame:SetAlpha(alpha) end
+				end
+			end -- (else the slot, reset by UnplacePin, waits for the next row)
+		end
+	end
+	for i = used + 1, #c.pinFrames do
+		local pair = c.pinFrames[i]
+		if pair.row or pair.placed or pair.onWorld then UnplacePin(P, c, pair) end
+	end
+	c.pinCount = used
+	if used == 0 then HideSightingPins(c) else SchedulePinTick(c) end
+	return true, used
+end
+
+function METHODS.SetSightingPins(c, list)
+	if Secret(list) or type(list) ~= "table" then return false, "invalid" end
+	local ok, why = SightingRead(c, function() return true end)
+	if not ok then return false, why or "unknown" end
+	if LocationsBarred() then HideSightingPins(c) return false, "barred" end
+	return DrawSightingPins(c, list)
+end
+function METHODS.ClearSightingPins(c)
+	HideSightingPins(c)
+	return true
+end
+
+local GUILD_TOOL_SECTIONS = { desk = true, reports = true, cases = true, chat = true, justice = true, profile = true }
+
+local function ShowGuildToolsSection(section, target)
+	if section == "profile" then return ns.Watch.OpenMember(target) end
+	ns.Watch.Show(section == "desk" and nil or section)
+	return true
+end
+
+local function RestoreGuildToolsSection(page)
+	if type(page) ~= "string" then return end
+	local kind, key = page:match("^(case):(.*)$")
+	if not kind then kind, key = page:match("^(profile):(.*)$") end
+	pcall(ns.Watch.Show, kind or page == "desk" and nil or page, key)
+end
+
+-- Opens only Olympus-owned Watch UI. The caller receives success/failure, never the page's
+-- records. A named profile is resolved and access-checked by Watch.OpenMember itself.
+function METHODS.OpenGuildTools(c, section, target)
+	section = section == nil and "desk" or section
+	if Secret(section) or type(section) ~= "string" or not GUILD_TOOL_SECTIONS[section] then
+		return false, "section"
+	end
+	if section == "profile" and (Secret(target) or type(target) ~= "string" or target == "") then
+		return false, "target"
+	end
+	if not Member() then return false, "guild" end
+	if not Has("UI", "SelectTab") or not Has("Watch", "Show") or not Has("Watch", "PageId")
+		or (section == "profile" and not Has("Watch", "OpenMember")) then
+		return false, "unavailable"
+	end
+
+	local priorOK, prior = pcall(ns.Watch.PageId)
+	if not priorOK or type(prior) ~= "string" then return false, "failed" end
+	local okShow, shown, showWhy = pcall(ShowGuildToolsSection, section, target)
+	local pageOK, page = pcall(ns.Watch.PageId)
+	local pageMatches = section == "profile" and type(page) == "string" and page:match("^profile:.+$") ~= nil
+		or section ~= "profile" and page == section
+	if not okShow or shown ~= true or not pageOK or not pageMatches then
+		RestoreGuildToolsSection(prior)
+		if not okShow or not pageOK then return false, "failed" end
+		return false, showWhy or "access"
+	end
+
+	local ok, selected, why = pcall(ns.UI.SelectTab, "watch")
+	if not ok or selected ~= true then
+		RestoreGuildToolsSection(prior)
+		return false, ok and (why or "failed") or "failed"
+	end
+	return true
+end
 function METHODS.RegisterSurface(c, spec)
 	if c.surfaceRegistered then return false, "registered" end
 	local ok, why = SurfaceCall("RegisterAPISurface", c.surfaceOwner, spec)
@@ -553,6 +1683,7 @@ function METHODS.RefreshSurface(c) return RegisteredSurfaceCall(c, "RefreshAPISu
 function METHODS.IsSurfaceOpen(c) return RegisteredSurfaceCall(c, "IsAPISurfaceOpen") end
 function METHODS.On(c, event, fn)
 	if not IS_EVENT[event] or type(fn) ~= "function" then return false end
+	if API.RESERVED_EVENTS[event] and not Authorized(c) then return false end
 	local list = c.callbacks[event] or {}
 	for _, f in ipairs(list) do if f == fn then return true end end
 	if #list >= API.MAX_CALLBACKS then return false end
@@ -574,9 +1705,24 @@ local function ReadOnly(_, k) error("OlympusAPI: read-only (" .. tostring(k) .. 
 
 local function NewClient(name, key, title, slot)
 	local c = { name = name, key = key, title = title, consentKey = "api:" .. key, callbacks = {}, told = {}, fails = {},
-		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot) }
+		rate = { at = -math.huge, n = 0 }, surfaceOwner = "api-surface:" .. tostring(slot), searches = {}, sightingTold = {}, sightingEnded = {},
+		areaMapOwner = {}, areaMapFrames = {}, pinOwner = {}, pinFrames = {}, pinCount = 0, areaProofs = {}, profileOwner = "api-profile:" .. tostring(slot),
+		quietOwner = "api-quiet:" .. tostring(slot), authKey = API.AuthorizedKey(key) }
 	local methods = {}
-	for k, fn in pairs(METHODS) do methods[k] = Method(c, fn) end
+	for k, fn in pairs(METHODS) do
+		local no = API.RESERVED_METHODS[k]
+		if no then
+			local inner = fn
+			fn = function(client, ...)
+				if not Authorized(client) then
+					if no == "false" then return false, "unauthorized" end
+					return nil, "unauthorized"
+				end
+				return inner(client, ...)
+			end
+		end
+		methods[k] = Method(c, fn)
+	end
 	c.handle = setmetatable({}, { __index = methods, __newindex = ReadOnly, __metatable = false })
 	return c
 end
@@ -601,8 +1747,15 @@ function API.Register(name)
 	return c.handle
 end
 
--- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile",
--- "callbacks", "ui.surface") or an event's name.
+-- What this build gives: a feature ("wanted", "rankings", "rankings.<kind>", "profile", "leader",
+-- "callbacks", "network.sightings", "network.sightings.area-scope", "presence.quiet", "ui.guild-tools", "ui.surface")
+-- or an event's name.
+local function SightingsComplete()
+	for _, fn in ipairs({ "Start", "Cancel", "Session", "StartArea", "CancelArea", "AreaSession" }) do
+		if not Has("PlayerSightings", fn) then return false end
+	end
+	return true
+end
 local FEATURES = {
 	wanted = function() return Has("Wanted", "Targets") end,
 	rankings = function() return true end,
@@ -611,7 +1764,28 @@ local FEATURES = {
 	["rankings.church"] = function() return Has("HonorsNet", "ChurchTop") end,
 	["rankings.games"] = function() return Has("ArenaHome", "RankingsPublic") end,
 	profile = function() return true end,
+	leader = function() return Has("Hop", "King") and Has("King", "Location") and Has("Layers", "ForMap") end,
 	callbacks = function() return true end,
+	["network.sightings"] = SightingsComplete,
+	["network.sightings.area-scope"] = function()
+		if not SightingsComplete() then return false end
+		local scopes = ns.PlayerSightings.AREA_SCOPES
+		return type(scopes) == "table" and scopes.outsiders == true
+	end,
+	["network.profile-effects"] = function()
+		for _, fn in ipairs({ "OpenSession", "CloseSession", "Set", "DisableOwner", "Session" }) do
+			if not Has("ProfileEffects", fn) then return false end
+		end
+		return true
+	end,
+	["presence.quiet"] = function()
+		return type(ns.SetQuietPresence) == "function" and type(ns.QuietPresenceState) == "function"
+			and type(ns.QuietPresenceOwnedBy) == "function"
+	end,
+	["ui.guild-tools"] = function()
+		return Has("UI", "SelectTab") and Has("Watch", "Show") and Has("Watch", "PageId")
+			and Has("Watch", "OpenMember")
+	end,
 	["ui.surface"] = function()
 		for _, fn in ipairs({ "RegisterAPISurface", "OpenAPISurface", "ToggleAPISurface", "RefreshAPISurface", "IsAPISurfaceOpen" }) do
 			if not Has("UI", fn) then return false end
@@ -658,5 +1832,32 @@ end)
 -- The games: a result, a ranking made public or kept to the staff (ArenaRoles: Arena.Changed).
 ns.On("ARENA_CHANGED", function() Mark("RANKINGS_CHANGED") end)
 ns.On("LOTTERY_RESULT", function() Mark("RANKINGS_CHANGED") end)
--- A guild joined or left, a rank (Roster.lua: DATA_CHANGED), the signed lists (the role).
-ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED") end)
+-- A guild joined or left, a rank (Roster.lua: DATA_CHANGED), the signed lists (the role); the census
+-- that names the leader online.
+ns.On("DATA_CHANGED", function() Mark("PROFILE_CHANGED", "LEADER_CHANGED") end)
+-- (1.2.5.1) The Olympus Accord accepted or asked again (Accord.lua): every read's answer changed
+-- (Member, "guild").
+ns.On("ACCORD_CHANGED", function() Mark(unpack(API.DATA_EVENTS)) end)
+-- The leader's crown, the layers announced, a local layer sighting (HOP_CHANGED) and a sanction on
+-- locations (WATCHCHAT_CHANGED): what his lines and the Realm tab's layers show.
+for _, event in ipairs({ "KING_LOCATION_CHANGED", "LAYERS_CHANGED", "HOP_CHANGED", "WATCHCHAT_CHANGED" }) do
+	ns.On(event, function() Mark("LEADER_CHANGED") end)
+end
+-- Locations hidden from this player (a sanction: WATCHCHAT_CHANGED; a net-off word: NETOFF_CHANGED),
+-- or the Accord asked again: every handle's sighting dots go at once, as the Wanted pins do, not on
+-- their next tick.
+for _, event in ipairs({ "WATCHCHAT_CHANGED", "NETOFF_CHANGED", "ACCORD_CHANGED" }) do
+	ns.On(event, function()
+		for _, c in ipairs(order) do
+			if (c.pinCount or 0) > 0 and not PinsAllowed(c) then HideSightingPins(c) end
+		end
+	end)
+end
+-- A request started by one handle changed or received a fresh, normalized observation. Only the
+-- handle that owns that opaque request id is told; the event never exposes another addon's search.
+ns.On("PLAYER_SIGHTINGS_CHANGED", function(id) MarkSighting(id) end)
+-- The profile module owns the issuer, grant and transport. The public event rebuilds only its
+-- sanitized style and remaining lease, including nil when the session closes or expires.
+ns.On("PROFILE_EFFECT_SESSION_CHANGED", function() Mark("PROFILE_EFFECT_SESSION_CHANGED") end)
+-- The quiet presence turned on or off (Core.lua), by whichever handle.
+ns.On("QUIET_PRESENCE_CHANGED", function() Mark("QUIET_PRESENCE_CHANGED") end)

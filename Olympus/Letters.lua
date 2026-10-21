@@ -39,7 +39,7 @@ local Letters = {}
 ns.Letters = Letters
 
 -- Every version with a letter, newest first.
-Letters.LIST = { "1.2.5.1", "1.2.5", "1.2.4", "1.2.3", "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
+Letters.LIST = { "1.3.2", "1.3.0", "1.2.5.1", "1.2.5", "1.2.4", "1.2.3", "1.2.2", "1.2.1", "1.2.0", "1.1.5", "1.1.4", "1.1.3", "1.1.2", "1.1.1", "1.1.0" }
 -- 1.2.3 (the author's ask: "why a minute later? why not when opening the game?"): a few seconds
 -- after login, once the loading screen is gone; a privacy question still to ask comes first
 -- (PageFirst: the letter waits for the page, then HANDOFF after it closes).
@@ -50,6 +50,8 @@ Letters.LOGIN_WAIT = 8
 Letters.RETRY = 10
 Letters.HANDOFF = 2
 Letters.WIDTH, Letters.HEIGHT = 440, 470
+-- The history's mark of this version on the parchment (0.35, 0.25, 0.12: the Accord's faded ink).
+Letters.MARK_INK = "ff59401f"
 
 local frame, ticker, waited
 
@@ -129,7 +131,8 @@ end
 -- first (1.2.2 already tells 1.2.1's changes itself, so it carries 1.2.0's, like 1.2.1; 1.2.3
 -- carries 1.2.2's, the fixes before the King's stream, and 1.2.0's): a version or a list.
 Letters.CATCH_UP = { ["1.2.1"] = "1.2.0", ["1.2.2"] = "1.2.0", ["1.2.3"] = { "1.2.2", "1.2.0" },
-	["1.2.4"] = { "1.2.3", "1.2.0" }, ["1.2.5"] = "1.2.4", ["1.2.5.1"] = "1.2.5" }
+	["1.2.4"] = { "1.2.3", "1.2.0" }, ["1.2.5"] = "1.2.4", ["1.2.5.1"] = "1.2.5", ["1.3.0"] = "1.2.5.1",
+	["1.3.2"] = { "1.3.0", "1.2.5.1" } }
 
 -- A version's letter: its title and its text as the page shows them (its marks drawn), or nil when
 -- it has none.
@@ -385,7 +388,9 @@ function Letters.ShowHistory()
 		r:SetPoint("TOPLEFT", f.page, "TOPLEFT", 0, y)
 		r:SetWidth(width)
 		local title = Letters.Text(v)
-		local now = v == ns.VERSION and ("  |cff9d9d9d(" .. L.LETTERS_CURRENT .. ")|r") or ""
+		-- (This version's mark in a faded brown ink, still dark on the parchment: the list's grey,
+		-- 9d9d9d, was barely there on it.)
+		local now = v == ns.VERSION and ("  |c" .. Letters.MARK_INK .. "(" .. L.LETTERS_CURRENT .. ")|r") or ""
 		r.text:SetText(L.LETTERS_ROW:format(v, title) .. now)
 		r:Show()
 		y = y - 24
@@ -439,6 +444,12 @@ ns.On("LOGIN", function() Letters.OnLogin() end)
 ns.On("CONSENT_CLOSED", function()
 	if not waited or not ticker or Letters.IsRead(ns.VERSION) then return end
 	ns.After(Letters.HANDOFF, "version letter", function() Letters.Ask("privacy") end)
+end)
+-- (1.2.5.1) The Olympus Accord accepted (Accord.lua): the letter a moment after, unless the privacy
+-- page asks first (PageFirst; its closing brings the letter, above).
+ns.On("ACCORD_CHANGED", function(on)
+	if on ~= true or not waited or not ticker or Letters.IsRead(ns.VERSION) then return end
+	ns.After(Letters.HANDOFF, "version letter", function() Letters.Ask("accord") end)
 end)
 
 -- `/oly letters` (the list), `/oly letters <version>` (that letter; one without a letter: the list).

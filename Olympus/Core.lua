@@ -2,7 +2,7 @@ local ADDON, ns = ...
 local L = ns.L
 
 ns.NAME = "Olympus"
-ns.VERSION = "1.2.5.1"
+ns.VERSION = "1.3.2"
 ns.PREFIX = "OLYMPUS"        -- addon message prefix (max 16 chars)
 ns.CHANNEL = "OlympusNet"    -- hidden chat channel shared by every Olympus guild (Alliance)
 ns.CHANNEL_HORDE = "OlympusNetH" -- the Horde's: the two factions never see each other's guilds
@@ -128,6 +128,18 @@ function ns.DisplayName(name)
 	local realm = ns.RealmOf(name)
 	if not realm or realm == ns.realm then return ns.ShortName(name) end
 	return name
+end
+
+-- A name as Olympus's pages show it (Cover.lua): a moderator's cover name, for a player who accepted
+-- it, in place of the name given; else that name. Never for what goes out or is kept (ns.DisplayName).
+function ns.CoverSwap(name)
+	local C = ns.Cover
+	if type(name) ~= "string" or type(C) ~= "table" or type(C.AliasOf) ~= "function" then return name end
+	return C.AliasOf(name) or name
+end
+function ns.IsCovered(name)
+	local C = ns.Cover
+	return type(name) == "string" and type(C) == "table" and type(C.AliasOf) == "function" and C.AliasOf(name) ~= nil
 end
 
 -- The name a whisper, an invite or /who takes. WoW: Forever's server finds "First Surname"
@@ -317,6 +329,11 @@ local function MergeChat(dst, src)
 	end
 end
 
+-- Keys of a store whose own file merges two copies of it: its Merge(dst's, src's) returns the one
+-- kept (the chat warnings' struck lines and hold, ChatStrikes.Merge: they have no time of their own,
+-- and the copy merged first would be kept whole).
+local MERGED_BY = { chatStrikes = "ChatStrikes" }
+
 -- Moves one store into another, losing nothing that is newer. Our own guild's report (`mine`)
 -- is kept like any other: an alt's own guild is a report nobody else may be sending. The
 -- realm key is settled by OpenStore, which sees every store at once.
@@ -343,7 +360,12 @@ local function MergeStore(dst, src)
 	for k, v in pairs(src) do
 		if k ~= "guilds" and k ~= "seen" and k ~= "inspect" and k ~= "chat" and k ~= "realmKey" then
 			local old = dst[k]
-			if old == nil or (type(v) == "table" and type(old) == "table" and (tonumber(v.t) or 0) > (tonumber(old.t) or 0)) then dst[k] = v end
+			local file = MERGED_BY[k] and rawget(ns, MERGED_BY[k])
+			local merge = type(file) == "table" and not file.missing and rawget(file, "Merge")
+			if old ~= nil and type(merge) == "function" then
+				local ok, merged = pcall(merge, old, v)
+				if ok and merged ~= nil then dst[k] = merged end
+			elseif old == nil or (type(v) == "table" and type(old) == "table" and (tonumber(v.t) or 0) > (tonumber(old.t) or 0)) then dst[k] = v end
 		end
 	end
 end
@@ -494,8 +516,12 @@ ns.Gate.Hooks("worldmap-icons", {
 	leftover = function() return worldMapTouched end,
 })
 
--- Round logo button with the exact geometry of minimap buttons (LibDBIcon layout at 31px,
--- scaled to the requested size): gold tracking ring, dark disc, round logo.
+-- Round logo button with the geometry of minimap buttons (LibDBIcon's sizes at 31px, scaled to
+-- the requested size): gold tracking ring, dark disc, round logo.
+-- The disc and the logo on the ring's centre, (16, -16) with the ring 53 across from the top left
+-- (UP-12, the author's "um pouquinho descentralizado"): LibDBIcon's places for them, (7, -5) and
+-- (7, -6), are its classic ones, and 0.9.0's logo on that disc, (8, -6), sat about 1 unit right
+-- of the ring's centre and 1 above it on Forever (measured in the author's screenshots of 10-04).
 function ns.MakeRoundButton(name, parent, size)
 	local k = size / 31
 	local b = CreateFrame("Button", name, parent)
@@ -503,13 +529,13 @@ function ns.MakeRoundButton(name, parent, size)
 	local bg = b:CreateTexture(nil, "BACKGROUND")
 	bg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
 	bg:SetSize(20 * k, 20 * k)
-	bg:SetPoint("TOPLEFT", 7 * k, -5 * k)
+	bg:SetPoint("TOPLEFT", 6 * k, -6 * k)
 	-- The logo, a disc (the mask): centred on the dark disc behind it (LibDBIcon's square
 	-- icons sit 1.5 px off it, which the ring hides; a disc there shows a crescent).
 	local icon = b:CreateTexture(nil, "ARTWORK")
 	icon:SetTexture(ns.LOGO)
 	icon:SetSize(18 * k, 18 * k)
-	icon:SetPoint("TOPLEFT", 8 * k, -6 * k)
+	icon:SetPoint("TOPLEFT", 7 * k, -7 * k)
 	if icon.SetMask then pcall(icon.SetMask, icon, "Interface\\CharacterFrame\\TempPortraitAlphaMask") end
 	local ring = b:CreateTexture(nil, "OVERLAY")
 	ring:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
@@ -1580,9 +1606,28 @@ function ns.IsFederation(guild)
 	return known
 end
 
--- The addon only works for members of an Olympus guild.
-function ns.IsMember()
+-- 1.2.5.1: the Olympus Accord (Accord.lua), Olympus's terms of use, accepted once per game account
+-- (ns.db.accord). Until then the addon works for nobody: nothing is sent or heard (Comm.lua) and the
+-- window shows the Accord alone. A field compare only: it is asked on every addon message and every
+-- pump, and never reads Battle.net (Accord.ReadTag does, at login and on Battle.net's events).
+ns.ACCORD_VERSION = 1
+function ns.AccordAccepted()
+	local a = ns.db and ns.db.accord
+	return type(a) == "table" and a.v == ns.ACCORD_VERSION and a.yes == true
+end
+-- In an Olympus guild, Accord or not: where "not a member" meant "an outsider".
+function ns.InOlympusGuild()
 	return IsInGuild() and ns.IsFederation(GetGuildInfo("player"))
+end
+-- The addon only works for members of an Olympus guild who accepted the Olympus Accord.
+function ns.IsMember()
+	return ns.AccordAccepted() and ns.InOlympusGuild()
+end
+-- What a "members only" refusal says: in an Olympus guild before the Olympus Accord, that it waits
+-- for the Accord (and where it is), never that he is no member; elsewhere the usual line.
+function ns.MembersOnlyText()
+	if ns.InOlympusGuild() and not ns.AccordAccepted() then return ns.L.ACCORD_DECLINED end
+	return ns.L.MEMBERS_ONLY
 end
 
 ---------------------------------------------------------------------------
@@ -1665,6 +1710,71 @@ function ns.Every(seconds, where, fn)
 		if not cancelled then ticker = C_Timer.NewTicker(seconds, Tick) end
 	end)
 	return handle
+end
+
+---------------------------------------------------------------------------
+-- Quiet presence (1.2.5.1). An authorized addon (OlympusAPI's SetQuietPresence) may ask, for this
+-- session alone, that this client send nothing that says its character is online or where it is:
+-- the hello, the census it would report, its layer and its dot on the map, layer-hop offers,
+-- answers about the King's layer or a player sighting, the King's crown, and the other presence
+-- words Comm.QUIET_WORDS lists. Other clients age it out as they do a logout: no word ever says it
+-- went quiet. What this client reads goes on working, and its Olympus chat lines still go when the
+-- player types them. Only the King, a High Councillor (each while a current signed issuer,
+-- Moderation.IsIssuer) and the addon's pinned author may turn it on, for their own character. Never
+-- saved: a /reload or a logout ends it.
+---------------------------------------------------------------------------
+
+local quiet -- { since, owner } while it is on
+
+-- Who may turn it on: the rule of the profile presentation's sessions (ProfileEffects.lua), kept to
+-- the King and the High Council among the signed issuers (a Steward or a Hand alone is not enough).
+function ns.QuietPresenceAllowed(name)
+	if type(name) ~= "string" or name == "" then return false end
+	local M = ns.Moderation
+	if type(M) ~= "table" or M.missing or type(M.IsIssuer) ~= "function" then return false end
+	if ns.IsKingCharacter(name) or ns.IsHighCouncillor(name) == true then
+		local ok, issuer = pcall(M.IsIssuer, name)
+		if ok and issuer == true then return true end
+	end
+	local W = ns.Workshop
+	if type(W) ~= "table" or W.missing or type(W.IsAuthorName) ~= "function" then return false end
+	local authorOK, author = pcall(W.IsAuthorName, name)
+	if not authorOK or author ~= true then return false end
+	if type(M.Hides) == "function" then
+		local safe, hidden = pcall(M.Hides, name)
+		if not safe or hidden then return false end
+	end
+	return true
+end
+
+function ns.QuietPresence() return quiet ~= nil end
+-- { on, since }: since, when it was turned on (ns.Now), while it is on.
+function ns.QuietPresenceState() return { on = quiet ~= nil, since = quiet and quiet.since or nil } end
+function ns.QuietPresenceOwnedBy(owner) return quiet ~= nil and owner ~= nil and quiet.owner == owner end
+
+-- on: true or false; owner: who asks (an API handle's own key). Returns true, or false and why:
+-- "guild" (outside an Olympus guild), "authority" (not the King, a councillor or the author),
+-- "owner" (another owner turned it on), "state". The owner that turned it on may always turn it off.
+function ns.SetQuietPresence(on, owner)
+	if on ~= true and on ~= false then return false, "state" end
+	if type(owner) ~= "string" or owner == "" then return false, "owner" end
+	if on == false and quiet and quiet.owner == owner then
+		quiet = nil
+		ns.Log("quiet presence off")
+		ns.Fire("QUIET_PRESENCE_CHANGED", false)
+		return true
+	end
+	if not ns.IsMember() then return false, "guild" end
+	if not ns.QuietPresenceAllowed(ns.me) then return false, "authority" end
+	if quiet then
+		if quiet.owner ~= owner then return false, "owner" end
+		return true
+	end
+	if not on then return true end
+	quiet = { since = ns.Now(), owner = owner }
+	ns.Log("quiet presence on")
+	ns.Fire("QUIET_PRESENCE_CHANGED", true)
+	return true
 end
 
 ---------------------------------------------------------------------------
@@ -1758,6 +1868,7 @@ StandIn("Borders", { "SetEnabled", "Report" })
 StandIn("Nameplates", { "SetEnabled", "Report" })
 StandIn("Members", { "Show", "SetWarnDays" }) -- (1.1)
 StandIn("Consent", { "Show" }) -- 1.1: the first-open page (Consent.lua)
+StandIn("Accord", { "Show", "Slash" }) -- 1.2.5.1: the Olympus Accord, the terms of use (Accord.lua)
 StandIn("ViewAs", {}) -- 1.2: the author's local role preview
 StandIn("TabardsV2", {}) -- 1.2: versioned tabard reports and publication lease
 StandIn("Letters", { "Slash", "ShowHistory", "Show" }) -- 1.1.5: the version letters (Letters.lua)
@@ -1767,6 +1878,8 @@ StandIn("Watch", { "Slash" }) -- 1.2: the guild-local moderation desk
 StandIn("Judgment", {}) -- 1.2: a case to the King, the High Council's votes, his final word
 StandIn("Church", { "Slash" }) -- 1.1.6: the Missionary Church of Olympus (Church.lua)
 StandIn("WatchChat", {}) -- 1.1.6: chat moderation (deleted lines, timeouts, sanctions' bars)
+StandIn("ChatStrikes", {}) -- the chat warnings: three in 24 hours (ChatStrikes.lua)
+StandIn("TagFollow", {}) -- a sanction that follows the BattleTag (TagFollow.lua)
 StandIn("Wanted", { "SightingsSlash", "Slash" }) -- 1.2: the Horde Most Wanted ledger and its sightings (1.2.3: /oly wanted)
 StandIn("Board", { "Slash" }) -- (1.1: the Board)
 StandIn("Week", {}) -- (1.1: the King's week)
@@ -1781,6 +1894,7 @@ StandIn("Crafters", { "Ask", "Slash" }) -- (1.1)
 StandIn("ChatWindow", { "Open", "Toggle" }) -- 1.1.1: the Chat tab of the Olympus window (ChatWindow.lua)
 StandIn("Arena", { "RunSlash" }) -- 1.2: the Blood Arena's core (ArenaNet.lua)
 StandIn("Records", {}) -- 1.2.4: the shared records of the games and duels that count (Records.lua)
+StandIn("Record", { "Slash" }) -- the Guinness attempt's record mode, the witnesses' own file (Record.lua)
 -- 1.1.2: the right-click menus' lines (PlayerMenu.lua), a player's version (Versions.lua), the
 -- answer bank's Answers and explanations (Answers.lua).
 StandIn("PlayerMenu", {})
@@ -1788,6 +1902,8 @@ StandIn("Versions", { "Check", "AskUpdate", "Tell" })
 StandIn("Answers", { "Open" })
 -- 1.1.5: the guild masters' centurions and correspondents (Nominees.lua).
 StandIn("Nominees", { "Slash", "Prompt" })
+-- The self-test of test builds (SelfTest.lua, /oly selftest: the author alone).
+StandIn("SelfTest", { "Slash" })
 
 -- Blizzard's gamepad UI (WoW: Forever's controller mode) is on.
 function ns.GamepadUI()
@@ -1992,7 +2108,7 @@ ns.RegisterEvent("PLAYER_LOGIN", function()
 	local missing = {}
 	-- (1.2: the file of a key named otherwise: the Blood Arena's core is ArenaNet.lua.)
 	local FILES = { Arena = "ArenaNet.lua" }
-	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees" }) do
+	for _, key in ipairs({ "Who", "Channels", "King", "Hop", "Workshop", "Vox", "Court", "Treasury", "Dues", "Acts", "Dialog", "Bank", "Link", "Borders", "Nameplates", "Backup", "Loot", "War", "Crafters", "Board", "Week", "Accord", "Consent", "ViewAs", "TabardsV2", "Chronicle", "Filter", "Watch", "Judgment", "WatchChat", "Wanted", "Members", "Moderation", "Alts", "Keys", "ChatWindow", "Arena", "PlayerMenu", "Versions", "Answers", "Letters", "Nominees", "ChatStrikes", "Record", "TagFollow" }) do
 		if ns[key].missing then missing[#missing + 1] = FILES[key] or (key .. ".lua") end
 	end
 	if ns.Gate.missing then missing[#missing + 1] = "Gamepad.lua" end -- (1.1.5, the gamepad gate)
@@ -2074,6 +2190,7 @@ local function Help()
 	print(L.HELP_MENTORS)
 	print(L.HELP_NOMINEES)
 	print(L.HELP_NOCONTACT)
+	print(L.HELP_PARTY_GUARD)
 	print(L.HELP_HOP)
 	print(L.HELP_LAYERHELP)
 	print(L.HELP_LAYERAUTO)
@@ -2081,6 +2198,7 @@ local function Help()
 	print(L.HELP_SIGHTINGS) -- (1.2)
 	print(L.HELP_WANTED) -- (1.2.3)
 	print(L.HELP_ROLLCALL)
+	print(L.HELP_ACCORD) -- (1.2.5.1)
 	print(L.HELP_PRIVACY_PAGE)
 	print(L.HELP_PROFILE)
 	print(L.HELP_CHAT)
@@ -2116,7 +2234,9 @@ local function Help()
 	print(L.HELP_CMD_SHARE)
 	print(L.HELP_CMD_BUG)
 	print(L.HELP_CMD_STATUS)
+	if ns.Cover and ns.Cover.Eligible(ns.me) then print(L.HELP_CMD_COVER) end
 	if ns.Perf then print(L.HELP_CMD_PERF) end -- (1.2.1: the profiler, Perf.lua; a new file, so after a restart)
+	if not ns.Record.missing then print(L.HELP_CMD_RECORD) end -- (record mode, Record.lua: a new file, so after a restart)
 	print(L.HELP_CMD_KEY)
 	print(L.HELP_CMD_KEY_PUBLIC)
 	print(L.HELP_MAINKEY)
@@ -2226,6 +2346,9 @@ local function Slash(input)
 			else
 				ns.Print(ns.Recruit.NoContactMe() and L.NOCONTACT_ON or L.NOCONTACT_OFF)
 			end
+		elseif cmd == "partyguard" then
+			-- A local, bounded inbox for clear party-invite whispers while the King is online.
+			ns.PartyGuard.Slash(rest)
 		elseif cmd == "inactive" or cmd == "members" or cmd == "recruits" or cmd == "mentors" then
 			-- (1.1: our guild's members offline 7, 14 or 30 days and more; the Lord's recruits and
 			-- their mentors. Members.lua.)
@@ -2332,15 +2455,19 @@ local function Slash(input)
 		elseif cmd == "log" then
 			-- 1.1 (Fern's #12): the acts this client saw (Chronicle.lua): [n], a word, copy, clear.
 			ns.Chronicle.Slash(rest)
+		elseif cmd == "accord" or cmd == "acordo" then
+			-- 1.2.5.1: the Olympus Accord, Olympus's terms of use (Accord.lua), accepted or not.
+			ns.Accord.Slash(rest)
 		elseif cmd == "privacy" or cmd == "privacidade" then
 			-- 1.1 (Fern's #11): the page of what this addon shares, each answer to change (Consent.lua).
-			ns.Consent.Show()
+			-- (1.2.5.1: the Olympus Accord comes first; the page follows once it is accepted.)
+			if ns.InOlympusGuild() and not ns.AccordAccepted() then ns.Accord.Show("privacy") else ns.Consent.Show() end
 		elseif cmd == "profile" or cmd == "perfil" then
 			-- 1.2: a player's profile in the Olympus window (PlayerProfile.OpenName), your own with no name.
 			local P = ns.PlayerProfile
 			local ok, why
 			if P and not P.missing and P.OpenName then ok, why = P.OpenName(rest ~= "" and rest or ns.me) end
-			if not ok then ns.Print(why == "member" and L.MEMBERS_ONLY or L.PLAYER_PROFILE_USAGE) end
+			if not ok then ns.Print(why == "member" and ns.MembersOnlyText() or L.PLAYER_PROFILE_USAGE) end
 		elseif cmd == "letters" or cmd == "letter" or cmd == "cartas" then
 			-- 1.1.5: the version letters (Letters.lua): every one, or one version's.
 			ns.Letters.Slash(rest)
@@ -2359,9 +2486,17 @@ local function Slash(input)
 			ns.Print(ns.L.DEMO_REMOVED)
 		elseif cmd == "bug" then
 			ns.UI.ShowBugReport()
+		elseif cmd == "record" then
+			-- The Guinness attempt's record mode (Record.lua): on, off, status, mark; alone, its status
+			-- in the copy window. It writes only to this client's own saved file and sends nothing.
+			ns.Record.Slash(rest)
 		elseif cmd == "perf" then
 			-- 1.2.1: the built-in profiler (Perf.lua): on, off, reset; alone, its report in a copy window.
 			if ns.Perf then ns.Perf.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
+		elseif cmd == "selftest" then
+			-- Test builds, the author alone (SelfTest.lua): the client, every page and the modules,
+			-- checked by themselves; status and stop.
+			if ns.SelfTest.missing then ns.Print(L.RESTART_NEEDED) else ns.SelfTest.Slash(rest) end
 		elseif cmd == "status" then
 			-- (1.2: the memory figures in it are measured now, on the command alone: Diagnostics' arena lines.)
 			if UpdateAddOnMemoryUsage then pcall(UpdateAddOnMemoryUsage) end
@@ -2452,6 +2587,9 @@ local function Slash(input)
 		elseif cmd == "lfg" or cmd == "board" or cmd == "camp" or cmd == "camps" or cmd == "week" then
 			-- The Board (Board.lua, 1.1): who is looking for a group, and where; camps; the King's week.
 			ns.Board.Slash(cmd, rest)
+		elseif cmd == "cover" or cmd == "anon" or cmd == "anonimo" then
+			-- Embrace Anonymity: a moderator's cover name, and off the network (Cover.lua).
+			if ns.Cover then ns.Cover.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "netoff" or cmd == "neton" then
 			-- 1.1: a character or a guild off Olympus for the army, or back on (Moderation.lua).
 			ns.Moderation.Slash(cmd == "netoff", rest)

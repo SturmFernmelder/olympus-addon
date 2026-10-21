@@ -66,6 +66,8 @@ local function ClassCoords(file)
 	local t = type(CLASS_ICON_TCOORDS) == "table" and CLASS_ICON_TCOORDS[file] or nil
 	return t or GRID[file]
 end
+-- (1.2.6: the duel view's class icons, the same circles.)
+Card.CIRCLES, Card.ClassCoords = CIRCLES, ClassCoords
 -- An emblem as the player picked it: a game icon only, never a path (ns.CouncilIconValue).
 local function EmblemTexture(emblem)
 	if emblem == nil or emblem == "" then return nil end

@@ -335,7 +335,11 @@ local function Draw(d)
 	f:ClearAllPoints()
 	f:SetPoint("CENTER", win, "TOPLEFT", d.x, -(d.y - up))
 	f:SetSize(2 * s, 2 * s)
-	f:SetHitRectInsets(s / 2, s / 2, s / 2, s / 2)   -- the die itself, not its shadow
+	-- The die itself, not its shadow. (1.2.6) A die raised (the mouse on it, or picked) keeps the
+	-- bottom of its resting square: the spot it rose from was no longer under it, so a 2 picked
+	-- near its lower edge missed the click that put it back, and the mouse on that edge lifted
+	-- the die off itself and dropped it back, over and over.
+	f:SetHitRectInsets(s / 2, s / 2, s / 2, max(0, s - up - d.size / 2))
 	f:SetAlpha(max(0, min(1, d.alpha)))
 	f:Show()
 	if d.air then

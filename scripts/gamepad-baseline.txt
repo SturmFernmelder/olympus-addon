@@ -17,10 +17,10 @@ Olympus_Arena/Games/Bicho.lua print 2
 Olympus_Arena/Games/Farkle.lua print 1
 Olympus_Arena/Games/Games.lua print 1
 Olympus_Arena/Games/Games.lua tooltip 5
-Olympus_Arena/Kit.lua tooltip 6
+Olympus_Arena/Kit.lua tooltip 11
 Olympus_Arena/LotteryBoard.lua tooltip 5
 Positions.lua tooltip 5
-UI.lua tooltip 53
-Views.lua tooltip 25
+UI.lua tooltip 54
+Views.lua tooltip 29
 Wanted.lua tooltip 4
 Workshop.lua tooltip 4

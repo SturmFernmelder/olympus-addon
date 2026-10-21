@@ -30,6 +30,28 @@ local function Errors(w)
 	for _, c in ipairs(w.clients) do for _, err in ipairs(c.errors) do error(c.name .. ": " .. err) end end
 end
 
+test("shared records diagnostics include every registered ranking type", function()
+	local w, _, _, c = Setup()
+	local text = Do(w, c, "StatusText")
+	assert(text:find("Bones games", 1, true), "Bones is visible")
+	assert(text:find("Craft deliveries", 1, true), "crafting is not hidden from the records diagnostic")
+	assert(text:find("Duels", 1, true), "duels are visible")
+	Errors(w)
+end)
+
+-- The weight rule (the design): 1.2.6's first build loaded the records on every login and sent an
+-- empty digest of each type (RD letter~~) from clients that hold nothing, so a practice game, a
+-- client that only heard the King's word, or any idle member sent RD and ran a records timer.
+test("records: the weight rule: a client that holds nothing loads nothing at login, runs no records timer and sends no records message", function()
+	local w, _, _, c = Setup()
+	w:Run(3600)
+	for _, t in ipairs(w:Timers(c, true)) do
+		assert(not tostring(t.where):find("^records") and not tostring(t.where):find("^craft ranking"), "an idle client's timer: " .. tostring(t.where))
+	end
+	for _, kind in ipairs({ "RK", "RD", "RA", "RR", "RV", "RS", "RT" }) do eq(#w:Sent({ from = c, type = kind }), 0, kind .. " from an idle client") end
+	Errors(w)
+end)
+
 test("1.2.4 records: both original signatures and firsthand keys admit one Bones result; repeated bodies never count twice", function()
 	local w, a, b, c = Setup() local body = Pair(w, a, b, "Kr1") Keys(w, a, b)
 	Take(w, c, body) eq(Do(w, c, "Count", "b"), 1)
@@ -287,6 +309,153 @@ test("1.2.4 records: any ordinary holder relays a Bones result to a late member;
 	assert(Do(w, c, "SendDigest", "b")) w:Run(20)
 	eq(Do(w, late, "Count", "b"), 1, "neither original player sent the result to this late client")
 	eq(#w:As(late, late.ns.FarkleTable.Best, "L"), 2)
+	Errors(w)
+end)
+
+test("global records: two validating holders recover Bones ranking for a late client while both original players are offline", function()
+	local w, a, b, c = Setup()
+	local second = w:Player(N.bettor2)
+	local body = Pair(w, a, b, "Kr11")
+	Keys(w, a, b)
+	Take(w, c, body)
+	Take(w, second, body)
+	eq(Do(w, c, "Count", "b"), 1)
+	eq(Do(w, second, "Count", "b"), 1)
+
+	-- The original players and their firsthand RK declarations are gone before this client exists.
+	w:Logout(a)
+	w:Logout(b)
+	local late = w:Player(N.bettor1)
+	c.ns.Records.random = function() return 0 end
+	second.ns.Records.random = function() return 0 end
+	late.ns.Records.random = function() return 0 end
+	-- (Changed on purpose, the weight rule: a client that holds nothing sends nothing at its login,
+	-- so the late client makes no discovery call of its own. A holder's periodic digest (Tick,
+	-- DIGEST_EVERY) is the path, as the author asked: "a rede precisa armazenar aquele estado e
+	-- republicar para as pessoas quando a fonte original não tiver online". The holders' digest,
+	-- the late client's ask, the body and two independently signed validations, within one round.)
+	w:Run(c.ns.Records.DIGEST_EVERY + 120)
+	eq(#w:Sent({ from = late, type = "RD" }), 0, "the late, empty client asked nobody at its login")
+
+	local count = Do(w, late, "Count", "b")
+	local refused = {}
+	for why, n in pairs(c.ns.Arena.Stats().refused or {}) do refused[#refused + 1] = tostring(why) .. "=" .. tostring(n) end
+	table.sort(refused)
+	assert(count == 1, ("validated network survives originals offline: count=%d pending=%d RD=%d RA=%d RR=%d RK=%d RV=%d witnessed=%d"):format(
+		count, Do(w, late, "Pending", "b"), #w:Sent({ type = "RD" }), #w:Sent({ type = "RA" }), #w:Sent({ type = "RR" }),
+		#w:Sent({ type = "RK" }), #w:Sent({ type = "RV" }), late.ns.Records.Stats().witnessed or 0)
+		.. (" out=%d/%d producers=%d/%d arenaoff=%s/%s"):format(Do(w, c, "OutSize"), Do(w, second, "OutSize"),
+			c.ns.Arena.ProducerCount(), second.ns.Arena.ProducerCount(), tostring(c.ns.Arena.Off()), tostring(second.ns.Arena.Off()))
+		.. " refused=" .. table.concat(refused, ","))
+	eq(Do(w, late, "Pending", "b"), 0)
+	eq(#w:As(late, late.ns.FarkleTable.Best, "L"), 2)
+	assert((late.ns.Records.Stats().witnessed or 0) >= 1, "identity was admitted by holder quorum")
+	Errors(w)
+end)
+
+-- The author: "ela passa a fazer o relay daquele negócio validado, que vai ser validado junto com
+-- outras pessoas que têm o negócio que receberam validade". The test above draws every holder
+-- (random 0); in the game a holder answers an ask only when drawn (about RELAYS of the army). The
+-- first build's late client then kept the body, waiting, after ONE holder's validation: its next
+-- asks listed that body as held, so no holder answered it again, no second validation ever came,
+-- and the result never counted (7 asks over an hour, 1 RV, count 0). It now asks for the
+-- validations alone (RA letter~w~day) with each ask of that day, and never gets the body again.
+local function ShortOfOne(w, id)
+	local a, b, c = w.clients[1], w.clients[2], w.clients[3]
+	local second = w:Player(N.bettor2)
+	local day = math.floor(w.clock / 86400) -- (the record's: Pair stamps it now)
+	local body = Pair(w, a, b, id)
+	Keys(w, a, b)
+	Take(w, c, body)
+	Take(w, second, body)
+	w:Logout(a)
+	w:Logout(b)
+	local late = w:Player(N.bettor1)
+	c.ns.Records.random, late.ns.Records.random = function() return 0 end, function() return 0 end
+	-- The second holder is not drawn for this round's answer.
+	second.ns.Records.random, second.ns.Records.RELAYS = function() return 0.99 end, 0
+	w:Run(c.ns.Records.DIGEST_EVERY + 120)
+	eq(Do(w, late, "Count", "b"), 0, "one holder's validation admits nothing")
+	eq(Do(w, late, "Pending", "b"), 1, "the body is here, waiting")
+	second.ns.Records.random, second.ns.Records.RELAYS = function() return 0 end, 3
+	return c, second, late, day
+end
+local function WitnessAsks(w, from)
+	local n = 0
+	for _, s in ipairs(w:Sent({ from = from, type = "RA" })) do if s.msg:find("~b~w~", 1, true) then n = n + 1 end end
+	return n
+end
+
+test("global records review: a late client one validation short asks for the validations alone and counts the result in the next round, without the body again", function()
+	local w = Setup()
+	local c, second, late = ShortOfOne(w, "Kr12")
+	local bodies = #w:Sent({ type = "EP" }) -- (the body went in parts, EP; nothing else here does)
+	w:Run(c.ns.Records.DIGEST_EVERY + 120)
+	eq(Do(w, late, "Count", "b"), 1, "the second holder's validation came: the result counts")
+	eq(Do(w, late, "Pending", "b"), 0)
+	assert(WitnessAsks(w, late) >= 1, "the late client asked for the validations of what it holds")
+	eq(#w:As(late, late.ns.FarkleTable.Best, "L"), 2)
+	eq(#w:Sent({ type = "EP" }), bodies, "the body was not sent again")
+	assert(#w:Sent({ from = second, type = "RV" }) >= 1, "the second holder validated it")
+	Errors(w)
+end)
+
+test("global records review: validations are heard in one session only; after a reload the waiting body is validated in the next session", function()
+	local w = Setup()
+	local c, second, late = ShortOfOne(w, "Kr13")
+	second.ns.Records.random, second.ns.Records.RELAYS = function() return 0.99 end, 0
+	w:Logout(late) w:Login(late)
+	late.ns.Records.random = function() return 0 end
+	w:Run(15)
+	eq(Do(w, late, "Pending", "b"), 1, "the body survived the reload, waiting")
+	second.ns.Records.random, second.ns.Records.RELAYS = function() return 0 end, 3
+	w:Run(c.ns.Records.DIGEST_EVERY + 120)
+	eq(Do(w, late, "Count", "b"), 1, "both holders' validations heard in this session")
+	eq(Do(w, late, "Pending", "b"), 0)
+	Errors(w)
+end)
+
+test("global records review: an ask for validations alone draws none for a record no holder has, and a malformed one is refused", function()
+	local w = Setup()
+	local c, _, late, d = ShortOfOne(w, "Kr14")
+	local before = #w:Sent({ type = "RV" })
+	local refused = (c.ns.Records.Stats().refused.shape or 0)
+	eq(#Do(w, c, "Bodies", "b", d, d), 1, "the holder holds a record of that day")
+	local day = c.ns.Arena.B36(d)
+	assert(w:As(late, late.ns.Arena.Send, "RA", "L", "b~w~" .. day .. "~" .. ("0"):rep(16), { dist = "CHANNEL" }))
+	assert(w:As(late, late.ns.Arena.Send, "RA", "L", "b~w~" .. day .. "~xyz", { dist = "CHANNEL" }))
+	w:Run(30)
+	eq(#w:Sent({ type = "RV" }), before, "nobody holds that record: no validation")
+	eq(c.ns.Records.Stats().refused.shape, refused + 1, "the malformed ask is refused")
+	Errors(w)
+end)
+
+-- The first build signed, in one timer callback, each validation of an answer and the holder's key
+-- again with each: a day of N missing records was 2N Ed25519 signatures on one frame of a drawn
+-- holder (a hitch, the 1.2.1 lesson). The key is now declared once an answer, and each validation
+-- is signed when its turn on the low lane comes (a message a second).
+test("global records review: an answer declares the holder's key once and signs each validation as it leaves, never a day's at once", function()
+	local w, a, b, c = Setup()
+	local late = w:Player(N.bettor1)
+	Keys(w, a, b)
+	local d = math.floor(w.clock / 86400)
+	for i = 1, 4 do Take(w, c, Pair(w, a, b, "Krs" .. i)) end
+	eq(Do(w, c, "Count", "b"), 4)
+	w:Run(c.ns.Records.ANSWER_GAP + 1)
+	c.ns.Records.random = function() return 0 end
+	local D, signs = c.ns.Debts, 0
+	local Sign = D.Sign
+	D.Sign = function(...) signs = signs + 1 return Sign(...) end
+	-- The late client holds none of that day's records: an ask with no prefixes.
+	assert(w:As(late, late.ns.Arena.Send, "RA", "L", "b~d~" .. late.ns.Arena.B36(d) .. "~", { dist = "CHANNEL" }))
+	w:Run(c.ns.Records.ANSWER_MIN + 1)
+	assert(Do(w, c, "OutSize") > 0, "the answer is on its way, a message at a time")
+	assert(signs <= 2, "the key once and at most the first validation so far, not 8 signatures: " .. signs)
+	w:Run(120)
+	eq(Do(w, c, "OutSize"), 0)
+	eq(signs, 1 + 4, "one key declaration and one signature a validation")
+	eq(#w:Sent({ from = c, type = "RV" }), 4)
+	D.Sign = Sign
 	Errors(w)
 end)
 

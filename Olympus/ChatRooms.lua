@@ -813,6 +813,9 @@ local function Keep(id, e)
 	-- its sender and must not make a background room look unread while the queued send
 	-- completes.
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", id, e.sender, e.text) end
+	-- The Companion's chat record (Bridge.lua): every line kept, ours too; our echo still sending
+	-- once one of its whispers left (Send's Settle), never one that reached nobody.
+	if not e.pending and ns.RecordChat then ns.RecordChat(id, e.sender, e.text, e.mine == true) end
 end
 
 -- The server's guild event includes guildmates without Olympus. Do not publish it to M2 or
@@ -1048,6 +1051,14 @@ function Rooms.RecipientCount(id)
 	return c.n, c.left
 end
 function Rooms.Recount(id) counts[id] = nil end
+-- (931, read only) How many members room `id` reached when the page last counted it (RecipientCount:
+-- those a line goes to and those online it left out, this character not counted), or nil when it
+-- was not counted this session. Counts nothing itself: the Companion's chatRooms section.
+function Rooms.KnownRecipientCount(id)
+	local c = type(id) == "string" and counts[id] or nil
+	if type(c) ~= "table" then return nil end
+	return (tonumber(c.n) or 0) + (tonumber(c.left) or 0)
+end
 
 -- What a sender is told when his line left `left` members online out: the audience's own words
 -- (the Church's), else the rooms'.
@@ -1146,12 +1157,22 @@ end
 -- Completion never reroutes a line: its audience is the one fixed at Enter.
 local function Send(id, text)
 	if Rooms.PreviewOnly(id) then return false, "preview" end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too.
+	-- 1.1.6: a moderator's timeout (WatchChat.lua) covers every room, a provider's too; so does a
+	-- chat warning's pause or hold ("paused", ChatStrikes.lua).
 	local WC = ns.WatchChat
-	if WC and WC.RefuseSend and WC.RefuseSend() then return false, "timeout" end
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
 	local provider = ProviderFor(id)
 	if provider then
 		if not Rooms.CanAccess(id) then ns.Print(L.CHATROOM_NO_ACCESS or "You cannot use this room.") return false, "access" end
+		-- (The chat warnings' words, as below: a squad's or a craft deal's room is reached only here.)
+		if WC and WC.RefuseSevere then
+			local severe, body = WC.RefuseSevere(text, id)
+			if severe then return false, severe end
+			text = body or text
+		end
 		return provider.Send(id, text)
 	end
 	local info = Rooms.Info(id)
@@ -1166,9 +1187,16 @@ local function Send(id, text)
 		ns.Print(ns.Moderation.YouText(ns.Moderation.SelfOff()))
 		return false, "netoff"
 	end
+	-- The chat warnings (the author, 2026-10-19): a word of their list in what he typed is never sent,
+	-- in Guild (the game's own send) and every room of this file; never read in The Watch's room
+	-- (ChatStrikes.Refuse: its staff quote what was said). On the raw line, as Channels.Send.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, id)
+		if severe then return false, severe end
+		text = body or text
+	end
 	text = Cut(ns.Codec.SanitizeChat(text), Rooms.TEXT_MAX)
 	if text == "" then return false, "empty" end
-	if WC and WC.RefuseSevere and WC.RefuseSevere(text) then return false, "severe" end -- (1.1.6, WatchChat.SEVERE)
 	if Locked() then ns.Print(L.CHAN_LOCKDOWN) return false, "lockdown" end
 	local now = Now()
 	if now - lastSend < Rooms.SEND_GAP or Recent(now) >= Rooms.PER_MINUTE then
@@ -1207,6 +1235,7 @@ local function Send(id, text)
 		if successes > 0 then
 			echo.pending = nil
 			ns.Fire("CHAT_ROOM_CHANGED", id)
+			if ns.RecordChat then ns.RecordChat(id, echo.sender, echo.text, true) end -- (it left: Keep's record)
 		else
 			Unkeep(id, echo)
 		end
@@ -1328,6 +1357,7 @@ function Rooms.Receive(dist, sender, text, now)
 	local admitted, why = ns.Channels.Admit(sender, guild, words, now, {
 		id = id .. ":" .. lineId, chat = id, line = lineId, level = info.scope == "guild" and 0 or 1,
 		buckets = receiveBuckets, seen = receiveSeen, mine = receiveMine, stats = stats, where = id,
+		evidence = true, -- (an M2 line his own addon sent: TagFollow.Evidence; never the native guild chat)
 	})
 	if not admitted and why ~= "filtered" then return Drop(why) end
 	local r = State(id, true)

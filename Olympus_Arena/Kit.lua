@@ -148,6 +148,55 @@ function Kit.Copy(title, text)
 	return text
 end
 
+-- (1.2.6) The tooltips of Olympus's own frames (the duel view's gear and talents): Kit.Tip(owner,
+-- lines, anchor) with lines = { "text" | { text, r, g, b, wrap } ... } (white by default);
+-- Kit.ItemTip(owner, item, anchor) the game's own tooltip of a piece of gear by its item string
+-- ("item:...", SetHyperlink); Kit.HideTip(owner) hides it when that frame owns it.
+function Kit.Tip(owner, lines, anchor, item)
+	if not owner or type(GameTooltip) ~= "table" then return false end
+	local list = {}
+	if item ~= nil then
+		if type(item) ~= "string" or not item:find("^item:%d+") then return false end
+	else
+		for _, l in ipairs(type(lines) == "table" and lines or {}) do
+			local text, r, g, b, wrap = l, 1, 1, 1, true
+			if type(l) == "table" then text, r, g, b, wrap = l[1], l[2] or 1, l[3] or 1, l[4] or 1, l[5] ~= false end
+			if type(text) == "string" and text ~= "" then list[#list + 1] = { text, r, g, b, wrap } end
+		end
+		if #list == 0 then return false end
+	end
+	GameTooltip:SetOwner(owner, anchor or "ANCHOR_RIGHT")
+	if item then GameTooltip:SetHyperlink(item) end
+	for _, l in ipairs(list) do GameTooltip:AddLine(l[1], l[2], l[3], l[4], l[5]) end
+	GameTooltip:Show()
+	return true
+end
+function Kit.ItemTip(owner, item, anchor) return Kit.Tip(owner, nil, anchor, item or false) end
+function Kit.HideTip(owner)
+	if not GameTooltip then return end
+	if owner and type(GameTooltip.IsOwned) == "function" and not GameTooltip:IsOwned(owner) then return end
+	GameTooltip:Hide()
+end
+
+-- (1.2.6) Lines of a colour round a frame (or round `on`, a region of it), `px` wide, `out` px
+-- outside it (the bronze edge of Kit.Inset, on any frame: the duel view's stage and bars).
+-- Returns the four textures, made on f.
+Kit.BRONZE = { 0.55, 0.36, 0.16, 0.95 }
+function Kit.Edge(f, color, px, out, layer, on)
+	color, px, out, on = color or Kit.BRONZE, px or 1, out or 0, on or f
+	local list = {}
+	for i, side in ipairs({ { "TOPLEFT", "TOPRIGHT", -out, out, out, out }, { "BOTTOMLEFT", "BOTTOMRIGHT", -out, -out, out, -out },
+		{ "TOPLEFT", "BOTTOMLEFT", -out, out, -out, -out }, { "TOPRIGHT", "BOTTOMRIGHT", out, out, out, -out } }) do
+		local t = f:CreateTexture(nil, layer or "BORDER")
+		t:SetColorTexture(color[1], color[2], color[3], color[4] or 1)
+		t:SetPoint(side[1], on, side[1], side[3], side[4])
+		t:SetPoint(side[2], on, side[2], side[5], side[6])
+		if i <= 2 then t:SetHeight(px) else t:SetWidth(px) end
+		list[i] = t
+	end
+	return list
+end
+
 ---------------------------------------------------------------------------
 -- Frames
 ---------------------------------------------------------------------------

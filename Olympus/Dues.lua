@@ -1932,14 +1932,19 @@ end
 ns.Comm.Handle("FP", function(...) Dues.HandlePayerAsk(...) end)
 function Dues.RequestPayerReceipt()
 	if not Dues.Pays() or Dues.PayerStatus() == "counted" or Clock() - lastPayerAsk < Dues.ASK_EVERY then return false end
-	lastPayerAsk = Clock()
 	local sent
 	for _, name in ipairs(ns.TREASURER_CHARACTERS or {}) do
 		local to, me = ns.FullName(name, ns.TREASURER_REALM), ns.me
-		local ok = ns.Comm.Whisper(to, "FP~1~" .. Dues.Week(), "own dues receipt " .. to, nil, nil, nil,
-			{ owner = Dues, guard = function() return Dues.Pays() and ns.me == me end })
-		sent = sent or ok
+		if not (ns.Treasury.Unavailable and ns.Treasury.Unavailable(to)) then
+			local ok = ns.Comm.Whisper(to, "FP~1~" .. Dues.Week(), "own dues receipt " .. to, nil, nil, nil,
+				{ owner = Dues, guard = function()
+					return Dues.Pays() and ns.me == me
+						and not (ns.Treasury.Unavailable and ns.Treasury.Unavailable(to))
+				end })
+			sent = sent or ok
+		end
 	end
+	if sent then lastPayerAsk = Clock() end
 	return sent == true
 end
 

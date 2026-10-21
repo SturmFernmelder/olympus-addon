@@ -207,6 +207,10 @@ local function OnlineCounts(leader, soldiers)
 	for _, name in ipairs(soldiers) do Count(name) end
 	return online, unknown
 end
+local function Online(name)
+	-- Squad() refreshes this cache before Lines reaches a member row.
+	return onlineIndex[Fold(name)] == true
+end
 -- Leader entry `leader` (of Squads.Leaders) with his squad as its stored row has it (Squads.Get's).
 local function Squad(leader)
 	local s = Store(false)
@@ -393,12 +397,15 @@ local function Words(text)
 	if type(text) ~= "string" then return "" end
 	return ns.Cut(ns.Codec.SanitizeChat(ns.Codec.Plain(text)):gsub("~", " "):gsub("%s+", " "):gsub("^ ", ""):gsub(" $", ""), 150)
 end
-local function Keep(room, e)
+-- unsent: our own line kept in the view before (or without) any whisper of it leaving; the
+-- Companion's chat record (Bridge.lua) takes our own line only once one left (ChatSend's Mine).
+local function Keep(room, e, unsent)
 	local chat = Chat(room, true); if not chat then return end
 	chat.lines[#chat.lines + 1] = e
 	while #chat.lines > Squads.CHAT_MAX do table.remove(chat.lines, 1) end
 	ns.Fire("CHAT_ROOM_CHANGED", room)
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", room, e.sender, e.text) end
+	if not unsent and ns.RecordChat then ns.RecordChat(room, e.sender, e.text, e.mine == true) end -- (the Companion's chat record, Bridge.lua)
 end
 function Squads.ChatHistory(room)
 	local out = {}
@@ -421,10 +428,17 @@ function Squads.ChatSend(room, text)
 	chat.seq = chat.seq + 1
 	local seq, msg = chat.seq, ("SC~1~%s~%d~%s"):format(room:sub(7), chat.seq, text)
 	local recipients = { leader.name }; for _, name in ipairs(squad.soldiers) do recipients[#recipients + 1] = name end
-	local kept, queued = false, false
-	local function Mine()
-		if not kept and Guild() == guild and ChatOn() and Squads.CanAccess(room) then
-			kept = true; Keep(room, { sender = ns.me, guild = guild, text = text, t = Now(), mine = true, id = seq })
+	-- left: one of its whispers left. A line kept before that (the leader alone, nobody to whisper)
+	-- shows in the view but reaches the Companion's chat record only once one does, if ever.
+	local kept, recorded, queued = false, false, false
+	local function Mine(left)
+		if Guild() ~= guild or not ChatOn() or not Squads.CanAccess(room) then return end
+		if not kept then
+			kept, recorded = true, left == true
+			Keep(room, { sender = ns.me, guild = guild, text = text, t = Now(), mine = true, id = seq }, not recorded)
+		elseif left and not recorded then
+			recorded = true
+			if ns.RecordChat then ns.RecordChat(room, ns.me, text, true) end
 		end
 	end
 	for _, recipient in ipairs(recipients) do
@@ -432,11 +446,11 @@ function Squads.ChatSend(room, text)
 			local to = recipient
 			local guard = function() return Guild() == guild and ChatOn() and Squads.CanAccess(room) and Squads.CanAccess(room, to) end
 			local ok = ns.Comm.Whisper(to, msg, "squad-chat:" .. room .. ":" .. seq .. ":" .. Fold(to), false, true,
-				function(sent) if sent and guard() then Mine() end end, { owner = Squads, guard = guard })
+				function(sent) if sent and guard() then Mine(true) end end, { owner = Squads, guard = guard })
 			queued = ok or queued
 		end
 	end
-	if #recipients == 1 then Mine(); return true end
+	if #recipients == 1 then Mine(false); return true end
 	return queued, queued and "ok" or "busy"
 end
 function Squads.ReceiveChat(dist, sender, text)
@@ -572,6 +586,11 @@ function Squads.Lines(query, baseIndent, manage)
 				end
 				for _, name in ipairs(squad.soldiers) do
 					lines[#lines + 1] = { indent = indent + 1, player = name, text = ns.Codec.Plain(ns.ShortName(name)) }
+					if edit and not squad.overflow and Online(name) and ns.PartyGuard and ns.PartyGuard.InviteGuildmate then
+						local soldier = name
+						lines[#lines + 1] = { indent = indent + 2, text = Label("SQUAD_INVITE", "Invite online member to raid"),
+							onClick = function() return CanEdit(e.name) and ns.PartyGuard.InviteGuildmate(soldier) or false end }
+					end
 					if edit and not squad.overflow then
 						local soldier, leader = name, e.name
 						lines[#lines + 1] = { indent = indent + 2, text = Label("SQUAD_REMOVE", "Remove soldier"),

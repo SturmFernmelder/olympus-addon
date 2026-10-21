@@ -253,6 +253,7 @@ function Roster.Scan()
 	local seen, seenOffline, zoneCount, levelSum = 0, 0, 0, 0
 	local distinct, bare, made, m, dup = 0, 0, 0, 0, false
 	local online = {} -- who is online now, for the Realm tab (Views.MembersOf)
+	local covered = 0 -- online, but under a cover name (Cover.lua): counted offline
 	local rawRealms, servers, sample, sampleDash = {}, {}, nil, false -- for /oly status (names raw)
 	for i = 1, numTotal do
 		local name, rankName, rankIndex, level, _, zone, _, _, isOnline, _, classFile, _, _, _, _, _, guid = GetGuildRosterInfo(i)
@@ -289,6 +290,10 @@ function Roster.Scan()
 				full = ns.FullName(name)
 				short = ns.DisplayName(full)
 			end
+			-- A moderator under a cover name (Cover.lua) asked to be off the network: offline in
+			-- every census and page we make of our roster.
+			local C = ns.Cover
+			if isOnline and C and C.Offline(full) then isOnline, covered = false, covered + 1 end
 			if full ~= name then bare = bare + 1 end
 			rankIndex = rankIndex or 9
 			if sameNames and keep[full] ~= rankIndex then sameNames = false end
@@ -424,7 +429,7 @@ function Roster.Scan()
 	end
 	r.home = home ~= "" and home or ns.realm
 	r.faction = ns.faction or ns.Faction()
-	if numOnline and numOnline > r.online then r.online = numOnline end
+	if numOnline and numOnline - covered > r.online then r.online = numOnline - covered end
 	local ms = debugprofilestop and (debugprofilestop() - started) or 0
 	Roster.lastStats = {
 		numTotal = numTotal, numOnline = numOnline, seen = seen, seenOffline = seenOffline,
@@ -486,7 +491,10 @@ function Roster.TryScan()
 	r.pres = ns.Comm.Presence and ns.Comm.Presence() or nil
 	r.cap = ns.Comm.CAPABILITY
 	ns.Data.SetLocal(r)
-	ns.Comm.MaybeBroadcast(r)
+	-- (1.2.5.1) Only a client whose player accepted the Olympus Accord takes part in the election:
+	-- another would elect itself, and its report, refused at the send, would hold its first real
+	-- one back (Comm.Broadcast moves on its time and id). Its guild's census comes from the others.
+	if ns.IsMember() then ns.Comm.MaybeBroadcast(r) end
 end
 
 function Roster.RequestScan(force)

@@ -1638,6 +1638,7 @@ local function LineSide(f, winner, loser)
 	if Is("B", winner) and Is("A", loser) then return "B" end
 	return nil
 end
+F.LineSide = LineSide -- (1.2.6: the duel view's result, ArenaSpectate.OnSystem)
 
 -- The Chronicle (the design): every src A decision, correction and disputed result is written on
 -- every client that hears it (the arbiter's own and each AR's), once per fight, round and kind.

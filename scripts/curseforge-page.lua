@@ -31,7 +31,7 @@ M.CUTS = {
 	{ title = "The Chat tab (1.1.1)", keep = 1 }, -- (1.1.6: the page grew past the budget with 1.2's sections)
 	{ title = "Net-off (1.1): the moderators hide a character or take a guild off the network", keep = 1 },
 	{ title = "The Throne (the King and his Hands)", keep = 1 },
-	{ title = "The King's Steward (1.0.0)", keep = 3 }, -- his opening, what he does, and what he never does
+	{ title = "The King's Steward (1.0.0)", keep = 2 }, -- his opening and what he does (what he never does: the README)
 	{ title = "The Treasury (its keepers, the King, and the army when the King says so)", keep = 1 },
 	{ title = "Privacy", keep = 1 },
 	{ title = "Security and trust", keep = 2 },
@@ -46,6 +46,20 @@ M.CUTS = {
 	{ title = "Loot notes (1.1)", keep = 1 },
 	-- (1.2.4: the role rooms' list and its rules are the README's; its opening stays.)
 	{ title = "Role rooms (1.2.4)", keep = 1 },
+	-- (1.2.5: the hostile-area API disclosure pushed the store page past its editor budget; keep
+	-- layer hop's complete player flow here and leave its discovery/security detail in the README.)
+	{ title = "Layer hop: join the King's layer without begging in chat", keep = 4 },
+	-- (1.2.5: the API's leader presence and wider area scope pushed it past the budget again: the
+	-- API's opening paragraph stays; its page-surface paragraph and the authors' link are the README's.)
+	{ title = "Other addons: the Olympus API (1.2.4)", keep = 1 },
+	-- (1.2.5.1 release integration: the merged lanes passed the budget by a few dozen bytes: the
+	-- Steward's "what he never does" paragraph is the README's.)
+	-- (1.2.5.1: the chat warnings, the Companion bridge and the Olympus Accord's line together passed
+	-- the budget: a High Councillor's tooltip paragraph is the README's.)
+	{ title = "Person details", keep = 1 },
+	-- (1.2.6: the Olympus Companion named in the privacy section's first words passed the budget:
+	-- the alt links' rules are the README's; their opening stays.)
+	{ title = "Alt links (1.1): one player, counted once", keep = 1 },
 }
 
 -- The commands table's rows that stay, by their first command as the table writes it. (1.2.4: the

@@ -98,7 +98,10 @@ local lastShare, sharePending = -math.huge, false
 local lastFlagsSent, lastKeepersSent = -math.huge, -math.huge
 local lastRelay = -math.huge
 local lastEarlySent, earlySending = -math.huge, nil
-local earlyPending           -- a list of early supporters coming in pieces: { at, pieces, got, count, from }
+local earlyAnswer             -- an ask heard inside EARLY_GAP, answered once it is over (its token)
+-- Lists of early supporters coming in pieces, one per sender: from -> { at, pieces, got, count, from }
+-- (TreasurerSpeaking: his pinned characters alone, so a few at most).
+local earlyPending = {}
 local earlyAsks, lastEarlyAsk, earlyArmed, heardEarlyAsk = 0, -math.huge, false, -math.huge
 local earlyShown = Treasury.EARLY_SHOWN
 local earlyOpen = false
@@ -1857,7 +1860,8 @@ ns.Comm.Handle("TB", function(...) Treasury.HandleReport(...) end)
 
 -- His mail character's book as the Treasurer's client passes it on (TR): from the Treasurer
 -- himself (his name, set by the server, in <Olympus>), about his mail character alone, of this
--- era; taken unless our copy of that book is as new (its own TB, dated when it came, always is).
+-- era; taken unless our copy of that book is newer, or as new and its own TB (dated when it came,
+-- it always is): a copy as new that was passed on too is replaced (its week moves on).
 -- The book is checked as a keeper's own is (ReadBook), and its date too: DATE_SLACK ahead of the
 -- server's clock at most (Konig's review of 1.0.0).
 function Treasury.HandleRelay(dist, sender, text)
@@ -1879,8 +1883,13 @@ function Treasury.HandleRelay(dist, sender, text)
 	-- part we hold takes its place.)
 	if dist == "WHISPER" and (r.part or not Treasury.IsInsider()) then return end
 	Treasury.Migrate()
+	-- A copy passed on again of the same book (its date unchanged) takes the place of the one
+	-- passed on before: its week is as the Treasurer's client counts it when it sends it (today
+	-- and the 6 days before: Treasury.Totals), so a book that stops changing no longer shows the
+	-- week it had when it first reached us. Its own TB as new still stays.
 	for from, old in pairs(Reports()) do
-		if SameChar(from, whose) and type(old) == "table" and (tonumber(old.t) or 0) >= r.t and (r.part or not old.part) then return end
+		local held = type(old) == "table" and (tonumber(old.t) or 0)
+		if SameChar(from, whose) and held and (held > r.t or (held == r.t and not old.relayed)) and (r.part or not old.part) then return end
 	end
 	r.relayed = true
 	Keep(r)
@@ -2078,6 +2087,7 @@ Treasury.PRIVATE_REPEAT = 1800     -- the same one whispered again to the same p
 
 local heard = {}         -- [Name-Realm] = when the King, a Steward or a keeper was last heard
 local firstHeard = {}    -- [Name-Realm] = when he was first heard this session
+local unavailable = {}   -- [server's displayed lower name] = true after its not-playing reply this session
 local outbox = {}        -- whispers waiting: { to, kind, key, msg, pieces }
 local sending            -- the transfer owned by Comm now, or waiting for admission
 local sentTo = {}        -- [Name-Realm] = { [key] = { msg, at }: the message last whispered whole to him, when }
@@ -2087,6 +2097,22 @@ local privAsm = ns.Codec.NewAssembler()
 local lastAsk = -math.huge
 local privateKinds = {}  -- [type] = { from(sender), to(), handle(dist, sender, text) }
 local held = false       -- a changed message was held back by PRIVATE_GAP: FlushPrivate sends it
+
+-- The game names an unavailable whisper recipient in a system line. Keep that server-stamped
+-- fact only for this login: periodic private recovery must not ask the same offline character
+-- every five minutes. Any later authenticated addon traffic from that character clears it.
+local function UnavailableMatches(name, who)
+	return (ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who
+end
+function Treasury.Unavailable(name)
+	if type(name) ~= "string" or name == "" then return false end
+	for who in pairs(unavailable) do if UnavailableMatches(name, who) then return true end end
+	return false
+end
+function Treasury.Available(name)
+	if type(name) ~= "string" or name == "" then return end
+	for who in pairs(unavailable) do if UnavailableMatches(name, who) then unavailable[who] = nil end end
+end
 
 -- The King's switches as he last gave them (never the author's Asmon's view): what goes on the
 -- channel. Returns the parts, and whether all of them show (the whole book goes there then).
@@ -2138,6 +2164,7 @@ end
 function Treasury.Heard(name)
 	if not Insider(name) then return end
 	name = ns.FullName(name)
+	Treasury.Available(name)
 	heard[name] = ns.Now()
 	firstHeard[name] = firstHeard[name] or heard[name]
 end
@@ -2379,6 +2406,209 @@ Treasury.OnPrivate("TR", { from = function(s) return TreasurerPin(s) == 1 end, t
 	end,
 	handle = function(...) Treasury.HandleRelay(...) end })
 
+---------------------------------------------------------------------------
+-- 1.2.6: durable Guild treasury ranking, without relaying a bank.  The bank's tabs, items,
+-- donors and book remain on TS/TB's private rails.  A TY carries one already-visible numeric
+-- ranking row between members of Bank.DirectoryViewer's audience.  One viewer is not enough to
+-- create a row on another client: two different authorized live holders must repeat the exact
+-- row.  Once accepted it is saved and may be repeated by that holder, so the original guild
+-- officer need not be online with every later viewer.  A newer accepted snapshot replaces an
+-- older one; old rows remain visibly dated, as the direct ranking's rows do.
+--   TY~1~<guild>~<original by>~<time>~<money>~<units>~<stacks>~<value>~<pending>~<unpriced>
+--       ~<total>~<average level>~<correspondent|->~<home 0|1>
+---------------------------------------------------------------------------
+Treasury.RANK_RELAY_WITNESSES = 2
+Treasury.RANK_RELAY_GUILDS = 128
+Treasury.RANK_RELAY_CANDIDATES = 3
+Treasury.RANK_RELAY_KEEP_PENDING = 3 * 86400
+
+local function RankRelayAudience(name)
+	local B = ns.Bank
+	return type(B) == "table" and type(B.DirectoryViewer) == "function" and B.DirectoryViewer(name) == true
+end
+local function RankRelayMe()
+	local B = ns.Bank
+	return type(B) == "table" and type(B.SeesSisters) == "function" and B.SeesSisters() == true
+end
+local function RankRelayRoot(make)
+	if type(ns.rdb) ~= "table" or type(ns.group) ~= "string" or type(ns.faction) ~= "string" then return nil end
+	local s = ns.rdb.treasuryRankRelay
+	if type(s) ~= "table" or s.v ~= 1 or s.group ~= ns.group or s.faction ~= ns.faction then
+		if not make then return nil end
+		s = { v = 1, group = ns.group, faction = ns.faction, rows = {} }
+		ns.rdb.treasuryRankRelay = s
+	end
+	if type(s.rows) ~= "table" then s.rows = {} end
+	return s
+end
+local function RankRelayNumber(v, hi)
+	v = tonumber(v)
+	return v and v == math.floor(v) and v >= 0 and v <= hi and v or nil
+end
+local function RankRelayWire(row)
+	if type(row) ~= "table" then return nil end
+	local guild = type(row.guild) == "string" and ns.King.CleanGuild(row.guild) or nil
+	local by = type(row.by) == "string" and ns.FullName(row.by) or nil
+	local corr = type(row.correspondent) == "string" and ns.FullName(row.correspondent) or "-"
+	local t = RankRelayNumber(row.t, 2147483647)
+	local money = RankRelayNumber(row.money, Treasury.MAX_COPPER)
+	local units = RankRelayNumber(row.units, 99999999)
+	local stacks = RankRelayNumber(row.stacks, 9999999)
+	local value = RankRelayNumber(row.value, Treasury.MAX_COPPER)
+	local pending = RankRelayNumber(row.pending, 99999999)
+	local unpriced = RankRelayNumber(row.unpriced, 99999999)
+	local total = RankRelayNumber(row.total, Treasury.MAX_COPPER * 2)
+	local level = RankRelayNumber(row.level or 0, 255)
+	local home = row.home == true or ns.IsKingGuild(guild or "")
+	if not guild or not ns.IsFederation(guild) or not by or by:find("[~%^|%c]") or corr:find("[~%^|%c]")
+		or not t or t == 0 or not money or not units or not stacks or not value or not pending or not unpriced or not total
+		or not level or total ~= money + value or home ~= ns.IsKingGuild(guild) then return nil end
+	return ("TY~1~%s~%s~%d~%d~%d~%d~%d~%d~%d~%d~%d~%s~%d"):format(guild, by, t, money, units,
+		stacks, value, pending, unpriced, total, level, corr, home and 1 or 0)
+end
+Treasury.RankRelayWire = RankRelayWire
+
+local function ReadRankRelay(text)
+	local guild, by, t, money, units, stacks, value, pending, unpriced, total, level, corr, home =
+		tostring(text or ""):match("^TY~1~([^~]+)~([^~]+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~(%d+)~([^~]+)~([01])$")
+	local row = { guild = guild, by = by, t = tonumber(t), money = tonumber(money), units = tonumber(units), stacks = tonumber(stacks),
+		value = tonumber(value), pending = tonumber(pending), unpriced = tonumber(unpriced), total = tonumber(total), level = tonumber(level),
+		correspondent = corr ~= "-" and corr or nil, home = home == "1" }
+	local wire = RankRelayWire(row)
+	if wire ~= text then return nil end
+	return row, wire
+end
+
+local function DirectRankRows()
+	if type(Treasury.Ranking) ~= "function" then return {} end
+	local rank = Treasury.Ranking(nil, true)
+	local rows = {}
+	if type(rank) == "table" and type(rank.federal) == "table" then rows[#rows + 1] = rank.federal end
+	for _, row in ipairs(type(rank) == "table" and type(rank.rows) == "table" and rank.rows or {}) do rows[#rows + 1] = row end
+	return rows
+end
+local function DirectRankWire(guild)
+	local key = ns.Fold(guild)
+	for _, row in ipairs(DirectRankRows()) do
+		if ns.Fold(row.guild) == key then return RankRelayWire(row) end
+	end
+end
+
+local function PruneRankRelays()
+	local s = RankRelayRoot(false)
+	if not s then return end
+	local now, guilds = ns.Now(), 0
+	for key, set in pairs(s.rows) do
+		if type(key) ~= "string" or type(set) ~= "table" then s.rows[key] = nil
+		else
+			guilds = guilds + 1
+			local list = {}
+			for wire, e in pairs(set) do
+				if type(wire) ~= "string" or type(e) ~= "table" or not ReadRankRelay(wire) then set[wire] = nil
+				else
+					if type(e.seen) ~= "table" then e.seen = {} end
+					if e.accepted ~= true and now - (tonumber(e.heard) or 0) > Treasury.RANK_RELAY_KEEP_PENDING then set[wire] = nil
+					else list[#list + 1] = { wire = wire, e = e } end
+				end
+			end
+			table.sort(list, function(a, b)
+				local ar, br = ReadRankRelay(a.wire), ReadRankRelay(b.wire)
+				if (a.e.accepted == true) ~= (b.e.accepted == true) then return a.e.accepted == true end
+				-- A newer proposal with only one witness must never evict a row that already
+				-- reached consensus.  Keep corroborated history first inside the bounded set;
+				-- RelayedRanking still chooses the newest accepted row for display.
+				if ar.t ~= br.t then return ar.t > br.t end
+				return a.wire < b.wire
+			end)
+			for i = Treasury.RANK_RELAY_CANDIDATES + 1, #list do set[list[i].wire] = nil end
+			if next(set) == nil then s.rows[key] = nil; guilds = guilds - 1 end
+		end
+	end
+	while guilds > Treasury.RANK_RELAY_GUILDS do
+		local victim, at
+		for key, set in pairs(s.rows) do
+			local newest = 0
+			for _, e in pairs(set) do newest = math.max(newest, tonumber(e.heard) or 0) end
+			if not at or newest < at then victim, at = key, newest end
+		end
+		if not victim then break end
+		s.rows[victim], guilds = nil, guilds - 1
+	end
+end
+
+function Treasury.HandleRankRelay(dist, sender, text)
+	if dist ~= "WHISPER" or not RankRelayMe() or not RankRelayAudience(sender) then return false, "access" end
+	local row, wire = ReadRankRelay(text)
+	if not row then return false, "shape" end
+	if row.t > ns.Now() + 30 then return false, "time" end
+	local B = ns.Bank
+	local source = row.home and Treasury.KeeperByName(row.by)
+		or type(B.LordOrCaptain) == "function" and B.LordOrCaptain(row.by, row.guild)
+	if not source then return false, "source" end
+	local s = RankRelayRoot(true)
+	if not s then return false, "store" end -- (no realm group or faction yet: nothing to keep it under)
+	local key = ns.Fold(row.guild)
+	s.rows[key] = type(s.rows[key]) == "table" and s.rows[key] or {}
+	local e = s.rows[key][wire]
+	if type(e) ~= "table" then e = { seen = {}, heard = ns.Now() }; s.rows[key][wire] = e end
+	e.seen[ns.Fold(ns.FullName(sender))] = ns.Now()
+	e.heard = ns.Now()
+	local n = 0
+	for _ in pairs(e.seen) do n = n + 1 end
+	if n >= Treasury.RANK_RELAY_WITNESSES then e.accepted = true end
+	PruneRankRelays()
+	if e.accepted then ns.Fire("TREASURY_CHANGED") end
+	return true, e.accepted == true and "accepted" or "witness"
+end
+
+function Treasury.RelayedRanking()
+	if not RankRelayMe() then return {} end
+	PruneRankRelays()
+	local s, out = RankRelayRoot(false), {}
+	for _, set in pairs(s and s.rows or {}) do
+		local best, bestWire
+		for wire, e in pairs(set) do
+			local row = e.accepted == true and ReadRankRelay(wire) or nil
+			if row and (not best or row.t > best.t or (row.t == best.t and wire < bestWire)) then best, bestWire = row, wire end
+		end
+		if best then best.relay = true; out[#out + 1] = best end
+	end
+	table.sort(out, function(a, b) return ns.Fold(a.guild) < ns.Fold(b.guild) end)
+	return out
+end
+
+local function RankRelayMessages()
+	local byGuild = {}
+	for _, row in ipairs(DirectRankRows()) do
+		local wire = RankRelayWire(row)
+		if wire then byGuild[ns.Fold(row.guild)] = { wire = wire, t = row.t } end
+	end
+	for _, row in ipairs(Treasury.RelayedRanking()) do
+		local wire = RankRelayWire(row)
+		local key, old = ns.Fold(row.guild), byGuild[ns.Fold(row.guild)]
+		if wire and (not old or row.t > old.t) then byGuild[key] = { wire = wire, t = row.t } end
+	end
+	return byGuild
+end
+function Treasury.SendRankRelays(to)
+	if not RankRelayMe() or not RankRelayAudience(to) then return 0 end
+	local n = 0
+	for key, e in pairs(RankRelayMessages()) do
+		if Treasury.Private(to, "TY", e.wire, "TY " .. key) then n = n + 1 end
+	end
+	return n
+end
+
+Treasury.OnPrivate("TY", { from = RankRelayAudience, to = RankRelayMe,
+	send = function(to, msg)
+		if not RankRelayMe() or not RankRelayAudience(to) then return false end
+		local row, wire = ReadRankRelay(msg)
+		if not row or wire ~= msg then return false end
+		local held = RankRelayMessages()[ns.Fold(row.guild)]
+		return held ~= nil and held.wire == msg
+	end,
+	handle = Treasury.HandleRankRelay })
+
 -- This client asks for what is its to see (TA): the King's, a Steward's or a keeper's (a Hand's,
 -- for the sister guilds' banks, Bank.lua; 1.2: any of the Guild treasuries' audience's, a
 -- councillor's, the Treasurer's, the author's). fresh: it holds nothing yet (a login). 1.2: so is
@@ -2389,6 +2619,10 @@ function Treasury.Ask(fresh)
 	if not (Treasury.IsInsider() or (ns.Bank and ns.Bank.AsksSisters and ns.Bank.AsksSisters())) then return false end
 	if lastAsk == -math.huge then fresh = true end
 	if ns.Bank and ns.Bank.Lapsed and ns.Bank.Lapsed() then fresh = true end
+	-- Quiet presence (1.2.5.1, Core.lua): an insider who hears our ask counts us online
+	-- (Treasury.Online) for AUDIENCE_FRESH. A fresh ask (a session's first, a keeper just named)
+	-- still goes, for what is ours to see; the repeat for what changed waits until it is off.
+	if not fresh and ns.QuietPresence and ns.QuietPresence() then return false end
 	lastAsk = ns.Now()
 	ns.Comm.Send("CHANNEL", ("TA~%s~%d"):format(Clean(GetGuildInfo("player")), fresh and 0 or 1), "treasuryask")
 	return true
@@ -2415,6 +2649,9 @@ function Treasury.HandleAsk(dist, sender, text)
 		Treasury.SendPrivate(sender)
 	end
 	if ns.Bank and ns.Bank.HeardAsk then ns.Bank.HeardAsk(sender, reset, fresh == "0") end
+	-- Numeric Guild-treasury rows are durable among the same private audience. They contain no
+	-- bank contents and need two independent holders at the receiver before they appear.
+	if RankRelayAudience(sender) then Treasury.SendRankRelays(sender) end
 end
 ns.Comm.Handle("TA", function(...) Treasury.HandleAsk(...) end)
 
@@ -2443,6 +2680,7 @@ function Treasury.NotFound(text)
 	local who = text:match(notFound)
 	if not who then return end
 	who = who:lower()
+	unavailable[who] = true
 	local function Is(name) return (ns.TellName(name) or ""):lower() == who or (ns.DisplayName(name) or ""):lower() == who end
 	Treasury.CancelPrivate(function(o) return Is(o.to) end)
 	for name in pairs(heard) do if Is(name) then heard[name] = nil end end
@@ -2454,7 +2692,7 @@ end
 function Treasury.PrivateState() return { outbox = outbox, sending = sending, sentTo = sentTo, heard = heard, held = held } end
 function Treasury.ResetPrivate()
 	Treasury.CancelPrivate()
-	wipe(heard); wipe(firstHeard); wipe(outbox); wipe(sentTo); wipe(resetAt)
+	wipe(heard); wipe(firstHeard); wipe(unavailable); wipe(outbox); wipe(sentTo); wipe(resetAt)
 	sending, lastAsk, notFound, held = nil, -math.huge, nil, false
 	if ns.rdb then ns.rdb.treasuryReaders = nil end
 	privAsm = ns.Codec.NewAssembler()
@@ -2899,7 +3137,7 @@ function Treasury.SendEarly(force)
 	if not list then return false end
 	local now = ns.Now()
 	if not force and now - lastEarlySent < Treasury.EARLY_GAP then return false end
-	lastEarlySent = now
+	lastEarlySent, earlyAnswer = now, nil -- (an answer waiting for the gap: this one is it)
 	local guild = Clean(GetGuildInfo("player"))
 	local pieces, token = EarlyPieces(list, guild), {}
 	earlySending = token
@@ -2934,7 +3172,9 @@ Treasury.OnPrivate("TE", { send = function(to) return MaySendEarly() and Insider
 -- A piece of the list: from one of the Treasurer's pinned characters (his name, set by the
 -- server). A list as new as ours changes nothing; a newer one replaces ours once all its
 -- pieces are in (an older list's piece meanwhile is dropped). By whisper (1.1) only to the King,
--- a Steward or a keeper.
+-- a Steward or a keeper. Each sender's pieces are put together apart: two of his characters
+-- cut the same list where their guild's name leaves room (EarlyPieces), so one's pieces never
+-- fill the gaps of the other's (a name at a cut lost for good once the list is taken).
 function Treasury.HandleEarly(dist, sender, text)
 	if (dist ~= "CHANNEL" and dist ~= "WHISPER") or type(text) ~= "string" or not ns.rdb then return end
 	if dist == "WHISPER" and not Treasury.IsInsider() then return end
@@ -2944,11 +3184,12 @@ function Treasury.HandleEarly(dist, sender, text)
 	if at < 1 or at > Clock() + 600 or n < 1 or n > Treasury.EARLY_PIECES or i < 1 or i > n then return end
 	local held = ns.rdb.treasuryEarly
 	if type(held) == "table" and (tonumber(held.at) or 0) >= at then return end
-	local p = earlyPending
+	local from = ns.FullName(sender)
+	local p = earlyPending[from]
 	if not p or p.at ~= at or p.pieces ~= n then
 		if p and p.at > at then return end
-		p = { at = at, pieces = n, got = {}, count = 0, from = ns.FullName(sender) }
-		earlyPending = p
+		p = { at = at, pieces = n, got = {}, count = 0, from = from }
+		earlyPending[from] = p
 	end
 	if p.got[i] then return end
 	local list = {}
@@ -2958,7 +3199,7 @@ function Treasury.HandleEarly(dist, sender, text)
 	end
 	p.got[i], p.count = list, p.count + 1
 	if p.count < p.pieces then return end
-	earlyPending = nil
+	for k, q in pairs(earlyPending) do if q.at <= at then earlyPending[k] = nil end end
 	local all = {}
 	for k = 1, p.pieces do
 		for _, name in ipairs(p.got[k]) do if #all < Treasury.EARLY_MAX then all[#all + 1] = name end end
@@ -2988,10 +3229,13 @@ end
 
 -- Someone asks: the holder answers when its list is newer than the asker's (EARLY_GAP apart at
 -- the soonest, however many ask: the answer goes to the whole channel), with the same yeses as
--- its own sending (SendEarly). Anyone's ask holds ours (EARLY_ASK_HOLD) only when its answer
--- reaches us too: it asks for no newer list than ours, so any list newer than it has is newer
--- than ours (Konig's review of 1.0.0: an ask as new as the holder's list, or dated ahead, is
--- never answered, and anyone repeating one kept every client without the list from asking).
+-- its own sending (SendEarly). An ask inside EARLY_GAP is answered once the gap is over, never
+-- left to its asker's next ask (EARLY_ASK_AGAIN later, and some of its EARLY_ASKS gone): a late
+-- login waits EARLY_GAP at most, and the list still goes out once each EARLY_GAP at most.
+-- Anyone's ask holds ours (EARLY_ASK_HOLD) only when its answer reaches us too: it asks for no
+-- newer list than ours, so any list newer than it has is newer than ours (Konig's review of
+-- 1.0.0: an ask as new as the holder's list, or dated ahead, is never answered, and anyone
+-- repeating one kept every client without the list from asking).
 function Treasury.HandleEarlyAsk(dist, sender, text)
 	if dist ~= "CHANNEL" or type(text) ~= "string" then return end
 	local at = tonumber(text:match("^TQ~(%d+)$"))
@@ -3003,7 +3247,17 @@ function Treasury.HandleEarlyAsk(dist, sender, text)
 	if not (list and list.at > at) then return end
 	-- (1.1: while the ranking is off the channel, the King, a Steward or a keeper asking gets it
 	-- by whisper; nobody else.)
-	if Treasury.PublicShows("ranking") then Treasury.SendEarly()
+	if Treasury.PublicShows("ranking") then
+		if Treasury.SendEarly() or earlyAnswer or not MaySendEarly() then return end
+		local wait = lastEarlySent + Treasury.EARLY_GAP - ns.Now()
+		if wait <= 0 then return end
+		local token = {}
+		earlyAnswer = token
+		ns.After(wait, "treasury early answer", function()
+			if earlyAnswer ~= token then return end
+			earlyAnswer = nil
+			Treasury.SendEarly()
+		end)
 	elseif Treasury.InsiderName(sender) and CanSend() then Treasury.SendEarlyTo(sender) end
 end
 ns.Comm.Handle("TQ", function(...) Treasury.HandleEarlyAsk(...) end)
@@ -3122,6 +3376,9 @@ end
 
 function Treasury.SendDonations(force)
 	if not donating or not RealKeeper() then return false end
+	-- Quiet presence (Core.lua): "taking donations" says he is online and where; it waits until it is
+	-- off, and the others' line lapses (DONATIONS_FRESH) as after a logout.
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local now = ns.Now()
 	if not force and now - lastDonationSent < Treasury.DONATIONS_EVERY then return false end
 	lastDonationSent = now
@@ -3138,9 +3395,10 @@ function Treasury.SetDonations(on)
 		donating = { since = ns.Now(), mapID = DonationZone() }
 		Treasury.SendDonations(true)
 		ns.Print(donating.mapID and L.DONATIONS_NOW_ON_ZONE or L.DONATIONS_NOW_ON)
+		if ns.QuietPresence and ns.QuietPresence() then ns.Print(L.QUIET_PRESENCE_HELD) end
 	elseif donating then
 		donating = nil
-		ns.Comm.Send("CHANNEL", DonationMessage(false), "treasurydonations")
+		if not (ns.QuietPresence and ns.QuietPresence()) then ns.Comm.Send("CHANNEL", DonationMessage(false), "treasurydonations") end
 		ns.Print(L.DONATIONS_NOW_OFF)
 	end
 	ns.Fire("TREASURY_CHANGED")
@@ -3161,6 +3419,8 @@ end
 function Treasury.DonationsLogout()
 	if not donating then return end
 	donating = nil
+	-- (Quiet presence: nothing at logout either; the others' line had lapsed or lapses.)
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local name = ns.Comm.ChannelName and ns.Comm.ChannelName()
 	local id = name and GetChannelName and GetChannelName(name) or 0
 	if id and id > 0 and C_ChatInfo and C_ChatInfo.SendAddonMessage then
@@ -3231,6 +3491,9 @@ function Treasury.DonationLines()
 	end
 	return out
 end
+
+-- Quiet presence turned off (Core.lua): a keeper taking donations says so again at once.
+ns.On("QUIET_PRESENCE_CHANGED", function(on) if on == false then Treasury.SendDonations(true) end end)
 
 ns.On("LOGIN", function()
 	ns.Every(30, "treasury donations", function() Treasury.SendDonations() end)
@@ -3724,40 +3987,61 @@ Treasury.DirectoryShown = DirectoryShown
 -- outside the race): the highest total first, then the higher average level, then the name. Only
 -- for the ranking drawn (`ranked`): a search's keystroke, the tab's visibility, a guild's page by
 -- name work out no value (their totals are the gold) and ask the game for no item's data.
-local function DirectoryBanks(role, ranked)
+local function DirectoryBanks(role, ranked, directOnly)
 	local out = {}
 	if not DirectoryShown() then return out end
 	local B = ns.Bank
 	role = role or Treasury.Role()
 	local own = BankVisible(role) and B.Current and B.Current() or nil
+	local at = {}
 	if type(own) == "table" and type(own.tabs) == "table" and type(own.guild) == "string" then
 		out[1] = { key = own.guild:lower(), guild = own.guild, snap = own, by = own.by, home = true }
+		at[ns.Fold(own.guild)] = 1
 	end
-	local at = {}
 	local function Add(s)
 		if type(s) ~= "table" or type(s.guild) ~= "string" or type(s.tabs) ~= "table" or ns.IsKingGuild(s.guild) then return end
-		local key = s.guild:lower()
-		local k = at[key]
+		local key, folded = s.guild:lower(), ns.Fold(s.guild)
+		local k = at[folded]
 		if k and (tonumber(out[k].snap.t) or 0) >= (tonumber(s.t) or 0) then return end
 		local b = { key = key, guild = s.guild, snap = s, by = s.by }
-		if k then out[k] = b else out[#out + 1] = b; at[key] = #out end
+		if k then out[k] = b else out[#out + 1] = b; at[folded] = #out end
 	end
 	local mine, guild = B.Own and B.Own(), GetGuildInfo("player")
 	if type(mine) == "table" and type(guild) == "string" and mine.guild == guild then Add(mine) end
 	for _, s in ipairs(B.Sisters()) do Add(s) end
+	-- A ranking row may outlive the client that supplied the full bank snapshot. It carries only
+	-- the numeric fields below. A newer direct snapshot always wins; a newer relayed row replaces
+	-- the ranking row but never becomes an expandable bank or a search target.
+	if ranked and not directOnly then
+		for _, r in ipairs(Treasury.RelayedRanking()) do
+			local folded, k = ns.Fold(r.guild), at[ns.Fold(r.guild)]
+			local direct = k and out[k] or nil
+			if not direct or (tonumber(r.t) or 0) > (tonumber(direct.snap and direct.snap.t) or 0) then
+				local b = { key = r.guild:lower(), guild = r.guild, by = r.by, home = r.home == true,
+					money = r.money, units = r.units, stacks = r.stacks, value = r.value, pending = r.pending,
+					unpriced = r.unpriced, total = r.total, t = r.t, level = r.level,
+					corr = r.correspondent, relay = true, ranked = true }
+				if k then out[k] = b else out[#out + 1] = b; at[folded] = #out end
+			end
+		end
+	end
 	local now = ns.Now()
 	if ranked and B.PriceAsks then B.PriceAsks() end
 	for _, b in ipairs(out) do
-		local x = B.Index(b.snap)
-		b.units, b.stacks = x and x.units or 0, x and x.stacks or 0
-		b.money, b.t = math.max(0, math.floor(tonumber(b.snap.money) or 0)), tonumber(b.snap.t) or 0
+		if not b.relay then
+			local x = B.Index(b.snap)
+			b.units, b.stacks = x and x.units or 0, x and x.stacks or 0
+			b.money, b.t = math.max(0, math.floor(tonumber(b.snap.money) or 0)), tonumber(b.snap.t) or 0
+			local v = ranked and B.Value and B.Value(b.snap)
+			b.value, b.pending, b.unpriced, b.ranked = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0, ranked and true or nil
+			b.total = b.money + b.value
+			if ranked and not b.home and B.Correspondent then b.corr, b.corrKept = B.Correspondent(b.guild) end
+			local g = ns.Data and ns.Data.Guild and ns.Data.Guild(b.guild)
+			b.level = type(g) == "table" and tonumber(g.avgLevel) or 0
+		end
+		b.t = tonumber(b.t) or 0
 		b.old = now - b.t > (B.SISTER_OLD or math.huge)
-		local v = ranked and B.Value and B.Value(b.snap)
-		b.value, b.pending, b.unpriced, b.ranked = v and v.value or 0, v and v.pending or 0, v and v.unpriced or 0, ranked and true or nil
-		b.total = b.money + b.value
-		if ranked and not b.home and B.Correspondent then b.corr, b.corrKept = B.Correspondent(b.guild) end
-		local g = ns.Data and ns.Data.Guild and ns.Data.Guild(b.guild)
-		b.level, b.folded = type(g) == "table" and tonumber(g.avgLevel) or 0, ns.Fold(b.guild)
+		b.folded = ns.Fold(b.guild)
 	end
 	table.sort(out, function(a, c)
 		if a.home ~= c.home then return a.home == true end
@@ -3776,13 +4060,15 @@ end
 -- 1.2.4: the ranking of the Guild treasuries as numbers alone: { federal = <Olympus>'s row or nil,
 -- rows = { { pos, guild, correspondent, money, units, stacks, value, pending, unpriced, total, t, old,
 -- level }, ... } }, in its order. What the Treasury tab draws in place of the banks' rows, for their
--- audience alone. Sharing it with everyone, its numbers without any bank's items, is for later (the
--- author's "depois"): a message of these fields would go from here. Nothing sends it in 1.2.4.
-function Treasury.Ranking(role)
+-- audience alone. The numeric rows are retained by authorized viewers through the two-witness TY
+-- relay above; no bank contents, donors or books travel with them. `directOnly` is the send path:
+-- it prevents a relayed row from recursively presenting itself as a new direct observation.
+function Treasury.Ranking(role, directOnly)
 	local out = { rows = {} }
-	for _, b in ipairs(DirectoryBanks(role, true)) do
+	for _, b in ipairs(DirectoryBanks(role, true, directOnly == true)) do
 		local row = { pos = b.pos, guild = b.guild, correspondent = b.corr or nil, money = b.money, units = b.units, stacks = b.stacks,
-			value = b.value, pending = b.pending, unpriced = b.unpriced, total = b.total, t = b.t, old = b.old, level = b.level }
+			value = b.value, pending = b.pending, unpriced = b.unpriced, total = b.total, t = b.t, old = b.old, level = b.level,
+			by = b.by, home = b.home == true, relay = b.relay == true }
 		if b.home then out.federal = row else out.rows[#out.rows + 1] = row end
 	end
 	return out
@@ -3805,7 +4091,7 @@ end
 local function DirectoryBank(name, ranked)
 	if type(name) ~= "string" or name == "" then return nil end
 	local key = name:lower()
-	for _, b in ipairs(DirectoryBanks(nil, ranked)) do if b.key == key then return b end end
+	for _, b in ipairs(DirectoryBanks(nil, ranked)) do if b.key == key and b.snap then return b end end
 end
 
 -- Its ledger: the Treasury books' balance (<Olympus>'s alone), as this viewer sees it. Returns its
@@ -3832,8 +4118,10 @@ end
 local function DirTip(b, click)
 	return function(tt)
 		tt:AddLine(L.TREASURY_GUILD_TITLE:format(b.guild), 1, 0.82, 0)
-		tt:AddLine(L.TREASURY_GUILD_SHARED_BY:format(DirWho(b), ns.Ago(b.t)), 1, 1, 1, true)
-		if b.old then tt:AddLine(L.TREASURY_DIR_STATE_OLD, 1, 0.4, 0.4, true) else tt:AddLine(L.TREASURY_DIR_STATE_SHARED, 0.6, 1, 0.6, true) end
+		tt:AddLine((b.relay and L.TREASURY_RANK_RELAY_BY or L.TREASURY_GUILD_SHARED_BY):format(DirWho(b), ns.Ago(b.t)), 1, 1, 1, true)
+		if b.relay then tt:AddLine(L.TREASURY_RANK_RELAY_STATE, b.old and 1 or 0.6, b.old and 0.4 or 1, b.old and 0.4 or 0.6, true)
+		elseif b.old then tt:AddLine(L.TREASURY_DIR_STATE_OLD, 1, 0.4, 0.4, true)
+		else tt:AddLine(L.TREASURY_DIR_STATE_SHARED, 0.6, 1, 0.6, true) end
 		-- (A search's rows are not ranked: their correspondent and value are worked out here, at the
 		-- hover alone, as the ranking's are: the branch's review.)
 		local B = ns.Bank
@@ -3844,7 +4132,7 @@ local function DirTip(b, click)
 			tt:AddLine(not who and L.TREASURY_RANK_CORR_NONE or (kept and L.TREASURY_RANK_CORR_KEPT or L.TREASURY_RANK_CORR):format(who), 1, 1, 1, true)
 		end
 		tt:AddLine(L.TREASURY_GUILD_ITEMS:format(b.units or 0, b.stacks or 0), 1, 1, 1, true)
-		tt:AddLine(b.home and L.TREASURY_DIR_LEDGER_TIP or L.TREASURY_GUILD_BOOK_UNAVAILABLE, 0.8, 0.8, 0.8, true)
+		tt:AddLine(b.relay and L.TREASURY_RANK_RELAY_TIP or (b.home and L.TREASURY_DIR_LEDGER_TIP or L.TREASURY_GUILD_BOOK_UNAVAILABLE), 0.8, 0.8, 0.8, true)
 		local v = b.ranked and { value = b.value or 0, pending = b.pending or 0, unpriced = b.unpriced or 0 } or (B.Value and B.Value(b.snap))
 		Treasury.ValueTip(tt, v)
 		if click then tt:AddLine(click, 0.6, 1, 0.6, true) end
@@ -3855,7 +4143,7 @@ end
 -- who took it and when on the right (an old one in red).
 local function DirDetail(b)
 	local text = L.TREASURY_RANK_DETAIL:format(Treasury.GoldText(b.money), b.units, AtLeast(b, Treasury.GoldText(b.value)))
-	if b.home then text = L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. text end
+	if b.home and not b.relay then text = L.TREASURY_DIR_LEDGER:format((DirLedger(b))) .. "  -  " .. text end
 	return { indent = 1, text = Grey(text),
 		right = (b.old and Red or Grey)(L.TREASURY_DIR_WHEN:format(DirWho(b), ns.Ago(b.t))), tooltip = DirTip(b) }
 end
@@ -3865,7 +4153,7 @@ end
 -- until a newer one or his no; a yes may be the King's alone, 1.1's).
 local function Unheld(banks)
 	local have, out = {}, {}
-	for _, b in ipairs(banks) do have[b.key] = true end
+	for _, b in ipairs(banks) do if b.snap then have[b.key] = true end end
 	local now, keep = ns.Now(), ns.Data and ns.Data.KEEP or 7 * 86400
 	for name, g in pairs(ns.rdb and ns.rdb.guilds or {}) do
 		if type(name) == "string" and type(g) == "table" and not have[name:lower()] and not ns.IsKingGuild(name)
@@ -3909,16 +4197,20 @@ local function SisterLines(lines, role)
 	if #banks > 0 then
 		-- The total: every bank's gold as its snapshot last saw it (of different times), and the
 		-- ledger apart (<Olympus>'s books, where this viewer sees them).
-		local gold, units, stacks, ledger = 0, 0, 0, L.TREASURY_DIR_LEDGER_NONE
+		local gold, units, stacks, ledger, relayed = 0, 0, 0, L.TREASURY_DIR_LEDGER_NONE, false
 		for _, b in ipairs(banks) do
 			gold, units, stacks = gold + b.money, units + b.units, stacks + b.stacks
-			if b.home then ledger = (DirLedger(b)) end
+			if b.home and b.snap then ledger = (DirLedger(b)) end
+			if b.relay then relayed = true end
 		end
+		-- (1.2.6: every row a bank snapshot held here is "All 3 banks", as before; once a row is a
+		-- relayed ranking total (no bank behind it here), the line says treasuries and its tip says so.)
+		local label = relayed and L.TREASURY_RANK_DIR_TOTAL or L.TREASURY_DIR_TOTAL
 		local function TotalTip(tt)
-			tt:AddLine(L.TREASURY_DIR_TOTAL:format(#banks), 1, 0.82, 0)
-			tt:AddLine(L.TREASURY_DIR_TOTAL_TIP, 1, 1, 1, true)
+			tt:AddLine(label:format(#banks), 1, 0.82, 0)
+			tt:AddLine(relayed and L.TREASURY_RANK_DIR_TOTAL_TIP or L.TREASURY_DIR_TOTAL_TIP, 1, 1, 1, true)
 		end
-		lines[#lines + 1] = { text = Gold(L.TREASURY_DIR_TOTAL:format(#banks)), right = Treasury.Coins(gold), key = "dir:total", tooltip = TotalTip }
+		lines[#lines + 1] = { text = Gold(label:format(#banks)), right = Treasury.Coins(gold), key = "dir:total", tooltip = TotalTip }
 		lines[#lines + 1] = { indent = 1, text = Grey(L.TREASURY_DIR_LEDGER:format(ledger) .. "  -  " .. L.TREASURY_GUILD_ITEMS:format(units, stacks)),
 			tooltip = TotalTip, gapAfter = true }
 	end
@@ -3926,15 +4218,17 @@ local function SisterLines(lines, role)
 	-- Treasury, outside the race; then each guild in its place, its correspondent, its gold, its
 	-- items, their value and its total; a click opens its bank as before.
 	local function Row(b)
-		local opened = dirOpen == b.key
+		local expandable = b.snap ~= nil
+		local opened = expandable and dirOpen == b.key
 		local label = b.home and L.TREASURY_RANK_FEDERAL:format("<" .. b.guild .. ">")
 			or L.TREASURY_RANK_ROW:format(b.pos, b.corr and ns.DisplayName(b.corr) or L.TREASURY_RANK_NO_CORR, "<" .. b.guild .. ">")
-		lines[#lines + 1] = { text = (opened and Gold or tostring)((opened and "[-] " or "[+] ") .. label), right = AtLeast(b, Treasury.Coins(b.total)),
-			key = "sister:" .. b.guild, tooltip = DirTip(b, L.TREASURY_DIR_EXPAND_TIP),
-			onClick = function()
+		lines[#lines + 1] = { text = (opened and Gold or tostring)((expandable and (opened and "[-] " or "[+] ") or "") .. label),
+			right = AtLeast(b, Treasury.Coins(b.total)), key = "sister:" .. b.guild,
+			tooltip = DirTip(b, expandable and L.TREASURY_DIR_EXPAND_TIP or L.TREASURY_RANK_RELAY_TIP),
+			onClick = expandable and function()
 				dirOpen = dirOpen ~= b.key and b.key or nil
 				ns.Fire("TREASURY_CHANGED")
-			end }
+			end or nil }
 		lines[#lines + 1] = DirDetail(b)
 		if opened then
 			SnapshotLines(lines, b.snap, { byLine = (b.home and L.TREASURY_BANK_AS_OF or L.TREASURY_GUILD_SHARED_BY):format(DirWho(b), ns.Ago(b.t)),
@@ -4642,7 +4936,7 @@ function Treasury.Reset()
 	wipe(pending)
 	wipe(itemPending)
 	lastMoney, lastRelay = nil, -math.huge
-	lastEarlySent, earlySending, earlyPending, earlyCache = -math.huge, nil, nil, nil
+	lastEarlySent, earlySending, earlyPending, earlyCache, earlyAnswer = -math.huge, nil, {}, nil, nil
 	Treasury.ResetPrivate()
 	donating, lastDonationSent = nil, -math.huge
 	wipe(donors); wipe(pinged)

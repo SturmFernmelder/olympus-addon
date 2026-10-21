@@ -354,3 +354,36 @@ test("1.2.3 roster: a GUID the client gives no race for is asked again at the ne
 		eq(RowOf(c, known.name).race, known.race[1])
 	end)
 end)
+
+test("roster: a moderator under a cover name (Cover.lua) is offline in the census we make of our roster: the online count, the officers' and the Lord's online, their zone", function()
+	if not ns.Cover then
+		assert(loadfile(ROOT .. "Olympus/Locales/CoverText.lua"))("Olympus", ns)
+		assert(loadfile(ROOT .. "Olympus/Cover.lua"))("Olympus", ns)
+	end
+	local saved = { covers = ns.rdb.covers, council = ns.rdb.council }
+	local ok, err = pcall(function()
+		local roster = Guild(10)
+		roster[1].online, roster[2].online = true, true -- the Lord and an officer, online
+		World(roster, function(w)
+			local c = Load("Olympus/Roster.lua", w)
+			local before = c.Roster.Scan()
+			eq(before.leaderOnline, true)
+			local online = before.online
+			-- The Lord and the officer are councillors under a cover heard just now.
+			ns.rdb.council = { at = 1, names = { member001 = "Member001", member002 = "Member002" } }
+			ns.rdb.covers = { ["Member001-Realm"] = { alias = "Aldric Stonebrook", t = ns.Now() },
+				["Member002-Realm"] = { alias = "Bran Oakfield", t = ns.Now() } }
+			w.clock = w.clock + 60
+			local r = c.Roster.Scan()
+			eq(r.leaderOnline, false, "the Lord offline")
+			eq(r.leaderZone, nil, "no zone")
+			eq(r.online, online - 2, "two fewer online")
+			for _, o in ipairs(r.officers) do
+				if o.name == "Member002" then eq(o.online, false, "the officer offline") end
+			end
+			assert(not tostring(r.leader):find("Aldric", 1, true), "the census keeps the real name: " .. tostring(r.leader))
+		end)
+	end)
+	ns.rdb.covers, ns.rdb.council = saved.covers, saved.council
+	if not ok then error(err, 0) end
+end)

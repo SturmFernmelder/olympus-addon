@@ -2,10 +2,17 @@
 
 Bones and direct duels keep their two original signed result halves in Olympus's core saved
 data, separately for each realm group and faction. Any ordinary holder can relay those halves.
-A receiver needs each player's key heard from that player, or an already verified wallet claim;
-a relay never establishes another player's identity. Unknown keys leave a bounded pending record
-until a player's own key arrives. If those players are offline and their keys were never heard,
-the receiver waits. Older clients continue using KN/AX and their existing ranking rules.
+A receiver normally needs each player's key heard from that player, or an already verified wallet
+claim; one relay never establishes another player's identity. Unknown keys leave a bounded pending
+record until a player's own key arrives. When both original players are offline, two independent
+holders that already validated the exact signed record can jointly attest the original key binding.
+Each holder signs its own attestation with a key the receiver heard directly from that holder, so
+one modified relay cannot bootstrap an invented player or result. Attestations are heard live,
+in one session: a receiver still holding a pending record names it again with each ask of its
+day, for attestations alone (never the body again), so a quorum left short by one holder drawn
+for an answer, or by a reload, completes in a later round. A holder declares its key once per
+answer and signs each attestation when its turn on the paced low lane comes. Older clients
+continue using KN/AX and their existing ranking rules.
 
 Accepted records are a union by stable game/pair identity. Repeats add no second game. Two different
 results for the same identity become a conflict only after both original signatures verify against

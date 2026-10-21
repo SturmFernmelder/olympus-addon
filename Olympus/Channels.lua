@@ -216,11 +216,13 @@ function Channels.SetGuildNamesShown(shown)
 end
 
 function Channels.FormatLine(tier, sender, guild, class, text, bare)
-	local name = ns.DisplayName(sender) or "?"
+	-- A moderator's cover name (Cover.lua): that name, plain, without the marks below.
+	local covered = ns.IsCovered(sender)
+	local name = ns.CoverSwap(ns.DisplayName(sender)) or "?"
 	-- The High Council (the moderators, Core.lua): their colour. For everyone, as in 0.9.8, but the
 	-- King while the councillors' names are hidden on his screen (his stream, ns.CouncilMasked): a
 	-- plain line.
-	local council = ns.IsHighCouncillor(sender) and not ns.CouncilMasked()
+	local council = not covered and ns.IsHighCouncillor(sender) and not ns.CouncilMasked()
 	if council then
 		name = "|c" .. ns.HIGH_COUNCIL_COLOR .. name .. "|r"
 	else
@@ -233,10 +235,10 @@ function Channels.FormatLine(tier, sender, guild, class, text, bare)
 	-- the game's own chat (Borders.ChatName). It was the Chat tab's mark (1.1.2), and the High
 	-- Council's mark and icon from 0.9.9. The Treasurer keeps the gold coin he carries in tooltips
 	-- and the census (0.9.9).
-	name = Channels.RoleBadge(sender) .. name
+	if not covered then name = Channels.RoleBadge(sender) .. name end
 	-- 1.2: the marks other files put before the name (Channels.nameDecorators: the honour's chat
 	-- mark, ChatMarks.lua), inside the link's brackets like the Treasurer's coin.
-	name = Channels.Decorations(sender) .. name
+	if not covered then name = Channels.Decorations(sender) .. name end
 	local guildLabel = Channels.ShowGuildNames() and (" <" .. tostring(guild or "?"):gsub("|", "||") .. ">") or ""
 	return (bare and "" or Channels.Tag(tier) .. " ") .. "|Hplayer:" .. (ns.TellName(sender) or "?") .. "|h[" .. name .. "]|h"
 		.. guildLabel .. ": " .. Codec.SanitizeChat(text)
@@ -887,12 +889,33 @@ end
 -- Every line kept goes through here, whether it is then shown, muted or held back by the flood
 -- guard: into the history the Chat tab shows (CHAT_CHANGED) and, from someone else, already
 -- checked and sanitized, to a companion reading along (CHAT_LINE, for
--- OlympusBridge.RegisterChatObserver). The mute and the flood guard only decide what this chat
--- frame shows.
+-- OlympusBridge.RegisterChatObserver); and every one, ours too, to the Companion's chat record
+-- (ns.RecordChat, OlympusBridge.RegisterChatRecorder). The mute and the flood guard only decide
+-- what this chat frame shows.
+-- 1.2.5.1: the senders this session heard on the Olympus channels and the guild their line
+-- spoke for (PlayerMenu.KnownOlympus: an Olympus player, whatever the signed boundary lets
+-- Data.ClaimGuild record). Bounded: past SPOKE_MAX it starts again.
+Channels.SPOKE_MAX = 2000
+local spoke, spokeCount = {}, 0
+function Channels.SpokeFor(name)
+	if type(name) ~= "string" or name == "" then return nil end
+	return spoke[ns.Fold(ns.FullName(name))]
+end
+
 local function Keep(tier, sender, guild, class, text, mine, id)
+	if not mine and type(sender) == "string" and type(guild) == "string" then
+		local key = ns.Fold(ns.FullName(sender))
+		if spoke[key] == nil then
+			spokeCount = spokeCount + 1
+			if spokeCount > Channels.SPOKE_MAX then wipe(spoke); spokeCount = 1 end
+		end
+		spoke[key] = guild
+	end
 	AddHistory(tier, { sender = sender, guild = guild, class = class, text = text, mine = mine or nil, id = tonumber(id) })
 	ns.Fire("CHAT_CHANGED", tier)
 	if not mine then ns.Fire("CHAT_LINE", tier, sender, text) end
+	-- Every line kept, ours too (our echo, a part that left): the Companion's chat record (Bridge.lua).
+	if ns.RecordChat then ns.RecordChat(tier, sender, text, mine == true) end
 end
 
 local function Accept(tier, sender, guild, class, text, mine, id)
@@ -941,7 +964,7 @@ function Channels.Send(tier, text, now, keepMute)
 	local t = TIERS[tier]
 	if not t then return false, "tier" end
 	if not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return false, "member"
 	end
 	if not Channels.CanUse(tier) then
@@ -964,17 +987,26 @@ function Channels.Send(tier, text, now, keepMute)
 		ns.Print(ns.Moderation.YouText(off))
 		return false, "netoff"
 	end
-	-- 1.1.6: a moderator's timeout (WatchChat.lua): refused, and told who (the role), until when, why.
+	-- 1.1.6: a moderator's timeout (WatchChat.lua): refused, and told who (the role), until when, why;
+	-- and a chat warning's pause or hold ("paused", ChatStrikes.lua), before any word is read.
 	local WC = ns.WatchChat
-	if WC and WC.RefuseSend and WC.RefuseSend() then return false, "timeout" end
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
+	-- The chat warnings (the author, 2026-10-19): a word of their list in what he typed is never
+	-- sent (refused here, before the privacy warning and in a lockdown too). Read on the raw line:
+	-- SanitizeChat drops the separator of a reply's quote. A quote alone holding one goes without it.
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, tier)
+		if severe then return false, severe end
+		text = body or text
+	end
 	text = Codec.SanitizeChat(text)
 	if text == "" then
 		ns.Print(L.CHAN_USAGE:format(t.slash, Label(tier)))
 		return false, "empty"
 	end
-	-- 1.1.6: a severe insult (WatchChat.SEVERE: empty until the author approves the list) is never
-	-- sent; it is counted on this client, never kept.
-	if WC and WC.RefuseSevere and WC.RefuseSevere(text) then return false, "severe" end
 	if Locked() then
 		ns.Print(L.CHAN_LOCKDOWN)
 		return false, "lockdown"
@@ -1181,6 +1213,12 @@ end
 
 local function Bump(t, key) t[key] = (t[key] or 0) + 1 end
 
+-- (TagFollow.lua) A line only a BattleTag's follow keeps out (Admit, below).
+local function Evidence(sender, kind, source)
+	local TF = ns.TagFollow
+	if type(TF) == "table" and not TF.missing and type(TF.Evidence) == "function" then ns.SafeCall("tag follow evidence", TF.Evidence, sender, kind, source) end
+end
+
 -- 1.2: the checks a line from another player passes before it may show, in Receive's order, one
 -- code shared with the Blood Arena's fight rooms (ArenaChat.lua, EC) rather than a copy:
 --   Channels.Admit(sender, guild, text, now, o) -> ok, reason
@@ -1194,6 +1232,8 @@ local function Bump(t, key) t[key] = (t[key] or 0) + 1 end
 --            (the channels' by default);
 --   where    the log's label for a dropped line (the tier by default).
 --   chat, line (1.1.6) the chat's key and the line's id, for a deleted line's tombstone (WatchChat).
+--   evidence a chat line the sender's own Olympus addon sent (M1, M2, EC): one hidden only by his
+--            BattleTag's follow tells TagFollow.Evidence he still chats.
 -- A refusal's reason: "netoff", "timeout" (1.1.6, a moderator's), "tier", "ignored", "own", "dup",
 -- "deleted" (1.1.6, a late copy of a deleted line), "rate", "forged", "rank", "unverified", or
 -- "filtered" (a line the player's block terms hide: the caller keeps it or not).
@@ -1204,16 +1244,26 @@ function Channels.Admit(sender, guild, text, now, o)
 	local st = o.stats or stats
 	local m = { tier = o.where or o.tier or "?", guild = guild }
 	-- 1.1: a name the moderators took off (net-off, Moderation.lua): not shown, not kept.
-	if ns.Moderation.Hides and ns.Moderation.Hides(sender, guild) then
+	local off, offOn, offVia
+	if ns.Moderation.Hides then off, offOn, offVia = ns.Moderation.Hides(sender, guild) end
+	if off then
 		Bump(st, "netoff")
+		-- (TagFollow.lua) Hidden here only through his BattleTag's follow, and still chatting: his
+		-- addon may not apply it (a team client may give him the same sanction by name). Only a line
+		-- his own Olympus addon sent (o.evidence: M1, M2, EC), never the game's own guild chat (an
+		-- honest addon cannot keep him from typing there) nor another lane that admits no chat line.
+		if offVia == "tag" and o.evidence then Evidence(sender, "N", offOn) end
 		return false, "netoff"
 	end
 	-- 1.1.6: a moderator's timeout on this sender (WatchChat.lua): not shown, not kept, nothing to a
 	-- companion. Every chat that calls Admit takes it: the three channels, the rooms, the fight rooms.
 	local WC = ns.WatchChat
-	if WC and WC.Silenced and WC.Silenced(sender, guild) then
+	local silenced, silencedVia
+	if WC and WC.Silenced then silenced, silencedVia = WC.Silenced(sender, guild) end
+	if silenced then
 		Bump(st, "timeout")
 		if WC.CountBlocked then WC.CountBlocked(sender, "timeout") end
+		if silencedVia and o.evidence then Evidence(sender, "T", silencedVia) end
 		return false, "timeout"
 	end
 	local level = o.level
@@ -1312,7 +1362,7 @@ function Channels.Receive(dist, sender, text, now)
 		stats.bad = stats.bad + 1
 		return false, "bad"
 	end
-	local ok, reason = Channels.Admit(sender, m.guild, m.text, now, { tier = m.tier, id = m.id, chat = m.tier, line = m.id })
+	local ok, reason = Channels.Admit(sender, m.guild, m.text, now, { tier = m.tier, id = m.id, chat = m.tier, line = m.id, evidence = true })
 	if not ok then
 		-- (A line the block terms hide is kept, see Admit.)
 		if reason == "filtered" then Keep(m.tier, sender, m.guild, m.class, m.text, false, m.id) end
@@ -1621,6 +1671,18 @@ function Channels.SetPin(text, now)
 	if off then
 		ns.Print(ns.Moderation.YouText(off))
 		return false, "netoff"
+	end
+	-- A chat warning's pause or hold, and the warnings' words, as for a line (Channels.Send): a
+	-- warning leaves his powers alone (MyPin's sanction), not his words.
+	local WC = ns.WatchChat
+	if WC and WC.RefuseSend then
+		local b, why = WC.RefuseSend()
+		if b then return false, why or "timeout" end
+	end
+	if WC and WC.RefuseSevere then
+		local severe, body = WC.RefuseSevere(text, "P")
+		if severe then return false, severe end
+		text = body or text
 	end
 	text = Channels.CleanPin(text)
 	if #text < 3 then
@@ -2137,7 +2199,7 @@ function Channels.CanWrite(tier, tell)
 	if not t then return false end
 	local why
 	if not ns.IsMember() then
-		why = L.MEMBERS_ONLY
+		why = ns.MembersOnlyText()
 	elseif not Channels.CanUse(tier) then
 		why = L[t.deny]:format(Label(tier))
 	elseif not Channels.ChatOn() then
@@ -2150,8 +2212,14 @@ function Channels.CanWrite(tier, tell)
 		else
 			local WC = ns.WatchChat
 			local timeout = WC and WC.SelfTimeout and WC.SelfTimeout()
-			if not timeout then return true end
-			if tell and WC.TellTimeout then WC.TellTimeout(timeout) end
+			if timeout then
+				if tell and WC.TellTimeout then WC.TellTimeout(timeout) end
+				return false
+			end
+			-- (A chat warning's pause or hold, ChatStrikes.lua: told as Channels.Send tells it.)
+			local block = WC and WC.ChatBlock and WC.ChatBlock()
+			if not block then return true end
+			if tell and WC.RefuseSend then WC.RefuseSend() end
 			return false
 		end
 	end

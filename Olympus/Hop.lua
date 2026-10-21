@@ -77,6 +77,8 @@ local promptShown, lastPromptCheck = false, -math.huge
 local privateHinted = false -- told this session what an ask says while the player shares nothing
 
 local function Changed() ns.Fire("HOP_CHANGED") end
+-- Quiet presence (1.2.5.1, Core.lua): we offer no help and answer no request (Comm.QUIET_WORDS).
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 
 ---------------------------------------------------------------------------
 -- Helping: who can invite
@@ -116,6 +118,8 @@ local function OnKingLayer(strict)
 	return (mine and type(S) == "table" and type(S.LocalKingLayer) == "function"
 		and S.LocalKingLayer(mine.mapID, mine.zoneUID)) and true or false
 end
+-- The same answer for the API's leader presence (API.lua), which reports the line "on the King's layer".
+function Hop.OnKingLayer(strict) return OnKingLayer(strict) end
 
 -- The short names of the others in our group.
 local function GroupNames()
@@ -246,6 +250,8 @@ function Hop.HandleAsk(dist, sender, text)
 	-- Only an admitted Olympus member contributes to the crowd/backoff state.  A stranger may
 	-- still send an addon packet on the public channel, but cannot manipulate a layer's demand.
 	Hop.Hear(mapID, zoneUID, short, now)
+	-- Quiet presence (Core.lua): no offer of ours, which would say we are online and on that layer.
+	if Quiet() then return end
 	if now - (answeredAt[short] or -math.huge) < Hop.HELP_GAP then return end
 	if now - lastOffer < Hop.OFFER_GAP then return end
 	if not Hop.CanHelp(mapID, zoneUID) then return end
@@ -267,7 +273,7 @@ function Hop.HandleAsk(dist, sender, text)
 		local function Allowed()
 			return offered[key] == offer and Member(sender)
 				and not (ns.Moderation.Hides and ns.Moderation.Hides(sender))
-				and Hop.CanHelp(mapID, zoneUID)
+				and Hop.CanHelp(mapID, zoneUID) and not Quiet()
 		end
 		if not Allowed() then offered[key] = nil; return end
 		local group, load = Hop.GroupState(), Load()
@@ -293,6 +299,7 @@ local function Invite(name, id, release) -- gp:hop-group
 end
 
 local function SayNo(name, id)
+	if Quiet() then return end -- (quiet presence: no answer at all, as after a logout)
 	ns.Comm.Whisper(name, ("LN~%d"):format(id), nil, true)
 	stats.noes = stats.noes + 1
 end
@@ -308,6 +315,9 @@ function Hop.HandleRequest(dist, sender, text)
 	local offer = key and offered[key]
 	if not offer or ns.Now() - offer.t > 120 then return end
 	offered[key] = nil
+	-- Quiet presence (Core.lua) since our offer: no invite and no answer; the asker's next offer
+	-- comes once this one lapses (Hop.WAIT), as after a logout.
+	if Quiet() then return end
 	stats.requests = stats.requests + 1
 	if not Hop.CanHelp(offer.mapID, offer.zoneUID) then return SayNo(sender, id) end
 	-- On its own ("Always invite", or "For Olympus!" on the King's layer): only while we are
@@ -407,7 +417,7 @@ end
 -- Rechecked when sending a queued ask, choosing a helper and receiving an invite.
 -- These checks do not change the player's group or their sharing preferences.
 local function RequestProblem(allowGroup)
-	if not ns.IsMember() then return L.MEMBERS_ONLY end
+	if not ns.IsMember() then return ns.MembersOnlyText() end
 	local off = ns.Moderation.SelfOff and ns.Moderation.SelfOff()
 	if off then return ns.Moderation.YouText(off) end
 	if IsInInstance and IsInInstance() then return L.HOP_INSTANCE end
@@ -557,7 +567,7 @@ end
 
 -- Ask for an invite to a layer (a zone and its zone UID), named for the messages.
 function Hop.Ask(mapID, zoneUID, label)
-	if not ns.IsMember() then return ns.Print(L.MEMBERS_ONLY) end
+	if not ns.IsMember() then return ns.Print(ns.MembersOnlyText()) end
 	-- 1.1: the moderators took this character off (net-off, Moderation.lua): nobody would answer.
 	local off = ns.Moderation.SelfOff and ns.Moderation.SelfOff()
 	if off then return ns.Print(ns.Moderation.YouText(off)) end

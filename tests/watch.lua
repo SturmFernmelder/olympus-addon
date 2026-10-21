@@ -46,7 +46,8 @@ local function WithWatch(fn)
 		c.ChatLocked = function() return w.locked == true end
 		-- 1.1.6: the right-click menu's entries, the Olympus channels' history (Channels.History) and
 		-- the copy box, as the Watch's report and case pages use them.
-		c.PlayerMenu = { Add = function(key, build, order) w.menu = { key = key, build = build, order = order } return true end }
+		-- (1.2.5.1: with its options too: Report to Olympus is an Olympus line, PlayerMenu.KnownOlympus.)
+		c.PlayerMenu = { Add = function(key, build, order, opts) w.menu = { key = key, build = build, order = order, opts = opts } return true end }
 		c.Channels = { ORDER = { "A", "C", "L" }, TIERS = { A = { label = "CHAN_ALL" }, C = { label = "CHAN_CAPTAINS" }, L = { label = "CHAN_LORDS" } },
 			History = function(tier) return w.chat[tier] or {} end }
 		c.Ago = function(at) return tostring(w.epoch - (tonumber(at) or 0)) .. "s ago" end
@@ -126,6 +127,9 @@ local function WithWatch(fn)
 		c.KingCharacter = function() return w.king and (w.king:gsub("%-.*$", "")) or nil end
 		c.ViewAs = { Available = function() return w.author ~= nil end, Role = function() return w.author or "my" end,
 			Allows = function(page) return w.allows ~= nil and w.allows[page] == true end }
+		c.Workshop = { IsAuthorName = function(name)
+			return w.authorName ~= nil and c.Fold(c.FullName(name)) == c.Fold(c.FullName(w.authorName))
+		end }
 
 		local initial = { "census", "treasury", "throne", "vox" }
 		c.UI = { TABS = {} }
@@ -356,18 +360,22 @@ end)
 
 -- The game's own chat: an Olympus line there carries the player's link, and its right-click menu
 -- (MENU_UNIT_FRIEND, PlayerMenu.lua's) has Report to Olympus for an ordinary member.
-test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report", function()
+-- (1.2.5.1) For a player this client knows to be in Olympus: his Olympus line claimed his guild
+-- (Channels.VerifiedLevel, Data.ClaimGuild), so here Data.ClaimedGuild names it; a stranger
+-- this client knows nothing of gets no Report line.
+test("watch: in the game's chat an ordinary member right-clicks the name on an Olympus line: Report to Olympus is in the menu and opens the report; not for a player not known to be in Olympus", function()
 	local line = ns.Channels.FormatLine("A", "Rude Guy-Realm", "Olympus II", "WA", "rude words")
 	assert(line:find("|Hplayer:" .. ns.TellName("Rude Guy-Realm") .. "|h", 1, true), "the name is the game's player link: " .. line)
 	WithWatch(function(w, W, c)
 		w.setRank(c.me, 3); w.setRank("Captain One-Realm", 1); w.online(c.me, "Captain One-Realm")
 		w.chat.A = { { sender = "Rude Guy-Realm", t = w.epoch - 10, text = "rude words" } }
+		c.Data.ClaimedGuild = function(name) return c.FullName(name) == "Rude Guy-Realm" and "Olympus II" or nil end
 		local pns = setmetatable({ Gate = { Hooks = function() end, Allowed = function() return true end, Install = function() end },
 			GamepadUI = function() return false end }, { __index = c })
 		assert(loadfile(ROOT .. "Olympus/PlayerMenu.lua"))("Olympus", pns)
 		local PM = pns.PlayerMenu
-		eq(w.menu.key, "report")
-		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order))
+		eq(w.menu.key, "report"); eq(w.menu.opts and w.menu.opts.olympus, true, "an Olympus line")
+		assert(PM.Add(w.menu.key, w.menu.build, w.menu.order, w.menu.opts))
 		local root = { items = {} }
 		local function Desc(kind, text, cb)
 			local d = { kind = kind, text = text, cb = cb, enabled = true }
@@ -386,6 +394,10 @@ test("watch: in the game's chat an ordinary member right-clicks the name on an O
 		assert(button, "the line"); eq(button.text, ns.L.WATCH_REPORT); eq(button.enabled, true)
 		button.cb()
 		eq(w.dialogs[#w.dialogs].which, "OLYMPUS_WATCH_REPORT_WHAT"); eq(w.dialogs[#w.dialogs].data.name, "Rude Guy-Realm")
+		-- A stranger: no Report to Olympus (nor any Olympus line).
+		root.items = {}
+		eq(PM.Build("FRIEND", root, { name = "Passing Stranger-Realm" }), 0)
+		eq(#root.items, 0, "no Olympus line for him")
 	end)
 end)
 
@@ -414,6 +426,130 @@ test("watch: tab is Treasury > The Watch > Throne and reuses Court and Moderatio
 	assert(not king:find("Court and ns.Court.HomeLines", 1, true), "Throne no longer renders the Court queue")
 	assert(views:find("ns.Moderation.Lines", 1, true), "Decrees keeps member-visible net-off and SelfOff disclosure")
 	assert(ui:find('{ "COURT_BTN", function() ns.Court.Toggle()', 1, true), "Hold Court remains a Throne button")
+end)
+
+test("watch: an integration opens one authorized member review without receiving its private data", function()
+	WithWatch(function(w, W, c)
+		local target, other = "Target Person-Realm", "Other Person-Realm"
+		w.setRank(target, 3); w.setRank(other, 3); w.online(c.me, target, other)
+		assert(W.Mark(target, "review the target"))
+		assert(W.Warn(target, "target warning"))
+		assert(W.Mark(other, "must stay out of target page"))
+		w.chat.A = {
+			{ sender = target, t = w.epoch - 30, text = "target public words" },
+			{ sender = other, t = w.epoch - 20, text = "other public words" },
+		}
+		c.WatchChat = {
+			Sanction = function(name)
+				if c.Fold(c.FullName(name)) ~= c.Fold(target) then return nil end
+				return { kind = "timeout", entry = { reason = "current restriction" }, ends = w.epoch + 60 }
+			end,
+			BarredText = function() return "restricted for testing" end,
+		}
+
+		local ok, why = W.OpenMember(target)
+		eq(ok, true); eq(why, nil); eq(W.PageId(), "profile:" .. target)
+		local lines, title, detail = W.Build()
+		eq(title, ns.L.TAB_WATCH); eq(detail, ns.L.WATCH_PROFILE_DETAIL)
+		local page = {}
+		local ids = {}
+		for _, line in ipairs(lines) do
+			page[#page + 1] = tostring(line.text or "")
+			if line.id then ids[line.id] = line end
+		end
+		page = table.concat(page, "\n")
+		assert(ids["watch-profile-status"], "the target's summary")
+		assert(ids["watch-profile-restriction"], "the target's active restriction")
+		assert(ids["watch-profile-audit"], "the target's action history")
+		assert(ids["watch-profile-messages"], "the target's retained public messages")
+		assert(page:find("target public words", 1, true), page)
+		assert(not page:find("other public words", 1, true), "another player's words leaked into the page")
+		assert(not page:find("must stay out of target page", 1, true), "another player's action leaked into the page")
+
+		-- Opening the page returns only a boolean; callers cannot ask it for records while access is gone.
+		w.setRank(c.me, 3)
+		ok, why = W.OpenMember(target)
+		eq(ok, false); eq(why, "access")
+		eq(W.Record(target), nil); eq(#W.Audit(), 0)
+		W.ResetForTests(); eq(W.profileKey, nil, "test/session reset forgets the selected private target")
+	end)
+end)
+
+-- 1.2.5.1: the BattleTags each player's addon sent the moderation team (Accord.lua), in The Watch: on
+-- a team client alone (WatchChat.InRoom), its own section and a line on the person page.
+test("watch: the BattleTags (1.2.5.1) are the moderation team's alone: an Olympus moderator with no desk gets the tab for them; an officer outside the team never sees them, on any page", function()
+	WithWatch(function(w, W, c)
+		local L = ns.L
+		local team = {}
+		c.WatchChat = { InRoom = function(name) return team[c.Fold(c.FullName(name))] == true end,
+			Sanction = function() return nil end, RecordLines = function() return {} end, PageShown = function() return false end }
+		assert(loadfile(ROOT .. "Olympus/Accord.lua"))("Olympus", c)
+		local function Row(name, guild, via)
+			return { name = name, tag = "Target#1111", guild = guild, via = via, first = w.epoch, last = w.epoch, av = 1, aat = w.epoch }
+		end
+		c.rdb.battletags = { v = 1, rows = { [c.Fold("Target Person-Realm")] = Row("Target Person-Realm", "Olympus II", "roster"),
+			[c.Fold("Target Alt-Realm")] = Row("Target Alt-Realm", "Olympus III", "self") } }
+		local function Page()
+			local out = {}
+			for _, l in ipairs(W.Build()) do
+				out[#out + 1] = tostring(l.text or "") .. " " .. tostring(l.right or "")
+				for _, item in ipairs(l.nav or {}) do out[#out + 1] = tostring(item.text) end
+			end
+			return table.concat(out, "\n")
+		end
+		w.setRank("Target Person-Realm", 3); w.online(c.me, "Target Person-Realm")
+		-- An officer outside the team: his desk, and no BattleTag on any page.
+		eq(W.TabVisible(), true)
+		assert(not Page():find(L.ACCORD_TEAM_TITLE, 1, true), "no BattleTags page in his navigation")
+		W.Show("tags"); eq(W.PageId(), "desk", "no such page for him")
+		assert(W.OpenMember("Target Person-Realm"))
+		assert(not Page():find("Target#", 1, true) and not Page():find(L.ACCORD_TEAM_PROFILE_NONE, 1, true), "nothing on the person page")
+		-- On the team: the line on the person page, the others sharing the tag; the page itself.
+		team[c.Fold(c.me)] = true
+		assert(W.OpenMember("Target Person-Realm"))
+		local page = Page()
+		-- (Changed on purpose, 1.2.5.1's review: the digits stay hidden until the page's Show.)
+		assert(page:find(L.ACCORD_TEAM_PROFILE:format("Target#****"), 1, true), page)
+		assert(not page:find("1111", 1, true), "no digits until Show")
+		assert(page:find(L.ACCORD_TEAM_PROFILE_ALSO:format("Target Alt"), 1, true), page)
+		assert(page:find(L.ACCORD_TEAM_NAV:format(2), 1, true), "in his navigation")
+		W.Show("tags")
+		eq(W.PageId(), "tags"); eq(W.ViewKey(), "judgments", "no desk buttons")
+		local _, title, detail = W.Build()
+		eq(title, L.TAB_WATCH); eq(detail, L.ACCORD_TEAM_DETAIL)
+		page = Page()
+		assert(page:find(L.ACCORD_TEAM_SHARED:format(2), 1, true) and page:find("Target#****", 1, true), page)
+		assert(c.Accord.RevealTeam(), "the page's Show")
+		assert(Page():find("Target#1111", 1, true), "the digits a moment")
+		c.Accord.RevealTeam()
+		-- On the King's screen (his stream): masked.
+		w.masked = true
+		c.KingsScreen = function() return true end
+		page = Page()
+		assert(not page:find("1111", 1, true), "never a tag on the King's screen")
+		c.KingsScreen, w.masked = nil, nil
+		-- An Olympus moderator with no desk (not an officer): the tab, opened on the BattleTags.
+		w.setRank(c.me, 3)
+		W.Show(nil)
+		eq(W.CanRead(), false); eq(W.TabVisible(), true, "the BattleTags give him the tab")
+		eq(W.PageId(), "member", "his own page first, as everyone's")
+		assert(Page():find(L.ACCORD_TEAM_NAV:format(2), 1, true), "the BattleTags in its navigation")
+		W.Show("tags"); eq(W.PageId(), "tags")
+		-- Off the team: none of it.
+		team = {}
+		eq(W.TabVisible(), false); eq(W.PageId() ~= "tags", true)
+	end)
+end)
+
+test("watch: member review accepts an explicit cross-realm name and reports empty local context honestly", function()
+	WithWatch(function(_, W)
+		local ok = W.OpenMember("Remote Person-OtherRealm")
+		eq(ok, true); eq(W.PageId(), "profile:Remote Person-OtherRealm")
+		local lines = W.Build()
+		local noRecord
+		for _, line in ipairs(lines) do if line.id == "watch-profile-no-record" then noRecord = line end end
+		assert(noRecord, "no local record is not presented as a clean record")
+	end)
 end)
 
 test("watch: only live local GM/Captains or a live signed roster moderator have access", function()
@@ -1166,8 +1302,9 @@ test("watch: a reporter's client reports a name once a day, once a minute and fi
 	end)
 end)
 
-test("watch: a report with no officer online waits a day for the first one; past a day it is dropped and the reporter told", function()
+test("watch: a report with no officer online waits privately for thirty days; after that it is dropped and the reporter told", function()
 	WithWatch(function(w, W, c)
+		eq(W.REPORT_HOLD, W.REPORT_KEEP, "the sender retains a pending report for the same thirty-day review window")
 		w.setRank(c.me, 3); w.online(c.me)
 		local ok, how = W.SendReport(SPAMMER, "A", "waits")
 		eq(ok, true); eq(how, "held"); eq(#w.jobs, 0)
@@ -1189,7 +1326,7 @@ test("watch: a report with no officer online waits a day for the first one; past
 		eq(#W.Book(false).outbox, 1, "delivered to the officers; it waits for the King's client")
 		eq(W.FlushReports(true), 0, "never twice")
 		eq(#w.jobs, 1, "nothing more to the officers")
-		-- Another one, from its dialog: the reporter is told it waits. Nobody online for a day:
+		-- Another one, from its dialog: the reporter is told it waits. Nobody online for the full window:
 		-- dropped, and said so.
 		w.online(c.me); w.jobs = {}
 		w.epoch = w.epoch + W.REPORT_GAP; w.refreshRoster()
@@ -1775,6 +1912,9 @@ local function Peer(w, c, name, o)
 	local p = setmetatable({ me = name, db = {}, rdb = { council = { names = w.councilNames } } }, { __index = c })
 	p.prints, p.handlers = {}, {}
 	p.King = { IsKing = function() return o.king == true end, Preview = function() return false end }
+	p.Workshop = { IsAuthorName = function(who)
+		return w.authorName ~= nil and c.Fold(c.FullName(who)) == c.Fold(c.FullName(w.authorName))
+	end }
 	p.Data = { ServerTime = function() return w.epoch end,
 		AuthorizedRank = function(sender, guild) return (w.ranksSeen or {})[c.Fold(c.FullName(sender)) .. "@" .. c.Fold(guild)] end }
 	p.Watch, p.ViewAs = { missing = true }, { missing = true }
@@ -2516,6 +2656,28 @@ test("watch: council reports (1.2.1): a member's report reaches the King's clien
 		local heads = 0
 		for _, m in ipairs(w.elsewhere) do if m.target == "Captain One-Realm" and m.msg:find("^MR~1~R~") then heads = heads + 1 end end
 		eq(heads, 1)
+	end)
+end)
+
+test("watch: council reports: the pinned addon author receives the read-only council copy without guild moderation powers", function()
+	WithWatch(function(w, W, c)
+		local king = CouncilWorld(w, c)
+		w.authorName = "Author-Realm"
+		local author = WatchPeer(w, c, w.authorName, { guild = "Olympus IV", rank = 3 })
+		eq(As(author, function() return author.Watch.CanRead() end), false, "not an officer of that guild")
+		eq(As(author, function() return author.Watch.CanManage() end), false, "the observer receives no moderation power")
+		eq(As(author, function() return author.Watch.CouncilDeskShown() end), true, "the exact pinned author has the council desk")
+		eq(As(author, function() return author.Watch.CouncilTick(true) end), true, "the author asks the King's relay")
+		Route(w, c)
+		local ok = W.SendReport(SPAMMER, "A", "author visibility")
+		eq(ok, true)
+		Route(w, c)
+		Timers(king)
+		Route(w, c)
+		local reports = As(author, function() return author.Watch.CouncilReports() end)
+		eq(#reports, 1); eq(reports[1].reporter, c.me); eq(reports[1].target, SPAMMER)
+		eq(#As(author, function() return author.Watch.CouncilCases() end), 1)
+		eq(As(author, function() return author.Watch.Store(false) end), nil, "no guild-local Watch store or actions")
 	end)
 end)
 

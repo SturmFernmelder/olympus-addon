@@ -1339,6 +1339,21 @@ function H.Known()
 	}
 end
 
+-- (1.2.6, the owner's rule of 10-19) The red cross is its wearer's own look, on his own screen alone
+-- (Borders.OwnLook): every other client shows him with the Apostles' cross he holds in the Church's
+-- ranking (apostle-1/2/3, the best one held, gold, silver or bronze). So while he wears it, the pick
+-- his profile's word carries is that cross; with none held, his pick as it is. Nil: no change.
+function H.OwnLookFrame(held)
+	local B = ns.Borders
+	if type(B) ~= "table" or B.missing or type(B.OwnLook) ~= "function" or B.OwnLook() == nil then return nil end
+	local best
+	for _, h in ipairs(type(held) == "table" and held or {}) do
+		if type(h) == "table" and h.family == "apostle" and type(h.frame) == "string" and type(h.place) == "number"
+			and ns.Honors.FrameShipped(h) and (not best or h.place < best.place) then best = h end
+	end
+	return best and best.frame or nil
+end
+
 local refreshing = false
 local letters = {} -- the queue shown now: { key, t }
 -- Our honours looked at again: what is new switches on (unless locked) and gets its letter.
@@ -1367,6 +1382,10 @@ function H.Refresh()
 		local pick, earned, lost = ns.Honors.Update(before, held, known, function(h)
 			return told[H.LetterMark(h.key, h.period)] == true
 		end, { now = H.Inputs().now })
+		-- (1.2.6) The red cross worn here: the cross he holds is what everyone else sees, whatever
+		-- else switched on (H.OwnLookFrame).
+		local cross = H.OwnLookFrame(held)
+		if cross then pick.frame = cross end
 		-- Kept only when something is to remember (an idle client writes no profile).
 		local same = pick.frame == before.frame and pick.title == before.title and #earned == 0 and #lost == 0
 		if not same or (first and next(pick.seen or {}) ~= nil) then P.SavePick(pick) end
@@ -1819,13 +1838,40 @@ function H.PreviewLetter(key)
 	frame:Show()
 	return true
 end
+-- The page of the previews lies on the Olympus window's parchment (its Realm page, parchment =
+-- true): its words in the game's quest fonts, the dark ink of the Throne's and "Your week"'s pages
+-- (line.font), never the list's white. (2026-10-19, the author: "as letras brancas em cima do
+-- parchment, não dá para ler direito".) A row never wraps: the note in rows short enough for it.
+local PAGE_INK, PAGE_TITLE = "QuestFont", "QuestTitleFont"
+H.PAGE_WRAP = 44
+local function PageLine(text, font, extra)
+	local line = { text = text, font = font or PAGE_INK }
+	for k, v in pairs(extra or {}) do line[k] = v end
+	return line
+end
+local function PageParagraph(lines, text, extra)
+	local row = ""
+	for word in tostring(text or ""):gmatch("%S+") do
+		if row ~= "" and #row + 1 + #word > H.PAGE_WRAP then
+			lines[#lines + 1] = PageLine(row)
+			row = word
+		else
+			row = row == "" and word or (row .. " " .. word)
+		end
+	end
+	if row ~= "" then lines[#lines + 1] = PageLine(row, nil, extra) end
+end
 function H.PreviewLines()
 	local keys = H.PreviewKeys()
 	if #keys == 0 then return {} end
-	local lines = { { header = true, text = L.HONOR_LETTER_PREVIEW_HEAD }, { text = L.HONOR_LETTER_PREVIEW_NOTE, gapAfter = true } }
+	-- Its first row, Back: the Realm again, as the Realm's other pages (2026-10-19, the author: the
+	-- page had none, he went to Classes and back to leave it).
+	local lines = { PageLine(L.HONOR_LETTER_PREVIEW_BACK, PAGE_INK, { gapAfter = true, onClick = function() ns.Views.ShowPage(nil) end }),
+		PageLine(L.HONOR_LETTER_PREVIEW_HEAD, PAGE_TITLE, { header = true }) }
+	PageParagraph(lines, L.HONOR_LETTER_PREVIEW_NOTE, { gapAfter = true })
 	for _, key in ipairs(keys) do
 		local k = key
-		lines[#lines + 1] = { text = "> " .. (H.TitleText(k) or k), onClick = function() H.PreviewLetter(k) end }
+		lines[#lines + 1] = PageLine("> " .. (H.TitleText(k) or k), nil, { onClick = function() H.PreviewLetter(k) end })
 	end
 	return lines
 end

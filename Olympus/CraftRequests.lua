@@ -1071,6 +1071,15 @@ local function SendPrivate(r, verb, ...)
 	return SendWord(r, to, verb, ...)
 end
 
+-- CraftRanking's bilateral receipt uses the request's existing logged private rail.  It is kept
+-- separate from the public request card: only the two parties ever exchange signature material;
+-- once both halves agree, Records.lua relays the resulting proof.
+function Requests.SendRankHalf(id, ...)
+	local r = Requests.Get(id)
+	if not r or r.state ~= "completed" or not Mine(r) then return false, "state" end
+	return SendPrivate(r, "rank", ...)
+end
+
 -- Did this client see goods or gold change hands with the other party, either way? Then the deal
 -- ends by its confirmation or a reviewed dispute: a cancel would let one side keep what it got.
 local function Performed(r)
@@ -1273,6 +1282,7 @@ local function ActionAllowed(r, sender, verb)
 	if verb == "complete" then return Same(sender, r.requester) and (r.state == "delivered" or r.state == "completed") and s ~= nil and s.rail == "direct" end
 	if verb == "completeok" then return Same(sender, r.crafter) and r.state == "delivered" and r.completionPending == true end
 	if verb == "receipt" then return Same(sender, r.requester) and s ~= nil and s.rail == "guild" and not Terminal(r) end
+	if verb == "rank" then return r.state == "completed" end
 	-- (Or a deal this client cancelled while the other side had already handed something over: the
 	-- other party turned the cancel into a dispute, and it reaches this client's record too.)
 	if verb == "dispute" then return s ~= nil and (not Terminal(r) or (r.state == "cancelled" and Same(r.cancelledBy, ns.me) and not s.dispute)) end
@@ -1340,6 +1350,11 @@ function Requests.ReceiveAction(dist, sender, text)
 		r.completionPending = nil
 		local finished, why = FinishRequest(r, r.evidence and #r.evidence > 0 and "observed-and-bilateral" or "bilateral-self-confirmed")
 		if not finished then return false, why end
+	elseif verb == "rank" then
+		local C = ns.CraftRanking
+		if type(C) ~= "table" or type(C.ReceiveHalf) ~= "function" then return false, "ranking" end
+		local ok, why = C.ReceiveHalf(r, sender, f)
+		if not ok then return false, why end
 	elseif verb == "receipt" then
 		s.buyerConfirmedAt = Now()
 		if Forward(s.state, "ready_to_settle") then s.state = "ready_to_settle" end
@@ -1643,6 +1658,7 @@ FinishRequest = function(r, validation)
 	Audit(r, "completed", ns.me, validation)
 	ForgetMoneyWatch(r)
 	Changed()
+	ns.Fire("CRAFT_REQUEST_COMPLETED", r)
 	return true
 end
 
@@ -3690,6 +3706,7 @@ local function KeepChat(r, e)
 	while #r.chat > Requests.CHAT_MAX do table.remove(r.chat, 1) end
 	ns.Fire("CHAT_ROOM_CHANGED", RoomId(r.id))
 	if not e.mine then ns.Fire("CHAT_ROOM_LINE", RoomId(r.id), e.sender, e.text) end
+	if ns.RecordChat then ns.RecordChat(RoomId(r.id), e.sender, e.text, e.mine == true) end -- (the Companion's chat record, Bridge.lua)
 end
 
 function Requests.ChatSend(room, text)

@@ -31,7 +31,9 @@ end
 Positions.Sanctioned = Sanctioned
 
 local function SendPosition()
+	-- Quiet presence (Core.lua): no dot of ours either; the guildmates' one expires (EXPIRE).
 	if not ns.db.sharePosition or not IsInGuild() or IsInInstance() or Sanctioned() then return end
+	if ns.QuietPresence and ns.QuietPresence() then return end
 	local mapID = C_Map.GetBestMapForUnit("player")
 	local pos = mapID and C_Map.GetPlayerMapPosition(mapID, "player")
 	if not pos then return end
@@ -69,6 +71,7 @@ local function Dot(size)
 end
 
 local function Color(frame, name, class)
+	name = ns.CoverSwap(name)
 	local file = class and ns.CLASS_FILES[class]
 	local c = file and RAID_CLASS_COLORS and RAID_CLASS_COLORS[file]
 	if c then frame.dot:SetVertexColor(c.r, c.g, c.b) else frame.dot:SetVertexColor(0.25, 1, 0.25) end

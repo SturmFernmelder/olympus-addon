@@ -144,11 +144,15 @@ end
 ---------------------------------------------------------------------------
 
 function PE.PickFrame(key)
-	-- 1.2.1: an own look (Borders.OWN_LOOKS) is this screen's alone: the pick, sent to everyone,
-	-- stays as it is. Any other frame ends it.
+	-- 1.2.1: an own look (Borders.OWN_LOOKS) is this screen's alone, never sent. (1.2.6, the owner's
+	-- rule of 10-19: the pick everyone else sees becomes the Apostles' cross he holds in the Church's
+	-- ranking, HonorsNet.OwnLookFrame; with none held it stays as it is.) Any other frame ends it.
 	local borders = B()
 	if borders and borders.OWN_LOOKS and borders.OWN_LOOKS[key] then
 		local ok, why = borders.SetOwnLook(key)
+		local cross = ok and H().OwnLookFrame and H().OwnLookFrame(H().Holdings(ns.me, P().MyGk())) or nil
+		local pick = P().Pick()
+		if cross and pick.frame ~= cross then P().SetPick(cross, pick.title) end
 		PE.Refresh()
 		return ok, why
 	end

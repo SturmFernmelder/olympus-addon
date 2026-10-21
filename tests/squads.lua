@@ -11,7 +11,7 @@ local function World(fn)
 		C_ChatInfo = { SendAddonMessageLogged = function() end }
 		StaticPopupDialogs = {}
 		local c = setmetatable({ me = "Officer-Realm", db = { chatRooms = true }, rdb = { war = { centuries = { old = "preserved" } } },
-			CAPTAIN_RANK = 1, Roster = { byName = {} }, ViewAs = {}, War = {}, ChatRooms = {}, Comm = {}, Nominees = {} }, { __index = ns })
+			CAPTAIN_RANK = 1, Roster = { byName = {} }, ViewAs = {}, War = {}, ChatRooms = {}, Comm = {}, Nominees = {}, PartyGuard = {} }, { __index = ns })
 		w.c = c
 		c.Fold = string.lower
 		c.FullName = function(name) return name:find("-", 1, true) and name or name .. "-Realm" end
@@ -56,6 +56,7 @@ local function World(fn)
 		c.Comm.Whisper = function(to, msg, key, _, logged, done, options)
 			w.jobs[#w.jobs + 1] = { to = to, msg = msg, key = key, logged = logged, done = done, options = options }; return true
 		end
+		c.PartyGuard.InviteGuildmate = function(name) w.invited = name; return true end
 		c.Channels = { Admit = function() return not w.filtered, "filtered" end }
 		c.Moderation = { Hides = function() return w.hidden == true end, Blocks = function() return false end }
 		assert(loadfile(ROOT .. "Olympus/WarSquads.lua"))("Olympus", c)
@@ -102,6 +103,23 @@ test("Legates: native online count includes the leader, leaves unknown honest, a
 		group = s.Get("Leader"); eq(group.online, 1); eq(group.onlineUnknown, 0)
 		eq(s.Get("OtherLeader").online, 1)
 		w.fresh = false; eq(s.Get("Leader"), nil, "stale or incomplete roster cannot claim a current group count")
+	end)
+end)
+
+test("Legates: an assigned online member has one deliberate raid invite action; offline members do not", function()
+	World(function(w, s)
+		local R = w.c.Roster
+		R.generation, R.snapshotAt = 1, w.now
+		R.members = { { full = "Leader-Realm", online = true }, { full = "Soldier1-Realm", online = true },
+			{ full = "Soldier2-Realm", online = false } }
+		assert(s.Replace("Leader", { "Soldier1", "Soldier2", "Soldier3" }))
+		local invite, inviteCount = nil, 0
+		for _, line in ipairs(s.Lines("Leader")) do
+			if line.text == (w.c.L.SQUAD_INVITE or "Invite online member to raid") then invite, inviteCount = line, inviteCount + 1 end
+		end
+		eq(inviteCount, 1, "only the member confirmed online is actionable")
+		assert(invite and invite.onClick())
+		eq(w.invited, "Soldier1-Realm")
 	end)
 end)
 
@@ -697,5 +715,42 @@ test("Squads (1.2.3): a census notice (DATA_CHANGED) tells SQUADS_CHANGED and CH
 		end)
 		s.Leaders, w.c.Fold = leaders, fold
 		if not ok then error(err, 0) end
+	end)
+end)
+
+-- The Companion's chat record (Bridge.lua's ns.RecordChat, a stand-in noting each call here): a
+-- squad room's line kept and shown, the sender's own once its whisper left, as his own; never a
+-- line that never left, one Olympus's checks refused, or one from outside the room.
+test("Squads: the Companion's chat record: each squad line kept, the sender's own once it left, never one refused or unsent", function()
+	World(function(w, s)
+		local rec = {}
+		w.c.RecordChat = function(tier, sender, text, isSelf) rec[#rec + 1] = { tier = tier, sender = sender, text = text, isSelf = isSelf } end
+		eq(s.Replace("Leader", { "Soldier1" }), true)
+		local room = s.Get("Leader").room
+		w.c.me = "Leader-Realm"
+		eq(s.ChatSend(room, "form up"), true)
+		eq(#rec, 0, "not while its whisper waits")
+		w.jobs[#w.jobs].done(false)
+		eq(#rec, 0, "never one that did not leave")
+		eq(s.ChatSend(room, "form up now"), true); w.jobs[#w.jobs].done(true)
+		eq(#rec, 1); eq(rec[1].tier, room); eq(rec[1].sender, "Leader-Realm"); eq(rec[1].text, "form up now"); eq(rec[1].isSelf, true)
+		w.c.me = "Soldier1-Realm"
+		local function Line(seq, words) return "SC~1~" .. room:sub(7) .. "~" .. seq .. "~" .. words end
+		w.filtered = true; eq(s.ReceiveChat("WHISPER", "Leader", Line(1, "refused by the checks")), false); w.filtered = false
+		eq(s.ReceiveChat("WHISPER", "Outsider", Line(1, "not of the squad")), false)
+		eq(#rec, 1, "nothing refused")
+		eq(s.ReceiveChat("WHISPER", "Leader", Line(2, "on me")), true)
+		eq(#rec, 2); eq(rec[2].sender, "Leader-Realm"); eq(rec[2].text, "on me"); eq(rec[2].isSelf, false)
+		-- (The record's review: a leader alone, nobody to whisper, saw his line kept and recorded at
+		-- once, though nothing left.) It shows in his room; it is never recorded.
+		w.c.me = "Officer-Realm"; eq(s.Replace("OtherLeader", {}), true)
+		local alone = s.Get("OtherLeader").room
+		w.c.me = "OtherLeader-Realm"
+		local jobs = #w.jobs
+		eq(s.ChatSend(alone, "anyone here?"), true)
+		eq(#w.jobs, jobs, "nobody to whisper")
+		local shown = s.ChatHistory(alone)
+		eq(#shown, 1); eq(shown[1].text, "anyone here?", "it shows in his room")
+		eq(#rec, 2, "a line that reached nobody is never recorded")
 	end)
 end)

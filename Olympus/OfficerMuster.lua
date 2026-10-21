@@ -65,6 +65,9 @@ local function Authorized(by, guild, dist)
 	if K and not K.missing and ((K.IsStewardName and K.IsStewardName(by)) or (K.IsHandName and K.IsHandName(by))) then return true end
 	return ns.IsKingGuild ~= nil and ns.IsKingGuild(guild) and Rank0(by, guild, CROWN_SOURCES)
 end
+-- (931, read-only) The same rule for the Companion's notices (BridgeAffairs.lua): an ended call's
+-- reach, which the acts log does not keep. It reads; it changes nothing.
+Muster.Authorized = Authorized
 -- Whether this player may post, his guild, and where his muster goes: "CHANNEL" (the Crown's, for
 -- the whole army) or "GUILD" (another guild's master's, for his guild alone).
 function Muster.CanPost()
@@ -95,7 +98,7 @@ local function Valid(row)
 		and (row.dist == nil or row.dist == "CHANNEL" or row.dist == "GUILD")
 end
 local function Refresh()
-	if ns.Views and ns.Views.PageShown and ns.Views.PageShown() == "officermuster" and ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
+	if ns.Views and ns.Views.DecreePageShown and ns.Views.DecreePageShown() == "officermuster" and ns.UI and ns.UI.RefreshSoon then ns.UI.RefreshSoon() end
 end
 local function Changed() ns.Fire("OFFICER_MUSTER_CHANGED"); Refresh() end
 local function Headcount(row)
@@ -239,16 +242,19 @@ function Muster.Tick()
 	if not s then return end
 	Prune(s)
 	local own = ns.me and s.active[Key(ns.me)]
-	if own and ns.Now() - lastSent >= Muster.REPEAT and Send(s, own) then lastSent = ns.Now() end
+	-- (1.2.5.1, quiet presence, Core.lua: the call he posted is not repeated, which would say he is
+	-- online; it lasts its LIFE where it was heard, and a post or withdrawal he makes still goes.)
+	local quiet = ns.QuietPresence and ns.QuietPresence()
+	if own and not quiet and ns.Now() - lastSent >= Muster.REPEAT and Send(s, own) then lastSent = ns.Now() end
 	Refresh()
 end
 function Muster.Link()
 	if not ns.IsMember() then return nil end
-	return { text = "|cffffd200> " .. L.OFFICER_MUSTER_TITLE .. "|r", onClick = function() ns.Views.ShowPage("officermuster") end }
+	return { text = "|cffffd200> " .. L.OFFICER_MUSTER_TITLE .. "|r", onClick = function() ns.Views.ShowDecreePage("officermuster") end }
 end
 function Muster.Lines(q)
 	if not ns.IsMember() then return {} end
-	local lines = { { text = L.OFFICER_MUSTER_BACK, onClick = function() ns.Views.ShowPage(nil) end, gapAfter = true },
+	local lines = { { text = L.OFFICER_MUSTER_BACK, onClick = function() ns.Views.ShowDecreePage(nil) end, gapAfter = true },
 		{ header = true, text = L.OFFICER_MUSTER_TITLE }, { text = L.OFFICER_MUSTER_HINT }, { text = L.OFFICER_MUSTER_COUNTS_NOTE, gapAfter = true } }
 	local can, guild, dist = Muster.CanPost()
 	if not q and can then
@@ -284,8 +290,10 @@ function Muster.Lines(q)
 	if shown == 0 then lines[#lines + 1] = { text = q and L.SEARCH_NO_MATCH or L.OFFICER_MUSTER_EMPTY } end
 	return lines
 end
-ns.RealmPages = ns.RealmPages or {}
-table.insert(ns.RealmPages, { key = "officermuster", Link = Muster.Link, Lines = Muster.Lines, tip = "OFFICER_MUSTER_TITLE" })
+-- A page of the Decrees tab (2026-10-19, Daniel: "Deveria estar no Decrees, né? Não no The Realm"):
+-- its link under the royal decrees, for the same members (Link), its lines in place of the list.
+ns.DecreePages = ns.DecreePages or {}
+table.insert(ns.DecreePages, { key = "officermuster", Link = Muster.Link, Lines = Muster.Lines, tip = "OFFICER_MUSTER" })
 ns.Comm.Handle("OM", Muster.Handle)
 for _, event in ipairs({ "DATA_CHANGED", "THRONE_CHANGED", "WATCH_CHANGED", "MODERATION_CHANGED" }) do
 	ns.On(event, function() local s = Store(); if s then Prune(s) end; Refresh() end)

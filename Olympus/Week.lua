@@ -825,7 +825,7 @@ function Week.Sign(id, role)
 	local e = Week.Entry(id)
 	if not e or not (role == "W" or Week.ROLE_OK[role]) then return false end
 	if not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return false
 	end
 	if SelfOff() then return false end

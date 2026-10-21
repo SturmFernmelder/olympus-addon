@@ -62,6 +62,59 @@ test("guild rank (1.2.1): no Olympus line in the game's guild roster menus, wher
 	end)
 end)
 
+-- ArenaHome.lua in a namespace of its own, on a client without PlayerMenu.lua's list: the Arena then
+-- calls Blizzard's Menu.ModifyMenu itself (ArenaHome.HookMenus), each menu tag recorded. What it
+-- registers elsewhere (its tab, its slash commands, its consent lines, its ranking rules) is kept out
+-- of the harness's own Arena. before(AH): run on the fresh module before it hooks.
+local function WithArenaMenus(fn, before)
+	local savedMenu = rawget(_G, "Menu")
+	local hooks = {}
+	local ok, err = pcall(function()
+		Menu = { ModifyMenu = function(tag, cb) hooks[tag] = cb end }
+		local ans = setmetatable({}, { __index = ns })
+		ans.On = function() end
+		ans.PlayerMenu = false
+		ans.Gate = { Hooks = function() end, Allowed = function() return true end }
+		ans.UI = { AddTab = function() return false end }
+		ans.RankingRules, ans.Consent = false, false
+		ans.Arena = setmetatable({ Slash = function() end, Off = function() return false end, Blocked = function() return false end },
+			{ __index = ns.Arena })
+		ans.IsMember = function() return true end
+		ans.ChatLocked = function() return false end
+		ans.me = "Tester-Realm"
+		assert(loadfile(H.ADDON_DIR .. "ArenaHome.lua"))("Olympus", ans)
+		local AH = ans.ArenaHome
+		if before then before(AH) end
+		eq(AH.HookMenus(), "own", "Blizzard's menus, directly")
+		fn(AH, hooks)
+	end)
+	Menu = savedMenu
+	if not ok then error(err, 0) end
+end
+
+test("guild rank: the Arena's own hook on Blizzard's menus (a client without PlayerMenu.lua) adds no line to the game's guild roster menus either; the other player menus keep the Arena's lines", function()
+	WithArenaMenus(function(AH, hooks)
+		eq(hooks.MENU_UNIT_COMMUNITIES_GUILD_MEMBER, nil, "Forever's Guild & Communities roster: not hooked")
+		eq(hooks.MENU_UNIT_GUILD, nil, "the old Guild window's roster: not hooked")
+		for _, which in ipairs({ "PLAYER", "PARTY", "RAID_PLAYER", "RAID", "FRIEND", "COMMUNITIES_WOW_MEMBER", "CHAT_ROSTER" }) do
+			assert(hooks["MENU_UNIT_" .. which], which .. " keeps the Arena's lines")
+		end
+		-- A guildmate's name in chat: the Arena's lines are there, for the same player.
+		local r = Root()
+		hooks.MENU_UNIT_FRIEND(nil, r, { name = "Ada" })
+		local items = table.concat(r.items, "|")
+		assert(items:find("title:" .. ns.L.ARENA_MENU_TITLE, 1, true) and items:find("button:" .. ns.L.ARENA_MENU_CHALLENGE, 1, true), items)
+	end)
+	-- A later addition to the list cannot bring them back.
+	WithArenaMenus(function(_, hooks)
+		eq(hooks.MENU_UNIT_COMMUNITIES_GUILD_MEMBER, nil); eq(hooks.MENU_UNIT_GUILD, nil)
+		assert(hooks.MENU_UNIT_PLAYER, "the rest of the list still hooked")
+	end, function(AH)
+		AH.MENUS[#AH.MENUS + 1] = "COMMUNITIES_GUILD_MEMBER"
+		AH.MENUS[#AH.MENUS + 1] = "GUILD"
+	end)
+end)
+
 -- The game's guild window and its member's card, as GuildFrame.lua reads them.
 local function GuildWindow(name)
 	local f = { name = name, shown = false, alpha = 1, hooks = {} }

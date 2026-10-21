@@ -88,6 +88,8 @@ local crossedAt = -math.huge
 local peerGuild = GetGuildInfo("player")
 local guildChangedAt = 0
 local guildSession, lastHello = 0, 0
+-- Quiet presence (1.2.5.1, Core.lua) is on: see Comm.QUIET_WORDS.
+local function Quiet() return ns.QuietPresence ~= nil and ns.QuietPresence() == true end
 
 -- count[key] + 1, with at most MAX_KEYS distinct keys (senders choose some of them).
 local function Count(t, key)
@@ -184,6 +186,8 @@ function Comm.Stats()
 		-- 1.0.0: whom the election counts (our realm's peers, or every realm's on a shared channel),
 		-- how many before us keep us quiet, our guild's realms, and what our report's new fields say.
 		electAll = Comm.ElectsAcrossRealms(now), quietAfter = Comm.QuietAfter(now), presence = Comm.PresenceRealms(now),
+		-- 1.2.5.1: quiet presence on, and how many of our words it held (Comm.QuietHolds).
+		quietPresence = Quiet(), quietHeld = stats.quiet or 0,
 		reportSt = r and r.st, reportCap = r and r.cap, reportPres = r and r.pres,
 	}
 end
@@ -357,7 +361,7 @@ end
 --   GuildCharter GC (master's public card), QC (outsider's bounded ask), QD (corroborated Join card)
 --   OfficerMuster OM (bounded, zone-only officer gathering, logged)
 --   Other 1.1 work: Recruit J1 J3 | Alts AL | Filter BW | Dues FA FB FC FD FQ FS FU
---   Board G0 G1 GQ | Keys K3 K4 K5 K7 | Channels N1 | Moderation O1 | The Watch MW | Treasury TA TD TW
+--   Board G0 G1 GQ | Keys K3 K4 K5 K7 | Channels N1 | Moderation O1 | ProfileEffects FX | The Watch MW | Treasury TA TD TW
 --   Bank TL TN TO TS | Week Y2 | Wanted WS WY W4 W5, and 1.2.3's WK (a member's own kill or death,
 --   and a reviewer's relay of one) WV (a reviewer's removal or void), and 1.2.4's W7 (a member's
 --   avenged ask at login: digests of the Horde players his open deaths name). Reserved: J2 (#20's route
@@ -375,13 +379,15 @@ end
 --   ZW ZS ZQ ZL ZJ | Debts ZT ZX ZY ZR ZF | Stakes ZA ZV | Markets BM BO BS BK BV | MarketBank BF |
 --   ArenaFights AF AG AC AW AR AS AN | ArenaLedger AE AB AQ AV AH AY AX | ArenaTourney AT AD |
 --   ArenaProfile AP | HonorsNet IL ID IO | FarkleTable KI KA KO KP KG KY KH KK KT KE KQ KR KS KN KD |
---   ArenaMatch AM | Lottery LW | ArenaRoles AU | Records RK RD RA RR RS RT.
+--   ArenaMatch AM | Lottery LW | ArenaRoles AU | Records RK RD RA RR RV RS RT.
 --   (The Lottery's: a day's bank publishes that day's winners for the Games tab's rankings.)
 --   FarkleTable also registers KL at runtime (the design: the arbiter's floor under a drunk level),
 --   without extending this legacy inventory.
 --   (ArenaLedger's last two: 1.1.6's, a finished game's record, any game, from its players to the auditors, the games'
 --   ledger; 1.2.3's, a fighter's signed half of a direct duel, the rankings' two halves.)
---   (Records', 1.2.4: the shared records of the games and duels that count, any holder's.)
+--   (Records', 1.2.4: the shared records of the games and duels that count, any holder's; 1.2.6's
+--   last one, a live holder's signed validation of one record, so two holders relay it once both
+--   original players are offline.)
 --   (The King's arena words are kinds of the King's type, King.Register in ArenaRoles.lua.)
 --   1.1.2, the right-click menus: Versions V7 V8 V9 | Workshop VR (the author asks for a bug report).
 --   1.1.5, the guild masters' centurions and correspondents: Nominees NM (a list in parts, never chunked;
@@ -394,18 +400,73 @@ end
 --   1.1.6, chat moderation: WatchChat MD (lines deleted, recent lines deleted, timeouts and their
 --   lifts, a guild master's Watchers, the Olympus moderators, a target's own word, appeals and their
 --   answers, a case's decision told to its player; logged, over GUILD or the channel).
+--   The chat warnings: ChatStrikes MS (from a third warning, the player's own report of the lines his
+--   client refused to the moderation team, and its decisions; logged whispers only).
 --   1.1.6, the War Room's squads: WarSquads WU (a guild's squad assignments, over GUILD) SC (a squad's chat, logged whispers).
 --   1.2.4, voluntary Campaign VG (the King's public aggregate and keepers' private reports).
 --   1.2.4, JusticeTasks JT (original signatures; private recovery by actual King, Council and verified author).
 --   1.2.4, Carry XC (bounded consented historical quotes to the destination guild master, private only).
 --   1.2.4, Dues FP FR (a payer's private receipt ask and the pinned Treasurer's observed receipt).
 --   1.2.4, ChurchFullness NF (private coverage recovery between a current nominee and the guild desk).
+--   1.2.6, global census CG (trusted anti-entropy snapshots; counts only, never census authority).
+--   1.2.5, PlayerSightings PS (request-bound queries; private last-seen answers and withdrawals).
+--   1.2.5.1, the Olympus Accord: Accord BT BQ (the first, a player's BattleTag to a moderation team
+--   member who asked, a logged whisper; the second, that member's ask, on the Olympus channel).
+--   Cover MC (a moderator's cover name, from their own client, over the channel and GUILD).
+--   TagFollow TF (a sanction that follows a BattleTag: a code of it, the character, the kind; logged,
+--   on the Olympus channel).
 local handlers = {}
 -- 1.1 (Moderation.lua): a client the moderators took off (net-off) sends none of what they hide.
 local function Held(msg)
 	local M = ns.Moderation
 	return M ~= nil and not M.missing and M.Blocks(msg) == true
 end
+-- Quiet presence (1.2.5.1, Core.lua): while it is on, no word that says this character is online,
+-- or where it is, leaves this client. Each module leaves its own out (the hello, the census report,
+-- the layer...); these words are held here too, on the whole message a module hands over (Send,
+-- Whisper, SendChunked, and Arena.Send for the arena's) and again on each part as the queue sends
+-- it, so what waited in the queue when it began stays home too. A census report goes in pieces
+-- that name no type: Comm.Broadcast holds it itself. Nothing says it went quiet: no withdrawal goes
+-- either, and what was told before expires on the other clients as after a logout. A read (a
+-- census, sighting or layer request) and a chat line the player types still go. The words a
+-- player's own click posts (a muster call, a decree, a list he changed) go too; only their timed
+-- repeats stay home, each in its module (King.lua, KingArrow.lua, Acts.lua, OfficerMuster.lua).
+Comm.QUIET_WORDS = {
+	"^H1~",         -- the hello
+	"^P1~",         -- a dot on the guildmates' maps (Positions.lua)
+	"^L[01]~",      -- a layer announced or taken back (Layers.lua)
+	"^L[ON]~",      -- a layer-hop offer, or its "not now" (Hop.lua)
+	"^LY~[RX]~",    -- an answer about the King's layer, or its withdrawal (HopSightings.lua)
+	"^PS~[RBXW]~",  -- a player-sighting answer, or its withdrawal (PlayerSightings.lua)
+	"^T1~[PQ]~",    -- the King's crown on the map, or its removal (King.lua)
+	"^CG~%d+~S~",   -- a global census snapshot (Data.lua)
+	"^V[248]~",     -- a roll call's answer, the author's presence, a version check's answer (Workshop.lua, Versions.lua)
+	"^NK~1~p~",     -- the Church's presence (Church.lua)
+	"^D[VW]~",      -- Olympus Link's confirmer and watcher presence (Link.lua)
+	-- The arena auditors' and fee receiver's hello, and an auditor's whispered check of a bank
+	-- snapshot (ZQ~<mode>~H~<epoch>~<seq>, Wallet.CheckSnapshot), which marks him as heard too: a
+	-- check held back is not sent again, and the bank prunes at the next snapshot (Wallet.lua).
+	"^ZQ~%u%d+~H~",
+	"^T1~[CZ]~",    -- the King's court where he stands, or its closing (Court.lua)
+	"^WS~[RSX]~",   -- a Wanted reviewer's lease or its No, a sighting, or its taking back (Wanted.lua)
+	"^H[AK]~",      -- a councillor's "available for help", or his "got it" to an ask (Workshop.lua)
+	"^TD~",         -- a keeper's "taking donations", with his zone (Treasury.lua)
+	"^ZV~%u%d+~",   -- an arbiter's availability, with his zone (Stakes.lua)
+	"^U[234]~",     -- the King's tabard collector lease, and the tabard reports whispered to it (TabardsV2.lua)
+	"^FX~",         -- a profile presentation or its session: heartbeats, stop and close (ProfileEffects.lua)
+	"^W[01AL]~",    -- a crafter's listing or its removal, his answer to an ask, his recipe list (Crafters.lua)
+}
+local function QuietHolds(msg)
+	if type(msg) ~= "string" or not Quiet() then return false end
+	for _, pattern in ipairs(Comm.QUIET_WORDS) do
+		if msg:find(pattern) then
+			stats.quiet = (stats.quiet or 0) + 1
+			return true
+		end
+	end
+	return false
+end
+Comm.QuietHolds = QuietHolds
 local function Refuse(done, why)
 	if done then ns.SafeCall("send done", done, false, why) end
 	return false
@@ -423,6 +484,7 @@ function Comm.Send(dist, msg, key, urgent, logged, done, options)
 	if dist == "GUILD" and not IsInGuild() then return Refuse(done, "guild") end
 	if not ns.IsMember() then return Refuse(done, "left") end
 	if Held(msg) then return Refuse(done, "held") end
+	if QuietHolds(msg) then return Refuse(done, "quiet") end
 	return Enqueue(dist, { msg }, key, nil, urgent, logged, done, options)
 end
 -- An addon message to one player only (answers to the King, Throne tab). logged (1.1): a
@@ -434,6 +496,7 @@ function Comm.Whisper(target, msg, key, urgent, logged, done, options)
 	if type(msg) ~= "string" or #msg > 255 then return Refuse(done, "size") end
 	if not ns.IsMember() then return Refuse(done, "left") end
 	if Held(msg) then return Refuse(done, "held") end
+	if QuietHolds(msg) then return Refuse(done, "quiet") end
 	return Enqueue("WHISPER", { msg }, key, target, urgent, logged, done, options)
 end
 -- A bounded whole transfer: accept all pieces or none, finish once after their send
@@ -451,6 +514,7 @@ function Comm.SendBatch(dist, pieces, key, target, urgent, done, options)
 		local msg = pieces[i]
 		if type(msg) ~= "string" or #msg > 255 then return Refuse(done, "size") end
 		if Held(msg) then return Refuse(done, "held") end
+		if QuietHolds(msg) then return Refuse(done, "quiet") end
 		copy[i] = msg
 	end
 	return Enqueue(dist, copy, key, target, urgent, false, done, options)
@@ -467,6 +531,7 @@ function Comm.SendChunked(payload, urgent, dist, done, options)
 	dist = dist == "GUILD" and "GUILD" or "CHANNEL"
 	if type(payload) ~= "string" then return Refuse(done, "size") end
 	if Held(payload) then return Refuse(done, "held") end
+	if QuietHolds(payload) then return Refuse(done, "quiet") end
 	if options ~= nil and type(options) ~= "table" then return Refuse(done, "guard") end
 	msgId = (msgId + 1) % 1000
 	local guard = options and options.guard
@@ -476,7 +541,7 @@ function Comm.SendChunked(payload, urgent, dist, done, options)
 		permit = options and options.permit,
 		guardKey = options and options.guardKey,
 		guard = function()
-		return not Held(payload) and (not guard or guard() == true)
+		return not Held(payload) and not QuietHolds(payload) and (not guard or guard() == true)
 	end }
 	return Comm.SendBatch(dist, Codec.Chunk(payload, tostring(msgId)), nil, nil, urgent, done, guarded)
 end
@@ -565,7 +630,8 @@ end
 -- non-member). A member of an Olympus guild sends neither.
 local OUTSIDE_TYPES = { J1 = true, J3 = true, QC = true }
 function Comm.WhisperOutside(target, msg)
-	if ns.IsMember() or type(target) ~= "string" or target == "" or type(msg) ~= "string" then return false end
+	-- (1.2.5.1: a member who has not accepted the Olympus Accord yet sends none of these either.)
+	if ns.InOlympusGuild() or type(target) ~= "string" or target == "" or type(msg) ~= "string" then return false end
 	if not OUTSIDE_TYPES[msg:sub(1, 2)] or msg:sub(3, 3) ~= "~" or #msg > 255 then return false end
 	return SendNow("WHISPER", msg, false, target)
 end
@@ -662,6 +728,7 @@ local function Valid(job, now)
 		if valid ~= true then return false, why or "cancelled" end
 	end
 	if Held(job.parts[job.i]) then return false, "held" end
+	if QuietHolds(job.parts[job.i]) then return false, "quiet" end
 	return true
 end
 local function SendJob(job, now)
@@ -1299,6 +1366,9 @@ end
 function Comm.Hello(force)
 	SyncGuild()
 	if not IsInGuild() then return end
+	-- Quiet presence (Core.lua): no hello at all, forced or not; our guildmates' clients age us out
+	-- (COUNT_WINDOW) as after a logout, and we are never elected.
+	if Quiet() then return end
 	local now, before = ns.Now(), 0
 	for name, t in pairs(Comm.Electable(now)) do
 		if now - t <= PEER_WINDOW and name < (ns.me or "") then before = before + 1 end
@@ -1371,7 +1441,9 @@ end
 function Comm.MaybeBroadcast(report)
 	SyncGuild()
 	local now = ns.Now()
-	if Comm.BankOnDuty() then
+	-- Quiet presence (Core.lua) too: neither the reporter nor its runner-up, so no report and no
+	-- census answer (Q1) of ours says we are online.
+	if Comm.BankOnDuty() or Quiet() then
 		Comm.isReporter, Comm.isRunnerUp, watch = false, false, nil
 		Comm.lastReport = report
 		return
@@ -1440,6 +1512,9 @@ function Comm.Broadcast(report)
 		return
 	end
 	Comm.heldReport = nil
+	-- Quiet presence (Core.lua): no census of ours, which would say we are online (its pieces name no
+	-- type for QuietHolds: held here, and by the guard below for one already on its way).
+	if Quiet() then return end
 	lastBroadcast = ns.Now()
 	msgId = (msgId + 1) % 1000
 	-- Where people are goes out only with their yes (0.9.1): nothing of it unless we share our
@@ -1451,6 +1526,7 @@ function Comm.Broadcast(report)
 	Comm.SendBatch("CHANNEL", chunks, nil, nil, false, nil, { guard = function()
 		local current = ns.Moderation
 		if current and not current.missing and current.OwnGuildOff() then return false end
+		if Quiet() then return false end
 		return not sharing or (ns.Layers and ns.Layers.Sharing and ns.Layers.Sharing()) == true
 	end })
 	ns.Log("broadcast %s: %d bytes in %d chunks", report.guild, #payload, #chunks)
@@ -1696,10 +1772,11 @@ local function OnAddonMessage(prefix, text, dist, sender, target, zoneChannelID,
 		-- Outside an Olympus guild the addon hears nothing of the army, but for two things (1.1): the
 		-- Join screen's route/card answers, J2 and QD, whispered by a member it asked, and the
 		-- author's signed titles list over its own guild, which may make that guild an Olympus guild
-		-- (Comm.Outsider).
+		-- (Comm.Outsider). (1.2.5.1) In an Olympus guild before the Olympus Accord is accepted
+		-- (Accord.lua) the titles list alone: such a member asked nobody for a route.
 		local outsideType = text:sub(1, 3)
-		if dist == "WHISPER" and (outsideType == "J2~" or outsideType == "QD~") and outsideHandler and not ns.db.blocked[sender:lower()]
-			and Comm.Admit(sender, GetTime()) then
+		if dist == "WHISPER" and (outsideType == "J2~" or outsideType == "QD~") and outsideHandler and not ns.InOlympusGuild()
+			and not ns.db.blocked[sender:lower()] and Comm.Admit(sender, GetTime()) then
 			ns.SafeCall("join route", outsideHandler, sender, text)
 		end
 		if dist == "GUILD" then Comm.Outsider(sender, text) end
@@ -1861,6 +1938,12 @@ function Comm.CheckMembership()
 	DropQueue("left")
 	DropChat("left")
 end
+
+-- Quiet presence turned off (Core.lua): our hello at once, so our guildmates count us again (the
+-- census we may report follows at its own pace, MaybeBroadcast).
+ns.On("QUIET_PRESENCE_CHANGED", function(on)
+	if on == false and ns.IsMember() then Comm.Hello(true) end
+end)
 
 ns.On("LOGIN", function()
 	Comm.loginAt = ns.Now()

@@ -619,6 +619,9 @@ function Data.Receive(r, sender)
 	local h = r ~= nil and heard.r == r and heard.who == ns.FullName(sender) and heard or nil
 	local taken = Take(r, sender, h)
 	heard.r, heard.text, heard.entry = nil, nil, nil -- (the text goes with its report)
+	-- Record mode (Record.lua): a report taken may go into the witness's own file (nothing is sent).
+	local record = ns.Record
+	if taken and record and record.Recording and record.Recording() then ns.SafeCall("record heard", record.Heard, r) end
 	return taken
 end
 
@@ -789,7 +792,8 @@ function Data.AvgTenthsOf(name)
 end
 -- The lists of guilds by a count of theirs (free slots, soldiers in a zone, players inspected,
 -- dues paid), sorted in place: the larger first by each count named in turn; then, all alike, the
--- higher average level first (1.2.4), then the name, so the order is the same every time. `rows`:
+-- exact <OLYMPUS> first (the standard-bearer, as in the default order: the author's ask), then the
+-- higher average level (1.2.4), then the name, so the order is the same every time. `rows`:
 -- { name = <guild>, [count] = n, ... } each, its census entry as `e` where it has one (Data.Summary's:
 -- read from it, else from the census kept by its name); each row gets its tenths as `avg` (0 for none).
 function Data.SortGuildCounts(rows, ...)
@@ -803,6 +807,8 @@ function Data.SortGuildCounts(rows, ...)
 			local na, nb = tonumber(a[k]) or 0, tonumber(b[k]) or 0
 			if na ~= nb then return na > nb end
 		end
+		local bearerA, bearerB = Data.IsStandardBearer(a.name), Data.IsStandardBearer(b.name)
+		if bearerA ~= bearerB then return bearerA end
 		if a.avg ~= b.avg then return a.avg > b.avg end
 		return tostring(a.name) < tostring(b.name)
 	end)
@@ -827,6 +833,11 @@ local function GuildSortName(name)
 	end
 	return folded
 end
+-- The standard-bearer: the exact <OLYMPUS> (any case), first on a tie of any order of guilds, the
+-- default one's and a column's whichever way it runs, before the average level (the author's ask).
+function Data.IsStandardBearer(name)
+	return type(name) == "string" and GuildSortName(name) == "olympus"
+end
 function Data.GuildDefaultLess(a, b)
 	if a.fresh ~= b.fresh then return a.fresh end
 	local totalA, totalB = a.g.total or 0, b.g.total or 0
@@ -840,10 +851,192 @@ function Data.GuildDefaultLess(a, b)
 	return a.name < b.name
 end
 
-function Data.Summary()
+-- 1.2.6: a census report used to survive only on clients that heard its elected reporter.
+-- That made the army total depend on login time even though several trusted desks still held
+-- the same last verified sizes.  Keep a second, deliberately narrow anti-entropy store.  It is
+-- used for display and totals only: it never enters ns.rdb.guilds, elects a reporter, proves a
+-- rank, changes a leader, or authorizes anything.  Church keepers, the King and signed High
+-- Council may retain and repeat these normalized rows; the original observation time travels
+-- with each row, so a relay cannot make old information fresh.
+Data.GLOBAL_PROTOCOL = 1
+-- Every client asks once after login, then only occasionally. A six-hour refresh is enough for
+-- anti-entropy without turning a large installation into a continuous query stream; trusted
+-- relays still answer a fresh client immediately.
+Data.GLOBAL_ASK_EVERY = 6 * 60 * 60
+Data.GLOBAL_ANSWER_GAP = 3 * 60
+Data.GLOBAL_MAX_BYTES = ns.Codec.CHUNK * ns.Codec.MAX_CHUNKS
+Data.GLOBAL_MAX_ROWS = 180
+local globalLastSent, globalLastHeard, globalAnswerPending = 0, 0, false
+
+local function GlobalStore()
+	ns.rdb.censusGlobal = type(ns.rdb.censusGlobal) == "table" and ns.rdb.censusGlobal or {}
+	return ns.rdb.censusGlobal
+end
+local function ObservationTime(g)
+	return math.floor(tonumber(g and g.st) or tonumber(g and g.t) or 0)
+end
+local function GlobalGuildField(name)
+	if type(name) ~= "string" or name == "" or #name > 72 or name:find("[~;,%c]") then return nil end
+	if ns.Codec.LongGuild(name) or not ns.IsFederation(name) then return nil end
+	return name
+end
+local function GlobalNumber(v, low, high)
+	local n = tonumber(v)
+	if not n or n ~= math.floor(n) or n < low or n > high then return nil end
+	return n
+end
+local function GlobalTrusted(name)
+	return ns.Church and ns.Church.IsLedgerRelay and ns.Church.IsLedgerRelay(name) == true
+end
+local function GlobalTake(name, total, online, avg10, observed, by, heardAt)
+	name = GlobalGuildField(name)
+	total = GlobalNumber(total, 0, ns.Codec.GUILD_CAP)
+	online = GlobalNumber(online, 0, ns.Codec.GUILD_CAP)
+	avg10 = GlobalNumber(avg10, 0, 600)
+	observed = GlobalNumber(observed, 1, 4102444800)
+	if not (name and total and online and avg10 and observed) or online > total then return false end
 	local now = ns.Now()
+	if observed > now + 5 * 60 or now - observed > Data.KEEP then return false end
+	local store, key = GlobalStore(), name:lower()
+	local old = store[key]
+	if type(old) == "table" and (tonumber(old.observed) or 0) > observed then return false end
+	store[key] = { name = name, total = total, online = online, avg10 = avg10,
+		observed = observed, by = ns.FullName(by), heard = heardAt or now }
+	return old == nil or old.total ~= total or old.online ~= online or old.avg10 ~= avg10 or old.observed ~= observed
+end
+
+function Data.CaptureGlobalCensus()
+	if not GlobalTrusted(ns.me) then return 0 end
+	local n, now = 0, ns.Now()
+	for name, g in pairs(ns.rdb.guilds or {}) do
+		local observed = ObservationTime(g)
+		if now - observed <= Data.KEEP and GlobalTake(name, tonumber(g.total) or 0, tonumber(g.online) or 0,
+			Data.AvgTenths(g) or 0, observed, ns.me, now) then n = n + 1 end
+	end
+	return n
+end
+
+local function GlobalRows()
+	local rows, now = {}, ns.Now()
+	for key, e in pairs(GlobalStore()) do
+		if type(e) ~= "table" or not GlobalGuildField(e.name) or now - (tonumber(e.observed) or 0) > Data.KEEP then
+			GlobalStore()[key] = nil
+		else
+			rows[#rows + 1] = e
+		end
+	end
+	table.sort(rows, function(a, b)
+		if a.observed ~= b.observed then return a.observed > b.observed end
+		return a.name < b.name
+	end)
+	return rows
+end
+
+-- One bounded chunked snapshot.  The freshest rows win the bound; with the current army the
+-- complete snapshot is well below it.  A later ask repeats it, so queue pressure loses no state.
+function Data.GlobalCensusPayload()
+	if not GlobalTrusted(ns.me) then return nil end
+	Data.CaptureGlobalCensus()
+	local head, out = ("CG~%d~S~%d~"):format(Data.GLOBAL_PROTOCOL, math.floor(ns.Now())), {}
+	local bytes = #head
+	for _, e in ipairs(GlobalRows()) do
+		if #out >= Data.GLOBAL_MAX_ROWS then break end
+		local row = ("%s,%d,%d,%d,%d"):format(e.name, e.total, e.online, e.avg10, e.observed)
+		local extra = #row + (#out > 0 and 1 or 0)
+		if bytes + extra > Data.GLOBAL_MAX_BYTES then break end
+		out[#out + 1], bytes = row, bytes + extra
+	end
+	return head .. table.concat(out, ";")
+end
+
+function Data.SendGlobalCensus()
+	-- Quiet presence (Core.lua): no snapshot of ours, which would name us as its sender online.
+	if ns.QuietPresence and ns.QuietPresence() then return false end
+	local payload = Data.GlobalCensusPayload()
+	if not payload or payload:sub(-1) == "~" then return false end
+	-- A keyed job carries its permit, which the transport asks before each piece goes out
+	-- (Comm.lua's NormalizeOptions refuses a key without one, and the snapshot then never left):
+	-- the channel's lane alone, and only while this client still holds the relay's trust.
+	local key = "census-global"
+	local ok = ns.Comm.SendChunked(payload, false, "CHANNEL", nil, { owner = Data, key = key,
+		permit = function(_, guardKey, dist, target)
+			if guardKey ~= key or dist ~= "CHANNEL" or target ~= nil then return false, "lane" end
+			if not GlobalTrusted(ns.me) then return false, "trust" end
+			return true
+		end })
+	if ok then globalLastSent = ns.Now() end
+	return ok
+end
+
+-- Public for the focused harness.  The server-stamped sender is the trust boundary; the rows
+-- themselves are never mistaken for signed census authority.
+function Data.ReceiveGlobalCensus(dist, sender, text)
+	if dist ~= "CHANNEL" or type(text) ~= "string" or type(sender) ~= "string"
+		or sender == "" or #sender > 100 or sender:find("[%c~]") then return false end
+	local ver, kind, made, body = text:match("^CG~(%d+)~([SQ])~(%d*)~?(.*)$")
+	if tonumber(ver) ~= Data.GLOBAL_PROTOCOL then return false end
+	if kind == "Q" then
+		-- A query grants no authority and the answer is broadcast to the channel.  Requiring
+		-- the requester itself to be a keeper made anti-entropy useless for the ordinary late
+		-- client it was designed to heal.  Only snapshot senders need the trusted-relay gate.
+		if not GlobalTrusted(ns.me) or ns.Now() - globalLastSent < Data.GLOBAL_ANSWER_GAP or globalAnswerPending then return true end
+		globalAnswerPending = true
+		local heardAt = globalLastHeard
+		ns.After(math.random(2, 9), "global census answer", function()
+			globalAnswerPending = false
+			if GlobalTrusted(ns.me) and globalLastHeard <= heardAt and ns.Now() - globalLastSent >= Data.GLOBAL_ANSWER_GAP then Data.SendGlobalCensus() end
+		end)
+		return true
+	end
+	if not GlobalTrusted(sender) then return false end
+	local snapshotAt = GlobalNumber(made, 1, 4102444800)
+	if not snapshotAt or snapshotAt > ns.Now() + 5 * 60 or ns.Now() - snapshotAt > Data.KEEP then return false end
+	local changed, count = false, 0
+	for row in tostring(body):gmatch("[^;]+") do
+		if count >= Data.GLOBAL_MAX_ROWS then return false end
+		local name, total, online, avg10, observed = row:match("^([^,]+),(%d+),(%d+),(%d+),(%d+)$")
+		if not name then return false end
+		count = count + 1
+		if GlobalTake(name, total, online, avg10, observed, sender, ns.Now()) then changed = true end
+	end
+	if count == 0 then return false end
+	globalLastHeard = ns.Now()
+	if changed then Data.ChangedSoon() end
+	return true
+end
+
+function Data.AskGlobalCensus()
+	return ns.Comm.Send("CHANNEL", ("CG~%d~Q~%d"):format(Data.GLOBAL_PROTOCOL, math.floor(ns.Now())), "census-global-ask")
+end
+
+local function SummaryGuilds()
+	local out, direct, now = {}, {}, ns.Now()
+	for name, g in pairs(ns.rdb.guilds or {}) do
+		out[name], direct[name:lower()] = g, true
+	end
+	for _, e in ipairs(GlobalRows()) do
+		local key, current, currentName = e.name:lower(), out[e.name], out[e.name] and e.name or nil
+		if not current then
+			for name, g in pairs(out) do
+				if name:lower() == key then current, currentName = g, name; break end
+			end
+		end
+		if not current or ObservationTime(current) < e.observed then
+			-- A normalized display row, intentionally missing leaders, ranks, zones and votes.
+			if currentName and currentName ~= e.name then out[currentName] = nil end
+			out[e.name] = { total = e.total, online = e.online, avgLevel = e.avg10 / 10,
+				t = e.observed, st = e.observed, zones = {}, relayed = true, relayBy = e.by }
+		end
+	end
+	return out, direct, now
+end
+
+function Data.Summary()
+	local guilds, direct, now = SummaryGuilds()
+	local known = {}
+	for name in pairs(guilds) do known[name:lower()] = true end
 	local s = { total = 0, online = 0, fresh = 0, newest = 0, guilds = {}, zones = {}, zoneGuilds = {}, zoneList = {} }
-	for name, g in pairs(ns.rdb.guilds) do
+	for name, g in pairs(guilds) do
 		if ns.IsFederation(name) and not NetOff(name) then
 			local age = now - (g.t or 0)
 			local fresh = age <= Data.FRESH
@@ -882,7 +1075,7 @@ function Data.Summary()
 	-- Guilds only /who has seen, for the census list alone: in no total, tree or map.
 	s.seen = {}
 	for name, e in pairs(Data.Seen()) do
-		if ns.IsFederation(name) and not NetOff(name) and not ns.rdb.guilds[name] and type(e) == "table" and now - (e.t or 0) <= Data.KEEP then
+		if ns.IsFederation(name) and not NetOff(name) and not direct[name:lower()] and not known[name:lower()] and type(e) == "table" and now - (e.t or 0) <= Data.KEEP then
 			s.seen[#s.seen + 1] = { name = name, online = e.online or 0, capped = e.capped, t = e.t }
 		end
 	end
@@ -897,6 +1090,16 @@ function Data.Summary()
 	end)
 	return s
 end
+
+ns.On("INIT", function()
+	local store, now = GlobalStore(), ns.Now()
+	for key, e in pairs(store) do
+		if type(e) ~= "table" or not GlobalGuildField(e.name) or now - (tonumber(e.observed) or 0) > Data.KEEP then store[key] = nil end
+	end
+	if ns.Comm and ns.Comm.Handle then ns.Comm.Handle("CG", Data.ReceiveGlobalCensus) end
+	ns.After(20, "global census ask", Data.AskGlobalCensus)
+	ns.Every(Data.GLOBAL_ASK_EVERY, "global census ask", Data.AskGlobalCensus)
+end)
 
 -- Tonight's count (1.1, Fern's #16): this client's own view of the evening, from the reports it
 -- already holds. Once a minute (Data.EVENING_EVERY) it reads the online total and each zone's
@@ -956,7 +1159,8 @@ function Data.DiscordText()
 	local s = Data.Summary()
 	local F, D = ns.FormatNumber, ns.Codec.Discord
 	local out = {}
-	out[#out + 1] = L.DISCORD_HEADER:format(F(s.total), F(s.online), #s.guilds)
+	-- (CR-02: the characters, as the window's header has them, then the people.)
+	out[#out + 1] = L.DISCORD_HEADER:format(F(s.characters or s.total), F(s.online), #s.guilds) .. " · " .. L.ARMY_PEOPLE:format(F(s.total))
 	local where = {}
 	for i = 1, math.min(8, #s.zoneList) do
 		local z = s.zoneList[i]

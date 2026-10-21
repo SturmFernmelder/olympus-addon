@@ -294,7 +294,9 @@ function Carry.List()
 end
 local function When(at) return type(at) == "number" and at > 0 and date("%Y-%m-%d %H:%M", at) or L.CARRY_UNKNOWN end
 function Carry.Lines()
-	local lines = { { header = true, text = L.CARRY_TITLE }, { text = L.CARRY_NOTE, gapAfter = true }, { text = L.CARRY_PREPARE, gapAfter = true } }
+	-- Its first row, Back: the Realm again, as the Realm's other pages (2026-10-19: it had none).
+	local lines = { { text = L.CARRY_BACK, onClick = function() ns.Views.ShowPage(nil) end, gapAfter = true },
+		{ header = true, text = L.CARRY_TITLE }, { text = L.CARRY_NOTE, gapAfter = true }, { text = L.CARRY_PREPARE, gapAfter = true } }
 	if ns.CarryHistory and ns.CarryHistory.Lines then
 		for _, line in ipairs(ns.CarryHistory.Lines()) do lines[#lines + 1] = line end
 	end

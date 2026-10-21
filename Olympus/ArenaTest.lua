@@ -768,6 +768,17 @@ ArenaTest.CHECKLIST = {
 	Item("Z06", "S4", "Army rehearsal on release 1.2", "The army sees nothing without rehearsals on"),
 	Item("Z07", "S4", "\"Arena fee TEST\" to a Treasurer stand-in", "Not counted by the real Treasurer's book"),
 	Item("Z08", "S2", "Copper mode's record", "Every copper deposit and bet in db.arenaCopper; test clear refused until refunded"),
+	-- (1.2.6) Watch duel: a member watching two players duel (ArenaSpectate.lua, the companion's Spectate.lua).
+	Item("D01", "S1", "Right-click a duelling player: Watch duel", "One window split in two: A red on the left, B blue on the right; health as on the target frame"),
+	Item("D02", "S1", "A spectator at 10, 25, 40 and 100 yd, and on another layer", "In sight: live bars; out of sight: \"-\", his last model kept, the status line says so"),
+	Item("D03", "S1", "Stand beyond inspect range, then come within 10 yd out of combat", "\"Waiting for inspection - move within inspect range\", then gear and talents; no chat line, sound or tabard row"),
+	Item("D04", "S1", "His gear against the game's own Inspect window", "The same items in the same slots; a slot's tooltip is the game's; stats from gear add up"),
+	Item("D05", "S1", "Talents: hover one in each tree", "Name, Passive or Active, what it does, Rank r / max; points as the game's own talent frame shows"),
+	Item("D06", "S1", "A fighter casts, then channels (First Aid)", "Name, icon and fill; seconds on Era and TBC only; a channel's bright part shrinks"),
+	Item("D07", "S1", "Auto: a fighter enters combat, then the duel ends", "The bar in combat; the full view at the result"),
+	Item("D08", "S1", "The duel's result line on the spectator", "The result in the strip; his fight records and ledger unchanged; nothing sent"),
+	Item("D09", "S3", "A gamepad spectator opens Watch duel", "The view shows; its X closes it; the controller still talks to an NPC after"),
+	Item("D10", "S3", "20 spectators on one duel", "None of them sends anything; the fighters' send queues unchanged"),
 }
 local BY_ID = {}
 for _, item in ipairs(ArenaTest.CHECKLIST) do BY_ID[item.id] = item end

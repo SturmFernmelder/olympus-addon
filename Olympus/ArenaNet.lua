@@ -60,7 +60,9 @@ Arena.PARK_TRIES = 36         -- ...this many times at most (about six hours)
 -- winners, LW (its bank's word for the Games tab's rankings), and the games' rankings'
 -- publish word AU (ArenaRoles, 2026-10-04), the games' ledger AY (ArenaLedger, 1.1.6), and the
 -- duels' signed halves AX (ArenaLedger, 1.2.3), and (1.2.4) the shared records' RK RD RA RR RS RT
--- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals): 75.
+-- (Records.lua: a ranking key, a digest, an ask, a record, a month's seal and its totals), and
+-- (1.2.6) RV (Records.lua: a live holder's signed validation of one record, the author's "todos os
+-- rankings precisam fazer o relay"): 76.
 -- Arena.Send refuses any other type.
 Arena.TYPES = {
 	EP = "ArenaNet", EC = "ArenaChat", EM = "ArenaChat", ER = "ArenaTest", EH = "ArenaTest",
@@ -81,7 +83,7 @@ Arena.TYPES = {
 	AM = "ArenaMatch",
 	LW = "Lottery",
 	AU = "ArenaRoles",
-	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RS = "Records", RT = "Records",
+	RK = "Records", RD = "Records", RA = "Records", RR = "Records", RV = "Records", RS = "Records", RT = "Records",
 }
 -- A player's own obligations go out even with the arena turned off, and in L while the live switch
 -- is off (the design): receipts, key claims, Farkle's payments; a debt mark about himself (ZX) and a
@@ -108,7 +110,7 @@ Arena.FREE_TYPES = {
 	KI = true, KA = true, KO = true, KP = true, KG = true, KY = true, KK = true, KT = true, KE = true, -- Bones
 	KQ = true, KR = true, KS = true, KN = true, KL = true,
 	-- (1.2.4) the shared records (Records.lua): any holder tells the games and duels that count
-	RK = true, RD = true, RA = true, RR = true, RS = true, RT = true,
+	RK = true, RD = true, RA = true, RR = true, RV = true, RS = true, RT = true,
 }
 -- The types a sender may mark as his own obligation (o.obligation: ZX about himself, a staked AW,
 -- the Wallet's hello): taken in L whatever the switch, their handlers check the rest.
@@ -1143,6 +1145,13 @@ function Arena.Send(kind, mode, body, o)
 		Count(stats.refused, "held")
 		ns.Log("arena %s not sent: held (net-off)", tostring(kind))
 		return false, "held"
+	end
+	-- Quiet presence (1.2.5.1, Core.lua): its words that say this character is online stay home,
+	-- checked here on the whole message as Comm.QuietHolds does on its own.
+	local C = ns.Comm
+	if type(C) == "table" and type(C.QuietHolds) == "function" and C.QuietHolds(text) == true then
+		Count(stats.refused, "quiet")
+		return false, "quiet"
 	end
 	if #text > 255 and o.chat then Count(stats.refused, "long") return false, "long" end
 	if math.ceil(#text / Arena.PIECE) > Arena.PIECES_MAX then

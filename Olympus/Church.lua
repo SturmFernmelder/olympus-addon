@@ -473,6 +473,18 @@ end
 
 function Church.InAudience(name) return AUDIENCE_ROLES[Church.Role(name or ns.me) or ""] == true end
 function Church.IsKeeper(name) return KEEPER_ROLES[Church.Role(name or ns.me) or ""] == true end
+-- A durable ledger relay is deliberately narrower than the whole Church audience.  Keepers still
+-- create and verify records; the King and signed High Council may retain and retransmit the
+-- verified ledger so it does not disappear merely because the Apostle that saw it logged out.
+-- This is also the trust boundary a future companion must use instead of becoming another source
+-- of Church facts. (The Church ledger itself, ChurchCount.lua: a keeper takes its lines only from
+-- keepers, a council client keeps a copy, and the King's client, as in 1.2.5.1, does no background
+-- Church work: no catch-up, no copy.)
+function Church.IsLedgerRelay(name)
+	name = name or ns.me
+	return Church.IsKeeper(name) or Church.IsKing(name)
+		or (type(ns.IsHighCouncillor) == "function" and ns.IsHighCouncillor(ns.FullName(name)) == true)
+end
 -- A Church person: one who holds a place and whose recruits count (the Head, an Apostle, a
 -- missionary, a correspondent).
 function Church.IsPerson(name)
@@ -1370,6 +1382,8 @@ function Church.SendPresence(force)
 	if not ns.IsMember() then return false end
 	local role = Church.Role(ns.me)
 	if not AUDIENCE_ROLES[role or ""] or Off() then return false end
+	-- Quiet presence (Core.lua): no presence of ours; the desk's lapses on its own (Church.Online).
+	if ns.QuietPresence and ns.QuietPresence() then return false end
 	local now = Now()
 	if not force and now - lastPresence < Church.PresenceEvery(role) then return false end
 	lastPresence = now
@@ -1458,6 +1472,31 @@ function Church.KeepersOnline(withSelf)
 	end
 	local mine = Church.Role(ns.me)
 	if withSelf ~= false and KEEPER_ROLES[mine or ""] and not Church.IsKing(ns.me) then out[#out + 1] = { name = ns.me, role = mine, self = true } end
+	table.sort(out, function(a, b)
+		if Order(a.role) ~= Order(b.role) then return Order(a.role) < Order(b.role) end
+		return Key(a.name) < Key(b.name)
+	end)
+	return out
+end
+
+-- Trusted clients heard online that can retain an already verified ledger.  Keepers sort first so
+-- evidence collection keeps its established route; the other relays are anti-entropy holders.
+function Church.LedgerRelaysOnline(withSelf)
+	local out, seen = {}, {}
+	for _, h in pairs(heard) do
+		local ok = Church.Online(h.name)
+		if ok and Church.IsLedgerRelay(h.name) and not Same(h.name, ns.me) then
+			local k = Key(h.name)
+			if k and not seen[k] then seen[k] = true; out[#out + 1] = { name = h.name, role = Church.Role(h.name) } end
+		end
+	end
+	if withSelf ~= false and Church.IsLedgerRelay(ns.me) then
+		local k = Key(ns.me)
+		if k and not seen[k] then out[#out + 1] = { name = ns.me, role = Church.Role(ns.me), self = true } end
+	end
+	local function Order(role)
+		return KEEPER_ROLES[role or ""] and 1 or (role == "K" and 2 or 3)
+	end
 	table.sort(out, function(a, b)
 		if Order(a.role) ~= Order(b.role) then return Order(a.role) < Order(b.role) end
 		return Key(a.name) < Key(b.name)

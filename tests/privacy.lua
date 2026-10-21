@@ -12,7 +12,9 @@ local function WithTransport(fn)
 	for _, key in ipairs(globals) do g[key] = _G[key] end
 	local w = { clock = 1800000000, mono = 1000, guild = "Olympus", rank = 1, sent = {}, timers = {}, errors = {} }
 	local ok, err = pcall(function()
-		ns.db, ns.rdb = {}, { treasuryEpoch = ns.Treasury.EPOCH }
+		-- (1.2.5.1: an account that accepted the Olympus Accord, as every Olympus account has: without
+		-- it nothing is sent at all, ns.IsMember, and these transfers are about consent, not the Accord.)
+		ns.db, ns.rdb = { accord = { v = 1, yes = true, at = 0 } }, { treasuryEpoch = ns.Treasury.EPOCH }
 		ns.me, ns.splitNames = TREASURER, true
 		ns.Now = function() return w.clock end
 		GetTime = function() return w.mono end

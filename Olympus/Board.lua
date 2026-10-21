@@ -392,7 +392,7 @@ Board.Send = Send
 -- Whether we can put anything on the Board now: a member, on the channel, not in lockdown, not off.
 function Board.Ready()
 	if not ns.IsMember() then
-		ns.Print(L.MEMBERS_ONLY)
+		ns.Print(ns.MembersOnlyText())
 		return false, "member"
 	end
 	if not ns.Comm.ChannelReady() then
@@ -668,7 +668,7 @@ end
 local function Colored(name, class)
 	local file = class and class ~= "" and ns.CLASS_FILES[class]
 	local c = file and RAID_CLASS_COLORS and RAID_CLASS_COLORS[file]
-	name = ns.Codec.Plain(name)
+	name = ns.Codec.Plain(ns.CoverSwap(name))
 	return c and c.colorStr and ("|c%s%s|r"):format(c.colorStr, name) or name
 end
 
@@ -676,7 +676,7 @@ end
 -- and how long it has been up. A click whispers its poster.
 -- A camp's card leads with its zone (where the fire is), and says how long it has left.
 function Board.Card(e)
-	local who = ns.DisplayName(e.sender) or "?"
+	local who = ns.CoverSwap(ns.DisplayName(e.sender)) or "?"
 	local note = Board.NoteShown(e)
 	local classFile = e.class ~= "" and ns.CLASS_FILES[e.class]
 	local camp = e.flag == "C"
