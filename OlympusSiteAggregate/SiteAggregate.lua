@@ -1,4 +1,4 @@
--- LOCAL COMPATIBILITY CANDIDATE, not part of CurseForge Olympus 1.3.2.
+-- Optional dedicated site aggregate module; publisher adoption is tracked separately.
 -- Target: dnl-gentile/olympus-addon d03ea8a9ce8d6d933dde9ce0f0ec7faa866a2df2.
 -- Package as OlympusSiteAggregate beside Olympus; Dependencies: Olympus orders the public bridge first.
 -- It reads the public checkpoint, never OlympusDB, chat, keys or member records.
@@ -7,6 +7,12 @@ local NAMES = { ["Olympus"] = true, ["Olympus I"] = true, ["Olympus II"] = true,
   ["Olympus III"] = true, ["Olympus IV"] = true, ["Olympus V"] = true,
   ["Olympus VI"] = true, ["Olympus VII"] = true, ["Olympus VIII"] = true,
   ["Olympus IX"] = true, ["Olympus X"] = true }
+-- ASCII names have one canonical published spelling; native guild names may be uppercase.
+local CANON = {}
+for name in pairs(NAMES) do CANON[name:upper()] = name end
+local function GuildName(name)
+  return type(name) == "string" and CANON[name:upper()] or nil
+end
 local function Whole(n, minimum, maximum)
   return type(n) == "number" and n == math.floor(n) and n >= minimum and n <= maximum
 end
@@ -26,8 +32,8 @@ local function Prepare()
   if type(GetGuildInfo) ~= "function" or type(IsInGuild) ~= "function" or not IsInGuild() then
     return false, "Join and open your current guild roster first."
   end
-  local own = GetGuildInfo("player")
-  if not NAMES[own] then return false, "Only your own Olympus or Olympus I-X roster can be exported. Alt coverage is unavailable." end
+  local own = GuildName(GetGuildInfo("player"))
+  if not own then return false, "Only your own Olympus or Olympus I-X roster can be exported. Alt coverage is unavailable." end
   local ok, c = pcall(b.GetCensusCheckpoint)
   local now = type(time) == "function" and time() or nil
   if not ok or type(c) ~= "table" or c.schema ~= "olympus-census-checkpoint" or c.version ~= 1
@@ -36,7 +42,7 @@ local function Prepare()
     or type(c.guilds) ~= "table" or #c.guilds > 256 then return false, "The current checkpoint or source clock is unavailable." end
   local selected
   for _, g in ipairs(c.guilds) do
-    if type(g) == "table" and g.name == own then
+    if type(g) == "table" and GuildName(g.name) == own then
       if selected then return false, "Ambiguous own-guild checkpoint refused." end
       selected = g
     end
@@ -68,7 +74,7 @@ end
 SLASH_OLYMPUSSITEAGGREGATE1 = "/olysite"
 SlashCmdList.OLYMPUSSITEAGGREGATE = function(msg)
   if msg == "clear" then OlympusSiteAggregate = nil; Say("Dedicated export cleared; /reload writes the cleared state."); return end
-  if msg ~= "export" then Say("Local compatibility module: /olysite export or /olysite clear. This module is not shipped in CurseForge 1.3.2."); return end
+  if msg ~= "export" then Say("Use /olysite export or /olysite clear. Only the dedicated export file is safe for the site."); return end
   local _, why = Prepare(); Say(why)
 end
 OlympusSiteAggregateCompatibility196 = { Prepare = Prepare, producer = PRODUCER }
