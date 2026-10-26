@@ -549,4 +549,3 @@ end)
 -- Forever's extracted API does not declare this event, while Era/TBC clients may provide it.
 -- Register it only where the client accepts it; PLAYER_ENTERING_WORLD is the portable fallback.
 pcall(ns.RegisterEvent, "PLAYER_LEAVING_WORLD", function() StopForTransition("the world changed") end)
-

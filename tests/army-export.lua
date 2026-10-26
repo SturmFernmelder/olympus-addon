@@ -327,4 +327,3 @@ test("Army QR: the shipped module has no storage, communication or upload path a
 	f = assert(io.open(ADDON_DIR .. "Olympus.toc", "rb")); local toc = f:read("*a"); f:close()
 	assert(toc:find("Link.lua\nArmyExport.lua\nGuildCharter.lua", 1, true), "ArmyExport loads immediately after Link")
 end)
-
