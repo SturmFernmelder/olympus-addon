@@ -2588,6 +2588,10 @@ local function Slash(input)
 			-- An attended aggregate of our own guild for the separate browser receiver (ArmyExport.lua).
 			-- Its release gate remains closed until that receiver and the real clients pass acceptance.
 			if ns.ArmyExport then ns.ArmyExport.Slash(rest) else ns.Print(L.RESTART_NEEDED) end
+		elseif cmd == "site" then
+			-- The optional sidecar's deliberate SavedVariables export; Core owns the slash/gamepad gate.
+			local site = rawget(_G, "OlympusSiteAggregateCommand")
+			if type(site) == "function" then site(rest) else ns.Print(L.RESTART_NEEDED) end
 		elseif cmd == "lfg" or cmd == "board" or cmd == "camp" or cmd == "camps" or cmd == "week" then
 			-- The Board (Board.lua, 1.1): who is looking for a group, and where; camps; the King's week.
 			ns.Board.Slash(cmd, rest)
@@ -2641,6 +2645,16 @@ ns.Gate.Hooks("slash", { key = "core", leftover = function() return slashDone en
 	SlashCmdList.OLYMPUSARMY = function(input)
 		if not ns.Gate.Allowed("slash") then return end
 		if ns.ArmyExport then ns.ArmyExport.Slash(tostring(input or "")) else ns.Print(L.RESTART_NEEDED) end
+	end
+	-- Compatibility for the separately saved site aggregate. /oly site remains canonical; Core
+	-- owns the alias so the sidecar cannot register a typed command during a gamepad login.
+	SLASH_OLYMPUSSITEAGGREGATE1 = "/olysite"
+	SlashCmdList.OLYMPUSSITEAGGREGATE = function(input)
+		if not ns.Gate.Allowed("slash") then return end
+		ns.SafeCall("slash olysite", function()
+			local site = rawget(_G, "OlympusSiteAggregateCommand")
+			if type(site) == "function" then site(tostring(input or "")) else ns.Print(L.RESTART_NEEDED) end
+		end)
 	end
 	-- 1.2: /ola <text> says a line in the fight room open here (ArenaChat.lua, through Arena.RunSlash),
 	-- as /ol says one on the Olympus channel. The room's own box needs no command (the gamepad UI).

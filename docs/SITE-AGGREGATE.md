@@ -34,7 +34,8 @@ website parser release; the addon does not pretend a newer schema is already acc
 
 1. Log into the character in the guild being reported and open the game's Guild roster. Wait for
    Olympus to have a current own-roster census row.
-2. Type `/olysite export`. No event, timer or network path invokes its private preparation
+2. Type `/oly site export` (or the compatibility alias `/olysite export`). No event, timer or
+   network path invokes its private preparation
    function; this command is the deliberate product flow to prepare a local file, not consent to
    publish it. WoW addons share one Lua environment, so this is not a security boundary against
    other installed addon code.
@@ -49,8 +50,8 @@ website parser release; the addon does not pretend a newer schema is already acc
 
 The addon clears an older session's in-memory value whenever it loads. After the `/reload` that
 writes a new export, upload it before another logout or reload, which writes the cleared state.
-Changing guild after `/olysite export` also withdraws the pending value. `/olysite clear` plus
-`/reload` explicitly removes it.
+Changing guild after `/oly site export` also withdraws the pending value. `/oly site clear` plus
+`/reload` explicitly removes it. Both commands have `/olysite` compatibility aliases.
 
 ## In-game acceptance before publication
 
@@ -59,7 +60,7 @@ These client-dependent checks cannot be proven by the offline Lua harness:
 1. Install the generated ZIP and confirm the AddOns screen lists `Olympus`, `Olympus Arena` and
    `Olympus - Site Aggregate` on Forever, Classic Era and Anniversary/TBC.
 2. On an Alliance character in each of `Olympus`, `Olympus I` and `Olympus X`, open the roster,
-   run `/olysite export`, and confirm the success line names only that current guild.
+   run `/oly site export`, and confirm the success line names only that current guild.
 3. Run `/reload`; inspect only the dedicated file and confirm it has exactly the fixed seven-key
    `.198` contract above and no name other than the guild name.
 4. Confirm no HTTP request, addon message, whisper, guild-roster request, popup or automatic

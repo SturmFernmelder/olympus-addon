@@ -21,16 +21,16 @@
 
 	local function With(fn)
 		local saved = {
-			bridge = OlympusBridge, aggregate = OlympusSiteAggregate, slash = SlashCmdList,
-			slashName = SLASH_OLYMPUSSITEAGGREGATE1, compat = OlympusSiteAggregateCompatibility196,
+			bridge = OlympusBridge, aggregate = OlympusSiteAggregate, command = OlympusSiteAggregateCommand,
+			compat = OlympusSiteAggregateCompatibility196,
 			frame = CreateFrame, inGuild = IsInGuild, guild = GetGuildInfo, server = GetServerTime,
 			chat = DEFAULT_CHAT_FRAME,
 		}
 		local state = { now = 1900000000, guild = "Olympus II", inGuild = true, messages = {}, bridgeCalls = 0 }
 		state.checkpoint = Base(state.now)
 		local onEvent, events = nil, {}
-		SlashCmdList = {}
 		OlympusSiteAggregate = { stale = "must be withdrawn at load" }
+		OlympusSiteAggregateCommand = nil
 		OlympusSiteAggregateCompatibility196 = nil
 		CreateFrame = function()
 			return {
@@ -58,15 +58,15 @@
 			state.onEvent, state.events = onEvent, events
 			fn(state)
 		end)
-		OlympusBridge, OlympusSiteAggregate, SlashCmdList = saved.bridge, saved.aggregate, saved.slash
-		SLASH_OLYMPUSSITEAGGREGATE1, OlympusSiteAggregateCompatibility196 = saved.slashName, saved.compat
+		OlympusBridge, OlympusSiteAggregate = saved.bridge, saved.aggregate
+		OlympusSiteAggregateCommand, OlympusSiteAggregateCompatibility196 = saved.command, saved.compat
 		CreateFrame, IsInGuild, GetGuildInfo, GetServerTime, DEFAULT_CHAT_FRAME = saved.frame, saved.inGuild, saved.guild, saved.server, saved.chat
 		if not ok then error(err, 0) end
 	end
 
 	local function Export()
-		assert(type(SlashCmdList.OLYMPUSSITEAGGREGATE) == "function", "the slash command")
-		SlashCmdList.OLYMPUSSITEAGGREGATE("export")
+		assert(type(OlympusSiteAggregateCommand) == "function", "the gated slash command target")
+		OlympusSiteAggregateCommand("export")
 		return OlympusSiteAggregate
 	end
 
@@ -87,7 +87,7 @@
 			eq(OlympusSiteAggregate, nil, "a prior session's value is withdrawn at load")
 			eq(s.bridgeCalls, 0, "loading performs no census read")
 			eq(OlympusSiteAggregateCompatibility196, nil, "Prepare is not exposed to another addon")
-			SlashCmdList.OLYMPUSSITEAGGREGATE("")
+			OlympusSiteAggregateCommand("")
 			eq(OlympusSiteAggregate, nil); eq(s.bridgeCalls, 0, "help does not prepare")
 			local out = assert(Export())
 			eq(s.bridgeCalls, 1)
@@ -181,10 +181,10 @@
 	test("site aggregate: clear is explicit and no other command creates or uploads a value", function()
 		With(function(s)
 			assert(Export())
-			SlashCmdList.OLYMPUSSITEAGGREGATE("clear")
+			OlympusSiteAggregateCommand("clear")
 			eq(OlympusSiteAggregate, nil)
 			local calls = s.bridgeCalls
-			SlashCmdList.OLYMPUSSITEAGGREGATE("publish")
+			OlympusSiteAggregateCommand("publish")
 			eq(OlympusSiteAggregate, nil); eq(s.bridgeCalls, calls, "unknown commands do no work")
 		end)
 	end)

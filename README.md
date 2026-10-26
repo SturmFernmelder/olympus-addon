@@ -2385,7 +2385,8 @@ or remove it in your addon app. Your settings stay in `WTF` until you delete the
 
 ### Deliberate website aggregate
 
-`/olysite export` prepares a fresh, masked aggregate for the current character's own exact
+`/oly site export` (or the compatibility alias `/olysite export`) prepares a fresh, masked
+aggregate for the current character's own exact
 `Olympus` or `Olympus I-X` guild, then `/reload` writes only the dedicated
 `OlympusSiteAggregate.lua` file. It never uploads automatically. Small counts and remainders are
 withheld, source age is checked, the selected private website review expires after five minutes,

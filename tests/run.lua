@@ -30858,9 +30858,9 @@ do
 		-- The addon's own: Core.lua's /oly and Channels.lua's /ol registered with it (taken over).
 		eq(ns.Gate.missing, nil, "the harness loads Gamepad.lua")
 		local fresh = {}
-		local savedEvents, savedPrint, savedSlash, savedArmy, savedNames = #EVENT_SCRIPTS, print,
-			SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY,
-			{ SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1 }
+		local savedEvents, savedPrint, savedSlash, savedArmy, savedSite, savedNames = #EVENT_SCRIPTS, print,
+			SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY, SlashCmdList.OLYMPUSSITEAGGREGATE,
+			{ SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1, SLASH_OLYMPUSSITEAGGREGATE1 }
 		local printed = {}
 		local ok, err = pcall(function()
 			for _, file in ipairs({ "Bootstrap", "Locales", "Core" }) do assert(loadfile(ADDON_DIR .. file .. ".lua"))("Olympus", fresh) end
@@ -30884,8 +30884,9 @@ do
 			assert(SlashCmdList.OLYMPUS ~= savedSlash and type(SlashCmdList.OLYMPUS) == "function", "its /oly")
 		end)
 		print = savedPrint
-		SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY = savedSlash, savedArmy
-		SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1 = savedNames[1], savedNames[2], savedNames[3]
+		SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY, SlashCmdList.OLYMPUSSITEAGGREGATE = savedSlash, savedArmy, savedSite
+		SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1, SLASH_OLYMPUSSITEAGGREGATE1 =
+			savedNames[1], savedNames[2], savedNames[3], savedNames[4]
 		for i = #EVENT_SCRIPTS, savedEvents + 1, -1 do EVENT_SCRIPTS[i] = nil end
 		if not ok then error(err, 0) end
 	end)
@@ -30894,9 +30895,10 @@ do
 	-- ParseText calls hash_SlashCmdList[command] directly, then ClearChat hides the box, its focus
 	-- lost runs ClearGamepadFocus): none registered with the gamepad UI. Core.lua and the gate as the
 	-- game loads them, in a namespace of their own, its login and switches through its own events.
-	test("1.1.5 the gamepad gate, typed commands: a login with the gamepad UI registers no /olympus, /oly, /ogarmy, /ol, /olc or /oll; mouse and keyboard does, once a session however many switches; after a switch to the gamepad UI they do nothing, and the player is told a /reload completes it", function()
-		local NAMES = { "OLYMPUS", "OLYMPUSARMY", "OLYMPUSALL", "OLYMPUSCAPTAINS", "OLYMPUSLORDS" }
-		local GLOBALS = { "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARMY1", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
+	test("1.1.5 the gamepad gate, typed commands: a gamepad login registers no /olympus, /oly, /ogarmy, /olysite, /ol, /olc or /oll; mouse and keyboard does, once a session however many switches; after a switch to gamepad they do nothing, and the player is told a /reload completes it", function()
+		local NAMES = { "OLYMPUS", "OLYMPUSARMY", "OLYMPUSSITEAGGREGATE", "OLYMPUSALL", "OLYMPUSCAPTAINS", "OLYMPUSLORDS" }
+		local GLOBALS = { "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARMY1", "SLASH_OLYMPUSSITEAGGREGATE1", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
+		local savedSiteCommand = OlympusSiteAggregateCommand
 		local saved = { list = {}, globals = {}, events = #EVENT_SCRIPTS, after = C_Timer.After, print = print, debug = ns.db.debug,
 			dialogs = { StaticPopupDialogs.OLYMPUS_CHAT_PRIVACY, StaticPopupDialogs.OLYMPUS_PIN, StaticPopupDialogs.OLYMPUS_PIN_DOWN },
 			chatInfo = C_ChatInfo }
@@ -30935,16 +30937,23 @@ do
 			sns.Fire("LOGIN")
 			eq(SlashCmdList.OLYMPUS, nil, "no /oly with the gamepad UI"); eq(SLASH_OLYMPUS1, nil); eq(SLASH_OLYMPUS2, nil)
 			eq(SlashCmdList.OLYMPUSARMY, nil, "no /ogarmy with the gamepad UI"); eq(SLASH_OLYMPUSARMY1, nil)
+			eq(SlashCmdList.OLYMPUSSITEAGGREGATE, nil, "no /olysite with the gamepad UI"); eq(SLASH_OLYMPUSSITEAGGREGATE1, nil)
 			eq(#sns.Gate.leftovers, 0)
 			-- Switched to mouse and keyboard: registered, and they work.
 			Switch(event, false)
 			local oly = SlashCmdList.OLYMPUS
 			local army = SlashCmdList.OLYMPUSARMY
+			local site = SlashCmdList.OLYMPUSSITEAGGREGATE
 			eq(type(oly), "function", "registered at the switch"); eq(SLASH_OLYMPUS1, "/olympus"); eq(SLASH_OLYMPUS2, "/oly")
 			eq(type(army), "function"); eq(SLASH_OLYMPUSARMY1, "/ogarmy")
+			eq(type(site), "function"); eq(SLASH_OLYMPUSSITEAGGREGATE1, "/olysite")
 			local armyCalls = 0
+			local siteCalls = 0
 			sns.ArmyExport = { Slash = function() armyCalls = armyCalls + 1 end }
+			OlympusSiteAggregateCommand = function() siteCalls = siteCalls + 1 end
 			army("test"); eq(armyCalls, 1, "/ogarmy works with mouse and keyboard")
+			site("test"); eq(siteCalls, 1, "/olysite works with mouse and keyboard")
+			oly("site test"); eq(siteCalls, 2, "/oly site is the canonical route")
 			ns.db.debug = false
 			oly("debug")
 			eq(ns.db.debug, true, "/oly debug works")
@@ -30957,9 +30966,10 @@ do
 			local said = table.concat(printed, "\n")
 			assert(said:find(ns.L.GATE_NOTICE, 1, true), said)
 			printed = {}
-			oly("debug"); oly(""); army("test")
+			oly("debug"); oly(""); oly("site test"); army("test"); site("test")
 			eq(ns.db.debug, true, "nothing done with the gamepad UI"); eq(#printed, 0, "nothing said")
 			eq(armyCalls, 1, "/ogarmy also becomes inert after a gamepad switch")
+			eq(siteCalls, 2, "both site aggregate routes become inert after a gamepad switch")
 			-- Back and forth: the same commands, registered once; told once a session.
 			Switch(event, false)
 			eq(SlashCmdList.OLYMPUS, oly, "the same function: registered once")
@@ -31006,6 +31016,7 @@ do
 		for _, k in ipairs(NAMES) do SlashCmdList[k] = saved.list[k] end
 		for _, k in ipairs(GLOBALS) do _G[k] = saved.globals[k] end
 		for i = #EVENT_SCRIPTS, saved.events + 1, -1 do EVENT_SCRIPTS[i] = nil end
+		OlympusSiteAggregateCommand = savedSiteCommand
 		if not ok then error(err, 0) end
 	end)
 

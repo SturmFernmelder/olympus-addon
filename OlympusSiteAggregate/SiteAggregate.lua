@@ -103,11 +103,11 @@ local function Prepare()
 	return true, "Fresh masked aggregate prepared for " .. own .. ". Type /reload now, then review ONLY SavedVariables/OlympusSiteAggregate.lua in the attended reporter. Nothing was uploaded."
 end
 
--- The action is wired only to this slash command. Prepare stays local and no event, timer,
--- network, roster request or upload invokes it. WoW addons share a Lua environment, so this is a
--- deliberate product flow rather than a cryptographic assertion about other installed code.
-SLASH_OLYMPUSSITEAGGREGATE1 = "/olysite"
-SlashCmdList.OLYMPUSSITEAGGREGATE = function(msg)
+-- Olympus Core owns both /oly site and the /olysite compatibility alias so they follow its
+-- gamepad slash gate. Prepare stays local and no event, timer, roster request or upload invokes it.
+-- WoW addons share a Lua environment, so this is a deliberate product flow rather than a
+-- cryptographic assertion about other installed code.
+OlympusSiteAggregateCommand = function(msg)
 	msg = type(msg) == "string" and msg:lower():match("^%s*(.-)%s*$") or ""
 	if msg == "clear" then
 		OlympusSiteAggregate = nil
@@ -115,7 +115,7 @@ SlashCmdList.OLYMPUSSITEAGGREGATE = function(msg)
 		return
 	end
 	if msg ~= "export" then
-		Say("Use /olysite export or /olysite clear. Only the dedicated export file is safe for the site.")
+		Say("Use /oly site export or /oly site clear (/olysite is a compatibility alias). Only the dedicated export file is safe for the site.")
 		return
 	end
 	local _, why = Prepare()
@@ -123,7 +123,7 @@ SlashCmdList.OLYMPUSSITEAGGREGATE = function(msg)
 end
 
 -- SavedVariables are loaded before addon code. Withdraw any previous session's value immediately;
--- only this session's deliberate /olysite export can arm the next /reload write.
+-- only this session's deliberate /oly site export can arm the next /reload write.
 OlympusSiteAggregate = nil
 
 -- If guild membership changes after export but before /reload, withdraw it. A routine roster
