@@ -102,8 +102,8 @@ end
 L.LETTER_1_3_3_TITLE = "Your guild on the website"
 L.LETTER_1_3_3 = [==[Version 1.3.3.
 
-- {news} A new optional folder, Olympus - Site Aggregate, comes in the same download. Type /oly site export, then /reload, and the game writes a masked count of your own guild (members and online, nothing else) to its own file for the Olympus website. Nothing is uploaded: you choose that file on the website and consent there.
-- {team} An export from an earlier session is cleared at login, and changing guild withdraws a pending one. /oly site clear removes it.
+- {news} A new optional folder, Olympus - Site Aggregate, comes in the same download. In an Alliance guild named Olympus or Olympus I to X, type /oly site export, then /reload, and the game writes a masked count of your own guild (members and online, nothing else) to its own file for the Olympus website. Nothing is uploaded: you choose that file on the website and consent there.
+- {team} Choose the file while the game is still open: your next logout or /reload empties it, so an old export never lingers. Changing guild withdraws a pending one, and /oly site clear removes it.
 - {team} /oly site follows the same gamepad safety rules as the other commands.
 ]==]
 
@@ -135,8 +135,8 @@ if GetLocale() == "ptBR" then
 	L.LETTER_1_3_3_TITLE = "Sua guilda no site"
 	L.LETTER_1_3_3 = [==[Versão 1.3.3.
 
-- {news} Uma nova pasta opcional, Olympus - Site Aggregate, vem no mesmo download. Digite /oly site export e depois /reload: o jogo grava uma contagem mascarada da sua própria guilda (membros e online, nada mais) num arquivo só dela para o site do Olympus. Nada é enviado: você escolhe esse arquivo no site e consente lá.
-- {team} Um export de uma sessão anterior é apagado no login, e trocar de guilda retira um export pendente. /oly site clear o remove.
+- {news} Uma nova pasta opcional, Olympus - Site Aggregate, vem no mesmo download. Numa guilda da Aliança chamada Olympus ou Olympus I a X, digite /oly site export e depois /reload: o jogo grava uma contagem mascarada da sua própria guilda (membros e online, nada mais) num arquivo só dela para o site do Olympus. Nada é enviado: você escolhe esse arquivo no site e consente lá.
+- {team} Escolha o arquivo com o jogo ainda aberto: o próximo logout ou /reload o esvazia, para que um export antigo nunca fique para trás. Trocar de guilda retira um export pendente, e /oly site clear o remove.
 - {team} /oly site segue as mesmas regras de segurança do gamepad que os outros comandos.
 ]==]
 
@@ -1067,6 +1067,8 @@ L.TREASURY_RANK_CORR_NONE = "Federal Treasury correspondent: none named"
 L.TREASURY_DIR_LIT = "%s, %dx in %s: lit below"
 L.TREASURY_GUILD_SNAPSHOT_GONE = "This authorized guild snapshot is no longer available. Return to the Treasury list."
 L.RESTART_NEEDED = "Olympus was updated with new files: close and reopen the game to load them (/reload is not enough)."
+-- 1.3.3: /oly site without the optional Site Aggregate folder loaded (disabled, or new since the game started).
+L.SITE_NOT_LOADED = "The optional Olympus - Site Aggregate addon is not loaded: enable it in the AddOns list, then close and reopen the game."
 L.REALMS_LINKED = "Your guild spans realms: the census of %s is now one."
 L.OFFICER_FIXED = "Captains are rank 1 (right below the guild master) in every guild. This is fixed so every Olympus guild agrees on who can send decrees."
 L.KEY_OFFICERS_ONLY = "Only officers of an Olympus guild can set the realm key."
@@ -3406,6 +3408,7 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.TREASURY_DIR_LIT = "%s, %dx em %s: aceso abaixo"
 	L.TREASURY_GUILD_SNAPSHOT_GONE = "Esta foto autorizada da guilda não está mais disponível. Volte à lista do Tesouro."
 	L.RESTART_NEEDED = "O Olympus foi atualizado com arquivos novos: feche e abra o jogo para carregá-los (/reload não basta)."
+	L.SITE_NOT_LOADED = "O addon opcional Olympus - Site Aggregate não está carregado: ative-o na lista de AddOns e depois feche e abra o jogo."
 	L.REALMS_LINKED = "Sua guilda abrange mais de um reino: o censo de %s agora é um só."
 	L.OFFICER_FIXED = "Capitães são o rank 1 (logo abaixo do guild master) em todas as guildas. É fixo para que todas as Olympus concordem sobre quem pode mandar decretos."
 	L.KEY_OFFICERS_ONLY = "Só officers de uma guilda Olympus podem definir a chave do reino."

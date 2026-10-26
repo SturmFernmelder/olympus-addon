@@ -30120,6 +30120,50 @@ test("1.1 companion checkpoint API: guild and seen-only arrays are sorted and bo
 	if not ok then error(err, 0) end
 end)
 
+-- 1.3.3: a relay's census snapshot can carry another member's newer report of our own guild.
+-- Our own roster row stays the source for our guild (as Take refuses such reports), so the
+-- deliberate site export, which accepts only a roster row, is not refused for it.
+test("1.3.3 companion checkpoint: a newer relayed copy never replaces our own guild's roster row", function()
+	local B, D = OlympusBridge, ns.Data
+	local saved = { rdb = ns.rdb, now = ns.Now, server = D.ServerTime, realm = ns.realm, group = ns.group,
+		faction = ns.faction, guild = GetGuildInfo }
+	local ok, err = pcall(function()
+		local clock = 1800000000
+		local guild = "Olympus II"
+		ns.Now = function() return clock end
+		D.ServerTime = function() return clock end
+		GetGuildInfo = function(unit) if unit == "player" then return guild end end
+		ns.realm, ns.group, ns.faction = "Realm", "Realm", "Alliance"
+		ns.rdb = { seen = {},
+			guilds = {
+				["Olympus II"] = { guild = "Olympus II", total = 900, online = 200, t = clock - 10, st = clock - 10, mine = true },
+				["Olympus III"] = { guild = "Olympus III", total = 500, online = 50, t = clock - 30, st = clock - 30 },
+			},
+			censusGlobal = {
+				["olympus ii"] = { name = "Olympus II", total = 899, online = 201, avg10 = 500, observed = clock - 5, by = "Relay-Realm", heard = clock },
+				["olympus iii"] = { name = "Olympus III", total = 510, online = 60, avg10 = 500, observed = clock - 5, by = "Relay-Realm", heard = clock },
+			},
+		}
+		local function Row(checkpoint, name)
+			for _, g in ipairs(checkpoint.guilds) do if g.name == name then return g end end
+		end
+		local checkpoint = B.GetCensusCheckpoint()
+		local own, other = assert(Row(checkpoint, "Olympus II")), assert(Row(checkpoint, "Olympus III"))
+		eq(own.provenance.source, "roster", "our own guild keeps its roster row")
+		eq(own.members, 900); eq(own.online, 200)
+		eq(other.provenance.source, "relay", "another guild still takes the newer relayed row")
+		eq(other.members, 510)
+		-- After a guild change the old roster row is no longer ours: the newer relay replaces it.
+		guild = "Olympus III"
+		own = assert(Row(B.GetCensusCheckpoint(), "Olympus II"))
+		eq(own.provenance.source, "relay", "a former guild's roster row is not ours any more")
+		eq(own.members, 899)
+	end)
+	ns.rdb, ns.Now, D.ServerTime, ns.realm, ns.group, ns.faction = saved.rdb, saved.now, saved.server, saved.realm, saved.group, saved.faction
+	GetGuildInfo = saved.guild
+	if not ok then error(err, 0) end
+end)
+
 test("1.1 private companion bridge: logout checkpoints, tombstones block old resurrection, malformed sources keep the last good one", function()
 	local realBridge, D = OlympusBridge, ns.Data
 	local saved = { db = OlympusCompanionDB, rdb = ns.rdb, now = ns.Now, server = D.ServerTime,
@@ -30954,6 +30998,16 @@ do
 			army("test"); eq(armyCalls, 1, "/ogarmy works with mouse and keyboard")
 			site("test"); eq(siteCalls, 1, "/olysite works with mouse and keyboard")
 			oly("site test"); eq(siteCalls, 2, "/oly site is the canonical route")
+			-- 1.3.3: the optional sidecar disabled in the AddOns list: both routes say so, by name.
+			local siteCommand = OlympusSiteAggregateCommand
+			OlympusSiteAggregateCommand = nil
+			printed = {}
+			site("export"); oly("site export")
+			local notLoaded = 0
+			for _, line in ipairs(printed) do if line:find(ns.L.SITE_NOT_LOADED, 1, true) then notLoaded = notLoaded + 1 end end
+			eq(notLoaded, 2, "both routes name the missing Site Aggregate addon")
+			assert(ns.L.SITE_NOT_LOADED:find("Site Aggregate", 1, true))
+			OlympusSiteAggregateCommand = siteCommand
 			ns.db.debug = false
 			oly("debug")
 			eq(ns.db.debug, true, "/oly debug works")

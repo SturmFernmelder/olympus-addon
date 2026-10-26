@@ -172,6 +172,11 @@
 		Refused(function(_, row) row.online = row.members + 1 end, "bad counts")
 		Refused(function(_, row) row.members, row.online = 0, 0 end, "empty own roster")
 		Refused(function(s) s.checkpoint.scope.faction = "Horde" end, "wrong faction")
+		With(function(s)
+			s.checkpoint.scope.faction = "Horde"
+			eq(Export(), nil)
+			assert(s.messages[#s.messages]:find("Only the Alliance Olympus", 1, true), "a Horde guild is told why")
+		end)
 		Refused(function(s) s.checkpoint.scope.realmGroup = "bad|group" end, "bad scope")
 		Refused(function(s) s.checkpoint.guilds[2] = s.checkpoint.guilds[1] end, "duplicate own row")
 		Refused(function(s) s.bridgeError = true end, "bridge error")

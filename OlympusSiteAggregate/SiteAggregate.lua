@@ -69,6 +69,9 @@ local function Prepare()
 		return false, "Olympus 1.3.2 census checkpoint API v1 is required."
 	end
 	local ok, c = pcall(b.GetCensusCheckpoint)
+	if ok and type(c) == "table" and type(c.scope) == "table" and c.scope.faction ~= nil and c.scope.faction ~= "Alliance" then
+		return false, "Only the Alliance Olympus and Olympus I-X guilds can be exported; no export was prepared."
+	end
 	if not ok or type(c) ~= "table" or c.schema ~= "olympus-census-checkpoint" or c.version ~= 1
 		or c.timeSource ~= "server" or not Age(now, c.capturedAtServer, CHECKPOINT_MAX_AGE)
 		or type(c.scope) ~= "table" or not Text(c.scope.realmGroup) or c.scope.faction ~= "Alliance"
@@ -100,7 +103,7 @@ local function Prepare()
 		realmGroup = c.scope.realmGroup, faction = "Alliance",
 		guild = { name = own, observedAt = g.observedAtServer, characters = characters, online = online },
 	}
-	return true, "Fresh masked aggregate prepared for " .. own .. ". Type /reload now, then review ONLY SavedVariables/OlympusSiteAggregate.lua in the attended reporter. Nothing was uploaded."
+	return true, "Fresh masked aggregate prepared for " .. own .. ". Type /reload now, then, with the game still open, review ONLY SavedVariables/OlympusSiteAggregate.lua in the attended reporter: your next logout or /reload empties it. Nothing was uploaded."
 end
 
 -- Olympus Core owns both /oly site and the /olysite compatibility alias so they follow its

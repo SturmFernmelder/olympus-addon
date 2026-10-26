@@ -2591,7 +2591,7 @@ local function Slash(input)
 		elseif cmd == "site" then
 			-- The optional sidecar's deliberate SavedVariables export; Core owns the slash/gamepad gate.
 			local site = rawget(_G, "OlympusSiteAggregateCommand")
-			if type(site) == "function" then site(rest) else ns.Print(L.RESTART_NEEDED) end
+			if type(site) == "function" then site(rest) else ns.Print(L.SITE_NOT_LOADED) end
 		elseif cmd == "lfg" or cmd == "board" or cmd == "camp" or cmd == "camps" or cmd == "week" then
 			-- The Board (Board.lua, 1.1): who is looking for a group, and where; camps; the King's week.
 			ns.Board.Slash(cmd, rest)
@@ -2653,7 +2653,7 @@ ns.Gate.Hooks("slash", { key = "core", leftover = function() return slashDone en
 		if not ns.Gate.Allowed("slash") then return end
 		ns.SafeCall("slash olysite", function()
 			local site = rawget(_G, "OlympusSiteAggregateCommand")
-			if type(site) == "function" then site(tostring(input or "")) else ns.Print(L.RESTART_NEEDED) end
+			if type(site) == "function" then site(tostring(input or "")) else ns.Print(L.SITE_NOT_LOADED) end
 		end)
 	end
 	-- 1.2: /ola <text> says a line in the fight room open here (ArenaChat.lua, through Arena.RunSlash),

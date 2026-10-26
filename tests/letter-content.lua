@@ -73,7 +73,8 @@ test("1.3.3 letter content: both languages explain the deliberate site export, t
 		assert(type(body) == "string" and body:find("1.3.3", 1, true), locale .. ": current letter")
 		assert(body:find("/oly site export", 1, true) and body:find("/reload", 1, true), locale .. ": the two steps")
 		assert(body:find(locale == "ptBR" and "Nada é enviado" or "Nothing is uploaded", 1, true), locale .. ": stays local")
-		assert(body:find(locale == "ptBR" and "apagado no login" or "cleared at login", 1, true), locale .. ": older export cleared")
+		assert(body:find(locale == "ptBR" and "o próximo logout ou /reload o esvazia" or "your next logout or /reload empties it", 1, true), locale .. ": when the file is emptied")
+		assert(body:find(locale == "ptBR" and "guilda da Aliança chamada Olympus ou Olympus I a X" or "Alliance guild named Olympus or Olympus I to X", 1, true), locale .. ": who can export")
 		assert(not body:find("{[%a]+}"), locale .. ": all icons render or have text fallback")
 	end
 end)
