@@ -30563,7 +30563,7 @@ test("1.1 private companion bridge: its TOC has one separate SavedVariable and d
 		assert(readme:find(text, 1, true), "bridge docs: " .. text)
 	end
 	local package = Read("scripts/package.sh")
-	assert(package:find("FOLDERS=(Olympus Olympus_Arena)", 1, true), "the public package always includes the complete Olympus bundle")
+	assert(package:find("FOLDERS=(Olympus Olympus_Arena OlympusSiteAggregate)", 1, true), "the public package always includes the complete Olympus bundle")
 	assert(not package:find("OlympusCompanionBridge", 1, true), "the private bridge is not in the public package")
 end)
 

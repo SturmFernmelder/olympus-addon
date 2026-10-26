@@ -23,15 +23,18 @@
 		local saved = {
 			bridge = OlympusBridge, aggregate = OlympusSiteAggregate, command = OlympusSiteAggregateCommand,
 			compat = OlympusSiteAggregateCompatibility196,
+			slash = SlashCmdList, slashName = SLASH_OLYMPUSSITEAGGREGATE1,
 			frame = CreateFrame, inGuild = IsInGuild, guild = GetGuildInfo, server = GetServerTime,
 			chat = DEFAULT_CHAT_FRAME,
 		}
-		local state = { now = 1900000000, guild = "Olympus II", inGuild = true, messages = {}, bridgeCalls = 0 }
+		local state = { now = 1900000000, guild = "Olympus II", inGuild = true, messages = {}, bridgeCalls = 0,
+			slash = {} }
 		state.checkpoint = Base(state.now)
 		local onEvent, events = nil, {}
 		OlympusSiteAggregate = { stale = "must be withdrawn at load" }
 		OlympusSiteAggregateCommand = nil
 		OlympusSiteAggregateCompatibility196 = nil
+		SlashCmdList, SLASH_OLYMPUSSITEAGGREGATE1 = state.slash, nil
 		CreateFrame = function()
 			return {
 				RegisterEvent = function(_, event) events[event] = true end,
@@ -60,6 +63,7 @@
 		end)
 		OlympusBridge, OlympusSiteAggregate = saved.bridge, saved.aggregate
 		OlympusSiteAggregateCommand, OlympusSiteAggregateCompatibility196 = saved.command, saved.compat
+		SlashCmdList, SLASH_OLYMPUSSITEAGGREGATE1 = saved.slash, saved.slashName
 		CreateFrame, IsInGuild, GetGuildInfo, GetServerTime, DEFAULT_CHAT_FRAME = saved.frame, saved.inGuild, saved.guild, saved.server, saved.chat
 		if not ok then error(err, 0) end
 	end
@@ -86,6 +90,8 @@
 		With(function(s)
 			eq(OlympusSiteAggregate, nil, "a prior session's value is withdrawn at load")
 			eq(s.bridgeCalls, 0, "loading performs no census read")
+			eq(s.slash.OLYMPUSSITEAGGREGATE, nil, "the sidecar cannot bypass Core's gamepad slash gate")
+			eq(SLASH_OLYMPUSSITEAGGREGATE1, nil, "Core alone owns the compatibility alias")
 			eq(OlympusSiteAggregateCompatibility196, nil, "Prepare is not exposed to another addon")
 			OlympusSiteAggregateCommand("")
 			eq(OlympusSiteAggregate, nil); eq(s.bridgeCalls, 0, "help does not prepare")
