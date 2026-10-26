@@ -29,8 +29,8 @@ master and the officers of the Horde guild named exactly "Olympus", if there is 
 
 ## Recent versions
 
-- **1.3.2**: Correction: explicitly approximate Census people counts, preserve accepted Treasury rows,
-  fix full-suite ordering regressions and export consented Companion identity evidence.
+- **1.3.3**: Deliberate site export: an optional Site Aggregate folder writes a masked own-guild count for the
+  Olympus website on /oly site export and /reload, never uploads, and clears older exports at login.
 - **1.2.5.1**: Hotfix: officers can return a guild separated by a mismatched private realm key to the
   public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
 - **1.2.5**: Follow-up candidate: chat replies, finalized office shields, normalized honour presentation,

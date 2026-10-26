@@ -99,6 +99,14 @@ if GetLocale and GetLocale() == "ptBR" then
 	L.JUSTICE_TASKS_CONFIRM_HINT = "Confirmar a conclusão para %s após sua própria revisão? A tentativa e a ausência observada não comprovam quem agiu ou a causa. O registro será identificado como confirmado por revisão humana."
 end
 
+L.LETTER_1_3_3_TITLE = "Your guild on the website"
+L.LETTER_1_3_3 = [==[Version 1.3.3.
+
+- {news} A new optional folder, Olympus - Site Aggregate, comes in the same download. Type /oly site export, then /reload, and the game writes a masked count of your own guild (members and online, nothing else) to its own file for the Olympus website. Nothing is uploaded: you choose that file on the website and consent there.
+- {team} An export from an earlier session is cleared at login, and changing guild withdraws a pending one. /oly site clear removes it.
+- {team} /oly site follows the same gamepad safety rules as the other commands.
+]==]
+
 L.LETTER_1_3_2_TITLE = "Shared counts, clarified"
 L.LETTER_1_3_2 = [==[Version 1.3.2.
 
@@ -124,6 +132,14 @@ L.LETTER_1_3_0 = [==[Version 1.3.0.
 This is a large release and therefore starts the 1.3 line. Offline tests cover the rules and data boundaries; multiplayer relay, client-specific UI and map placement still depend on live in-game observation.]==]
 
 if GetLocale() == "ptBR" then
+	L.LETTER_1_3_3_TITLE = "Sua guilda no site"
+	L.LETTER_1_3_3 = [==[Versão 1.3.3.
+
+- {news} Uma nova pasta opcional, Olympus - Site Aggregate, vem no mesmo download. Digite /oly site export e depois /reload: o jogo grava uma contagem mascarada da sua própria guilda (membros e online, nada mais) num arquivo só dela para o site do Olympus. Nada é enviado: você escolhe esse arquivo no site e consente lá.
+- {team} Um export de uma sessão anterior é apagado no login, e trocar de guilda retira um export pendente. /oly site clear o remove.
+- {team} /oly site segue as mesmas regras de segurança do gamepad que os outros comandos.
+]==]
+
 	L.LETTER_1_3_2_TITLE = "Contagens compartilhadas, explicadas"
 	L.LETTER_1_3_2 = [==[Versão 1.3.2.
 

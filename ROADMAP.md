@@ -45,6 +45,8 @@
   safer shared rankings and relay queues, and predictable Most Wanted list expansion.
 - v1.2.5.1 Hotfix: officers can return a guild separated by a mismatched private realm key to the
   public Olympus channel, restoring shared chat and live census relay without accepting an older key again.
+- v1.3.3 Deliberate site export: an optional Site Aggregate folder writes a masked own-guild count for the
+  Olympus website on /oly site export and /reload, never uploads, and clears older exports at login.
 - v1.3.2 Correction: explicitly approximate Census people counts, preserve accepted Treasury rows,
   fix full-suite ordering regressions and export consented Companion identity evidence.
 - v1.3.0 Shared durable records and rankings; Church catch-up; Wanted and Slayers pagination,

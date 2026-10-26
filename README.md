@@ -2370,7 +2370,7 @@ game in the app, not Classic Era.
    Careful: Windows' *Extract All* adds a folder named after the zip
    (`AddOns\Olympus-0.8.1\Olympus\...`). If that happens, move the `Olympus` folder up into
    `AddOns`; the game only loads it from `AddOns\Olympus\`.
-   From 1.3.2 the zip holds three folders: `Olympus`, `Olympus_Arena` (the Blood Arena's screens,
+   From 1.3.3 the zip holds three folders: `Olympus`, `Olympus_Arena` (the Blood Arena's screens,
    loaded only when you open the arena) and `OlympusSiteAggregate` (the deliberate, no-upload
    website reporter). All three go in `AddOns`, so that `...\AddOns\Olympus_Arena\Olympus_Arena.toc`
    and `...\AddOns\OlympusSiteAggregate\OlympusSiteAggregate.toc` exist too. Keep them together
