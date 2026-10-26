@@ -2639,6 +2639,7 @@ ns.Gate.Hooks("slash", { key = "core", leftover = function() return slashDone en
 	-- enter ArmyExport's same closed release gate.
 	SLASH_OLYMPUSARMY1 = "/ogarmy"
 	SlashCmdList.OLYMPUSARMY = function(input)
+		if not ns.Gate.Allowed("slash") then return end
 		if ns.ArmyExport then ns.ArmyExport.Slash(tostring(input or "")) else ns.Print(L.RESTART_NEEDED) end
 	end
 	-- 1.2: /ola <text> says a line in the fight room open here (ArenaChat.lua, through Arena.RunSlash),

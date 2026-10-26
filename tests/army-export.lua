@@ -132,7 +132,7 @@ test("Army QR: existing BSD encoder makes bounded level-L matrices from the prot
 	for x = 1, #matrix do eq(#matrix[x], #matrix) end
 end)
 
-test("Army QR: native scan requires show-offline, every row and exactly one matching player GUID", function()
+test("Army QR: native scan requires a stable complete roster and one online matching player GUID", function()
 	local saved = { IsInGuild, GetGuildInfo, UnitFactionGroup, UnitGUID, GetNumGuildMembers, GetGuildRosterInfo,
 		GetGuildRosterShowOffline, ns.faction, ns.group }
 	local ok, err = pcall(function()
@@ -141,22 +141,52 @@ test("Army QR: native scan requires show-offline, every row and exactly one matc
 		GetGuildInfo = function() return "Olympus III" end
 		UnitFactionGroup = function() return "Alliance" end
 		UnitGUID = function() return "Player-1-ME" end
-		GetNumGuildMembers = function() return 5, 1 end
-		GetGuildRosterShowOffline = function() return true end
+		local mode, countCalls, showCalls = nil, 0, 0
+		GetNumGuildMembers = function()
+			countCalls = countCalls + 1
+			if mode == "size-changed" and countCalls > 1 then return 4, 1 end
+			if mode == "online-changed" and countCalls > 1 then return 5, 2 end
+			if mode == "online-mismatch" then return 5, 2 end
+			if mode == "online-missing" then return 5, nil end
+			return 5, 1
+		end
+		GetGuildRosterShowOffline = function()
+			showCalls = showCalls + 1
+			return not (mode == "show-changed" and showCalls > 1)
+		end
 		GetGuildRosterInfo = function(i)
-			return "Member" .. i, "Rank", i - 1, i == 5 and 70 or 60, "Warrior", "", "", "", i == 1,
-				0, "WARRIOR", 0, 0, false, false, 0, i == 3 and "Player-1-ME" or ("Player-1-" .. i)
+			if mode == "incomplete" and i == 5 then return nil end
+			local name = "Member" .. i
+			local guid = i == 3 and "Player-1-ME" or ("Player-1-" .. i)
+			local online = i == 3
+			if mode == "duplicate" and i == 5 then guid = "Player-1-4" end
+			if mode == "duplicate-name" and i == 5 then name = "Member4" end
+			if mode == "missing-online" and i == 5 then online = nil end
+			if mode == "self-offline" then online = i == 1 end
+			return name, "Rank", i - 1, i == 5 and 70 or 60, "Warrior", "", "", "", online,
+				0, "WARRIOR", 0, 0, false, false, 0, guid
 		end
 		local scope = assert(Army.Scope())
 		scope.playerGUID = UnitGUID("player")
 		local rows = assert(Army.ReadRoster(scope)); eq(#rows, 5); eq(rows[5].level, 70)
-		GetGuildRosterInfo = function(i)
-			if i == 5 then return nil end
-			return "Member" .. i, "Rank", 0, 60, "Warrior", "", "", "", false, 0, "WARRIOR", 0, 0, false, false, 0, "Player-1-" .. i
+		local function Refused(which, want)
+			mode, countCalls, showCalls = which, 0, 0
+			local none, why = Army.ReadRoster(scope)
+			eq(none, nil, which); eq(why, want, which)
 		end
-		local none, why = Army.ReadRoster(scope); eq(none, nil); eq(why, "roster-incomplete")
+		Refused("incomplete", "roster-incomplete")
+		Refused("duplicate", "roster-duplicate")
+		Refused("duplicate-name", "roster-duplicate")
+		Refused("missing-online", "roster-incomplete")
+		Refused("self-offline", "own-guid-offline")
+		Refused("online-missing", "native-online")
+		Refused("online-mismatch", "online-mismatch")
+		Refused("size-changed", "roster-changed")
+		Refused("online-changed", "online-changed")
+		Refused("show-changed", "show-offline")
+		mode, countCalls, showCalls = nil, 0, 0
 		GetGuildRosterShowOffline = function() return false end
-		none, why = Army.ReadRoster(scope); eq(none, nil); eq(why, "show-offline")
+		local none, why = Army.ReadRoster(scope); eq(none, nil); eq(why, "show-offline")
 		GetGuildRosterShowOffline = nil
 		none, why = Army.ReadRoster(scope); eq(none, nil); eq(why, "show-offline")
 	end)
@@ -182,7 +212,7 @@ test("Army QR: Start binds the native GUID and a roster event completes real fra
 		SetGuildRosterShowOffline = function(value) shown = value == true end
 		GetNumGuildMembers = function() return 5, 1 end
 		GetGuildRosterInfo = function(i)
-			return "Member" .. i, "Rank", i - 1, 60, "Warrior", "", "", "", i == 1,
+			return "Member" .. i, "Rank", i - 1, 60, "Warrior", "", "", "", i == 3,
 				0, "WARRIOR", 0, 0, false, false, 0, i == 3 and "Player-1-ME" or ("Player-1-" .. i)
 		end
 		GetServerTime = function() return 1800000000 end
@@ -201,6 +231,23 @@ test("Army QR: Start binds the native GUID and a roster event completes real fra
 		assert(captured[1]:find("^OLCS2|0123456789abcdef0123456789abcdef|"), captured[1])
 		eq(shown, false, "the player's show-offline choice is restored")
 		eq(rosterCalls, 2, "restoring show-offline refreshes the native roster")
+		captured = nil
+		started, why = WithActivation(function()
+			return Army.Start("11111111111111111111111111111111")
+		end)
+		eq(started, true); eq(shown, true)
+		for _, dispatch in ipairs(EVENT_SCRIPTS) do dispatch(nil, "PLAYER_GUILD_UPDATE", "target") end
+		local again, pendingWhy = WithActivation(function()
+			return Army.Start("22222222222222222222222222222222")
+		end)
+		eq(again, false); eq(pendingWhy, "pending", "another unit's guild update must not cancel our scan")
+		for _, dispatch in ipairs(EVENT_SCRIPTS) do dispatch(nil, "PLAYER_GUILD_UPDATE", "player") end
+		eq(shown, false, "our own guild update cancels and restores the roster filter")
+		again, pendingWhy = WithActivation(function()
+			return Army.Start("22222222222222222222222222222222")
+		end)
+		eq(again, true, "a player guild update cleared the pending scan"); eq(pendingWhy, nil)
+		Army.Cancel()
 	end)
 	Army.Cancel()
 	IsInGuild, GetGuildInfo, UnitFactionGroup, UnitGUID, GetNumGuildMembers, GetGuildRosterInfo =
@@ -251,9 +298,19 @@ test("Army QR: the lazy renderer rotates bounded rectangles and forgets frames w
 			assert(#f.modules > 0 and #f.modules < 2401, "merged QR rectangles, not one texture per possible module")
 			assert(f.canvas:GetWidth() > 0 and f.part:GetText() == "Frame 1 of 3")
 			assert(timers[1] and not timers[1].cancelled, "one cancellable rotation timer")
-			f:Hide()
+			local started, why = WithActivation(function() return Army.Start("invalid") end)
+			eq(started, false); eq(why, "nonce")
+			eq(f:IsShown(), false, "a new refused attempt closes the stale QR")
 			eq(f.frames, nil); eq(f.part:GetText(), ""); eq(timers[1].cancelled, true)
 			for _, texture in ipairs(f.modules) do eq(texture:IsShown(), false) end
+			eq(Army.ShowFrames(frames), true)
+			for _, dispatch in ipairs(EVENT_SCRIPTS) do dispatch(nil, "PLAYER_GUILD_UPDATE", "target") end
+			eq(f:IsShown(), true, "another unit's guild update leaves the attended QR visible")
+			for _, dispatch in ipairs(EVENT_SCRIPTS) do dispatch(nil, "PLAYER_REGEN_DISABLED") end
+			eq(f:IsShown(), false); eq(f.frames, nil, "combat clears the attended QR")
+			eq(Army.ShowFrames(frames), true)
+			for _, dispatch in ipairs(EVENT_SCRIPTS) do dispatch(nil, "PLAYER_LEAVING_WORLD") end
+			eq(f:IsShown(), false); eq(f.frames, nil, "a supported leaving-world event clears the QR")
 		end)
 		Ed.after, C_Timer.NewTimer = oldAfter, oldTimer
 		Ed.Reset()

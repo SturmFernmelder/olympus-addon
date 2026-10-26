@@ -30939,8 +30939,12 @@ do
 			-- Switched to mouse and keyboard: registered, and they work.
 			Switch(event, false)
 			local oly = SlashCmdList.OLYMPUS
+			local army = SlashCmdList.OLYMPUSARMY
 			eq(type(oly), "function", "registered at the switch"); eq(SLASH_OLYMPUS1, "/olympus"); eq(SLASH_OLYMPUS2, "/oly")
-			eq(type(SlashCmdList.OLYMPUSARMY), "function"); eq(SLASH_OLYMPUSARMY1, "/ogarmy")
+			eq(type(army), "function"); eq(SLASH_OLYMPUSARMY1, "/ogarmy")
+			local armyCalls = 0
+			sns.ArmyExport = { Slash = function() armyCalls = armyCalls + 1 end }
+			army("test"); eq(armyCalls, 1, "/ogarmy works with mouse and keyboard")
 			ns.db.debug = false
 			oly("debug")
 			eq(ns.db.debug, true, "/oly debug works")
@@ -30953,8 +30957,9 @@ do
 			local said = table.concat(printed, "\n")
 			assert(said:find(ns.L.GATE_NOTICE, 1, true), said)
 			printed = {}
-			oly("debug"); oly("")
+			oly("debug"); oly(""); army("test")
 			eq(ns.db.debug, true, "nothing done with the gamepad UI"); eq(#printed, 0, "nothing said")
+			eq(armyCalls, 1, "/ogarmy also becomes inert after a gamepad switch")
 			-- Back and forth: the same commands, registered once; told once a session.
 			Switch(event, false)
 			eq(SlashCmdList.OLYMPUS, oly, "the same function: registered once")

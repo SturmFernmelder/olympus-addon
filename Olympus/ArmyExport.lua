@@ -276,20 +276,48 @@ function Army.ReadRoster(expected)
 	if scope.guild ~= expected.guild or scope.faction ~= expected.faction or scope.realmGroup ~= expected.realmGroup then return nil, "scope-changed" end
 	local playerGUID = type(UnitGUID) == "function" and Public(UnitGUID("player"), "string") or nil
 	if not playerGUID or playerGUID ~= expected.playerGUID then return nil, "player-changed" end
-	local total = Integer(GetNumGuildMembers(), 1, Army.MAX_REPORTED_CHARACTERS)
+	local total, reportedOnline = GetNumGuildMembers()
+	total = Integer(total, 1, Army.MAX_REPORTED_CHARACTERS)
+	reportedOnline = total and Integer(reportedOnline, 0, total) or nil
 	if not total then return nil, "roster-count" end
-	local rows, own = {}, 0
+	if not reportedOnline then return nil, "native-online" end
+	local rows, own, onlineCount = {}, 0, 0
+	local seenGUID, seenName = {}, {}
 	for i = 1, total do
 		local name, _, rankIndex, level, _, _, _, _, online, _, classFile, _, _, _, _, _, guid = GetGuildRosterInfo(i)
-		name, guid = Public(name, "string"), Public(guid, "string")
-		if not name or name == "" or not guid or guid == "" then return nil, "roster-incomplete" end
-		if guid == playerGUID then own = own + 1 end
+		name, guid, online = Public(name, "string"), Public(guid, "string"), Public(online, "boolean")
+		if not name or name == "" or not guid or guid == "" or online == nil then return nil, "roster-incomplete" end
+		local foldedName = name:lower()
+		if seenGUID[guid] or seenName[foldedName] then
+			return nil, guid == playerGUID and "own-guid-duplicate" or "roster-duplicate"
+		end
+		seenGUID[guid], seenName[foldedName] = true, true
+		if online then onlineCount = onlineCount + 1 end
+		if guid == playerGUID then
+			if not online then return nil, "own-guid-offline" end
+			own = own + 1
+		end
 		rows[i] = {
 			level = Integer(level, 1, 255), rankIndex = Integer(rankIndex, 0, 255),
-			classFile = Public(classFile, "string"), online = online == true,
+			classFile = Public(classFile, "string"), online = online,
 		}
 	end
 	if #rows ~= total or own ~= 1 then return nil, own == 0 and "own-guid-missing" or "own-guid-duplicate" end
+	local endTotal, endOnline = GetNumGuildMembers()
+	endTotal = Integer(endTotal, 1, Army.MAX_REPORTED_CHARACTERS)
+	endOnline = endTotal and Integer(endOnline, 0, endTotal) or nil
+	if not endTotal then return nil, "roster-count" end
+	if not endOnline then return nil, "native-online" end
+	if endTotal ~= total then return nil, "roster-changed" end
+	if endOnline ~= reportedOnline then return nil, "online-changed" end
+	if onlineCount ~= reportedOnline then return nil, "online-mismatch" end
+	if OfflineShown() ~= true then return nil, "show-offline" end
+	local endScope, endWhy = Army.Scope()
+	if not endScope then return nil, endWhy end
+	if endScope.guild ~= expected.guild or endScope.faction ~= expected.faction
+		or endScope.realmGroup ~= expected.realmGroup then return nil, "scope-changed" end
+	local endGUID = type(UnitGUID) == "function" and Public(UnitGUID("player"), "string") or nil
+	if not endGUID or endGUID ~= playerGUID then return nil, "player-changed" end
 	return rows
 end
 
@@ -434,7 +462,10 @@ local function Finish(id)
 	end
 	local rows, why = Army.ReadRoster(p.scope)
 	if not rows then
-		if why == "roster-incomplete" or why == "roster-count" or why == "own-guid-missing" or why == "show-offline" then
+		if why == "roster-incomplete" or why == "roster-count" or why == "native-online"
+			or why == "roster-duplicate" or why == "own-guid-missing" or why == "own-guid-duplicate"
+			or why == "own-guid-offline" or why == "roster-changed" or why == "online-changed"
+			or why == "online-mismatch" or why == "show-offline" then
 			return false, why -- another roster update may finish the native snapshot
 		end
 		return Cancel("the roster was refused"), why
@@ -453,6 +484,8 @@ end
 
 function Army.Start(nonce)
 	if not ACTIVATION_ENABLED then return false, "inactive" end
+	-- A new attended attempt supersedes any old display even when its new input is refused.
+	CloseWindow()
 	if pending then return false, "pending" end
 	nonce = Army.ValidateNonce(nonce)
 	if not nonce then return false, "nonce" end
@@ -477,7 +510,6 @@ function Army.Start(nonce)
 		if not ok then Cancel() return false, "show-offline-api" end
 	end
 	if not RequestRoster() then Cancel() return false, "api" end
-	CloseWindow()
 	local id = serial
 	ns.After(Army.SCAN_TIMEOUT, "army export timeout", function()
 		if pending and pending.id == id then Cancel("the roster timed out") end
@@ -503,10 +535,18 @@ ns.RegisterEvent("GUILD_ROSTER_UPDATE", function()
 	pending.updated = true
 	Finish(pending.id)
 end)
-for _, event in ipairs({ "PLAYER_LOGOUT", "PLAYER_ENTERING_WORLD", "PLAYER_GUILD_UPDATE" }) do
-	ns.RegisterEvent(event, function()
-		CloseWindow()
-		Cancel("the world or guild changed")
-	end)
+local function StopForTransition(reason)
+	CloseWindow()
+	Cancel(reason)
 end
+ns.RegisterEvent("PLAYER_LOGOUT", function() StopForTransition("the world changed") end)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", function() StopForTransition("the world changed") end)
+ns.RegisterEvent("PLAYER_REGEN_DISABLED", function() StopForTransition("combat started") end)
+ns.RegisterEvent("PLAYER_GUILD_UPDATE", function(unit)
+	if unit and unit ~= "player" then return end
+	StopForTransition("the guild changed")
+end)
+-- Forever's extracted API does not declare this event, while Era/TBC clients may provide it.
+-- Register it only where the client accepts it; PLAYER_ENTERING_WORLD is the portable fallback.
+pcall(ns.RegisterEvent, "PLAYER_LEAVING_WORLD", function() StopForTransition("the world changed") end)
 
