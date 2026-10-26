@@ -48,7 +48,8 @@ website parser release; the addon does not pretend a newer schema is already acc
    review then expires after five minutes.
 6. Preview the proposed publication on the website and consent there separately.
 
-The addon clears an older session's in-memory value whenever it loads. After the `/reload` that
+The addon clears an older session's value as soon as the game restores it at login or reload
+(on `ADDON_LOADED`), so only an export made in this session is written. After the `/reload` that
 writes a new export, upload it before another logout or reload, which writes the cleared state.
 Changing guild after `/oly site export` also withdraws the pending value. `/oly site clear` plus
 `/reload` explicitly removes it. Both commands have `/olysite` compatibility aliases.

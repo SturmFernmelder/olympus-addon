@@ -122,16 +122,23 @@ OlympusSiteAggregateCommand = function(msg)
 	Say(why)
 end
 
--- SavedVariables are loaded before addon code. Withdraw any previous session's value immediately;
--- only this session's deliberate /oly site export can arm the next /reload write.
-OlympusSiteAggregate = nil
-
+-- The client restores SavedVariables after this file runs, then fires ADDON_LOADED for this
+-- addon. Withdraw any previous session's value there; only this session's deliberate
+-- /oly site export can arm the next /reload write.
 -- If guild membership changes after export but before /reload, withdraw it. A routine roster
 -- refresh for the same guild keeps it armed.
 local frame = CreateFrame("Frame")
+frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_GUILD_UPDATE")
 frame:RegisterEvent("GUILD_ROSTER_UPDATE")
-frame:SetScript("OnEvent", function()
+frame:SetScript("OnEvent", function(self, event, name)
+	if event == "ADDON_LOADED" then
+		if name == "OlympusSiteAggregate" then
+			OlympusSiteAggregate = nil
+			self:UnregisterEvent("ADDON_LOADED")
+		end
+		return
+	end
 	local export = OlympusSiteAggregate
 	if type(export) == "table" and type(export.guild) == "table" and CurrentGuild() ~= export.guild.name then
 		OlympusSiteAggregate = nil

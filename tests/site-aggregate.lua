@@ -30,16 +30,18 @@
 		local state = { now = 1900000000, guild = "Olympus II", inGuild = true, messages = {}, bridgeCalls = 0,
 			slash = {} }
 		state.checkpoint = Base(state.now)
-		local onEvent, events = nil, {}
-		OlympusSiteAggregate = { stale = "must be withdrawn at load" }
+		local onEvent, events, frame = nil, {}, nil
+		OlympusSiteAggregate = nil
 		OlympusSiteAggregateCommand = nil
 		OlympusSiteAggregateCompatibility196 = nil
 		SlashCmdList, SLASH_OLYMPUSSITEAGGREGATE1 = state.slash, nil
 		CreateFrame = function()
-			return {
+			frame = {
 				RegisterEvent = function(_, event) events[event] = true end,
+				UnregisterEvent = function(_, event) events[event] = nil end,
 				SetScript = function(_, kind, handler) if kind == "OnEvent" then onEvent = handler end end,
 			}
+			return frame
 		end
 		IsInGuild = function() return state.inGuild end
 		GetGuildInfo = function(unit) if unit == "player" then return state.guild end end
@@ -57,8 +59,15 @@
 			end,
 		}
 		local ok, err = pcall(function()
+			-- The client's order: the file runs, the previous session's SavedVariables are
+			-- restored, then ADDON_LOADED fires for this addon.
 			assert(loadfile(FILE))()
-			state.onEvent, state.events = onEvent, events
+			OlympusSiteAggregate = { stale = "must be withdrawn at load" }
+			state.restored = OlympusSiteAggregate
+			state.onEvent, state.events = function(_, ...) return onEvent(frame, ...) end, events
+			state.onEvent(nil, "ADDON_LOADED", "Olympus")
+			eq(OlympusSiteAggregate, state.restored, "another addon's load leaves it alone")
+			state.onEvent(nil, "ADDON_LOADED", "OlympusSiteAggregate")
 			fn(state)
 		end)
 		OlympusBridge, OlympusSiteAggregate = saved.bridge, saved.aggregate
@@ -88,7 +97,8 @@
 
 	test("site aggregate: only an explicit export writes a fresh server-clock own-roster allowlist", function()
 		With(function(s)
-			eq(OlympusSiteAggregate, nil, "a prior session's value is withdrawn at load")
+			eq(OlympusSiteAggregate, nil, "a prior session's value is withdrawn once its SavedVariables load")
+			eq(s.events.ADDON_LOADED, nil, "the load listener is released after its own addon")
 			eq(s.bridgeCalls, 0, "loading performs no census read")
 			eq(s.slash.OLYMPUSSITEAGGREGATE, nil, "the sidecar cannot bypass Core's gamepad slash gate")
 			eq(SLASH_OLYMPUSSITEAGGREGATE1, nil, "Core alone owns the compatibility alias")
