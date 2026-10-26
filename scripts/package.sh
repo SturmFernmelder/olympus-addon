@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Builds dist/Olympus-<version>.zip with both folders, Olympus and Olympus_Arena (1.2: the Blood
-# Arena's load-on-demand screens); unzip it into World of Warcraft/<flavor>/Interface/AddOns.
+# Builds dist/Olympus-<version>.zip with Olympus, Olympus_Arena and OlympusSiteAggregate (the
+# deliberate, no-upload site reporter); unzip it into World of Warcraft/<flavor>/Interface/AddOns.
 # Every zip also gets a sorted .files.txt manifest and a .sha256 checksum.
 #   scripts/package.sh            the release; refused while Olympus/TestBuild.lua exists
 #   scripts/package.sh --test N   arena test build N (1-999) of the TOC's version, into dist/testN/
@@ -80,7 +80,7 @@ if [ "$MODE" != test ] && [ -e Olympus/TestBuild.lua ]; then
 fi
 clean_source
 
-# Olympus and Olympus_Arena are one release bundle. Refuse an incomplete commit instead of
+# All three folders are one release bundle. Refuse an incomplete commit instead of
 # silently producing a package that drops the load-on-demand Arena module. The module handoff
 # already requires the two base versions to match at runtime; enforce the same invariant before
 # publishing so a mixed install cannot be created by this script.
@@ -89,9 +89,15 @@ for toc in Olympus/Olympus.toc Olympus_Arena/Olympus_Arena.toc OlympusSiteAggreg
 done
 VERSION=$(git show HEAD:Olympus/Olympus.toc | awk '/^## Version:/ { sub(/\r$/, "", $3); print $3; exit }')
 ARENA_VERSION=$(git show HEAD:Olympus_Arena/Olympus_Arena.toc | awk '/^## Version:/ { sub(/\r$/, "", $3); print $3; exit }')
+SITE_VERSION=$(git show HEAD:OlympusSiteAggregate/OlympusSiteAggregate.toc | awk '/^## Version:/ { sub(/\r$/, "", $3); print $3; exit }')
 [ -n "$VERSION" ] || fail "package.sh cannot read Olympus/Olympus.toc Version"
 [ -n "$ARENA_VERSION" ] || fail "package.sh cannot read Olympus_Arena/Olympus_Arena.toc Version"
+[ -n "$SITE_VERSION" ] || fail "package.sh cannot read OlympusSiteAggregate/OlympusSiteAggregate.toc Version"
 [ "$ARENA_VERSION" = "$VERSION" ] || fail "package.sh requires one bundle version: Olympus is $VERSION but Olympus_Arena is $ARENA_VERSION"
+case "$SITE_VERSION" in
+	"$VERSION"-site.*) ;;
+	*) fail "package.sh requires the site reporter for Olympus $VERSION: OlympusSiteAggregate is $SITE_VERSION" ;;
+esac
 
 if ! command -v zip >/dev/null 2>&1; then fail "package.sh requires zip"; fi
 if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1 && ! command -v openssl >/dev/null 2>&1; then
@@ -190,11 +196,13 @@ For the named testers only: never put it on CurseForge or GitHub.
 2. Verify the zip against Olympus-$VERSION-test$N.sha256.
 3. In the CurseForge app or WowUp, turn off auto-update for Olympus (or stop managing it).
 4. Keep a copy of WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua (/oly backup works too).
-5. Delete Interface/AddOns/Olympus and Interface/AddOns/Olympus_Arena, then unzip this zip in
+5. Delete Interface/AddOns/Olympus, Interface/AddOns/Olympus_Arena and
+   Interface/AddOns/OlympusSiteAggregate, then unzip this zip in
    Interface/AddOns, so that Interface/AddOns/Olympus/Olympus.toc and
-   Interface/AddOns/Olympus_Arena/Olympus_Arena.toc exist (the folders keep those names).
+   Interface/AddOns/Olympus_Arena/Olympus_Arena.toc and
+   Interface/AddOns/OlympusSiteAggregate/OlympusSiteAggregate.toc exist (the folders keep those names).
 6. Start the game: /oly arena status says "arena test build $N".
-Going back: quit, delete both folders, reinstall Olympus from the app, turn auto-update on again.
+Going back: quit, delete all three folders, reinstall Olympus from the app, turn auto-update on again.
 TXT
 	echo "$ZIP"
 	exit 0

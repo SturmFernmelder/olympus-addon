@@ -2370,15 +2370,27 @@ game in the app, not Classic Era.
    Careful: Windows' *Extract All* adds a folder named after the zip
    (`AddOns\Olympus-0.8.1\Olympus\...`). If that happens, move the `Olympus` folder up into
    `AddOns`; the game only loads it from `AddOns\Olympus\`.
-   From 1.2 the zip holds two folders, `Olympus` and `Olympus_Arena` (the Blood Arena's screens,
-   loaded only when you open the arena): both go in `AddOns`, so that
-   `...\AddOns\Olympus_Arena\Olympus_Arena.toc` exists too. Keep them together and update them
-   together; Olympus Arena needs Olympus enabled.
+   From 1.3.2 the zip holds three folders: `Olympus`, `Olympus_Arena` (the Blood Arena's screens,
+   loaded only when you open the arena) and `OlympusSiteAggregate` (the deliberate, no-upload
+   website reporter). All three go in `AddOns`, so that `...\AddOns\Olympus_Arena\Olympus_Arena.toc`
+   and `...\AddOns\OlympusSiteAggregate\OlympusSiteAggregate.toc` exist too. Keep them together
+   and update them together; both additional folders need Olympus enabled.
 5. **Restart the game.** If the addon list says *out of date*, tick **Load out of date AddOns**.
 
-**To uninstall:** delete `Interface\AddOns\Olympus` (and, from 1.2, `Interface\AddOns\Olympus_Arena`),
+**To uninstall:** delete `Interface\AddOns\Olympus`, `Interface\AddOns\Olympus_Arena` and
+`Interface\AddOns\OlympusSiteAggregate`,
 or remove it in your addon app. Your settings stay in `WTF` until you delete them too
-(`SavedVariables\Olympus.lua`, and from 1.2 `SavedVariables\Olympus_Arena.lua`).
+(`SavedVariables\Olympus.lua`, `SavedVariables\Olympus_Arena.lua` and the separate, short-lived
+`SavedVariables\OlympusSiteAggregate.lua`).
+
+### Deliberate website aggregate
+
+`/olysite export` prepares a fresh, masked aggregate for the current character's own exact
+`Olympus` or `Olympus I-X` guild, then `/reload` writes only the dedicated
+`OlympusSiteAggregate.lua` file. It never uploads automatically. Small counts and remainders are
+withheld, source age is checked, the selected private website review expires after five minutes,
+and publishing remains a separate preview and consent. See [the data boundary, workflow, in-game
+checks and rollback](docs/SITE-AGGREGATE.md).
 
 The addon only shows **live data**: guilds appear as soon as one of their members with the
 addon is online (give it a few minutes). There is no demo mode any more.
@@ -3168,13 +3180,15 @@ Council signing round trip: a throwaway key in a temporary folder, lists signed 
 `scripts/council-sign.py` and checked by `Olympus/Sign.lua` (never the author's key). This
 is the same command CI uses; it stops with a nonzero exit status on failure.
 The TOC file check also catches filename case mismatches on CI's Linux filesystem.
-From 1.2 the same checks cover the Olympus Arena module folder, `Olympus_Arena/` (its Lua files,
-the files `Olympus_Arena/Olympus_Arena.toc` lists, its lint), and `bash tests/check-scripts.sh`
-builds both packages in a temporary copy: the release zip holds both folders and no test build, and
+From 1.2 the same checks cover the Olympus Arena module folder, `Olympus_Arena/`; they also cover
+the bundled `OlympusSiteAggregate/` addon (Lua syntax, TOC entries and globals). `bash
+tests/check-scripts.sh` builds the release in a temporary copy: its zip holds all three folders and
+no test build, and
 `scripts/package.sh --test N` writes `Olympus/TestBuild.lua` (never committed: `.gitignore`) after
 `Core.lua` in its own copy of `Olympus.toc` alone, the Olympus Arena module keeping the base
-version. Packaging refuses a commit missing either folder or giving the two TOCs different base
-versions. The arena's tests live in `tests/arena/` (one file per part, run by `tests/run.lua`), on
+version. Packaging refuses a commit missing any folder, giving the two core TOCs different base
+versions, or carrying a site reporter for another Olympus base version. The reporter's behavior
+tests live in `tests/site-aggregate.lua`. The arena's tests live in `tests/arena/` (one file per part, run by `tests/run.lua`), on
 the test world of `tests/arena/lib/world.lua`.
 
 Test builds, the author only: `/oly selftest` probes the client's APIs, opens every page and module
@@ -3360,11 +3374,11 @@ python3 scripts/council-sign.py steward "<Name-Realm>"  # the author: mark the K
 python3 scripts/council-sign.py guild "<Guild Name>"  # the author: approve a guild of Olympus, sign the council (below)
 python3 scripts/council-sign.py arbiter [--audit] "<Name-Realm>"  # the author (1.2): a signed arena arbiter (+ auditor), sign the council
 python3 scripts/council-sign.py check     # the author: read dist/CouncilList.lua back, check its signatures with the key
-scripts/package.sh                        # dist/Olympus-<version>.zip (both folders: Olympus and Olympus_Arena)
-scripts/package.sh --test N               # 1.2: arena test build N in dist/testN/ and dist/Olympus-<version>-testN.zip
+scripts/package.sh                        # dist/Olympus-<version>.zip (Olympus, Arena and SiteAggregate)
+scripts/package.sh --test N               # test build N with all three folders and rollback steps
 scripts/package.sh --release116           # 1.1.6: the release without scripts/bets-only.txt's files, in dist/release116/
-WOW_HOST=user@pc scripts/deploy.sh        # copy to a Windows PC over SSH (both folders)
-OLY_TREE=dist/test1 WOW_HOST=user@pc scripts/deploy.sh  # 1.2: deploy a test build's two folders instead
+WOW_HOST=user@pc scripts/deploy.sh        # copy all bundled addon folders to a Windows PC over SSH
+OLY_TREE=dist/test1 WOW_HOST=user@pc scripts/deploy.sh  # deploy a test build's three folders instead
 WOW_HOST=user@pc scripts/logs.sh          # read the log and captured errors from that PC
 ```
 
