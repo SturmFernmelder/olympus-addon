@@ -104,6 +104,7 @@ Versions.lua
 Ed25519.lua
 libs\QREncode\qrencode.lua
 Link.lua
+ArmyExport.lua
 GuildCharter.lua
 Recruit.lua
 PartyGuard.lua

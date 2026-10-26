@@ -3167,6 +3167,31 @@ also saved in `WTF/Account/<ACCOUNT>/SavedVariables/Olympus.lua`.
 The [transport lifecycle notes](docs/transport-lifecycle.md) describe queue completion,
 cancellation, compatibility and the in-game checks for the transport queue.
 
+### Attended Army snapshot (not active in releases)
+
+`Olympus/ArmyExport.lua` contains an independent OLCS2 v2 encoder for a future, attended
+own-guild snapshot. It is deliberately behind the single `ACTIVATION_ENABLED = false` release
+gate while there is no active reviewed browser receiver, so `/oly army` only says that the export
+is unavailable. Its pure aggregate, canonical-payload and framing functions remain covered by the
+offline suite.
+
+If a later release activates it, the browser supplies a fresh 32-character nonce and the player
+explicitly types `/oly army <nonce>`. The addon reads one complete native, show-offline roster and
+rotates bounded QR frames locally. It neither writes this observation to SavedVariables nor sends
+an addon message, chat message or upload. The payload contains the canonical guild name, current
+realm group, observation time and masked totals/distributions only: never character names or
+GUIDs, and it explicitly says that its source and membership are unverified. Only an Alliance
+member of `Olympus` or `Olympus I` through `Olympus X` can start it. Unsupported level values (for
+example levels above 60 on a later client) withhold the entire level distribution but do not invent
+or discard the independent total.
+
+`/ogarmy <nonce>` is a compatibility alias for the attended browser pilot. It reaches the exact
+same release gate and scan as `/oly army`; `/oly army` remains the documented canonical command.
+
+Activation requires a compatible receiver plus the three-client checks in
+[the Army QR in-game test plan](docs/army-qr-test.md). Closing the QR window, changing world or
+changing guild stops rotation and removes the attended frames from the window.
+
 A feature that should leave a line in the acts log (1.1) calls `ns.Chronicle.Add(kind, by, what,
 opts)` (`Olympus/Chronicle.lua`, where its arguments are described): `by` is the sender as the
 server stamped it, and `opts.key`/`opts.value` write a repeated state (a switch, a list) once per

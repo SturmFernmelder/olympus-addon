@@ -163,7 +163,7 @@ end
 -- Load addon files like WoW does: each gets (addonName, sharedTable)
 ---------------------------------------------------------------------------
 local ns = {}
-for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections", "BridgePeople", "BridgeAffairs" }) do
+for _, file in ipairs({ "Bootstrap", "Locales", "Locales/deDE", "Locales/esES", "Locales/frFR", "Locales/DuesGraceText", "Locales/DuesRosterText", "Locales/JusticeResponseText", "Locales/CarryText", "Locales/CarryMergerText", "Locales/CampaignText", "Locales/GuildFinanceText", "Locales/RankingRulesText", "Locales/AccordText", "Core", "RankingRules", "GamepadRegistry", "Gamepad", "Diagnostics", "Dialog", "PlayerMenu", "Codec", "Sign", "Authority", "Zones", "Who", "Data", "Roster", "Comm", "Map", "Layers", "Hop", "Positions", "Decree", "Channels", "Filter", "Inspect", "King", "HopSightings", "Vox", "Court", "Board", "Week", "Treasury", "Dues", "Bank", "Acts", "Loot", "War", "Crafters", "Chronicle", "Workshop", "Versions", "Ed25519", "libs/QREncode/qrencode", "Link", "ArmyExport", "Recruit", "PartyGuard", "AnswerBank", "Answers", "Views", "Accord", "Consent", "ChatRooms", "CraftRequests", "ViewAs", "TabardsV2", "Members", "Nominees", "CensusClean", "Bridge", "BridgeSections", "BridgePeople", "BridgeAffairs" }) do
 	local chunk = assert(loadfile(ADDON_DIR .. file .. ".lua"))
 	chunk("Olympus", ns)
 end
@@ -30858,7 +30858,9 @@ do
 		-- The addon's own: Core.lua's /oly and Channels.lua's /ol registered with it (taken over).
 		eq(ns.Gate.missing, nil, "the harness loads Gamepad.lua")
 		local fresh = {}
-		local savedEvents, savedPrint, savedSlash, savedNames = #EVENT_SCRIPTS, print, SlashCmdList.OLYMPUS, { SLASH_OLYMPUS1, SLASH_OLYMPUS2 }
+		local savedEvents, savedPrint, savedSlash, savedArmy, savedNames = #EVENT_SCRIPTS, print,
+			SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY,
+			{ SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1 }
 		local printed = {}
 		local ok, err = pcall(function()
 			for _, file in ipairs({ "Bootstrap", "Locales", "Core" }) do assert(loadfile(ADDON_DIR .. file .. ".lua"))("Olympus", fresh) end
@@ -30882,7 +30884,8 @@ do
 			assert(SlashCmdList.OLYMPUS ~= savedSlash and type(SlashCmdList.OLYMPUS) == "function", "its /oly")
 		end)
 		print = savedPrint
-		SlashCmdList.OLYMPUS, SLASH_OLYMPUS1, SLASH_OLYMPUS2 = savedSlash, savedNames[1], savedNames[2]
+		SlashCmdList.OLYMPUS, SlashCmdList.OLYMPUSARMY = savedSlash, savedArmy
+		SLASH_OLYMPUS1, SLASH_OLYMPUS2, SLASH_OLYMPUSARMY1 = savedNames[1], savedNames[2], savedNames[3]
 		for i = #EVENT_SCRIPTS, savedEvents + 1, -1 do EVENT_SCRIPTS[i] = nil end
 		if not ok then error(err, 0) end
 	end)
@@ -30891,9 +30894,9 @@ do
 	-- ParseText calls hash_SlashCmdList[command] directly, then ClearChat hides the box, its focus
 	-- lost runs ClearGamepadFocus): none registered with the gamepad UI. Core.lua and the gate as the
 	-- game loads them, in a namespace of their own, its login and switches through its own events.
-	test("1.1.5 the gamepad gate, typed commands: a login with the gamepad UI registers no /olympus, /oly, /ol, /olc or /oll; mouse and keyboard does, once a session however many switches; after a switch to the gamepad UI they do nothing, and the player is told a /reload completes it", function()
-		local NAMES = { "OLYMPUS", "OLYMPUSALL", "OLYMPUSCAPTAINS", "OLYMPUSLORDS" }
-		local GLOBALS = { "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
+	test("1.1.5 the gamepad gate, typed commands: a login with the gamepad UI registers no /olympus, /oly, /ogarmy, /ol, /olc or /oll; mouse and keyboard does, once a session however many switches; after a switch to the gamepad UI they do nothing, and the player is told a /reload completes it", function()
+		local NAMES = { "OLYMPUS", "OLYMPUSARMY", "OLYMPUSALL", "OLYMPUSCAPTAINS", "OLYMPUSLORDS" }
+		local GLOBALS = { "SLASH_OLYMPUS1", "SLASH_OLYMPUS2", "SLASH_OLYMPUSARMY1", "SLASH_OLYMPUSALL1", "SLASH_OLYMPUSCAPTAINS1", "SLASH_OLYMPUSLORDS1" }
 		local saved = { list = {}, globals = {}, events = #EVENT_SCRIPTS, after = C_Timer.After, print = print, debug = ns.db.debug,
 			dialogs = { StaticPopupDialogs.OLYMPUS_CHAT_PRIVACY, StaticPopupDialogs.OLYMPUS_PIN, StaticPopupDialogs.OLYMPUS_PIN_DOWN },
 			chatInfo = C_ChatInfo }
@@ -30931,11 +30934,13 @@ do
 			local sns, event = Load()
 			sns.Fire("LOGIN")
 			eq(SlashCmdList.OLYMPUS, nil, "no /oly with the gamepad UI"); eq(SLASH_OLYMPUS1, nil); eq(SLASH_OLYMPUS2, nil)
+			eq(SlashCmdList.OLYMPUSARMY, nil, "no /ogarmy with the gamepad UI"); eq(SLASH_OLYMPUSARMY1, nil)
 			eq(#sns.Gate.leftovers, 0)
 			-- Switched to mouse and keyboard: registered, and they work.
 			Switch(event, false)
 			local oly = SlashCmdList.OLYMPUS
 			eq(type(oly), "function", "registered at the switch"); eq(SLASH_OLYMPUS1, "/olympus"); eq(SLASH_OLYMPUS2, "/oly")
+			eq(type(SlashCmdList.OLYMPUSARMY), "function"); eq(SLASH_OLYMPUSARMY1, "/ogarmy")
 			ns.db.debug = false
 			oly("debug")
 			eq(ns.db.debug, true, "/oly debug works")
@@ -65362,6 +65367,9 @@ end)()
 		end)
 	end)
 end)()
+
+print("tests/army-export.lua")
+assert(loadfile(ROOT .. "tests/army-export.lua"))(ns, test, eq, ADDON_DIR, WithUI)
 
 -- 1.1.5: the gamepad pass (tests/gamepad.lua): whole sessions with Blizzard's gamepad UI simulated, in
 -- a model of Forever's client of their own, from a gamepad login and across switches both ways.

@@ -191,7 +191,7 @@ ns.GAMEPAD = {
 		why = "Reads only (taint probe, stacks), and the notices in Olympus's own windows." },
 
 	-- Found by the audit (scripts/gamepad-audit.lua), registered with it.
-	{ id = "lookups", kind = "reads", files = { "ArenaMatch.lua", "ArenaParse.lua", "Borders.lua", "Channels.lua", "ChatWindow.lua", "Dialog.lua", "GuildFrame.lua", "Treasury.lua", "UI.lua", "Views.lua", "Who.lua", "Workshop.lua" },
+	{ id = "lookups", kind = "reads", files = { "ArmyExport.lua", "ArenaMatch.lua", "ArenaParse.lua", "Borders.lua", "Channels.lua", "ChatWindow.lua", "Dialog.lua", "GuildFrame.lua", "Treasury.lua", "UI.lua", "Views.lua", "Who.lua", "Workshop.lua" },
 		guard = "own", toPad = "stays", toMouse = "nothing", safe = "keep",
 		why = "Looked up by name and only read: Olympus's own frames' parts, the game's fonts and strings, where the game's popups and main chat tab are (Olympus's own windows go under or point at them), whether the who windows are open, the client's icon lists." },
 	{ id = "own-templates", kind = "frame-helper", files = { "UI.lua" },
