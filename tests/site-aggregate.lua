@@ -209,3 +209,58 @@
 			eq(OlympusSiteAggregate, nil); eq(s.bridgeCalls, calls, "unknown commands do no work")
 		end)
 	end)
+
+	test("site aggregate: OLYMPUS PRIME exports only its own fresh masked roster with the unchanged public wire contract", function()
+		With(function(s)
+			s.guild = "Olympus Prime"
+			local own = s.checkpoint.guilds[1]
+			own.name, own.members, own.online = "OLYMPUS PRIME", 6, 2
+			-- Another allowed guild is present but never substitutes for the player's own roster.
+			s.checkpoint.guilds[2] = Base(s.now).guilds[1]
+			local out = assert(Export(), "Prime's fresh own roster is eligible")
+			eq(out.guild.name, "OLYMPUS PRIME")
+			eq(out.guild.characters, 6); eq(out.guild.online, "unavailable", "small complementary counts remain masked")
+			eq(out.schema, "olympus-site-aggregate"); eq(out.version, 1); eq(out.producer, "1.3.2-site.1")
+			local rootCount, guildCount = 0, 0
+			for _ in pairs(out) do rootCount = rootCount + 1 end
+			for _ in pairs(out.guild) do guildCount = guildCount + 1 end
+			eq(rootCount, 7, "no new root fields"); eq(guildCount, 4, "aggregate-only guild fields")
+			for _, private in ipairs({ "PRIVATE REPORTER", "Player-PRIVATE", "PRIVATE KEY", "PRIVATE LEADER", "PRIVATE MEMBER", "PRIVATE CHAT" }) do
+				assert(not Contains(out, private), "Prime export leaked " .. private)
+			end
+			own.members, own.online = 4, 4
+			out = assert(Export())
+			eq(out.guild.characters, "few"); eq(out.guild.online, "unavailable", "Prime small-roster masking")
+			s.guild = "Olympus II"
+			s.onEvent(nil, "PLAYER_GUILD_UPDATE")
+			eq(OlympusSiteAggregate, nil, "leaving Prime withdraws its pending export")
+		end)
+	end)
+
+	test("site aggregate: Prime eligibility does not bypass own-guild scope, freshness, complete observation or faction checks", function()
+		local cases = {
+			{ "missing own row", function(s, row) row.name = "Olympus II" end },
+			{ "ambiguous own rows", function(s, row) s.checkpoint.guilds[2] = row end },
+			{ "partial observation", function(_, row) row.counted = false end },
+			{ "stale observation", function(s, row) row.observedAtServer = s.now - 901 end },
+			{ "stale checkpoint", function(s) s.checkpoint.capturedAtServer = s.now - 61 end },
+			{ "relay", function(_, row) row.provenance.source = "relay" end },
+			{ "dispute", function(_, row) row.provenance.disputed = true end },
+			{ "wrong faction", function(s) s.checkpoint.scope.faction = "Horde" end },
+			{ "similar guild", function(s) s.guild = "OLYMPUS PRIME II" end },
+			{ "not in guild", function(s) s.inGuild = false end },
+		}
+		for _, case in ipairs(cases) do
+			With(function(s)
+				s.guild = "OLYMPUS PRIME"
+				local row = s.checkpoint.guilds[1]
+				row.name = "OLYMPUS PRIME"
+				case[2](s, row)
+				OlympusSiteAggregate = { armed = true }
+				eq(Export(), nil, "Prime refusal: " .. case[1])
+				if case[1] == "similar guild" or case[1] == "not in guild" then
+					assert(s.messages[#s.messages]:find("OLYMPUS PRIME", 1, true), "eligibility refusal names Prime")
+				end
+			end)
+		end
+	end)

@@ -50,6 +50,7 @@ Locales\AccordText.lua
 Locales\RecordText.lua
 Locales\CensusStatsText.lua
 Locales\VerifyText.lua
+Locales\PersonalVerificationText.lua
 Locales\SelfTestText.lua
 Locales\MapNamesText.lua
 Locales\PlayerTooltipText.lua
@@ -161,6 +162,7 @@ ChatStrikes.lua
 TagFollow.lua
 OfficerMuster.lua
 Bridge.lua
+PersonalVerification.lua
 Wanted.lua
 PlayerSightings.lua
 API.lua

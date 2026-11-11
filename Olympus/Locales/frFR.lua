@@ -9,6 +9,8 @@ local ADDON, ns = ...
 local code = GetLocale and GetLocale()
 if code ~= "frFR" then return end
 ns.Locale("frFR", {
+	TAB_SELF_VERIFY = "Ma vérification",
+	SELF_VERIFY_SUBMIT = "Envoyer le code",
 	CHATWIN_GROUP_ALL = "Tous",
 	CHATWIN_GROUP_PVP = "JcJ",
 	CHATWIN_GROUP_PVE = "JcE",

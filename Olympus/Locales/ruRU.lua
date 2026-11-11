@@ -9,6 +9,8 @@ local ADDON, ns = ...
 local code = GetLocale and GetLocale()
 if code ~= "ruRU" then return end
 ns.Locale("ruRU", {
+	TAB_SELF_VERIFY = "Моя проверка",
+	SELF_VERIFY_SUBMIT = "Отправить код",
 	LETTER_1_5_6_TITLE = "Обмен данными переписи и инструменты гильдии",
 	LETTER_1_5_6_HEAD = "Обмен данными переписи и инструменты гильдии",
 	LETTER_1_5_6_SIGNED = "Ваш покорный мастеровой, разработчик Olympus",

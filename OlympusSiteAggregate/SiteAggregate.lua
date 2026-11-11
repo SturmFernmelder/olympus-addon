@@ -10,7 +10,7 @@ local OBSERVATION_MAX_AGE = 15 * 60
 local NAMES = { ["Olympus"] = true, ["Olympus I"] = true, ["Olympus II"] = true,
 	["Olympus III"] = true, ["Olympus IV"] = true, ["Olympus V"] = true,
 	["Olympus VI"] = true, ["Olympus VII"] = true, ["Olympus VIII"] = true,
-	["Olympus IX"] = true, ["Olympus X"] = true }
+	["Olympus IX"] = true, ["Olympus X"] = true, ["OLYMPUS PRIME"] = true }
 local CANON = {}
 for name in pairs(NAMES) do CANON[name:upper()] = name end
 
@@ -59,7 +59,7 @@ local function Prepare()
 	OlympusSiteAggregate = nil
 	local own = CurrentGuild()
 	if not own then
-		return false, "Only your current Olympus or Olympus I-X roster can be exported. Alt coverage is unavailable."
+		return false, "Only your current Olympus, Olympus I-X or OLYMPUS PRIME roster can be exported. Alt coverage is unavailable."
 	end
 	local now = ServerNow()
 	if not now then return false, "The game server clock is unavailable; no export was prepared." end
@@ -70,7 +70,7 @@ local function Prepare()
 	end
 	local ok, c = pcall(b.GetCensusCheckpoint)
 	if ok and type(c) == "table" and type(c.scope) == "table" and c.scope.faction ~= nil and c.scope.faction ~= "Alliance" then
-		return false, "Only the Alliance Olympus and Olympus I-X guilds can be exported; no export was prepared."
+		return false, "Only the Alliance Olympus, Olympus I-X and OLYMPUS PRIME guilds can be exported; no export was prepared."
 	end
 	if not ok or type(c) ~= "table" or c.schema ~= "olympus-census-checkpoint" or c.version ~= 1
 		or c.timeSource ~= "server" or not Age(now, c.capturedAtServer, CHECKPOINT_MAX_AGE)
