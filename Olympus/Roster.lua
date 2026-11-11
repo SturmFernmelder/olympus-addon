@@ -466,6 +466,35 @@ function Roster.RankOf(name)
 	return byName[ns.FullName(base)]
 end
 
+-- (Olympus Link) The GUID a complete, fresh scan gave for a member of OUR current guild, found
+-- by name as RankOf finds his rank (the same sub-realm family rule). nil when the snapshot is
+-- stale or belongs to another guild/group/faction, he is not a member, the scan gave no GUID,
+-- or the value is secret. Read-only: nothing is sent and nothing is scanned here.
+-- guidOf is filed by the raw name the roster gave; this index goes from the full name to it and is
+-- made again when a scan has run since (Roster.generation). Fresh guards the retained snapshot
+-- before this index is used, including a guild change before the next successful scan.
+local rawOfFull, rawOfFullAt = {}, nil
+function Roster.GuidOf(name)
+	if not name or not Roster.Fresh() then return nil end
+	if rawOfFullAt ~= Roster.generation then
+		rawOfFull = {}
+		for raw, row in pairs(rowOf) do
+			if type(row) == "table" and row.full then rawOfFull[row.full] = raw end
+		end
+		rawOfFullAt = Roster.generation
+	end
+	local full = ns.FullName(name)
+	local raw = rawOfFull[full]
+	if raw == nil and ns.splitNames then
+		local base, realm = full:match("^(.+)%-([^%-]+)$")
+		if realm and realm ~= ns.realm then
+			local family = ns.ForeverFamily(realm)
+			if family and family == ns.ForeverFamily(ns.realm) then raw = rawOfFull[ns.FullName(base)] end
+		end
+	end
+	return raw and PublicString(guidOf[raw]) or nil
+end
+
 -- Our own rank index (0 = guild master), used for layer names and decree permission.
 function Roster.MyRank()
 	local _, _, rankIndex = GetGuildInfo("player")
