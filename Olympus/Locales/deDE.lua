@@ -9,6 +9,8 @@ local ADDON, ns = ...
 local code = GetLocale and GetLocale()
 if code ~= "deDE" then return end
 ns.Locale("deDE", {
+	TAB_SELF_VERIFY = "Meine Verifizierung",
+	SELF_VERIFY_SUBMIT = "Code senden",
 	CHATWIN_GROUP_ALL = "Alle",
 	CHATWIN_GROUP_PVP = "PvP",
 	CHATWIN_GROUP_PVE = "PvE",

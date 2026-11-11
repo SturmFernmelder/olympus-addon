@@ -29,6 +29,36 @@ local function Text(V)
 	return table.concat(out, "\n"), lines
 end
 
+test("personal verification: actual TOC localizes the tab and Submit labels for every supported client", function()
+	local oldLocale, oldBridge = GetLocale, rawget(_G, "OlympusVerifyBridge242")
+	local english
+	local ok, err = pcall(function()
+		OlympusVerifyBridge242 = nil
+		for _, code in ipairs({ "enUS", "enGB", "ptBR", "deDE", "esES", "esMX", "frFR", "itIT", "ruRU" }) do
+			GetLocale = function() return code end
+			local tab
+			local n = { UI = { AddTab = function(definition) tab = definition return true end } }
+			for line in io.lines(extra.ADDON_DIR .. "Olympus.toc") do
+				local file = line:match("^%s*(Locales%.lua)%s*$") or line:match("^%s*(Locales[\\/].-%.lua)%s*$")
+				if file then assert(loadfile(extra.ADDON_DIR .. file:gsub("\\", "/")))("Olympus", n) end
+			end
+			assert(loadfile(FILE))("Olympus", n)
+			local _, title = n.PersonalVerification.Build()
+			local labels = { rawget(n.L, tab.label), rawget(n.L, tab.buttons[1][1]) }
+			for i = 1, 2 do assert(type(labels[i]) == "string" and labels[i] ~= "", code .. " has a real panel label") end
+			eq(title, labels[1], code .. " actual page title uses the localized key")
+			if code == "enUS" then english = labels
+			elseif code == "enGB" then eq(labels[1], english[1]); eq(labels[2], english[2])
+			else
+				assert(labels[1] ~= english[1], code .. " tab label must not fall back to English")
+				assert(labels[2] ~= english[2], code .. " Submit label must not fall back to English")
+			end
+		end
+	end)
+	GetLocale, OlympusVerifyBridge242 = oldLocale, oldBridge
+	if not ok then error(err, 0) end
+end)
+
 test("personal verification: absent at file load, discovered at page open after PLAYER_LOGIN, dot calls only", function()
 	With(function(V, s)
 		assert(Text(V):find("bridge unavailable", 1, true))
