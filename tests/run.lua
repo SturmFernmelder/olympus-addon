@@ -65184,6 +65184,9 @@ end)()
 print("tests/link-loader.lua")
 assert(loadfile(ROOT .. "tests/link-loader.lua"))(ns, test, eq, { ROOT = ROOT, ADDON_DIR = ADDON_DIR })
 
+print("tests/personal-verification.lua")
+assert(loadfile(ROOT .. "tests/personal-verification.lua"))(ns, test, eq, { ROOT = ROOT, ADDON_DIR = ADDON_DIR, WithUI = WithUI, LoadUI = LoadUI })
+
 print("tests/army-export.lua")
 assert(loadfile(ROOT .. "tests/army-export.lua"))(ns, test, eq, ADDON_DIR, WithUI)
 
